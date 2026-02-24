@@ -341,8 +341,8 @@ def register_worker_monitoring_tools(
                 ticket_id=ticket_id,
                 analysis=analysis,
                 severity=urgency,
-                queen_graph_id="hive_coder_queen",
-                queen_stream_id="hive_coder_queen::ticket_receiver",
+                queen_graph_id="queen",
+                queen_stream_id="queen",
             )
             logger.info(
                 "Queen intervention requested: ticket_id=%s urgency=%s",

@@ -8,7 +8,9 @@ Allows streams to:
 """
 
 import asyncio
+import json
 import logging
+import os
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -16,6 +18,13 @@ from enum import StrEnum
 from typing import Any
 
 logger = logging.getLogger(__name__)
+
+# When HIVE_DEBUG_EVENTS is set, every event published on the bus is logged.
+# Values: "1" or "true" → log type + stream + node (one-liner)
+#         "full"         → log complete event payload as JSON
+_DEBUG_EVENTS = os.environ.get("HIVE_DEBUG_EVENTS", "").strip().lower()
+_DEBUG_EVENTS_ENABLED = _DEBUG_EVENTS in ("1", "true", "full")
+_DEBUG_EVENTS_FULL = _DEBUG_EVENTS == "full"
 
 
 class EventType(StrEnum):
@@ -254,6 +263,24 @@ class EventBus:
             self._event_history.append(event)
             if len(self._event_history) > self._max_history:
                 self._event_history = self._event_history[-self._max_history :]
+
+        # Debug logging (gated by HIVE_DEBUG_EVENTS env var)
+        if _DEBUG_EVENTS_ENABLED:
+            if _DEBUG_EVENTS_FULL:
+                try:
+                    payload = json.dumps(event.to_dict(), default=str)
+                except Exception:
+                    payload = repr(event)
+                logger.debug("[EventBus] %s", payload)
+            else:
+                logger.debug(
+                    "[EventBus] %s  stream=%s  node=%s  graph=%s  exec=%s",
+                    event.type.value,
+                    event.stream_id,
+                    event.node_id or "-",
+                    event.graph_id or "-",
+                    event.execution_id or "-",
+                )
 
         # Find matching subscriptions
         matching_handlers: list[EventHandler] = []

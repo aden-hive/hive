@@ -27,7 +27,7 @@ This layered approach enables efficient debugging: start with L1 to identify pro
         │   ├── summary.json     # L1: Run outcome
         │   ├── details.jsonl    # L2: Per-node results
         │   └── tool_logs.jsonl  # L3: Step-by-step execution
-        ├── conversations/       # Per-node EventLoop state
+        ├── conversations/       # Flat EventLoop state (parts carry phase_id)
         └── data/                # Spillover artifacts
 ```
 

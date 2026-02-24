@@ -241,7 +241,10 @@ class AdenTUI(App):
         # Health judge + queen monitoring graphs (loaded alongside worker agents)
         self._queen_graph_id: str | None = None
         self._judge_graph_id: str | None = None
-        self._queen_agent = None  # HiveCoderAgent instance — kept alive to hold MCP process
+        self._judge_task = None   # concurrent.futures.Future for the judge loop
+        self._queen_task = None   # concurrent.futures.Future for the queen loop
+        self._queen_executor = None  # GraphExecutor for queen input injection
+        self._queen_escalation_sub = None  # EventBus subscription for queen
 
         # Widgets are created lazily when runtime is available
         self.graph_view = None
@@ -404,9 +407,9 @@ class AdenTUI(App):
         import asyncio
 
         # Reset health monitoring state from any prior agent load
+        self._stop_health_monitoring()
         self._queen_graph_id = None
         self._judge_graph_id = None
-        self._queen_agent = None
 
         loop = asyncio.get_event_loop()
         try:
@@ -454,149 +457,284 @@ class AdenTUI(App):
             await self._load_judge_and_queen(runner._storage_path)
 
     async def _load_judge_and_queen(self, storage_path) -> None:
-        """Load the health judge and full Hive Coder as secondary monitoring graphs.
+        """Start health judge and interactive queen as independent conversations.
 
-        Both are added to the current worker runtime so they share its EventBus.
-        - Health judge: fires every 2 minutes via timer, emits EscalationTickets.
-        - Queen (full Hive Coder): two entry points —
-            ticket_triage_node fires automatically on WORKER_ESCALATION_TICKET;
-            coder_node is the interactive interface when operator connects via Ctrl+Q.
+        Three-conversation architecture:
+        - **Queen**: persistent interactive GraphExecutor (user's primary interface)
+        - **Judge**: timer-driven background GraphExecutor (silent monitoring)
+        - **Worker**: the existing AgentRuntime (unchanged)
 
-        The queen gets the full hive-tools MCP tool set: read_file, run_command,
-        restart_agent, get_agent_session_state, etc. Gap 1 is resolved.
-
-        Works for any agent automatically — no agent-side configuration needed.
+        They share ONLY the EventBus (for communication) and the base
+        storage path (so the judge can read worker logs).  Nothing else
+        is shared — no state manager, no session store, no tool merging
+        into the worker runtime.  The worker is completely untouched.
         """
         import asyncio
-        import json as _json
         from pathlib import Path
 
-        from framework.agents.hive_coder.agent import HiveCoderAgent
-        from framework.monitoring import HEALTH_JUDGE_ENTRY_POINT, judge_goal, judge_graph
+        from framework.graph.executor import GraphExecutor
+        from framework.monitoring import judge_goal, judge_graph
         from framework.runner.tool_registry import ToolRegistry
-        from framework.runtime.execution_stream import EntryPointSpec
+        from framework.runtime.core import Runtime
+        from framework.runtime.event_bus import EventType as _ET
+        from framework.tools.queen_lifecycle_tools import register_queen_lifecycle_tools
         from framework.tools.worker_monitoring_tools import register_worker_monitoring_tools
+
+        log = logging.getLogger("tui.judge")
 
         try:
             storage_path = Path(storage_path)
-            loop = asyncio.get_event_loop()
+            event_bus = self.runtime._event_bus
+            llm = self.runtime._llm
+            agent_loop = self.chat_repl._agent_loop
 
-            # 1. Monitoring tools: health summary, emit ticket, notify operator
+            # 1. Monitoring tools (health summary, emit ticket, notify operator).
+            #    Registered on a standalone registry — NOT merged into the worker.
             monitoring_registry = ToolRegistry()
             register_worker_monitoring_tools(
                 monitoring_registry,
-                self.runtime._event_bus,
+                event_bus,
                 storage_path,
                 worker_graph_id=self.runtime._graph_id,
             )
+
+            # 2. Storage dirs — under worker's base path but completely owned
+            #    by the judge/queen.  Worker never writes here.
+            judge_dir = storage_path / "graphs" / "worker_health_judge" / "session"
+            judge_dir.mkdir(parents=True, exist_ok=True)
+            queen_dir = storage_path / "graphs" / "queen" / "session"
+            queen_dir.mkdir(parents=True, exist_ok=True)
+
+            # ---------------------------------------------------------------
+            # 3. Health judge — background task, fires every 2 minutes.
+            # ---------------------------------------------------------------
+            judge_runtime = Runtime(storage_path / "graphs" / "worker_health_judge")
             monitoring_tools = list(monitoring_registry.get_tools().values())
             monitoring_executor = monitoring_registry.get_executor()
-            monitoring_tool_names = {t.name for t in monitoring_tools}
 
-            # 2. Full Hive Coder setup — loads hive-tools MCP, giving the queen
-            #    read_file, write_file, run_command, restart_agent, etc.
-            #    mock_mode=True: skip LLM provider init; the queen will use the
-            #    worker runtime's LLM when it actually runs.
-            self._queen_agent = HiveCoderAgent()
-            await loop.run_in_executor(None, lambda: self._queen_agent._setup(mock_mode=True))
-            queen_tools_raw = list(self._queen_agent._tool_registry.get_tools().values())
-            queen_executor = self._queen_agent._tool_registry.get_executor()
-            queen_tool_names = {t.name for t in queen_tools_raw}
-            # Only add tools not already on the worker runtime (avoid duplicate schemas)
-            existing_tool_names = {t.name for t in self.runtime._tools}
-            queen_tools = [t for t in queen_tools_raw if t.name not in existing_tool_names]
+            async def _judge_loop():
+                interval = 120  # seconds
+                first = True
+                while True:
+                    if not first:
+                        await asyncio.sleep(interval)
+                    first = False
+                    try:
+                        executor = GraphExecutor(
+                            runtime=judge_runtime,
+                            llm=llm,
+                            tools=monitoring_tools,
+                            tool_executor=monitoring_executor,
+                            event_bus=event_bus,
+                            stream_id="worker_health_judge",
+                            storage_path=judge_dir,
+                            loop_config=judge_graph.loop_config,
+                        )
+                        await executor.execute(
+                            graph=judge_graph,
+                            goal=judge_goal,
+                            input_data={
+                                "event": {"source": "timer", "reason": "scheduled"},
+                            },
+                            session_state={"resume_session_id": "persistent"},
+                        )
+                    except Exception:
+                        log.error("Health judge tick failed", exc_info=True)
 
-            # 3. Merge monitoring + queen tools into the worker runtime so all
-            #    secondary graphs (judge, queen) can call them.
-            original_executor = self.runtime._tool_executor
-
-            def merged_executor(tool_use):
-                if tool_use.name in monitoring_tool_names:
-                    return monitoring_executor(tool_use)
-                if tool_use.name in queen_tool_names:
-                    return queen_executor(tool_use)
-                if original_executor is not None:
-                    return original_executor(tool_use)
-                from framework.llm.provider import ToolResult
-                return ToolResult(
-                    tool_use_id=tool_use.id,
-                    content=_json.dumps({"error": f"Unknown tool: {tool_use.name}"}),
-                    is_error=True,
-                )
-
-            self.runtime._tools = self.runtime._tools + monitoring_tools + queen_tools
-            self.runtime._tool_executor = merged_executor
-
-            # Dispatch add_graph calls to the agent execution loop.
-            # add_graph creates asyncio.Tasks for timers and event handlers;
-            # these MUST live on the agent loop (where stream.execute runs
-            # LLM calls and tool execution), not Textual's UI loop.
-            agent_loop = self.chat_repl._agent_loop
-
-            # 4. Load health judge as a secondary graph on the worker runtime
-            future = asyncio.run_coroutine_threadsafe(
-                self.runtime.add_graph(
-                    graph_id="worker_health_judge",
-                    graph=judge_graph,
-                    goal=judge_goal,
-                    entry_points={"health_check": HEALTH_JUDGE_ENTRY_POINT},
-                    storage_subpath="graphs/worker_health_judge",
-                ),
-                agent_loop,
+            self._judge_task = asyncio.run_coroutine_threadsafe(
+                _judge_loop(), agent_loop,
             )
-            await asyncio.wrap_future(future)
             self._judge_graph_id = "worker_health_judge"
 
-            # 5. Load full Hive Coder as the queen graph on the worker runtime.
-            #    ticket_triage_node handles auto-triage (event-driven, isolated).
-            #    coder_node handles interactive investigation (operator via Ctrl+Q).
-            queen_entry_points = {
-                "ticket_receiver": EntryPointSpec(
-                    id="ticket_receiver",
-                    name="Ticket Receiver",
-                    entry_node="ticket_triage",
-                    trigger_type="event",
-                    trigger_config={
-                        "event_types": ["worker_escalation_ticket"],
-                        "exclude_own_graph": True,
-                    },
-                    isolation_level="isolated",
-                ),
-                "start": EntryPointSpec(
-                    id="start",
-                    name="Start",
-                    entry_node="coder",
-                    trigger_type="manual",
-                    isolation_level="shared",
-                ),
-            }
-            future = asyncio.run_coroutine_threadsafe(
-                self.runtime.add_graph(
-                    graph_id="hive_coder_queen",
-                    graph=self._queen_agent._graph,
-                    goal=self._queen_agent.goal,
-                    entry_points=queen_entry_points,
-                    storage_subpath="graphs/hive_coder_queen",
-                ),
-                agent_loop,
+            # ---------------------------------------------------------------
+            # 4. Queen — persistent interactive conversation.
+            #    Runs a continuous event_loop node that is the user's
+            #    primary interface.  Has lifecycle tools to control the
+            #    worker.  Escalation tickets from the judge are injected
+            #    as messages into this conversation.
+            # ---------------------------------------------------------------
+            import framework.agents.hive_coder as _hive_coder_pkg
+            from framework.agents.hive_coder.agent import queen_goal, queen_graph
+
+            # Queen gets lifecycle tools, monitoring tools, AND coding tools
+            # from the hive_coder's coder-tools MCP server.  This spawns a
+            # separate MCP process so the queen can read/write files, run
+            # commands, discover tools, etc. independently of the worker.
+            queen_registry = ToolRegistry()
+
+            # Coding tools from hive_coder's MCP config (coder_tools_server).
+            hive_coder_dir = Path(_hive_coder_pkg.__file__).parent
+            mcp_config = hive_coder_dir / "mcp_servers.json"
+            if mcp_config.exists():
+                try:
+                    queen_registry.load_mcp_config(mcp_config)
+                    log.info("Queen: loaded MCP config from %s", mcp_config)
+                except Exception:
+                    log.warning("Queen: MCP config failed to load", exc_info=True)
+
+            register_queen_lifecycle_tools(
+                queen_registry,
+                worker_runtime=self.runtime,
+                event_bus=event_bus,
+                storage_path=storage_path,
             )
-            await asyncio.wrap_future(future)
-            self._queen_graph_id = "hive_coder_queen"
+            register_worker_monitoring_tools(
+                queen_registry,
+                event_bus,
+                storage_path,
+                stream_id="queen",
+                worker_graph_id=self.runtime._graph_id,
+            )
+            queen_tools = list(queen_registry.get_tools().values())
+            queen_tool_executor = queen_registry.get_executor()
+
+            # Build worker identity to inject into the queen's system prompt.
+            # This must be in the system prompt (not input_data) because
+            # persistent sessions restore the old conversation and skip
+            # _build_initial_message — the queen would lose context.
+            worker_graph_id = self.runtime._graph_id
+            worker_goal_name = getattr(self.runtime.goal, "name", worker_graph_id)
+            worker_goal_desc = getattr(self.runtime.goal, "description", "")
+            worker_identity = (
+                f"\n\n# Current Session\n"
+                f"Worker agent: {worker_graph_id}\n"
+                f"Goal: {worker_goal_name}\n"
+            )
+            if worker_goal_desc:
+                worker_identity += f"Description: {worker_goal_desc}\n"
+            worker_identity += "Status at session start: idle (not started)."
+
+            # Adjust queen graph: filter tools to what's registered and
+            # append worker identity to the system prompt.
+            registered_tool_names = set(queen_registry.get_tools().keys())
+            _orig_queen_node = queen_graph.nodes[0]
+            declared_tools = _orig_queen_node.tools or []
+            available_tools = [t for t in declared_tools if t in registered_tool_names]
+
+            node_updates: dict = {}
+            if set(available_tools) != set(declared_tools):
+                missing = sorted(set(declared_tools) - registered_tool_names)
+                log.warning("Queen: tools not available (MCP may have failed): %s", missing)
+                node_updates["tools"] = available_tools
+            # Always inject worker identity into system prompt.
+            base_prompt = _orig_queen_node.system_prompt or ""
+            node_updates["system_prompt"] = base_prompt + worker_identity
+
+            adjusted_node = _orig_queen_node.model_copy(update=node_updates)
+            queen_graph = queen_graph.model_copy(update={"nodes": [adjusted_node]})
+
+            queen_runtime = Runtime(storage_path / "graphs" / "queen")
+
+            async def _queen_loop():
+                try:
+                    executor = GraphExecutor(
+                        runtime=queen_runtime,
+                        llm=llm,
+                        tools=queen_tools,
+                        tool_executor=queen_tool_executor,
+                        event_bus=event_bus,
+                        stream_id="queen",
+                        storage_path=queen_dir,
+                        loop_config=queen_graph.loop_config,
+                    )
+                    self._queen_executor = executor
+                    log.info(
+                        "Queen starting with %d tools: %s",
+                        len(queen_tools),
+                        [t.name for t in queen_tools],
+                    )
+                    # The queen's event_loop node runs forever (continuous mode).
+                    # It blocks on _await_user_input() after each LLM turn,
+                    # and input is injected via executor.node_registry["queen"].inject_event().
+                    result = await executor.execute(
+                        graph=queen_graph,
+                        goal=queen_goal,
+                        input_data={"greeting": "Session started."},
+                        session_state={"resume_session_id": "persistent"},
+                    )
+                    # Should never reach here — queen is forever-alive.
+                    log.warning(
+                        "Queen executor returned (should be forever-alive): %s",
+                        result,
+                    )
+                except Exception:
+                    log.error("Queen conversation crashed", exc_info=True)
+                finally:
+                    self._queen_executor = None
+
+            self._queen_task = asyncio.run_coroutine_threadsafe(
+                _queen_loop(), agent_loop,
+            )
+            self._queen_graph_id = "queen"
+
+            # Wire queen injection callback into ChatRepl so user input
+            # is routed to the queen by default.
+            async def _inject_queen(content: str) -> bool:
+                """Inject user input into the queen's active node."""
+                executor = self._queen_executor
+                if executor is None:
+                    return False
+                node = executor.node_registry.get("queen")
+                if node is not None and hasattr(node, "inject_event"):
+                    await node.inject_event(content)
+                    return True
+                return False
+
+            self.chat_repl._queen_inject_callback = _inject_queen
+
+            # Judge escalation → inject into queen conversation as a message.
+            async def _on_escalation(event):
+                ticket = event.data.get("ticket", {})
+                executor = self._queen_executor
+                if executor is None:
+                    log.warning("Escalation received but queen executor is None")
+                    return
+                node = executor.node_registry.get("queen")
+                if node is not None and hasattr(node, "inject_event"):
+                    import json as _json
+                    msg = (
+                        "[ESCALATION TICKET from Health Judge]\n"
+                        + _json.dumps(ticket, indent=2, ensure_ascii=False)
+                    )
+                    await node.inject_event(msg)
+                else:
+                    log.warning("Escalation received but queen node not ready for injection")
+
+            self._queen_escalation_sub = event_bus.subscribe(
+                event_types=[_ET.WORKER_ESCALATION_TICKET],
+                handler=_on_escalation,
+            )
 
             self.notify(
-                "Health judge + queen monitoring active",
+                "Queen + health judge active",
                 severity="information",
                 timeout=3,
             )
         except Exception as e:
-            logging.getLogger("tui.judge").error(
-                "Failed to load health monitoring: %s", e, exc_info=True
-            )
+            log.error("Failed to load health monitoring: %s", e, exc_info=True)
             self.notify(
                 f"Health monitoring unavailable: {e}",
                 severity="warning",
                 timeout=5,
             )
+
+    def _stop_health_monitoring(self) -> None:
+        """Cancel judge task, queen task, and subscriptions from a prior load."""
+        if self._judge_task is not None:
+            self._judge_task.cancel()
+            self._judge_task = None
+        if self._queen_task is not None:
+            self._queen_task.cancel()
+            self._queen_task = None
+        self._queen_executor = None
+        if self._queen_escalation_sub is not None:
+            try:
+                event_bus = self.runtime._event_bus if self.runtime else None
+                if event_bus:
+                    event_bus.unsubscribe(self._queen_escalation_sub)
+            except Exception:
+                pass
+            self._queen_escalation_sub = None
 
     def _show_account_selection(self, runner, accounts: list[dict]) -> None:
         """Show the account selection screen and continue loading on selection."""
@@ -1081,10 +1219,74 @@ class AdenTUI(App):
         try:
             et = event.type
 
-            # --- Multi-graph filtering ---
+            # --- Judge monitoring filter ---
+            # The judge runs as a silent background task.  Only surface
+            # escalation ticket events on the status bar; everything else
+            # (LLM deltas, tool calls, node iterations) goes to logs only.
+            if event.stream_id == "worker_health_judge":
+                if et == EventType.WORKER_ESCALATION_TICKET:
+                    ticket = event.data.get("ticket", {})
+                    severity = ticket.get("severity", "")
+                    if severity:
+                        self.status_bar.set_node_detail(f"judge: {severity} ticket")
+                # All judge events → logs only, not displayed.
+                return
+
+            # --- Queen-primary event routing ---
+            # When the queen is active, queen events go to chat display
+            # and worker events are handled specially.
+            _queen_active = self._queen_executor is not None
+
+            if _queen_active:
+                # Queen events (stream_id="queen") → display in chat
+                if event.stream_id == "queen":
+                    if et == EventType.QUEEN_INTERVENTION_REQUESTED:
+                        self._handle_queen_intervention(event.data)
+                        return
+                    # Tag streaming source so ChatRepl labels resolve correctly.
+                    self.chat_repl._streaming_source = "queen"
+                    # Queen events fall through to the chat handlers below.
+
+                # Worker events (from AgentRuntime, graph_id set) when queen is primary
+                elif event.graph_id is not None:
+                    if et == EventType.CLIENT_INPUT_REQUESTED:
+                        # Worker asking for input — set override in ChatRepl
+                        self.chat_repl.handle_worker_input_requested(
+                            event.node_id or event.data.get("node_id", ""),
+                            graph_id=event.graph_id,
+                        )
+                        return
+                    elif et == EventType.EXECUTION_COMPLETED:
+                        # Inject status into queen conversation
+                        self._inject_worker_status_into_queen(
+                            "Worker execution completed successfully."
+                        )
+                        return
+                    elif et == EventType.EXECUTION_FAILED:
+                        error = event.data.get("error", "Unknown error")[:200]
+                        self._inject_worker_status_into_queen(
+                            f"Worker execution failed: {error}"
+                        )
+                        return
+                    elif et in (
+                        EventType.LLM_TEXT_DELTA,
+                        EventType.CLIENT_OUTPUT_DELTA,
+                        EventType.TOOL_CALL_STARTED,
+                        EventType.TOOL_CALL_COMPLETED,
+                    ):
+                        # Let worker client-facing output and tool events
+                        # through so the user can see what the worker is
+                        # doing/asking.  Clear queen streaming source tag.
+                        self.chat_repl._streaming_source = None
+                        # Fall through to the standard chat handlers below.
+                    else:
+                        # All other worker events while queen is active → logs only
+                        return
+
+            # --- Multi-graph filtering (non-queen mode) ---
             # If the event has a graph_id and it's not the active graph,
             # show a notification for important events and drop the rest.
-            if event.graph_id is not None and event.graph_id != self.runtime.active_graph_id:
+            if not _queen_active and event.graph_id is not None and event.graph_id != self.runtime.active_graph_id:
                 if et == EventType.CLIENT_INPUT_REQUESTED:
                     self.notify(
                         f"[bold]{event.graph_id}[/bold] is waiting for input",
@@ -1104,15 +1306,6 @@ class AdenTUI(App):
                         severity="information",
                         timeout=5,
                     )
-                elif et == EventType.WORKER_ESCALATION_TICKET:
-                    # Judge ticket from background graph — still update status bar
-                    ticket = event.data.get("ticket", {})
-                    severity = ticket.get("severity", "")
-                    if severity:
-                        self.status_bar.set_node_detail(f"judge: {severity} ticket")
-                elif et == EventType.QUEEN_INTERVENTION_REQUESTED:
-                    # Always surface queen interventions regardless of active graph
-                    self._handle_queen_intervention(event.data)
                 # All other background events are silently dropped (visible in logs)
                 return
 
@@ -1149,13 +1342,6 @@ class AdenTUI(App):
                     context=event.data.get("context", ""),
                     node_id=event.node_id or "",
                 )
-            elif et == EventType.WORKER_ESCALATION_TICKET:
-                ticket = event.data.get("ticket", {})
-                severity = ticket.get("severity", "")
-                if severity:
-                    self.status_bar.set_node_detail(f"judge: {severity} ticket")
-            elif et == EventType.QUEEN_INTERVENTION_REQUESTED:
-                self._handle_queen_intervention(event.data)
             elif et == EventType.NODE_LOOP_STARTED:
                 self.chat_repl.handle_node_started(event.node_id or "")
             elif et == EventType.NODE_LOOP_ITERATION:
@@ -1227,10 +1413,14 @@ class AdenTUI(App):
                     )
 
             # --- Status bar events ---
+            # Map of external node IDs (queen, judge) to display names.
+            _ext_names = {"queen": "Queen"}
+
             if et == EventType.EXECUTION_STARTED:
                 entry_node = event.data.get("entry_node") or (
                     self.runtime.graph.entry_node if self.runtime else ""
                 )
+                entry_node = _ext_names.get(entry_node, entry_node)
                 self.status_bar.set_running(entry_node)
             elif et == EventType.EXECUTION_COMPLETED:
                 self.status_bar.set_completed()
@@ -1239,7 +1429,7 @@ class AdenTUI(App):
             elif et == EventType.NODE_LOOP_STARTED:
                 nid = event.node_id or ""
                 node = self.runtime.graph.get_node(nid)
-                name = node.name if node else nid
+                name = node.name if node else _ext_names.get(nid, nid)
                 self.status_bar.set_active_node(name, "thinking...")
             elif et == EventType.NODE_LOOP_ITERATION:
                 self.status_bar.set_node_detail(f"step {event.data.get('iteration', '?')}")
@@ -1303,6 +1493,24 @@ class AdenTUI(App):
 
         textual_severity = "error" if severity in ("high", "critical") else "warning"
         self.notify(msg, severity=textual_severity, timeout=30)
+
+    def _inject_worker_status_into_queen(self, message: str) -> None:
+        """Inject a worker status update into the queen's conversation."""
+        import asyncio as _aio
+
+        executor = self._queen_executor
+        if executor is None:
+            return
+        node = executor.node_registry.get("queen")
+        if node is None or not hasattr(node, "inject_event"):
+            return
+
+        agent_loop = getattr(self.chat_repl, "_agent_loop", None)
+        if agent_loop is None:
+            return
+
+        status_msg = f"[WORKER STATUS UPDATE]\n{message}"
+        _aio.run_coroutine_threadsafe(node.inject_event(status_msg), agent_loop)
 
     # -- Actions --
 
@@ -1525,6 +1733,12 @@ class AdenTUI(App):
                         except Exception:
                             pass
                         break
+        except Exception:
+            pass
+
+        # Stop health monitoring (judge + queen)
+        try:
+            self._stop_health_monitoring()
         except Exception:
             pass
 

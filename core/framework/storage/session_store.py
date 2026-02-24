@@ -24,7 +24,7 @@ class SessionStore:
     Manages sessions in the new structure:
       {base_path}/sessions/session_YYYYMMDD_HHMMSS_{uuid}/
         ├── state.json            # Single source of truth
-        ├── conversations/        # Per-node EventLoop state
+        ├── conversations/        # Flat EventLoop state (parts carry phase_id)
         ├── artifacts/            # Spillover data
         └── logs/                 # L1/L2/L3 observability
             ├── summary.json
