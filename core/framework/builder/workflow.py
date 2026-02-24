@@ -441,14 +441,15 @@ class GraphBuilder:
         self.session.test_cases.append(test)
         self._save_session()
 
-    def run_test(
+    async def run_test_async(
         self,
         test: TestCase,
         executor_factory: Callable,
     ) -> TestResult:
         """
-        Run a single test case.
+        Run a single test case asynchronously.
 
+        This method is safe to call from async contexts (Jupyter, FastAPI, etc.).
         executor_factory should return a configured GraphExecutor.
         """
         self._require_phase([BuildPhase.ADDING_NODES, BuildPhase.ADDING_EDGES, BuildPhase.TESTING])
@@ -460,14 +461,10 @@ class GraphBuilder:
             executor = executor_factory()
 
             # Run the test
-            import asyncio
-
-            result = asyncio.run(
-                executor.execute(
-                    graph=graph,
-                    goal=self.session.goal,
-                    input_data=test.input,
-                )
+            result = await executor.execute(
+                graph=graph,
+                goal=self.session.goal,
+                input_data=test.input,
             )
 
             # Check result
@@ -496,6 +493,36 @@ class GraphBuilder:
         self._save_session()
 
         return test_result
+
+    def run_test(
+        self,
+        test: TestCase,
+        executor_factory: Callable,
+    ) -> TestResult:
+        """
+        Run a single test case.
+
+        This is a synchronous wrapper around run_test_async().
+        If called from an async context (Jupyter, FastAPI, etc.), use run_test_async() instead.
+
+        executor_factory should return a configured GraphExecutor.
+        """
+        import asyncio
+
+        # Check if an event loop is already running
+        # get_running_loop() returns a loop if one exists, or raises RuntimeError if none exists
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            # No event loop running - safe to use asyncio.run()
+            return asyncio.run(self.run_test_async(test, executor_factory))
+
+        # Event loop is running - cannot use asyncio.run()
+        raise RuntimeError(
+            "Cannot call run_test() from an async context. "
+            "An event loop is already running. "
+            "Please use 'await builder.run_test_async(test, executor_factory)' instead."
+        )
 
     def run_all_tests(self, executor_factory: Callable) -> list[TestResult]:
         """Run all test cases."""
