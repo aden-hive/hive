@@ -8,14 +8,52 @@ Allows streams to:
 """
 
 import asyncio
+import json
 import logging
+import os
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import StrEnum
-from typing import Any
+from pathlib import Path
+from typing import IO, Any
 
 logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# HIVE_DEBUG_EVENTS — write every published event to a JSONL file.
+#
+# Set the env var to any truthy value to enable:
+#   HIVE_DEBUG_EVENTS=1          → writes to ~/.hive/event_logs/<ts>.jsonl
+#   HIVE_DEBUG_EVENTS=/tmp/ev    → writes to that exact directory
+#
+# Each line is a full JSON serialisation of the AgentEvent.
+# The file is opened lazily on first publish and flushed after every write.
+# ---------------------------------------------------------------------------
+_DEBUG_EVENTS_RAW = os.environ.get("HIVE_DEBUG_EVENTS", "").strip()
+_DEBUG_EVENTS_ENABLED = _DEBUG_EVENTS_RAW.lower() in ("1", "true", "full") or (
+    bool(_DEBUG_EVENTS_RAW) and _DEBUG_EVENTS_RAW.lower() not in ("0", "false", "")
+)
+
+
+def _open_event_log() -> IO[str] | None:
+    """Open a JSONL event log file.  Returns None if disabled."""
+    if not _DEBUG_EVENTS_ENABLED:
+        return None
+    raw = _DEBUG_EVENTS_RAW
+    if raw.lower() in ("1", "true", "full"):
+        log_dir = Path.home() / ".hive" / "event_logs"
+    else:
+        log_dir = Path(raw)
+    log_dir.mkdir(parents=True, exist_ok=True)
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+    path = log_dir / f"{ts}.jsonl"
+    logger.info("Event debug log → %s", path)
+    return open(path, "a", encoding="utf-8")  # noqa: SIM115
+
+
+_event_log_file: IO[str] | None = None
+_event_log_ready = False  # lazy init guard
 
 
 class EventType(StrEnum):
@@ -85,6 +123,10 @@ class EventType(StrEnum):
 
     # Escalation (agent requests handoff to hive_coder)
     ESCALATION_REQUESTED = "escalation_requested"
+
+    # Worker health monitoring (judge → queen → operator)
+    WORKER_ESCALATION_TICKET = "worker_escalation_ticket"
+    QUEEN_INTERVENTION_REQUESTED = "queen_intervention_requested"
 
 
 @dataclass
@@ -250,6 +292,20 @@ class EventBus:
             self._event_history.append(event)
             if len(self._event_history) > self._max_history:
                 self._event_history = self._event_history[-self._max_history :]
+
+        # Write event to JSONL file (gated by HIVE_DEBUG_EVENTS env var)
+        if _DEBUG_EVENTS_ENABLED:
+            global _event_log_file, _event_log_ready  # noqa: PLW0603
+            if not _event_log_ready:
+                _event_log_file = _open_event_log()
+                _event_log_ready = True
+            if _event_log_file is not None:
+                try:
+                    line = json.dumps(event.to_dict(), default=str)
+                    _event_log_file.write(line + "\n")
+                    _event_log_file.flush()
+                except Exception:
+                    pass  # never break event delivery
 
         # Find matching subscriptions
         matching_handlers: list[EventHandler] = []
@@ -849,6 +905,52 @@ class EventBus:
                 node_id=node_id,
                 execution_id=execution_id,
                 data={"reason": reason, "context": context},
+            )
+        )
+
+    async def emit_worker_escalation_ticket(
+        self,
+        stream_id: str,
+        node_id: str,
+        ticket: dict,
+        execution_id: str | None = None,
+    ) -> None:
+        """Emitted by health judge when worker shows a degradation pattern."""
+        await self.publish(
+            AgentEvent(
+                type=EventType.WORKER_ESCALATION_TICKET,
+                stream_id=stream_id,
+                node_id=node_id,
+                execution_id=execution_id,
+                data={"ticket": ticket},
+            )
+        )
+
+    async def emit_queen_intervention_requested(
+        self,
+        stream_id: str,
+        node_id: str,
+        ticket_id: str,
+        analysis: str,
+        severity: str,
+        queen_graph_id: str,
+        queen_stream_id: str,
+        execution_id: str | None = None,
+    ) -> None:
+        """Emitted by queen when she decides the operator should be involved."""
+        await self.publish(
+            AgentEvent(
+                type=EventType.QUEEN_INTERVENTION_REQUESTED,
+                stream_id=stream_id,
+                node_id=node_id,
+                execution_id=execution_id,
+                data={
+                    "ticket_id": ticket_id,
+                    "analysis": analysis,
+                    "severity": severity,
+                    "queen_graph_id": queen_graph_id,
+                    "queen_stream_id": queen_stream_id,
+                },
             )
         )
 

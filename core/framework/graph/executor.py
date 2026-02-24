@@ -242,7 +242,12 @@ class GraphExecutor:
 
     def _validate_tools(self, graph: GraphSpec) -> list[str]:
         """
-        Validate that all tools declared by nodes are available.
+        Validate that all tools declared by reachable nodes are available.
+
+        Only checks nodes reachable from graph.entry_node via edges.
+        Nodes belonging to other entry points (e.g. the coder node when
+        entering via ticket_triage) are skipped — they will be validated
+        when their own entry point triggers execution.
 
         Returns:
             List of error messages (empty if all tools are available)
@@ -250,7 +255,20 @@ class GraphExecutor:
         errors = []
         available_tool_names = {t.name for t in self.tools}
 
+        # Compute reachable nodes from the execution's entry node
+        reachable: set[str] = set()
+        to_visit = [graph.entry_node]
+        while to_visit:
+            nid = to_visit.pop()
+            if nid in reachable:
+                continue
+            reachable.add(nid)
+            for edge in graph.get_outgoing_edges(nid):
+                to_visit.append(edge.target)
+
         for node in graph.nodes:
+            if node.id not in reachable:
+                continue
             if node.tools:
                 missing = set(node.tools) - available_tool_names
                 if missing:
@@ -481,7 +499,7 @@ class GraphExecutor:
             try:
                 from framework.storage.conversation_store import FileConversationStore
 
-                entry_conv_path = self._storage_path / "conversations" / current_node_id
+                entry_conv_path = self._storage_path / "conversations"
                 if entry_conv_path.exists():
                     _store = FileConversationStore(base_path=entry_conv_path)
 
@@ -1219,18 +1237,6 @@ class GraphExecutor:
                         )
                         continuous_conversation.update_system_prompt(new_system)
 
-                        # Switch conversation store to the next node's directory
-                        # so the transition marker and all subsequent messages are
-                        # persisted there instead of the first node's directory.
-                        if self._storage_path:
-                            from framework.storage.conversation_store import (
-                                FileConversationStore,
-                            )
-
-                            next_store_path = self._storage_path / "conversations" / next_spec.id
-                            next_store = FileConversationStore(base_path=next_store_path)
-                            await continuous_conversation.switch_store(next_store)
-
                         # Insert transition marker into conversation
                         data_dir = str(self._storage_path / "data") if self._storage_path else None
                         marker = build_transition_marker(
@@ -1345,7 +1351,7 @@ class GraphExecutor:
                     import json as _json
 
                     cursor_path = (
-                        self._storage_path / "conversations" / current_node_id / "cursor.json"
+                        self._storage_path / "conversations" / "cursor.json"
                     )
                     if cursor_path.exists():
                         cursor_data = _json.loads(cursor_path.read_text(encoding="utf-8"))
@@ -1448,7 +1454,7 @@ class GraphExecutor:
                     import json as _json
 
                     cursor_path = (
-                        self._storage_path / "conversations" / current_node_id / "cursor.json"
+                        self._storage_path / "conversations" / "cursor.json"
                     )
                     if cursor_path.exists():
                         cursor_data = _json.loads(cursor_path.read_text(encoding="utf-8"))
@@ -1621,7 +1627,7 @@ class GraphExecutor:
             if self._storage_path:
                 from framework.storage.conversation_store import FileConversationStore
 
-                store_path = self._storage_path / "conversations" / node_spec.id
+                store_path = self._storage_path / "conversations"
                 conv_store = FileConversationStore(base_path=store_path)
 
             # Auto-configure spillover directory for large tool results.

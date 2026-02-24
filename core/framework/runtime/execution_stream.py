@@ -19,6 +19,7 @@ from typing import TYPE_CHECKING, Any
 
 from framework.graph.checkpoint_config import CheckpointConfig
 from framework.graph.executor import ExecutionResult, GraphExecutor
+from framework.runtime.event_bus import EventBus
 from framework.runtime.shared_state import IsolationLevel, SharedStateManager
 from framework.runtime.stream_runtime import StreamRuntime, StreamRuntimeAdapter
 
@@ -26,7 +27,7 @@ if TYPE_CHECKING:
     from framework.graph.edge import GraphSpec
     from framework.graph.goal import Goal
     from framework.llm.provider import LLMProvider, Tool
-    from framework.runtime.event_bus import AgentEvent, EventBus
+    from framework.runtime.event_bus import AgentEvent
     from framework.runtime.outcome_aggregator import OutcomeAggregator
     from framework.storage.concurrent import ConcurrentStorage
     from framework.storage.session_store import SessionStore
@@ -34,29 +35,50 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-class _GraphScopedEventBus:
-    """Thin proxy that stamps ``graph_id`` on every published event.
+class _GraphScopedEventBus(EventBus):
+    """Proxy that stamps ``graph_id`` on every published event.
 
     The ``GraphExecutor`` and ``EventLoopNode`` emit events via the
     convenience methods on ``EventBus`` (e.g. ``emit_llm_text_delta``).
     Rather than threading ``graph_id`` through every one of those 20+
-    methods, this proxy intercepts ``publish()`` and sets ``graph_id``
-    before forwarding to the real bus.  All other attribute access is
-    delegated unchanged.
+    methods, this subclass overrides ``publish()`` to stamp the id
+    before forwarding to the real bus.
+
+    Because the ``emit_*`` methods are *inherited* from ``EventBus``,
+    ``self.publish()`` inside them resolves to this class's override —
+    unlike a ``__getattr__``-based proxy where the delegated bound
+    methods would call ``EventBus.publish`` directly, bypassing the
+    stamp entirely.
     """
 
-    __slots__ = ("_bus", "_graph_id")
-
     def __init__(self, bus: "EventBus", graph_id: str) -> None:
-        object.__setattr__(self, "_bus", bus)
-        object.__setattr__(self, "_graph_id", graph_id)
+        # Intentionally skip super().__init__() — we delegate all state
+        # (subscriptions, history, semaphore, etc.) to the real bus.
+        self._real_bus = bus
+        self._scope_graph_id = graph_id
 
     async def publish(self, event: "AgentEvent") -> None:  # type: ignore[override]
-        event.graph_id = object.__getattribute__(self, "_graph_id")
-        await object.__getattribute__(self, "_bus").publish(event)
+        event.graph_id = self._scope_graph_id
+        await self._real_bus.publish(event)
 
-    def __getattr__(self, name: str) -> Any:
-        return getattr(object.__getattribute__(self, "_bus"), name)
+    # --- Delegate state-reading methods to the real bus ---
+    # These access internal state (_subscriptions, _event_history, etc.)
+    # that only exists on the real bus.
+
+    def subscribe(self, *args: Any, **kwargs: Any) -> str:
+        return self._real_bus.subscribe(*args, **kwargs)
+
+    def unsubscribe(self, subscription_id: str) -> bool:
+        return self._real_bus.unsubscribe(subscription_id)
+
+    def get_history(self, *args: Any, **kwargs: Any) -> list:
+        return self._real_bus.get_history(*args, **kwargs)
+
+    def get_stats(self) -> dict:
+        return self._real_bus.get_stats()
+
+    async def wait_for(self, *args: Any, **kwargs: Any) -> Any:
+        return await self._real_bus.wait_for(*args, **kwargs)
 
 
 @dataclass
@@ -457,7 +479,14 @@ class ExecutionStream:
                 # to this execution.  The executor sets data_dir via execution
                 # context (contextvars) so data tools and spillover share the
                 # same session-scoped directory.
-                exec_storage = self._storage.base_path / "sessions" / execution_id
+                # Derive storage from session_store (graph-specific for secondary
+                # graphs) so that all files — conversations, state, checkpoints,
+                # data — land under the graph's own sessions/ directory, not the
+                # primary worker's.
+                if self._session_store:
+                    exec_storage = self._session_store.sessions_dir / execution_id
+                else:
+                    exec_storage = self._storage.base_path / "sessions" / execution_id
                 executor = GraphExecutor(
                     runtime=runtime_adapter,
                     llm=self._llm,

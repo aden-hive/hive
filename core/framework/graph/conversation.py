@@ -217,21 +217,11 @@ class NodeConversation:
         Layer 3 (focus) while preserving the conversation history.
         """
         self._system_prompt = new_prompt
+        self._meta_persisted = False  # re-persist with new prompt
 
     def set_current_phase(self, phase_id: str) -> None:
         """Set the current phase ID. Subsequent messages will be stamped with it."""
         self._current_phase = phase_id
-
-    async def switch_store(self, new_store: ConversationStore) -> None:
-        """Switch to a new persistence store at a phase transition.
-
-        Subsequent messages are written to *new_store*.  Meta (system
-        prompt, config) is re-persisted on the next write so the new
-        store's ``meta.json`` reflects the updated prompt.
-        """
-        self._store = new_store
-        self._meta_persisted = False
-        await new_store.write_cursor({"next_seq": self._next_seq})
 
     @property
     def current_phase(self) -> str | None:
@@ -689,8 +679,19 @@ class NodeConversation:
     # --- Restore -----------------------------------------------------------
 
     @classmethod
-    async def restore(cls, store: ConversationStore) -> NodeConversation | None:
+    async def restore(
+        cls,
+        store: ConversationStore,
+        phase_id: str | None = None,
+    ) -> NodeConversation | None:
         """Reconstruct a NodeConversation from a store.
+
+        Args:
+            store: The conversation store to read from.
+            phase_id: If set, only load parts matching this phase_id.
+                Used in isolated mode so a node only sees its own
+                messages in the shared flat store.  In continuous mode
+                pass ``None`` to load all parts.
 
         Returns ``None`` if the store contains no metadata (i.e. the
         conversation was never persisted).
@@ -709,6 +710,8 @@ class NodeConversation:
         conv._meta_persisted = True
 
         parts = await store.read_parts()
+        if phase_id:
+            parts = [p for p in parts if p.get("phase_id") == phase_id]
         conv._messages = [Message.from_storage_dict(p) for p in parts]
 
         cursor = await store.read_cursor()

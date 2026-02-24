@@ -286,6 +286,18 @@ class EventLoopNode(NodeProtocol):
                 start_iteration = restored.start_iteration
                 _restored_recent_responses = restored.recent_responses
                 _restored_tool_fingerprints = restored.recent_tool_fingerprints
+
+                # Refresh the system prompt to the current node spec's version.
+                # The stored prompt may be stale after code changes or when
+                # runtime-injected context (e.g. worker identity) has changed.
+                from framework.graph.prompt_composer import _with_datetime
+
+                _current_prompt = _with_datetime(ctx.node_spec.system_prompt or "")
+                if ctx.accounts_prompt:
+                    _current_prompt = f"{_current_prompt}\n\n{ctx.accounts_prompt}"
+                if conversation.system_prompt != _current_prompt:
+                    conversation.update_system_prompt(_current_prompt)
+                    logger.info("Refreshed system prompt for restored conversation")
             else:
                 _restored_recent_responses = []
                 _restored_tool_fingerprints = []
@@ -2371,7 +2383,15 @@ class EventLoopNode(NodeProtocol):
         if self._conversation_store is None:
             return None
 
-        conversation = await NodeConversation.restore(self._conversation_store)
+        # In isolated mode, filter parts by phase_id so the node only sees
+        # its own messages in the shared flat conversation store.  In
+        # continuous mode (or when _restore is called for timer-resume)
+        # load all parts — the full conversation threads across nodes.
+        _is_continuous = getattr(ctx, "continuous_mode", False)
+        phase_filter = None if _is_continuous else ctx.node_id
+        conversation = await NodeConversation.restore(
+            self._conversation_store, phase_id=phase_filter,
+        )
         if conversation is None:
             return None
 

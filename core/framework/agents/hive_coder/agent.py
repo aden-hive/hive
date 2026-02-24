@@ -12,7 +12,11 @@ from framework.runtime.agent_runtime import AgentRuntime, create_agent_runtime
 from framework.runtime.execution_stream import EntryPointSpec
 
 from .config import default_config, metadata
-from .nodes import coder_node
+from .nodes import coder_node, queen_node
+# ticket_receiver is no longer needed — the queen runs as an independent
+# GraphExecutor and receives escalation tickets via inject_event().
+# Keeping the import commented for reference:
+# from .ticket_receiver import TICKET_RECEIVER_ENTRY_POINT
 
 # Goal definition
 goal = Goal(
@@ -90,7 +94,8 @@ goal = Goal(
     ],
 )
 
-# Nodes — single coder node (guardian is now auto-attached by the framework)
+# Nodes: primary coder node only.  The queen runs as an independent
+# GraphExecutor with queen_node — not as part of this graph.
 nodes = [coder_node]
 
 # No edges needed — single forever-alive event_loop node
@@ -102,7 +107,8 @@ entry_points = {"start": "coder"}
 pause_nodes = []
 terminal_nodes = []  # Forever-alive: loops until user exits
 
-# No async entry points — guardian is now auto-attached via attach_guardian()
+# No async entry points needed — the queen is now an independent executor,
+# not a secondary graph receiving events via add_graph().
 async_entry_points = []
 
 # Module-level variables read by AgentRunner.load()
@@ -125,12 +131,48 @@ loop_config = {
 }
 
 
+# ---------------------------------------------------------------------------
+# Queen graph — runs as an independent persistent conversation in the TUI.
+# Loaded by _load_judge_and_queen() in app.py, NOT by AgentRunner.
+# ---------------------------------------------------------------------------
+
+queen_goal = Goal(
+    id="queen-manager",
+    name="Queen Manager",
+    description=(
+        "Manage the worker agent lifecycle and serve as the user's primary "
+        "interactive interface. Triage health escalations from the judge."
+    ),
+    success_criteria=[],
+    constraints=[],
+)
+
+queen_graph = GraphSpec(
+    id="queen-graph",
+    goal_id=queen_goal.id,
+    version="1.0.0",
+    entry_node="queen",
+    entry_points={"start": "queen"},
+    terminal_nodes=[],
+    pause_nodes=[],
+    nodes=[queen_node],
+    edges=[],
+    conversation_mode="continuous",
+    loop_config={
+        "max_iterations": 200,
+        "max_tool_calls_per_turn": 10,
+        "max_history_tokens": 32000,
+    },
+)
+
+
 class HiveCoderAgent:
     """
     Hive Coder — builds Hive agent packages from natural language.
 
     Single-node architecture: the coder runs in a continuous while(true) loop.
-    The guardian watchdog is auto-attached by the framework in TUI mode.
+    The queen runs as an independent GraphExecutor (loaded by the TUI via
+    _load_judge_and_queen), not as part of this graph.
     """
 
     def __init__(self, config=None):
