@@ -8,6 +8,7 @@ from __future__ import annotations
 import json
 import os
 from typing import TYPE_CHECKING, Any
+from framework.llm.litellm import LiteLLMProvider
 
 if TYPE_CHECKING:
     from framework.llm.provider import LLMProvider
@@ -16,12 +17,13 @@ if TYPE_CHECKING:
 class LLMJudge:
     """
     LLM-based judge for semantic evaluation of test results.
-    Automatically detects available providers (OpenAI/Anthropic) if none injected.
+    Automatically detects a LiteLLM-backed provider when none is injected.
     """
 
-    def __init__(self, llm_provider: LLMProvider | None = None):
+    def __init__(self, llm_provider: LLMProvider | None = None, model: str | None = None):
         """Initialize the LLM judge."""
         self._provider = llm_provider
+        self._model_override = (model or "").strip() or None
         self._client = None  # Fallback Anthropic client (lazy-loaded for tests)
 
     def _get_client(self):
@@ -40,20 +42,19 @@ class LLMJudge:
 
     def _get_fallback_provider(self) -> LLMProvider | None:
         """
-        Auto-detects available API keys and returns the appropriate provider.
-        Priority: OpenAI -> Anthropic.
+        Auto-detects available configuration and returns a LiteLLM-backed provider.
+
+        Priority:
+        1) Explicit model passed to LLMJudge
+        2) LLM_JUDGE_MODEL env var (explicit model selection)
+        3) Default model: claude-3-haiku-20240307 (previous fallback behavior)
         """
-        if os.environ.get("OPENAI_API_KEY"):
-            from framework.llm.openai import OpenAIProvider
+        model = self._model_override or os.environ.get("LLM_JUDGE_MODEL", "").strip()
+        if not model:
+            model = "claude-3-haiku-20240307"
 
-            return OpenAIProvider(model="gpt-4o-mini")
 
-        if os.environ.get("ANTHROPIC_API_KEY"):
-            from framework.llm.anthropic import AnthropicProvider
-
-            return AnthropicProvider(model="claude-3-haiku-20240307")
-
-        return None
+        return LiteLLMProvider(model=model)
 
     def evaluate(
         self,
@@ -80,17 +81,24 @@ Respond with JSON: {{"passes": true/false, "explanation": "..."}}"""
             # 1. Use injected provider
             if self._provider:
                 active_provider = self._provider
-            # 2. Check if _get_client was MOCKED (legacy tests) or use Agnostic Fallback
-            elif hasattr(self._get_client, "return_value") or not self._get_fallback_provider():
-                client = self._get_client()
-                response = client.messages.create(
-                    model="claude-haiku-4-5-20251001",
-                    max_tokens=500,
-                    messages=[{"role": "user", "content": prompt}],
-                )
-                return self._parse_json_result(response.content[0].text.strip())
             else:
-                active_provider = self._get_fallback_provider()
+                # 2. Use LiteLLM-backed fallback provider when configured
+                fallback_provider = self._get_fallback_provider()
+                if fallback_provider:
+                    active_provider = fallback_provider
+                # 3. Legacy client path only when explicitly mocked (unit tests)
+                elif hasattr(self._get_client, "return_value"):
+                    client = self._get_client()
+                    response = client.messages.create(
+                        model="claude-haiku-4-5-20251001",
+                        max_tokens=500,
+                        messages=[{"role": "user", "content": prompt}],
+                    )
+                    return self._parse_json_result(response.content[0].text.strip())
+                else:
+                    raise RuntimeError(
+                        "No LLM provider configured. Set LLM_JUDGE_MODEL or provider API key."
+                    )
 
             response = active_provider.complete(
                 messages=[{"role": "user", "content": prompt}],

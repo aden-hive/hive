@@ -2,13 +2,13 @@
 Unit tests for the LLMJudge with configurable LLM provider.
 
 Tests cover:
-- Backward compatibility (no provider, uses Anthropic fallback)
+- Fallback behavior (no provider, uses LiteLLM-backed provider)
 - Custom LLM provider injection
 - Response parsing (JSON, markdown code blocks)
 - Error handling
 """
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -259,12 +259,12 @@ class TestLLMJudgeErrorHandling:
 
 
 # ============================================================================
-# LLMJudge Tests - Backward Compatibility (Anthropic Fallback)
+# LLMJudge Tests - Fallback and Legacy Client Behavior
 # ============================================================================
 
 
-class TestLLMJudgeBackwardCompatibility:
-    """Tests for LLMJudge backward compatibility with Anthropic fallback."""
+class TestLLMJudgeFallbackBehavior:
+    """Tests for LLMJudge fallback behavior when no provider is injected."""
 
     def test_init_without_provider(self):
         """Test initialization without a provider (backward compatible)."""
@@ -273,18 +273,34 @@ class TestLLMJudgeBackwardCompatibility:
         assert judge._provider is None
         assert judge._client is None
 
-    def test_evaluate_without_provider_uses_anthropic(self):
-        """Test that evaluate() falls back to Anthropic when no provider is set."""
+    def test_evaluate_without_provider_uses_fallback_provider(self):
+        """Test that evaluate() uses fallback provider when no provider is set."""
         judge = LLMJudge()
+        fallback_provider = MockLLMProvider(
+            response_content='{"passes": true, "explanation": "Fallback response"}'
+        )
+        judge._get_fallback_provider = MagicMock(return_value=fallback_provider)
 
-        # Mock the _get_client method and Anthropic response
+        result = judge.evaluate(
+            constraint="test",
+            source_document="doc",
+            summary="sum",
+            criteria="crit",
+        )
+
+        assert result["passes"] is True
+        assert result["explanation"] == "Fallback response"
+        assert len(fallback_provider.complete_calls) == 1
+
+    def test_legacy_client_used_only_when_mocked(self):
+        """Test that legacy client path is used only when _get_client is mocked."""
+        judge = LLMJudge()
+        judge._get_fallback_provider = MagicMock(return_value=None)
+
         mock_client = MagicMock()
         mock_response = MagicMock()
-        mock_response.content = [
-            MagicMock(text='{"passes": true, "explanation": "Anthropic response"}')
-        ]
+        mock_response.content = [MagicMock(text='{"passes": true, "explanation": "Legacy"}')]
         mock_client.messages.create.return_value = mock_response
-
         judge._get_client = MagicMock(return_value=mock_client)
 
         result = judge.evaluate(
@@ -295,48 +311,7 @@ class TestLLMJudgeBackwardCompatibility:
         )
 
         assert result["passes"] is True
-        assert result["explanation"] == "Anthropic response"
-        mock_client.messages.create.assert_called_once()
-
-    def test_anthropic_client_lazy_loaded(self):
-        """Test that Anthropic client is lazy-loaded only when needed."""
-        # Patch anthropic import
-        with patch.dict("sys.modules", {"anthropic": MagicMock()}):
-            judge = LLMJudge()
-
-            # Client should not be loaded yet
-            assert judge._client is None
-
-    def test_anthropic_import_error_handling(self):
-        """Test handling when anthropic package is not installed."""
-        judge = LLMJudge()
-
-        # Remove anthropic from sys.modules if present and mock ImportError
-        with patch.dict("sys.modules", {"anthropic": None}):
-            import_error = ImportError("No module named 'anthropic'")
-            with patch("builtins.__import__", side_effect=import_error):
-                with pytest.raises(RuntimeError, match="anthropic package required"):
-                    judge._get_client()
-
-    def test_anthropic_client_uses_correct_model(self):
-        """Test that Anthropic fallback uses the correct model."""
-        judge = LLMJudge()
-
-        mock_client = MagicMock()
-        mock_response = MagicMock()
-        mock_response.content = [MagicMock(text='{"passes": true, "explanation": "OK"}')]
-        mock_client.messages.create.return_value = mock_response
-
-        judge._get_client = MagicMock(return_value=mock_client)
-
-        judge.evaluate(
-            constraint="test",
-            source_document="doc",
-            summary="sum",
-            criteria="crit",
-        )
-
-        # Check that the correct model was used
+        assert result["explanation"] == "Legacy"
         call_kwargs = mock_client.messages.create.call_args[1]
         assert call_kwargs["model"] == "claude-haiku-4-5-20251001"
         assert call_kwargs["max_tokens"] == 500
