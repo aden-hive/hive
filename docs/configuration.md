@@ -60,6 +60,17 @@ export BRAVE_SEARCH_API_KEY="..."
 export EXA_API_KEY="..."
 ```
 
+### Observability (optional)
+
+```bash
+# Langfuse — send agent traces and logs to Langfuse for visualization and analysis
+# Requires: pip install 'framework[langfuse]'
+# See: core/framework/observability/README.md
+export LANGFUSE_PUBLIC_KEY="pk-lf-..."
+export LANGFUSE_SECRET_KEY="sk-lf-..."
+export LANGFUSE_HOST="https://cloud.langfuse.com"  # omit for cloud, set for self-hosted
+```
+
 ### Runtime Flags
 
 ```bash
