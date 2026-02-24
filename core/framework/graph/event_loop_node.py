@@ -3062,6 +3062,16 @@ class EventLoopNode(NodeProtocol):
         )
 
         # 5. Create and execute subagent EventLoopNode
+        # Derive a conversation store for the subagent from the parent's store
+        subagent_conv_store = None
+        if self._conversation_store is not None:
+            from framework.storage.conversation_store import FileConversationStore
+
+            parent_base = getattr(self._conversation_store, "_base", None)
+            if parent_base is not None:
+                subagent_store_path = parent_base / "subagents" / agent_id
+                subagent_conv_store = FileConversationStore(base_path=subagent_store_path)
+
         subagent_node = EventLoopNode(
             event_bus=None,  # Subagents don't emit events to parent's bus
             judge=SubagentJudge(task=task, max_iterations=max_iter),
@@ -3072,7 +3082,7 @@ class EventLoopNode(NodeProtocol):
                 stall_detection_threshold=self._config.stall_detection_threshold,
             ),
             tool_executor=self._tool_executor,
-            conversation_store=None,  # No persistence for subagents
+            conversation_store=subagent_conv_store,
         )
 
         try:
