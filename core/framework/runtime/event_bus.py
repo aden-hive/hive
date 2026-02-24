@@ -15,16 +15,45 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import StrEnum
-from typing import Any
+from pathlib import Path
+from typing import IO, Any
 
 logger = logging.getLogger(__name__)
 
-# When HIVE_DEBUG_EVENTS is set, every event published on the bus is logged.
-# Values: "1" or "true" → log type + stream + node (one-liner)
-#         "full"         → log complete event payload as JSON
-_DEBUG_EVENTS = os.environ.get("HIVE_DEBUG_EVENTS", "").strip().lower()
-_DEBUG_EVENTS_ENABLED = _DEBUG_EVENTS in ("1", "true", "full")
-_DEBUG_EVENTS_FULL = _DEBUG_EVENTS == "full"
+# ---------------------------------------------------------------------------
+# HIVE_DEBUG_EVENTS — write every published event to a JSONL file.
+#
+# Set the env var to any truthy value to enable:
+#   HIVE_DEBUG_EVENTS=1          → writes to ~/.hive/event_logs/<ts>.jsonl
+#   HIVE_DEBUG_EVENTS=/tmp/ev    → writes to that exact directory
+#
+# Each line is a full JSON serialisation of the AgentEvent.
+# The file is opened lazily on first publish and flushed after every write.
+# ---------------------------------------------------------------------------
+_DEBUG_EVENTS_RAW = os.environ.get("HIVE_DEBUG_EVENTS", "").strip()
+_DEBUG_EVENTS_ENABLED = _DEBUG_EVENTS_RAW.lower() in ("1", "true", "full") or (
+    bool(_DEBUG_EVENTS_RAW) and _DEBUG_EVENTS_RAW.lower() not in ("0", "false", "")
+)
+
+
+def _open_event_log() -> IO[str] | None:
+    """Open a JSONL event log file.  Returns None if disabled."""
+    if not _DEBUG_EVENTS_ENABLED:
+        return None
+    raw = _DEBUG_EVENTS_RAW
+    if raw.lower() in ("1", "true", "full"):
+        log_dir = Path.home() / ".hive" / "event_logs"
+    else:
+        log_dir = Path(raw)
+    log_dir.mkdir(parents=True, exist_ok=True)
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+    path = log_dir / f"{ts}.jsonl"
+    logger.info("Event debug log → %s", path)
+    return open(path, "a", encoding="utf-8")  # noqa: SIM115
+
+
+_event_log_file: IO[str] | None = None
+_event_log_ready = False  # lazy init guard
 
 
 class EventType(StrEnum):
@@ -264,23 +293,19 @@ class EventBus:
             if len(self._event_history) > self._max_history:
                 self._event_history = self._event_history[-self._max_history :]
 
-        # Debug logging (gated by HIVE_DEBUG_EVENTS env var)
+        # Write event to JSONL file (gated by HIVE_DEBUG_EVENTS env var)
         if _DEBUG_EVENTS_ENABLED:
-            if _DEBUG_EVENTS_FULL:
+            global _event_log_file, _event_log_ready  # noqa: PLW0603
+            if not _event_log_ready:
+                _event_log_file = _open_event_log()
+                _event_log_ready = True
+            if _event_log_file is not None:
                 try:
-                    payload = json.dumps(event.to_dict(), default=str)
+                    line = json.dumps(event.to_dict(), default=str)
+                    _event_log_file.write(line + "\n")
+                    _event_log_file.flush()
                 except Exception:
-                    payload = repr(event)
-                logger.debug("[EventBus] %s", payload)
-            else:
-                logger.debug(
-                    "[EventBus] %s  stream=%s  node=%s  graph=%s  exec=%s",
-                    event.type.value,
-                    event.stream_id,
-                    event.node_id or "-",
-                    event.graph_id or "-",
-                    event.execution_id or "-",
-                )
+                    pass  # never break event delivery
 
         # Find matching subscriptions
         matching_handlers: list[EventHandler] = []

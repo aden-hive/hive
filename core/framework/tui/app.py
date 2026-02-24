@@ -1243,8 +1243,11 @@ class AdenTUI(App):
                     if et == EventType.QUEEN_INTERVENTION_REQUESTED:
                         self._handle_queen_intervention(event.data)
                         return
-                    # Tag streaming source so ChatRepl labels resolve correctly.
+                    # Tag streaming source and active node so labels resolve
+                    # correctly even when worker events interleave.
                     self.chat_repl._streaming_source = "queen"
+                    if event.node_id:
+                        self.chat_repl._active_node_id = event.node_id
                     # Queen events fall through to the chat handlers below.
 
                 # Worker events (from AgentRuntime, graph_id set) when queen is primary
@@ -1276,8 +1279,11 @@ class AdenTUI(App):
                     ):
                         # Let worker client-facing output and tool events
                         # through so the user can see what the worker is
-                        # doing/asking.  Clear queen streaming source tag.
+                        # doing/asking.  Clear queen streaming source and
+                        # update the active node so labels resolve correctly.
                         self.chat_repl._streaming_source = None
+                        if event.node_id:
+                            self.chat_repl._active_node_id = event.node_id
                         # Fall through to the standard chat handlers below.
                     else:
                         # All other worker events while queen is active → logs only
