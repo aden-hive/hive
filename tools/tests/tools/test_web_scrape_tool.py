@@ -26,7 +26,6 @@ def _make_playwright_mocks(html, status=200, final_url="https://example.com/page
     mock_page = AsyncMock()
     mock_page.goto.return_value = mock_response
     mock_page.content.return_value = html
-    mock_page.wait_for_timeout.return_value = None
     mock_page.wait_for_load_state.return_value = None
 
     mock_context = AsyncMock()
@@ -397,3 +396,37 @@ class TestWebScrapeToolErrorHandling:
         assert "error" in result
         assert result["skipped"] is True
         mock_page.wait_for_load_state.assert_not_called()
+
+
+class TestWebScrapeToolRobotsTxt:
+    """Tests for robots.txt respect."""
+
+    @pytest.mark.asyncio
+    @patch(_STEALTH_PATH)
+    @patch(_PW_PATH)
+    @patch("aden_tools.tools.web_scrape_tool.web_scrape_tool.RobotFileParser")
+    async def test_blocked_by_robots_txt(self, mock_rp_cls, mock_pw, mock_stealth, web_scrape_fn):
+        """URLs disallowed by robots.txt are skipped."""
+        mock_rp = MagicMock()
+        mock_rp.can_fetch.return_value = False
+        mock_rp_cls.return_value = mock_rp
+
+        result = await web_scrape_fn(url="https://example.com/private")
+        assert "error" in result
+        assert "robots.txt" in result["error"]
+        assert result["skipped"] is True
+
+    @pytest.mark.asyncio
+    @patch(_STEALTH_PATH)
+    @patch(_PW_PATH)
+    @patch("aden_tools.tools.web_scrape_tool.web_scrape_tool.RobotFileParser")
+    async def test_robots_txt_disabled(self, mock_rp_cls, mock_pw, mock_stealth, web_scrape_fn):
+        """robots.txt check is skipped when respect_robots_txt=False."""
+        html = "<html><body>Content</body></html>"
+        mock_cm, _, _ = _make_playwright_mocks(html)
+        mock_pw.return_value = mock_cm
+        mock_stealth.return_value.apply_stealth_async = AsyncMock()
+
+        result = await web_scrape_fn(url="https://example.com", respect_robots_txt=False)
+        assert "error" not in result
+        mock_rp_cls.assert_not_called()

@@ -14,6 +14,7 @@ Use when you need to read the content of a specific URL, extract data from a web
 | `selector` | str | No | `None` | CSS selector to target specific content (e.g., 'article', '.main-content') |
 | `include_links` | bool | No | `False` | Include extracted links in the response |
 | `max_length` | int | No | `50000` | Maximum length of extracted text (1000-500000) |
+| `respect_robots_txt` | bool | No | `True` | Whether to respect robots.txt rules |
 
 ## Setup
 
@@ -35,6 +36,7 @@ Returns error dicts for common issues:
 - `Navigation failed: no response received` - Browser could not navigate to URL
 - `No elements found matching selector: <selector>` - CSS selector matched nothing
 - `Request timed out` - Page load exceeded 60s timeout
+- `Blocked by robots.txt: <url>` - URL disallowed by site's robots.txt
 - `Browser error: <error>` - Playwright/Chromium error
 - `Scraping failed: <error>` - HTML parsing or other error
 
@@ -46,3 +48,4 @@ Returns error dicts for common issues:
 - Waits for `networkidle` before extracting content
 - Removes script, style, nav, footer, header, aside, noscript, and iframe elements
 - Auto-detects main content using article, main, or common content class selectors
+- Respects robots.txt by default (set `respect_robots_txt=False` to disable)
