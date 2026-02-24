@@ -308,7 +308,13 @@ class ExecutionStream:
                 )
             )
 
-    async def inject_input(self, node_id: str, content: str) -> bool:
+    async def inject_input(
+        self,
+        node_id: str,
+        content: str,
+        *,
+        is_client_input: bool = False,
+    ) -> bool:
         """Inject user input into a running client-facing EventLoopNode.
 
         Searches active executors for a node matching ``node_id`` and calls
@@ -319,7 +325,7 @@ class ExecutionStream:
         for executor in self._active_executors.values():
             node = executor.node_registry.get(node_id)
             if node is not None and hasattr(node, "inject_event"):
-                await node.inject_event(content)
+                await node.inject_event(content, is_client_input=is_client_input)
                 return True
         return False
 

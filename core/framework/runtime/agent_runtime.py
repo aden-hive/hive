@@ -974,7 +974,14 @@ class AgentRuntime:
                     )
         return None
 
-    async def inject_input(self, node_id: str, content: str, graph_id: str | None = None) -> bool:
+    async def inject_input(
+        self,
+        node_id: str,
+        content: str,
+        graph_id: str | None = None,
+        *,
+        is_client_input: bool = False,
+    ) -> bool:
         """Inject user input into a running client-facing node.
 
         Routes input to the EventLoopNode identified by ``node_id``.
@@ -984,6 +991,8 @@ class AgentRuntime:
             node_id: The node currently waiting for input
             content: The user's input text
             graph_id: Optional graph to search first (defaults to active graph)
+            is_client_input: True when the message originates from a real
+                human user (e.g. /chat endpoint), False for external events.
 
         Returns:
             True if input was delivered, False if no matching node found
@@ -995,7 +1004,7 @@ class AgentRuntime:
         target = graph_id or self._active_graph_id
         if target in self._graphs:
             for stream in self._graphs[target].streams.values():
-                if await stream.inject_input(node_id, content):
+                if await stream.inject_input(node_id, content, is_client_input=is_client_input):
                     return True
 
         # Then search all other graphs
@@ -1003,7 +1012,7 @@ class AgentRuntime:
             if gid == target:
                 continue
             for stream in reg.streams.values():
-                if await stream.inject_input(node_id, content):
+                if await stream.inject_input(node_id, content, is_client_input=is_client_input):
                     return True
         return False
 

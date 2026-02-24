@@ -202,7 +202,7 @@ class EventLoopNode(NodeProtocol):
         self._config = config or LoopConfig()
         self._tool_executor = tool_executor
         self._conversation_store = conversation_store
-        self._injection_queue: asyncio.Queue[str] = asyncio.Queue()
+        self._injection_queue: asyncio.Queue[tuple[str, bool]] = asyncio.Queue()
         # Client-facing input blocking state
         self._input_ready = asyncio.Event()
         self._awaiting_input = False
@@ -1041,14 +1041,19 @@ class EventLoopNode(NodeProtocol):
             conversation=conversation if _is_continuous else None,
         )
 
-    async def inject_event(self, content: str) -> None:
-        """Inject an external event into the running loop.
+    async def inject_event(self, content: str, *, is_client_input: bool = False) -> None:
+        """Inject an external event or user input into the running loop.
 
         The content becomes a user message prepended to the next iteration.
         Thread-safe via asyncio.Queue.
         Also unblocks _await_user_input() if the node is waiting.
+
+        Args:
+            content: The message text.
+            is_client_input: True when the message originates from a real
+                human user (e.g. /chat endpoint), False for external events.
         """
-        await self._injection_queue.put(content)
+        await self._injection_queue.put((content, is_client_input))
         self._input_ready.set()
 
     def signal_shutdown(self) -> None:
@@ -2419,12 +2424,17 @@ class EventLoopNode(NodeProtocol):
         count = 0
         while not self._injection_queue.empty():
             try:
-                content = self._injection_queue.get_nowait()
+                content, is_client_input = self._injection_queue.get_nowait()
                 logger.info(
-                    "[drain] injected message: %s",
+                    "[drain] injected message (client_input=%s): %s",
+                    is_client_input,
                     content[:200] if content else "(empty)",
                 )
-                await conversation.add_user_message(f"[External event]: {content}")
+                # Real user input is stored as-is; external events get a prefix
+                if is_client_input:
+                    await conversation.add_user_message(content, is_client_input=True)
+                else:
+                    await conversation.add_user_message(f"[External event]: {content}")
                 count += 1
             except asyncio.QueueEmpty:
                 break

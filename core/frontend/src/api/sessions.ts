@@ -26,8 +26,11 @@ export const sessionsApi = {
       `/agents/${agentId}/sessions/${sessionId}/checkpoints/${checkpointId}/restore`,
     ),
 
-  messages: (agentId: string, sessionId: string, nodeId?: string) =>
-    api.get<{ messages: Message[] }>(
-      `/agents/${agentId}/sessions/${sessionId}/messages${nodeId ? `?node_id=${nodeId}` : ""}`,
-    ),
+  messages: (agentId: string, sessionId: string, nodeId?: string) => {
+    const params = new URLSearchParams({ client_only: "true" });
+    if (nodeId) params.set("node_id", nodeId);
+    return api.get<{ messages: Message[] }>(
+      `/agents/${agentId}/sessions/${sessionId}/messages?${params}`,
+    );
+  },
 };

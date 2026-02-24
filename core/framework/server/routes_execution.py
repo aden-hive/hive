@@ -89,7 +89,12 @@ async def handle_chat(request: web.Request) -> web.Response:
     node_id, graph_id = slot.runtime.find_awaiting_node()
 
     if node_id:
-        delivered = await slot.runtime.inject_input(node_id, message, graph_id=graph_id)
+        delivered = await slot.runtime.inject_input(
+            node_id,
+            message,
+            graph_id=graph_id,
+            is_client_input=True,
+        )
         return web.json_response(
             {
                 "status": "injected",

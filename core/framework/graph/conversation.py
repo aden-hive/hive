@@ -30,6 +30,8 @@ class Message:
     # Phase-aware compaction metadata (continuous mode)
     phase_id: str | None = None
     is_transition_marker: bool = False
+    # True when this message is real human input (from /chat), not a system prompt
+    is_client_input: bool = False
 
     def to_llm_dict(self) -> dict[str, Any]:
         """Convert to OpenAI-format message dict."""
@@ -67,6 +69,8 @@ class Message:
             d["phase_id"] = self.phase_id
         if self.is_transition_marker:
             d["is_transition_marker"] = self.is_transition_marker
+        if self.is_client_input:
+            d["is_client_input"] = self.is_client_input
         return d
 
     @classmethod
@@ -81,6 +85,7 @@ class Message:
             is_error=data.get("is_error", False),
             phase_id=data.get("phase_id"),
             is_transition_marker=data.get("is_transition_marker", False),
+            is_client_input=data.get("is_client_input", False),
         )
 
 
@@ -258,6 +263,7 @@ class NodeConversation:
         content: str,
         *,
         is_transition_marker: bool = False,
+        is_client_input: bool = False,
     ) -> Message:
         msg = Message(
             seq=self._next_seq,
@@ -265,6 +271,7 @@ class NodeConversation:
             content=content,
             phase_id=self._current_phase,
             is_transition_marker=is_transition_marker,
+            is_client_input=is_client_input,
         )
         self._messages.append(msg)
         self._next_seq += 1

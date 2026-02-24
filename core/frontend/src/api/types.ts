@@ -123,6 +123,9 @@ export interface Message {
   role: string;
   content: string;
   _node_id: string;
+  is_transition_marker?: boolean;
+  is_client_input?: boolean;
+  tool_calls?: unknown[];
   [key: string]: unknown;
 }
 

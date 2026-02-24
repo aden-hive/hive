@@ -362,6 +362,12 @@ export default function Workspace() {
   const [newTabOpen, setNewTabOpen] = useState(false);
   const newTabBtnRef = useRef<HTMLButtonElement>(null);
 
+  // Monotonic counter that increments each time a new agent response turn
+  // begins.  Used to give each streaming response a unique message ID so the
+  // upsert logic creates a new bubble per turn instead of replacing the same
+  // one forever.
+  const streamTurnRef = useRef(0);
+
   // --- Backend state ---
   const [backendAgentId, setBackendAgentId] = useState<string | null>(null);
   const [backendLoading, setBackendLoading] = useState(true);
@@ -415,13 +421,17 @@ export default function Workspace() {
           if (loadErr.body.loading) {
             // Agent is mid-load — poll GET /api/agents/{id} until it appears
             agent = await (async () => {
-              const maxAttempts = 15;
+              const maxAttempts = 30;
               const delay = 1000;
               for (let i = 0; i < maxAttempts; i++) {
                 if (cancelled) throw new Error("cancelled");
                 await new Promise((r) => setTimeout(r, delay));
                 try {
-                  return await agentsApi.get(agentId);
+                  const result = await agentsApi.get(agentId);
+                  // 202 returns {id, loading: true} — keep polling
+                  const raw = result as Record<string, unknown>;
+                  if (raw.loading) continue;
+                  return result;
                 } catch {
                   if (i === maxAttempts - 1) throw loadErr;
                 }
@@ -529,6 +539,7 @@ export default function Workspace() {
     (event: AgentEvent) => {
       switch (event.type) {
         case "execution_started":
+          streamTurnRef.current += 1;
           setIsTyping(true);
           setAwaitingInput(false);
           break;
@@ -540,9 +551,12 @@ export default function Workspace() {
 
         case "execution_failed":
         case "client_output_delta":
-        case "client_input_requested": {
+        case "client_input_requested":
+        case "llm_text_delta": {
+          // DEBUG: trace message ID generation
+          console.log(`[SSE] type=${event.type} node_id=${event.node_id} turn=${streamTurnRef.current} → id=stream-${streamTurnRef.current}-${event.node_id}`);
           // Convert event to a chat message (if applicable)
-          const chatMsg = sseEventToChatMessage(event, activeWorker, agentDisplayName || undefined);
+          const chatMsg = sseEventToChatMessage(event, activeWorker, agentDisplayName || undefined, streamTurnRef.current);
           if (chatMsg) {
             // Upsert: if a message with this ID already exists, replace it (streaming)
             setSessionsByAgent((prev) => {
@@ -575,7 +589,12 @@ export default function Workspace() {
         }
 
         case "node_loop_started":
+          streamTurnRef.current += 1;
           setIsTyping(true);
+          break;
+
+        case "node_loop_iteration":
+          streamTurnRef.current += 1;
           break;
 
         default:

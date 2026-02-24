@@ -140,6 +140,9 @@ class AgentManager:
     def get_agent(self, agent_id: str) -> AgentSlot | None:
         return self._slots.get(agent_id)
 
+    def is_loading(self, agent_id: str) -> bool:
+        return agent_id in self._loading
+
     def list_agents(self) -> list[AgentSlot]:
         return list(self._slots.values())
 

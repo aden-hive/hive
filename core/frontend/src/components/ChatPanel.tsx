@@ -132,9 +132,10 @@ export default function ChatPanel({ messages, onSend, isWaiting, activeThread, a
   // Suppress unused var
   void readMap;
 
+  const lastMsg = threadMessages[threadMessages.length - 1];
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [threadMessages.length]);
+  }, [threadMessages.length, lastMsg?.content]);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();

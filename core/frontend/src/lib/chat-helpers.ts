@@ -59,13 +59,20 @@ export function sseEventToChatMessage(
   event: AgentEvent,
   thread: string,
   agentDisplayName?: string,
+  turnId?: number,
 ): ChatMessage | null {
+  // turnId disambiguates messages across response turns.  Within a single
+  // turn the ID stays stable so the upsert logic can replace the previous
+  // snapshot (streaming).  Across turns, different turnIds produce different
+  // IDs so each response gets its own bubble.
+  const idKey = turnId != null ? String(turnId) : (event.execution_id ?? "0");
+
   switch (event.type) {
     case "client_output_delta": {
       const snapshot = (event.data?.snapshot as string) || (event.data?.content as string) || "";
       if (!snapshot) return null;
       return {
-        id: `stream-${event.execution_id}-${event.node_id}`,
+        id: `stream-${idKey}-${event.node_id}`,
         agent: agentDisplayName || event.node_id || "Agent",
         agentColor: "",
         content: snapshot,
@@ -79,10 +86,24 @@ export function sseEventToChatMessage(
       const prompt = (event.data?.prompt as string) || "";
       if (!prompt) return null;
       return {
-        id: `input-req-${event.execution_id}-${event.node_id}`,
+        id: `input-req-${idKey}-${event.node_id}`,
         agent: agentDisplayName || event.node_id || "Agent",
         agentColor: "",
         content: prompt,
+        timestamp: "",
+        role: "worker",
+        thread,
+      };
+    }
+
+    case "llm_text_delta": {
+      const snapshot = (event.data?.snapshot as string) || (event.data?.content as string) || "";
+      if (!snapshot) return null;
+      return {
+        id: `stream-${idKey}-${event.node_id}`,
+        agent: event.node_id || "Agent",
+        agentColor: "",
+        content: snapshot,
         timestamp: "",
         role: "worker",
         thread,

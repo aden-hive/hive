@@ -189,6 +189,9 @@ async def handle_messages(request: web.Request) -> web.Response:
 
     Query params:
         node_id: Scope to a specific node's conversation (optional).
+        client_only: When "true", filter to only user-facing messages
+            (drops tool results, transition markers, internal nodes, and
+            assistant messages that are just tool-call invocations).
     """
     manager = _get_manager(request)
     agent_id = request.match_info["agent_id"]
@@ -227,6 +230,31 @@ async def handle_messages(request: web.Request) -> web.Response:
 
     # Sort by sequence number
     all_messages.sort(key=lambda m: m.get("seq", 0))
+
+    # Optionally filter to client-facing messages only.
+    # When the graph spec isn't available (runner not loaded / session ended),
+    # we can't determine which nodes are client-facing, so we skip the filter
+    # and return all messages rather than silently returning an empty list.
+    client_only = request.query.get("client_only", "").lower() in ("true", "1")
+    if client_only:
+        client_facing_nodes: set[str] = set()
+        if slot.runner and hasattr(slot.runner, "graph"):
+            for node in slot.runner.graph.nodes:
+                if node.client_facing:
+                    client_facing_nodes.add(node.id)
+
+        if client_facing_nodes:
+            all_messages = [
+                m
+                for m in all_messages
+                if not m.get("is_transition_marker")
+                and m["role"] != "tool"
+                and not (m["role"] == "assistant" and m.get("tool_calls"))
+                and (
+                    (m["role"] == "user" and m.get("is_client_input"))
+                    or (m["role"] == "assistant" and m.get("_node_id") in client_facing_nodes)
+                )
+            ]
 
     return web.json_response({"messages": all_messages})
 

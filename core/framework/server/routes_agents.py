@@ -118,6 +118,8 @@ async def handle_get_agent(request: web.Request) -> web.Response:
     slot = manager.get_agent(agent_id)
 
     if slot is None:
+        if manager.is_loading(agent_id):
+            return web.json_response({"id": agent_id, "loading": True}, status=202)
         return web.json_response({"error": f"Agent '{agent_id}' not found"}, status=404)
 
     data = _slot_to_dict(slot)

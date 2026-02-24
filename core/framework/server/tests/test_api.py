@@ -112,7 +112,7 @@ class MockRuntime:
     async def trigger(self, ep_id, input_data=None, session_state=None):
         return "exec_test_123"
 
-    async def inject_input(self, node_id, content, graph_id=None):
+    async def inject_input(self, node_id, content, graph_id=None, *, is_client_input=False):
         return True
 
     async def get_goal_progress(self):
@@ -353,6 +353,18 @@ class TestAgentCRUD:
         async with TestClient(TestServer(app)) as client:
             resp = await client.get("/api/agents/nonexistent")
             assert resp.status == 404
+
+    @pytest.mark.asyncio
+    async def test_get_agent_loading(self):
+        """GET /api/agents/{id} returns 202 when agent is mid-load."""
+        app = create_app()
+        app["manager"]._loading.add("loading_agent")
+        async with TestClient(TestServer(app)) as client:
+            resp = await client.get("/api/agents/loading_agent")
+            assert resp.status == 202
+            data = await resp.json()
+            assert data["id"] == "loading_agent"
+            assert data["loading"] is True
 
     @pytest.mark.asyncio
     async def test_unload_agent(self):
@@ -886,6 +898,112 @@ class TestMessages:
             assert resp.status == 200
             data = await resp.json()
             assert data["messages"] == []
+
+    @pytest.mark.asyncio
+    async def test_get_messages_client_only(self, tmp_agent_dir):
+        """client_only=true keeps user+client-facing assistant."""
+        tmp_path, agent_name, base = tmp_agent_dir
+        session_id = "session_client_only"
+        session_dir = base / "sessions" / session_id
+        session_dir.mkdir(parents=True)
+        (session_dir / "state.json").write_text(json.dumps({"status": "completed"}))
+
+        # node_a is NOT client-facing, chat_node IS
+        conv_a = session_dir / "conversations" / "node_a" / "parts"
+        conv_a.mkdir(parents=True)
+        (conv_a / "0001.json").write_text(
+            json.dumps({"seq": 1, "role": "user", "content": "system prompt"})
+        )
+        (conv_a / "0002.json").write_text(
+            json.dumps({"seq": 2, "role": "assistant", "content": "internal work"})
+        )
+        (conv_a / "0003.json").write_text(
+            json.dumps({"seq": 3, "role": "tool", "content": "tool result"})
+        )
+
+        conv_chat = session_dir / "conversations" / "chat_node" / "parts"
+        conv_chat.mkdir(parents=True)
+        (conv_chat / "0004.json").write_text(
+            json.dumps({"seq": 4, "role": "user", "content": "hi", "is_client_input": True})
+        )
+        (conv_chat / "0005.json").write_text(
+            json.dumps({"seq": 5, "role": "assistant", "content": "hello!"})
+        )
+        (conv_chat / "0006.json").write_text(
+            json.dumps(
+                {
+                    "seq": 6,
+                    "role": "assistant",
+                    "content": "",
+                    "tool_calls": [{"id": "tc1", "function": {"name": "search"}}],
+                }
+            )
+        )
+        (conv_chat / "0007.json").write_text(
+            json.dumps(
+                {
+                    "seq": 7,
+                    "role": "user",
+                    "content": "marker",
+                    "is_transition_marker": True,
+                }
+            )
+        )
+
+        nodes = [
+            MockNodeSpec(id="node_a", name="Node A", client_facing=False),
+            MockNodeSpec(id="chat_node", name="Chat", client_facing=True),
+        ]
+        slot = _make_slot(
+            tmp_dir=tmp_path / ".hive" / "agents" / agent_name,
+            nodes=nodes,
+        )
+        slot.runner.graph = MockGraphSpec(nodes=nodes)
+        app = _make_app_with_agent(slot)
+
+        async with TestClient(TestServer(app)) as client:
+            resp = await client.get(
+                f"/api/agents/test_agent/sessions/{session_id}/messages?client_only=true"
+            )
+            assert resp.status == 200
+            msgs = (await resp.json())["messages"]
+            # Keep: seq 4 (user+is_client_input), seq 5 (assistant from chat_node)
+            # Drop: seq 1,2,3,6,7 (internal / tool / tool_calls / marker)
+            assert len(msgs) == 2
+            assert msgs[0]["seq"] == 4
+            assert msgs[0]["role"] == "user"
+            assert msgs[1]["seq"] == 5
+            assert msgs[1]["role"] == "assistant"
+            assert msgs[1]["_node_id"] == "chat_node"
+
+    @pytest.mark.asyncio
+    async def test_get_messages_client_only_no_runner_returns_all(self, tmp_agent_dir):
+        """client_only=true with no runner skips filtering (returns all messages)."""
+        tmp_path, agent_name, base = tmp_agent_dir
+        session_id = "session_no_runner"
+        session_dir = base / "sessions" / session_id
+        session_dir.mkdir(parents=True)
+        (session_dir / "state.json").write_text(json.dumps({"status": "completed"}))
+
+        conv = session_dir / "conversations" / "node_a" / "parts"
+        conv.mkdir(parents=True)
+        (conv / "0001.json").write_text(json.dumps({"seq": 1, "role": "user", "content": "hello"}))
+        (conv / "0002.json").write_text(
+            json.dumps({"seq": 2, "role": "assistant", "content": "response"})
+        )
+
+        slot = _make_slot(tmp_dir=tmp_path / ".hive" / "agents" / agent_name)
+        slot.runner = None  # Simulate runner not available
+        app = _make_app_with_agent(slot)
+
+        async with TestClient(TestServer(app)) as client:
+            resp = await client.get(
+                f"/api/agents/test_agent/sessions/{session_id}/messages?client_only=true"
+            )
+            assert resp.status == 200
+            msgs = (await resp.json())["messages"]
+            # No runner → can't resolve client-facing nodes → returns all messages
+            assert len(msgs) == 2
 
 
 class TestGraphNodes:

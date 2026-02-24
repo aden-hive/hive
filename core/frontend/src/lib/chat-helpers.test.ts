@@ -108,6 +108,69 @@ describe("sseEventToChatMessage", () => {
     );
   });
 
+  it("uses turnId for message ID when provided", () => {
+    const event = makeEvent({
+      type: "client_output_delta",
+      node_id: "chat",
+      execution_id: null,
+      data: { snapshot: "hello" },
+    });
+    const result = sseEventToChatMessage(event, "t", undefined, 3);
+    expect(result!.id).toBe("stream-3-chat");
+  });
+
+  it("different turnIds produce different message IDs (separate bubbles)", () => {
+    const event = makeEvent({
+      type: "client_output_delta",
+      node_id: "chat",
+      execution_id: null,
+      data: { snapshot: "hello" },
+    });
+    const r1 = sseEventToChatMessage(event, "t", undefined, 1);
+    const r2 = sseEventToChatMessage(event, "t", undefined, 2);
+    expect(r1!.id).not.toBe(r2!.id);
+  });
+
+  it("same turnId produces same ID within a turn (enables streaming upsert)", () => {
+    const e1 = makeEvent({
+      type: "client_output_delta",
+      node_id: "chat",
+      execution_id: null,
+      data: { snapshot: "partial" },
+    });
+    const e2 = makeEvent({
+      type: "client_output_delta",
+      node_id: "chat",
+      execution_id: null,
+      data: { snapshot: "partial response" },
+    });
+    expect(sseEventToChatMessage(e1, "t", undefined, 5)!.id).toBe(
+      sseEventToChatMessage(e2, "t", undefined, 5)!.id,
+    );
+  });
+
+  it("falls back to execution_id when turnId is not provided", () => {
+    const event = makeEvent({
+      type: "client_output_delta",
+      node_id: "chat",
+      execution_id: "exec-123",
+      data: { snapshot: "hello" },
+    });
+    const result = sseEventToChatMessage(event, "t");
+    expect(result!.id).toBe("stream-exec-123-chat");
+  });
+
+  it("falls back to '0' when both turnId and execution_id are null", () => {
+    const event = makeEvent({
+      type: "client_output_delta",
+      node_id: "chat",
+      execution_id: null,
+      data: { snapshot: "hello" },
+    });
+    const result = sseEventToChatMessage(event, "t");
+    expect(result!.id).toBe("stream-0-chat");
+  });
+
   it("converts client_input_requested with prompt to message", () => {
     const event = makeEvent({
       type: "client_input_requested",
@@ -158,6 +221,43 @@ describe("sseEventToChatMessage", () => {
     const result = sseEventToChatMessage(event, "t", "Competitive Intel Agent");
     expect(result).not.toBeNull();
     expect(result!.agent).toBe("Competitive Intel Agent");
+  });
+
+  it("converts llm_text_delta with snapshot to worker message", () => {
+    const event = makeEvent({
+      type: "llm_text_delta",
+      node_id: "news-search",
+      execution_id: "abc",
+      data: { content: "Searching", snapshot: "Searching for news articles..." },
+    });
+    const result = sseEventToChatMessage(event, "t");
+    expect(result).not.toBeNull();
+    expect(result!.id).toBe("stream-abc-news-search");
+    expect(result!.content).toBe("Searching for news articles...");
+    expect(result!.role).toBe("worker");
+    expect(result!.agent).toBe("news-search");
+  });
+
+  it("returns null for llm_text_delta with empty snapshot", () => {
+    const event = makeEvent({
+      type: "llm_text_delta",
+      node_id: "news-search",
+      execution_id: "abc",
+      data: { content: "", snapshot: "" },
+    });
+    expect(sseEventToChatMessage(event, "t")).toBeNull();
+  });
+
+  it("uses node_id (not agentDisplayName) for llm_text_delta", () => {
+    const event = makeEvent({
+      type: "llm_text_delta",
+      node_id: "news-search",
+      execution_id: "abc",
+      data: { snapshot: "results" },
+    });
+    const result = sseEventToChatMessage(event, "t", "Competitive Intel Agent");
+    expect(result).not.toBeNull();
+    expect(result!.agent).toBe("news-search");
   });
 
   it("still uses 'System' for execution_failed even when agentDisplayName is provided", () => {
