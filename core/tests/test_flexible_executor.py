@@ -195,6 +195,22 @@ class TestCodeSandbox:
         assert result.success is True
         assert result.result == 8
 
+    @pytest.mark.parametrize(
+        "expression",
+        [
+            "[].__class__.__mro__",
+            "eval('1 + 1')",
+            "exec('x = 1')",
+            "compile('1 + 1', '<x>', 'eval')",
+            "__import__('os')",
+        ],
+    )
+    def test_safe_eval_blocks_dangerous_expressions(self, expression):
+        """Test safe_eval blocks dangerous expression payloads."""
+        result = safe_eval(expression)
+        assert result.success is False
+        assert "validation failed" in result.error.lower()
+
     def test_allowed_modules(self):
         """Test that allowed modules work."""
         sandbox = CodeSandbox()
