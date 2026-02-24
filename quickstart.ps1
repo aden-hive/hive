@@ -662,7 +662,7 @@ $DefaultModels = @{
     anthropic   = "claude-opus-4-6"
     openai      = "gpt-5.2"
     gemini      = "gemini-3-flash-preview"
-    groq        = "moonshotai/kimi-k2-instruct-0905"
+    groq        = "llama-3.3-70b-versatile"
     cerebras    = "zai-glm-4.7"
     mistral     = "mistral-large-latest"
     together_ai = "meta-llama/Llama-3.3-70B-Instruct-Turbo"
@@ -687,8 +687,9 @@ $ModelChoices = @{
         @{ Id = "gemini-3-pro-preview";   Label = "Gemini 3 Pro - Best quality";         MaxTokens = 8192 }
     )
     groq = @(
-        @{ Id = "moonshotai/kimi-k2-instruct-0905"; Label = "Kimi K2 - Best quality (recommended)"; MaxTokens = 8192 },
-        @{ Id = "openai/gpt-oss-120b";              Label = "GPT-OSS 120B - Fast reasoning";        MaxTokens = 8192 }
+        @{ Id = "llama-3.3-70b-versatile";            Label = "Llama 3.3 70B - Best tool following (recommended)"; MaxTokens = 8192 },
+        @{ Id = "moonshotai/kimi-k2-instruct-0905";   Label = "Kimi K2 - Best quality";                            MaxTokens = 8192 },
+        @{ Id = "openai/gpt-oss-120b";                Label = "GPT-OSS 120B - Fast reasoning";                     MaxTokens = 8192 }
     )
     cerebras = @(
         @{ Id = "zai-glm-4.7";                    Label = "ZAI-GLM 4.7 - Best quality (recommended)"; MaxTokens = 8192 },

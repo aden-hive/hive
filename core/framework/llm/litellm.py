@@ -212,7 +212,34 @@ def _is_stream_transient_error(exc: BaseException) -> bool:
     except ImportError:
         transient_types = (TimeoutError, ConnectionError, OSError)
 
-    return isinstance(exc, transient_types)
+    if not isinstance(exc, transient_types):
+        return False
+
+    error_str = str(exc).lower()
+    if "tool call validation failed" in error_str or "did not match schema" in error_str:
+        return False
+
+    return True
+
+
+def _is_tool_validation_error(exc: BaseException) -> bool:
+    """Check if the exception is a tool validation error from the LLM provider.
+
+    Tool validation errors occur when the LLM generates a tool call that doesn't
+    conform to the tool's schema. This is a model capability issue, not a transient
+    error, and typically requires using a different model or adjusting the prompt.
+
+    Returns True if this is a tool validation error that should not be retried.
+    """
+    error_str = str(exc).lower()
+    tool_validation_patterns = [
+        "tool call validation failed",
+        "did not match schema",
+        "tool call parameters",
+        "invalid tool call",
+        "function call validation",
+    ]
+    return any(pattern in error_str for pattern in tool_validation_patterns)
 
 
 class LiteLLMProvider(LLMProvider):
@@ -1032,6 +1059,20 @@ class LiteLLMProvider(LLMProvider):
                 return
 
             except Exception as e:
+                if _is_tool_validation_error(e):
+                    model_hint = ""
+                    model_lower = self.model.lower()
+                    if "groq" in model_lower or model_lower.startswith("llama-3.1"):
+                        model_hint = (
+                            " This may indicate that the model does not follow tool schemas well. "
+                            "Consider using a model with better tool-following capabilities "
+                            "(e.g., llama-3.3-70b-versatile for Groq, or Claude/GPT-4)."
+                        )
+                    yield StreamErrorEvent(
+                        error=f"Tool validation error: {e!s}.{model_hint}",
+                        recoverable=False,
+                    )
+                    return
                 if _is_stream_transient_error(e) and attempt < RATE_LIMIT_MAX_RETRIES:
                     wait = _compute_retry_delay(attempt, exception=e)
                     logger.warning(

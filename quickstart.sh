@@ -306,7 +306,7 @@ if [ "$USE_ASSOC_ARRAYS" = true ]; then
         ["anthropic"]="claude-haiku-4-5"
         ["openai"]="gpt-5-mini"
         ["gemini"]="gemini-3-flash-preview"
-        ["groq"]="moonshotai/kimi-k2-instruct-0905"
+        ["groq"]="llama-3.3-70b-versatile"
         ["cerebras"]="zai-glm-4.7"
         ["mistral"]="mistral-large-latest"
         ["together_ai"]="meta-llama/Llama-3.3-70B-Instruct-Turbo"
@@ -325,8 +325,9 @@ if [ "$USE_ASSOC_ARRAYS" = true ]; then
         ["openai:2"]="gpt-5-nano"
         ["gemini:0"]="gemini-3-flash-preview"
         ["gemini:1"]="gemini-3-pro-preview"
-        ["groq:0"]="moonshotai/kimi-k2-instruct-0905"
-        ["groq:1"]="openai/gpt-oss-120b"
+        ["groq:0"]="llama-3.3-70b-versatile"
+        ["groq:1"]="moonshotai/kimi-k2-instruct-0905"
+        ["groq:2"]="openai/gpt-oss-120b"
         ["cerebras:0"]="zai-glm-4.7"
         ["cerebras:1"]="qwen3-235b-a22b-instruct-2507"
     )
@@ -341,8 +342,9 @@ if [ "$USE_ASSOC_ARRAYS" = true ]; then
         ["openai:2"]="GPT-5 Nano - Fastest"
         ["gemini:0"]="Gemini 3 Flash - Fast (recommended)"
         ["gemini:1"]="Gemini 3 Pro - Best quality"
-        ["groq:0"]="Kimi K2 - Best quality (recommended)"
-        ["groq:1"]="GPT-OSS 120B - Fast reasoning"
+        ["groq:0"]="Llama 3.3 70B - Best tool following (recommended)"
+        ["groq:1"]="Kimi K2 - Best quality"
+        ["groq:2"]="GPT-OSS 120B - Fast reasoning"
         ["cerebras:0"]="ZAI-GLM 4.7 - Best quality (recommended)"
         ["cerebras:1"]="Qwen3 235B - Frontier reasoning"
     )
@@ -359,6 +361,7 @@ if [ "$USE_ASSOC_ARRAYS" = true ]; then
         ["gemini:1"]=8192
         ["groq:0"]=8192
         ["groq:1"]=8192
+        ["groq:2"]=8192
         ["cerebras:0"]=8192
         ["cerebras:1"]=8192
     )
@@ -367,7 +370,7 @@ if [ "$USE_ASSOC_ARRAYS" = true ]; then
         ["anthropic"]=4
         ["openai"]=3
         ["gemini"]=2
-        ["groq"]=2
+        ["groq"]=3
         ["cerebras"]=2
     )
 
@@ -407,7 +410,7 @@ else
 
     # Default models by provider id (parallel arrays)
     MODEL_PROVIDER_IDS=(anthropic openai gemini groq cerebras mistral together_ai deepseek)
-    MODEL_DEFAULTS=("claude-opus-4-6" "gpt-5.2" "gemini-3-flash-preview" "moonshotai/kimi-k2-instruct-0905" "zai-glm-4.7" "mistral-large-latest" "meta-llama/Llama-3.3-70B-Instruct-Turbo" "deepseek-chat")
+    MODEL_DEFAULTS=("claude-opus-4-6" "gpt-5.2" "gemini-3-flash-preview" "llama-3.3-70b-versatile" "zai-glm-4.7" "mistral-large-latest" "meta-llama/Llama-3.3-70B-Instruct-Turbo" "deepseek-chat")
 
     # Helper: get provider display name for an env var
     get_provider_name() {
@@ -449,11 +452,11 @@ else
     }
 
     # Model choices per provider - flat parallel arrays with provider offsets
-    # Provider order: anthropic(4), openai(3), gemini(2), groq(2), cerebras(2)
-    MC_PROVIDERS=(anthropic anthropic anthropic anthropic openai openai openai gemini gemini groq groq cerebras cerebras)
-    MC_IDS=("claude-opus-4-6" "claude-sonnet-4-5-20250929" "claude-sonnet-4-20250514" "claude-haiku-4-5-20251001" "gpt-5.2" "gpt-5-mini" "gpt-5-nano" "gemini-3-flash-preview" "gemini-3-pro-preview" "moonshotai/kimi-k2-instruct-0905" "openai/gpt-oss-120b" "zai-glm-4.7" "qwen3-235b-a22b-instruct-2507")
-    MC_LABELS=("Opus 4.6 - Most capable (recommended)" "Sonnet 4.5 - Best balance" "Sonnet 4 - Fast + capable" "Haiku 4.5 - Fast + cheap" "GPT-5.2 - Most capable (recommended)" "GPT-5 Mini - Fast + cheap" "GPT-5 Nano - Fastest" "Gemini 3 Flash - Fast (recommended)" "Gemini 3 Pro - Best quality" "Kimi K2 - Best quality (recommended)" "GPT-OSS 120B - Fast reasoning" "ZAI-GLM 4.7 - Best quality (recommended)" "Qwen3 235B - Frontier reasoning")
-    MC_MAXTOKENS=(32768 16384 8192 8192 16384 16384 16384 8192 8192 8192 8192 8192 8192)
+    # Provider order: anthropic(4), openai(3), gemini(2), groq(3), cerebras(2)
+    MC_PROVIDERS=(anthropic anthropic anthropic anthropic openai openai openai gemini gemini groq groq groq cerebras cerebras)
+    MC_IDS=("claude-opus-4-6" "claude-sonnet-4-5-20250929" "claude-sonnet-4-20250514" "claude-haiku-4-5-20251001" "gpt-5.2" "gpt-5-mini" "gpt-5-nano" "gemini-3-flash-preview" "gemini-3-pro-preview" "llama-3.3-70b-versatile" "moonshotai/kimi-k2-instruct-0905" "openai/gpt-oss-120b" "zai-glm-4.7" "qwen3-235b-a22b-instruct-2507")
+    MC_LABELS=("Opus 4.6 - Most capable (recommended)" "Sonnet 4.5 - Best balance" "Sonnet 4 - Fast + capable" "Haiku 4.5 - Fast + cheap" "GPT-5.2 - Most capable (recommended)" "GPT-5 Mini - Fast + cheap" "GPT-5 Nano - Fastest" "Gemini 3 Flash - Fast (recommended)" "Gemini 3 Pro - Best quality" "Llama 3.3 70B - Best tool following (recommended)" "Kimi K2 - Best quality" "GPT-OSS 120B - Fast reasoning" "ZAI-GLM 4.7 - Best quality (recommended)" "Qwen3 235B - Frontier reasoning")
+    MC_MAXTOKENS=(32768 16384 8192 8192 16384 16384 16384 8192 8192 8192 8192 8192 8192 8192)
 
     # Helper: get number of model choices for a provider
     get_model_choice_count() {
