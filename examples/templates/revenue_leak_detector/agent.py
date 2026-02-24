@@ -327,6 +327,21 @@ class RevenueLeakDetectorAgent:
             if ep_node not in node_ids:
                 errors.append(f"Entry point '{ep_id}': node '{ep_node}' not found")
 
+        # Cross-check each node's tool list against the registered TOOLS dict.
+        # Catches typos and desync between NodeSpec and tools.py at validate-time
+        # rather than silently failing at runtime when the LLM calls the missing tool.
+        try:
+            from .tools import TOOLS as _TOOLS  # noqa: PLC0415
+            registered = set(_TOOLS.keys())
+            for node in self.nodes:
+                for tool_name in node.tools or []:
+                    if tool_name not in registered:
+                        errors.append(
+                            f"Node '{node.id}' references unregistered tool '{tool_name}'"
+                        )
+        except Exception as exc:  # pragma: no cover
+            warnings.append(f"Could not validate tool references: {exc}")
+
         return {
             "valid": len(errors) == 0,
             "errors": errors,
