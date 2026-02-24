@@ -14,20 +14,36 @@ logger = logging.getLogger(__name__)
 
 
 def ensure_credential_key_env() -> None:
-    """Load HIVE_CREDENTIAL_KEY and ADEN_API_KEY from shell config if not in environment.
+    """Load credentials from shell config if not in environment.
 
-    The setup-credentials skill writes these to ~/.zshrc or ~/.bashrc.
-    If the user hasn't sourced their config in the current shell, this reads
-    them directly so the runner (and any MCP subprocesses it spawns) can:
-    - Unlock the encrypted credential store (HIVE_CREDENTIAL_KEY)
-    - Enable Aden OAuth sync for Google/HubSpot/etc. (ADEN_API_KEY)
+    The quickstart.sh and setup-credentials skill write API keys to ~/.zshrc
+    or ~/.bashrc. If the user hasn't sourced their config in the current shell,
+    this reads them directly so the runner (and any MCP subprocesses) can use them.
+
+    Loads:
+    - HIVE_CREDENTIAL_KEY (encrypted credential store)
+    - ADEN_API_KEY (Aden OAuth sync)
+    - All LLM API keys (ANTHROPIC_API_KEY, OPENAI_API_KEY, ZAI_API_KEY, etc.)
     """
     try:
         from aden_tools.credentials.shell_config import check_env_var_in_shell_config
     except ImportError:
         return
 
-    for var_name in ("HIVE_CREDENTIAL_KEY", "ADEN_API_KEY"):
+    # Core credentials that are always checked
+    env_vars_to_load = ["HIVE_CREDENTIAL_KEY", "ADEN_API_KEY"]
+
+    # Add all LLM/tool API keys from CREDENTIAL_SPECS
+    try:
+        from aden_tools.credentials import CREDENTIAL_SPECS
+
+        for spec in CREDENTIAL_SPECS.values():
+            if spec.env_var and spec.env_var not in env_vars_to_load:
+                env_vars_to_load.append(spec.env_var)
+    except ImportError:
+        pass
+
+    for var_name in env_vars_to_load:
         if os.environ.get(var_name):
             continue
         found, value = check_env_var_in_shell_config(var_name)

@@ -92,6 +92,14 @@ try:
 except ImportError:
     _ADEN_AVAILABLE = False
 
+# Local credential registry (named API key accounts with identity metadata)
+try:
+    from .local import LocalAccountInfo, LocalCredentialRegistry
+
+    _LOCAL_AVAILABLE = True
+except ImportError:
+    _LOCAL_AVAILABLE = False
+
 __all__ = [
     # Main store
     "CredentialStore",
@@ -133,7 +141,11 @@ __all__ = [
     "AdenCredentialClient",
     "AdenClientConfig",
     "AdenCachedStorage",
+    # Local credential registry (optional - requires cryptography)
+    "LocalCredentialRegistry",
+    "LocalAccountInfo",
 ]
 
 # Track Aden availability for runtime checks
 ADEN_AVAILABLE = _ADEN_AVAILABLE
+LOCAL_AVAILABLE = _LOCAL_AVAILABLE

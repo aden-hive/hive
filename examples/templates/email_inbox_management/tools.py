@@ -41,6 +41,13 @@ TOOLS = {
                     "type": "string",
                     "description": "Maximum number of emails to fetch (default '100')",
                 },
+                "account": {
+                    "type": "string",
+                    "description": (
+                        "Account alias to use (e.g. 'timothy-home'). "
+                        "Required when multiple Google accounts are connected."
+                    ),
+                },
             },
             "required": [],
         },
@@ -64,8 +71,13 @@ def _get_data_dir() -> str:
     return ctx["data_dir"]
 
 
-def _get_access_token() -> str:
-    """Get Google OAuth access token from credential store."""
+def _get_access_token(account: str = "") -> str:
+    """Get Google OAuth access token from credential store.
+
+    Args:
+        account: Account alias (e.g. 'timothy-home'). When provided,
+                 resolves the token for that specific account.
+    """
     import os
 
     # Try credential store first (same pattern as gmail_tool.py)
@@ -73,7 +85,10 @@ def _get_access_token() -> str:
         from aden_tools.credentials import CredentialStoreAdapter
 
         credentials = CredentialStoreAdapter.default()
-        token = credentials.get("google")
+        if account:
+            token = credentials.get_by_alias("google", account)
+        else:
+            token = credentials.get("google")
         if token:
             return token
     except Exception:
@@ -105,17 +120,21 @@ def _parse_headers(headers: list[dict]) -> dict[str, str]:
 # ---------------------------------------------------------------------------
 
 
-def _bulk_fetch_emails(max_emails: str = "100") -> str:
+def _bulk_fetch_emails(max_emails: str = "100", account: str = "") -> str:
     """Fetch inbox emails and write them to emails.jsonl.
 
     Uses synchronous httpx.Client since this runs as a tool call inside
     an already-running async event loop.
 
+    Args:
+        max_emails: Maximum number of emails to fetch.
+        account: Account alias (e.g. 'timothy-home') for multi-account routing.
+
     Returns:
         The filename "emails.jsonl" (written to session data_dir).
     """
     max_count = int(max_emails) if max_emails else 100
-    access_token = _get_access_token()
+    access_token = _get_access_token(account)
     data_dir = _get_data_dir()
     Path(data_dir).mkdir(parents=True, exist_ok=True)
 
@@ -237,7 +256,8 @@ def tool_executor(tool_use: ToolUse) -> ToolResult:
     if tool_use.name == "bulk_fetch_emails":
         try:
             max_emails = tool_use.input.get("max_emails", "100")
-            filename = _bulk_fetch_emails(max_emails=max_emails)
+            account = tool_use.input.get("account", "")
+            filename = _bulk_fetch_emails(max_emails=max_emails, account=account)
             return ToolResult(
                 tool_use_id=tool_use.id,
                 content=json.dumps({"filename": filename}),

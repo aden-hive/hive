@@ -25,6 +25,7 @@ from .account_info_tool import register_tools as register_account_info
 from .apollo_tool import register_tools as register_apollo
 from .arxiv_tool import register_tools as register_arxiv
 from .bigquery_tool import register_tools as register_bigquery
+from .brevo_tool import register_tools as register_brevo
 from .calcom_tool import register_tools as register_calcom
 from .calendar_tool import register_tools as register_calendar
 from .csv_tool import register_tools as register_csv
@@ -76,6 +77,9 @@ from .vision_tool import register_tools as register_vision
 from .web_scrape_tool import register_tools as register_web_scrape
 from .web_search_tool import register_tools as register_web_search
 
+# Web and PDF tools
+from .wikipedia_tool import register_tools as register_wikipedia
+
 
 def register_all_tools(
     mcp: FastMCP,
@@ -98,6 +102,7 @@ def register_all_tools(
     register_pdf_read(mcp)
     register_time(mcp)
     register_runtime_logs(mcp)
+    register_wikipedia(mcp)
     register_arxiv(mcp)
 
     # Tools that need credentials (pass credentials if provided)
@@ -147,6 +152,7 @@ def register_all_tools(
     register_subdomain_enumerator(mcp)
     register_risk_scorer(mcp)
     register_stripe(mcp, credentials=credentials)
+    register_brevo(mcp, credentials=credentials)
 
     # Postgres tool
     register_postgres(mcp, credentials=credentials)
