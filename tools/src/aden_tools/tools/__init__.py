@@ -32,6 +32,7 @@ from .discord_tool import register_tools as register_discord
 
 # Security scanning tools
 from .dns_security_scanner import register_tools as register_dns_security_scanner
+from .duckduckgo_search_tool import register_tools as register_duckduckgo_search
 from .email_tool import register_tools as register_email
 from .exa_search_tool import register_tools as register_exa_search
 from .example_tool import register_tools as register_example
@@ -99,6 +100,7 @@ def register_all_tools(
     register_time(mcp)
     register_runtime_logs(mcp)
     register_arxiv(mcp)
+    register_duckduckgo_search(mcp)
 
     # Tools that need credentials (pass credentials if provided)
     # web_search supports multiple providers (Google, Brave) with auto-detection

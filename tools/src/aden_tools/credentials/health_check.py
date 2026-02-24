@@ -596,6 +596,42 @@ class DiscordHealthChecker:
             )
 
 
+class DuckDuckGoHealthChecker:
+    """Health checker for DuckDuckGo."""
+
+    ENDPOINT = "https://duckduckgo.com"
+    TIMEOUT = 10.0
+
+    def check(self, api_key: str = "") -> HealthCheckResult:
+        """Validate DuckDuckGo is reachable."""
+        try:
+            with httpx.Client(timeout=self.TIMEOUT) as client:
+                response = client.get(self.ENDPOINT)
+                if response.status_code == 200:
+                    return HealthCheckResult(
+                        valid=True,
+                        message="DuckDuckGo is reachable",
+                    )
+                else:
+                    return HealthCheckResult(
+                        valid=False,
+                        message=f"DuckDuckGo returned status {response.status_code}",
+                        details={"status_code": response.status_code},
+                    )
+        except httpx.TimeoutException:
+            return HealthCheckResult(
+                valid=False,
+                message="DuckDuckGo request timed out",
+                details={"error": "timeout"},
+            )
+        except httpx.RequestError as e:
+            return HealthCheckResult(
+                valid=False,
+                message=f"Failed to connect to DuckDuckGo: {e}",
+                details={"error": str(e)},
+            )
+
+
 class ResendHealthChecker:
     """Health checker for Resend API credentials."""
 
@@ -753,6 +789,7 @@ HEALTH_CHECKERS: dict[str, CredentialHealthChecker] = {
     "anthropic": AnthropicHealthChecker(),
     "github": GitHubHealthChecker(),
     "resend": ResendHealthChecker(),
+    "duckduckgo": DuckDuckGoHealthChecker(),
 }
 
 

@@ -13,6 +13,7 @@ from aden_tools.credentials.health_check import (
     GoogleMapsHealthChecker,
     GoogleSearchHealthChecker,
     ResendHealthChecker,
+    DuckDuckGoHealthChecker,
     check_credential_health,
 )
 
@@ -69,6 +70,7 @@ class TestHealthCheckerRegistry:
             "google",
             "slack",
             "discord",
+            "duckduckgo",
         }
         assert set(HEALTH_CHECKERS.keys()) == expected
 
