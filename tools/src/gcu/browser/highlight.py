@@ -22,7 +22,7 @@ logger = logging.getLogger(__name__)
 
 _ENABLED = os.environ.get("HIVE_BROWSER_HIGHLIGHTS", "1") != "0"
 _COLOR = os.environ.get("HIVE_HIGHLIGHT_COLOR", "#FAC43B")
-_DURATION_MS = int(os.environ.get("HIVE_HIGHLIGHT_DURATION_MS", "600"))
+_DURATION_MS = int(os.environ.get("HIVE_HIGHLIGHT_DURATION_MS", "1500"))
 _ANIMATION_WAIT_S = 0.35
 
 # ---------------------------------------------------------------------------

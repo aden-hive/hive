@@ -148,15 +148,20 @@ def register_inspection_tools(mcp: FastMCP) -> None:
     async def browser_snapshot(
         target_id: str | None = None,
         profile: str = "default",
+        mode: Literal["aria", "cdp"] = "aria",
     ) -> dict:
         """
-        Get an AI-optimized accessibility snapshot of the page.
+        Get an accessibility snapshot of the page.
 
-        Uses Playwright's aria_snapshot() to return a compact, indented text tree
-        with role/name annotations. Much smaller than raw HTML and ideal for LLM
-        consumption — typically 1-5 KB vs 100+ KB of HTML.
+        Two modes:
+          - "aria" (default): Uses Playwright's aria_snapshot() for a compact,
+            indented text tree with role/name annotations. Much smaller than raw
+            HTML and ideal for LLM consumption — typically 1-5 KB vs 100+ KB.
+          - "cdp": Uses Chrome DevTools Protocol (Accessibility.getFullAXTree)
+            for the complete, low-level accessibility tree. More verbose but
+            includes all ARIA properties and states.
 
-        Output format example:
+        Aria output format example:
             - navigation "Main":
               - link "Home"
               - link "About"
@@ -167,6 +172,7 @@ def register_inspection_tools(mcp: FastMCP) -> None:
         Args:
             target_id: Tab ID (default: active tab)
             profile: Browser profile name (default: "default")
+            mode: Snapshot mode - "aria" (compact) or "cdp" (full tree). Default: "aria"
 
         Returns:
             Dict with the snapshot text tree, URL, and target ID
@@ -177,52 +183,19 @@ def register_inspection_tools(mcp: FastMCP) -> None:
             if not page:
                 return {"ok": False, "error": "No active tab"}
 
-            snapshot = await page.locator(":root").aria_snapshot()
+            if mode == "cdp":
+                if not session.context:
+                    return {"ok": False, "error": "No browser context"}
 
-            return {
-                "ok": True,
-                "targetId": target_id or session.active_page_id,
-                "url": page.url,
-                "snapshot": snapshot,
-            }
-        except PlaywrightError as e:
-            return {"ok": False, "error": f"Browser error: {e!s}"}
-
-    @mcp.tool()
-    async def browser_snapshot_aria(
-        target_id: str | None = None,
-        profile: str = "default",
-    ) -> dict:
-        """
-        Get a full CDP accessibility tree snapshot of the page.
-
-        Uses Chrome DevTools Protocol (Accessibility.getFullAXTree) to return
-        the complete, low-level accessibility tree. More verbose than
-        browser_snapshot but includes all ARIA properties and states.
-
-        Args:
-            target_id: Tab ID (default: active tab)
-            profile: Browser profile name (default: "default")
-
-        Returns:
-            Dict with the formatted accessibility tree, URL, and target ID
-        """
-        try:
-            session = get_session(profile)
-            page = session.get_page(target_id)
-            if not page:
-                return {"ok": False, "error": "No active tab"}
-
-            if not session.context:
-                return {"ok": False, "error": "No browser context"}
-
-            cdp = await session.context.new_cdp_session(page)
-            try:
-                result = await cdp.send("Accessibility.getFullAXTree")
-                ax_nodes = result.get("nodes", [])
-                snapshot = _format_ax_tree(ax_nodes)
-            finally:
-                await cdp.detach()
+                cdp = await session.context.new_cdp_session(page)
+                try:
+                    result = await cdp.send("Accessibility.getFullAXTree")
+                    ax_nodes = result.get("nodes", [])
+                    snapshot = _format_ax_tree(ax_nodes)
+                finally:
+                    await cdp.detach()
+            else:
+                snapshot = await page.locator(":root").aria_snapshot()
 
             return {
                 "ok": True,
