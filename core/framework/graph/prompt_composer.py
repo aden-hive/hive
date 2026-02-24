@@ -204,7 +204,7 @@ def build_transition_marker(
                 ]
                 if file_lines:
                     sections.append(
-                        "\nData files (use load_data to access):\n" + "\n".join(file_lines)
+                        "\nData files (use read_file to access):\n" + "\n".join(file_lines)
                     )
 
     # Agent working memory

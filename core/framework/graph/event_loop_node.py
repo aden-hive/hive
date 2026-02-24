@@ -423,6 +423,12 @@ class EventLoopNode(NodeProtocol):
         if ctx.is_subagent_mode and ctx.report_callback is not None:
             tools.append(self._build_report_to_parent_tool())
 
+        # Add built-in file tools when spillover is configured
+        if self._config.spillover_dir:
+            from framework.graph.file_tools import build_file_tools
+
+            tools.extend(build_file_tools())
+
         logger.info(
             "[%s] Tools available (%d): %s | client_facing=%s | judge=%s",
             node_id,
@@ -1327,6 +1333,8 @@ class EventLoopNode(NodeProtocol):
 
             # Phase 1: triage — handle framework tools immediately,
             # queue real tools and subagents for parallel execution.
+            from framework.graph.file_tools import execute_file_tool, is_file_tool
+
             results_by_id: dict[str, ToolResult] = {}
             pending_real: list[ToolCallEvent] = []
             pending_subagent: list[ToolCallEvent] = []
@@ -1456,6 +1464,15 @@ class EventLoopNode(NodeProtocol):
                         is_error=False,
                     )
                     results_by_id[tc.tool_use_id] = result
+
+                elif is_file_tool(tc.tool_name):
+                    # --- Built-in file tool: execute inline, log as real work ---
+                    result = execute_file_tool(
+                        tc.tool_name, tc.tool_input, tool_use_id=tc.tool_use_id,
+                    )
+                    results_by_id[tc.tool_use_id] = self._truncate_tool_result(
+                        result, tc.tool_name
+                    )
 
                 else:
                     # --- Real tool: check for truncated args, else queue ---
@@ -2269,21 +2286,20 @@ class EventLoopNode(NodeProtocol):
         if limit <= 0 or result.is_error or len(result.content) <= limit:
             return result
 
-        # load_data is the designated mechanism for reading spilled files.
-        # Don't re-spill (circular), but DO truncate with a pagination hint.
-        if tool_name == "load_data":
+        # Anti-circular truncation: tools that read/produce large content
+        # should NOT be re-spilled.  Truncate with a pagination hint instead.
+        if tool_name in ("load_data", "read_file", "search_files", "list_directory", "run_command"):
             preview_chars = max(limit - 300, limit // 2)
             preview = result.content[:preview_chars]
             truncated = (
-                f"[load_data result: {len(result.content)} chars — "
-                f"too large for context. Use offset_bytes and limit_bytes parameters "
-                f"to read smaller chunks, e.g. "
-                f"load_data(filename=..., offset_bytes=0, limit_bytes=5000).]\n\n"
+                f"[{tool_name} result: {len(result.content)} chars — "
+                f"too large for context. Use offset/limit parameters "
+                f"to read smaller chunks.]\n\n"
                 f"Preview:\n{preview}…"
             )
             logger.info(
-                "load_data result truncated: %d → %d chars "
-                "(use offset_bytes/limit_bytes to paginate)",
+                "%s result truncated: %d → %d chars (use offset/limit to paginate)",
+                tool_name,
                 len(result.content),
                 len(truncated),
             )
@@ -2317,11 +2333,12 @@ class EventLoopNode(NodeProtocol):
 
             (spill_path / filename).write_text(write_content, encoding="utf-8")
 
+            full_path = str(spill_path / filename)
             truncated = (
                 f"[Result from {tool_name}: {len(result.content)} chars — "
-                f"too large for context, saved to '{filename}'. "
-                f"Use load_data(filename='{filename}') "
-                f"to read the full result.]\n\n"
+                f"too large for context, saved to '{full_path}'. "
+                f"Use read_file(path='{full_path}') to read the full result. "
+                f"Use offset and limit to paginate.]\n\n"
                 f"Preview:\n{preview}…"
             )
             logger.info(
@@ -2576,17 +2593,22 @@ class EventLoopNode(NodeProtocol):
                 if data_dir.is_dir():
                     files = sorted(f.name for f in data_dir.iterdir() if f.is_file())
                     if files:
-                        file_list = "\n".join(f"  - {f}" for f in files[:30])
-                        parts.append("DATA FILES (use load_data to read):\n" + file_list)
+                        file_lines = [
+                            f"  - {str(data_dir / f)}" for f in files[:30]
+                        ]
+                        parts.append(
+                            "DATA FILES (use read_file to read):\n"
+                            + "\n".join(file_lines)
+                        )
                     else:
                         parts.append(
                             "NOTE: Large tool results may have been saved to files. "
-                            "Use list_data_files() to check."
+                            "Use list_directory to check the data directory."
                         )
             except Exception:
                 parts.append(
                     "NOTE: Large tool results were saved to files. "
-                    "Use load_data(filename='<filename>') to read them."
+                    "Use read_file(path='<path>') to read them."
                 )
 
         # 6. Tool call history (prevent re-calling tools)
