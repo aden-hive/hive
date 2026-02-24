@@ -131,9 +131,11 @@ def register_tools(
 ) -> None:
     """Register HubSpot CRM tools with the MCP server."""
 
-    def _get_token() -> str | None:
+    def _get_token(account: str = "") -> str | None:
         """Get HubSpot access token from credential manager or environment."""
         if credentials is not None:
+            if account:
+                return credentials.get_by_alias("hubspot", account)
             token = credentials.get("hubspot")
             # Defensive check: ensure we get a string, not a complex object
             if token is not None and not isinstance(token, str):
@@ -143,9 +145,9 @@ def register_tools(
             return token
         return os.getenv("HUBSPOT_ACCESS_TOKEN")
 
-    def _get_client() -> _HubSpotClient | dict[str, str]:
+    def _get_client(account: str = "") -> _HubSpotClient | dict[str, str]:
         """Get a HubSpot client, or return an error dict if no credentials."""
-        token = _get_token()
+        token = _get_token(account)
         if not token:
             return {
                 "error": "HubSpot credentials not configured",
@@ -163,6 +165,7 @@ def register_tools(
         query: str = "",
         properties: list[str] | None = None,
         limit: int = 10,
+        account: str = "",
     ) -> dict:
         """
         Search HubSpot contacts.
@@ -176,7 +179,7 @@ def register_tools(
         Returns:
             Dict with search results or error
         """
-        client = _get_client()
+        client = _get_client(account)
         if isinstance(client, dict):
             return client
         try:
@@ -192,6 +195,7 @@ def register_tools(
     def hubspot_get_contact(
         contact_id: str,
         properties: list[str] | None = None,
+        account: str = "",
     ) -> dict:
         """
         Get a HubSpot contact by ID.
@@ -204,7 +208,7 @@ def register_tools(
         Returns:
             Dict with contact data or error
         """
-        client = _get_client()
+        client = _get_client(account)
         if isinstance(client, dict):
             return client
         try:
@@ -217,6 +221,7 @@ def register_tools(
     @mcp.tool()
     def hubspot_create_contact(
         properties: dict[str, str],
+        account: str = "",
     ) -> dict:
         """
         Create a new HubSpot contact.
@@ -228,7 +233,7 @@ def register_tools(
         Returns:
             Dict with created contact data or error
         """
-        client = _get_client()
+        client = _get_client(account)
         if isinstance(client, dict):
             return client
         try:
@@ -242,6 +247,7 @@ def register_tools(
     def hubspot_update_contact(
         contact_id: str,
         properties: dict[str, str],
+        account: str = "",
     ) -> dict:
         """
         Update an existing HubSpot contact.
@@ -253,7 +259,7 @@ def register_tools(
         Returns:
             Dict with updated contact data or error
         """
-        client = _get_client()
+        client = _get_client(account)
         if isinstance(client, dict):
             return client
         try:
@@ -270,6 +276,7 @@ def register_tools(
         query: str = "",
         properties: list[str] | None = None,
         limit: int = 10,
+        account: str = "",
     ) -> dict:
         """
         Search HubSpot companies.
@@ -282,7 +289,7 @@ def register_tools(
         Returns:
             Dict with search results or error
         """
-        client = _get_client()
+        client = _get_client(account)
         if isinstance(client, dict):
             return client
         try:
@@ -298,6 +305,7 @@ def register_tools(
     def hubspot_get_company(
         company_id: str,
         properties: list[str] | None = None,
+        account: str = "",
     ) -> dict:
         """
         Get a HubSpot company by ID.
@@ -309,7 +317,7 @@ def register_tools(
         Returns:
             Dict with company data or error
         """
-        client = _get_client()
+        client = _get_client(account)
         if isinstance(client, dict):
             return client
         try:
@@ -322,6 +330,7 @@ def register_tools(
     @mcp.tool()
     def hubspot_create_company(
         properties: dict[str, str],
+        account: str = "",
     ) -> dict:
         """
         Create a new HubSpot company.
@@ -333,7 +342,7 @@ def register_tools(
         Returns:
             Dict with created company data or error
         """
-        client = _get_client()
+        client = _get_client(account)
         if isinstance(client, dict):
             return client
         try:
@@ -347,6 +356,7 @@ def register_tools(
     def hubspot_update_company(
         company_id: str,
         properties: dict[str, str],
+        account: str = "",
     ) -> dict:
         """
         Update an existing HubSpot company.
@@ -358,7 +368,7 @@ def register_tools(
         Returns:
             Dict with updated company data or error
         """
-        client = _get_client()
+        client = _get_client(account)
         if isinstance(client, dict):
             return client
         try:
@@ -375,6 +385,7 @@ def register_tools(
         query: str = "",
         properties: list[str] | None = None,
         limit: int = 10,
+        account: str = "",
     ) -> dict:
         """
         Search HubSpot deals.
@@ -388,7 +399,7 @@ def register_tools(
         Returns:
             Dict with search results or error
         """
-        client = _get_client()
+        client = _get_client(account)
         if isinstance(client, dict):
             return client
         try:
@@ -404,6 +415,7 @@ def register_tools(
     def hubspot_get_deal(
         deal_id: str,
         properties: list[str] | None = None,
+        account: str = "",
     ) -> dict:
         """
         Get a HubSpot deal by ID.
@@ -416,7 +428,7 @@ def register_tools(
         Returns:
             Dict with deal data or error
         """
-        client = _get_client()
+        client = _get_client(account)
         if isinstance(client, dict):
             return client
         try:
@@ -429,6 +441,7 @@ def register_tools(
     @mcp.tool()
     def hubspot_create_deal(
         properties: dict[str, str],
+        account: str = "",
     ) -> dict:
         """
         Create a new HubSpot deal.
@@ -440,7 +453,7 @@ def register_tools(
         Returns:
             Dict with created deal data or error
         """
-        client = _get_client()
+        client = _get_client(account)
         if isinstance(client, dict):
             return client
         try:
@@ -454,6 +467,7 @@ def register_tools(
     def hubspot_update_deal(
         deal_id: str,
         properties: dict[str, str],
+        account: str = "",
     ) -> dict:
         """
         Update an existing HubSpot deal.
@@ -466,7 +480,7 @@ def register_tools(
         Returns:
             Dict with updated deal data or error
         """
-        client = _get_client()
+        client = _get_client(account)
         if isinstance(client, dict):
             return client
         try:

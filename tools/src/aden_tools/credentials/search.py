@@ -79,4 +79,29 @@ SEARCH_CREDENTIALS = {
         credential_key="api_key",
         credential_group="google_custom_search",
     ),
+    "exa_search": CredentialSpec(
+        env_var="EXA_API_KEY",
+        tools=["exa_search", "exa_find_similar", "exa_get_contents", "exa_answer"],
+        node_types=[],
+        required=True,
+        startup_required=False,
+        help_url="https://dashboard.exa.ai/api-keys",
+        description="API key for Exa Search",
+        # Auth method support
+        direct_api_key_supported=True,
+        api_key_instructions="""To get an Exa Search API key:
+1. Go to https://dashboard.exa.ai/
+2. Sign up for an Exa account (or sign in)
+3. Navigate to "API Keys" in the dashboard
+4. Click "Create new API key"
+5. Give your API key a name (e.g., "Hive Agent")
+6. Copy the API key and store it securely
+Note: Free tier includes 1,000 searches/month.""",
+        # Health check configuration
+        health_check_endpoint="https://api.exa.ai/search",
+        health_check_method="POST",
+        # Credential store mapping
+        credential_id="exa_search",
+        credential_key="api_key",
+    ),
 }

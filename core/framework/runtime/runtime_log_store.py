@@ -52,29 +52,20 @@ class RuntimeLogStore:
 
         - New format (session_*): {storage_root}/sessions/{run_id}/logs/
         - Old format (anything else): {base_path}/runs/{run_id}/ (deprecated)
-
-        When base_path ends with 'runtime_logs', we use the parent directory
-        to avoid nesting under runtime_logs/.
-
-        This allows backward compatibility for reading old logs.
         """
         if run_id.startswith("session_"):
-            # New: sessions/{session_id}/logs/
-            # If base_path ends with runtime_logs, use parent (storage root)
             is_runtime_logs = self._base_path.name == "runtime_logs"
             root = self._base_path.parent if is_runtime_logs else self._base_path
             return root / "sessions" / run_id / "logs"
-        else:
-            # Old: runs/{run_id}/ (deprecated, backward compatibility only)
-            import warnings
+        import warnings
 
-            warnings.warn(
-                f"Reading logs from deprecated location for run_id={run_id}. "
-                "New sessions use unified storage at sessions/session_*/logs/",
-                DeprecationWarning,
-                stacklevel=3,
-            )
-            return self._base_path / "runs" / run_id
+        warnings.warn(
+            f"Reading logs from deprecated location for run_id={run_id}. "
+            "New sessions use unified storage at sessions/session_*/logs/",
+            DeprecationWarning,
+            stacklevel=3,
+        )
+        return self._base_path / "runs" / run_id
 
     # -------------------------------------------------------------------
     # Incremental write (sync — called from locked sections)

@@ -494,9 +494,11 @@ def register_tools(
 ) -> None:
     """Register GitHub tools with the MCP server."""
 
-    def _get_token() -> str | None:
+    def _get_token(account: str = "") -> str | None:
         """Get GitHub token from credential manager or environment."""
         if credentials is not None:
+            if account:
+                return credentials.get_by_alias("github", account)
             token = credentials.get("github")
             if token is not None and not isinstance(token, str):
                 raise TypeError(
@@ -505,9 +507,9 @@ def register_tools(
             return token
         return os.getenv("GITHUB_TOKEN")
 
-    def _get_client() -> _GitHubClient | dict[str, str]:
+    def _get_client(account: str = "") -> _GitHubClient | dict[str, str]:
         """Get a GitHub client, or return an error dict if no credentials."""
-        token = _get_token()
+        token = _get_token(account)
         if not token:
             return {
                 "error": "GitHub credentials not configured",
@@ -527,6 +529,7 @@ def register_tools(
         visibility: str = "all",
         sort: str = "updated",
         limit: int = 30,
+        account: str = "",
     ) -> dict:
         """
         List repositories for a user or the authenticated user.
@@ -540,7 +543,7 @@ def register_tools(
         Returns:
             Dict with list of repositories or error
         """
-        client = _get_client()
+        client = _get_client(account)
         if isinstance(client, dict):
             return client
         try:
@@ -554,6 +557,7 @@ def register_tools(
     def github_get_repo(
         owner: str,
         repo: str,
+        account: str = "",
     ) -> dict:
         """
         Get information about a specific repository.
@@ -565,7 +569,7 @@ def register_tools(
         Returns:
             Dict with repository information or error
         """
-        client = _get_client()
+        client = _get_client(account)
         if isinstance(client, dict):
             return client
         try:
@@ -580,6 +584,7 @@ def register_tools(
         query: str,
         sort: str | None = None,
         limit: int = 30,
+        account: str = "",
     ) -> dict:
         """
         Search for repositories on GitHub.
@@ -592,7 +597,7 @@ def register_tools(
         Returns:
             Dict with search results or error
         """
-        client = _get_client()
+        client = _get_client(account)
         if isinstance(client, dict):
             return client
         try:
@@ -611,6 +616,7 @@ def register_tools(
         state: str = "open",
         page: int = 1,
         limit: int = 30,
+        account: str = "",
     ) -> dict:
         """
         List issues for a repository.
@@ -625,7 +631,7 @@ def register_tools(
         Returns:
             Dict with list of issues or error
         """
-        client = _get_client()
+        client = _get_client(account)
         if isinstance(client, dict):
             return client
         try:
@@ -640,6 +646,7 @@ def register_tools(
         owner: str,
         repo: str,
         issue_number: int,
+        account: str = "",
     ) -> dict:
         """
         Get a specific issue.
@@ -652,7 +659,7 @@ def register_tools(
         Returns:
             Dict with issue information or error
         """
-        client = _get_client()
+        client = _get_client(account)
         if isinstance(client, dict):
             return client
         try:
@@ -670,6 +677,7 @@ def register_tools(
         body: str | None = None,
         labels: list[str] | None = None,
         assignees: list[str] | None = None,
+        account: str = "",
     ) -> dict:
         """
         Create a new issue in a repository.
@@ -685,7 +693,7 @@ def register_tools(
         Returns:
             Dict with created issue information or error
         """
-        client = _get_client()
+        client = _get_client(account)
         if isinstance(client, dict):
             return client
         try:
@@ -704,6 +712,7 @@ def register_tools(
         body: str | None = None,
         state: str | None = None,
         labels: list[str] | None = None,
+        account: str = "",
     ) -> dict:
         """
         Update an existing issue.
@@ -720,7 +729,7 @@ def register_tools(
         Returns:
             Dict with updated issue information or error
         """
-        client = _get_client()
+        client = _get_client(account)
         if isinstance(client, dict):
             return client
         try:
@@ -739,6 +748,7 @@ def register_tools(
         state: str = "open",
         page: int = 1,
         limit: int = 30,
+        account: str = "",
     ) -> dict:
         """
         List pull requests for a repository.
@@ -753,7 +763,7 @@ def register_tools(
         Returns:
             Dict with list of pull requests or error
         """
-        client = _get_client()
+        client = _get_client(account)
         if isinstance(client, dict):
             return client
         try:
@@ -768,6 +778,7 @@ def register_tools(
         owner: str,
         repo: str,
         pull_number: int,
+        account: str = "",
     ) -> dict:
         """
         Get a specific pull request.
@@ -780,7 +791,7 @@ def register_tools(
         Returns:
             Dict with pull request information or error
         """
-        client = _get_client()
+        client = _get_client(account)
         if isinstance(client, dict):
             return client
         try:
@@ -799,6 +810,7 @@ def register_tools(
         base: str,
         body: str | None = None,
         draft: bool = False,
+        account: str = "",
     ) -> dict:
         """
         Create a new pull request.
@@ -815,7 +827,7 @@ def register_tools(
         Returns:
             Dict with created pull request information or error
         """
-        client = _get_client()
+        client = _get_client(account)
         if isinstance(client, dict):
             return client
         try:
@@ -831,6 +843,7 @@ def register_tools(
     def github_search_code(
         query: str,
         limit: int = 30,
+        account: str = "",
     ) -> dict:
         """
         Search code across GitHub.
@@ -842,7 +855,7 @@ def register_tools(
         Returns:
             Dict with search results or error
         """
-        client = _get_client()
+        client = _get_client(account)
         if isinstance(client, dict):
             return client
         try:
@@ -859,6 +872,7 @@ def register_tools(
         owner: str,
         repo: str,
         limit: int = 30,
+        account: str = "",
     ) -> dict:
         """
         List branches for a repository.
@@ -871,7 +885,7 @@ def register_tools(
         Returns:
             Dict with list of branches or error
         """
-        client = _get_client()
+        client = _get_client(account)
         if isinstance(client, dict):
             return client
         try:
@@ -886,6 +900,7 @@ def register_tools(
         owner: str,
         repo: str,
         branch: str,
+        account: str = "",
     ) -> dict:
         """
         Get information about a specific branch.
@@ -898,7 +913,7 @@ def register_tools(
         Returns:
             Dict with branch information or error
         """
-        client = _get_client()
+        client = _get_client(account)
         if isinstance(client, dict):
             return client
         try:
@@ -916,6 +931,7 @@ def register_tools(
         repo: str,
         page: int = 1,
         limit: int = 30,
+        account: str = "",
     ) -> dict:
         """
         List users who starred a repository.
@@ -929,7 +945,7 @@ def register_tools(
         Returns:
             Dict with list of stargazers or error
         """
-        client = _get_client()
+        client = _get_client(account)
         if isinstance(client, dict):
             return client
         try:
@@ -944,6 +960,7 @@ def register_tools(
     @mcp.tool()
     def github_get_user_profile(
         username: str,
+        account: str = "",
     ) -> dict:
         """
         Get a GitHub user's public profile including name, bio, company, location, and email.
@@ -954,7 +971,7 @@ def register_tools(
         Returns:
             Dict with user profile information or error
         """
-        client = _get_client()
+        client = _get_client(account)
         if isinstance(client, dict):
             return client
         try:
@@ -967,6 +984,7 @@ def register_tools(
     @mcp.tool()
     def github_get_user_emails(
         username: str,
+        account: str = "",
     ) -> dict:
         """
         Find a GitHub user's email addresses from their public activity.
@@ -980,7 +998,7 @@ def register_tools(
         Returns:
             Dict with emails list (each with email and source), total count
         """
-        client = _get_client()
+        client = _get_client(account)
         if isinstance(client, dict):
             return client
         try:

@@ -206,7 +206,7 @@ class OutputCleaner:
             warnings=warnings,
         )
 
-    def clean_output(
+    async def clean_output(
         self,
         output: dict[str, Any],
         source_node_id: str,
@@ -288,7 +288,7 @@ Return ONLY valid JSON matching the expected schema. No explanations, no markdow
                     f"🧹 Cleaning output from '{source_node_id}' using {self.config.fast_model}"
                 )
 
-            response = self.llm.complete(
+            response = await self.llm.acomplete(
                 messages=[{"role": "user", "content": prompt}],
                 system=(
                     "You clean malformed agent outputs. Return only valid JSON matching the schema."

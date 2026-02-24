@@ -1,5 +1,150 @@
 # Hive Agent Framework: Triangulated Verification for Reliable Goal-Driven Agents
 
+## System Architecture Overview
+
+The Hive framework is organized around five core subsystems that collaborate to execute goal-driven agents reliably. The following diagram shows how these subsystems connect:
+
+```mermaid
+flowchart TB
+    %% Main Entity
+    User([User])
+
+    %% =========================================
+    %% EXTERNAL EVENT SOURCES
+    %% =========================================
+    subgraph ExtEventSource [External Event Source]
+        E_Sch["Schedulers"]
+        E_WH["Webhook"]
+        E_SSE["SSE"]
+    end
+
+    %% =========================================
+    %% SYSTEM NODES
+    %% =========================================
+    subgraph WorkerBees [Worker Bees]
+        WB_C["Conversation"]
+        WB_SP["System prompt"]
+
+        subgraph Graph [Graph]
+            direction TB
+            N1["Node"] --> N2["Node"] --> N3["Node"]
+            N1 -.-> AN["Active Node"]
+            N2 -.-> AN
+            N3 -.-> AN
+
+            %% Nested Event Loop Node
+            subgraph EventLoopNode [Event Loop Node]
+                ELN_L["listener"]
+                ELN_SP["System Prompt<br/>(Task)"]
+                ELN_EL["Event loop"]
+                ELN_C["Conversation"]
+            end
+        end
+    end
+
+    subgraph JudgeNode [Judge]
+        J_C["Criteria"]
+        J_P["Principles"]
+        J_EL["Event loop"] <--> J_S["Scheduler"]
+    end
+
+    subgraph QueenBee [Queen Bee]
+        QB_SP["System prompt"]
+        QB_EL["Event loop"]
+        QB_C["Conversation"]
+    end
+
+    subgraph Infra [Infra]
+        SA["Sub Agent"]
+        TR["Tool Registry"]
+        WTM["Write through Conversation Memory<br/>(Logs/RAM/Harddrive)"]
+        SM["Shared Memory<br/>(State/Harddrive)"]
+        EB["Event Bus<br/>(RAM)"]
+        CS["Credential Store<br/>(Harddrive/Cloud)"]
+    end
+
+    subgraph PC [PC]
+        B["Browser"]
+        CB["Codebase<br/>v 0.0.x ... v n.n.n"]
+    end
+
+    %% =========================================
+    %% CONNECTIONS & DATA FLOW
+    %% =========================================
+
+    %% External Event Routing
+    E_Sch --> ELN_L
+    E_WH --> ELN_L
+    E_SSE --> ELN_L
+    ELN_L -->|"triggers"| ELN_EL
+
+    %% User Interactions
+    User -->|"Talk"| WB_C
+    User -->|"Talk"| QB_C
+    User -->|"Read/Write Access"| CS
+
+    %% Inter-System Logic
+    ELN_C <-->|"Mirror"| WB_C
+    WB_C -->|"Focus"| AN
+
+    WorkerBees -->|"Inquire"| JudgeNode
+    JudgeNode -->|"Approve"| WorkerBees
+
+    %% Judge Alignments
+    J_C <-.->|"aligns"| WB_SP
+    J_P <-.->|"aligns"| QB_SP
+
+    %% Escalate path
+    J_EL -->|"Report (Escalate)"| QB_EL
+
+    %% Pub/Sub Logic
+    AN -->|"publish"| EB
+    EB -->|"subscribe"| QB_C
+
+    %% Infra and Process Spawning
+    ELN_EL -->|"Spawn"| SA
+    SA -->|"Inform"| ELN_EL
+    SA -->|"Starts"| B
+    B -->|"Report"| ELN_EL
+    TR -->|"Assigned"| EventLoopNode
+    CB -->|"Modify Worker Bee"| WorkerBees
+
+    %% =========================================
+    %% SHARED MEMORY & LOGS ACCESS
+    %% =========================================
+
+    %% Worker Bees Access
+    Graph <-->|"Read/Write"| WTM
+    Graph <-->|"Read/Write"| SM
+
+    %% Queen Bee Access
+    QB_C <-->|"Read/Write"| WTM
+    QB_EL <-->|"Read/Write"| SM
+
+    %% Credentials Access
+    CS -->|"Read Access"| QB_C
+```
+
+### Key Subsystems
+
+| Subsystem           | Role        | Description                                                                                                                                                                                                                                                  |
+| ------------------- | ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **Event Loop Node** | Entry point | Listens for external events (schedulers, webhooks, SSE), triggers the event loop, and spawns sub-agents. Its conversation mirrors the Worker Bees conversation for context continuity.                                                                       |
+| **Worker Bees**     | Execution   | A graph of nodes that execute the actual work. Each node in the graph can become the Active Node. Workers maintain their own conversation and system prompt, and read/write to shared memory.                                                                |
+| **Judge**           | Evaluation  | Evaluates Worker Bee output against criteria (aligned with Worker system prompt) and principles (aligned with Queen Bee system prompt). Runs on a scheduled event loop and escalates to the Queen Bee when needed.                                           |
+| **Queen Bee**       | Oversight   | The orchestration layer. Subscribes to Active Node events via the Event Bus, receives escalation reports from the Judge, and has read/write access to shared memory and credentials. Users can talk directly to the Queen Bee.                               |
+| **Infra**           | Services    | Shared infrastructure: Tool Registry (assigned to Event Loop Nodes), Write-through Conversation Memory (logs across RAM and disk), Shared Memory (state on disk), Event Bus (pub/sub in RAM), Credential Store (encrypted on disk or cloud), and Sub Agents. |
+
+### Data Flow Patterns
+
+- **External triggers**: Schedulers, Webhooks, and SSE events flow into the Event Loop Node's listener, which triggers the event loop to spawn sub-agents or start browser-based tasks.
+- **User interaction**: Users talk directly to Worker Bees (for task execution) or the Queen Bee (for oversight). Users also have read/write access to the Credential Store.
+- **Worker-Judge loop**: Worker Bees inquire with the Judge after completing work. The Judge approves the output or escalates to the Queen Bee.
+- **Pub/Sub**: The Active Node publishes events to the Event Bus. The Queen Bee subscribes for real-time visibility.
+- **Adaptiveness**: The Codebase modifies Worker Bees, enabling the framework to evolve agent graphs across versions.
+
+---
+
 ## The Core Problem: The Ground Truth Crisis in Agentic Systems
 
 Modern agent frameworks face a fundamental epistemological challenge: **there is no reliable oracle**.
@@ -324,30 +469,35 @@ High Confidence ─────────────────────�
 
 ## The Complete Picture
 
+The system architecture (see diagram above) maps onto four logical layers. The **Goal Layer** defines what the Queen Bee and Judge align on. The **Execution Layer** is the Worker Bees graph. The **Verification Layer** is the Judge with its triangulated signals. The **Reflexion Layer** is the feedback loop between Worker Bees and Judge.
+
 ```
 ┌─────────────────────────────────────────────────────────────────────┐
 │                         HIVE AGENT FRAMEWORK                         │
 ├─────────────────────────────────────────────────────────────────────┤
 │                                                                      │
 │  ┌─────────────────────────────────────────────────────────────┐    │
-│  │                         GOAL LAYER                           │    │
+│  │                    GOAL LAYER (Queen Bee)                     │    │
 │  │  • Success criteria (weighted, multi-metric)                 │    │
 │  │  • Constraints (hard/soft boundaries)                        │    │
+│  │  • Principles aligned with Queen Bee system prompt           │    │
 │  │  • Context (domain knowledge, preferences)                   │    │
 │  └─────────────────────────────────────────────────────────────┘    │
 │                              │                                       │
 │                              ▼                                       │
 │  ┌─────────────────────────────────────────────────────────────┐    │
-│  │                      EXECUTION LAYER                         │    │
+│  │              EXECUTION LAYER (Worker Bees)                    │    │
 │  │  ┌──────────┐    ┌──────────┐    ┌──────────┐               │    │
-│  │  │  Graph   │───►│  Worker  │───►│  Shared  │               │    │
+│  │  │  Graph   │───►│  Active  │───►│  Shared  │               │    │
 │  │  │ Executor │    │   Node   │    │  Memory  │               │    │
 │  │  └──────────┘    └──────────┘    └──────────┘               │    │
+│  │  Event Loop Node triggers │ Sub Agents, Browser tasks        │    │
+│  │  Tool Registry provides tools │ Event Bus publishes events   │    │
 │  └─────────────────────────────────────────────────────────────┘    │
 │                              │                                       │
 │                              ▼                                       │
 │  ┌─────────────────────────────────────────────────────────────┐    │
-│  │                  TRIANGULATED VERIFICATION                   │    │
+│  │              TRIANGULATED VERIFICATION (Judge)                │    │
 │  │                                                              │    │
 │  │   Signal 1          Signal 2           Signal 3             │    │
 │  │  ┌────────┐       ┌──────────┐       ┌─────────┐            │    │
@@ -356,9 +506,9 @@ High Confidence ─────────────────────�
 │  │  └────────┘       └──────────┘       └─────────┘            │    │
 │  │       │                │                  │                  │    │
 │  │       └────────────────┴──────────────────┘                  │    │
-│  │                        │                                     │    │
-│  │                        ▼                                     │    │
-│  │              Confidence from Agreement                       │    │
+│  │  Criteria aligned with Worker Bee system prompt              │    │
+│  │  Principles aligned with Queen Bee system prompt             │    │
+│  │  Confidence from agreement across signals                    │    │
 │  └─────────────────────────────────────────────────────────────┘    │
 │                              │                                       │
 │                              ▼                                       │
@@ -367,7 +517,7 @@ High Confidence ─────────────────────�
 │  │  • ACCEPT: Proceed with confidence                          │    │
 │  │  • RETRY: Learn from failure, try again                     │    │
 │  │  • REPLAN: Strategy failed, change approach                 │    │
-│  │  • ESCALATE: Uncertainty too high, ask human                │    │
+│  │  • ESCALATE: Report to Queen Bee, ask human                 │    │
 │  └─────────────────────────────────────────────────────────────┘    │
 │                                                                      │
 └─────────────────────────────────────────────────────────────────────┘
@@ -628,17 +778,19 @@ class SignalWeights:
 
 ## Summary
 
-The Hive Agent Framework addresses the fundamental reliability crisis in agentic systems through **Triangulated Verification** and a roadmap toward **Online Learning**:
+The Hive Agent Framework addresses the fundamental reliability crisis in agentic systems through a layered architecture of **Event Loop Nodes**, **Worker Bees**, **Judges**, and a **Queen Bee**, unified by **Triangulated Verification** and a roadmap toward **Online Learning**:
 
-1. **The Problem**: No single evaluation signal is trustworthy. Tests can be gamed, model confidence is miscalibrated, LLM judges hallucinate.
+1. **The Architecture**: External events enter through Event Loop Nodes, which trigger Worker Bees to execute graph-based tasks. A Judge evaluates output using triangulated signals. A Queen Bee provides oversight, receives escalations, and subscribes to events via the Event Bus. Shared infrastructure (memory, credentials, tool registry) connects all subsystems.
 
-2. **The Solution**: Confidence emerges from agreement across multiple independent signals—deterministic rules, semantic evaluation, and human judgment.
+2. **The Problem**: No single evaluation signal is trustworthy. Tests can be gamed, model confidence is miscalibrated, LLM judges hallucinate.
 
-3. **The Foundation**: Goal-driven architecture ensures we're optimizing for user intent, not metric gaming. The reflexion loop enables learning from failure without expensive search.
+3. **The Solution**: Confidence emerges from agreement across multiple independent signals—deterministic rules, semantic evaluation, and human judgment. The Judge's criteria align with Worker Bee prompts; its principles align with the Queen Bee.
 
-4. **The Learning Path**: Human escalations aren't just fallbacks—they're training signals. Confidence calibration tunes thresholds automatically. Rule generation transforms repeated human decisions into deterministic automation.
+4. **The Foundation**: Goal-driven architecture ensures we're optimizing for user intent, not metric gaming. The reflexion loop between Worker Bees and Judge enables learning from failure without expensive search.
 
-5. **The Result**: Agents that are reliable not because they're always right, but because they **know when they don't know**—and get smarter every time they ask for help.
+5. **The Learning Path**: Human escalations aren't just fallbacks—they're training signals. Confidence calibration tunes thresholds automatically. Rule generation transforms repeated human decisions into deterministic automation.
+
+6. **The Result**: Agents that are reliable not because they're always right, but because they **know when they don't know**—and get smarter every time they ask for help.
 
 ---
 

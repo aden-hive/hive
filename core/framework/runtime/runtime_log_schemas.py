@@ -30,11 +30,14 @@ class NodeStepLog(BaseModel):
     """Full tool and LLM details for one step within a node.
 
     For EventLoopNode, each iteration is a step. For single-step nodes
-    (LLMNode, FunctionNode, RouterNode), step_index is 0.
+    (e.g. RouterNode), step_index is 0.
+
+    OTel-aligned fields (trace_id, span_id, execution_id) enable correlation
+    and future OpenTelemetry export without schema changes.
     """
 
     node_id: str
-    node_type: str = ""  # "event_loop"|"llm_tool_use"|"llm_generate"|"function"|"router"
+    node_type: str = ""  # "event_loop" (the only valid type)
     step_index: int = 0  # iteration number for event_loop, 0 for single-step nodes
     llm_text: str = ""
     tool_calls: list[ToolCallLog] = Field(default_factory=list)
@@ -48,6 +51,11 @@ class NodeStepLog(BaseModel):
     error: str = ""  # Error message if step failed
     stacktrace: str = ""  # Full stack trace if exception occurred
     is_partial: bool = False  # True if step didn't complete normally
+    # OTel / trace context (from observability; empty if not set):
+    trace_id: str = ""  # OTel trace id (e.g. from set_trace_context)
+    span_id: str = ""  # OTel span id (16 hex chars per step)
+    parent_span_id: str = ""  # Optional; for nested span hierarchy
+    execution_id: str = ""  # Session/run correlation id
 
 
 # ---------------------------------------------------------------------------
@@ -56,7 +64,10 @@ class NodeStepLog(BaseModel):
 
 
 class NodeDetail(BaseModel):
-    """Per-node completion result and attention flags."""
+    """Per-node completion result and attention flags.
+
+    OTel-aligned fields (trace_id, span_id) tie L2 to the same trace as L3.
+    """
 
     node_id: str
     node_name: str = ""
@@ -78,6 +89,9 @@ class NodeDetail(BaseModel):
     continue_count: int = 0
     needs_attention: bool = False
     attention_reasons: list[str] = Field(default_factory=list)
+    # OTel / trace context (from observability; empty if not set):
+    trace_id: str = ""
+    span_id: str = ""  # Optional node-level span for hierarchy
 
 
 # ---------------------------------------------------------------------------
@@ -86,7 +100,10 @@ class NodeDetail(BaseModel):
 
 
 class RunSummaryLog(BaseModel):
-    """Run-level summary for a full graph execution."""
+    """Run-level summary for a full graph execution.
+
+    OTel-aligned fields (trace_id, execution_id) tie L1 to the same trace as L2/L3.
+    """
 
     run_id: str
     agent_id: str = ""
@@ -101,6 +118,9 @@ class RunSummaryLog(BaseModel):
     started_at: str = ""  # ISO timestamp
     duration_ms: int = 0
     execution_quality: str = ""  # "clean"|"degraded"|"failed"
+    # OTel / trace context (from observability; empty if not set):
+    trace_id: str = ""
+    execution_id: str = ""
 
 
 # ---------------------------------------------------------------------------

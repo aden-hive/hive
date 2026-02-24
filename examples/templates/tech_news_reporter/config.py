@@ -1,33 +1,8 @@
 """Runtime configuration."""
 
-import json
-from dataclasses import dataclass, field
-from pathlib import Path
+from dataclasses import dataclass
 
-
-def _load_preferred_model() -> str:
-    """Load preferred model from ~/.hive/configuration.json."""
-    config_path = Path.home() / ".hive" / "configuration.json"
-    if config_path.exists():
-        try:
-            with open(config_path) as f:
-                config = json.load(f)
-            llm = config.get("llm", {})
-            if llm.get("provider") and llm.get("model"):
-                return f"{llm['provider']}/{llm['model']}"
-        except Exception:
-            pass
-    return "anthropic/claude-sonnet-4-20250514"
-
-
-@dataclass
-class RuntimeConfig:
-    model: str = field(default_factory=_load_preferred_model)
-    temperature: float = 0.7
-    max_tokens: int = 40000
-    api_key: str | None = None
-    api_base: str | None = None
-
+from framework.config import RuntimeConfig
 
 default_config = RuntimeConfig()
 
@@ -40,6 +15,11 @@ class AgentMetadata:
         "Research the latest technology and AI news from the web, "
         "summarize key stories, and produce a well-organized report "
         "for the user to read."
+    )
+    intro_message: str = (
+        "Hi! I'm your tech news reporter. I'll search the web for the latest technology "
+        "and AI news, then put together a clear summary for you. What topic or area "
+        "should I cover?"
     )
 
 

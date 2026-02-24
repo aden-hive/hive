@@ -106,7 +106,7 @@ class TestExecutionQuality:
                     id="node1",
                     name="Always Succeeds",
                     description="Never fails",
-                    node_type="function",
+                    node_type="event_loop",
                     output_keys=["result"],
                 ),
             ],
@@ -151,6 +151,7 @@ class TestExecutionQuality:
         )
 
         # Create graph with flaky node (fails 2 times before succeeding)
+        # (actual impl from registry is FlakyNode)
         graph = GraphSpec(
             id="test-graph",
             goal_id=goal.id,
@@ -159,7 +160,7 @@ class TestExecutionQuality:
                     id="flaky",
                     name="Flaky Node",
                     description="Fails then succeeds",
-                    node_type="function",
+                    node_type="event_loop",
                     output_keys=["result"],
                     max_retries=3,  # Allow retries
                 ),
@@ -206,6 +207,7 @@ class TestExecutionQuality:
         )
 
         # Create graph with always-failing node
+        # (actual impl from registry is AlwaysFailsNode)
         graph = GraphSpec(
             id="test-graph",
             goal_id=goal.id,
@@ -214,7 +216,7 @@ class TestExecutionQuality:
                     id="fails",
                     name="Always Fails",
                     description="Never succeeds",
-                    node_type="function",
+                    node_type="event_loop",
                     output_keys=["result"],
                     max_retries=2,  # Will retry twice then fail
                 ),
@@ -261,6 +263,7 @@ class TestExecutionQuality:
         )
 
         # Create graph with multiple flaky nodes
+        # (actual impls from registry are FlakyNode instances)
         graph = GraphSpec(
             id="test-graph",
             goal_id=goal.id,
@@ -269,7 +272,7 @@ class TestExecutionQuality:
                     id="flaky1",
                     name="Flaky Node 1",
                     description="Fails once",
-                    node_type="function",
+                    node_type="event_loop",
                     output_keys=["result1"],
                     max_retries=3,
                 ),
@@ -277,7 +280,7 @@ class TestExecutionQuality:
                     id="flaky2",
                     name="Flaky Node 2",
                     description="Fails twice",
-                    node_type="function",
+                    node_type="event_loop",
                     input_keys=["result1"],
                     output_keys=["result2"],
                     max_retries=3,
@@ -286,7 +289,7 @@ class TestExecutionQuality:
                     id="success",
                     name="Success Node",
                     description="Always succeeds",
-                    node_type="function",
+                    node_type="event_loop",
                     input_keys=["result2"],
                     output_keys=["final"],
                 ),
