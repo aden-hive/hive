@@ -116,8 +116,7 @@ def _list_local_accounts() -> list[dict]:
         from framework.credentials.local.registry import LocalCredentialRegistry
 
         return [
-            info.to_account_dict()
-            for info in LocalCredentialRegistry.default().list_accounts()
+            info.to_account_dict() for info in LocalCredentialRegistry.default().list_accounts()
         ]
     except Exception:
         return []
@@ -257,7 +256,8 @@ def _activate_local_account(credential_id: str, alias: str) -> None:
     group_specs = [
         (cred_name, spec)
         for cred_name, spec in CREDENTIAL_SPECS.items()
-        if spec.credential_group == credential_id or spec.credential_id == credential_id
+        if spec.credential_group == credential_id
+        or spec.credential_id == credential_id
         or cred_name == credential_id
     ]
     # Deduplicate — credential_id and credential_group may both match the same spec
@@ -270,7 +270,7 @@ def _activate_local_account(credential_id: str, alias: str) -> None:
         registry = LocalCredentialRegistry.default()
         flat_storage = EncryptedFileStorage()
 
-        for cred_name, spec in group_specs:
+        for _cred_name, spec in group_specs:
             if spec.env_var in seen_env_vars:
                 continue
             # If env var is already set, nothing to do for this one

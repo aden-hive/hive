@@ -317,9 +317,7 @@ class CredentialStoreAdapter:
 
     # --- Local credential registry ---
 
-    def list_local_accounts(
-        self, credential_id: str | None = None
-    ) -> list[dict]:
+    def list_local_accounts(self, credential_id: str | None = None) -> list[dict]:
         """
         List named local API key accounts from LocalCredentialRegistry.
 

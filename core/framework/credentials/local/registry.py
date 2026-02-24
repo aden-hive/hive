@@ -37,9 +37,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from pydantic import SecretStr
-
-from framework.credentials.models import CredentialIdentity, CredentialKey, CredentialObject
+from framework.credentials.models import CredentialIdentity, CredentialObject
 from framework.credentials.storage import EncryptedFileStorage
 
 from .models import LocalAccountInfo
