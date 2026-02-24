@@ -56,6 +56,7 @@ To add a new credential:
 from .apollo import APOLLO_CREDENTIALS
 from .base import CredentialError, CredentialSpec
 from .bigquery import BIGQUERY_CREDENTIALS
+from .brevo import BREVO_CREDENTIALS
 from .browser import get_aden_auth_url, get_aden_setup_url, open_browser
 from .calcom import CALCOM_CREDENTIALS
 from .discord import DISCORD_CREDENTIALS
@@ -65,10 +66,16 @@ from .github import GITHUB_CREDENTIALS
 from .google_calendar import GOOGLE_CALENDAR_CREDENTIALS
 from .google_docs import GOOGLE_DOCS_CREDENTIALS
 from .google_maps import GOOGLE_MAPS_CREDENTIALS
-from .health_check import HealthCheckResult, check_credential_health
+from .health_check import (
+    BaseHttpHealthChecker,
+    HealthCheckResult,
+    check_credential_health,
+    validate_integration_wiring,
+)
 from .hubspot import HUBSPOT_CREDENTIALS
 from .llm import LLM_CREDENTIALS
 from .news import NEWS_CREDENTIALS
+from .postgres import POSTGRES_CREDENTIALS
 from .razorpay import RAZORPAY_CREDENTIALS
 from .search import SEARCH_CREDENTIALS
 from .serpapi import SERPAPI_CREDENTIALS
@@ -82,6 +89,7 @@ from .slack import SLACK_CREDENTIALS
 from .store_adapter import CredentialStoreAdapter
 from .stripe import STRIPE_CREDENTIALS
 from .telegram import TELEGRAM_CREDENTIALS
+from .ticktick import TICKTICK_CREDENTIALS
 
 # Merged registry of all credentials
 CREDENTIAL_SPECS = {
@@ -104,6 +112,8 @@ CREDENTIAL_SPECS = {
     **BIGQUERY_CREDENTIALS,
     **CALCOM_CREDENTIALS,
     **STRIPE_CREDENTIALS,
+    **BREVO_CREDENTIALS,
+    **POSTGRES_CREDENTIALS,
 }
 
 __all__ = [
@@ -114,8 +124,10 @@ __all__ = [
     # Credential store adapter (replaces deprecated CredentialManager)
     "CredentialStoreAdapter",
     # Health check utilities
+    "BaseHttpHealthChecker",
     "HealthCheckResult",
     "check_credential_health",
+    "validate_integration_wiring",
     # Browser utilities for OAuth2 flows
     "open_browser",
     "get_aden_auth_url",
@@ -147,4 +159,7 @@ __all__ = [
     "CALCOM_CREDENTIALS",
     "DISCORD_CREDENTIALS",
     "STRIPE_CREDENTIALS",
+    "BREVO_CREDENTIALS",
+    "POSTGRES_CREDENTIALS",
+    "TICKTICK_CREDENTIALS",
 ]
