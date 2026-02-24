@@ -155,7 +155,9 @@ class AddLocalCredentialScreen(ModalScreen[dict | None]):
             type_list.display = False
             form.display = True
             spec = self._selected_spec
-            description = getattr(spec, "description", self._selected_id) if spec else self._selected_id
+            description = (
+                getattr(spec, "description", self._selected_id) if spec else self._selected_id
+            )
             subtitle = self.query_one("#alc-subtitle", Label)
             subtitle.update(f"[dim]{self._selected_id}[/dim]  {description}")
             self._clear_status()
@@ -223,9 +225,7 @@ class AddLocalCredentialScreen(ModalScreen[dict | None]):
                 if identity:
                     parts = [f"{k}: {v}" for k, v in identity.items() if v]
                     identity_str = "  " + ", ".join(parts) if parts else ""
-                self._set_status(
-                    f"[green]Saved:[/green] {info.storage_id}{identity_str}"
-                )
+                self._set_status(f"[green]Saved:[/green] {info.storage_id}{identity_str}")
                 # Dismiss with result so callers can react
                 self.set_timer(1.0, lambda: self.dismiss(info.to_account_dict()))
                 return

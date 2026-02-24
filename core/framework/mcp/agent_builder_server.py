@@ -3413,9 +3413,7 @@ def list_stored_credentials() -> str:
                 "storage_id": info.storage_id,
                 "status": info.status,
                 "created_at": info.created_at.isoformat() if info.created_at else None,
-                "last_validated": info.last_validated.isoformat()
-                if info.last_validated
-                else None,
+                "last_validated": info.last_validated.isoformat() if info.last_validated else None,
             }
             identity = info.identity.to_dict()
             if identity:
