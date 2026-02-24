@@ -75,6 +75,7 @@ from .health_check import (
 from .hubspot import HUBSPOT_CREDENTIALS
 from .llm import LLM_CREDENTIALS
 from .news import NEWS_CREDENTIALS
+from .notion import NOTION_CREDENTIALS
 from .postgres import POSTGRES_CREDENTIALS
 from .razorpay import RAZORPAY_CREDENTIALS
 from .search import SEARCH_CREDENTIALS
@@ -94,6 +95,7 @@ from .telegram import TELEGRAM_CREDENTIALS
 CREDENTIAL_SPECS = {
     **LLM_CREDENTIALS,
     **NEWS_CREDENTIALS,
+    **NOTION_CREDENTIALS,
     **SEARCH_CREDENTIALS,
     **EMAIL_CREDENTIALS,
     **GCP_VISION_CREDENTIALS,
@@ -141,6 +143,7 @@ __all__ = [
     # Category registries (for direct access if needed)
     "LLM_CREDENTIALS",
     "NEWS_CREDENTIALS",
+    "NOTION_CREDENTIALS",
     "SEARCH_CREDENTIALS",
     "EMAIL_CREDENTIALS",
     "GCP_VISION_CREDENTIALS",
