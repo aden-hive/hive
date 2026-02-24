@@ -153,6 +153,7 @@ class AgentRuntime:
         self._config = config or AgentRuntimeConfig()
         self._runtime_log_store = runtime_log_store
         self._checkpoint_config = checkpoint_config
+        self.accounts_prompt = accounts_prompt
 
         # Primary graph identity
         self._graph_id: str = graph_id or "primary"
