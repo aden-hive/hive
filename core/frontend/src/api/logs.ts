@@ -2,31 +2,31 @@ import { api } from "./client";
 import type { LogEntry, LogNodeDetail, LogToolStep } from "./types";
 
 export const logsApi = {
-  list: (agentId: string, limit?: number) =>
+  list: (sessionId: string, limit?: number) =>
     api.get<{ logs: LogEntry[] }>(
-      `/agents/${agentId}/logs${limit ? `?limit=${limit}` : ""}`,
+      `/sessions/${sessionId}/logs${limit ? `?limit=${limit}` : ""}`,
     ),
 
-  summary: (agentId: string, sessionId: string) =>
+  summary: (sessionId: string, workerSessionId: string) =>
     api.get<LogEntry>(
-      `/agents/${agentId}/logs?session_id=${sessionId}&level=summary`,
+      `/sessions/${sessionId}/logs?session_id=${workerSessionId}&level=summary`,
     ),
 
-  details: (agentId: string, sessionId: string) =>
+  details: (sessionId: string, workerSessionId: string) =>
     api.get<{ session_id: string; nodes: LogNodeDetail[] }>(
-      `/agents/${agentId}/logs?session_id=${sessionId}&level=details`,
+      `/sessions/${sessionId}/logs?session_id=${workerSessionId}&level=details`,
     ),
 
-  tools: (agentId: string, sessionId: string) =>
+  tools: (sessionId: string, workerSessionId: string) =>
     api.get<{ session_id: string; steps: LogToolStep[] }>(
-      `/agents/${agentId}/logs?session_id=${sessionId}&level=tools`,
+      `/sessions/${sessionId}/logs?session_id=${workerSessionId}&level=tools`,
     ),
 
   nodeLogs: (
-    agentId: string,
+    sessionId: string,
     graphId: string,
     nodeId: string,
-    sessionId: string,
+    workerSessionId: string,
     level?: string,
   ) =>
     api.get<{
@@ -35,6 +35,6 @@ export const logsApi = {
       details?: LogNodeDetail[];
       tool_logs?: LogToolStep[];
     }>(
-      `/agents/${agentId}/graphs/${graphId}/nodes/${nodeId}/logs?session_id=${sessionId}${level ? `&level=${level}` : ""}`,
+      `/sessions/${sessionId}/graphs/${graphId}/nodes/${nodeId}/logs?session_id=${workerSessionId}${level ? `&level=${level}` : ""}`,
     ),
 };

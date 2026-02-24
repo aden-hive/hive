@@ -23,9 +23,9 @@ interface ToolCredential {
 interface NodeDetailPanelProps {
   node: GraphNode | null;
   nodeSpec?: NodeSpec | null;
-  agentId?: string;
+  sessionId?: string;
   graphId?: string;
-  sessionId?: string | null;
+  workerSessionId?: string | null;
   nodeLogs?: string[];
   actionPlan?: string;
   onClose: () => void;
@@ -97,14 +97,14 @@ function ToolRow({ tool }: { tool: Tool }) {
   );
 }
 
-function LogsTab({ nodeId, isActive: _isActive, agentId, graphId, sessionId, nodeLogs }: { nodeId: string; isActive: boolean; agentId?: string; graphId?: string; sessionId?: string | null; nodeLogs?: string[] }) {
+function LogsTab({ nodeId, isActive: _isActive, sessionId, graphId, workerSessionId, nodeLogs }: { nodeId: string; isActive: boolean; sessionId?: string; graphId?: string; workerSessionId?: string | null; nodeLogs?: string[] }) {
   const [historicalLines, setHistoricalLines] = useState<string[]>([]);
   const bottomRef = useRef<HTMLDivElement>(null);
 
   // Fetch historical logs when session is available (post-execution viewing)
   useEffect(() => {
-    if (agentId && graphId && sessionId) {
-      logsApi.nodeLogs(agentId, graphId, nodeId, sessionId)
+    if (sessionId && graphId && workerSessionId) {
+      logsApi.nodeLogs(sessionId, graphId, nodeId, workerSessionId)
         .then(r => {
           const realLines: string[] = [];
           if (r.details) {
@@ -123,7 +123,7 @@ function LogsTab({ nodeId, isActive: _isActive, agentId, graphId, sessionId, nod
         })
         .catch(() => { /* keep fallback on error */ });
     }
-  }, [agentId, graphId, nodeId, sessionId]);
+  }, [sessionId, graphId, nodeId, workerSessionId]);
 
   // Resolve which lines to display: live SSE logs > historical > default
   const lines = (nodeLogs && nodeLogs.length > 0)
@@ -213,7 +213,7 @@ const tabs: { id: Tab; label: string; Icon: React.FC<{ className?: string }> }[]
   { id: "subagents", label: "Subagents", Icon: ({ className }) => <Bot className={className} /> },
 ];
 
-export default function NodeDetailPanel({ node, nodeSpec, agentId, graphId, sessionId, nodeLogs, actionPlan, onClose }: NodeDetailPanelProps) {
+export default function NodeDetailPanel({ node, nodeSpec, sessionId, graphId, workerSessionId, nodeLogs, actionPlan, onClose }: NodeDetailPanelProps) {
   const [activeTab, setActiveTab] = useState<Tab>("overview");
   const [realTools, setRealTools] = useState<ToolInfo[] | null>(null);
   const [realCriteria, setRealCriteria] = useState<NodeCriteria | null>(null);
@@ -224,23 +224,23 @@ export default function NodeDetailPanel({ node, nodeSpec, agentId, graphId, sess
     setRealCriteria(null);
   }, [node?.id]);
 
-  // Fetch real tool descriptions when Tools tab is active and agent is loaded
+  // Fetch real tool descriptions when Tools tab is active and session is loaded
   useEffect(() => {
-    if (activeTab === "tools" && agentId && graphId && node) {
-      graphsApi.nodeTools(agentId, graphId, node.id)
+    if (activeTab === "tools" && sessionId && graphId && node) {
+      graphsApi.nodeTools(sessionId, graphId, node.id)
         .then(r => setRealTools(r.tools))
         .catch(() => setRealTools(null));
     }
-  }, [activeTab, agentId, graphId, node?.id]);
+  }, [activeTab, sessionId, graphId, node?.id]);
 
-  // Fetch real criteria when Overview tab is active and agent is loaded
+  // Fetch real criteria when Overview tab is active and session is loaded
   useEffect(() => {
-    if (activeTab === "overview" && agentId && graphId && node) {
-      graphsApi.nodeCriteria(agentId, graphId, node.id, sessionId || undefined)
+    if (activeTab === "overview" && sessionId && graphId && node) {
+      graphsApi.nodeCriteria(sessionId, graphId, node.id, workerSessionId || undefined)
         .then(r => setRealCriteria(r))
         .catch(() => setRealCriteria(null));
     }
-  }, [activeTab, agentId, graphId, node?.id, sessionId]);
+  }, [activeTab, sessionId, graphId, node?.id, workerSessionId]);
 
   if (!node) return null;
 
@@ -390,7 +390,7 @@ export default function NodeDetailPanel({ node, nodeSpec, agentId, graphId, sess
         )}
 
         {activeTab === "logs" && (
-          <LogsTab nodeId={node.id} isActive={isActive} agentId={agentId} graphId={graphId} sessionId={sessionId} nodeLogs={nodeLogs} />
+          <LogsTab nodeId={node.id} isActive={isActive} sessionId={sessionId} graphId={graphId} workerSessionId={workerSessionId} nodeLogs={nodeLogs} />
         )}
 
         {activeTab === "prompt" && (

@@ -2,14 +2,14 @@ import { useEffect, useRef, useCallback, useState } from "react";
 import type { AgentEvent, EventTypeName } from "@/api/types";
 
 interface UseSSEOptions {
-  agentId: string;
+  sessionId: string;
   eventTypes?: EventTypeName[];
   onEvent?: (event: AgentEvent) => void;
   enabled?: boolean;
 }
 
 export function useSSE({
-  agentId,
+  sessionId,
   eventTypes,
   onEvent,
   enabled = true,
@@ -23,9 +23,9 @@ export function useSSE({
   const typesKey = eventTypes?.join(",") ?? "";
 
   useEffect(() => {
-    if (!enabled || !agentId) return;
+    if (!enabled || !sessionId) return;
 
-    let url = `/api/agents/${agentId}/events`;
+    let url = `/api/sessions/${sessionId}/events`;
     if (eventTypes?.length) {
       url += `?types=${eventTypes.join(",")}`;
     }
@@ -46,7 +46,6 @@ export function useSSE({
       }
     };
 
-    // Listen on generic message for all events
     es.onmessage = handler;
 
     return () => {
@@ -54,7 +53,7 @@ export function useSSE({
       eventSourceRef.current = null;
       setConnected(false);
     };
-  }, [agentId, enabled, typesKey]);
+  }, [sessionId, enabled, typesKey]);
 
   const close = useCallback(() => {
     eventSourceRef.current?.close();
@@ -65,30 +64,30 @@ export function useSSE({
   return { connected, lastEvent, close };
 }
 
-// --- Multi-agent SSE hook ---
+// --- Multi-session SSE hook ---
 
 interface UseMultiSSEOptions {
-  /** Map of agentType → backendAgentId. Only non-empty IDs get an EventSource. */
-  agents: Record<string, string>;
+  /** Map of agentType → backendSessionId. Only non-empty IDs get an EventSource. */
+  sessions: Record<string, string>;
   onEvent: (agentType: string, event: AgentEvent) => void;
 }
 
 /**
- * Manages one EventSource per loaded agent. Diffs `agents` on each render:
+ * Manages one EventSource per loaded session. Diffs `sessions` on each render:
  * opens new connections, closes removed ones, leaves existing ones alone.
  */
-export function useMultiSSE({ agents, onEvent }: UseMultiSSEOptions) {
+export function useMultiSSE({ sessions, onEvent }: UseMultiSSEOptions) {
   const onEventRef = useRef(onEvent);
   onEventRef.current = onEvent;
 
   const sourcesRef = useRef(new Map<string, EventSource>());
 
-  // Diff-based open/close — runs on every `agents` change
+  // Diff-based open/close — runs on every `sessions` change
   useEffect(() => {
     const current = sourcesRef.current;
-    const desired = new Set(Object.keys(agents));
+    const desired = new Set(Object.keys(sessions));
 
-    // Close connections for agents no longer in the map
+    // Close connections for sessions no longer in the map
     for (const [agentType, es] of current) {
       if (!desired.has(agentType)) {
         es.close();
@@ -96,16 +95,17 @@ export function useMultiSSE({ agents, onEvent }: UseMultiSSEOptions) {
       }
     }
 
-    // Open connections for newly added agents
-    for (const [agentType, agentId] of Object.entries(agents)) {
-      if (!agentId || current.has(agentType)) continue;
+    // Open connections for newly added sessions
+    for (const [agentType, sessionId] of Object.entries(sessions)) {
+      if (!sessionId || current.has(agentType)) continue;
 
-      const url = `/api/agents/${agentId}/events`;
+      const url = `/api/sessions/${sessionId}/events`;
       const es = new EventSource(url);
 
       es.onmessage = (e: MessageEvent) => {
         try {
           const event: AgentEvent = JSON.parse(e.data);
+          console.log('[SSE] received:', agentType, event.type, event.stream_id, event.node_id);
           onEventRef.current(agentType, event);
         } catch {
           // Ignore parse errors (keepalive comments)
@@ -114,8 +114,7 @@ export function useMultiSSE({ agents, onEvent }: UseMultiSSEOptions) {
 
       current.set(agentType, es);
     }
-    // No cleanup here — diff logic handles open/close incrementally
-  }, [agents]);
+  }, [sessions]);
 
   // Close all on unmount only
   useEffect(() => {

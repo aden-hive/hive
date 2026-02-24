@@ -2,28 +2,28 @@ import { api } from "./client";
 import type { GraphTopology, NodeDetail, NodeCriteria, ToolInfo } from "./types";
 
 export const graphsApi = {
-  nodes: (agentId: string, graphId: string, sessionId?: string) =>
+  nodes: (sessionId: string, graphId: string, workerSessionId?: string) =>
     api.get<GraphTopology>(
-      `/agents/${agentId}/graphs/${graphId}/nodes${sessionId ? `?session_id=${sessionId}` : ""}`,
+      `/sessions/${sessionId}/graphs/${graphId}/nodes${workerSessionId ? `?session_id=${workerSessionId}` : ""}`,
     ),
 
-  node: (agentId: string, graphId: string, nodeId: string) =>
+  node: (sessionId: string, graphId: string, nodeId: string) =>
     api.get<NodeDetail>(
-      `/agents/${agentId}/graphs/${graphId}/nodes/${nodeId}`,
+      `/sessions/${sessionId}/graphs/${graphId}/nodes/${nodeId}`,
     ),
 
   nodeCriteria: (
-    agentId: string,
+    sessionId: string,
     graphId: string,
     nodeId: string,
-    sessionId?: string,
+    workerSessionId?: string,
   ) =>
     api.get<NodeCriteria>(
-      `/agents/${agentId}/graphs/${graphId}/nodes/${nodeId}/criteria${sessionId ? `?session_id=${sessionId}` : ""}`,
+      `/sessions/${sessionId}/graphs/${graphId}/nodes/${nodeId}/criteria${workerSessionId ? `?session_id=${workerSessionId}` : ""}`,
     ),
 
-  nodeTools: (agentId: string, graphId: string, nodeId: string) =>
+  nodeTools: (sessionId: string, graphId: string, nodeId: string) =>
     api.get<{ tools: ToolInfo[] }>(
-      `/agents/${agentId}/graphs/${graphId}/nodes/${nodeId}/tools`,
+      `/sessions/${sessionId}/graphs/${graphId}/nodes/${nodeId}/tools`,
     ),
 };

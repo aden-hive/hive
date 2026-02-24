@@ -22,6 +22,19 @@ def safe_path_segment(value: str) -> str:
     return value
 
 
+def resolve_session(request: web.Request):
+    """Resolve a Session from {session_id} in the URL.
+
+    Returns (session, None) on success or (None, error_response) on failure.
+    """
+    manager: SessionManager = request.app["manager"]
+    sid = request.match_info["session_id"]
+    session = manager.get_session(sid)
+    if not session:
+        return None, web.json_response({"error": f"Session '{sid}' not found"}, status=404)
+    return session, None
+
+
 def sessions_dir(session: Session) -> Path:
     """Resolve the worker sessions directory for a session.
 
@@ -138,7 +151,6 @@ def create_app(model: str | None = None) -> web.Application:
     app.router.add_get("/api/health", handle_health)
 
     # Register route modules
-    from framework.server.routes_agents import register_routes as register_agent_routes
     from framework.server.routes_credentials import register_routes as register_credential_routes
     from framework.server.routes_events import register_routes as register_event_routes
     from framework.server.routes_execution import register_routes as register_execution_routes
@@ -147,7 +159,6 @@ def create_app(model: str | None = None) -> web.Application:
     from framework.server.routes_sessions import register_routes as register_session_routes
 
     register_credential_routes(app)
-    register_agent_routes(app)
     register_execution_routes(app)
     register_event_routes(app)
     register_session_routes(app)

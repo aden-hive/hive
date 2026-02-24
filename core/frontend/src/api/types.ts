@@ -1,15 +1,24 @@
-// --- Agent types ---
+// --- Session types (primary) ---
 
-export interface Agent {
-  id: string;
+export interface LiveSession {
+  session_id: string;
+  worker_id: string | null;
+  worker_name: string | null;
+  has_worker: boolean;
   agent_path: string;
-  name: string;
   description: string;
   goal: string;
   node_count: number;
   loaded_at: number;
   uptime_seconds: number;
   intro_message?: string;
+  /** Present in 409 conflict responses when worker is still loading */
+  loading?: boolean;
+}
+
+export interface LiveSessionDetail extends LiveSession {
+  entry_points?: EntryPoint[];
+  graphs?: string[];
 }
 
 export interface EntryPoint {
@@ -17,11 +26,6 @@ export interface EntryPoint {
   name: string;
   entry_node: string;
   trigger_type: string;
-}
-
-export interface AgentDetail extends Agent {
-  entry_points: EntryPoint[];
-  graphs: string[];
 }
 
 export interface DiscoverEntry {

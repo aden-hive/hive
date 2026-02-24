@@ -155,6 +155,9 @@ def register_queen_lifecycle_tools(
             return json.dumps({"error": "No worker loaded in this session."})
 
         try:
+            # Resume timers in case they were paused by a previous stop_worker
+            worker_runtime.resume_timers()
+
             # Get session state from any prior execution for memory continuity
             session_state = runtime._get_primary_session_state("default") or {}
 
@@ -226,17 +229,21 @@ def register_queen_lifecycle_tools(
                 except Exception as e:
                     logger.warning("Failed to cancel %s: %s", exec_id, e)
 
+        # Pause timers so the next tick doesn't restart execution
+        worker_runtime.pause_timers()
+
         return json.dumps(
             {
                 "status": "stopped" if cancelled else "no_active_executions",
                 "cancelled": cancelled,
+                "timers_paused": True,
             }
         )
 
     _stop_tool = Tool(
         name="stop_worker",
         description=(
-            "Cancel the worker agent's active execution. "
+            "Cancel the worker agent's active execution and pause its timers. "
             "The worker stops gracefully. No parameters needed."
         ),
         parameters={"type": "object", "properties": {}},

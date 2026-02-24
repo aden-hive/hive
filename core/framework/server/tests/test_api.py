@@ -337,108 +337,97 @@ class TestHealth:
             assert data["sessions"] == 0
 
 
-class TestAgentCRUD:
+class TestSessionCRUD:
     @pytest.mark.asyncio
-    async def test_list_agents_empty(self):
+    async def test_list_sessions_empty(self):
         app = create_app()
         async with TestClient(TestServer(app)) as client:
-            resp = await client.get("/api/agents")
+            resp = await client.get("/api/sessions")
             assert resp.status == 200
             data = await resp.json()
-            assert data["agents"] == []
+            assert data["sessions"] == []
 
     @pytest.mark.asyncio
-    async def test_list_agents_with_loaded(self):
+    async def test_list_sessions_with_loaded(self):
         session = _make_session()
         app = _make_app_with_session(session)
         async with TestClient(TestServer(app)) as client:
-            resp = await client.get("/api/agents")
+            resp = await client.get("/api/sessions")
             assert resp.status == 200
             data = await resp.json()
-            assert len(data["agents"]) == 1
-            assert data["agents"][0]["id"] == "test_agent"
-            assert data["agents"][0]["intro_message"] == "Test intro"
+            assert len(data["sessions"]) == 1
+            assert data["sessions"][0]["session_id"] == "test_agent"
+            assert data["sessions"][0]["intro_message"] == "Test intro"
 
     @pytest.mark.asyncio
-    async def test_get_agent_found(self):
+    async def test_get_session_found(self):
         session = _make_session()
         app = _make_app_with_session(session)
         async with TestClient(TestServer(app)) as client:
-            resp = await client.get("/api/agents/test_agent")
+            resp = await client.get("/api/sessions/test_agent")
             assert resp.status == 200
             data = await resp.json()
-            assert data["id"] == "test_agent"
+            assert data["session_id"] == "test_agent"
+            assert data["has_worker"] is True
             assert "entry_points" in data
             assert "graphs" in data
 
     @pytest.mark.asyncio
-    async def test_get_agent_not_found(self):
+    async def test_get_session_not_found(self):
         app = create_app()
         async with TestClient(TestServer(app)) as client:
-            resp = await client.get("/api/agents/nonexistent")
+            resp = await client.get("/api/sessions/nonexistent")
             assert resp.status == 404
 
     @pytest.mark.asyncio
-    async def test_get_agent_loading(self):
-        """GET /api/agents/{id} returns 202 when agent is mid-load."""
-        app = create_app()
-        app["manager"]._loading.add("loading_agent")
-        async with TestClient(TestServer(app)) as client:
-            resp = await client.get("/api/agents/loading_agent")
-            assert resp.status == 202
-            data = await resp.json()
-            assert data["id"] == "loading_agent"
-            assert data["loading"] is True
-
-    @pytest.mark.asyncio
-    async def test_unload_agent(self):
+    async def test_stop_session(self):
         session = _make_session()
         session.runner.cleanup_async = AsyncMock()
         app = _make_app_with_session(session)
         async with TestClient(TestServer(app)) as client:
-            resp = await client.delete("/api/agents/test_agent")
+            resp = await client.delete("/api/sessions/test_agent")
             assert resp.status == 200
             data = await resp.json()
-            assert data["unloaded"] == "test_agent"
+            assert data["stopped"] is True
 
             # Verify it's gone
-            resp2 = await client.get("/api/agents/test_agent")
+            resp2 = await client.get("/api/sessions/test_agent")
             assert resp2.status == 404
 
     @pytest.mark.asyncio
-    async def test_unload_agent_not_found(self):
+    async def test_stop_session_not_found(self):
         app = create_app()
         async with TestClient(TestServer(app)) as client:
-            resp = await client.delete("/api/agents/nonexistent")
+            resp = await client.delete("/api/sessions/nonexistent")
             assert resp.status == 404
 
     @pytest.mark.asyncio
-    async def test_stats(self):
+    async def test_session_stats(self):
         session = _make_session()
         app = _make_app_with_session(session)
         async with TestClient(TestServer(app)) as client:
-            resp = await client.get("/api/agents/test_agent/stats")
+            resp = await client.get("/api/sessions/test_agent/stats")
             assert resp.status == 200
             data = await resp.json()
             assert data["running"] is True
 
     @pytest.mark.asyncio
-    async def test_entry_points(self):
+    async def test_session_entry_points(self):
         session = _make_session()
         app = _make_app_with_session(session)
         async with TestClient(TestServer(app)) as client:
-            resp = await client.get("/api/agents/test_agent/entry-points")
+            resp = await client.get("/api/sessions/test_agent/entry-points")
             assert resp.status == 200
             data = await resp.json()
             assert len(data["entry_points"]) == 1
             assert data["entry_points"][0]["id"] == "default"
 
     @pytest.mark.asyncio
-    async def test_graphs(self):
+    async def test_session_graphs(self):
         session = _make_session()
         app = _make_app_with_session(session)
         async with TestClient(TestServer(app)) as client:
-            resp = await client.get("/api/agents/test_agent/graphs")
+            resp = await client.get("/api/sessions/test_agent/graphs")
             assert resp.status == 200
             data = await resp.json()
             assert "primary" in data["graphs"]
@@ -451,7 +440,7 @@ class TestExecution:
         app = _make_app_with_session(session)
         async with TestClient(TestServer(app)) as client:
             resp = await client.post(
-                "/api/agents/test_agent/trigger",
+                "/api/sessions/test_agent/trigger",
                 json={"entry_point_id": "default", "input_data": {"msg": "hi"}},
             )
             assert resp.status == 200
@@ -463,7 +452,7 @@ class TestExecution:
         app = create_app()
         async with TestClient(TestServer(app)) as client:
             resp = await client.post(
-                "/api/agents/nope/trigger",
+                "/api/sessions/nope/trigger",
                 json={"entry_point_id": "default"},
             )
             assert resp.status == 404
@@ -474,7 +463,7 @@ class TestExecution:
         app = _make_app_with_session(session)
         async with TestClient(TestServer(app)) as client:
             resp = await client.post(
-                "/api/agents/test_agent/inject",
+                "/api/sessions/test_agent/inject",
                 json={"node_id": "node_a", "content": "answer"},
             )
             assert resp.status == 200
@@ -487,7 +476,7 @@ class TestExecution:
         app = _make_app_with_session(session)
         async with TestClient(TestServer(app)) as client:
             resp = await client.post(
-                "/api/agents/test_agent/inject",
+                "/api/sessions/test_agent/inject",
                 json={"content": "answer"},
             )
             assert resp.status == 400
@@ -499,7 +488,7 @@ class TestExecution:
         app = _make_app_with_session(session)
         async with TestClient(TestServer(app)) as client:
             resp = await client.post(
-                "/api/agents/test_agent/chat",
+                "/api/sessions/test_agent/chat",
                 json={"message": "hello"},
             )
             assert resp.status == 200
@@ -515,7 +504,7 @@ class TestExecution:
         app = _make_app_with_session(session)
         async with TestClient(TestServer(app)) as client:
             resp = await client.post(
-                "/api/agents/test_agent/chat",
+                "/api/sessions/test_agent/chat",
                 json={"message": "user reply"},
             )
             assert resp.status == 200
@@ -531,7 +520,7 @@ class TestExecution:
         app = _make_app_with_session(session)
         async with TestClient(TestServer(app)) as client:
             resp = await client.post(
-                "/api/agents/test_agent/chat",
+                "/api/sessions/test_agent/chat",
                 json={"message": "hello"},
             )
             assert resp.status == 503
@@ -542,7 +531,7 @@ class TestExecution:
         app = _make_app_with_session(session)
         async with TestClient(TestServer(app)) as client:
             resp = await client.post(
-                "/api/agents/test_agent/chat",
+                "/api/sessions/test_agent/chat",
                 json={"message": ""},
             )
             assert resp.status == 400
@@ -553,7 +542,7 @@ class TestExecution:
         app = _make_app_with_session(session)
         async with TestClient(TestServer(app)) as client:
             resp = await client.post(
-                "/api/agents/test_agent/pause",
+                "/api/sessions/test_agent/pause",
                 json={"execution_id": "nonexistent"},
             )
             assert resp.status == 404
@@ -564,7 +553,7 @@ class TestExecution:
         app = _make_app_with_session(session)
         async with TestClient(TestServer(app)) as client:
             resp = await client.post(
-                "/api/agents/test_agent/pause",
+                "/api/sessions/test_agent/pause",
                 json={},
             )
             assert resp.status == 400
@@ -574,7 +563,7 @@ class TestExecution:
         session = _make_session()
         app = _make_app_with_session(session)
         async with TestClient(TestServer(app)) as client:
-            resp = await client.get("/api/agents/test_agent/goal-progress")
+            resp = await client.get("/api/sessions/test_agent/goal-progress")
             assert resp.status == 200
             data = await resp.json()
             assert data["progress"] == 0.5
@@ -592,7 +581,7 @@ class TestResume:
 
         async with TestClient(TestServer(app)) as client:
             resp = await client.post(
-                "/api/agents/test_agent/resume",
+                "/api/sessions/test_agent/resume",
                 json={"session_id": session_id},
             )
             assert resp.status == 200
@@ -612,7 +601,7 @@ class TestResume:
 
         async with TestClient(TestServer(app)) as client:
             resp = await client.post(
-                "/api/agents/test_agent/resume",
+                "/api/sessions/test_agent/resume",
                 json={
                     "session_id": session_id,
                     "checkpoint_id": "cp_node_complete_node_a_001",
@@ -628,7 +617,7 @@ class TestResume:
         app = _make_app_with_session(session)
         async with TestClient(TestServer(app)) as client:
             resp = await client.post(
-                "/api/agents/test_agent/resume",
+                "/api/sessions/test_agent/resume",
                 json={},
             )
             assert resp.status == 400
@@ -639,7 +628,7 @@ class TestResume:
         app = _make_app_with_session(session)
         async with TestClient(TestServer(app)) as client:
             resp = await client.post(
-                "/api/agents/test_agent/resume",
+                "/api/sessions/test_agent/resume",
                 json={"session_id": "session_nonexistent"},
             )
             assert resp.status == 404
@@ -654,7 +643,7 @@ class TestStop:
         app = _make_app_with_session(session)
         async with TestClient(TestServer(app)) as client:
             resp = await client.post(
-                "/api/agents/test_agent/stop",
+                "/api/sessions/test_agent/stop",
                 json={"execution_id": "exec_abc"},
             )
             assert resp.status == 200
@@ -667,7 +656,7 @@ class TestStop:
         app = _make_app_with_session(session)
         async with TestClient(TestServer(app)) as client:
             resp = await client.post(
-                "/api/agents/test_agent/stop",
+                "/api/sessions/test_agent/stop",
                 json={"execution_id": "nonexistent"},
             )
             assert resp.status == 404
@@ -678,7 +667,7 @@ class TestStop:
         app = _make_app_with_session(session)
         async with TestClient(TestServer(app)) as client:
             resp = await client.post(
-                "/api/agents/test_agent/stop",
+                "/api/sessions/test_agent/stop",
                 json={},
             )
             assert resp.status == 400
@@ -695,7 +684,7 @@ class TestReplay:
 
         async with TestClient(TestServer(app)) as client:
             resp = await client.post(
-                "/api/agents/test_agent/replay",
+                "/api/sessions/test_agent/replay",
                 json={
                     "session_id": session_id,
                     "checkpoint_id": "cp_node_complete_node_a_001",
@@ -712,13 +701,13 @@ class TestReplay:
         app = _make_app_with_session(session)
         async with TestClient(TestServer(app)) as client:
             resp = await client.post(
-                "/api/agents/test_agent/replay",
+                "/api/sessions/test_agent/replay",
                 json={"session_id": "s1"},
             )
             assert resp.status == 400  # missing checkpoint_id
 
             resp2 = await client.post(
-                "/api/agents/test_agent/replay",
+                "/api/sessions/test_agent/replay",
                 json={"checkpoint_id": "cp1"},
             )
             assert resp2.status == 400  # missing session_id
@@ -733,7 +722,7 @@ class TestReplay:
 
         async with TestClient(TestServer(app)) as client:
             resp = await client.post(
-                "/api/agents/test_agent/replay",
+                "/api/sessions/test_agent/replay",
                 json={
                     "session_id": session_id,
                     "checkpoint_id": "nonexistent_cp",
@@ -742,7 +731,7 @@ class TestReplay:
             assert resp.status == 404
 
 
-class TestSessions:
+class TestWorkerSessions:
     @pytest.mark.asyncio
     async def test_list_sessions(self, sample_session, tmp_agent_dir):
         session_id, session_dir, state = sample_session
@@ -752,7 +741,7 @@ class TestSessions:
         app = _make_app_with_session(session)
 
         async with TestClient(TestServer(app)) as client:
-            resp = await client.get("/api/agents/test_agent/sessions")
+            resp = await client.get("/api/sessions/test_agent/worker-sessions")
             assert resp.status == 200
             data = await resp.json()
             assert len(data["sessions"]) == 1
@@ -767,7 +756,7 @@ class TestSessions:
         app = _make_app_with_session(session)
 
         async with TestClient(TestServer(app)) as client:
-            resp = await client.get("/api/agents/test_agent/sessions")
+            resp = await client.get("/api/sessions/test_agent/worker-sessions")
             assert resp.status == 200
             data = await resp.json()
             assert data["sessions"] == []
@@ -781,7 +770,7 @@ class TestSessions:
         app = _make_app_with_session(session)
 
         async with TestClient(TestServer(app)) as client:
-            resp = await client.get(f"/api/agents/test_agent/sessions/{session_id}")
+            resp = await client.get(f"/api/sessions/test_agent/worker-sessions/{session_id}")
             assert resp.status == 200
             data = await resp.json()
             assert data["status"] == "paused"
@@ -794,7 +783,7 @@ class TestSessions:
         app = _make_app_with_session(session)
 
         async with TestClient(TestServer(app)) as client:
-            resp = await client.get("/api/agents/test_agent/sessions/nonexistent")
+            resp = await client.get("/api/sessions/test_agent/worker-sessions/nonexistent")
             assert resp.status == 404
 
     @pytest.mark.asyncio
@@ -806,7 +795,7 @@ class TestSessions:
         app = _make_app_with_session(session)
 
         async with TestClient(TestServer(app)) as client:
-            resp = await client.delete(f"/api/agents/test_agent/sessions/{session_id}")
+            resp = await client.delete(f"/api/sessions/test_agent/worker-sessions/{session_id}")
             assert resp.status == 200
             data = await resp.json()
             assert data["deleted"] == session_id
@@ -821,7 +810,7 @@ class TestSessions:
         app = _make_app_with_session(session)
 
         async with TestClient(TestServer(app)) as client:
-            resp = await client.delete("/api/agents/test_agent/sessions/nonexistent")
+            resp = await client.delete("/api/sessions/test_agent/worker-sessions/nonexistent")
             assert resp.status == 404
 
     @pytest.mark.asyncio
@@ -833,7 +822,7 @@ class TestSessions:
         app = _make_app_with_session(session)
 
         async with TestClient(TestServer(app)) as client:
-            resp = await client.get(f"/api/agents/test_agent/sessions/{session_id}/checkpoints")
+            resp = await client.get(f"/api/sessions/test_agent/worker-sessions/{session_id}/checkpoints")
             assert resp.status == 200
             data = await resp.json()
             assert len(data["checkpoints"]) == 1
@@ -852,7 +841,7 @@ class TestSessions:
 
         async with TestClient(TestServer(app)) as client:
             resp = await client.post(
-                f"/api/agents/test_agent/sessions/{session_id}"
+                f"/api/sessions/test_agent/worker-sessions/{session_id}"
                 "/checkpoints/cp_node_complete_node_a_001/restore"
             )
             assert resp.status == 200
@@ -871,7 +860,7 @@ class TestSessions:
 
         async with TestClient(TestServer(app)) as client:
             resp = await client.post(
-                f"/api/agents/test_agent/sessions/{session_id}/checkpoints/nonexistent_cp/restore"
+                f"/api/sessions/test_agent/worker-sessions/{session_id}/checkpoints/nonexistent_cp/restore"
             )
             assert resp.status == 404
 
@@ -886,7 +875,7 @@ class TestMessages:
         app = _make_app_with_session(session)
 
         async with TestClient(TestServer(app)) as client:
-            resp = await client.get(f"/api/agents/test_agent/sessions/{session_id}/messages")
+            resp = await client.get(f"/api/sessions/test_agent/worker-sessions/{session_id}/messages")
             assert resp.status == 200
             data = await resp.json()
             msgs = data["messages"]
@@ -910,7 +899,7 @@ class TestMessages:
 
         async with TestClient(TestServer(app)) as client:
             resp = await client.get(
-                f"/api/agents/test_agent/sessions/{session_id}/messages?node_id=node_a"
+                f"/api/sessions/test_agent/worker-sessions/{session_id}/messages?node_id=node_a"
             )
             assert resp.status == 200
             data = await resp.json()
@@ -932,7 +921,7 @@ class TestMessages:
 
         async with TestClient(TestServer(app)) as client:
             resp = await client.get(
-                f"/api/agents/test_agent/sessions/{worker_session_id}/messages"
+                f"/api/sessions/test_agent/worker-sessions/{worker_session_id}/messages"
             )
             assert resp.status == 200
             data = await resp.json()
@@ -1002,7 +991,7 @@ class TestMessages:
 
         async with TestClient(TestServer(app)) as client:
             resp = await client.get(
-                f"/api/agents/test_agent/sessions/{worker_session_id}/messages?client_only=true"
+                f"/api/sessions/test_agent/worker-sessions/{worker_session_id}/messages?client_only=true"
             )
             assert resp.status == 200
             msgs = (await resp.json())["messages"]
@@ -1037,11 +1026,11 @@ class TestMessages:
 
         async with TestClient(TestServer(app)) as client:
             resp = await client.get(
-                f"/api/agents/test_agent/sessions/{worker_session_id}/messages?client_only=true"
+                f"/api/sessions/test_agent/worker-sessions/{worker_session_id}/messages?client_only=true"
             )
             assert resp.status == 200
             msgs = (await resp.json())["messages"]
-            # No runner → can't resolve client-facing nodes → returns all messages
+            # No runner -> can't resolve client-facing nodes -> returns all messages
             assert len(msgs) == 2
 
 
@@ -1053,7 +1042,7 @@ class TestGraphNodes:
         app = _make_app_with_session(session)
 
         async with TestClient(TestServer(app)) as client:
-            resp = await client.get("/api/agents/test_agent/graphs/primary/nodes")
+            resp = await client.get("/api/sessions/test_agent/graphs/primary/nodes")
             assert resp.status == 200
             data = await resp.json()
             assert len(data["nodes"]) == 2
@@ -1073,7 +1062,7 @@ class TestGraphNodes:
         app = _make_app_with_session(session)
 
         async with TestClient(TestServer(app)) as client:
-            resp = await client.get("/api/agents/test_agent/graphs/primary/nodes")
+            resp = await client.get("/api/sessions/test_agent/graphs/primary/nodes")
             assert resp.status == 200
             data = await resp.json()
 
@@ -1105,7 +1094,7 @@ class TestGraphNodes:
 
         async with TestClient(TestServer(app)) as client:
             resp = await client.get(
-                f"/api/agents/test_agent/graphs/primary/nodes?session_id={session_id}"
+                f"/api/sessions/test_agent/graphs/primary/nodes?session_id={session_id}"
             )
             assert resp.status == 200
             data = await resp.json()
@@ -1121,7 +1110,7 @@ class TestGraphNodes:
         session = _make_session()
         app = _make_app_with_session(session)
         async with TestClient(TestServer(app)) as client:
-            resp = await client.get("/api/agents/test_agent/graphs/nonexistent/nodes")
+            resp = await client.get("/api/sessions/test_agent/graphs/nonexistent/nodes")
             assert resp.status == 404
 
     @pytest.mark.asyncio
@@ -1131,7 +1120,7 @@ class TestGraphNodes:
         app = _make_app_with_session(session)
 
         async with TestClient(TestServer(app)) as client:
-            resp = await client.get("/api/agents/test_agent/graphs/primary/nodes/node_a")
+            resp = await client.get("/api/sessions/test_agent/graphs/primary/nodes/node_a")
             assert resp.status == 200
             data = await resp.json()
             assert data["id"] == "node_a"
@@ -1151,7 +1140,7 @@ class TestGraphNodes:
         app = _make_app_with_session(session)
 
         async with TestClient(TestServer(app)) as client:
-            resp = await client.get("/api/agents/test_agent/graphs/primary/nodes/node_a")
+            resp = await client.get("/api/sessions/test_agent/graphs/primary/nodes/node_a")
             assert resp.status == 200
             data = await resp.json()
             assert "system_prompt" in data
@@ -1160,7 +1149,7 @@ class TestGraphNodes:
             )
 
             # Node without system_prompt should return empty string
-            resp2 = await client.get("/api/agents/test_agent/graphs/primary/nodes/node_b")
+            resp2 = await client.get("/api/sessions/test_agent/graphs/primary/nodes/node_b")
             assert resp2.status == 200
             data2 = await resp2.json()
             assert data2["system_prompt"] == ""
@@ -1172,7 +1161,7 @@ class TestGraphNodes:
         app = _make_app_with_session(session)
 
         async with TestClient(TestServer(app)) as client:
-            resp = await client.get("/api/agents/test_agent/graphs/primary/nodes/nonexistent")
+            resp = await client.get("/api/sessions/test_agent/graphs/primary/nodes/nonexistent")
             assert resp.status == 404
 
 
@@ -1184,7 +1173,7 @@ class TestNodeCriteria:
         app = _make_app_with_session(session)
 
         async with TestClient(TestServer(app)) as client:
-            resp = await client.get("/api/agents/test_agent/graphs/primary/nodes/node_a/criteria")
+            resp = await client.get("/api/sessions/test_agent/graphs/primary/nodes/node_a/criteria")
             assert resp.status == 200
             data = await resp.json()
             assert data["node_id"] == "node_a"
@@ -1215,7 +1204,7 @@ class TestNodeCriteria:
 
         async with TestClient(TestServer(app)) as client:
             resp = await client.get(
-                f"/api/agents/test_agent/graphs/primary/nodes/node_b/criteria"
+                f"/api/sessions/test_agent/graphs/primary/nodes/node_b/criteria"
                 f"?session_id={session_id}"
             )
             assert resp.status == 200
@@ -1234,7 +1223,7 @@ class TestNodeCriteria:
 
         async with TestClient(TestServer(app)) as client:
             resp = await client.get(
-                "/api/agents/test_agent/graphs/primary/nodes/nonexistent/criteria"
+                "/api/sessions/test_agent/graphs/primary/nodes/nonexistent/criteria"
             )
             assert resp.status == 404
 
@@ -1248,7 +1237,7 @@ class TestLogs:
         app = _make_app_with_session(session)
 
         async with TestClient(TestServer(app)) as client:
-            resp = await client.get("/api/agents/test_agent/logs")
+            resp = await client.get("/api/sessions/test_agent/logs")
             assert resp.status == 404
 
     @pytest.mark.asyncio
@@ -1266,7 +1255,7 @@ class TestLogs:
         app = _make_app_with_session(session)
 
         async with TestClient(TestServer(app)) as client:
-            resp = await client.get("/api/agents/test_agent/logs")
+            resp = await client.get("/api/sessions/test_agent/logs")
             assert resp.status == 200
             data = await resp.json()
             assert "logs" in data
@@ -1289,7 +1278,7 @@ class TestLogs:
 
         async with TestClient(TestServer(app)) as client:
             resp = await client.get(
-                f"/api/agents/test_agent/logs?session_id={session_id}&level=summary"
+                f"/api/sessions/test_agent/logs?session_id={session_id}&level=summary"
             )
             assert resp.status == 200
             data = await resp.json()
@@ -1312,7 +1301,7 @@ class TestLogs:
 
         async with TestClient(TestServer(app)) as client:
             resp = await client.get(
-                f"/api/agents/test_agent/logs?session_id={session_id}&level=details"
+                f"/api/sessions/test_agent/logs?session_id={session_id}&level=details"
             )
             assert resp.status == 200
             data = await resp.json()
@@ -1336,7 +1325,7 @@ class TestLogs:
 
         async with TestClient(TestServer(app)) as client:
             resp = await client.get(
-                f"/api/agents/test_agent/logs?session_id={session_id}&level=tools"
+                f"/api/sessions/test_agent/logs?session_id={session_id}&level=tools"
             )
             assert resp.status == 200
             data = await resp.json()
@@ -1364,7 +1353,7 @@ class TestNodeLogs:
 
         async with TestClient(TestServer(app)) as client:
             resp = await client.get(
-                f"/api/agents/test_agent/graphs/primary/nodes/node_a/logs?session_id={session_id}"
+                f"/api/sessions/test_agent/graphs/primary/nodes/node_a/logs?session_id={session_id}"
             )
             assert resp.status == 200
             data = await resp.json()
@@ -1387,7 +1376,7 @@ class TestNodeLogs:
         app = _make_app_with_session(session)
 
         async with TestClient(TestServer(app)) as client:
-            resp = await client.get("/api/agents/test_agent/graphs/primary/nodes/node_a/logs")
+            resp = await client.get("/api/sessions/test_agent/graphs/primary/nodes/node_a/logs")
             assert resp.status == 400
 
 
@@ -1495,7 +1484,7 @@ class TestCredentials:
 
 
 class TestSSEFormat:
-    """Tests for SSE event wire format — events must be unnamed (data-only)
+    """Tests for SSE event wire format -- events must be unnamed (data-only)
     so the frontend's es.onmessage handler receives them."""
 
     @pytest.mark.asyncio

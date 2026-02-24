@@ -5,32 +5,17 @@ import logging
 
 from aiohttp import web
 
-from framework.server.app import safe_path_segment, sessions_dir
-from framework.server.session_manager import SessionManager
+from framework.server.app import resolve_session, safe_path_segment, sessions_dir
 
 logger = logging.getLogger(__name__)
 
 
-def _get_manager(request: web.Request) -> SessionManager:
-    return request.app["manager"]
-
-
-def _get_session_or_404(request: web.Request):
-    """Lookup session by agent_id; returns (session, None) or (None, error_response)."""
-    manager = _get_manager(request)
-    agent_id = request.match_info["agent_id"]
-    session = manager.get_session_for_agent(agent_id)
-    if session is None:
-        return None, web.json_response({"error": f"Agent '{agent_id}' not found"}, status=404)
-    return session, None
-
-
 async def handle_trigger(request: web.Request) -> web.Response:
-    """POST /api/agents/{agent_id}/trigger — start an execution.
+    """POST /api/sessions/{session_id}/trigger — start an execution.
 
     Body: {"entry_point_id": "default", "input_data": {...}, "session_state": {...}?}
     """
-    session, err = _get_session_or_404(request)
+    session, err = resolve_session(request)
     if err:
         return err
 
@@ -52,11 +37,11 @@ async def handle_trigger(request: web.Request) -> web.Response:
 
 
 async def handle_inject(request: web.Request) -> web.Response:
-    """POST /api/agents/{agent_id}/inject — inject input into a waiting node.
+    """POST /api/sessions/{session_id}/inject — inject input into a waiting node.
 
     Body: {"node_id": "...", "content": "...", "graph_id": "..."}
     """
-    session, err = _get_session_or_404(request)
+    session, err = resolve_session(request)
     if err:
         return err
 
@@ -76,7 +61,7 @@ async def handle_inject(request: web.Request) -> web.Response:
 
 
 async def handle_chat(request: web.Request) -> web.Response:
-    """POST /api/agents/{agent_id}/chat — convenience endpoint.
+    """POST /api/sessions/{session_id}/chat — convenience endpoint.
 
     Routing priority:
     1. Worker awaiting input → inject into worker node
@@ -85,7 +70,7 @@ async def handle_chat(request: web.Request) -> web.Response:
 
     Body: {"message": "hello"}
     """
-    session, err = _get_session_or_404(request)
+    session, err = resolve_session(request)
     if err:
         return err
 
@@ -132,8 +117,8 @@ async def handle_chat(request: web.Request) -> web.Response:
 
 
 async def handle_goal_progress(request: web.Request) -> web.Response:
-    """GET /api/agents/{agent_id}/goal-progress — evaluate goal progress."""
-    session, err = _get_session_or_404(request)
+    """GET /api/sessions/{session_id}/goal-progress — evaluate goal progress."""
+    session, err = resolve_session(request)
     if err:
         return err
 
@@ -145,11 +130,11 @@ async def handle_goal_progress(request: web.Request) -> web.Response:
 
 
 async def handle_resume(request: web.Request) -> web.Response:
-    """POST /api/agents/{agent_id}/resume — resume a paused execution.
+    """POST /api/sessions/{session_id}/resume — resume a paused execution.
 
     Body: {"session_id": "...", "checkpoint_id": "..." (optional)}
     """
-    session, err = _get_session_or_404(request)
+    session, err = resolve_session(request)
     if err:
         return err
 
@@ -217,11 +202,11 @@ async def handle_resume(request: web.Request) -> web.Response:
 
 
 async def handle_stop(request: web.Request) -> web.Response:
-    """POST /api/agents/{agent_id}/stop — cancel a running execution.
+    """POST /api/sessions/{session_id}/stop — cancel a running execution.
 
     Body: {"execution_id": "..."}
     """
-    session, err = _get_session_or_404(request)
+    session, err = resolve_session(request)
     if err:
         return err
 
@@ -252,11 +237,11 @@ async def handle_stop(request: web.Request) -> web.Response:
 
 
 async def handle_replay(request: web.Request) -> web.Response:
-    """POST /api/agents/{agent_id}/replay — re-run from a checkpoint.
+    """POST /api/sessions/{session_id}/replay — re-run from a checkpoint.
 
     Body: {"session_id": "...", "checkpoint_id": "..."}
     """
-    session, err = _get_session_or_404(request)
+    session, err = resolve_session(request)
     if err:
         return err
 
@@ -305,11 +290,12 @@ async def handle_replay(request: web.Request) -> web.Response:
 
 def register_routes(app: web.Application) -> None:
     """Register execution control routes."""
-    app.router.add_post("/api/agents/{agent_id}/trigger", handle_trigger)
-    app.router.add_post("/api/agents/{agent_id}/inject", handle_inject)
-    app.router.add_post("/api/agents/{agent_id}/chat", handle_chat)
-    app.router.add_post("/api/agents/{agent_id}/pause", handle_stop)  # alias
-    app.router.add_post("/api/agents/{agent_id}/resume", handle_resume)
-    app.router.add_post("/api/agents/{agent_id}/stop", handle_stop)
-    app.router.add_post("/api/agents/{agent_id}/replay", handle_replay)
-    app.router.add_get("/api/agents/{agent_id}/goal-progress", handle_goal_progress)
+    # Session-primary routes
+    app.router.add_post("/api/sessions/{session_id}/trigger", handle_trigger)
+    app.router.add_post("/api/sessions/{session_id}/inject", handle_inject)
+    app.router.add_post("/api/sessions/{session_id}/chat", handle_chat)
+    app.router.add_post("/api/sessions/{session_id}/pause", handle_stop)
+    app.router.add_post("/api/sessions/{session_id}/resume", handle_resume)
+    app.router.add_post("/api/sessions/{session_id}/stop", handle_stop)
+    app.router.add_post("/api/sessions/{session_id}/replay", handle_replay)
+    app.router.add_get("/api/sessions/{session_id}/goal-progress", handle_goal_progress)

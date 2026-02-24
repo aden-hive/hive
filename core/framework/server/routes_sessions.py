@@ -1,29 +1,35 @@
-"""Session lifecycle and browsing routes.
+"""Session lifecycle, info, and worker-session browsing routes.
 
-New session-primary routes:
-- POST /api/sessions — create a session (queen-only)
-- GET  /api/sessions — list all sessions
-- POST /api/sessions/{session_id}/worker — load a worker into session
-- DELETE /api/sessions/{session_id}/worker — unload worker from session
-- DELETE /api/sessions/{session_id} — stop session entirely
+Session-primary routes:
+- POST   /api/sessions                               — create session (with or without worker)
+- GET    /api/sessions                               — list all active sessions
+- GET    /api/sessions/{session_id}                  — session detail
+- DELETE /api/sessions/{session_id}                  — stop session entirely
+- POST   /api/sessions/{session_id}/worker           — load a worker into session
+- DELETE /api/sessions/{session_id}/worker           — unload worker from session
+- GET    /api/sessions/{session_id}/stats            — runtime statistics
+- GET    /api/sessions/{session_id}/entry-points     — list entry points
+- GET    /api/sessions/{session_id}/graphs           — list graph IDs
 
-Legacy worker session browsing routes (backward compat):
-- GET /api/agents/{agent_id}/sessions — list worker sessions on disk
-- GET /api/agents/{agent_id}/sessions/{session_id} — session detail
-- DELETE /api/agents/{agent_id}/sessions/{session_id} — delete session
-- GET /api/agents/{agent_id}/sessions/{session_id}/checkpoints
-- POST /api/agents/{agent_id}/sessions/{session_id}/checkpoints/{cp_id}/restore
-- GET /api/agents/{agent_id}/sessions/{session_id}/messages
+Worker session browsing (persisted execution runs on disk):
+- GET    /api/sessions/{session_id}/worker-sessions                             — list
+- GET    /api/sessions/{session_id}/worker-sessions/{ws_id}                     — detail
+- DELETE /api/sessions/{session_id}/worker-sessions/{ws_id}                     — delete
+- GET    /api/sessions/{session_id}/worker-sessions/{ws_id}/checkpoints         — list CPs
+- POST   /api/sessions/{session_id}/worker-sessions/{ws_id}/checkpoints/{cp}/restore
+- GET    /api/sessions/{session_id}/worker-sessions/{ws_id}/messages            — messages
+
 """
 
 import json
 import logging
 import shutil
 import time
+from pathlib import Path
 
 from aiohttp import web
 
-from framework.server.app import safe_path_segment, sessions_dir
+from framework.server.app import resolve_session, safe_path_segment, sessions_dir
 from framework.server.session_manager import SessionManager
 
 logger = logging.getLogger(__name__)
@@ -33,54 +39,144 @@ def _get_manager(request: web.Request) -> SessionManager:
     return request.app["manager"]
 
 
+def _session_to_live_dict(session) -> dict:
+    """Serialize a live Session to the session-primary JSON shape."""
+    info = session.worker_info
+    return {
+        "session_id": session.id,
+        "worker_id": session.worker_id,
+        "worker_name": info.name if info else session.worker_id,
+        "has_worker": session.worker_runtime is not None,
+        "agent_path": str(session.worker_path) if session.worker_path else "",
+        "description": info.description if info else "",
+        "goal": info.goal_name if info else "",
+        "node_count": info.node_count if info else 0,
+        "loaded_at": session.loaded_at,
+        "uptime_seconds": round(time.time() - session.loaded_at, 1),
+        "intro_message": getattr(session.runner, "intro_message", "") or "",
+    }
+
+
 # ------------------------------------------------------------------
-# New session-primary routes
+# Session lifecycle
 # ------------------------------------------------------------------
 
 
 async def handle_create_session(request: web.Request) -> web.Response:
-    """POST /api/sessions — create a queen-only session.
+    """POST /api/sessions — create a session.
 
-    Body: {"session_id": "..." (optional), "model": "..." (optional)}
+    Body: {
+        "agent_path": "..." (optional — if provided, creates session with worker),
+        "agent_id": "..." (optional — worker ID override),
+        "session_id": "..." (optional — custom session ID),
+        "model": "..." (optional),
+    }
+
+    When agent_path is provided, creates a session with a worker in one step
+    (equivalent to the old POST /api/agents). Otherwise creates a queen-only
+    session that can later have a worker loaded via POST /sessions/{id}/worker.
     """
     manager = _get_manager(request)
     body = await request.json() if request.can_read_body else {}
+    agent_path = body.get("agent_path")
+    agent_id = body.get("agent_id")
     session_id = body.get("session_id")
     model = body.get("model")
 
     try:
-        session = await manager.create_session(session_id=session_id, model=model)
+        if agent_path:
+            # One-step: create session + load worker
+            session = await manager.create_session_with_worker(
+                agent_path, agent_id=agent_id, model=model,
+            )
+        else:
+            # Queen-only session
+            session = await manager.create_session(
+                session_id=session_id, model=model,
+            )
     except ValueError as e:
-        return web.json_response({"error": str(e)}, status=409)
+        msg = str(e)
+        # Provide extra info when agent is already loaded
+        if agent_path and "already loaded" in msg:
+            resolved_id = agent_id or Path(agent_path).name
+            existing = manager.get_session_by_worker_id(resolved_id)
+            if existing:
+                return web.json_response(
+                    {"error": msg, **_session_to_live_dict(existing)},
+                    status=409,
+                )
+        if "currently loading" in msg:
+            resolved_id = agent_id or (Path(agent_path).name if agent_path else "")
+            return web.json_response(
+                {"error": msg, "worker_id": resolved_id, "loading": True},
+                status=409,
+            )
+        return web.json_response({"error": msg}, status=409)
+    except FileNotFoundError as e:
+        return web.json_response({"error": str(e)}, status=404)
     except Exception as e:
-        logger.exception(f"Error creating session: {e}")
+        logger.exception("Error creating session: %s", e)
         return web.json_response({"error": str(e)}, status=500)
 
-    return web.json_response(
-        {
-            "session_id": session.id,
-            "has_worker": session.worker_runtime is not None,
-            "loaded_at": session.loaded_at,
-        },
-        status=201,
-    )
+    return web.json_response(_session_to_live_dict(session), status=201)
 
 
 async def handle_list_live_sessions(request: web.Request) -> web.Response:
     """GET /api/sessions — list all active sessions."""
     manager = _get_manager(request)
-    sessions = []
-    for s in manager.list_sessions():
-        sessions.append(
-            {
-                "session_id": s.id,
-                "worker_id": s.worker_id,
-                "has_worker": s.worker_runtime is not None,
-                "loaded_at": s.loaded_at,
-                "uptime_seconds": round(time.time() - s.loaded_at, 1),
-            }
-        )
+    sessions = [_session_to_live_dict(s) for s in manager.list_sessions()]
     return web.json_response({"sessions": sessions})
+
+
+async def handle_get_live_session(request: web.Request) -> web.Response:
+    """GET /api/sessions/{session_id} — get session detail."""
+    manager = _get_manager(request)
+    session_id = request.match_info["session_id"]
+    session = manager.get_session(session_id)
+
+    if session is None:
+        if manager.is_loading(session_id):
+            return web.json_response(
+                {"session_id": session_id, "loading": True}, status=202,
+            )
+        return web.json_response(
+            {"error": f"Session '{session_id}' not found"}, status=404,
+        )
+
+    data = _session_to_live_dict(session)
+
+    if session.worker_runtime:
+        data["entry_points"] = [
+            {
+                "id": ep.id,
+                "name": ep.name,
+                "entry_node": ep.entry_node,
+                "trigger_type": ep.trigger_type,
+            }
+            for ep in session.worker_runtime.get_entry_points()
+        ]
+        data["graphs"] = session.worker_runtime.list_graphs()
+
+    return web.json_response(data)
+
+
+async def handle_stop_session(request: web.Request) -> web.Response:
+    """DELETE /api/sessions/{session_id} — stop a session entirely."""
+    manager = _get_manager(request)
+    session_id = request.match_info["session_id"]
+
+    stopped = await manager.stop_session(session_id)
+    if not stopped:
+        return web.json_response(
+            {"error": f"Session '{session_id}' not found"}, status=404,
+        )
+
+    return web.json_response({"session_id": session_id, "stopped": True})
+
+
+# ------------------------------------------------------------------
+# Worker lifecycle
+# ------------------------------------------------------------------
 
 
 async def handle_load_worker(request: web.Request) -> web.Response:
@@ -108,18 +204,10 @@ async def handle_load_worker(request: web.Request) -> web.Response:
     except FileNotFoundError as e:
         return web.json_response({"error": str(e)}, status=404)
     except Exception as e:
-        logger.exception(f"Error loading worker: {e}")
+        logger.exception("Error loading worker: %s", e)
         return web.json_response({"error": str(e)}, status=500)
 
-    info = session.worker_info
-    return web.json_response(
-        {
-            "session_id": session.id,
-            "worker_id": session.worker_id,
-            "worker_name": info.name if info else session.worker_id,
-            "worker_description": info.description if info else "",
-        }
-    )
+    return web.json_response(_session_to_live_dict(session))
 
 
 async def handle_unload_worker(request: web.Request) -> web.Response:
@@ -131,37 +219,88 @@ async def handle_unload_worker(request: web.Request) -> web.Response:
     if not removed:
         session = manager.get_session(session_id)
         if session is None:
-            return web.json_response({"error": f"Session '{session_id}' not found"}, status=404)
-        return web.json_response({"error": "No worker loaded in this session"}, status=409)
+            return web.json_response(
+                {"error": f"Session '{session_id}' not found"}, status=404,
+            )
+        return web.json_response(
+            {"error": "No worker loaded in this session"}, status=409,
+        )
 
     return web.json_response({"session_id": session_id, "worker_unloaded": True})
 
 
-async def handle_stop_session(request: web.Request) -> web.Response:
-    """DELETE /api/sessions/{session_id} — stop a session entirely."""
+# ------------------------------------------------------------------
+# Session info (worker details)
+# ------------------------------------------------------------------
+
+
+async def handle_session_stats(request: web.Request) -> web.Response:
+    """GET /api/sessions/{session_id}/stats — runtime statistics."""
     manager = _get_manager(request)
     session_id = request.match_info["session_id"]
-
-    stopped = await manager.stop_session(session_id)
-    if not stopped:
-        return web.json_response({"error": f"Session '{session_id}' not found"}, status=404)
-
-    return web.json_response({"session_id": session_id, "stopped": True})
-
-
-# ------------------------------------------------------------------
-# Legacy worker session browsing routes (unchanged URLs)
-# ------------------------------------------------------------------
-
-
-async def handle_list_sessions(request: web.Request) -> web.Response:
-    """GET /api/agents/{agent_id}/sessions — list worker sessions on disk."""
-    manager = _get_manager(request)
-    agent_id = request.match_info["agent_id"]
-    session = manager.get_session_for_agent(agent_id)
+    session = manager.get_session(session_id)
 
     if session is None:
-        return web.json_response({"error": f"Agent '{agent_id}' not found"}, status=404)
+        return web.json_response(
+            {"error": f"Session '{session_id}' not found"}, status=404,
+        )
+
+    stats = session.worker_runtime.get_stats() if session.worker_runtime else {}
+    return web.json_response(stats)
+
+
+async def handle_session_entry_points(request: web.Request) -> web.Response:
+    """GET /api/sessions/{session_id}/entry-points — list entry points."""
+    manager = _get_manager(request)
+    session_id = request.match_info["session_id"]
+    session = manager.get_session(session_id)
+
+    if session is None:
+        return web.json_response(
+            {"error": f"Session '{session_id}' not found"}, status=404,
+        )
+
+    eps = session.worker_runtime.get_entry_points() if session.worker_runtime else []
+    return web.json_response(
+        {
+            "entry_points": [
+                {
+                    "id": ep.id,
+                    "name": ep.name,
+                    "entry_node": ep.entry_node,
+                    "trigger_type": ep.trigger_type,
+                }
+                for ep in eps
+            ]
+        }
+    )
+
+
+async def handle_session_graphs(request: web.Request) -> web.Response:
+    """GET /api/sessions/{session_id}/graphs — list loaded graphs."""
+    manager = _get_manager(request)
+    session_id = request.match_info["session_id"]
+    session = manager.get_session(session_id)
+
+    if session is None:
+        return web.json_response(
+            {"error": f"Session '{session_id}' not found"}, status=404,
+        )
+
+    graphs = session.worker_runtime.list_graphs() if session.worker_runtime else []
+    return web.json_response({"graphs": graphs})
+
+
+# ------------------------------------------------------------------
+# Worker session browsing (persisted execution runs on disk)
+# ------------------------------------------------------------------
+
+
+async def handle_list_worker_sessions(request: web.Request) -> web.Response:
+    """List worker sessions on disk."""
+    session, err = resolve_session(request)
+    if err:
+        return err
 
     if not session.worker_path:
         return web.json_response({"sessions": []})
@@ -201,20 +340,20 @@ async def handle_list_sessions(request: web.Request) -> web.Response:
     return web.json_response({"sessions": sessions})
 
 
-async def handle_get_session(request: web.Request) -> web.Response:
-    """GET /api/agents/{agent_id}/sessions/{session_id} — session detail."""
-    manager = _get_manager(request)
-    agent_id = request.match_info["agent_id"]
-    worker_session_id = safe_path_segment(request.match_info["session_id"])
-    session = manager.get_session_for_agent(agent_id)
-
-    if session is None:
-        return web.json_response({"error": f"Agent '{agent_id}' not found"}, status=404)
+async def handle_get_worker_session(request: web.Request) -> web.Response:
+    """Get worker session detail from disk."""
+    session, err = resolve_session(request)
+    if err:
+        return err
 
     if not session.worker_path:
         return web.json_response({"error": "No worker loaded"}, status=503)
 
-    state_path = sessions_dir(session) / worker_session_id / "state.json"
+    # Support both URL param names: ws_id (new) or session_id (legacy)
+    ws_id = request.match_info.get("ws_id") or request.match_info.get("session_id", "")
+    ws_id = safe_path_segment(ws_id)
+
+    state_path = sessions_dir(session) / ws_id / "state.json"
     if not state_path.exists():
         return web.json_response({"error": "Session not found"}, status=404)
 
@@ -227,19 +366,18 @@ async def handle_get_session(request: web.Request) -> web.Response:
 
 
 async def handle_list_checkpoints(request: web.Request) -> web.Response:
-    """GET /api/agents/{agent_id}/sessions/{session_id}/checkpoints"""
-    manager = _get_manager(request)
-    agent_id = request.match_info["agent_id"]
-    worker_session_id = safe_path_segment(request.match_info["session_id"])
-    session = manager.get_session_for_agent(agent_id)
-
-    if session is None:
-        return web.json_response({"error": f"Agent '{agent_id}' not found"}, status=404)
+    """List checkpoints for a worker session."""
+    session, err = resolve_session(request)
+    if err:
+        return err
 
     if not session.worker_path:
         return web.json_response({"error": "No worker loaded"}, status=503)
 
-    cp_dir = sessions_dir(session) / worker_session_id / "checkpoints"
+    ws_id = request.match_info.get("ws_id") or request.match_info.get("session_id", "")
+    ws_id = safe_path_segment(ws_id)
+
+    cp_dir = sessions_dir(session) / ws_id / "checkpoints"
     if not cp_dir.exists():
         return web.json_response({"checkpoints": []})
 
@@ -264,42 +402,40 @@ async def handle_list_checkpoints(request: web.Request) -> web.Response:
     return web.json_response({"checkpoints": checkpoints})
 
 
-async def handle_delete_session(request: web.Request) -> web.Response:
-    """DELETE /api/agents/{agent_id}/sessions/{session_id} — delete a worker session."""
-    manager = _get_manager(request)
-    agent_id = request.match_info["agent_id"]
-    worker_session_id = safe_path_segment(request.match_info["session_id"])
-    session = manager.get_session_for_agent(agent_id)
-
-    if session is None:
-        return web.json_response({"error": f"Agent '{agent_id}' not found"}, status=404)
+async def handle_delete_worker_session(request: web.Request) -> web.Response:
+    """Delete a worker session from disk."""
+    session, err = resolve_session(request)
+    if err:
+        return err
 
     if not session.worker_path:
         return web.json_response({"error": "No worker loaded"}, status=503)
 
-    session_path = sessions_dir(session) / worker_session_id
+    ws_id = request.match_info.get("ws_id") or request.match_info.get("session_id", "")
+    ws_id = safe_path_segment(ws_id)
+
+    session_path = sessions_dir(session) / ws_id
     if not session_path.exists():
         return web.json_response({"error": "Session not found"}, status=404)
 
     shutil.rmtree(session_path)
-    return web.json_response({"deleted": worker_session_id})
+    return web.json_response({"deleted": ws_id})
 
 
 async def handle_restore_checkpoint(request: web.Request) -> web.Response:
-    """POST /api/agents/{agent_id}/sessions/{session_id}/checkpoints/{checkpoint_id}/restore"""
-    manager = _get_manager(request)
-    agent_id = request.match_info["agent_id"]
-    worker_session_id = safe_path_segment(request.match_info["session_id"])
-    checkpoint_id = safe_path_segment(request.match_info["checkpoint_id"])
-    session = manager.get_session_for_agent(agent_id)
-
-    if session is None:
-        return web.json_response({"error": f"Agent '{agent_id}' not found"}, status=404)
+    """Restore from a checkpoint."""
+    session, err = resolve_session(request)
+    if err:
+        return err
 
     if not session.worker_runtime:
         return web.json_response({"error": "No worker loaded in this session"}, status=503)
 
-    cp_path = sessions_dir(session) / worker_session_id / "checkpoints" / f"{checkpoint_id}.json"
+    ws_id = request.match_info.get("ws_id") or request.match_info.get("session_id", "")
+    ws_id = safe_path_segment(ws_id)
+    checkpoint_id = safe_path_segment(request.match_info["checkpoint_id"])
+
+    cp_path = sessions_dir(session) / ws_id / "checkpoints" / f"{checkpoint_id}.json"
     if not cp_path.exists():
         return web.json_response({"error": "Checkpoint not found"}, status=404)
 
@@ -308,7 +444,7 @@ async def handle_restore_checkpoint(request: web.Request) -> web.Response:
         return web.json_response({"error": "No entry points available"}, status=400)
 
     restore_session_state = {
-        "resume_session_id": worker_session_id,
+        "resume_session_id": ws_id,
         "resume_from_checkpoint": checkpoint_id,
     }
 
@@ -321,26 +457,25 @@ async def handle_restore_checkpoint(request: web.Request) -> web.Response:
     return web.json_response(
         {
             "execution_id": execution_id,
-            "restored_from": worker_session_id,
+            "restored_from": ws_id,
             "checkpoint_id": checkpoint_id,
         }
     )
 
 
 async def handle_messages(request: web.Request) -> web.Response:
-    """GET /api/agents/{agent_id}/sessions/{session_id}/messages"""
-    manager = _get_manager(request)
-    agent_id = request.match_info["agent_id"]
-    worker_session_id = safe_path_segment(request.match_info["session_id"])
-    session = manager.get_session_for_agent(agent_id)
-
-    if session is None:
-        return web.json_response({"error": f"Agent '{agent_id}' not found"}, status=404)
+    """Get messages for a worker session."""
+    session, err = resolve_session(request)
+    if err:
+        return err
 
     if not session.worker_path:
         return web.json_response({"error": "No worker loaded"}, status=503)
 
-    convs_dir = sessions_dir(session) / worker_session_id / "conversations"
+    ws_id = request.match_info.get("ws_id") or request.match_info.get("session_id", "")
+    ws_id = safe_path_segment(ws_id)
+
+    convs_dir = sessions_dir(session) / ws_id / "conversations"
     if not convs_dir.exists():
         return web.json_response({"messages": []})
 
@@ -393,28 +528,80 @@ async def handle_messages(request: web.Request) -> web.Response:
     return web.json_response({"messages": all_messages})
 
 
+# ------------------------------------------------------------------
+# Agent discovery (not session-specific)
+# ------------------------------------------------------------------
+
+
+async def handle_discover(request: web.Request) -> web.Response:
+    """GET /api/discover — discover agents from filesystem."""
+    from framework.tui.screens.agent_picker import discover_agents
+
+    manager = _get_manager(request)
+    loaded_paths = {
+        str(s.worker_path) for s in manager.list_sessions() if s.worker_path
+    }
+
+    groups = discover_agents()
+    result = {}
+    for category, entries in groups.items():
+        result[category] = [
+            {
+                "path": str(entry.path),
+                "name": entry.name,
+                "description": entry.description,
+                "category": entry.category,
+                "session_count": entry.session_count,
+                "node_count": entry.node_count,
+                "tool_count": entry.tool_count,
+                "tags": entry.tags,
+                "last_active": entry.last_active,
+                "is_loaded": str(entry.path) in loaded_paths,
+            }
+            for entry in entries
+        ]
+    return web.json_response(result)
+
+
+# ------------------------------------------------------------------
+# Route registration
+# ------------------------------------------------------------------
+
+
 def register_routes(app: web.Application) -> None:
     """Register session routes."""
-    # New session-primary routes
+    # Discovery
+    app.router.add_get("/api/discover", handle_discover)
+
+    # Session lifecycle
     app.router.add_post("/api/sessions", handle_create_session)
     app.router.add_get("/api/sessions", handle_list_live_sessions)
-    app.router.add_post("/api/sessions/{session_id}/worker", handle_load_worker)
-    app.router.add_delete("/api/sessions/{session_id}/worker", handle_unload_worker)
+    app.router.add_get("/api/sessions/{session_id}", handle_get_live_session)
     app.router.add_delete("/api/sessions/{session_id}", handle_stop_session)
 
-    # Legacy worker session browsing routes
-    app.router.add_get("/api/agents/{agent_id}/sessions", handle_list_sessions)
-    app.router.add_get("/api/agents/{agent_id}/sessions/{session_id}", handle_get_session)
-    app.router.add_delete("/api/agents/{agent_id}/sessions/{session_id}", handle_delete_session)
+    # Worker lifecycle
+    app.router.add_post("/api/sessions/{session_id}/worker", handle_load_worker)
+    app.router.add_delete("/api/sessions/{session_id}/worker", handle_unload_worker)
+
+    # Session info
+    app.router.add_get("/api/sessions/{session_id}/stats", handle_session_stats)
+    app.router.add_get("/api/sessions/{session_id}/entry-points", handle_session_entry_points)
+    app.router.add_get("/api/sessions/{session_id}/graphs", handle_session_graphs)
+
+    # Worker session browsing (session-primary)
+    app.router.add_get("/api/sessions/{session_id}/worker-sessions", handle_list_worker_sessions)
+    app.router.add_get("/api/sessions/{session_id}/worker-sessions/{ws_id}", handle_get_worker_session)
+    app.router.add_delete("/api/sessions/{session_id}/worker-sessions/{ws_id}", handle_delete_worker_session)
     app.router.add_get(
-        "/api/agents/{agent_id}/sessions/{session_id}/checkpoints",
+        "/api/sessions/{session_id}/worker-sessions/{ws_id}/checkpoints",
         handle_list_checkpoints,
     )
     app.router.add_post(
-        "/api/agents/{agent_id}/sessions/{session_id}/checkpoints/{checkpoint_id}/restore",
+        "/api/sessions/{session_id}/worker-sessions/{ws_id}/checkpoints/{checkpoint_id}/restore",
         handle_restore_checkpoint,
     )
     app.router.add_get(
-        "/api/agents/{agent_id}/sessions/{session_id}/messages",
+        "/api/sessions/{session_id}/worker-sessions/{ws_id}/messages",
         handle_messages,
     )
+

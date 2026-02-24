@@ -108,6 +108,7 @@ export default function ChatPanel({ messages, onSend, isWaiting, activeThread, a
     if (m.type === "system" && !m.thread) return false;
     return m.thread === activeThread;
   });
+  console.log('[ChatPanel] render: messages:', messages.length, 'threadMessages:', threadMessages.length, 'activeThread:', activeThread, 'threads:', [...new Set(messages.map(m => m.thread))]);
 
   // Mark current thread as read
   useEffect(() => {

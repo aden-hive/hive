@@ -209,6 +209,7 @@ class AgentRuntime:
 
         # State
         self._running = False
+        self._timers_paused = False
         self._lock = asyncio.Lock()
 
         # Optional greeting shown to user on TUI load (set by AgentRunner)
@@ -424,6 +425,36 @@ class AgentRuntime:
                                 )
                                 await asyncio.sleep(max(0, sleep_secs))
                             while self._running:
+                                # Calculate next fire time upfront (used by skip paths too)
+                                cron = croniter(expr, datetime.now())
+                                next_dt = cron.get_next(datetime)
+                                sleep_secs = (next_dt - datetime.now()).total_seconds()
+
+                                # Gate: skip tick if timers are explicitly paused
+                                if self._timers_paused:
+                                    logger.debug(
+                                        "Cron '%s': paused, skipping tick",
+                                        entry_point_id,
+                                    )
+                                    self._timer_next_fire[entry_point_id] = (
+                                        time.monotonic() + sleep_secs
+                                    )
+                                    await asyncio.sleep(max(0, sleep_secs))
+                                    continue
+
+                                # Gate: skip tick if previous execution still running
+                                _stream = self._streams.get(entry_point_id)
+                                if _stream and _stream.active_execution_ids:
+                                    logger.debug(
+                                        "Cron '%s': execution already in progress, skipping tick",
+                                        entry_point_id,
+                                    )
+                                    self._timer_next_fire[entry_point_id] = (
+                                        time.monotonic() + sleep_secs
+                                    )
+                                    await asyncio.sleep(max(0, sleep_secs))
+                                    continue
+
                                 self._timer_next_fire.pop(entry_point_id, None)
                                 try:
                                     ep_spec = self._entry_points.get(entry_point_id)
@@ -439,6 +470,18 @@ class AgentRuntime:
                                         session_state = self._get_primary_session_state(
                                             exclude_entry_point=entry_point_id
                                         )
+                                        # Gate: skip tick if no active session
+                                        if session_state is None:
+                                            logger.debug(
+                                                "Cron '%s': no active primary session, skipping tick",
+                                                entry_point_id,
+                                            )
+                                            self._timer_next_fire[entry_point_id] = (
+                                                time.monotonic() + sleep_secs
+                                            )
+                                            await asyncio.sleep(max(0, sleep_secs))
+                                            continue
+
                                     exec_id = await self.trigger(
                                         entry_point_id,
                                         {
@@ -496,6 +539,31 @@ class AgentRuntime:
                                 )
                                 await asyncio.sleep(interval_secs)
                             while self._running:
+                                # Gate: skip tick if timers are explicitly paused
+                                if self._timers_paused:
+                                    logger.debug(
+                                        "Timer '%s': paused, skipping tick",
+                                        entry_point_id,
+                                    )
+                                    self._timer_next_fire[entry_point_id] = (
+                                        time.monotonic() + interval_secs
+                                    )
+                                    await asyncio.sleep(interval_secs)
+                                    continue
+
+                                # Gate: skip tick if previous execution still running
+                                _stream = self._streams.get(entry_point_id)
+                                if _stream and _stream.active_execution_ids:
+                                    logger.debug(
+                                        "Timer '%s': execution already in progress, skipping tick",
+                                        entry_point_id,
+                                    )
+                                    self._timer_next_fire[entry_point_id] = (
+                                        time.monotonic() + interval_secs
+                                    )
+                                    await asyncio.sleep(interval_secs)
+                                    continue
+
                                 self._timer_next_fire.pop(entry_point_id, None)
                                 try:
                                     ep_spec = self._entry_points.get(entry_point_id)
@@ -511,6 +579,18 @@ class AgentRuntime:
                                         session_state = self._get_primary_session_state(
                                             exclude_entry_point=entry_point_id
                                         )
+                                        # Gate: skip tick if no active session
+                                        if session_state is None:
+                                            logger.debug(
+                                                "Timer '%s': no active primary session, skipping tick",
+                                                entry_point_id,
+                                            )
+                                            self._timer_next_fire[entry_point_id] = (
+                                                time.monotonic() + interval_secs
+                                            )
+                                            await asyncio.sleep(interval_secs)
+                                            continue
+
                                     exec_id = await self.trigger(
                                         entry_point_id,
                                         {
@@ -570,6 +650,7 @@ class AgentRuntime:
             )
 
             self._running = True
+            self._timers_paused = False
             logger.info(f"AgentRuntime started with {len(self._streams)} streams")
 
     async def stop(self) -> None:
@@ -610,6 +691,19 @@ class AgentRuntime:
 
             self._running = False
             logger.info("AgentRuntime stopped")
+
+    def pause_timers(self) -> None:
+        """Pause all timer-driven entry points.
+
+        Timers will skip their ticks until ``resume_timers()`` is called.
+        """
+        self._timers_paused = True
+        logger.info("Timers paused")
+
+    def resume_timers(self) -> None:
+        """Resume timer-driven entry points after a pause."""
+        self._timers_paused = False
+        logger.info("Timers resumed")
 
     def _resolve_stream(
         self,
@@ -885,6 +979,30 @@ class AgentRuntime:
                             timer_next_fire[local_ep] = time.monotonic() + interval_secs
                             await asyncio.sleep(interval_secs)
                         while self._running and gid in self._graphs:
+                            # Gate: skip tick if timers are explicitly paused
+                            if self._timers_paused:
+                                logger.debug(
+                                    "Timer '%s::%s': paused, skipping tick",
+                                    gid,
+                                    local_ep,
+                                )
+                                timer_next_fire[local_ep] = time.monotonic() + interval_secs
+                                await asyncio.sleep(interval_secs)
+                                continue
+
+                            # Gate: skip tick if previous execution still running
+                            _reg = self._graphs.get(gid)
+                            _stream = _reg.streams.get(local_ep) if _reg else None
+                            if _stream and _stream.active_execution_ids:
+                                logger.debug(
+                                    "Timer '%s::%s': execution already in progress, skipping tick",
+                                    gid,
+                                    local_ep,
+                                )
+                                timer_next_fire[local_ep] = time.monotonic() + interval_secs
+                                await asyncio.sleep(interval_secs)
+                                continue
+
                             logger.info("Timer firing for '%s::%s'", gid, local_ep)
                             timer_next_fire.pop(local_ep, None)
                             try:
@@ -912,6 +1030,17 @@ class AgentRuntime:
                                     session_state = self._get_primary_session_state(
                                         local_ep, source_graph_id=gid
                                     )
+                                    # Gate: skip tick if no active session
+                                    if session_state is None:
+                                        logger.debug(
+                                            "Timer '%s::%s': no active primary session, skipping tick",
+                                            gid,
+                                            local_ep,
+                                        )
+                                        timer_next_fire[local_ep] = time.monotonic() + interval_secs
+                                        await asyncio.sleep(interval_secs)
+                                        continue
+
                                 exec_id = await stream.execute(
                                     {"event": {"source": "timer", "reason": "scheduled"}},
                                     session_state=session_state,
@@ -1386,6 +1515,11 @@ class AgentRuntime:
     def webhook_server(self) -> Any:
         """Access the webhook server (None if no webhook entry points)."""
         return self._webhook_server
+
+    @property
+    def timers_paused(self) -> bool:
+        """True when timer-driven entry points are paused (e.g. by stop_worker)."""
+        return self._timers_paused
 
     @property
     def is_running(self) -> bool:

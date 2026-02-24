@@ -6,7 +6,7 @@ import logging
 from aiohttp import web
 
 from framework.runtime.event_bus import EventType
-from framework.server.session_manager import SessionManager
+from framework.server.app import resolve_session
 
 logger = logging.getLogger(__name__)
 
@@ -60,17 +60,14 @@ def _parse_event_types(query_param: str | None) -> list[EventType]:
 
 
 async def handle_events(request: web.Request) -> web.StreamResponse:
-    """GET /api/agents/{agent_id}/events — SSE event stream.
+    """SSE event stream for a session.
 
     Query params:
         types: Comma-separated event type names to filter (optional).
     """
-    manager: SessionManager = request.app["manager"]
-    agent_id = request.match_info["agent_id"]
-    session = manager.get_session_for_agent(agent_id)
-
-    if session is None:
-        return web.json_response({"error": f"Agent '{agent_id}' not found"}, status=404)
+    session, err = resolve_session(request)
+    if err:
+        return err
 
     # Session always has an event_bus — no runtime guard needed
     event_bus = session.event_bus
@@ -114,11 +111,12 @@ async def handle_events(request: web.Request) -> web.StreamResponse:
         pass
     finally:
         event_bus.unsubscribe(sub_id)
-        logger.debug(f"SSE client disconnected from agent '{agent_id}'")
+        logger.debug("SSE client disconnected from session '%s'", session.id)
 
     return sse.response
 
 
 def register_routes(app: web.Application) -> None:
-    """Register SSE event streaming route."""
-    app.router.add_get("/api/agents/{agent_id}/events", handle_events)
+    """Register SSE event streaming routes."""
+    # Session-primary route
+    app.router.add_get("/api/sessions/{session_id}/events", handle_events)

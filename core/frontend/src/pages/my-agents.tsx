@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
-import { Crown, Bot, Activity, Moon, Plus } from "lucide-react";
+import { Bot, Activity, Moon, Plus } from "lucide-react";
+import TopBar from "@/components/TopBar";
 import { agentsApi } from "@/api/agents";
 import type { DiscoverEntry } from "@/api/types";
 
@@ -41,13 +42,7 @@ export default function MyAgents() {
 
   return (
     <div className="min-h-screen bg-background flex flex-col">
-      {/* Top bar */}
-      <div className="h-12 flex items-center px-6 border-b border-border/40 flex-shrink-0">
-        <button onClick={() => navigate("/")} className="flex items-center gap-2 hover:opacity-80 transition-opacity">
-          <Crown className="w-4 h-4 text-primary" />
-          <span className="text-sm font-semibold text-primary">Hive</span>
-        </button>
-      </div>
+      <TopBar />
 
       {/* Content */}
       <div className="flex-1 p-6 md:p-10 max-w-5xl mx-auto w-full">

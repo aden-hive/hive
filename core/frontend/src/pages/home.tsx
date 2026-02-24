@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { Crown, Mail, Briefcase, Shield, Search, Newspaper, ArrowRight, Hexagon, Send, Bot } from "lucide-react";
+import TopBar from "@/components/TopBar";
 import type { LucideIcon } from "lucide-react";
 import { agentsApi } from "@/api/agents";
 import type { DiscoverEntry } from "@/api/types";
@@ -78,13 +79,7 @@ export default function Home() {
 
   return (
     <div className="min-h-screen bg-background flex flex-col">
-      {/* Top bar */}
-      <div className="h-12 flex items-center px-6 border-b border-border/40 flex-shrink-0">
-        <div className="flex items-center gap-2">
-          <Crown className="w-4 h-4 text-primary" />
-          <span className="text-sm font-semibold text-primary">Hive</span>
-        </div>
-      </div>
+      <TopBar />
 
       {/* Main content */}
       <div className="flex-1 flex flex-col items-center justify-center p-6">

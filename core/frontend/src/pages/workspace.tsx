@@ -1,9 +1,11 @@
 import { useState, useCallback, useRef, useEffect, useMemo } from "react";
 import ReactDOM from "react-dom";
 import { useSearchParams, useNavigate } from "react-router-dom";
-import { Crown, Plus, X, KeyRound, Sparkles, Layers, ChevronLeft, Bot, Loader2, WifiOff } from "lucide-react";
+import { Plus, KeyRound, Sparkles, Layers, ChevronLeft, Bot, Loader2, WifiOff } from "lucide-react";
 import AgentGraph, { type GraphNode, type NodeStatus } from "@/components/AgentGraph";
 import ChatPanel, { type ChatMessage } from "@/components/ChatPanel";
+import TopBar from "@/components/TopBar";
+import { TAB_STORAGE_KEY, loadPersistedTabs, savePersistedTabs, type PersistedTabState } from "@/lib/tab-persistence";
 import NodeDetailPanel from "@/components/NodeDetailPanel";
 import CredentialsModal, { type Credential, createFreshCredentials, cloneCredentials, allRequiredCredentialsMet } from "@/components/CredentialsModal";
 import { agentsApi } from "@/api/agents";
@@ -11,7 +13,7 @@ import { executionApi } from "@/api/execution";
 import { graphsApi } from "@/api/graphs";
 import { sessionsApi } from "@/api/sessions";
 import { useMultiSSE } from "@/hooks/use-sse";
-import type { Agent, AgentEvent, DiscoverEntry, Message, NodeSpec } from "@/api/types";
+import type { LiveSession, AgentEvent, DiscoverEntry, Message, NodeSpec } from "@/api/types";
 import { backendMessageToChatMessage, sseEventToChatMessage, formatAgentDisplayName } from "@/lib/chat-helpers";
 import { topologyToGraphNodes } from "@/lib/graph-converter";
 
@@ -36,50 +38,6 @@ function createSession(agentType: string, label: string, existingCredentials?: C
     graphNodes: [],
     credentials: existingCredentials ? cloneCredentials(existingCredentials) : createFreshCredentials(agentType),
   };
-}
-
-// --- Tab persistence ---
-const TAB_STORAGE_KEY = "hive:workspace-tabs";
-
-interface PersistedTabState {
-  tabs: Array<{ id: string; agentType: string; label: string }>;
-  activeSessionByAgent: Record<string, string>;
-  activeWorker: string;
-  sessions?: Record<string, { messages: ChatMessage[]; graphNodes: GraphNode[] }>;
-}
-
-function loadPersistedTabs(): PersistedTabState | null {
-  try {
-    const raw = localStorage.getItem(TAB_STORAGE_KEY);
-    if (!raw) return null;
-    const parsed = JSON.parse(raw);
-    if (!Array.isArray(parsed.tabs) || parsed.tabs.length === 0) return null;
-    return parsed as PersistedTabState;
-  } catch {
-    return null;
-  }
-}
-
-const MAX_PERSISTED_MESSAGES = 50;
-
-function savePersistedTabs(state: PersistedTabState): void {
-  try {
-    // Cap messages to avoid blowing the ~5MB localStorage budget
-    const capped = { ...state };
-    if (capped.sessions) {
-      const trimmed: typeof capped.sessions = {};
-      for (const [id, data] of Object.entries(capped.sessions)) {
-        trimmed[id] = {
-          messages: data.messages.slice(-MAX_PERSISTED_MESSAGES),
-          graphNodes: data.graphNodes,
-        };
-      }
-      capped.sessions = trimmed;
-    }
-    localStorage.setItem(TAB_STORAGE_KEY, JSON.stringify(capped));
-  } catch {
-    // localStorage full or unavailable — silently ignore
-  }
 }
 
 // --- NewTabPopover ---
@@ -237,7 +195,7 @@ function truncate(s: string, max: number): string {
 
 // --- Per-agent backend state (consolidated) ---
 interface AgentBackendState {
-  agentId: string | null;
+  sessionId: string | null;
   loading: boolean;
   ready: boolean;
   queenReady: boolean;
@@ -257,7 +215,7 @@ interface AgentBackendState {
 
 function defaultAgentState(): AgentBackendState {
   return {
-    agentId: null,
+    sessionId: null,
     loading: true,
     ready: false,
     queenReady: false,
@@ -388,15 +346,17 @@ export default function Workspace() {
     }
     if (tabs.length > 0) {
       savePersistedTabs({ tabs, activeSessionByAgent, activeWorker, sessions });
+    } else {
+      localStorage.removeItem(TAB_STORAGE_KEY);
     }
   }, [sessionsByAgent, activeSessionByAgent, activeWorker]);
 
   const handleRun = useCallback(async () => {
     const state = agentStates[activeWorker];
-    if (!state?.agentId || !state?.ready) return;
+    if (!state?.sessionId || !state?.ready) return;
     try {
       updateAgentState(activeWorker, { workerRunState: "deploying" });
-      const result = await executionApi.trigger(state.agentId, "default", {});
+      const result = await executionApi.trigger(state.sessionId, "default", {});
       updateAgentState(activeWorker, { currentExecutionId: result.execution_id });
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : String(err);
@@ -437,32 +397,32 @@ export default function Workspace() {
       return;
     }
 
-    updateAgentState(agentType, { loading: true, error: null, ready: false, agentId: null });
+    updateAgentState(agentType, { loading: true, error: null, ready: false, sessionId: null });
 
     try {
-      let agent: Agent;
+      let liveSession: LiveSession;
       try {
-        agent = await agentsApi.load(agentType);
+        liveSession = await sessionsApi.create(agentType);
       } catch (loadErr: unknown) {
         const { ApiError } = await import("@/api/client");
         if (!(loadErr instanceof ApiError) || loadErr.status !== 409) {
           throw loadErr;
         }
 
-        const agentId = loadErr.body.id as string | undefined;
-        if (!agentId) throw loadErr;
+        const body = loadErr.body as Record<string, unknown>;
+        const existingSessionId = body.session_id as string | undefined;
+        if (!existingSessionId) throw loadErr;
 
-        if (loadErr.body.loading) {
-          agent = await (async () => {
+        if (body.loading) {
+          liveSession = await (async () => {
             const maxAttempts = 30;
             const delay = 1000;
             for (let i = 0; i < maxAttempts; i++) {
               await new Promise((r) => setTimeout(r, delay));
               try {
-                const result = await agentsApi.get(agentId);
-                const raw = result as unknown as Record<string, unknown>;
-                if (raw.loading) continue;
-                return result as unknown as Agent;
+                const result = await sessionsApi.get(existingSessionId);
+                if (result.loading) continue;
+                return result as LiveSession;
               } catch {
                 if (i === maxAttempts - 1) throw loadErr;
               }
@@ -470,12 +430,12 @@ export default function Workspace() {
             throw loadErr;
           })();
         } else {
-          agent = loadErr.body as unknown as Agent;
+          liveSession = body as unknown as LiveSession;
         }
       }
 
-      const displayName = formatAgentDisplayName(agent.name || agentType);
-      updateAgentState(agentType, { agentId: agent.id, displayName });
+      const displayName = formatAgentDisplayName(liveSession.worker_name || agentType);
+      updateAgentState(agentType, { sessionId: liveSession.session_id, displayName });
 
       // Update the session label
       setSessionsByAgent((prev) => {
@@ -489,12 +449,12 @@ export default function Workspace() {
         };
       });
 
-      // Always check backend session status (detects running worker).
+      // Check worker session status (detects running worker).
       // Only load messages if we don't already have them from localStorage.
       let isWorkerRunning = false;
       try {
-        const { sessions } = await sessionsApi.list(agent.id);
-        const resumable = sessions.find(
+        const { sessions: workerSessions } = await sessionsApi.workerSessions(liveSession.session_id);
+        const resumable = workerSessions.find(
           (s) => s.status === "active" || s.status === "paused",
         );
         isWorkerRunning = resumable?.status === "active";
@@ -502,7 +462,7 @@ export default function Workspace() {
         const currentSessions = sessionsRef.current[agentType] || [];
         const hasRestoredMessages = currentSessions.some(s => s.messages.length > 0);
         if (!hasRestoredMessages && resumable) {
-          const { messages } = await sessionsApi.messages(agent.id, resumable.session_id);
+          const { messages } = await sessionsApi.messages(liveSession.session_id, resumable.session_id);
           if (messages.length > 0) {
             const chatMsgs = messages.map((m: Message) =>
               backendMessageToChatMessage(m, agentType, displayName),
@@ -516,7 +476,7 @@ export default function Workspace() {
           }
         }
       } catch {
-        // Session listing failed — not critical
+        // Worker session listing failed — not critical
       }
 
       updateAgentState(agentType, {
@@ -540,19 +500,19 @@ export default function Workspace() {
         }
         continue;
       }
-      if (agentStates[agentType]?.agentId || agentStates[agentType]?.loading || agentStates[agentType]?.error) continue;
+      if (agentStates[agentType]?.sessionId || agentStates[agentType]?.loading || agentStates[agentType]?.error) continue;
       loadAgentForType(agentType);
     }
   }, [sessionsByAgent, agentStates, loadAgentForType, updateAgentState]);
 
-  // --- Fetch graph topology when an agent becomes ready ---
-  const fetchGraphForAgent = useCallback(async (agentType: string, agentId: string) => {
+  // --- Fetch graph topology when a session becomes ready ---
+  const fetchGraphForAgent = useCallback(async (agentType: string, sessionId: string) => {
     try {
-      const { graphs } = await agentsApi.graphs(agentId);
+      const { graphs } = await sessionsApi.graphs(sessionId);
       if (!graphs.length) return;
 
       const graphId = graphs[0];
-      const topology = await graphsApi.nodes(agentId, graphId);
+      const topology = await graphsApi.nodes(sessionId, graphId);
 
       updateAgentState(agentType, { graphId, nodeSpecs: topology.nodes });
 
@@ -580,8 +540,8 @@ export default function Workspace() {
 
   useEffect(() => {
     for (const [agentType, state] of Object.entries(agentStates)) {
-      if (!state.agentId || !state.ready || state.nodeSpecs.length > 0 || state.graphId) continue;
-      fetchGraphForAgent(agentType, state.agentId);
+      if (!state.sessionId || !state.ready || state.nodeSpecs.length > 0 || state.graphId) continue;
+      fetchGraphForAgent(agentType, state.sessionId);
     }
   }, [agentStates, fetchGraphForAgent]);
 
@@ -633,12 +593,31 @@ export default function Workspace() {
 
   const handlePause = useCallback(async () => {
     const state = agentStates[activeWorker];
-    if (!state?.agentId || !state?.currentExecutionId) return;
+    if (!state?.sessionId) return;
+
+    // If we don't have an execution ID, the UI is stale — just reset state
+    if (!state.currentExecutionId) {
+      updateAgentState(activeWorker, { workerRunState: "idle", currentExecutionId: null });
+      markAllNodesAs(activeWorker, ["running", "looping"], "pending");
+      return;
+    }
+
     try {
-      await executionApi.pause(state.agentId, state.currentExecutionId);
+      const result = await executionApi.pause(state.sessionId, state.currentExecutionId);
+      // If the backend says "not found", the execution already finished —
+      // reset UI state instead of showing an error.
+      if (result && !result.stopped) {
+        updateAgentState(activeWorker, { workerRunState: "idle", currentExecutionId: null });
+        markAllNodesAs(activeWorker, ["running", "looping"], "pending");
+        return;
+      }
       updateAgentState(activeWorker, { workerRunState: "idle", currentExecutionId: null });
       markAllNodesAs(activeWorker, ["running", "looping"], "pending");
     } catch (err) {
+      // Network errors or non-2xx responses — still reset the UI since
+      // the execution is likely gone, but also surface the error.
+      updateAgentState(activeWorker, { workerRunState: "idle", currentExecutionId: null });
+      markAllNodesAs(activeWorker, ["running", "looping"], "pending");
       const errMsg = err instanceof Error ? err.message : String(err);
       setSessionsByAgent((prev) => {
         const sessions = prev[activeWorker] || [];
@@ -681,12 +660,14 @@ export default function Workspace() {
   // --- SSE event handler ---
   const upsertChatMessage = useCallback(
     (agentType: string, chatMsg: ChatMessage) => {
+      console.log('[UPSERT] agentType:', agentType, 'msgId:', chatMsg.id, 'thread:', chatMsg.thread, 'role:', chatMsg.role, 'content:', chatMsg.content?.slice(0, 40));
       setSessionsByAgent((prev) => {
         const sessions = prev[agentType] || [];
+        const activeId = activeSessionByAgent[agentType] || sessions[0]?.id;
+        console.log('[UPSERT-inner] sessions:', sessions.length, 'activeId:', activeId, 'sessionIds:', sessions.map(s => s.id));
         return {
           ...prev,
           [agentType]: sessions.map((s) => {
-            const activeId = activeSessionByAgent[agentType] || sessions[0]?.id;
             if (s.id !== activeId) return s;
             const idx = s.messages.findIndex((m) => m.id === chatMsg.id);
             const newMessages =
@@ -707,6 +688,7 @@ export default function Workspace() {
       if (streamId === "judge") return;
 
       const isQueen = streamId === "queen";
+      if (isQueen) console.log('[QUEEN] handleSSEEvent:', event.type, 'agentType:', agentType);
       const agentDisplayName = agentStates[agentType]?.displayName;
       const displayName = isQueen ? "Queen Bee" : (agentDisplayName || undefined);
       const role = isQueen ? "queen" as const : "worker" as const;
@@ -769,6 +751,7 @@ export default function Workspace() {
         case "client_input_requested":
         case "llm_text_delta": {
           const chatMsg = sseEventToChatMessage(event, agentType, displayName, currentTurn);
+          if (isQueen) console.log('[QUEEN] chatMsg:', chatMsg?.id, chatMsg?.content?.slice(0, 50), 'turn:', currentTurn);
           if (chatMsg) {
             if (isQueen) chatMsg.role = role;
             upsertChatMessage(agentType, chatMsg);
@@ -976,18 +959,18 @@ export default function Workspace() {
     [agentStates, activeSessionByAgent, updateAgentState, updateGraphNodeStatus, markAllNodesAs, upsertChatMessage, appendNodeLog],
   );
 
-  // --- Multi-agent SSE subscription ---
-  const sseAgents = useMemo(() => {
+  // --- Multi-session SSE subscription ---
+  const sseSessions = useMemo(() => {
     const map: Record<string, string> = {};
     for (const [agentType, state] of Object.entries(agentStates)) {
-      if (state.agentId && state.ready) {
-        map[agentType] = state.agentId;
+      if (state.sessionId && state.ready) {
+        map[agentType] = state.sessionId;
       }
     }
     return map;
   }, [agentStates]);
 
-  useMultiSSE({ agents: sseAgents, onEvent: handleSSEEvent });
+  useMultiSSE({ sessions: sseSessions, onEvent: handleSSEEvent });
 
   const currentSessions = sessionsByAgent[activeWorker] || [];
   const activeSessionId = activeSessionByAgent[activeWorker] || currentSessions[0]?.id;
@@ -1048,8 +1031,8 @@ export default function Workspace() {
     }));
     updateAgentState(activeWorker, { isTyping: true });
 
-    if (state?.agentId && state?.ready) {
-      executionApi.chat(state.agentId, text).then((result) => {
+    if (state?.sessionId && state?.ready) {
+      executionApi.chat(state.sessionId, text).then((result) => {
         if (result.status === "started") {
           // Queen wasn't ready — backend triggered worker directly
           updateAgentState(activeWorker, {
@@ -1116,7 +1099,7 @@ export default function Workspace() {
 
   const closeAgentTab = useCallback((agentType: string) => {
     const allTypes = Object.keys(sessionsByAgent).filter(k => (sessionsByAgent[k] || []).length > 0);
-    if (allTypes.length <= 1) return;
+    const remaining = allTypes.filter(k => k !== agentType);
 
     setSessionsByAgent(prev => {
       const next = { ...prev };
@@ -1135,13 +1118,12 @@ export default function Workspace() {
       return next;
     });
 
-    if (activeWorker === agentType) {
-      const remaining = allTypes.filter(k => k !== agentType);
-      if (remaining.length > 0) {
-        setActiveWorker(remaining[0]);
-      }
+    if (remaining.length === 0) {
+      navigate("/");
+    } else if (activeWorker === agentType) {
+      setActiveWorker(remaining[0]);
     }
-  }, [sessionsByAgent, activeWorker]);
+  }, [sessionsByAgent, activeWorker, navigate]);
 
   // Create a new session for any agent type (used by NewTabPopover)
   const addAgentSession = useCallback((agentType: string, agentLabel?: string, cloned = false) => {
@@ -1179,45 +1161,18 @@ export default function Workspace() {
 
   return (
     <div className="flex flex-col h-screen bg-background overflow-hidden">
-      {/* Top bar */}
-      <div className="relative h-12 flex items-center justify-between px-5 border-b border-border/60 bg-card/50 backdrop-blur-sm flex-shrink-0">
-        <div className="flex items-center gap-3 min-w-0">
-          <button onClick={() => navigate("/")} className="flex items-center gap-2 hover:opacity-80 transition-opacity flex-shrink-0">
-            <Crown className="w-4 h-4 text-primary" />
-            <span className="text-sm font-semibold text-primary">Hive</span>
-          </button>
-          <span className="text-border text-xs flex-shrink-0">|</span>
-
-          {/* Agent tabs — one per agent type */}
-          <div className="flex items-center gap-0.5 min-w-0 overflow-x-auto scrollbar-hide">
-            {agentTabs.map((tab) => (
-              <button
-                key={tab.agentType}
-                onClick={() => {
-                  setActiveWorker(tab.agentType);
-                  setActiveSessionByAgent(prev => ({ ...prev, [tab.agentType]: tab.sessionId }));
-                }}
-                className={`group flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-colors whitespace-nowrap flex-shrink-0 ${
-                  tab.isActive
-                    ? "bg-primary/15 text-primary"
-                    : "text-muted-foreground hover:text-foreground hover:bg-muted/50"
-                }`}
-              >
-                {tab.hasRunning && (
-                  <span className="relative flex h-1.5 w-1.5 flex-shrink-0">
-                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary opacity-60" />
-                    <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-primary" />
-                  </span>
-                )}
-                <span>{tab.label}</span>
-                {agentTabs.length > 1 && (
-                  <X
-                    className="w-3 h-3 opacity-0 group-hover:opacity-60 hover:!opacity-100 transition-opacity"
-                    onClick={(e) => { e.stopPropagation(); closeAgentTab(tab.agentType); }}
-                  />
-                )}
-              </button>
-            ))}
+      <TopBar
+        tabs={agentTabs}
+        onTabClick={(agentType) => {
+          const tab = agentTabs.find(t => t.agentType === agentType);
+          if (tab) {
+            setActiveWorker(agentType);
+            setActiveSessionByAgent(prev => ({ ...prev, [agentType]: tab.sessionId }));
+          }
+        }}
+        onCloseTab={closeAgentTab}
+        afterTabs={
+          <>
             <button
               ref={newTabBtnRef}
               onClick={() => setNewTabOpen(o => !o)}
@@ -1226,8 +1181,18 @@ export default function Workspace() {
             >
               <Plus className="w-3.5 h-3.5" />
             </button>
-          </div>
-        </div>
+            <NewTabPopover
+              open={newTabOpen}
+              onClose={() => setNewTabOpen(false)}
+              anchorRef={newTabBtnRef}
+              activeWorker={activeWorker}
+              discoverAgents={discoverAgents}
+              onFromScratch={() => { addAgentSession("new-agent"); }}
+              onCloneAgent={(agentPath, agentName) => { addAgentSession(agentPath, agentName, true); }}
+            />
+          </>
+        }
+      >
         <button
           onClick={() => setCredentialsOpen(true)}
           className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors flex-shrink-0"
@@ -1235,18 +1200,7 @@ export default function Workspace() {
           <KeyRound className="w-3.5 h-3.5" />
           Credentials
         </button>
-
-        {/* Popover portalled to document.body, positioned from anchor button */}
-        <NewTabPopover
-          open={newTabOpen}
-          onClose={() => setNewTabOpen(false)}
-          anchorRef={newTabBtnRef}
-          activeWorker={activeWorker}
-          discoverAgents={discoverAgents}
-          onFromScratch={() => { addAgentSession("new-agent"); }}
-          onCloneAgent={(agentPath, agentName) => { addAgentSession(agentPath, agentName, true); }}
-        />
-      </div>
+      </TopBar>
 
       {/* Main content area */}
       <div className="flex flex-1 min-h-0">
@@ -1309,9 +1263,9 @@ export default function Workspace() {
               <NodeDetailPanel
                 node={selectedNode}
                 nodeSpec={activeAgentState?.nodeSpecs.find(n => n.id === selectedNode.id) ?? null}
-                agentId={activeAgentState?.agentId || undefined}
+                sessionId={activeAgentState?.sessionId || undefined}
                 graphId={activeAgentState?.graphId || undefined}
-                sessionId={null}
+                workerSessionId={null}
                 nodeLogs={activeAgentState?.nodeLogs[selectedNode.id] || []}
                 actionPlan={activeAgentState?.nodeActionPlans[selectedNode.id]}
                 onClose={() => setSelectedNode(null)}

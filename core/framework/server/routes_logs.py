@@ -2,41 +2,25 @@
 
 import json
 import logging
-from pathlib import Path
 
 from aiohttp import web
 
-from framework.server.session_manager import SessionManager
+from framework.server.app import resolve_session
 
 logger = logging.getLogger(__name__)
 
 
-def _get_manager(request: web.Request) -> SessionManager:
-    return request.app["manager"]
-
-
-def _storage_path(session) -> Path:
-    """Resolve the storage root for a session's worker."""
-    if session.worker_path is None:
-        raise ValueError("No worker loaded — no worker storage path")
-    agent_name = session.worker_path.name
-    return Path.home() / ".hive" / "agents" / agent_name
-
-
 async def handle_logs(request: web.Request) -> web.Response:
-    """GET /api/agents/{agent_id}/logs — agent-level logs.
+    """Session-level logs.
 
     Query params:
-        session_id: Scope to a specific session (optional).
+        session_id: Scope to a specific worker session (optional).
         level: "summary" | "details" | "tools" (default: "summary").
         limit: Max results when listing summaries (default: 20).
     """
-    manager = _get_manager(request)
-    agent_id = request.match_info["agent_id"]
-    session = manager.get_session_for_agent(agent_id)
-
-    if session is None:
-        return web.json_response({"error": f"Agent '{agent_id}' not found"}, status=404)
+    session, err = resolve_session(request)
+    if err:
+        return err
 
     if not session.worker_runtime:
         return web.json_response({"error": "No worker loaded in this session"}, status=503)
@@ -86,14 +70,12 @@ async def handle_logs(request: web.Request) -> web.Response:
 
 
 async def handle_node_logs(request: web.Request) -> web.Response:
-    """GET /api/agents/{agent_id}/graphs/{graph_id}/nodes/{node_id}/logs"""
-    manager = _get_manager(request)
-    agent_id = request.match_info["agent_id"]
-    node_id = request.match_info["node_id"]
-    session = manager.get_session_for_agent(agent_id)
+    """Node-scoped logs."""
+    session, err = resolve_session(request)
+    if err:
+        return err
 
-    if session is None:
-        return web.json_response({"error": f"Agent '{agent_id}' not found"}, status=404)
+    node_id = request.match_info["node_id"]
 
     if not session.worker_runtime:
         return web.json_response({"error": "No worker loaded in this session"}, status=503)
@@ -124,8 +106,9 @@ async def handle_node_logs(request: web.Request) -> web.Response:
 
 def register_routes(app: web.Application) -> None:
     """Register log routes."""
-    app.router.add_get("/api/agents/{agent_id}/logs", handle_logs)
+    # Session-primary routes
+    app.router.add_get("/api/sessions/{session_id}/logs", handle_logs)
     app.router.add_get(
-        "/api/agents/{agent_id}/graphs/{graph_id}/nodes/{node_id}/logs",
+        "/api/sessions/{session_id}/graphs/{graph_id}/nodes/{node_id}/logs",
         handle_node_logs,
     )

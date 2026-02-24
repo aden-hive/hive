@@ -11,54 +11,54 @@ import type {
 
 export const executionApi = {
   trigger: (
-    agentId: string,
+    sessionId: string,
     entryPointId: string,
     inputData: Record<string, unknown>,
     sessionState?: Record<string, unknown>,
   ) =>
-    api.post<TriggerResult>(`/agents/${agentId}/trigger`, {
+    api.post<TriggerResult>(`/sessions/${sessionId}/trigger`, {
       entry_point_id: entryPointId,
       input_data: inputData,
       session_state: sessionState,
     }),
 
   inject: (
-    agentId: string,
+    sessionId: string,
     nodeId: string,
     content: string,
     graphId?: string,
   ) =>
-    api.post<InjectResult>(`/agents/${agentId}/inject`, {
+    api.post<InjectResult>(`/sessions/${sessionId}/inject`, {
       node_id: nodeId,
       content,
       graph_id: graphId,
     }),
 
-  chat: (agentId: string, message: string) =>
-    api.post<ChatResult>(`/agents/${agentId}/chat`, { message }),
+  chat: (sessionId: string, message: string) =>
+    api.post<ChatResult>(`/sessions/${sessionId}/chat`, { message }),
 
-  stop: (agentId: string, executionId: string) =>
-    api.post<StopResult>(`/agents/${agentId}/stop`, {
+  stop: (sessionId: string, executionId: string) =>
+    api.post<StopResult>(`/sessions/${sessionId}/stop`, {
       execution_id: executionId,
     }),
 
-  pause: (agentId: string, executionId: string) =>
-    api.post<StopResult>(`/agents/${agentId}/pause`, {
+  pause: (sessionId: string, executionId: string) =>
+    api.post<StopResult>(`/sessions/${sessionId}/pause`, {
       execution_id: executionId,
     }),
 
-  resume: (agentId: string, sessionId: string, checkpointId?: string) =>
-    api.post<ResumeResult>(`/agents/${agentId}/resume`, {
-      session_id: sessionId,
+  resume: (sessionId: string, workerSessionId: string, checkpointId?: string) =>
+    api.post<ResumeResult>(`/sessions/${sessionId}/resume`, {
+      session_id: workerSessionId,
       checkpoint_id: checkpointId,
     }),
 
-  replay: (agentId: string, sessionId: string, checkpointId: string) =>
-    api.post<ReplayResult>(`/agents/${agentId}/replay`, {
-      session_id: sessionId,
+  replay: (sessionId: string, workerSessionId: string, checkpointId: string) =>
+    api.post<ReplayResult>(`/sessions/${sessionId}/replay`, {
+      session_id: workerSessionId,
       checkpoint_id: checkpointId,
     }),
 
-  goalProgress: (agentId: string) =>
-    api.get<GoalProgress>(`/agents/${agentId}/goal-progress`),
+  goalProgress: (sessionId: string) =>
+    api.get<GoalProgress>(`/sessions/${sessionId}/goal-progress`),
 };

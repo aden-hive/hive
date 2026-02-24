@@ -569,7 +569,8 @@ class ExecutionStream:
                 if not _is_shared_session:
                     await self._write_session_state(execution_id, ctx, result=result)
 
-                # Emit completion/failure event (skip for pauses — executor already emitted execution_paused)
+                # Emit completion/failure event
+                # (skip for pauses — executor already emitted execution_paused)
                 if self._scoped_event_bus:
                     if result.success:
                         await self._scoped_event_bus.emit_execution_completed(

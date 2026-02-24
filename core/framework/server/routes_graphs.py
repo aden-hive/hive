@@ -5,14 +5,9 @@ import logging
 
 from aiohttp import web
 
-from framework.server.app import safe_path_segment
-from framework.server.session_manager import SessionManager
+from framework.server.app import resolve_session, safe_path_segment
 
 logger = logging.getLogger(__name__)
-
-
-def _get_manager(request: web.Request) -> SessionManager:
-    return request.app["manager"]
 
 
 def _get_graph_spec(session, graph_id: str):
@@ -46,15 +41,12 @@ def _node_to_dict(node) -> dict:
 
 
 async def handle_list_nodes(request: web.Request) -> web.Response:
-    """GET /api/agents/{agent_id}/graphs/{graph_id}/nodes — list nodes."""
-    manager = _get_manager(request)
-    agent_id = request.match_info["agent_id"]
+    """List nodes in a graph."""
+    session, err = resolve_session(request)
+    if err:
+        return err
+
     graph_id = request.match_info["graph_id"]
-    session = manager.get_session_for_agent(agent_id)
-
-    if session is None:
-        return web.json_response({"error": f"Agent '{agent_id}' not found"}, status=404)
-
     graph, err = _get_graph_spec(session, graph_id)
     if err:
         return err
@@ -108,15 +100,13 @@ async def handle_list_nodes(request: web.Request) -> web.Response:
 
 
 async def handle_get_node(request: web.Request) -> web.Response:
-    """GET /api/agents/{agent_id}/graphs/{graph_id}/nodes/{node_id} — node detail."""
-    manager = _get_manager(request)
-    agent_id = request.match_info["agent_id"]
+    """Get node detail."""
+    session, err = resolve_session(request)
+    if err:
+        return err
+
     graph_id = request.match_info["graph_id"]
     node_id = request.match_info["node_id"]
-    session = manager.get_session_for_agent(agent_id)
-
-    if session is None:
-        return web.json_response({"error": f"Agent '{agent_id}' not found"}, status=404)
 
     graph, err = _get_graph_spec(session, graph_id)
     if err:
@@ -138,15 +128,13 @@ async def handle_get_node(request: web.Request) -> web.Response:
 
 
 async def handle_node_criteria(request: web.Request) -> web.Response:
-    """GET /api/agents/{agent_id}/graphs/{graph_id}/nodes/{node_id}/criteria"""
-    manager = _get_manager(request)
-    agent_id = request.match_info["agent_id"]
+    """Get node success criteria and last execution info."""
+    session, err = resolve_session(request)
+    if err:
+        return err
+
     graph_id = request.match_info["graph_id"]
     node_id = request.match_info["node_id"]
-    session = manager.get_session_for_agent(agent_id)
-
-    if session is None:
-        return web.json_response({"error": f"Agent '{agent_id}' not found"}, status=404)
 
     graph, err = _get_graph_spec(session, graph_id)
     if err:
@@ -183,15 +171,13 @@ async def handle_node_criteria(request: web.Request) -> web.Response:
 
 
 async def handle_node_tools(request: web.Request) -> web.Response:
-    """GET /api/agents/{agent_id}/graphs/{graph_id}/nodes/{node_id}/tools"""
-    manager = _get_manager(request)
-    agent_id = request.match_info["agent_id"]
+    """Get tools available to a node."""
+    session, err = resolve_session(request)
+    if err:
+        return err
+
     graph_id = request.match_info["graph_id"]
     node_id = request.match_info["node_id"]
-    session = manager.get_session_for_agent(agent_id)
-
-    if session is None:
-        return web.json_response({"error": f"Agent '{agent_id}' not found"}, status=404)
 
     graph, err = _get_graph_spec(session, graph_id)
     if err:
@@ -223,13 +209,14 @@ async def handle_node_tools(request: web.Request) -> web.Response:
 
 def register_routes(app: web.Application) -> None:
     """Register graph/node inspection routes."""
-    app.router.add_get("/api/agents/{agent_id}/graphs/{graph_id}/nodes", handle_list_nodes)
-    app.router.add_get("/api/agents/{agent_id}/graphs/{graph_id}/nodes/{node_id}", handle_get_node)
+    # Session-primary routes
+    app.router.add_get("/api/sessions/{session_id}/graphs/{graph_id}/nodes", handle_list_nodes)
+    app.router.add_get("/api/sessions/{session_id}/graphs/{graph_id}/nodes/{node_id}", handle_get_node)
     app.router.add_get(
-        "/api/agents/{agent_id}/graphs/{graph_id}/nodes/{node_id}/criteria",
+        "/api/sessions/{session_id}/graphs/{graph_id}/nodes/{node_id}/criteria",
         handle_node_criteria,
     )
     app.router.add_get(
-        "/api/agents/{agent_id}/graphs/{graph_id}/nodes/{node_id}/tools",
+        "/api/sessions/{session_id}/graphs/{graph_id}/nodes/{node_id}/tools",
         handle_node_tools,
     )
