@@ -280,7 +280,11 @@ class AgentOrchestrator:
             Response message from target agent
         """
         if to_agent not in self._agents:
-            raise ValueError(f"Unknown agent: {to_agent}")
+           raise ValueError(
+    f"Unknown agent '{to_agent}'. "
+    f"Available agents: {list(self.agents.keys())}"
+)
+
 
         message = AgentMessage(
             type=MessageType.HANDOFF,
