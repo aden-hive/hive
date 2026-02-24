@@ -76,6 +76,9 @@ from .vision_tool import register_tools as register_vision
 from .web_scrape_tool import register_tools as register_web_scrape
 from .web_search_tool import register_tools as register_web_search
 
+# Web and PDF tools
+from .wikipedia_tool import register_tools as register_wikipedia
+
 
 def register_all_tools(
     mcp: FastMCP,
@@ -98,6 +101,7 @@ def register_all_tools(
     register_pdf_read(mcp)
     register_time(mcp)
     register_runtime_logs(mcp)
+    register_wikipedia(mcp)
     register_arxiv(mcp)
 
     # Tools that need credentials (pass credentials if provided)
