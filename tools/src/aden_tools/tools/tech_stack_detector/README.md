@@ -1,122 +1,87 @@
-# Tech Stack Detector Tool
+# Tech Stack Detector
 
 Fingerprint web technologies through passive HTTP analysis.
 
 ## Features
 
-- **tech_stack_detect** - Identify web server, framework, CMS, JavaScript libraries, CDN, and security configuration
+- **Web server detection** — identifies server software and version from headers
+- **Framework detection** — recognizes frameworks via headers (X-Powered-By), HTML patterns, and cookies
+- **CMS identification** — detects WordPress, Drupal, Joomla, Shopify, Squarespace, Wix, Ghost, and others
+- **JavaScript library detection** — identifies React, Angular, Vue.js, jQuery, Bootstrap, Tailwind CSS, Svelte, Next.js, Nuxt.js
+- **CDN detection** — recognizes Cloudflare, AWS CloudFront, Fastly, Akamai, Vercel, Netlify, Fly.io
+- **Analytics detection** — identifies Google Analytics, Facebook Pixel, Hotjar, Mixpanel, Segment
+- **Cookie security analysis** — checks Secure, HttpOnly, and SameSite flags
+- **Common path probing** — tests for security.txt, robots.txt, admin panels, and CMS-specific paths
+- **Grade input** output for the `risk_scorer` tool
 
-## How It Works
+## Usage
 
-Performs non-intrusive HTTP requests to identify technologies:
-1. Analyzes response headers (Server, X-Powered-By)
-2. Parses HTML for JS libraries, frameworks, and CMS signatures
-3. Inspects cookies for backend technology hints
-4. Probes common paths (wp-admin, security.txt, etc.)
-5. Detects CDN and analytics services
-
-**No credentials required** - Uses only standard HTTP requests.
-
-## Usage Examples
-
-### Basic Detection
 ```python
-tech_stack_detect(url="https://example.com")
+result = await tech_stack_detect("https://example.com")
+```
+
+### Scan Options
+
+```python
+# Auto-prefixes https:// if omitted
+result = await tech_stack_detect("example.com")
 ```
 
 ## API Reference
 
-### tech_stack_detect
+| Parameter | Type  | Default  | Description                                          |
+|-----------|-------|----------|------------------------------------------------------|
+| `url`     | `str` | required | URL to analyze. Auto-prefixes `https://` if needed.  |
 
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| url | str | Yes | URL to analyze (auto-prefixes https://) |
+### Return Value
 
-### Response
-```json
-{
-  "url": "https://example.com/",
-  "server": {
-    "name": "nginx",
-    "version": "1.18.0",
-    "raw": "nginx/1.18.0"
-  },
-  "framework": "Express",
-  "language": "Node.js",
-  "cms": "WordPress",
-  "javascript_libraries": ["React", "jQuery 3.6.0"],
-  "cdn": "Cloudflare",
-  "analytics": ["Google Analytics"],
-  "security_txt": true,
-  "robots_txt": true,
-  "interesting_paths": ["/api/", "/admin/"],
-  "cookies": [
-    {
-      "name": "session",
-      "secure": true,
-      "httponly": true,
-      "samesite": "Strict"
-    }
-  ],
-  "grade_input": {
-    "server_version_hidden": false,
-    "framework_version_hidden": true,
-    "security_txt_present": true,
-    "cookies_secure": true,
-    "cookies_httponly": true
-  }
-}
-```
+| Field                  | Type         | Description                                        |
+|------------------------|--------------|----------------------------------------------------|
+| `url`                  | `str`        | Final URL after redirects                          |
+| `server`               | `dict\|None` | Server name, version, and raw header               |
+| `framework`            | `str\|None`  | Detected framework (e.g., `"Django"`, `"Express"`) |
+| `language`             | `str\|None`  | Detected language (e.g., `"PHP"`, `"Node.js"`)     |
+| `cms`                  | `str\|None`  | Detected CMS (e.g., `"WordPress"`)                 |
+| `javascript_libraries` | `list[str]`  | Detected JS libraries with versions when available |
+| `cdn`                  | `str\|None`  | Detected CDN provider                              |
+| `analytics`            | `list[str]`  | Detected analytics and tracking services           |
+| `security_txt`         | `bool`       | Whether `/.well-known/security.txt` exists         |
+| `robots_txt`           | `bool`       | Whether `/robots.txt` exists                       |
+| `interesting_paths`    | `list[str]`  | Other discovered paths (admin, API, etc.)          |
+| `cookies`              | `list[dict]` | Cookie security flag analysis                      |
+| `grade_input`          | `dict`       | Scoring data for the `risk_scorer` tool            |
 
-## Technologies Detected
+### Detection Methods
 
-### Web Servers
-nginx, Apache, IIS, LiteSpeed, etc.
+| Detection Target     | Method                                       |
+|----------------------|----------------------------------------------|
+| Web server           | `Server` response header                     |
+| Framework            | `X-Powered-By` header, HTML patterns, cookies|
+| Language             | Headers, cookie names (e.g., `PHPSESSID`)    |
+| CMS                  | HTML content, meta generator tag, probe paths|
+| JavaScript libraries | Regex patterns in HTML source                |
+| CDN                  | CDN-specific response headers                |
+| Analytics            | Regex patterns in HTML source                |
 
-### Frameworks & Languages
-- **PHP**: Laravel, WordPress, Drupal
-- **Python**: Django, Flask
-- **JavaScript**: Express, Next.js, Nuxt.js
-- **Ruby**: Rails
-- **Java**: Spring
-- **.NET**: ASP.NET
+## Dependencies
 
-### JavaScript Libraries
-React, Angular, Vue.js, jQuery, Bootstrap, Tailwind CSS, Svelte
-
-### CMS Platforms
-WordPress, Drupal, Joomla, Shopify, Squarespace, Wix, Ghost
-
-### CDN Providers
-Cloudflare, AWS CloudFront, Fastly, Akamai, Vercel, Netlify
-
-### Analytics
-Google Analytics, Facebook Pixel, Hotjar, Mixpanel, Segment
-
-## Security Checks
-
-| Check | Risk |
-|-------|------|
-| Server version disclosed | Enables targeted exploits |
-| Framework version disclosed | Enables targeted exploits |
-| No security.txt | No vulnerability reporting channel |
-| Cookies missing Secure flag | Transmitted over HTTP |
-| Cookies missing HttpOnly flag | Accessible to JavaScript (XSS risk) |
-
-## Ethical Use
-
-⚠️ **Important**: Only scan systems you own or have explicit permission to test.
-
-- This tool sends multiple HTTP requests
-- Path probing may be logged by the target
+- Python 3.11+
+- [httpx](https://www.python-httpx.org/)
 
 ## Error Handling
-```python
-{"error": "Connection failed: [details]"}
-{"error": "Request to https://example.com timed out"}
-{"error": "Detection failed: [details]"}
-```
 
-## Integration with Risk Scorer
+| Error                       | Cause                    |
+|-----------------------------|--------------------------|
+| `"Connection failed: ..."`    | Host unreachable         |
+| `"Request to ... timed out"`  | 15-second timeout exceeded|
+| `"Detection failed: ..."`     | Other HTTP error         |
 
-The `grade_input` field can be passed to the `risk_score` tool for weighted security grading.
+## Responsible Use
+
+This tool performs **passive fingerprinting** through standard HTTP requests and public HTML analysis. It does not exploit vulnerabilities or inject payloads.
+
+- Only scan websites you own or have explicit authorization to test
+- Path probing sends standard HTTP requests — each returns normal 200/301/403/404 responses
+- Technology information is used for security assessment, not exploitation
+- Respect robots.txt directives when performing broader assessments
+- Do not use detected technology versions to target known vulnerabilities without authorization

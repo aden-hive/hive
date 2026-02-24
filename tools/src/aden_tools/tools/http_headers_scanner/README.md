@@ -1,111 +1,88 @@
-# HTTP Headers Scanner Tool
+# HTTP Headers Scanner
 
-Check OWASP-recommended security headers and detect information leakage.
+Evaluate OWASP-recommended security headers and detect information leakage.
 
 ## Features
 
-- **http_headers_scan** - Evaluate response headers against OWASP Secure Headers Project guidelines
+- **Security header audit** — checks 6 OWASP Secure Headers Project recommendations
+- **Information leak detection** — identifies headers that expose server software and versions
+- **Severity-rated findings** — each missing header includes severity and remediation guidance
+- **Deprecated header awareness** — flags deprecated `X-XSS-Protection` if present
+- **Redirect following** — optionally follows HTTP redirects before analysis
+- **Grade input** output for the `risk_scorer` tool
 
-## How It Works
+## Usage
 
-Sends a single GET request and analyzes response headers:
-1. Checks for presence of security headers (HSTS, CSP, X-Frame-Options, etc.)
-2. Identifies missing headers with remediation guidance
-3. Detects information-leaking headers (Server, X-Powered-By)
-
-**No credentials required** - Uses only standard HTTP requests.
-
-## Usage Examples
-
-### Basic Scan
 ```python
-http_headers_scan(url="https://example.com")
+result = await http_headers_scan("https://example.com")
 ```
 
-### Without Following Redirects
+### Scan Options
+
 ```python
-http_headers_scan(
-    url="https://example.com",
-    follow_redirects=False
-)
+# Auto-prefixes https:// if omitted
+result = await http_headers_scan("example.com")
+
+# Disable redirect following
+result = await http_headers_scan("example.com", follow_redirects=False)
 ```
 
 ## API Reference
 
-### http_headers_scan
+| Parameter          | Type   | Default  | Description                                        |
+|--------------------|--------|----------|----------------------------------------------------|
+| `url`              | `str`  | required | URL to scan. Auto-prefixes `https://` if needed.   |
+| `follow_redirects` | `bool` | `True`   | Whether to follow HTTP redirects before analysis.  |
 
-| Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
-| url | str | Yes | - | Full URL to scan (auto-prefixes https://) |
-| follow_redirects | bool | No | True | Whether to follow HTTP redirects |
+### Return Value
 
-### Response
-```json
-{
-  "url": "https://example.com/",
-  "status_code": 200,
-  "headers_present": [
-    "Strict-Transport-Security",
-    "X-Content-Type-Options"
-  ],
-  "headers_missing": [
-    {
-      "header": "Content-Security-Policy",
-      "severity": "high",
-      "description": "No CSP header. The site is more vulnerable to XSS attacks.",
-      "remediation": "Add a Content-Security-Policy header. Start restrictive: default-src 'self'"
-    }
-  ],
-  "leaky_headers": [
-    {
-      "header": "Server",
-      "value": "nginx/1.18.0",
-      "severity": "low",
-      "remediation": "Remove or genericize the Server header to avoid version disclosure."
-    }
-  ],
-  "grade_input": {
-    "hsts": true,
-    "csp": false,
-    "x_frame_options": true,
-    "x_content_type_options": true,
-    "referrer_policy": false,
-    "permissions_policy": false,
-    "no_leaky_headers": false
-  }
-}
-```
+| Field             | Type         | Description                                      |
+|-------------------|--------------|--------------------------------------------------|
+| `url`             | `str`        | Final URL after redirects                        |
+| `status_code`     | `int`        | HTTP response status code                        |
+| `headers_present` | `list[str]`  | Security headers that are correctly set          |
+| `headers_missing` | `list[dict]` | Missing headers with severity and remediation    |
+| `leaky_headers`   | `list[dict]` | Headers that leak server/technology information  |
+| `grade_input`     | `dict`       | Scoring data for the `risk_scorer` tool          |
 
-## Security Headers Checked
+### Security Headers Checked
 
-| Header | Severity | Purpose |
-|--------|----------|---------|
-| Strict-Transport-Security | High | Enforces HTTPS connections |
-| Content-Security-Policy | High | Prevents XSS attacks |
-| X-Frame-Options | Medium | Prevents clickjacking |
-| X-Content-Type-Options | Medium | Prevents MIME sniffing |
-| Referrer-Policy | Low | Controls referrer information |
-| Permissions-Policy | Low | Restricts browser features |
+| Header                       | Severity | Risk if Missing                        |
+|------------------------------|----------|----------------------------------------|
+| `Strict-Transport-Security`  | High     | Man-in-the-middle via HTTP downgrade   |
+| `Content-Security-Policy`    | High     | Cross-site scripting (XSS)             |
+| `X-Frame-Options`            | Medium   | Clickjacking                           |
+| `X-Content-Type-Options`     | Medium   | MIME-sniffing attacks                  |
+| `Referrer-Policy`            | Low      | URL leakage to third parties           |
+| `Permissions-Policy`         | Low      | Unrestricted browser feature access    |
 
-## Leaky Headers Detected
+### Leaky Headers Detected
 
-| Header | Risk |
-|--------|------|
-| Server | Reveals web server and version |
-| X-Powered-By | Reveals backend framework |
-| X-AspNet-Version | Reveals ASP.NET version |
-| X-Generator | Reveals CMS/platform |
+| Header               | Risk                                     |
+|----------------------|------------------------------------------|
+| `Server`             | Web server software and version exposure |
+| `X-Powered-By`       | Backend framework disclosure             |
+| `X-AspNet-Version`   | ASP.NET version disclosure               |
+| `X-AspNetMvc-Version`| ASP.NET MVC version disclosure           |
+| `X-Generator`        | CMS/platform disclosure                  |
 
-## Ethical Use
+## Dependencies
 
-⚠️ **Important**: Only scan systems you own or have explicit permission to test.
+- Python 3.11+
+- [httpx](https://www.python-httpx.org/)
 
 ## Error Handling
-```python
-{"error": "Connection failed: [details]"}
-{"error": "Request to https://example.com timed out"}
-```
 
-## Integration with Risk Scorer
+| Error                       | Cause                     |
+|-----------------------------|---------------------------|
+| `"Connection failed: ..."`    | Host unreachable          |
+| `"Request to ... timed out"`  | 15-second timeout exceeded|
+| `"Request failed: ..."`       | Other HTTP error          |
 
-The `grade_input` field can be passed to the `risk_score` tool for weighted security grading.
+## Responsible Use
+
+This tool sends a **single non-intrusive HTTP GET request** per scan. It does not modify headers, inject payloads, or exploit vulnerabilities.
+
+- Only scan URLs you own or have explicit authorization to test
+- The tool evaluates response headers only — it does not test for active exploits
+- Use results to improve your own security posture

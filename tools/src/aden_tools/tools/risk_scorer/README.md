@@ -1,141 +1,43 @@
-# Risk Scorer Tool
+# Risk Scorer
 
-Calculate weighted letter-grade risk scores from security scan results.
+Produce weighted letter-grade risk scores from security scan results.
 
 ## Features
 
-- **risk_score** - Aggregate findings from all scanning tools into A-F grades per category and overall
+- **Aggregated scoring** — consumes `grade_input` from all 6 scanning tools
+- **Weighted categories** — configurable weights across SSL/TLS, HTTP headers, DNS, network, technology, and attack surface
+- **Letter grading** — A through F scale with score ranges (A: 90-100, F: 0-39)
+- **Top risks summary** — prioritized list of the most critical findings
+- **Graceful partial input** — categories with missing scan data are skipped and weights are redistributed
+- **No external dependencies** — pure Python implementation
 
-## How It Works
+## Usage
 
-Consumes `grade_input` from the 6 scanning tools and produces:
-1. Per-category scores (0-100) and letter grades (A-F)
-2. Weighted overall score based on category importance
-3. Top 10 risks sorted by severity
-4. Handles missing scans gracefully (redistributes weight)
-
-**Pure Python** - No external dependencies.
-
-## Usage Examples
-
-### Score All Scan Results
 ```python
-risk_score(
-    ssl_results='{"grade_input": {"tls_version_ok": true, ...}}',
-    headers_results='{"grade_input": {"hsts": true, ...}}',
-    dns_results='{"grade_input": {"spf_present": true, ...}}',
-    ports_results='{"grade_input": {"no_database_ports_exposed": true, ...}}',
-    tech_results='{"grade_input": {"server_version_hidden": false, ...}}',
-    subdomain_results='{"grade_input": {"no_dev_staging_exposed": true, ...}}'
-)
-```
-
-### Partial Scan (Some Categories Skipped)
-```python
-# Only SSL and headers scanned
-risk_score(
+result = risk_score(
     ssl_results='{"grade_input": {...}}',
-    headers_results='{"grade_input": {...}}'
+    headers_results='{"grade_input": {...}}',
+    dns_results='{"grade_input": {...}}',
+    ports_results='{"grade_input": {...}}',
+    tech_results='{"grade_input": {...}}',
+    subdomain_results='{"grade_input": {...}}',
 )
 ```
 
-## API Reference
+### Typical Workflow
 
-### risk_score
+Run individual scanners first, then pass their JSON output to the risk scorer:
 
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| ssl_results | str | No | JSON string from ssl_tls_scan |
-| headers_results | str | No | JSON string from http_headers_scan |
-| dns_results | str | No | JSON string from dns_security_scan |
-| ports_results | str | No | JSON string from port_scan |
-| tech_results | str | No | JSON string from tech_stack_detect |
-| subdomain_results | str | No | JSON string from subdomain_enumerate |
-
-### Response
-```json
-{
-  "overall_score": 72,
-  "overall_grade": "C",
-  "categories": {
-    "ssl_tls": {
-      "score": 85,
-      "grade": "B",
-      "weight": 0.20,
-      "findings_count": 1,
-      "skipped": false
-    },
-    "http_headers": {
-      "score": 60,
-      "grade": "C",
-      "weight": 0.20,
-      "findings_count": 3,
-      "skipped": false
-    },
-    "dns_security": {
-      "score": null,
-      "grade": "N/A",
-      "weight": 0.15,
-      "findings_count": 0,
-      "skipped": true
-    }
-  },
-  "top_risks": [
-    "Missing Content-Security-Policy header (Http Headers: C)",
-    "No DMARC record found (Dns Security: D)",
-    "Database port(s) exposed to internet (Network Exposure: D)"
-  ],
-  "grade_scale": {
-    "A": "90-100: Excellent security posture",
-    "B": "75-89: Good, minor improvements needed",
-    "C": "60-74: Fair, notable security gaps",
-    "D": "40-59: Poor, significant vulnerabilities",
-    "F": "0-39: Critical, immediate action required"
-  }
-}
-```
-
-## Grade Scale
-
-| Grade | Score | Meaning |
-|-------|-------|---------|
-| A | 90-100 | Excellent security posture |
-| B | 75-89 | Good, minor improvements needed |
-| C | 60-74 | Fair, notable security gaps |
-| D | 40-59 | Poor, significant vulnerabilities |
-| F | 0-39 | Critical, immediate action required |
-
-## Category Weights
-
-| Category | Weight | Source Tool |
-|----------|--------|-------------|
-| SSL/TLS | 20% | ssl_tls_scan |
-| HTTP Headers | 20% | http_headers_scan |
-| DNS Security | 15% | dns_security_scan |
-| Network Exposure | 15% | port_scan |
-| Technology | 15% | tech_stack_detect |
-| Attack Surface | 15% | subdomain_enumerate |
-
-## Scoring Logic
-
-Each category has specific checks worth points:
-- Passing a check earns full points
-- Failing a check earns zero points and adds a finding
-- Missing data (scan not run) earns half credit
-
-The overall score is a weighted average of category scores, normalized if some categories were skipped.
-
-## Workflow Example
 ```python
-# 1. Run all scans
+# 1. Run scans
 ssl = ssl_tls_scan("example.com")
-headers = http_headers_scan("https://example.com")
+headers = await http_headers_scan("example.com")
 dns = dns_security_scan("example.com")
-ports = port_scan("example.com")
-tech = tech_stack_detect("https://example.com")
-subs = subdomain_enumerate("example.com")
+ports = await port_scan("example.com")
+tech = await tech_stack_detect("example.com")
+subs = await subdomain_enumerate("example.com")
 
-# 2. Calculate risk score
+# 2. Score results
 import json
 score = risk_score(
     ssl_results=json.dumps(ssl),
@@ -143,14 +45,68 @@ score = risk_score(
     dns_results=json.dumps(dns),
     ports_results=json.dumps(ports),
     tech_results=json.dumps(tech),
-    subdomain_results=json.dumps(subs)
+    subdomain_results=json.dumps(subs),
 )
-
-# 3. Review results
-print(f"Overall Grade: {score['overall_grade']}")
-print(f"Top Risks: {score['top_risks']}")
 ```
+
+## API Reference
+
+| Parameter            | Type  | Default | Description                                      |
+|----------------------|-------|---------|--------------------------------------------------|
+| `ssl_results`        | `str` | `""`    | JSON string from `ssl_tls_scan` output           |
+| `headers_results`    | `str` | `""`    | JSON string from `http_headers_scan` output      |
+| `dns_results`        | `str` | `""`    | JSON string from `dns_security_scan` output      |
+| `ports_results`      | `str` | `""`    | JSON string from `port_scan` output              |
+| `tech_results`       | `str` | `""`    | JSON string from `tech_stack_detect` output      |
+| `subdomain_results`  | `str` | `""`    | JSON string from `subdomain_enumerate` output    |
+
+All parameters accept empty strings to skip that category.
+
+### Return Value
+
+| Field           | Type         | Description                                          |
+|-----------------|--------------|------------------------------------------------------|
+| `overall_score` | `int`        | Weighted score (0-100)                               |
+| `overall_grade` | `str`        | Letter grade (A-F)                                   |
+| `categories`    | `dict`       | Per-category score, grade, weight, and findings count|
+| `top_risks`     | `list[str]`  | Up to 10 most critical findings, worst first         |
+| `grade_scale`   | `dict`       | Grade definitions for reference                      |
+
+### Category Weights
+
+| Category           | Weight | Input Tool                |
+|--------------------|--------|---------------------------|
+| `ssl_tls`          | 0.20   | `ssl_tls_scan`            |
+| `http_headers`     | 0.20   | `http_headers_scan`       |
+| `dns_security`     | 0.15   | `dns_security_scan`       |
+| `network_exposure` | 0.15   | `port_scan`               |
+| `technology`       | 0.15   | `tech_stack_detect`       |
+| `attack_surface`   | 0.15   | `subdomain_enumerate`     |
+
+### Grade Scale
+
+| Grade | Score Range | Meaning                              |
+|-------|-------------|--------------------------------------|
+| A     | 90-100      | Excellent security posture           |
+| B     | 75-89       | Good, minor improvements needed      |
+| C     | 60-74       | Fair, notable security gaps          |
+| D     | 40-59       | Poor, significant vulnerabilities    |
+| F     | 0-39        | Critical, immediate action required  |
+
+## Dependencies
+
+- Python 3.11+
+- Python stdlib only (`json`)
 
 ## Error Handling
 
-Invalid JSON inputs are treated as skipped categories (grade = N/A).
+- **Missing scan data**: Categories with empty or invalid JSON input are marked as `"skipped": True` with grade `"N/A"`. Their weight is redistributed to evaluated categories.
+- **Missing checks within a category**: Individual checks without data receive half credit to avoid penalizing partial scans.
+
+## Responsible Use
+
+The risk scorer is a **purely computational aggregation tool**. It does not perform any network requests or scanning.
+
+- Scores are based on automated checks and should not replace professional security audits
+- Use grades as directional guidance, not absolute security guarantees
+- A high score does not mean a system is invulnerable

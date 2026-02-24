@@ -1,110 +1,84 @@
-# Subdomain Enumerator Tool
+# Subdomain Enumerator
 
-Discover subdomains via Certificate Transparency (CT) logs using passive OSINT.
+Discover subdomains through passive Certificate Transparency (CT) log analysis.
 
 ## Features
 
-- **subdomain_enumerate** - Find subdomains from public CT log data and flag sensitive environments
+- **Passive discovery** — queries [crt.sh](https://crt.sh/) CT log aggregator (no active brute-forcing)
+- **Interesting subdomain detection** — flags staging, dev, admin, backup, debug, and other sensitive environments
+- **Severity-rated findings** — each flagged subdomain includes severity and remediation guidance
+- **Wildcard filtering** — removes wildcard entries from results
+- **Configurable result limit** — up to 200 subdomains per scan
+- **Grade input** output for the `risk_scorer` tool
 
-## How It Works
+## Usage
 
-Queries crt.sh (Certificate Transparency log aggregator) to discover subdomains:
-1. Fetches all certificates issued for the domain
-2. Extracts subdomain names from certificate SANs
-3. Identifies potentially sensitive subdomains (staging, dev, admin, etc.)
-
-**Fully passive** - No active DNS enumeration or brute-forcing.
-
-## Usage Examples
-
-### Basic Enumeration
 ```python
-subdomain_enumerate(domain="example.com")
+result = await subdomain_enumerate("example.com")
 ```
 
-### Limit Results
+### Scan Options
+
 ```python
-subdomain_enumerate(
-    domain="example.com",
-    max_results=100
-)
+# Default: up to 50 results
+result = await subdomain_enumerate("example.com")
+
+# Custom limit (max 200)
+result = await subdomain_enumerate("example.com", max_results=100)
 ```
 
 ## API Reference
 
-### subdomain_enumerate
+| Parameter     | Type  | Default  | Description                                                |
+|---------------|-------|----------|------------------------------------------------------------|
+| `domain`      | `str` | required | Base domain to enumerate. Do not include protocol prefix.  |
+| `max_results` | `int` | `50`     | Maximum subdomains to return. Capped at 200.               |
 
-| Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
-| domain | str | Yes | - | Base domain to enumerate |
-| max_results | int | No | 50 | Maximum subdomains to return (max 200) |
+### Return Value
 
-### Response
-```json
-{
-  "domain": "example.com",
-  "source": "crt.sh (Certificate Transparency)",
-  "total_found": 25,
-  "subdomains": [
-    "www.example.com",
-    "api.example.com",
-    "staging.example.com",
-    "mail.example.com"
-  ],
-  "interesting": [
-    {
-      "subdomain": "staging.example.com",
-      "reason": "Staging environment exposed publicly",
-      "severity": "medium",
-      "remediation": "Restrict staging to VPN or internal network access."
-    },
-    {
-      "subdomain": "admin.example.com",
-      "reason": "Admin panel subdomain exposed publicly",
-      "severity": "high",
-      "remediation": "Restrict admin panels to VPN or trusted IP ranges."
-    }
-  ],
-  "grade_input": {
-    "no_dev_staging_exposed": false,
-    "no_admin_exposed": false,
-    "reasonable_surface_area": true
-  }
-}
-```
+| Field         | Type         | Description                                       |
+|---------------|--------------|---------------------------------------------------|
+| `domain`      | `str`        | Scanned base domain                               |
+| `source`      | `str`        | Data source (`"crt.sh (Certificate Transparency)"`) |
+| `total_found` | `int`        | Number of unique subdomains discovered            |
+| `subdomains`  | `list[str]`  | Sorted list of discovered subdomains              |
+| `interesting` | `list[dict]` | Flagged subdomains with severity and remediation  |
+| `grade_input` | `dict`       | Scoring data for the `risk_scorer` tool           |
 
-## Sensitive Subdomain Detection
+### Interesting Subdomain Keywords
 
-| Keyword | Severity | Risk |
-|---------|----------|------|
-| admin | High | Admin panel exposed |
-| backup | High | Backup infrastructure exposed |
-| debug | High | Debug endpoints exposed |
-| staging | Medium | Staging environment exposed |
-| dev | Medium | Development environment exposed |
-| test | Medium | Test environment exposed |
-| internal | Medium | Internal systems in CT logs |
-| ftp | Medium | Legacy FTP service |
-| vpn | Low | VPN endpoint discoverable |
-| api | Low | API attack surface |
-| mail | Info | Mail server (check SPF/DKIM/DMARC) |
+| Keyword    | Severity | Reason                                    |
+|------------|----------|-------------------------------------------|
+| `admin`    | High     | Admin panel exposed publicly              |
+| `debug`    | High     | Debug endpoint exposed publicly           |
+| `backup`   | High     | Backup infrastructure exposed             |
+| `staging`  | Medium   | Staging environment exposed               |
+| `dev`      | Medium   | Development environment exposed           |
+| `test`     | Medium   | Test environment exposed                  |
+| `internal` | Medium   | Internal subdomain in CT logs             |
+| `ftp`      | Medium   | Legacy FTP protocol in use                |
+| `api`      | Low      | API subdomain — potential attack surface  |
+| `vpn`      | Low      | VPN endpoint discoverable                 |
+| `mail`     | Info     | Mail server subdomain found               |
 
-## Ethical Use
+## Dependencies
 
-⚠️ **Important**: 
-
-- This tool uses only public Certificate Transparency data
-- CT logs are public by design (browser transparency requirement)
-- Still, only enumerate domains you have authorization to assess
-- Discovery of subdomains does not grant permission to test them
+- Python 3.11+
+- [httpx](https://www.python-httpx.org/)
 
 ## Error Handling
-```python
-{"error": "crt.sh returned HTTP 503", "domain": "example.com"}
-{"error": "crt.sh request timed out (try again later)", "domain": "example.com"}
-{"error": "CT log query failed: [details]", "domain": "example.com"}
-```
 
-## Integration with Risk Scorer
+| Error                            | Cause                          |
+|----------------------------------|--------------------------------|
+| `"crt.sh returned HTTP ..."`      | crt.sh API error               |
+| `"crt.sh request timed out"`      | 30-second timeout exceeded     |
+| `"CT log query failed: ..."`      | Network or parsing error       |
 
-The `grade_input` field can be passed to the `risk_score` tool for weighted security grading.
+## Responsible Use
+
+This tool performs **fully passive OSINT** by querying publicly available Certificate Transparency logs. It does not probe target infrastructure.
+
+- CT logs are public records — querying them is not intrusive
+- Discovered subdomains should only be used for authorized security assessment
+- Do not use results to attack, enumerate, or scan unauthorized infrastructure
+- Report exposed staging/admin environments responsibly through proper disclosure channels

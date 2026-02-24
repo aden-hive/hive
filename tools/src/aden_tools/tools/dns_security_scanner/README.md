@@ -1,111 +1,75 @@
-# DNS Security Scanner Tool
+# DNS Security Scanner
 
-Check SPF, DMARC, DKIM, DNSSEC configuration and zone transfer vulnerability.
+Evaluate email security configuration and DNS infrastructure hardening through standard DNS queries.
 
 ## Features
 
-- **dns_security_scan** - Evaluate email security and DNS infrastructure hardening
+- **SPF validation** — checks record presence, parses policy (`hardfail`, `softfail`, `neutral`, `pass_all`)
+- **DMARC analysis** — verifies record and policy enforcement level (`none`, `quarantine`, `reject`)
+- **DKIM probing** — tests 8 common selectors (`default`, `google`, `selector1`, `selector2`, `k1`, `mail`, `dkim`, `s1`)
+- **DNSSEC detection** — checks whether DNSKEY records are present for the domain
+- **MX record enumeration** — lists mail exchangers with priority
+- **CAA record retrieval** — identifies authorized certificate authorities
+- **Zone transfer testing** — detects AXFR misconfiguration across all nameservers
+- **Grade input** output for the `risk_scorer` tool
 
-## How It Works
+## Usage
 
-Performs non-intrusive DNS queries to check:
-1. SPF record presence and policy strength
-2. DMARC record presence and enforcement level
-3. DKIM selectors (probes common selectors)
-4. DNSSEC enablement
-5. MX and CAA records
-6. Zone transfer vulnerability (AXFR)
-
-**Requires dnspython** - Install with `pip install dnspython`
-
-## Usage Examples
-
-### Basic Scan
 ```python
-dns_security_scan(domain="example.com")
+result = dns_security_scan("example.com")
 ```
 
 ## API Reference
 
-### dns_security_scan
+| Parameter | Type  | Default  | Description                                          |
+|-----------|-------|----------|------------------------------------------------------|
+| `domain`  | `str` | required | Domain name to scan. Do not include protocol prefix. |
 
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| domain | str | Yes | Domain name to scan (e.g., "example.com") |
+### Return Value
 
-### Response
-```json
-{
-  "domain": "example.com",
-  "spf": {
-    "present": true,
-    "record": "v=spf1 include:_spf.google.com -all",
-    "policy": "hardfail",
-    "issues": []
-  },
-  "dmarc": {
-    "present": true,
-    "record": "v=DMARC1; p=reject; rua=mailto:dmarc@example.com",
-    "policy": "reject",
-    "issues": []
-  },
-  "dkim": {
-    "selectors_found": ["google", "selector1"],
-    "selectors_missing": ["default", "k1", "mail"]
-  },
-  "dnssec": {
-    "enabled": true,
-    "issues": []
-  },
-  "mx_records": ["10 mail.example.com"],
-  "caa_records": ["0 issue \"letsencrypt.org\""],
-  "zone_transfer": {
-    "vulnerable": false
-  },
-  "grade_input": {
-    "spf_present": true,
-    "spf_strict": true,
-    "dmarc_present": true,
-    "dmarc_enforcing": true,
-    "dkim_found": true,
-    "dnssec_enabled": true,
-    "zone_transfer_blocked": true
-  }
-}
-```
+| Field           | Type         | Description                                       |
+|-----------------|--------------|---------------------------------------------------|
+| `domain`        | `str`        | Scanned domain                                    |
+| `spf`           | `dict`       | SPF record analysis (present, record, policy, issues) |
+| `dmarc`         | `dict`       | DMARC record analysis (present, record, policy, issues) |
+| `dkim`          | `dict`       | DKIM selector probe results                       |
+| `dnssec`        | `dict`       | DNSSEC status and issues                          |
+| `mx_records`    | `list[str]`  | MX records with priority                          |
+| `caa_records`   | `list[str]`  | CAA records                                       |
+| `zone_transfer` | `dict`       | Zone transfer vulnerability status                |
+| `grade_input`   | `dict`       | Scoring data for the `risk_scorer` tool           |
 
-## Security Checks
+### Findings by Category
 
-| Check | Severity | Description |
-|-------|----------|-------------|
-| No SPF record | High | Any server can spoof emails |
-| SPF softfail (~all) | Medium | Spoofed emails may be delivered |
-| SPF +all | Critical | Effectively disables SPF |
-| No DMARC record | High | Email spoofing not blocked |
-| DMARC p=none | Medium | Monitoring only, no enforcement |
-| No DKIM | Medium | Emails cannot be cryptographically verified |
-| DNSSEC disabled | Medium | Vulnerable to DNS spoofing |
-| Zone transfer allowed | Critical | Full DNS zone can be downloaded |
+| Check         | Severity | Risk if Failing                                        |
+|---------------|----------|--------------------------------------------------------|
+| No SPF record | High     | Any server can send email as this domain               |
+| SPF `+all`    | Critical | Effectively disables SPF protection                    |
+| No DMARC      | High     | Email spoofing not monitored or blocked                |
+| DMARC `p=none`| Medium   | Spoofed emails not rejected                            |
+| No DKIM       | Medium   | Email authenticity cannot be verified                  |
+| No DNSSEC     | Medium   | Vulnerable to DNS spoofing and cache poisoning         |
+| Zone transfer | Critical | Full DNS zone data exposed to attackers                |
 
-## DKIM Selectors Probed
+## Dependencies
 
-The tool checks these common DKIM selectors:
-- `default`, `google`, `selector1`, `selector2`
-- `k1`, `mail`, `dkim`, `s1`
-
-## Ethical Use
-
-⚠️ **Important**: Only scan domains you own or have explicit permission to test.
-
-- DNS queries are generally non-intrusive
-- Zone transfer tests may be logged by DNS providers
+- Python 3.11+
+- [dnspython](https://www.dnspython.org/)
 
 ## Error Handling
-```python
-{"error": "dnspython is not installed. Install it with: pip install dnspython"}
-{"error": "Could not resolve NS records"}
-```
 
-## Integration with Risk Scorer
+| Error                        | Cause                              |
+|------------------------------|------------------------------------|
+| `"dnspython is not installed"` | Missing `dnspython` dependency     |
+| DNS resolution failures      | Gracefully handled per-check       |
 
-The `grade_input` field can be passed to the `risk_score` tool for weighted security grading.
+Each sub-check (SPF, DMARC, DKIM, etc.) handles DNS exceptions independently, so a failure in one check does not block the others.
+
+## Responsible Use
+
+This tool performs **standard DNS queries only** (TXT, MX, DNSKEY, CAA, NS, AXFR). It does not modify DNS records or exploit vulnerabilities.
+
+- Only scan domains you own or have explicit authorization to test
+- Zone transfer testing (AXFR) is a standard misconfiguration check — it reveals data the nameserver is already serving publicly
+- Do not use discovered records for email spoofing or impersonation
+- Use results for defensive security assessment only
