@@ -130,6 +130,7 @@ class AgentRuntime:
         accounts_prompt: str = "",
         accounts_data: list[dict] | None = None,
         tool_provider_map: dict[str, str] | None = None,
+        event_bus: "EventBus | None" = None,
     ):
         """
         Initialize agent runtime.
@@ -148,6 +149,9 @@ class AgentRuntime:
             accounts_prompt: Connected accounts block for system prompt injection
             accounts_data: Raw account data for per-node prompt generation
             tool_provider_map: Tool name to provider name mapping for account routing
+            event_bus: Optional external EventBus. If provided, the runtime shares
+                this bus instead of creating its own. Used by SessionManager to
+                share a single bus between queen, worker, and judge.
         """
         self.graph = graph
         self.goal = goal
@@ -179,7 +183,7 @@ class AgentRuntime:
 
         # Initialize shared components
         self._state_manager = SharedStateManager()
-        self._event_bus = EventBus(max_history=self._config.max_history)
+        self._event_bus = event_bus or EventBus(max_history=self._config.max_history)
         self._outcome_aggregator = OutcomeAggregator(goal, self._event_bus)
 
         # LLM and tools
@@ -1408,6 +1412,7 @@ def create_agent_runtime(
     accounts_prompt: str = "",
     accounts_data: list[dict] | None = None,
     tool_provider_map: dict[str, str] | None = None,
+    event_bus: "EventBus | None" = None,
 ) -> AgentRuntime:
     """
     Create and configure an AgentRuntime with entry points.
@@ -1433,6 +1438,7 @@ def create_agent_runtime(
         graph_id: Optional identifier for the primary graph (defaults to "primary").
         accounts_data: Raw account data for per-node prompt generation.
         tool_provider_map: Tool name to provider name mapping for account routing.
+        event_bus: Optional external EventBus to share with other components.
 
     Returns:
         Configured AgentRuntime (not yet started)
@@ -1458,6 +1464,7 @@ def create_agent_runtime(
         accounts_prompt=accounts_prompt,
         accounts_data=accounts_data,
         tool_provider_map=tool_provider_map,
+        event_bus=event_bus,
     )
 
     for spec in entry_points:
