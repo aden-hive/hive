@@ -36,8 +36,13 @@ def register_queen_lifecycle_tools(
     worker_runtime: AgentRuntime,
     event_bus: EventBus,
     storage_path: Path | None = None,
+    session_id: str | None = None,
 ) -> int:
     """Register queen lifecycle tools bound to *worker_runtime*.
+
+    Args:
+        session_id: Shared session ID so the worker uses the same session
+                    scope as the queen and judge.
 
     Returns the number of tools registered.
     """
@@ -55,7 +60,12 @@ def register_queen_lifecycle_tools(
         """
         try:
             # Get session state from any prior execution for memory continuity
-            session_state = worker_runtime._get_primary_session_state("default")
+            session_state = worker_runtime._get_primary_session_state("default") or {}
+
+            # Use the shared session ID so queen, judge, and worker all
+            # scope their conversations to the same session.
+            if session_id:
+                session_state["resume_session_id"] = session_id
 
             exec_id = await worker_runtime.trigger(
                 entry_point_id="default",

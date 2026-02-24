@@ -606,7 +606,7 @@ export default function Workspace() {
       const streamId = event.stream_id;
 
       // Suppress judge events (silent background monitoring)
-      if (streamId === "worker_health_judge") return;
+      if (streamId === "judge") return;
 
       // Determine if this is a queen event
       const isQueen = streamId === "queen";
