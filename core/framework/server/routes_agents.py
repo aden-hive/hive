@@ -42,24 +42,6 @@ def _session_to_agent_dict(session: Session) -> dict:
     }
 
 
-async def handle_queen_session(request: web.Request) -> web.Response:
-    """POST /api/sessions/queen — start a queen-only session."""
-    manager = _get_manager(request)
-    body = await request.json() if request.can_read_body else {}
-    model = body.get("model")
-    session_id = body.get("session_id")
-
-    try:
-        session = await manager.create_session(session_id=session_id, model=model)
-    except ValueError as e:
-        return web.json_response({"error": str(e)}, status=409)
-    except Exception as e:
-        logger.exception(f"Error starting queen session: {e}")
-        return web.json_response({"error": str(e)}, status=500)
-
-    return web.json_response(_session_to_agent_dict(session), status=201)
-
-
 async def handle_discover(request: web.Request) -> web.Response:
     """GET /api/discover — discover agents from filesystem."""
     from framework.tui.screens.agent_picker import discover_agents
@@ -247,7 +229,6 @@ async def handle_graphs(request: web.Request) -> web.Response:
 
 def register_routes(app: web.Application) -> None:
     """Register agent CRUD routes on the application."""
-    app.router.add_post("/api/sessions/queen", handle_queen_session)
     app.router.add_get("/api/discover", handle_discover)
     app.router.add_get("/api/agents", handle_list_agents)
     app.router.add_post("/api/agents", handle_load_agent)
