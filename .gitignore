@@ -76,9 +76,3 @@ docs/github-issues/*
 core/tests/*dumps/*
 
 screenshots/*
-
-# OAuth credentials (never commit)
-client_secret.json
-token.pickle
-token.json
-get_gmail_token.py
