@@ -271,6 +271,8 @@ class EventLoopNode(NodeProtocol):
         self._shutdown = False
         # Subagent mark_complete: when True, _evaluate returns ACCEPT immediately
         self._mark_complete_flag = False
+        # Counter for subagent instances (1, 2, 3, ...)
+        self._subagent_instance_counter: dict[str, int] = {}
 
     def validate_input(self, ctx: NodeContext) -> list[str]:
         """Validate hard requirements only.
@@ -3084,23 +3086,33 @@ class EventLoopNode(NodeProtocol):
         )
 
         # 5. Create and execute subagent EventLoopNode
-        # Derive a conversation store for the subagent from the parent's store
+        # Derive a conversation store for the subagent from the parent's store.
+        # Each invocation gets a unique path so that repeated delegate calls
+        # (e.g. one per profile) don't restore a stale completed conversation.
+        self._subagent_instance_counter.setdefault(agent_id, 0)
+        self._subagent_instance_counter[agent_id] += 1
+        subagent_instance = str(self._subagent_instance_counter[agent_id])
+
         subagent_conv_store = None
         if self._conversation_store is not None:
             from framework.storage.conversation_store import FileConversationStore
 
             parent_base = getattr(self._conversation_store, "_base", None)
             if parent_base is not None:
-                subagent_store_path = parent_base / "subagents" / agent_id
+                # Store subagent conversations parallel to the parent node,
+                # not nested inside it.  e.g. conversations/{node}:subagent:{agent_id}:{instance}/
+                conversations_dir = parent_base.parent  # e.g. conversations/
+                subagent_dir_name = f"{agent_id}-{subagent_instance}"
+                subagent_store_path = conversations_dir / subagent_dir_name
                 subagent_conv_store = FileConversationStore(base_path=subagent_store_path)
 
         # Derive a subagent-scoped spillover dir so large tool results
         # (e.g. browser_snapshot) get written to disk instead of being
-        # silently truncated.  Scoped under /subagents/<id> to avoid
-        # file collisions between concurrent subagents.
+        # silently truncated.  Each instance gets its own directory to
+        # avoid file collisions between concurrent subagents.
         subagent_spillover = None
         if self._config.spillover_dir:
-            subagent_spillover = str(Path(self._config.spillover_dir) / "subagents" / agent_id)
+            subagent_spillover = str(Path(self._config.spillover_dir) / agent_id / subagent_instance)
 
         subagent_node = EventLoopNode(
             event_bus=None,  # Subagents don't emit events to parent's bus
