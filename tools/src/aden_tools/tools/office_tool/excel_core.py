@@ -1,8 +1,4 @@
 import pandas as pd
-from openpyxl.styles import Font, Alignment, PatternFill
-from openpyxl.chart import LineChart, BarChart, Reference
-from openpyxl.formatting.rule import CellIsRule
-
 from .schemas import ExcelSchema
 from .export_utils import build_export_path
 
@@ -11,11 +7,15 @@ MAX_ROWS = 100000
 MAX_SHEETS = 10
 
 
-MAX_ROWS = 100000
-MAX_SHEETS = 10
-
-
 def generate_excel(schema: ExcelSchema) -> str:
+    try:
+        from openpyxl.styles import Font, Alignment, PatternFill
+        from openpyxl.chart import LineChart, BarChart, Reference
+        from openpyxl.formatting.rule import CellIsRule
+    except ImportError as e:
+        raise RuntimeError(
+            "Excel generation requires openpyxl. Install with: pip install tools[office]"
+        ) from e
 
     if len(schema.sheets) > MAX_SHEETS:
         raise ValueError("Too many sheets in Excel file.")

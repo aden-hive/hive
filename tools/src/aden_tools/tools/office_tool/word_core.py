@@ -1,13 +1,21 @@
-from docx import Document
-from docx.shared import Pt, Inches
-from docx.enum.text import WD_ALIGN_PARAGRAPH
-from docx.enum.style import WD_STYLE_TYPE
 from pathlib import Path
 
 from .schemas import WordSchema
 from .export_utils import build_export_path
 
+
 def generate_word(schema: WordSchema) -> str:
+
+    try:
+        from docx import Document
+        from docx.shared import Pt, Inches
+        from docx.enum.text import WD_ALIGN_PARAGRAPH
+        from docx.enum.style import WD_STYLE_TYPE
+    except ImportError as e:
+        raise RuntimeError(
+            "Word generation requires python-docx. "
+            "Install with: pip install tools[office]"
+        ) from e
     """
     Generate Word document from schema.
     Returns absolute file path.
@@ -80,7 +88,8 @@ def generate_word(schema: WordSchema) -> str:
             cols=len(table_data.headers)
         )
 
-        table.style = table_data.style
+        if table_data.style:
+            table.style = table_data.style
 
         # Header row
         header_cells = table.rows[0].cells

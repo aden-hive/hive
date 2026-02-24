@@ -117,8 +117,16 @@ def register_all_tools(
     register_pdf_read(mcp)
     register_time(mcp)
     register_runtime_logs(mcp)
+<<<<<<< HEAD
     register_wikipedia(mcp)
     register_arxiv(mcp)
+=======
+
+    #office tools
+    register_excel(mcp)
+    register_excel_generate(mcp)
+    register_word_generate(mcp, credentials=credentials)
+>>>>>>> 98418ae (fix: stabilize office tools (optional deps, lazy imports, registration cleanup, tests passing))
     register_powerpoint(mcp)
 
 
@@ -158,9 +166,8 @@ def register_all_tools(
     register_execute_command(mcp)
     register_data_tools(mcp)
     register_csv(mcp)
-    register_excel(mcp)
-    register_excel_generate(mcp)
-    tools.extend(register_word_generate(mcp, credentials))
+
+
 
 
 
