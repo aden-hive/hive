@@ -27,115 +27,41 @@ from pydantic import BaseModel, Field
 from framework.llm.provider import LLMProvider, Tool
 from framework.runtime.core import Runtime
 
+from framework.utils.json_utils import (
+    _fix_unescaped_newlines_in_json as _fix_newlines,
+)
+from framework.utils.json_utils import extract_json as _extract_json
+from framework.utils.json_utils import find_json_objects
+
 logger = logging.getLogger(__name__)
 
 
 def _fix_unescaped_newlines_in_json(json_str: str) -> str:
-    """Fix unescaped newlines inside JSON string values.
-
-    LLMs sometimes output actual newlines inside JSON strings instead of \\n.
-    This function fixes that by properly escaping newlines within string values.
-    """
-    result = []
-    in_string = False
-    escape_next = False
-    i = 0
-
-    while i < len(json_str):
-        char = json_str[i]
-
-        if escape_next:
-            result.append(char)
-            escape_next = False
-            i += 1
-            continue
-
-        if char == "\\" and in_string:
-            escape_next = True
-            result.append(char)
-            i += 1
-            continue
-
-        if char == '"' and not escape_next:
-            in_string = not in_string
-            result.append(char)
-            i += 1
-            continue
-
-        # Fix unescaped newlines inside strings
-        if in_string and char == "\n":
-            result.append("\\n")
-            i += 1
-            continue
-
-        # Fix unescaped carriage returns inside strings
-        if in_string and char == "\r":
-            result.append("\\r")
-            i += 1
-            continue
-
-        # Fix unescaped tabs inside strings
-        if in_string and char == "\t":
-            result.append("\\t")
-            i += 1
-            continue
-
-        result.append(char)
-        i += 1
-
-    return "".join(result)
+    """Fix unescaped newlines inside JSON string values. (Deprecated: use json_utils)"""
+    return _fix_newlines(json_str)
 
 
 def find_json_object(text: str) -> str | None:
-    """Find the first valid JSON object in text using balanced brace matching.
-
-    This handles nested objects correctly, unlike simple regex like r'\\{[^{}]*\\}'.
-    """
-    start = text.find("{")
-    if start == -1:
+    """Find the first valid (or balanced) JSON object in text. (Deprecated: use json_utils)"""
+    candidates = find_json_objects(text)
+    if not candidates:
         return None
 
-    end = text.rfind("}")
-    if end == -1 or end < start:
-        return None
+    # Try to find a valid one first (including fixable)
+    for c in candidates:
+        try:
+            json.loads(c)
+            return c
+        except json.JSONDecodeError:
+            try:
+                fixed = _fix_newlines(c)
+                json.loads(fixed)
+                return c
+            except json.JSONDecodeError:
+                pass
 
-    # Fast path: try json.loads directly (C extension, handles 1MB in ~14ms)
-    try:
-        candidate = text[start : end + 1]
-        json.loads(candidate)
-        return candidate
-    except json.JSONDecodeError:
-        pass
-
-    # Fall back to existing brace matching
-    depth = 0
-    in_string = False
-    escape_next = False
-
-    for i, char in enumerate(text[start:], start):
-        if escape_next:
-            escape_next = False
-            continue
-
-        if char == "\\" and in_string:
-            escape_next = True
-            continue
-
-        if char == '"' and not escape_next:
-            in_string = not in_string
-            continue
-
-        if in_string:
-            continue
-
-        if char == "{":
-            depth += 1
-        elif char == "}":
-            depth -= 1
-            if depth == 0:
-                return text[start : i + 1]
-
-    return None
+    # Fallback to the first balanced candidate even if invalid (for compatibility)
+    return candidates[0]
 
 
 class NodeSpec(BaseModel):

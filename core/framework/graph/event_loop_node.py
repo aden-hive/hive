@@ -12,6 +12,7 @@ Implements NodeProtocol and runs a streaming event loop:
 from __future__ import annotations
 
 import asyncio
+import difflib
 import json
 import logging
 import time
@@ -102,6 +103,18 @@ class LoopConfig:
     # For non-client-facing nodes, injects a warning into the conversation.
     tool_doom_loop_threshold: int = 3
     tool_doom_loop_enabled: bool = True
+
+    # --- Token budgeting ---
+    # Maximum cumulative tokens (combined prompt + completion) for this node
+    # before forced escalation/failure. Set to 0 to disable.
+    max_node_tokens: int = 0
+
+    # --- Fuzzy stall detection ---
+    # Threshold for fuzzy stall detection (0.0 to 1.0).
+    # If a new assistant response has similarity > this value to a previous
+    # response, it contributes to the stall counter.
+    # 1.0 = exact match only (current behavior).
+    stall_similarity_threshold: float = 1.0
 
 
 # ---------------------------------------------------------------------------
@@ -441,6 +454,32 @@ class EventLoopNode(NodeProtocol):
                     )
                     total_input_tokens += turn_tokens.get("input", 0)
                     total_output_tokens += turn_tokens.get("output", 0)
+
+                    # 6e'. Token budgeting check (hard cutoff)
+                    if (
+                        self._config.max_node_tokens > 0
+                        and (total_input_tokens + total_output_tokens)
+                        > self._config.max_node_tokens
+                    ):
+                        logger.warning(
+                            "[%s] Token budget exceeded: %d > %d",
+                            node_id,
+                            total_input_tokens + total_output_tokens,
+                            self._config.max_node_tokens,
+                        )
+                        latency_ms = int((time.time() - start_time) * 1000)
+                        return NodeResult(
+                            success=False,
+                            error=(
+                                f"Token budget exceeded: {total_input_tokens + total_output_tokens} "
+                                f"> {self._config.max_node_tokens}"
+                            ),
+                            output=accumulator.to_dict(),
+                            tokens_used=total_input_tokens + total_output_tokens,
+                            latency_ms=latency_ms,
+                            conversation=conversation if _is_continuous else None,
+                        )
+
                     break  # success — exit retry loop
 
                 except Exception as e:
@@ -1853,12 +1892,27 @@ class EventLoopNode(NodeProtocol):
         return [k for k in output_keys if k not in skip and accumulator.get(k) is None]
 
     def _is_stalled(self, recent_responses: list[str]) -> bool:
-        """Detect stall: N consecutive identical non-empty responses."""
+        """Detect stall: N consecutive similar non-empty responses."""
         if len(recent_responses) < self._config.stall_detection_threshold:
             return False
         if not recent_responses[0]:
             return False
-        return all(r == recent_responses[0] for r in recent_responses)
+
+        # Check for similarity against the most recent response
+        target = recent_responses[-1]
+        threshold = self._config.stall_similarity_threshold
+
+        for r in recent_responses[:-1]:
+            if not r:
+                return False
+            # Quick check for exact match
+            if r == target:
+                continue
+            # Fuzzy match
+            similarity = difflib.SequenceMatcher(None, r, target).ratio()
+            if similarity < threshold:
+                return False
+        return True
 
     @staticmethod
     def _is_transient_error(exc: BaseException) -> bool:
