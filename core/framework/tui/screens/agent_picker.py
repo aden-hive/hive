@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass, field
+from enum import Enum
 from pathlib import Path
 
 from rich.console import Group
@@ -14,6 +15,14 @@ from textual.containers import Vertical
 from textual.screen import ModalScreen
 from textual.widgets import Label, OptionList, TabbedContent, TabPane
 from textual.widgets._option_list import Option
+
+
+class GetStartedAction(Enum):
+    """Actions available in the Get Started tab."""
+
+    RUN_EXAMPLES = "run_examples"
+    RUN_EXISTING = "run_existing"
+    BUILD_EDIT = "build_edit"
 
 
 @dataclass
@@ -139,10 +148,20 @@ def _render_agent_option(agent: AgentEntry) -> Group:
     return Group(*parts)
 
 
+def _render_get_started_option(title: str, description: str, icon: str = "→") -> Group:
+    """Build a Rich renderable for a Get Started option."""
+    line1 = Text()
+    line1.append(f"{icon} ", style="bold cyan")
+    line1.append(title, style="bold")
+    line2 = Text(description, style="dim")
+    return Group(line1, line2)
+
+
 class AgentPickerScreen(ModalScreen[str | None]):
     """Modal screen showing available agents organized by tabbed categories.
 
     Returns the selected agent path as a string, or None if dismissed.
+    For Get Started actions, returns a special prefix like "action:run_examples".
     """
 
     BINDINGS = [
@@ -188,9 +207,14 @@ class AgentPickerScreen(ModalScreen[str | None]):
     }
     """
 
-    def __init__(self, agent_groups: dict[str, list[AgentEntry]]) -> None:
+    def __init__(
+        self,
+        agent_groups: dict[str, list[AgentEntry]],
+        show_get_started: bool = False,
+    ) -> None:
         super().__init__()
         self._groups = agent_groups
+        self._show_get_started = show_get_started
         # Map (tab_id, option_index) -> AgentEntry
         self._option_map: dict[str, dict[int, AgentEntry]] = {}
 
@@ -203,6 +227,43 @@ class AgentPickerScreen(ModalScreen[str | None]):
                 id="picker-subtitle",
             )
             with TabbedContent():
+                # Get Started tab (only on initial launch)
+                if self._show_get_started:
+                    with TabPane("Get Started", id="get-started"):
+                        option_list = OptionList(id="list-get-started")
+                        option_list.add_option(
+                            Option(
+                                _render_get_started_option(
+                                    "Test and run example agents",
+                                    "Try pre-built example agents to learn how Hive works",
+                                    "📚",
+                                ),
+                                id="action:run_examples",
+                            )
+                        )
+                        option_list.add_option(
+                            Option(
+                                _render_get_started_option(
+                                    "Test and run existing agent",
+                                    "Load and run an agent you've already built (from exports/)",
+                                    "🚀",
+                                ),
+                                id="action:run_existing",
+                            )
+                        )
+                        option_list.add_option(
+                            Option(
+                                _render_get_started_option(
+                                    "Build or edit agent",
+                                    "Create a new agent or modify an existing one",
+                                    "🛠️ ",
+                                ),
+                                id="action:build_edit",
+                            )
+                        )
+                        yield option_list
+
+                # Agent category tabs
                 for category, agents in self._groups.items():
                     tab_id = category.lower().replace(" ", "-")
                     with TabPane(f"{category} ({len(agents)})", id=tab_id):
@@ -224,6 +285,15 @@ class AgentPickerScreen(ModalScreen[str | None]):
 
     def on_option_list_option_selected(self, event: OptionList.OptionSelected) -> None:
         list_id = event.option_list.id or ""
+
+        # Handle Get Started tab options
+        if list_id == "list-get-started":
+            option = event.option
+            if option and option.id:
+                self.dismiss(option.id)  # Returns "action:run_examples", etc.
+            return
+
+        # Handle agent selection from other tabs
         idx = event.option_index
         agent_map = self._option_map.get(list_id, {})
         agent = agent_map.get(idx)
