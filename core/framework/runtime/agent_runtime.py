@@ -128,6 +128,8 @@ class AgentRuntime:
         checkpoint_config: CheckpointConfig | None = None,
         graph_id: str | None = None,
         accounts_prompt: str = "",
+        accounts_data: list[dict] | None = None,
+        tool_provider_map: dict[str, str] | None = None,
     ):
         """
         Initialize agent runtime.
@@ -144,12 +146,15 @@ class AgentRuntime:
             checkpoint_config: Optional checkpoint configuration for resumable sessions
             graph_id: Optional identifier for the primary graph (defaults to "primary")
             accounts_prompt: Connected accounts block for system prompt injection
+            accounts_data: Raw account data for per-node prompt generation
+            tool_provider_map: Tool name to provider name mapping for account routing
         """
         self.graph = graph
         self.goal = goal
         self._config = config or AgentRuntimeConfig()
         self._runtime_log_store = runtime_log_store
         self._checkpoint_config = checkpoint_config
+        self.accounts_prompt = accounts_prompt
 
         # Primary graph identity
         self._graph_id: str = graph_id or "primary"
@@ -182,6 +187,8 @@ class AgentRuntime:
         self._tools = tools or []
         self._tool_executor = tool_executor
         self._accounts_prompt = accounts_prompt
+        self._accounts_data = accounts_data
+        self._tool_provider_map = tool_provider_map
 
         # Entry points and streams (primary graph)
         self._entry_points: dict[str, EntryPointSpec] = {}
@@ -278,6 +285,8 @@ class AgentRuntime:
                     checkpoint_config=self._checkpoint_config,
                     graph_id=self._graph_id,
                     accounts_prompt=self._accounts_prompt,
+                    accounts_data=self._accounts_data,
+                    tool_provider_map=self._tool_provider_map,
                 )
                 await stream.start()
                 self._streams[ep_id] = stream
@@ -752,6 +761,8 @@ class AgentRuntime:
                 checkpoint_config=self._checkpoint_config,
                 graph_id=graph_id,
                 accounts_prompt=self._accounts_prompt,
+                accounts_data=self._accounts_data,
+                tool_provider_map=self._tool_provider_map,
             )
             if self._running:
                 await stream.start()
@@ -1306,6 +1317,8 @@ def create_agent_runtime(
     checkpoint_config: CheckpointConfig | None = None,
     graph_id: str | None = None,
     accounts_prompt: str = "",
+    accounts_data: list[dict] | None = None,
+    tool_provider_map: dict[str, str] | None = None,
 ) -> AgentRuntime:
     """
     Create and configure an AgentRuntime with entry points.
@@ -1329,6 +1342,8 @@ def create_agent_runtime(
         checkpoint_config: Optional checkpoint configuration for resumable sessions.
             If None, uses default checkpointing behavior.
         graph_id: Optional identifier for the primary graph (defaults to "primary").
+        accounts_data: Raw account data for per-node prompt generation.
+        tool_provider_map: Tool name to provider name mapping for account routing.
 
     Returns:
         Configured AgentRuntime (not yet started)
@@ -1352,6 +1367,8 @@ def create_agent_runtime(
         checkpoint_config=checkpoint_config,
         graph_id=graph_id,
         accounts_prompt=accounts_prompt,
+        accounts_data=accounts_data,
+        tool_provider_map=tool_provider_map,
     )
 
     for spec in entry_points:

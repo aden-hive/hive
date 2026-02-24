@@ -1,17 +1,21 @@
 """
-Credential Tester — verify synced credentials via live API calls.
+Credential Tester — verify credentials (Aden OAuth + local API keys) via live API calls.
 
-Interactive agent that lists connected accounts, lets the user pick one,
+Interactive agent that lists all testable accounts, lets the user pick one,
 loads the provider's tools, and runs a chat session to test the credential.
 """
 
 from .agent import (
     CredentialTesterAgent,
+    _list_aden_accounts,
+    _list_env_fallback_accounts,
+    _list_local_accounts,
     configure_for_account,
     conversation_mode,
     edges,
     entry_node,
     entry_points,
+    get_tools_for_provider,
     goal,
     identity_prompt,
     list_connected_accounts,
@@ -34,6 +38,7 @@ __all__ = [
     "edges",
     "entry_node",
     "entry_points",
+    "get_tools_for_provider",
     "goal",
     "identity_prompt",
     "list_connected_accounts",
@@ -43,4 +48,8 @@ __all__ = [
     "requires_account_selection",
     "skip_credential_validation",
     "terminal_nodes",
+    # Internal list helpers (exposed for testing)
+    "_list_aden_accounts",
+    "_list_local_accounts",
+    "_list_env_fallback_accounts",
 ]

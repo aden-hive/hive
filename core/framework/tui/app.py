@@ -841,9 +841,74 @@ class AdenTUI(App):
             if result is None:
                 self.exit()
                 return
+            self._handle_picker_result(result)
+
+        # Show Get Started tab on initial launch
+        self.push_screen(
+            AgentPickerScreen(agents, show_get_started=True),
+            callback=_on_initial_pick,
+        )
+
+    def _handle_picker_result(self, result: str) -> None:
+        """Handle the result from the agent picker, including Get Started actions."""
+        if result.startswith("action:"):
+            action = result.removeprefix("action:")
+            if action == "run_examples":
+                # Switch to Examples tab by re-opening picker focused on examples
+                self._show_agent_picker_tab("examples")
+            elif action == "run_existing":
+                # Switch to Your Agents tab
+                self._show_agent_picker_tab("your-agents")
+            elif action == "build_edit":
+                # Launch agent builder guidance
+                self._show_build_edit_message()
+        else:
+            # Regular agent path - load it
             self._do_load_agent(result)
 
-        self.push_screen(AgentPickerScreen(agents), callback=_on_initial_pick)
+    def _show_agent_picker_tab(self, tab_id: str) -> None:
+        """Show the agent picker focused on a specific tab (no Get Started)."""
+        from framework.tui.screens.agent_picker import AgentPickerScreen, discover_agents
+
+        agents = discover_agents()
+        if not agents:
+            self.notify("No agents found", severity="error", timeout=5)
+            return
+
+        def _on_pick(result: str | None) -> None:
+            if result is None:
+                self.exit()
+                return
+            if result.startswith("action:"):
+                # Shouldn't happen but handle gracefully
+                self._handle_picker_result(result)
+            else:
+                self._do_load_agent(result)
+
+        screen = AgentPickerScreen(agents, show_get_started=False)
+
+        def _focus_tab() -> None:
+            try:
+                tabbed = screen.query_one(
+                    "TabbedContent", expect_type=type(screen.query_one("TabbedContent"))
+                )
+                tabbed.active = tab_id
+            except Exception:
+                pass
+
+        self.push_screen(screen, callback=_on_pick)
+        self.call_later(_focus_tab)
+
+    def _show_build_edit_message(self) -> None:
+        """Show guidance for building or editing agents."""
+        self.notify(
+            "To build or edit agents, use 'hive build' from the terminal "
+            "or run Claude Code with the /hive skill.",
+            severity="information",
+            timeout=10,
+        )
+        # Re-show picker so user can still select an agent
+        self._show_agent_picker_initial()
 
     def action_show_agent_picker(self) -> None:
         """Open the agent picker (Ctrl+A or /agents)."""

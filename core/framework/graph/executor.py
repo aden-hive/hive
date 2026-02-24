@@ -135,6 +135,8 @@ class GraphExecutor:
         storage_path: str | Path | None = None,
         loop_config: dict[str, Any] | None = None,
         accounts_prompt: str = "",
+        accounts_data: list[dict] | None = None,
+        tool_provider_map: dict[str, str] | None = None,
     ):
         """
         Initialize the executor.
@@ -155,6 +157,8 @@ class GraphExecutor:
             storage_path: Optional base path for conversation persistence
             loop_config: Optional EventLoopNode configuration (max_iterations, etc.)
             accounts_prompt: Connected accounts block for system prompt injection
+            accounts_data: Raw account data for per-node prompt generation
+            tool_provider_map: Tool name to provider name mapping for account routing
         """
         self.runtime = runtime
         self.llm = llm
@@ -170,6 +174,8 @@ class GraphExecutor:
         self._storage_path = Path(storage_path) if storage_path else None
         self._loop_config = loop_config or {}
         self.accounts_prompt = accounts_prompt
+        self.accounts_data = accounts_data
+        self.tool_provider_map = tool_provider_map
 
         # Initialize output cleaner
         self.cleansing_config = cleansing_config or CleansingConfig()
@@ -1184,6 +1190,7 @@ class GraphExecutor:
                     next_spec = graph.get_node(current_node_id)
                     if next_spec and next_spec.node_type == "event_loop":
                         from framework.graph.prompt_composer import (
+                            build_accounts_prompt,
                             build_narrative,
                             build_transition_marker,
                             compose_system_prompt,
@@ -1209,12 +1216,24 @@ class GraphExecutor:
                                 else _adapt_text
                             )
 
+                        # Build per-node accounts prompt for the next node
+                        _node_accounts = self.accounts_prompt or None
+                        if self.accounts_data and self.tool_provider_map:
+                            _node_accounts = (
+                                build_accounts_prompt(
+                                    self.accounts_data,
+                                    self.tool_provider_map,
+                                    node_tool_names=next_spec.tools,
+                                )
+                                or None
+                            )
+
                         # Compose new system prompt (Layer 1 + 2 + 3 + accounts)
                         new_system = compose_system_prompt(
                             identity_prompt=getattr(graph, "identity_prompt", None),
                             focus_prompt=next_spec.system_prompt,
                             narrative=narrative,
-                            accounts_prompt=self.accounts_prompt or None,
+                            accounts_prompt=_node_accounts,
                         )
                         continuous_conversation.update_system_prompt(new_system)
 
@@ -1529,6 +1548,17 @@ class GraphExecutor:
             write_keys=node_spec.output_keys,
         )
 
+        # Build per-node accounts prompt (filtered to this node's tools)
+        node_accounts_prompt = self.accounts_prompt
+        if self.accounts_data and self.tool_provider_map:
+            from framework.graph.prompt_composer import build_accounts_prompt
+
+            node_accounts_prompt = build_accounts_prompt(
+                self.accounts_data,
+                self.tool_provider_map,
+                node_tool_names=node_spec.tools,
+            )
+
         return NodeContext(
             runtime=self.runtime,
             node_id=node_spec.id,
@@ -1546,7 +1576,7 @@ class GraphExecutor:
             inherited_conversation=inherited_conversation,
             cumulative_output_keys=cumulative_output_keys or [],
             event_triggered=event_triggered,
-            accounts_prompt=self.accounts_prompt,
+            accounts_prompt=node_accounts_prompt,
             execution_id=self.runtime.execution_id,
         )
 

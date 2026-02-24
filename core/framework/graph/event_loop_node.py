@@ -327,8 +327,10 @@ class EventLoopNode(NodeProtocol):
                                 f"{system_prompt}\n\n"
                                 f"--- Your Memory ---\n{_adapt_text}\n--- End Memory ---\n\n"
                                 'Maintain your memory by calling save_data("adapt.md", ...) '
-                                'or edit_data("adapt.md", ...) as you work. '
-                                "Record identity, session history, decisions, and working notes."
+                                'or edit_data("adapt.md", ...) as you work.\n'
+                                "IMMEDIATELY save: user rules about which account/identity to use, "
+                                "behavioral constraints, and preferences. "
+                                "Also record session history, decisions, and working notes."
                             )
 
                 conversation = NodeConversation(
@@ -2210,7 +2212,11 @@ class EventLoopNode(NodeProtocol):
         )
         prompt = (
             "Summarize this conversation so far in 2-3 sentences, "
-            "preserving key decisions and results:\n\n"
+            "preserving key decisions and results.\n\n"
+            "IMPORTANT: Always preserve any user-stated rules, constraints, "
+            "or preferences — especially which account/identity to use, "
+            "formatting preferences, and behavioral instructions. "
+            "These MUST appear verbatim or near-verbatim in your summary.\n\n"
             f"{messages_text}"
         )
         if tool_history:
@@ -2227,7 +2233,9 @@ class EventLoopNode(NodeProtocol):
             response = await ctx.llm.acomplete(
                 messages=[{"role": "user", "content": prompt}],
                 system=(
-                    "Summarize conversations concisely. Always preserve the tool history section."
+                    "Summarize conversations concisely. Always preserve the tool "
+                    "history section. Always preserve user-stated rules, constraints, "
+                    "and account/identity preferences verbatim."
                 ),
                 max_tokens=summary_budget,
             )
@@ -2299,13 +2307,24 @@ class EventLoopNode(NodeProtocol):
 
         # 5. Spillover files — list actual files so the LLM can load
         # them immediately instead of having to call list_data_files first.
+        # Inline adapt.md (agent memory) directly — it contains user rules
+        # and identity preferences that must survive emergency compaction.
         if self._config.spillover_dir:
             try:
                 from pathlib import Path
 
                 data_dir = Path(self._config.spillover_dir)
                 if data_dir.is_dir():
-                    files = sorted(f.name for f in data_dir.iterdir() if f.is_file())
+                    # Inline adapt.md content directly
+                    adapt_path = data_dir / "adapt.md"
+                    if adapt_path.is_file():
+                        adapt_text = adapt_path.read_text(encoding="utf-8").strip()
+                        if adapt_text:
+                            parts.append(f"AGENT MEMORY (adapt.md):\n{adapt_text}")
+
+                    files = sorted(
+                        f.name for f in data_dir.iterdir() if f.is_file() and f.name != "adapt.md"
+                    )
                     if files:
                         file_list = "\n".join(f"  - {f}" for f in files[:30])
                         parts.append("DATA FILES (use load_data to read):\n" + file_list)

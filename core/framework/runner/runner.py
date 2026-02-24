@@ -783,31 +783,38 @@ class AgentRunner:
                     extra_headers={"authorization": f"Bearer {api_key}"},
                 )
             else:
-                # Fall back to environment variable
-                # First check api_key_env_var from config (set by quickstart)
-                api_key_env = llm_config.get("api_key_env_var") or self._get_api_key_env_var(
-                    self.model
-                )
-                if api_key_env and os.environ.get(api_key_env):
+                # Local models (e.g. Ollama) don't need an API key
+                if self._is_local_model(self.model):
                     self._llm = LiteLLMProvider(
                         model=self.model,
-                        api_key=os.environ[api_key_env],
                         api_base=api_base,
                     )
                 else:
-                    # Fall back to credential store
-                    api_key = self._get_api_key_from_credential_store()
-                    if api_key:
+                    # Fall back to environment variable
+                    # First check api_key_env_var from config (set by quickstart)
+                    api_key_env = llm_config.get("api_key_env_var") or self._get_api_key_env_var(
+                        self.model
+                    )
+                    if api_key_env and os.environ.get(api_key_env):
                         self._llm = LiteLLMProvider(
-                            model=self.model, api_key=api_key, api_base=api_base
+                            model=self.model,
+                            api_key=os.environ[api_key_env],
+                            api_base=api_base,
                         )
-                        # Set env var so downstream code (e.g. cleanup LLM in
-                        # node._extract_json) can also find it
-                        if api_key_env:
-                            os.environ[api_key_env] = api_key
-                    elif api_key_env:
-                        print(f"Warning: {api_key_env} not set. LLM calls will fail.")
-                        print(f"Set it with: export {api_key_env}=your-api-key")
+                    else:
+                        # Fall back to credential store
+                        api_key = self._get_api_key_from_credential_store()
+                        if api_key:
+                            self._llm = LiteLLMProvider(
+                                model=self.model, api_key=api_key, api_base=api_base
+                            )
+                            # Set env var so downstream code (e.g. cleanup LLM in
+                            # node._extract_json) can also find it
+                            if api_key_env:
+                                os.environ[api_key_env] = api_key
+                        elif api_key_env:
+                            print(f"Warning: {api_key_env} not set. LLM calls will fail.")
+                            print(f"Set it with: export {api_key_env}=your-api-key")
 
             # Fail fast if the agent needs an LLM but none was configured
             if self._llm is None:
@@ -815,6 +822,12 @@ class AgentRunner:
                 if has_llm_nodes:
                     from framework.credentials.models import CredentialError
 
+                    if self._is_local_model(self.model):
+                        raise CredentialError(
+                            f"Failed to initialize LLM for local model '{self.model}'. "
+                            f"Ensure your local LLM server is running "
+                            f"(e.g. 'ollama serve' for Ollama)."
+                        )
                     api_key_env = self._get_api_key_env_var(self.model)
                     hint = (
                         f"Set it with: export {api_key_env}=your-api-key"
@@ -829,19 +842,28 @@ class AgentRunner:
 
         # Collect connected account info for system prompt injection
         accounts_prompt = ""
+        accounts_data: list[dict] | None = None
+        tool_provider_map: dict[str, str] | None = None
         try:
             from aden_tools.credentials.store_adapter import CredentialStoreAdapter
 
             adapter = CredentialStoreAdapter.default()
-            accounts = adapter.get_all_account_info()
-            if accounts:
+            accounts_data = adapter.get_all_account_info()
+            tool_provider_map = adapter.get_tool_provider_map()
+            if accounts_data:
                 from framework.graph.prompt_composer import build_accounts_prompt
 
-                accounts_prompt = build_accounts_prompt(accounts)
+                accounts_prompt = build_accounts_prompt(accounts_data, tool_provider_map)
         except Exception:
             pass  # Best-effort — agent works without account info
 
-        self._setup_agent_runtime(tools, tool_executor, accounts_prompt=accounts_prompt)
+        self._setup_agent_runtime(
+            tools,
+            tool_executor,
+            accounts_prompt=accounts_prompt,
+            accounts_data=accounts_data,
+            tool_provider_map=tool_provider_map,
+        )
 
     def _get_api_key_env_var(self, model: str) -> str | None:
         """Get the environment variable name for the API key based on model name."""
@@ -861,8 +883,8 @@ class AgentRunner:
             return "MISTRAL_API_KEY"
         elif model_lower.startswith("groq/"):
             return "GROQ_API_KEY"
-        elif model_lower.startswith("ollama/"):
-            return None  # Ollama doesn't need an API key (local)
+        elif self._is_local_model(model_lower):
+            return None  # Local models don't need an API key
         elif model_lower.startswith("azure/"):
             return "AZURE_API_KEY"
         elif model_lower.startswith("cohere/"):
@@ -902,8 +924,29 @@ class AgentRunner:
         except Exception:
             return None
 
+    @staticmethod
+    def _is_local_model(model: str) -> bool:
+        """Check if a model is a local model that doesn't require an API key.
+
+        Local providers like Ollama run on the user's machine and do not
+        need any authentication credentials.
+        """
+        LOCAL_PREFIXES = (
+            "ollama/",
+            "ollama_chat/",
+            "vllm/",
+            "lm_studio/",
+            "llamacpp/",
+        )
+        return model.lower().startswith(LOCAL_PREFIXES)
+
     def _setup_agent_runtime(
-        self, tools: list, tool_executor: Callable | None, accounts_prompt: str = ""
+        self,
+        tools: list,
+        tool_executor: Callable | None,
+        accounts_prompt: str = "",
+        accounts_data: list[dict] | None = None,
+        tool_provider_map: dict[str, str] | None = None,
     ) -> None:
         """Set up multi-entry-point execution using AgentRuntime."""
         # Convert AsyncEntryPointSpec to EntryPointSpec for AgentRuntime
@@ -976,6 +1019,8 @@ class AgentRunner:
             config=runtime_config,
             graph_id=self.graph.id or self.agent_path.name,
             accounts_prompt=accounts_prompt,
+            accounts_data=accounts_data,
+            tool_provider_map=tool_provider_map,
         )
 
         # Pass intro_message through for TUI display
