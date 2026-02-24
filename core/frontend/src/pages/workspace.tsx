@@ -178,6 +178,19 @@ function NewTabPopover({ open, onClose, anchorRef, discoverAgents, onFromScratch
   );
 }
 
+function fmtLogTs(ts: string): string {
+  try {
+    const d = new Date(ts);
+    return `[${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}:${String(d.getSeconds()).padStart(2, "0")}]`;
+  } catch {
+    return "[--:--:--]";
+  }
+}
+
+function truncate(s: string, max: number): string {
+  return s.length > max ? s.slice(0, max) + "..." : s;
+}
+
 export default function Workspace() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
@@ -244,6 +257,10 @@ export default function Workspace() {
   const sessionsRef = useRef(sessionsByAgent);
   sessionsRef.current = sessionsByAgent;
 
+  // Tracks the latest LLM text snapshot per node so we can flush it as a
+  // log line when the first tool call starts (avoids per-token log spam).
+  const llmSnapshotRef = useRef<Record<string, string>>({});
+
   // --- Backend state ---
   const [backendAgentId, setBackendAgentId] = useState<string | null>(null);
   const [backendLoading, setBackendLoading] = useState(true);
@@ -252,6 +269,10 @@ export default function Workspace() {
   const [awaitingInput, setAwaitingInput] = useState(false);
   // Run button state — driven by SSE events from the worker
   const [workerRunState, setWorkerRunState] = useState<"idle" | "deploying" | "running">("idle");
+  // Current execution ID — needed for pause API
+  const [currentExecutionId, setCurrentExecutionId] = useState<string | null>(null);
+  // Per-node live log lines accumulated from SSE events
+  const [nodeLogs, setNodeLogs] = useState<Record<string, string[]>>({});
   // Resolved display name for the loaded agent (e.g. "Competitive Intel Agent")
   const [agentDisplayName, setAgentDisplayName] = useState<string | null>(null);
   // Graph context for NodeDetailPanel
@@ -277,7 +298,8 @@ export default function Workspace() {
     if (!backendAgentId || !backendReady) return;
     try {
       setWorkerRunState("deploying");
-      await executionApi.trigger(backendAgentId, "default", {});
+      const result = await executionApi.trigger(backendAgentId, "default", {});
+      setCurrentExecutionId(result.execution_id);
       // State transitions from here are driven by SSE events (step 7)
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : String(err);
@@ -385,27 +407,6 @@ export default function Workspace() {
             ),
           };
         });
-
-        // Inject intro_message as seed message (only if session is empty)
-        if (agent.intro_message) {
-          const introMsg: ChatMessage = {
-            id: `intro-${agent.id}`,
-            agent: displayName,
-            agentColor: "",
-            content: agent.intro_message,
-            timestamp: "",
-            role: "worker" as const,
-            thread: initialAgent,
-          };
-          setSessionsByAgent((prev) => {
-            const sessions = prev[initialAgent] || [];
-            if (!sessions.length || sessions[0].messages.length > 0) return prev;
-            return {
-              ...prev,
-              [initialAgent]: [{ ...sessions[0], messages: [introMsg] }, ...sessions.slice(1)],
-            };
-          });
-        }
 
         // Check for existing sessions and load message history
         try {
@@ -539,6 +540,42 @@ export default function Workspace() {
     [activeWorker, activeSessionByAgent],
   );
 
+  const handlePause = useCallback(async () => {
+    if (!backendAgentId || !currentExecutionId) return;
+    try {
+      await executionApi.pause(backendAgentId, currentExecutionId);
+      setWorkerRunState("idle");
+      setCurrentExecutionId(null);
+      markAllNodesAs(["running", "looping"], "pending");
+    } catch (err) {
+      const errMsg = err instanceof Error ? err.message : String(err);
+      setSessionsByAgent((prev) => {
+        const sessions = prev[activeWorker] || [];
+        return {
+          ...prev,
+          [activeWorker]: sessions.map((s) => {
+            const activeId = activeSessionByAgent[activeWorker] || sessions[0]?.id;
+            if (s.id !== activeId) return s;
+            const errorMsg: ChatMessage = {
+              id: makeId(), agent: "System", agentColor: "",
+              content: `Failed to pause: ${errMsg}`,
+              timestamp: "", type: "system", thread: activeWorker,
+            };
+            return { ...s, messages: [...s.messages, errorMsg] };
+          }),
+        };
+      });
+    }
+  }, [backendAgentId, currentExecutionId, activeWorker, activeSessionByAgent, markAllNodesAs]);
+
+  // --- Node log helpers (live SSE → per-node log lines) ---
+  const appendNodeLog = useCallback((nodeId: string, line: string) => {
+    setNodeLogs((prev) => ({
+      ...prev,
+      [nodeId]: [...(prev[nodeId] || []), line].slice(-200),
+    }));
+  }, []);
+
   // --- SSE event handler (Phase 5) ---
   // Helper: upsert a chat message into the active session
   const upsertChatMessage = useCallback(
@@ -578,18 +615,21 @@ export default function Workspace() {
       const displayName = isQueen ? "Queen Bee" : (agentDisplayName || undefined);
       const role = isQueen ? "queen" as const : "worker" as const;
 
+      const ts = fmtLogTs(event.timestamp);
+
       switch (event.type) {
         case "execution_started":
           streamTurnRef.current += 1;
           if (isQueen) {
-            // Queen execution starting — show typing indicator
             setIsTyping(true);
           } else {
-            // Worker execution starting — update run button + graph
             setIsTyping(true);
             setAwaitingInput(false);
             setWorkerRunState("running");
+            if (event.execution_id) setCurrentExecutionId(event.execution_id);
             markAllNodesAs(["running", "looping", "complete", "error"], "pending");
+            setNodeLogs({});
+            llmSnapshotRef.current = {};
           }
           break;
 
@@ -597,10 +637,10 @@ export default function Workspace() {
           if (isQueen) {
             setIsTyping(false);
           } else {
-            // Worker finished
             setIsTyping(false);
             setAwaitingInput(false);
             setWorkerRunState("idle");
+            setCurrentExecutionId(null);
             markAllNodesAs(["running", "looping"], "complete");
           }
           break;
@@ -609,12 +649,18 @@ export default function Workspace() {
         case "client_output_delta":
         case "client_input_requested":
         case "llm_text_delta": {
-          // Convert event to a chat message — queen events get role:"queen"
           const chatMsg = sseEventToChatMessage(event, activeWorker, displayName, streamTurnRef.current);
           if (chatMsg) {
-            // Override role for queen events
             if (isQueen) chatMsg.role = role;
             upsertChatMessage(chatMsg);
+          }
+
+          // Track LLM text snapshots for node logs (flushed on tool_call_started)
+          if (event.type === "llm_text_delta" && !isQueen && event.node_id) {
+            const snapshot = (event.data?.snapshot as string) || "";
+            if (snapshot) {
+              llmSnapshotRef.current[event.node_id] = snapshot;
+            }
           }
 
           if (event.type === "client_input_requested") {
@@ -626,7 +672,12 @@ export default function Workspace() {
             setAwaitingInput(false);
             if (!isQueen) {
               setWorkerRunState("idle");
-              if (event.node_id) updateGraphNodeStatus(event.node_id, "error");
+              setCurrentExecutionId(null);
+              if (event.node_id) {
+                updateGraphNodeStatus(event.node_id, "error");
+                const errMsg = (event.data?.error as string) || "unknown error";
+                appendNodeLog(event.node_id, `${ts} ERROR Execution failed: ${errMsg}`);
+              }
               markAllNodesAs(["running", "looping"], "pending");
             }
           }
@@ -645,21 +696,35 @@ export default function Workspace() {
             updateGraphNodeStatus(event.node_id, isRevisit ? "looping" : "running", {
               maxIterations: (event.data?.max_iterations as number) ?? undefined,
             });
+            appendNodeLog(event.node_id, `${ts} INFO  Node started`);
           }
           break;
 
         case "node_loop_iteration":
           streamTurnRef.current += 1;
           if (!isQueen && event.node_id) {
-            updateGraphNodeStatus(event.node_id, "looping", {
-              iterations: (event.data?.iteration as number) ?? undefined,
-            });
+            // Flush any accumulated LLM text before starting next iteration
+            const pendingText = llmSnapshotRef.current[event.node_id];
+            if (pendingText?.trim()) {
+              appendNodeLog(event.node_id, `${ts} INFO  LLM: ${truncate(pendingText.trim(), 300)}`);
+              delete llmSnapshotRef.current[event.node_id];
+            }
+            const iter = (event.data?.iteration as number) ?? undefined;
+            updateGraphNodeStatus(event.node_id, "looping", { iterations: iter });
+            appendNodeLog(event.node_id, `${ts} INFO  Iteration ${iter ?? "?"}`);
           }
           break;
 
         case "node_loop_completed":
           if (!isQueen && event.node_id) {
+            // Flush any remaining LLM text
+            const pendingText = llmSnapshotRef.current[event.node_id];
+            if (pendingText?.trim()) {
+              appendNodeLog(event.node_id, `${ts} INFO  LLM: ${truncate(pendingText.trim(), 300)}`);
+              delete llmSnapshotRef.current[event.node_id];
+            }
             updateGraphNodeStatus(event.node_id, "complete");
+            appendNodeLog(event.node_id, `${ts} INFO  Node completed`);
           }
           break;
 
@@ -673,11 +738,56 @@ export default function Workspace() {
           break;
         }
 
+        case "tool_call_started":
+          if (!isQueen && event.node_id) {
+            // Flush accumulated LLM reasoning before listing tool calls
+            const pendingText = llmSnapshotRef.current[event.node_id];
+            if (pendingText?.trim()) {
+              appendNodeLog(event.node_id, `${ts} INFO  LLM: ${truncate(pendingText.trim(), 300)}`);
+              delete llmSnapshotRef.current[event.node_id];
+            }
+            const toolName = (event.data?.tool_name as string) || "unknown";
+            const toolInput = event.data?.tool_input;
+            const argsStr = toolInput ? truncate(JSON.stringify(toolInput), 200) : "";
+            appendNodeLog(event.node_id, `${ts} INFO  Calling ${toolName}(${argsStr})`);
+          }
+          break;
+
+        case "tool_call_completed":
+          if (!isQueen && event.node_id) {
+            const toolName = (event.data?.tool_name as string) || "unknown";
+            const isError = event.data?.is_error as boolean | undefined;
+            const result = event.data?.result as string | undefined;
+            if (isError) {
+              appendNodeLog(event.node_id, `${ts} ERROR ${toolName} failed: ${truncate(result || "unknown error", 200)}`);
+            } else {
+              const resultStr = result ? ` (${truncate(result, 200)})` : "";
+              appendNodeLog(event.node_id, `${ts} INFO  ${toolName} done${resultStr}`);
+            }
+          }
+          break;
+
+        case "node_internal_output":
+          if (!isQueen && event.node_id) {
+            const content = (event.data?.content as string) || "";
+            if (content.trim()) {
+              appendNodeLog(event.node_id, `${ts} INFO  ${content}`);
+            }
+          }
+          break;
+
+        case "node_stalled":
+          if (!isQueen && event.node_id) {
+            const reason = (event.data?.reason as string) || "unknown";
+            appendNodeLog(event.node_id, `${ts} WARN  Stalled: ${reason}`);
+          }
+          break;
+
         default:
           break;
       }
     },
-    [activeWorker, activeSessionByAgent, agentDisplayName, updateGraphNodeStatus, markAllNodesAs, upsertChatMessage],
+    [activeWorker, activeSessionByAgent, agentDisplayName, updateGraphNodeStatus, markAllNodesAs, upsertChatMessage, appendNodeLog],
   );
 
   // SSE subscription
@@ -917,6 +1027,7 @@ export default function Workspace() {
               onNodeClick={(node) => setSelectedNode(prev => prev?.id === node.id ? null : node)}
               onVersionBump={handleVersionBump}
               onRun={handleRun}
+              onPause={handlePause}
               version={`v${agentVersions[activeWorker]?.[0] ?? 1}.${agentVersions[activeWorker]?.[1] ?? 0}`}
               runState={workerRunState}
             />
@@ -961,6 +1072,7 @@ export default function Workspace() {
                 agentId={backendAgentId || undefined}
                 graphId={backendGraphId || undefined}
                 sessionId={null}
+                nodeLogs={nodeLogs[selectedNode.id] || []}
                 onClose={() => setSelectedNode(null)}
               />
             </div>

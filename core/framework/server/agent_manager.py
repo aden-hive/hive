@@ -5,7 +5,6 @@ is tracked as an AgentSlot holding a runner, runtime, and metadata.
 """
 
 import asyncio
-import json
 import logging
 import time
 from dataclasses import dataclass
@@ -13,84 +12,6 @@ from pathlib import Path
 from typing import Any
 
 logger = logging.getLogger(__name__)
-
-
-async def _extract_subgraph_steps(nodes: list, llm: Any) -> None:
-    """Extract workflow steps from system prompts for frontend visualization.
-
-    Called once during agent load. Iterates event_loop nodes with system prompts,
-    asks the LLM to decompose each prompt into a DAG of steps, and stores the
-    result on node.subgraph_steps. Non-critical — failures are logged and skipped.
-    """
-    candidates = [
-        n for n in nodes if n.node_type == "event_loop" and n.system_prompt and not n.subgraph_steps
-    ]
-    if not candidates:
-        return
-
-    for node in candidates:
-        try:
-            prompt = (
-                f"Analyze this system prompt for an AI agent node "
-                f"and extract the workflow steps.\n\n"
-                f"The node has these tools available: {json.dumps(node.tools)}\n"
-                f"The node reads these inputs: {json.dumps(node.input_keys)}\n"
-                f"The node must produce these outputs: {json.dumps(node.output_keys)}\n\n"
-                f"System prompt:\n---\n{node.system_prompt}\n---\n\n"
-                f"Extract a JSON array of workflow steps. For each step:\n"
-                f'- "id": short snake_case identifier\n'
-                f'- "label": human-readable description (5-10 words)\n'
-                f'- "tool": the tool name this step uses, or null for reasoning/decision steps\n'
-                f'- "depends_on": list of step ids that must complete before this one starts\n'
-                f'- "type": "action" (does work), "decision" '
-                f'(branches/loops), "loop" (repeats), or '
-                f'"output" (sets output)\n\n'
-                f"IMPORTANT:\n"
-                f"- Look for parallelism: if multiple tools can run "
-                f"independently after the same step, "
-                f"give them the SAME depends_on — this creates fan-out\n"
-                f"- Look for convergence: if a step needs results from multiple prior steps, "
-                f"list ALL of them in depends_on — this creates fan-in\n"
-                f"- Look for loops: if the prompt says 'repeat', 'go back to', 'if more then...', "
-                f"model it as a decision step\n"
-                f"- Do NOT make a simple linear chain unless the "
-                f"prompt truly describes a strictly sequential "
-                f"process\n\n"
-                f"Return ONLY a JSON array of step objects. No explanation."
-            )
-
-            response = await llm.acomplete(
-                messages=[{"role": "user", "content": prompt}],
-                max_tokens=1000,
-                json_mode=True,
-            )
-
-            # Parse the JSON array from the response
-            text = response.content.strip()
-            # Handle responses wrapped in {"steps": [...]} or just [...]
-            parsed = json.loads(text)
-            if isinstance(parsed, dict) and "steps" in parsed:
-                steps = parsed["steps"]
-            elif isinstance(parsed, list):
-                steps = parsed
-            else:
-                logger.warning(f"Subgraph extraction for '{node.id}': unexpected format")
-                continue
-
-            # Basic validation
-            if not isinstance(steps, list) or not all(
-                isinstance(s, dict) and s.get("id") and s.get("label") and "depends_on" in s
-                for s in steps
-            ):
-                logger.warning(f"Subgraph extraction for '{node.id}': invalid step structure")
-                continue
-
-            node.subgraph_steps = steps
-            logger.info(f"Extracted {len(steps)} subgraph steps for node '{node.id}'")
-
-        except Exception as e:
-            logger.warning(f"Subgraph extraction failed for node '{node.id}': {e}")
-            continue
 
 
 @dataclass
@@ -171,13 +92,6 @@ class AgentManager:
             # Setup (LLM provider, runtime, tools)
             if runner._agent_runtime is None:
                 await loop.run_in_executor(None, runner._setup)
-
-            # Extract subgraph steps for frontend visualization (non-critical)
-            if runner.graph and runner._llm:
-                try:
-                    await _extract_subgraph_steps(runner.graph.nodes, runner._llm)
-                except Exception as e:
-                    logger.warning(f"Subgraph extraction skipped: {e}")
 
             runtime = runner._agent_runtime
 

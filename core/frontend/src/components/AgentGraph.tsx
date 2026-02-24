@@ -1,6 +1,6 @@
 import { useMemo, useState, useRef, useEffect } from "react";
 import ReactDOM from "react-dom";
-import { Play, Loader2, CheckCircle2, GitBranch, Zap, Layers } from "lucide-react";
+import { Play, Pause, Loader2, CheckCircle2, GitBranch, Zap, Layers } from "lucide-react";
 
 export type NodeStatus = "running" | "complete" | "pending" | "error" | "looping";
 
@@ -25,6 +25,7 @@ interface AgentGraphProps {
   onNodeClick?: (node: GraphNode) => void;
   onVersionBump?: (type: VersionBump) => void;
   onRun?: () => void;
+  onPause?: () => void;
   version?: string;
   runState?: RunState;
 }
@@ -79,7 +80,7 @@ function formatLabel(id: string): string {
     .join(" ");
 }
 
-export default function AgentGraph({ nodes, title: _title, onNodeClick, onVersionBump, onRun, version, runState: externalRunState }: AgentGraphProps) {
+export default function AgentGraph({ nodes, title: _title, onNodeClick, onVersionBump, onRun, onPause, version, runState: externalRunState }: AgentGraphProps) {
   const [localRunState, setLocalRunState] = useState<RunState>("idle");
   const runState = externalRunState ?? localRunState;
   const [versionPopover, setVersionPopover] = useState<"hidden" | "confirm" | "pick">("hidden");
@@ -225,31 +226,42 @@ export default function AgentGraph({ nodes, title: _title, onNodeClick, onVersio
     return { layers, cols, maxCols, nodeW, colSpacing, firstColX };
   }, [nodes, forwardEdges]);
 
-  const RunButton = () => (
-    <button
-      ref={runBtnRef}
-      onClick={handleRun}
-      disabled={runState !== "idle" || nodes.length === 0}
-      className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[11px] font-semibold transition-all duration-200 ${
-        runState === "running"
-          ? "bg-green-500/15 text-green-400 border border-green-500/30 cursor-default"
-          : runState === "deploying"
-          ? "bg-primary/10 text-primary border border-primary/20 cursor-default"
-          : nodes.length === 0
-          ? "bg-muted/30 text-muted-foreground/40 border border-border/20 cursor-not-allowed"
-          : "bg-primary/10 text-primary border border-primary/20 hover:bg-primary/20 hover:border-primary/40 active:scale-95"
-      }`}
-    >
-      {runState === "deploying" ? (
-        <Loader2 className="w-3 h-3 animate-spin" />
-      ) : runState === "running" ? (
-        <CheckCircle2 className="w-3 h-3" />
-      ) : (
-        <Play className="w-3 h-3 fill-current" />
-      )}
-      {runState === "deploying" ? "Deploying\u2026" : runState === "running" ? "Running" : "Run"}
-    </button>
-  );
+  const RunButton = () => {
+    const [hovered, setHovered] = useState(false);
+    const showPause = runState === "running" && hovered;
+
+    return (
+      <button
+        ref={runBtnRef}
+        onClick={runState === "running" ? onPause : handleRun}
+        disabled={runState === "deploying" || nodes.length === 0}
+        onMouseEnter={() => setHovered(true)}
+        onMouseLeave={() => setHovered(false)}
+        className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[11px] font-semibold transition-all duration-200 ${
+          showPause
+            ? "bg-amber-500/15 text-amber-400 border border-amber-500/40 hover:bg-amber-500/25 active:scale-95 cursor-pointer"
+            : runState === "running"
+            ? "bg-green-500/15 text-green-400 border border-green-500/30 cursor-pointer"
+            : runState === "deploying"
+            ? "bg-primary/10 text-primary border border-primary/20 cursor-default"
+            : nodes.length === 0
+            ? "bg-muted/30 text-muted-foreground/40 border border-border/20 cursor-not-allowed"
+            : "bg-primary/10 text-primary border border-primary/20 hover:bg-primary/20 hover:border-primary/40 active:scale-95"
+        }`}
+      >
+        {runState === "deploying" ? (
+          <Loader2 className="w-3 h-3 animate-spin" />
+        ) : showPause ? (
+          <Pause className="w-3 h-3 fill-current" />
+        ) : runState === "running" ? (
+          <CheckCircle2 className="w-3 h-3" />
+        ) : (
+          <Play className="w-3 h-3 fill-current" />
+        )}
+        {runState === "deploying" ? "Deploying\u2026" : showPause ? "Pause" : runState === "running" ? "Running" : "Run"}
+      </button>
+    );
+  };
 
   // Version bump popover (portalled)
   const VersionPopover = () => {
@@ -587,7 +599,7 @@ export default function AgentGraph({ nodes, title: _title, onNodeClick, onVersio
       <VersionPopover />
 
       {/* Graph */}
-      <div className="flex-1 overflow-auto px-3 pb-5">
+      <div className="flex-1 overflow-y-auto overflow-x-hidden px-3 pb-5">
         <svg
           width={svgWidth}
           height={svgHeight}

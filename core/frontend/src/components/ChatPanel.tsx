@@ -1,6 +1,7 @@
-import { useState, useRef, useEffect } from "react";
+import { memo, useState, useRef, useEffect } from "react";
 import { Send, Crown, Cpu } from "lucide-react";
 import { formatAgentDisplayName } from "@/lib/chat-helpers";
+import MarkdownContent from "@/components/MarkdownContent";
 
 export interface ChatMessage {
   id: string;
@@ -32,7 +33,7 @@ function getColor(_agent: string, role?: "queen" | "worker"): string {
   return "hsl(220,60%,55%)";
 }
 
-function MessageBubble({ msg }: { msg: ChatMessage }) {
+const MessageBubble = memo(function MessageBubble({ msg }: { msg: ChatMessage }) {
   const isUser = msg.type === "user";
   const isQueen = msg.role === "queen";
   const color = getColor(msg.agent, msg.role);
@@ -91,12 +92,12 @@ function MessageBubble({ msg }: { msg: ChatMessage }) {
             isQueen ? "border border-primary/20 bg-primary/5" : "bg-muted/60"
           }`}
         >
-          <p className="whitespace-pre-wrap break-words text-foreground">{msg.content}</p>
+          <MarkdownContent content={msg.content} />
         </div>
       </div>
     </div>
   );
-}
+}, (prev, next) => prev.msg.id === next.msg.id && prev.msg.content === next.msg.content);
 
 export default function ChatPanel({ messages, onSend, isWaiting, activeThread, awaitingInput, disabled }: ChatPanelProps) {
   const [input, setInput] = useState("");
