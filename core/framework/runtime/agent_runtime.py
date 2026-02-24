@@ -46,6 +46,10 @@ class AgentRuntimeConfig:
     webhook_port: int = 8080
     webhook_routes: list[dict] = field(default_factory=list)
     # Each dict: {"source_id": str, "path": str, "methods": ["POST"], "secret": str|None}
+    # Lifecycle REST API server (disabled by default)
+    lifecycle_enabled: bool = False
+    lifecycle_host: str = "127.0.0.1"
+    lifecycle_port: int = 8090
 
 
 @dataclass
@@ -195,6 +199,8 @@ class AgentRuntime:
 
         # Webhook server (created on start if webhook_routes configured)
         self._webhook_server: Any = None
+        # Lifecycle REST API server (created on start if lifecycle_enabled)
+        self._lifecycle_server: Any = None
         # Event-driven entry point subscriptions (primary graph)
         self._event_subscriptions: list[str] = []
         # Timer tasks for scheduled entry points (primary graph)
@@ -314,6 +320,20 @@ class AgentRuntime:
                     self._webhook_server.add_route(route)
 
                 await self._webhook_server.start()
+
+            # Start lifecycle REST API server if enabled
+            if self._config.lifecycle_enabled:
+                from framework.runtime.lifecycle_server import (
+                    LifecycleServer,
+                    LifecycleServerConfig,
+                )
+
+                lc_config = LifecycleServerConfig(
+                    host=self._config.lifecycle_host,
+                    port=self._config.lifecycle_port,
+                )
+                self._lifecycle_server = LifecycleServer(self, lc_config)
+                await self._lifecycle_server.start()
 
             # Subscribe event-driven entry points to EventBus
             from framework.runtime.event_bus import EventType as _ET
@@ -548,6 +568,11 @@ class AgentRuntime:
             for sub_id in self._event_subscriptions:
                 self._event_bus.unsubscribe(sub_id)
             self._event_subscriptions.clear()
+
+            # Stop lifecycle REST API server
+            if self._lifecycle_server:
+                await self._lifecycle_server.stop()
+                self._lifecycle_server = None
 
             # Stop webhook server
             if self._webhook_server:
@@ -1140,6 +1165,11 @@ class AgentRuntime:
     def webhook_server(self) -> Any:
         """Access the webhook server (None if no webhook entry points)."""
         return self._webhook_server
+
+    @property
+    def lifecycle_server(self) -> Any:
+        """Access the lifecycle REST API server (None if not enabled)."""
+        return self._lifecycle_server
 
     @property
     def is_running(self) -> bool:
