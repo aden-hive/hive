@@ -171,6 +171,17 @@ for s in suggestions:
     print(f"[{s['priority']}] {s['recommendation']}")
 ```
 
+
+## Code Sandbox Safety
+
+Framework includes a restricted code sandbox (`framework.graph.code_sandbox`) for dynamic execution used in planning flows.
+
+- `safe_exec()` validates and runs statements in an isolated namespace.
+- `safe_eval()` validates and evaluates expressions in the same threat model as `safe_exec()`.
+- Validation blocks private attribute access (for example `.__class__`) and dangerous function names (`exec`, `eval`, `compile`, `__import__`).
+
+Use these helpers instead of raw `exec`/`eval` when evaluating planner-generated code.
+
 ## Architecture
 
 ```
