@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { KeyRound, Check, AlertCircle, X, Shield, Loader2, Trash2, ExternalLink } from "lucide-react";
-import { credentialsApi, type CredentialInfo, type AgentCredentialRequirement } from "@/api/credentials";
+import { credentialsApi, type AgentCredentialRequirement } from "@/api/credentials";
 
 export interface Credential {
   id: string;
@@ -11,32 +11,11 @@ export interface Credential {
   required: boolean;
 }
 
-export const credentialTemplates: Record<string, Omit<Credential, "connected">[]> = {
-  "inbox-management": [
-    { id: "gmail", name: "Gmail", description: "Read, send, and archive emails", icon: "\ud83d\udce7", required: true },
-    { id: "gcal", name: "Google Calendar", description: "Accept invites and create events", icon: "\ud83d\udcc5", required: false },
-    { id: "gsheets", name: "Google Sheets", description: "Log invoices and expenses", icon: "\ud83d\udcca", required: false },
-  ],
-  "job-hunter": [
-    { id: "linkedin", name: "LinkedIn", description: "Scan jobs and auto-apply", icon: "\ud83d\udcbc", required: true },
-    { id: "gmail", name: "Gmail", description: "Send cover letters and replies", icon: "\ud83d\udce7", required: true },
-    { id: "gdrive", name: "Google Drive", description: "Access resume and documents", icon: "\ud83d\udcc1", required: false },
-  ],
-  "fitness-coach": [
-    { id: "apple-health", name: "Apple Health", description: "Sleep, HRV, and recovery data", icon: "\u2764\ufe0f", required: true },
-    { id: "gcal", name: "Google Calendar", description: "Schedule workouts and meals", icon: "\ud83d\udcc5", required: false },
-  ],
-  "vuln-assessment": [
-    { id: "shodan", name: "Shodan", description: "Port scanning and host discovery", icon: "\ud83d\udd0d", required: true },
-    { id: "ssl-labs", name: "SSL Labs", description: "SSL certificate analysis", icon: "\ud83d\udd12", required: false },
-    { id: "gcal", name: "Google Calendar", description: "Set renewal reminders", icon: "\ud83d\udcc5", required: false },
-  ],
-};
-
-/** Create fresh (disconnected) credentials for an agent type */
-export function createFreshCredentials(agentType: string): Credential[] {
-  const templates = credentialTemplates[agentType] || [];
-  return templates.map(t => ({ ...t, connected: false }));
+/** Create fresh (disconnected) credentials for an agent type.
+ *  Real credentials are fetched from the backend via agentPath — this returns
+ *  an empty list as a safe default until the backend responds. */
+export function createFreshCredentials(_agentType: string): Credential[] {
+  return [];
 }
 
 /** Clone credentials from an existing set (for new instances of the same agent) */
@@ -131,21 +110,11 @@ export default function CredentialsModal({
         }));
         setRows(newRows);
       } else {
-        // No real path — fall back to templates + list
-        setLoading(true);
-        const { credentials: stored } = await credentialsApi.list();
-        const storedIds = new Set(stored.map((c: CredentialInfo) => c.credential_id));
-        const templates = credentialTemplates[agentType] || [];
-        const newRows: CredentialRow[] = templates.map(t => ({
-          ...t,
-          connected: storedIds.has(t.id),
-          credentialKey: "api_key",
-          adenSupported: false,
-        }));
-        setRows(newRows);
+        // No real path — no credentials to show
+        setRows([]);
       }
     } catch {
-      // Backend unavailable — fall back to legacy props or templates
+      // Backend unavailable — fall back to legacy props or empty
       if (legacyCredentials) {
         setRows(legacyCredentials.map(c => ({
           ...c,
@@ -153,13 +122,7 @@ export default function CredentialsModal({
           adenSupported: false,
         })));
       } else {
-        const templates = credentialTemplates[agentType] || [];
-        setRows(templates.map(t => ({
-          ...t,
-          connected: false,
-          credentialKey: "api_key",
-          adenSupported: false,
-        })));
+        setRows([]);
       }
     } finally {
       setLoading(false);

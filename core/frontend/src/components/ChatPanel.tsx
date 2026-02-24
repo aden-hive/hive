@@ -26,26 +26,11 @@ interface ChatPanelProps {
 }
 
 const queenColor = "hsl(45,95%,58%)";
-const workerColorMap: Record<string, string> = {
-  "inbox-management": "hsl(38,80%,55%)",
-  "job-hunter": "hsl(30,85%,58%)",
-  "fitness-coach": "hsl(25,75%,55%)",
-  "vuln-assessment": "hsl(15,70%,52%)",
-};
 
 function getColor(_agent: string, role?: "queen" | "worker"): string {
   if (role === "queen") return queenColor;
-  return workerColorMap[_agent] || "hsl(220,60%,55%)";
+  return "hsl(220,60%,55%)";
 }
-
-export const workerList = [
-  { id: "inbox-management", label: "Inbox Management" },
-  { id: "job-hunter", label: "Job Hunter" },
-  { id: "fitness-coach", label: "Fitness Coach" },
-  { id: "vuln-assessment", label: "Vuln Assessment" },
-  { id: "content-writer", label: "Content Writer" },
-  { id: "new-agent", label: "New Agent" },
-];
 
 function MessageBubble({ msg }: { msg: ChatMessage }) {
   const isUser = msg.type === "user";
@@ -144,8 +129,7 @@ export default function ChatPanel({ messages, onSend, isWaiting, activeThread, a
     setInput("");
   };
 
-  const activeWorkerLabel = workerList.find((w) => w.id === activeThread)?.label
-    || formatAgentDisplayName(activeThread);
+  const activeWorkerLabel = formatAgentDisplayName(activeThread);
 
   return (
     <div className="flex flex-col h-full min-w-0">
