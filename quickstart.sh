@@ -1207,10 +1207,26 @@ if [ "$CODEX_AVAILABLE" = true ]; then
     echo ""
 fi
 
+# Prompt user to source shell config or start new terminal
+echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+echo -e "${BOLD}⚠️  IMPORTANT: Load your new configuration${NC}"
+echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+echo ""
+echo -e "  Your API keys have been saved to ${CYAN}$SHELL_RC_FILE${NC}"
+echo -e "  To use them, either:"
+echo ""
+echo -e "  ${GREEN}Option 1:${NC} Source your shell config now:"
+echo -e "     ${CYAN}source $SHELL_RC_FILE${NC}"
+echo ""
+echo -e "  ${GREEN}Option 2:${NC} Open a new terminal window"
+echo ""
+echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+echo ""
+
 echo -e "${BOLD}Run an Agent:${NC}"
 echo ""
 echo -e "  Launch the interactive dashboard to browse and run agents:"
-echo -e "  You can start a example agent or an agent built by yourself:"
+echo -e "  You can start an example agent or an agent built by yourself:"
 echo -e "     ${CYAN}hive tui${NC}"
 echo ""
 echo -e "${DIM}Run ./quickstart.sh again to reconfigure.${NC}"
