@@ -22,7 +22,6 @@
   <img src="https://img.shields.io/badge/MCP-102_Tools-00ADD8?style=flat-square" alt="MCP" />
 </p>
 
-
 <p align="center">
   <img src="https://img.shields.io/badge/AI_Agents-Self--Improving-brightgreen?style=flat-square" alt="AI Agents" />
   <img src="https://img.shields.io/badge/Multi--Agent-Systems-blue?style=flat-square" alt="Multi-Agent" />
@@ -75,17 +74,23 @@ Use Hive when you need:
 - **[Changelog](https://github.com/adenhq/hive/releases)** - Latest updates and releases
 - **[Roadmap](docs/roadmap.md)** - Upcoming features and plans
 - **[Report Issues](https://github.com/adenhq/hive/issues)** - Bug reports and feature requests
+- **[Contributing](CONTRIBUTING.md)** - How to contribute and submit PRs
 
 ## Quick Start
 
 ### Prerequisites
 
 - Python 3.11+ for agent development
-- Claude Code or Cursor for utilizing agent skills
+- Claude Code, Codex CLI, or Cursor for utilizing agent skills
 
 > **Note for Windows Users:** It is strongly recommended to use **WSL (Windows Subsystem for Linux)** or **Git Bash** to run this framework. Some core automation scripts may not execute correctly in standard Command Prompt or PowerShell.
 
 ### Installation
+
+> **Note**
+> Hive uses a `uv` workspace layout and is not installed with `pip install`.
+> Running `pip install -e .` from the repository root will create a placeholder package and Hive will not function correctly.
+> Please use the quickstart script below to set up the environment.
 
 ```bash
 # Clone the repository
@@ -120,7 +125,44 @@ hive tui
 hive run exports/your_agent_name --input '{"key": "value"}'
 ```
 
+## Coding Agent Support
+
+### Codex CLI
+
+Hive includes native support for [OpenAI Codex CLI](https://github.com/openai/codex) (v0.101.0+).
+
+1. **Config:** `.codex/config.toml` with `agent-builder` MCP server (tracked in git)
+2. **Skills:** `.agents/skills/` symlinks to Hive skills (tracked in git)
+3. **Launch:** Run `codex` in the repo root, then type `use hive`
+
+Example:
+
+```
+codex> use hive
+```
+
+### Opencode
+
+Hive includes native support for [Opencode](https://github.com/opencode-ai/opencode).
+
+1. **Setup:** Run the quickstart script
+2. **Launch:** Open Opencode in the project root.
+3. **Activate:** Type `/hive` in the chat to switch to the Hive Agent.
+4. **Verify:** Ask the agent _"List your tools"_ to confirm the connection.
+
+The agent has access to all Hive skills and can scaffold agents, add tools, and debug workflows directly from the chat.
+
 **[📖 Complete Setup Guide](docs/environment-setup.md)** - Detailed instructions for agent development
+
+### Antigravity IDE Support
+
+Skills and MCP servers are also available in [Antigravity IDE](https://antigravity.google/) (Google's AI-powered IDE). **Easiest:** open a terminal in the hive repo folder and run (use `./` — the script is inside the repo):
+
+```bash
+./scripts/setup-antigravity-mcp.sh
+```
+
+**Important:** Always restart/refresh Antigravity IDE after running the setup script—MCP servers only load on startup. After restart, **agent-builder** and **tools** MCP servers should connect. Skills are under `.agent/skills/` (symlinks to `.claude/skills/`). See [docs/antigravity-setup.md](docs/antigravity-setup.md) for manual setup and troubleshooting.
 
 ## Features
 
@@ -142,7 +184,6 @@ Hive is built to be model-agnostic and system-agnostic.
 
 - **LLM flexibility** - Hive Framework is designed to support various types of LLMs, including hosted and local models through LiteLLM-compatible providers.
 - **Business system connectivity** - Hive Framework is designed to connect to all kinds of business systems as tools, such as CRM, support, messaging, data, file, and internal APIs via MCP.
-
 
 ## Why Aden
 
@@ -236,92 +277,124 @@ See [environment-setup.md](docs/environment-setup.md) for complete setup instruc
 Aden Hive Agent Framework aims to help developers build outcome-oriented, self-adaptive agents. See [roadmap.md](docs/roadmap.md) for details.
 
 ```mermaid
-flowchart TD
-subgraph Foundation
-    direction LR
-    subgraph arch["Architecture"]
-        a1["Node-Based Architecture"]:::done
-        a2["Python SDK"]:::done
-        a3["LLM Integration"]:::done
-        a4["Communication Protocol"]:::done
-    end
-    subgraph ca["Coding Agent"]
-        b1["Goal Creation Session"]:::done
-        b2["Worker Agent Creation"]
-        b3["MCP Tools"]:::done
-    end
-    subgraph wa["Worker Agent"]
-        c1["Human-in-the-Loop"]:::done
-        c2["Callback Handlers"]:::done
-        c3["Intervention Points"]:::done
-        c4["Streaming Interface"]
-    end
-    subgraph cred["Credentials"]
-        d1["Setup Process"]:::done
-        d2["Pluggable Sources"]:::done
-        d3["Enterprise Secrets"]
-        d4["Integration Tools"]:::done
-    end
-    subgraph tools["Tools"]
-        e1["File Use"]:::done
-        e2["Memory STM/LTM"]:::done
-        e3["Web Search/Scraper"]:::done
-        e4["CSV/PDF"]:::done
-        e5["Excel/Email"]
-    end
-    subgraph core["Core"]
-        f1["Eval System"]
-        f2["Pydantic Validation"]:::done
-        f3["Documentation"]:::done
-        f4["Adaptiveness"]
-        f5["Sample Agents"]
-    end
-end
+flowchart TB
+    %% Main Entity
+    User([User])
 
-subgraph Expansion
-    direction LR
-    subgraph intel["Intelligence"]
-        g1["Guardrails"]
-        g2["Streaming Mode"]
-        g3["Image Generation"]
-        g4["Semantic Search"]
+    %% =========================================
+    %% EXTERNAL EVENT SOURCES
+    %% =========================================
+    subgraph ExtEventSource [External Event Source]
+        E_Sch["Schedulers"]
+        E_WH["Webhook"]
+        E_SSE["SSE"]
     end
-    subgraph mem["Memory Iteration"]
-        h1["Message Model & Sessions"]
-        h2["Storage Migration"]
-        h3["Context Building"]
-        h4["Proactive Compaction"]
-        h5["Token Tracking"]
-    end
-    subgraph evt["Event System"]
-        i1["Event Bus for Nodes"]
-    end
-    subgraph cas["Coding Agent Support"]
-        j1["Claude Code"]
-        j2["Cursor"]
-        j3["Opencode"]
-        j4["Antigravity"]
-    end
-    subgraph plat["Platform"]
-        k1["JavaScript/TypeScript SDK"]
-        k2["Custom Tool Integrator"]
-        k3["Windows Support"]
-    end
-    subgraph dep["Deployment"]
-        l1["Self-Hosted"]
-        l2["Cloud Services"]
-        l3["CI/CD Pipeline"]
-    end
-    subgraph tmpl["Templates"]
-        m1["Sales Agent"]
-        m2["Marketing Agent"]
-        m3["Analytics Agent"]
-        m4["Training Agent"]
-        m5["Smart Form Agent"]
-    end
-end
 
-classDef done fill:#9e9e9e,color:#fff,stroke:#757575
+    %% =========================================
+    %% SYSTEM NODES
+    %% =========================================
+    subgraph WorkerBees [Worker Bees]
+        WB_C["Conversation"]
+        WB_SP["System prompt"]
+
+        subgraph Graph [Graph]
+            direction TB
+            N1["Node"] --> N2["Node"] --> N3["Node"]
+            N1 -.-> AN["Active Node"]
+            N2 -.-> AN
+            N3 -.-> AN
+
+            %% Nested Event Loop Node
+            subgraph EventLoopNode [Event Loop Node]
+                ELN_L["listener"]
+                ELN_SP["System Prompt<br/>(Task)"]
+                ELN_EL["Event loop"]
+                ELN_C["Conversation"]
+            end
+        end
+    end
+
+    subgraph JudgeNode [Judge]
+        J_C["Criteria"]
+        J_P["Principles"]
+        J_EL["Event loop"] <--> J_S["Scheduler"]
+    end
+
+    subgraph QueenBee [Queen Bee]
+        QB_SP["System prompt"]
+        QB_EL["Event loop"]
+        QB_C["Conversation"]
+    end
+
+    subgraph Infra [Infra]
+        SA["Sub Agent"]
+        TR["Tool Registry"]
+        WTM["Write through Conversation Memory<br/>(Logs/RAM/Harddrive)"]
+        SM["Shared Memory<br/>(State/Harddrive)"]
+        EB["Event Bus<br/>(RAM)"]
+        CS["Credential Store<br/>(Harddrive/Cloud)"]
+    end
+
+    subgraph PC [PC]
+        B["Browser"]
+        CB["Codebase<br/>v 0.0.x ... v n.n.n"]
+    end
+
+    %% =========================================
+    %% CONNECTIONS & DATA FLOW
+    %% =========================================
+
+    %% External Event Routing
+    E_Sch --> ELN_L
+    E_WH --> ELN_L
+    E_SSE --> ELN_L
+    ELN_L -->|"triggers"| ELN_EL
+
+    %% User Interactions
+    User -->|"Talk"| WB_C
+    User -->|"Talk"| QB_C
+    User -->|"Read/Write Access"| CS
+
+    %% Inter-System Logic
+    ELN_C <-->|"Mirror"| WB_C
+    WB_C -->|"Focus"| AN
+
+    WorkerBees -->|"Inquire"| JudgeNode
+    JudgeNode -->|"Approve"| WorkerBees
+
+    %% Judge Alignments
+    J_C <-.->|"aligns"| WB_SP
+    J_P <-.->|"aligns"| QB_SP
+
+    %% Escalate path
+    J_EL -->|"Report (Escalate)"| QB_EL
+
+    %% Pub/Sub Logic
+    AN -->|"publish"| EB
+    EB -->|"subscribe"| QB_C
+
+    %% Infra and Process Spawning
+    ELN_EL -->|"Spawn"| SA
+    SA -->|"Inform"| ELN_EL
+    SA -->|"Starts"| B
+    B -->|"Report"| ELN_EL
+    TR -->|"Assigned"| EventLoopNode
+    CB -->|"Modify Worker Bee"| WorkerBees
+
+    %% =========================================
+    %% SHARED MEMORY & LOGS ACCESS
+    %% =========================================
+
+    %% Worker Bees Access
+    Graph <-->|"Read/Write"| WTM
+    Graph <-->|"Read/Write"| SM
+
+    %% Queen Bee Access
+    QB_C <-->|"Read/Write"| WTM
+    QB_EL <-->|"Read/Write"| SM
+
+    %% Credentials Access
+    CS -->|"Read Access"| QB_C
 ```
 
 ## Contributing

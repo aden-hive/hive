@@ -245,19 +245,13 @@ class GraphBuilder:
             warnings.append(f"Node '{node.id}' should have a description")
 
         # Type-specific validation
-        if node.node_type == "llm_tool_use":
-            if not node.tools:
-                errors.append(f"LLM tool node '{node.id}' must specify tools")
-            if not node.system_prompt:
-                warnings.append(f"LLM node '{node.id}' should have a system_prompt")
+        if node.node_type == "event_loop":
+            if node.tools and not node.system_prompt:
+                warnings.append(f"Event loop node '{node.id}' should have a system_prompt")
 
         if node.node_type == "router":
             if not node.routes:
                 errors.append(f"Router node '{node.id}' must specify routes")
-
-        if node.node_type == "function":
-            if not node.function:
-                errors.append(f"Function node '{node.id}' must specify function name")
 
         # Check input/output keys
         if not node.input_keys:
@@ -400,9 +394,13 @@ class GraphBuilder:
         if not terminal_candidates and self.session.nodes:
             warnings.append("No terminal nodes found (all nodes have outgoing edges)")
 
-        # Check reachability
+        # Check reachability from ALL entry candidates (not just the first one).
+        # Agents with async entry points have multiple nodes with no incoming
+        # edges (e.g., a primary entry node and an event-driven entry node).
         if entry_candidates and self.session.nodes:
-            reachable = self._compute_reachable(entry_candidates[0])
+            reachable = set()
+            for candidate in entry_candidates:
+                reachable |= self._compute_reachable(candidate)
             unreachable = [n.id for n in self.session.nodes if n.id not in reachable]
             if unreachable:
                 errors.append(f"Unreachable nodes: {unreachable}")

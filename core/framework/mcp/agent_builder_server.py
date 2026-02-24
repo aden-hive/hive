@@ -8,21 +8,25 @@ Usage:
 """
 
 import json
+import logging
 import os
 import sys
 from datetime import datetime
 from pathlib import Path
 from typing import Annotated
 
+# Project root resolution.  This file lives at core/framework/mcp/agent_builder_server.py,
+# so the project root (where exports/ lives) is four parents up.
+_PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent.parent
+
 # Ensure exports/ is on sys.path so AgentRunner can import agent modules.
-_framework_dir = Path(__file__).resolve().parent.parent  # core/framework/ -> core/
-_project_root = _framework_dir.parent  # core/ -> project root
-_exports_dir = _project_root / "exports"
+_exports_dir = _PROJECT_ROOT / "exports"
 if _exports_dir.is_dir() and str(_exports_dir) not in sys.path:
     sys.path.insert(0, str(_exports_dir))
-del _framework_dir, _project_root, _exports_dir
+del _exports_dir
 
 from mcp.server import FastMCP  # noqa: E402
+from pydantic import ValidationError  # noqa: E402
 
 from framework.graph import (  # noqa: E402
     Constraint,
@@ -32,7 +36,6 @@ from framework.graph import (  # noqa: E402
     NodeSpec,
     SuccessCriterion,
 )
-from framework.graph.plan import Plan  # noqa: E402
 
 # Testing framework imports
 from framework.testing.prompts import (  # noqa: E402
@@ -175,8 +178,8 @@ def _load_active_session() -> BuildSession | None:
 
         if session_id:
             return _load_session(session_id)
-    except Exception:
-        pass
+    except Exception as e:
+        logging.warning("Failed to load active session: %s", e)
 
     return None
 
@@ -541,6 +544,9 @@ def _validate_agent_path(agent_path: str) -> tuple[Path | None, str | None]:
     """
     Validate and normalize agent_path.
 
+    Resolves relative paths against _PROJECT_ROOT since the MCP server's
+    cwd (core/) differs from the user's cwd (project root).
+
     Returns:
         (Path, None) if valid
         (None, error_json) if invalid
@@ -554,6 +560,12 @@ def _validate_agent_path(agent_path: str) -> tuple[Path | None, str | None]:
         )
 
     path = Path(agent_path)
+
+    # Resolve relative paths against project root (not MCP server's cwd)
+    if not path.is_absolute() and not path.exists():
+        resolved = _PROJECT_ROOT / path
+        if resolved.exists():
+            path = resolved
 
     if not path.exists():
         return None, json.dumps(
@@ -574,13 +586,12 @@ def add_node(
     description: Annotated[str, "What this node does"],
     node_type: Annotated[
         str,
-        "Type: event_loop (recommended), function, router. "
-        "Deprecated: llm_generate, llm_tool_use (use event_loop instead)",
+        "Type: event_loop (recommended), router.",
     ],
     input_keys: Annotated[str, "JSON array of keys this node reads from shared memory"],
     output_keys: Annotated[str, "JSON array of keys this node writes to shared memory"],
     system_prompt: Annotated[str, "Instructions for LLM nodes"] = "",
-    tools: Annotated[str, "JSON array of tool names for event_loop or llm_tool_use nodes"] = "[]",
+    tools: Annotated[str, "JSON array of tool names for event_loop nodes"] = "[]",
     routes: Annotated[
         str, "JSON object mapping conditions to target node IDs for router nodes"
     ] = "{}",
@@ -652,23 +663,17 @@ def add_node(
         errors.append("Node must have an id")
     if not name:
         errors.append("Node must have a name")
-    if node_type == "llm_tool_use" and not tools_list:
-        errors.append(f"Node '{node_id}' of type llm_tool_use must specify tools")
+
+    # Reject removed node types
+    if node_type in ("function", "llm_tool_use", "llm_generate"):
+        errors.append(f"Node type '{node_type}' is no longer supported. Use 'event_loop' instead.")
+
     if node_type == "router" and not routes_dict:
         errors.append(f"Router node '{node_id}' must specify routes")
-    if node_type in ("llm_generate", "llm_tool_use") and not system_prompt:
-        warnings.append(f"LLM node '{node_id}' should have a system_prompt")
 
     # EventLoopNode validation
     if node_type == "event_loop" and not system_prompt:
         warnings.append(f"Event loop node '{node_id}' should have a system_prompt")
-
-    # Deprecated type warnings
-    if node_type in ("llm_generate", "llm_tool_use"):
-        warnings.append(
-            f"Node type '{node_type}' is deprecated. Use 'event_loop' instead. "
-            "EventLoopNode supports tool use, streaming, and judge-based evaluation."
-        )
 
     # Warn about client_facing on nodes with tools (likely autonomous work)
     if node_type == "event_loop" and client_facing and tools_list:
@@ -825,8 +830,7 @@ def update_node(
     description: Annotated[str, "Updated description"] = "",
     node_type: Annotated[
         str,
-        "Updated type: event_loop (recommended), function, router. "
-        "Deprecated: llm_generate, llm_tool_use",
+        "Updated type: event_loop (recommended), router.",
     ] = "",
     input_keys: Annotated[str, "Updated JSON array of input keys"] = "",
     output_keys: Annotated[str, "Updated JSON array of output keys"] = "",
@@ -906,23 +910,18 @@ def update_node(
     errors = []
     warnings = []
 
-    if node.node_type == "llm_tool_use" and not node.tools:
-        errors.append(f"Node '{node_id}' of type llm_tool_use must specify tools")
+    # Reject removed node types
+    if node.node_type in ("function", "llm_tool_use", "llm_generate"):
+        errors.append(
+            f"Node type '{node.node_type}' is no longer supported. Use 'event_loop' instead."
+        )
+
     if node.node_type == "router" and not node.routes:
         errors.append(f"Router node '{node_id}' must specify routes")
-    if node.node_type in ("llm_generate", "llm_tool_use") and not node.system_prompt:
-        warnings.append(f"LLM node '{node_id}' should have a system_prompt")
 
     # EventLoopNode validation
     if node.node_type == "event_loop" and not node.system_prompt:
         warnings.append(f"Event loop node '{node_id}' should have a system_prompt")
-
-    # Deprecated type warnings
-    if node.node_type in ("llm_generate", "llm_tool_use"):
-        warnings.append(
-            f"Node type '{node.node_type}' is deprecated. Use 'event_loop' instead. "
-            "EventLoopNode supports tool use, streaming, and judge-based evaluation."
-        )
 
     # nullable_output_keys must be a subset of output_keys
     if node.nullable_output_keys:
@@ -1099,11 +1098,11 @@ def validate_graph() -> str:
     if entry_candidates:
         reachable = set()
 
-        # For pause/resume agents, start from ALL entry points (including resume)
-        if is_pause_resume_agent:
-            to_visit = list(entry_candidates)  # All nodes without incoming edges
-        else:
-            to_visit = [entry_candidates[0]]  # Just the primary entry
+        # Start from ALL entry candidates (nodes without incoming edges).
+        # This handles both pause/resume agents and async entry point agents
+        # where multiple nodes have no incoming edges (e.g., a primary entry
+        # node and an event-driven entry node).
+        to_visit = list(entry_candidates)
 
         while to_visit:
             current = to_visit.pop()
@@ -1377,17 +1376,6 @@ def validate_graph() -> str:
                     f"must be a subset of output_keys {node.output_keys}"
                 )
 
-    # Deprecated node type warnings
-    deprecated_nodes = [
-        {"node_id": n.id, "type": n.node_type, "replacement": "event_loop"}
-        for n in session.nodes
-        if n.node_type in ("llm_generate", "llm_tool_use")
-    ]
-    for dn in deprecated_nodes:
-        warnings.append(
-            f"Node '{dn['node_id']}' uses deprecated type '{dn['type']}'. Use 'event_loop' instead."
-        )
-
     # Warn if all event_loop nodes are client_facing (common misconfiguration)
     el_nodes = [n for n in session.nodes if n.node_type == "event_loop"]
     cf_el_nodes = [n for n in el_nodes if n.client_facing]
@@ -1423,7 +1411,6 @@ def validate_graph() -> str:
             "event_loop_nodes": event_loop_nodes,
             "client_facing_nodes": client_facing_nodes,
             "feedback_edges": feedback_edges,
-            "deprecated_node_types": deprecated_nodes,
         }
     )
 
@@ -1633,9 +1620,8 @@ def export_graph() -> str:
     """
     Export the validated graph as a GraphSpec for GraphExecutor.
 
-    Exports the complete agent definition including nodes, edges, goal,
-    and evaluation rules. The GraphExecutor runs the graph with dynamic
-    edge traversal and routing logic.
+    Exports the complete agent definition including nodes, edges, and goal.
+    The GraphExecutor runs the graph with dynamic edge traversal and routing logic.
 
     AUTOMATICALLY WRITES FILES TO DISK:
     - exports/{agent-name}/agent.json - Full agent specification
@@ -1843,7 +1829,6 @@ def export_graph() -> str:
             "files_written": files_written,
             "graph": graph_spec,
             "goal": session.goal.model_dump(),
-            "evaluation_rules": _evaluation_rules,
             "required_tools": list(all_tools),
             "node_count": len(session.nodes),
             "edge_count": len(edges_list),
@@ -1853,6 +1838,85 @@ def export_graph() -> str:
         },
         default=str,
         indent=2,
+    )
+
+
+@mcp.tool()
+def import_from_export(
+    agent_json_path: Annotated[str, "Path to the agent.json file to import"],
+) -> str:
+    """
+    Import an agent definition from an exported agent.json file into the current build session.
+
+    Reads the agent.json, parses goal/nodes/edges, and populates the current session.
+    This is the reverse of export_graph().
+
+    Args:
+        agent_json_path: Path to the agent.json file to import
+
+    Returns:
+        JSON summary of what was imported (goal name, node count, edge count)
+    """
+    session = get_session()
+
+    path = Path(agent_json_path)
+    if not path.exists():
+        return json.dumps({"success": False, "error": f"File not found: {agent_json_path}"})
+
+    try:
+        data = json.loads(path.read_text())
+    except json.JSONDecodeError as e:
+        return json.dumps({"success": False, "error": f"Invalid JSON: {e}"})
+
+    try:
+        # Parse goal (same pattern as BuildSession.from_dict lines 88-99)
+        goal_data = data.get("goal")
+        if goal_data:
+            session.goal = Goal(
+                id=goal_data["id"],
+                name=goal_data["name"],
+                description=goal_data["description"],
+                success_criteria=[
+                    SuccessCriterion(**sc) for sc in goal_data.get("success_criteria", [])
+                ],
+                constraints=[Constraint(**c) for c in goal_data.get("constraints", [])],
+            )
+
+        # Parse nodes (same pattern as BuildSession.from_dict line 102)
+        graph_data = data.get("graph", {})
+        nodes_data = graph_data.get("nodes", [])
+        session.nodes = [NodeSpec(**n) for n in nodes_data]
+
+        # Parse edges (same pattern as BuildSession.from_dict lines 105-118)
+        edges_data = graph_data.get("edges", [])
+        session.edges = []
+        for e in edges_data:
+            condition_str = e.get("condition")
+            if isinstance(condition_str, str):
+                condition_map = {
+                    "always": EdgeCondition.ALWAYS,
+                    "on_success": EdgeCondition.ON_SUCCESS,
+                    "on_failure": EdgeCondition.ON_FAILURE,
+                    "conditional": EdgeCondition.CONDITIONAL,
+                    "llm_decide": EdgeCondition.LLM_DECIDE,
+                }
+                e["condition"] = condition_map.get(condition_str, EdgeCondition.ON_SUCCESS)
+            session.edges.append(EdgeSpec(**e))
+    except (KeyError, TypeError, ValueError, ValidationError) as e:
+        return json.dumps({"success": False, "error": f"Malformed agent.json: {e}"})
+
+    # Persist updated session
+    _save_session(session)
+
+    return json.dumps(
+        {
+            "success": True,
+            "goal": session.goal.name if session.goal else None,
+            "nodes_count": len(session.nodes),
+            "edges_count": len(session.edges),
+            "node_ids": [n.id for n in session.nodes],
+            "edge_ids": [e.id for e in session.edges],
+        }
     )
 
 
@@ -1874,9 +1938,6 @@ def get_session_status() -> str:
             "mcp_servers": [s["name"] for s in session.mcp_servers],
             "event_loop_nodes": [n.id for n in session.nodes if n.node_type == "event_loop"],
             "client_facing_nodes": [n.id for n in session.nodes if n.client_facing],
-            "deprecated_nodes": [
-                n.id for n in session.nodes if n.node_type in ("llm_generate", "llm_tool_use")
-            ],
             "feedback_edges": [e.id for e in session.edges if e.priority < 0],
         }
     )
@@ -2047,7 +2108,7 @@ def add_mcp_server(
                     "total_mcp_servers": len(session.mcp_servers),
                     "note": (
                         f"MCP server '{name}' registered with {len(tool_names)} tools. "
-                        "These tools can now be used in llm_tool_use nodes."
+                        "These tools can now be used in event_loop nodes."
                     ),
                 },
                 indent=2,
@@ -2148,7 +2209,7 @@ def list_mcp_tools(
             "success": True,
             "tools_by_server": all_tools,
             "total_tools": total_tools,
-            "note": "Use these tool names in the 'tools' parameter when adding llm_tool_use nodes",
+            "note": "Use these tool names in the 'tools' parameter when adding event_loop nodes",
         },
         indent=2,
     )
@@ -2247,23 +2308,6 @@ def test_node(
                 + f"Max visits per graph run: {node_spec.max_node_visits}."
             )
 
-    elif node_spec.node_type in ("llm_generate", "llm_tool_use"):
-        # Legacy LLM node types
-        result["system_prompt"] = node_spec.system_prompt
-        result["available_tools"] = node_spec.tools
-        result["deprecation_warning"] = (
-            f"Node type '{node_spec.node_type}' is deprecated. Use 'event_loop' instead."
-        )
-
-        if mock_llm_response:
-            result["mock_response"] = mock_llm_response
-            result["simulation"] = "LLM would receive prompt and produce response"
-        else:
-            result["simulation"] = "LLM would be called with the system prompt and input data"
-
-    elif node_spec.node_type == "function":
-        result["simulation"] = "Function node would execute deterministic logic"
-
     # Show memory state after (simulated)
     result["expected_memory_state"] = {
         "inputs_available": {k: input_data.get(k, "<not provided>") for k in node_spec.input_keys},
@@ -2357,7 +2401,7 @@ def test_graph(
             "writes": current_node.output_keys,
         }
 
-        if current_node.node_type in ("llm_generate", "llm_tool_use", "event_loop"):
+        if current_node.node_type == "event_loop":
             step_info["prompt_preview"] = (
                 current_node.system_prompt[:200] + "..."
                 if current_node.system_prompt and len(current_node.system_prompt) > 200
@@ -2429,466 +2473,6 @@ def test_graph(
 
 
 # =============================================================================
-# FLEXIBLE EXECUTION TOOLS (Worker-Judge Pattern)
-# =============================================================================
-
-# Storage for evaluation rules
-_evaluation_rules: list[dict] = []
-
-
-@mcp.tool()
-def add_evaluation_rule(
-    rule_id: Annotated[str, "Unique identifier for the rule"],
-    description: Annotated[str, "Human-readable description of what this rule checks"],
-    condition: Annotated[
-        str,
-        "Python expression with result, step, goal context. E.g., 'result.get(\"success\")'",
-    ],
-    action: Annotated[str, "Action when rule matches: accept, retry, replan, escalate"],
-    feedback_template: Annotated[
-        str, "Template for feedback message, can use {result}, {step}"
-    ] = "",
-    priority: Annotated[int, "Rule priority (higher = checked first)"] = 0,
-) -> str:
-    """
-    Add an evaluation rule for the HybridJudge.
-
-    Rules are checked in priority order before falling back to LLM evaluation.
-    Use this to define deterministic success/failure conditions.
-
-    Example conditions:
-    - 'result.get("success") == True' - Check for explicit success flag
-    - 'result.get("error_type") == "timeout"' - Check for specific error type
-    - 'len(result.get("data", [])) > 0' - Check for non-empty data
-    """
-    global _evaluation_rules
-
-    # Validate action
-    valid_actions = ["accept", "retry", "replan", "escalate"]
-    if action.lower() not in valid_actions:
-        return json.dumps(
-            {
-                "success": False,
-                "error": f"Invalid action '{action}'. Must be one of: {valid_actions}",
-            }
-        )
-
-    # Check for duplicate
-    if any(r["id"] == rule_id for r in _evaluation_rules):
-        return json.dumps(
-            {
-                "success": False,
-                "error": f"Rule '{rule_id}' already exists",
-            }
-        )
-
-    rule = {
-        "id": rule_id,
-        "description": description,
-        "condition": condition,
-        "action": action.lower(),
-        "feedback_template": feedback_template,
-        "priority": priority,
-    }
-
-    _evaluation_rules.append(rule)
-    _evaluation_rules.sort(key=lambda r: -r["priority"])
-
-    return json.dumps(
-        {
-            "success": True,
-            "rule": rule,
-            "total_rules": len(_evaluation_rules),
-        }
-    )
-
-
-@mcp.tool()
-def list_evaluation_rules() -> str:
-    """List all configured evaluation rules for the HybridJudge."""
-    return json.dumps(
-        {
-            "rules": _evaluation_rules,
-            "total": len(_evaluation_rules),
-        }
-    )
-
-
-@mcp.tool()
-def remove_evaluation_rule(
-    rule_id: Annotated[str, "ID of the rule to remove"],
-) -> str:
-    """Remove an evaluation rule."""
-    global _evaluation_rules
-
-    for i, rule in enumerate(_evaluation_rules):
-        if rule["id"] == rule_id:
-            _evaluation_rules.pop(i)
-            return json.dumps({"success": True, "removed": rule_id})
-
-    return json.dumps({"success": False, "error": f"Rule '{rule_id}' not found"})
-
-
-@mcp.tool()
-def create_plan(
-    plan_id: Annotated[str, "Unique identifier for the plan"],
-    goal_id: Annotated[str, "ID of the goal this plan achieves"],
-    description: Annotated[str, "Description of what this plan does"],
-    steps: Annotated[
-        str,
-        "JSON array of plan steps with id, description, action, inputs, outputs, deps",
-    ],
-    context: Annotated[str, "JSON object with initial context for execution"] = "{}",
-) -> str:
-    """
-    Create a plan for flexible execution.
-
-    Plans are executed by the Worker-Judge loop. Each step specifies:
-    - id: Unique step identifier
-    - description: What this step does
-    - action: Object with action_type and parameters
-      - action_type: "llm_call", "tool_use", "function", "code_execution", "sub_graph"
-      - For llm_call: prompt, system_prompt
-      - For tool_use: tool_name, tool_args
-      - For function: function_name, function_args
-      - For code_execution: code
-    - inputs: Dict mapping input names to values or "$variable" references
-    - expected_outputs: List of output keys this step should produce
-    - dependencies: List of step IDs that must complete first (deps)
-
-    Example step:
-    {
-        "id": "step_1",
-        "description": "Fetch user data",
-        "action": {"action_type": "tool_use", "tool_name": "get_user", ...},
-        "inputs": {"user_id": "$input_user_id"},
-        "expected_outputs": ["user_data"],
-        "dependencies": []
-    }
-    """
-    try:
-        steps_list = json.loads(steps)
-        context_dict = json.loads(context)
-    except json.JSONDecodeError as e:
-        return json.dumps({"success": False, "error": f"Invalid JSON: {e}"})
-
-    # Validate steps
-    errors = []
-    step_ids = set()
-
-    for i, step in enumerate(steps_list):
-        if "id" not in step:
-            errors.append(f"Step {i} missing 'id'")
-        else:
-            if step["id"] in step_ids:
-                errors.append(f"Duplicate step id: {step['id']}")
-            step_ids.add(step["id"])
-
-        if "description" not in step:
-            errors.append(f"Step {i} missing 'description'")
-
-        if "action" not in step:
-            errors.append(f"Step {i} missing 'action'")
-        elif "action_type" not in step.get("action", {}):
-            errors.append(f"Step {i} action missing 'action_type'")
-
-        # Check dependencies exist
-        for dep in step.get("dependencies", []):
-            if dep not in step_ids:
-                errors.append(f"Step {step.get('id', i)} has unknown dependency: {dep}")
-
-    if errors:
-        return json.dumps({"success": False, "errors": errors})
-
-    # Build plan object
-    plan = {
-        "id": plan_id,
-        "goal_id": goal_id,
-        "description": description,
-        "steps": steps_list,
-        "context": context_dict,
-        "revision": 1,
-        "created_at": datetime.now().isoformat(),
-    }
-
-    return json.dumps(
-        {
-            "success": True,
-            "plan": plan,
-            "step_count": len(steps_list),
-            "note": "Plan created. Use execute_plan to run it with the Worker-Judge loop.",
-        },
-        indent=2,
-    )
-
-
-@mcp.tool()
-def validate_plan(
-    plan_json: Annotated[str, "JSON string of the plan to validate"],
-) -> str:
-    """
-    Validate a plan structure before execution.
-
-    Checks:
-    - All required fields present
-    - No circular dependencies
-    - All dependencies reference existing steps
-    - Action types are valid
-    - Context flow: all $variable references can be resolved
-    """
-    try:
-        plan = json.loads(plan_json)
-    except json.JSONDecodeError as e:
-        return json.dumps({"valid": False, "errors": [f"Invalid JSON: {e}"]})
-
-    errors = []
-    warnings = []
-
-    # Check required fields
-    required = ["id", "goal_id", "steps"]
-    for field in required:
-        if field not in plan:
-            errors.append(f"Missing required field: {field}")
-
-    if "steps" not in plan:
-        return json.dumps({"valid": False, "errors": errors})
-
-    steps = plan["steps"]
-    step_ids = {s.get("id") for s in steps if "id" in s}
-    steps_by_id = {s.get("id"): s for s in steps}
-
-    # Check each step
-    valid_action_types = ["llm_call", "tool_use", "function", "code_execution", "sub_graph"]
-
-    for i, step in enumerate(steps):
-        step_id = step.get("id", f"step_{i}")
-
-        # Check dependencies
-        for dep in step.get("dependencies", []):
-            if dep not in step_ids:
-                errors.append(f"Step '{step_id}': unknown dependency '{dep}'")
-
-        # Check action type
-        action = step.get("action", {})
-        action_type = action.get("action_type")
-        if action_type and action_type not in valid_action_types:
-            errors.append(f"Step '{step_id}': invalid action_type '{action_type}'")
-
-        # Check action has required params
-        if action_type == "llm_call" and not action.get("prompt"):
-            warnings.append(f"Step '{step_id}': llm_call without prompt")
-        if action_type == "tool_use" and not action.get("tool_name"):
-            errors.append(f"Step '{step_id}': tool_use requires tool_name")
-        if action_type == "code_execution" and not action.get("code"):
-            errors.append(f"Step '{step_id}': code_execution requires code")
-
-    # Check for circular dependencies
-    def has_cycle(step_id: str, visited: set, path: set) -> bool:
-        if step_id in path:
-            return True
-        if step_id in visited:
-            return False
-
-        visited.add(step_id)
-        path.add(step_id)
-
-        step = next((s for s in steps if s.get("id") == step_id), None)
-        if step:
-            for dep in step.get("dependencies", []):
-                if has_cycle(dep, visited, path):
-                    return True
-
-        path.remove(step_id)
-        return False
-
-    for step in steps:
-        if has_cycle(step.get("id", ""), set(), set()):
-            errors.append(f"Circular dependency detected involving step '{step.get('id')}'")
-            break
-
-    # === CONTEXT FLOW VALIDATION ===
-    # Compute what keys each step can access (from dependencies' outputs)
-
-    # Build output map (step_id -> expected_outputs)
-    step_outputs: dict[str, set[str]] = {}
-    for step in steps:
-        step_outputs[step.get("id", "")] = set(step.get("expected_outputs", []))
-
-    # Compute available context for each step in topological order
-    available_context: dict[str, set[str]] = {}
-    computed = set()
-    remaining = set(step_ids)
-
-    # Get initial context keys from plan.context
-    initial_context = set(plan.get("context", {}).keys())
-
-    for _ in range(len(steps) * 2):
-        if not remaining:
-            break
-
-        for step_id in list(remaining):
-            step = steps_by_id.get(step_id)
-            if not step:
-                remaining.discard(step_id)
-                continue
-
-            deps = step.get("dependencies", [])
-
-            # Can compute if all dependencies are computed
-            if all(d in computed for d in deps):
-                # Collect outputs from all dependencies (transitive)
-                available = set(initial_context)
-                for dep_id in deps:
-                    available.update(step_outputs.get(dep_id, set()))
-                    available.update(available_context.get(dep_id, set()))
-
-                available_context[step_id] = available
-                computed.add(step_id)
-                remaining.discard(step_id)
-                break
-
-    # Check each step's inputs can be resolved
-    context_errors = []
-    context_warnings = []
-
-    for step in steps:
-        step_id = step.get("id", "")
-        available = available_context.get(step_id, set())
-        deps = step.get("dependencies", [])
-        inputs = step.get("inputs", {})
-
-        missing_vars = []
-        for _, input_value in inputs.items():
-            # Check $variable references
-            if isinstance(input_value, str) and input_value.startswith("$"):
-                var_name = input_value[1:]  # Remove $ prefix
-                if var_name not in available:
-                    missing_vars.append(var_name)
-
-        if missing_vars:
-            if not deps:
-                # Entry step - inputs must come from initial context
-                context_warnings.append(
-                    f"Step '{step_id}' requires ${missing_vars} from initial context. "
-                    f"Ensure these are provided when running the agent: {missing_vars}"
-                )
-            else:
-                # Find which step could provide each missing var
-                suggestions = []
-                for var in missing_vars:
-                    producers = [s.get("id") for s in steps if var in s.get("expected_outputs", [])]
-                    if producers:
-                        suggestions.append(f"${var} is produced by {producers} - add as dependency")
-                    else:
-                        suggestions.append(
-                            f"${var} is not produced by any step - add a step that outputs '{var}'"
-                        )
-
-                context_errors.append(
-                    f"Step '{step_id}' references ${missing_vars} but deps "
-                    f"{deps} don't provide them. Suggestions: {'; '.join(suggestions)}"
-                )
-
-    errors.extend(context_errors)
-    warnings.extend(context_warnings)
-
-    return json.dumps(
-        {
-            "valid": len(errors) == 0,
-            "errors": errors,
-            "warnings": warnings,
-            "step_count": len(steps),
-            "context_flow": {step_id: list(keys) for step_id, keys in available_context.items()}
-            if available_context
-            else None,
-        }
-    )
-
-
-@mcp.tool()
-def simulate_plan_execution(
-    plan_json: Annotated[str, "JSON string of the plan to simulate"],
-    max_steps: Annotated[int, "Maximum steps to simulate"] = 20,
-) -> str:
-    """
-    Simulate plan execution without actually running it.
-
-    Shows the order steps would execute based on dependencies.
-    Useful for understanding the execution flow before running.
-    """
-    try:
-        plan = json.loads(plan_json)
-    except json.JSONDecodeError as e:
-        return json.dumps({"success": False, "error": f"Invalid JSON: {e}"})
-
-    # Validate first
-    validation = json.loads(validate_plan(plan_json))
-    if not validation["valid"]:
-        return json.dumps(
-            {
-                "success": False,
-                "error": "Plan is not valid",
-                "validation_errors": validation["errors"],
-            }
-        )
-
-    steps = plan.get("steps", [])
-    completed = set()
-    execution_order = []
-    iteration = 0
-
-    while len(completed) < len(steps) and iteration < max_steps:
-        iteration += 1
-
-        # Find ready steps
-        ready = []
-        for step in steps:
-            step_id = step.get("id")
-            if step_id in completed:
-                continue
-            deps = set(step.get("dependencies", []))
-            if deps.issubset(completed):
-                ready.append(step)
-
-        if not ready:
-            break
-
-        # Execute first ready step (in real execution, could be parallel)
-        step = ready[0]
-        step_id = step.get("id")
-
-        execution_order.append(
-            {
-                "iteration": iteration,
-                "step_id": step_id,
-                "description": step.get("description"),
-                "action_type": step.get("action", {}).get("action_type"),
-                "dependencies_met": list(step.get("dependencies", [])),
-                "parallel_candidates": [s.get("id") for s in ready[1:]],
-            }
-        )
-
-        completed.add(step_id)
-
-    remaining = [s.get("id") for s in steps if s.get("id") not in completed]
-
-    return json.dumps(
-        {
-            "success": True,
-            "execution_order": execution_order,
-            "steps_simulated": len(execution_order),
-            "remaining_steps": remaining,
-            "plan_complete": len(remaining) == 0,
-            "note": (
-                "This is a simulation. Actual execution may differ "
-                "based on step results and judge decisions."
-            ),
-        },
-        indent=2,
-    )
-
-
-# =============================================================================
 # TESTING TOOLS (Goal-Based Evaluation)
 # =============================================================================
 
@@ -2939,18 +2523,15 @@ def _format_success_criteria(criteria: list[SuccessCriterion]) -> str:
 
 # Test template for Claude to use when writing tests
 CONSTRAINT_TEST_TEMPLATE = '''@pytest.mark.asyncio
-async def test_constraint_{constraint_id}_{scenario}(mock_mode):
+async def test_constraint_{constraint_id}_{scenario}(runner, auto_responder, mock_mode):
     """Test: {description}"""
-    result = await default_agent.run({{"key": "value"}}, mock_mode=mock_mode)
-
-    # IMPORTANT: result is an ExecutionResult object with these attributes:
-    # - result.success: bool - whether the agent succeeded
-    # - result.output: dict - the agent's output data (access data here!)
-    # - result.error: str or None - error message if failed
+    await auto_responder.start()
+    try:
+        result = await runner.run({{"key": "value"}})
+    finally:
+        await auto_responder.stop()
 
     assert result.success, f"Agent failed: {{result.error}}"
-
-    # Access output data via result.output
     output_data = result.output or {{}}
 
     # Add constraint-specific assertions here
@@ -2958,18 +2539,15 @@ async def test_constraint_{constraint_id}_{scenario}(mock_mode):
 '''
 
 SUCCESS_TEST_TEMPLATE = '''@pytest.mark.asyncio
-async def test_success_{criteria_id}_{scenario}(mock_mode):
+async def test_success_{criteria_id}_{scenario}(runner, auto_responder, mock_mode):
     """Test: {description}"""
-    result = await default_agent.run({{"key": "value"}}, mock_mode=mock_mode)
-
-    # IMPORTANT: result is an ExecutionResult object with these attributes:
-    # - result.success: bool - whether the agent succeeded
-    # - result.output: dict - the agent's output data (access data here!)
-    # - result.error: str or None - error message if failed
+    await auto_responder.start()
+    try:
+        result = await runner.run({{"key": "value"}})
+    finally:
+        await auto_responder.stop()
 
     assert result.success, f"Agent failed: {{result.error}}"
-
-    # Access output data via result.output
     output_data = result.output or {{}}
 
     # Add success criteria-specific assertions here
@@ -3025,7 +2603,6 @@ def generate_constraint_tests(
         test_type="Constraint",
         agent_name=agent_module,
         description=f"Tests for constraints defined in goal: {goal.name}",
-        agent_module=agent_module,
     )
 
     # Return guidelines + data for Claude to write tests directly
@@ -3041,14 +2618,22 @@ def generate_constraint_tests(
                 "max_tests": 5,
                 "naming_convention": "test_constraint_<constraint_id>_<scenario>",
                 "required_decorator": "@pytest.mark.asyncio",
-                "required_fixture": "mock_mode",
-                "agent_call_pattern": "await default_agent.run(input_dict, mock_mode=mock_mode)",
+                "required_fixtures": "runner, auto_responder, mock_mode",
+                "agent_call_pattern": "await runner.run(input_dict)",
+                "auto_responder_pattern": (
+                    "await auto_responder.start()\n"
+                    "try:\n"
+                    "    result = await runner.run(input_dict)\n"
+                    "finally:\n"
+                    "    await auto_responder.stop()"
+                ),
                 "result_type": "ExecutionResult with .success, .output (dict), .error",
                 "critical_rules": [
                     "Every test function MUST be async with @pytest.mark.asyncio",
-                    "Every test MUST accept mock_mode as a parameter",
-                    "Use await default_agent.run(input, mock_mode=mock_mode)",
-                    "default_agent is already imported - do NOT add imports",
+                    "Every test MUST accept runner, auto_responder, and mock_mode fixtures",
+                    "Use await runner.run(input) -- NOT default_agent.run()",
+                    "Start auto_responder before running, stop in finally block",
+                    "runner and auto_responder are from conftest.py -- do NOT import them",
                     "NEVER call result.get() - use result.output.get() instead",
                     "Always check result.success before accessing result.output",
                 ],
@@ -3112,7 +2697,6 @@ def generate_success_tests(
         test_type="Success criteria",
         agent_name=agent_module,
         description=f"Tests for success criteria defined in goal: {goal.name}",
-        agent_module=agent_module,
     )
 
     # Return guidelines + data for Claude to write tests directly
@@ -3134,14 +2718,22 @@ def generate_success_tests(
                 "max_tests": 12,
                 "naming_convention": "test_success_<criteria_id>_<scenario>",
                 "required_decorator": "@pytest.mark.asyncio",
-                "required_fixture": "mock_mode",
-                "agent_call_pattern": "await default_agent.run(input_dict, mock_mode=mock_mode)",
+                "required_fixtures": "runner, auto_responder, mock_mode",
+                "agent_call_pattern": "await runner.run(input_dict)",
+                "auto_responder_pattern": (
+                    "await auto_responder.start()\n"
+                    "try:\n"
+                    "    result = await runner.run(input_dict)\n"
+                    "finally:\n"
+                    "    await auto_responder.stop()"
+                ),
                 "result_type": "ExecutionResult with .success, .output (dict), .error",
                 "critical_rules": [
                     "Every test function MUST be async with @pytest.mark.asyncio",
-                    "Every test MUST accept mock_mode as a parameter",
-                    "Use await default_agent.run(input, mock_mode=mock_mode)",
-                    "default_agent is already imported - do NOT add imports",
+                    "Every test MUST accept runner, auto_responder, and mock_mode fixtures",
+                    "Use await runner.run(input) -- NOT default_agent.run()",
+                    "Start auto_responder before running, stop in finally block",
+                    "runner and auto_responder are from conftest.py -- do NOT import them",
                     "NEVER call result.get() - use result.output.get() instead",
                     "Always check result.success before accessing result.output",
                 ],
@@ -3238,11 +2830,13 @@ def run_tests(
     # Add short traceback and quiet summary
     cmd.append("--tb=short")
 
-    # Set PYTHONPATH to project root so agents can import from core.framework
+    # Set PYTHONPATH so framework and agent packages are importable
     env = os.environ.copy()
     pythonpath = env.get("PYTHONPATH", "")
     project_root = Path(__file__).parent.parent.parent.parent.resolve()
-    env["PYTHONPATH"] = f"{project_root}:{pythonpath}"
+    core_path = project_root / "core"
+    exports_path = project_root / "exports"
+    env["PYTHONPATH"] = f"{core_path}:{exports_path}:{project_root}:{pythonpath}"
 
     # Run pytest
     try:
@@ -3612,89 +3206,36 @@ def list_tests(
 
 
 # =============================================================================
-# PLAN LOADING AND EXECUTION
-# =============================================================================
-
-
-def load_plan_from_json(plan_json: str | dict) -> Plan:
-    """
-    Load a Plan object from exported JSON.
-
-    Args:
-        plan_json: JSON string or dict from export_graph()
-
-    Returns:
-        Plan object ready for FlexibleGraphExecutor
-    """
-    from framework.graph.plan import Plan
-
-    return Plan.from_json(plan_json)
-
-
-@mcp.tool()
-def load_exported_plan(
-    plan_json: Annotated[str, "JSON string from export_graph() output"],
-) -> str:
-    """
-    Validate and load an exported plan, returning its structure.
-
-    Use this to verify a plan can be loaded before execution.
-    """
-    try:
-        plan = load_plan_from_json(plan_json)
-        return json.dumps(
-            {
-                "success": True,
-                "plan_id": plan.id,
-                "goal_id": plan.goal_id,
-                "description": plan.description,
-                "step_count": len(plan.steps),
-                "steps": [
-                    {
-                        "id": s.id,
-                        "description": s.description,
-                        "action_type": s.action.action_type.value,
-                        "dependencies": s.dependencies,
-                    }
-                    for s in plan.steps
-                ],
-            },
-            indent=2,
-        )
-    except Exception as e:
-        return json.dumps({"success": False, "error": str(e)})
-
-
-# =============================================================================
 # CREDENTIAL STORE TOOLS
 # =============================================================================
 
 
 def _get_credential_store():
-    """Get a CredentialStore that checks encrypted files and env vars.
+    """Get a CredentialStore that checks encrypted files, env vars, and Aden sync.
 
-    Uses CompositeStorage: encrypted file storage (primary) with env var fallback.
-    This ensures credentials stored via `store_credential` AND env vars are both found.
+    Uses CredentialStoreAdapter.default() which handles:
+    - Aden sync + provider index (resolving hashed IDs for OAuth)
+    - CompositeStorage (encrypted primary + env fallback)
+    - Auto-refresh of OAuth tokens
+    - Graceful fallback if Aden is unavailable
     """
-    from framework.credentials import CredentialStore
-    from framework.credentials.storage import CompositeStorage, EncryptedFileStorage, EnvVarStorage
-
-    # Build env var mapping from CREDENTIAL_SPECS for the fallback
-    env_mapping: dict[str, str] = {}
     try:
-        from aden_tools.credentials import CREDENTIAL_SPECS
+        from aden_tools.credentials.store_adapter import CredentialStoreAdapter
 
-        for name, spec in CREDENTIAL_SPECS.items():
-            cred_id = spec.credential_id or name
-            env_mapping[cred_id] = spec.env_var
+        return CredentialStoreAdapter.default().store
     except ImportError:
-        pass
+        from framework.credentials import CredentialStore
+        from framework.credentials.storage import (
+            CompositeStorage,
+            EncryptedFileStorage,
+            EnvVarStorage,
+        )
 
-    storage = CompositeStorage(
-        primary=EncryptedFileStorage(),
-        fallbacks=[EnvVarStorage(env_mapping=env_mapping)],
-    )
-    return CredentialStore(storage=storage)
+        storage = CompositeStorage(
+            primary=EncryptedFileStorage(),
+            fallbacks=[EnvVarStorage(env_mapping={})],
+        )
+        return CredentialStore(storage=storage)
 
 
 @mcp.tool()
@@ -3712,7 +3253,11 @@ def check_missing_credentials(
 
         from framework.runner import AgentRunner
 
-        runner = AgentRunner.load(agent_path)
+        path, err = _validate_agent_path(agent_path)
+        if err:
+            return err
+
+        runner = AgentRunner.load(str(path))
         runner.validate()
 
         store = _get_credential_store()
@@ -3912,7 +3457,11 @@ def verify_credentials(
     try:
         from framework.runner import AgentRunner
 
-        runner = AgentRunner.load(agent_path)
+        path, err = _validate_agent_path(agent_path)
+        if err:
+            return err
+
+        runner = AgentRunner.load(str(path))
         validation = runner.validate()
 
         return json.dumps(
@@ -3927,6 +3476,382 @@ def verify_credentials(
         )
     except Exception as e:
         return json.dumps({"error": str(e)})
+
+
+# =============================================================================
+# SESSION & CHECKPOINT TOOLS (read-only, no build session required)
+# =============================================================================
+
+_MAX_DIFF_VALUE_LEN = 500
+
+
+def _read_session_json(path: Path) -> dict | None:
+    """Read a JSON file, returning None on failure."""
+    if not path.exists():
+        return None
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return None
+
+
+def _scan_agent_sessions(agent_work_dir: Path) -> list[tuple[str, Path]]:
+    """Find session directories with state.json, sorted most-recent-first."""
+    sessions: list[tuple[str, Path]] = []
+    sessions_dir = agent_work_dir / "sessions"
+    if not sessions_dir.exists():
+        return sessions
+    for session_dir in sessions_dir.iterdir():
+        if session_dir.is_dir() and session_dir.name.startswith("session_"):
+            state_path = session_dir / "state.json"
+            if state_path.exists():
+                sessions.append((session_dir.name, state_path))
+    sessions.sort(key=lambda t: t[0], reverse=True)
+    return sessions
+
+
+def _truncate_value(value: object, max_len: int = _MAX_DIFF_VALUE_LEN) -> object:
+    """Truncate a value's JSON representation if too long."""
+    s = json.dumps(value, default=str)
+    if len(s) <= max_len:
+        return value
+    return {"_truncated": True, "_preview": s[:max_len] + "...", "_length": len(s)}
+
+
+@mcp.tool()
+def list_agent_sessions(
+    agent_work_dir: Annotated[
+        str,
+        "Path to the agent's working directory (e.g., ~/.hive/agents/my_agent)",
+    ],
+    status: Annotated[
+        str,
+        "Filter by status: 'active', 'paused', 'completed', 'failed', 'cancelled'. Empty for all.",
+    ] = "",
+    limit: Annotated[int, "Maximum number of results (default 20)"] = 20,
+    offset: Annotated[int, "Number of sessions to skip for pagination"] = 0,
+) -> str:
+    """
+    List sessions for an agent with optional status filter.
+
+    Use this to discover which sessions exist, find resumable sessions,
+    or identify failed sessions for debugging. Combines well with
+    query_runtime_logs for correlating session state with log data.
+    """
+    work_dir = Path(agent_work_dir)
+    all_sessions = _scan_agent_sessions(work_dir)
+
+    if not all_sessions:
+        return json.dumps({"sessions": [], "total": 0, "offset": offset, "limit": limit})
+
+    summaries = []
+    for session_id, state_path in all_sessions:
+        data = _read_session_json(state_path)
+        if data is None:
+            continue
+
+        session_status = data.get("status", "")
+        if status and session_status != status:
+            continue
+
+        timestamps = data.get("timestamps", {})
+        progress = data.get("progress", {})
+        checkpoint_dir = state_path.parent / "checkpoints"
+
+        summaries.append(
+            {
+                "session_id": session_id,
+                "status": session_status,
+                "goal_id": data.get("goal_id", ""),
+                "started_at": timestamps.get("started_at", ""),
+                "updated_at": timestamps.get("updated_at", ""),
+                "completed_at": timestamps.get("completed_at"),
+                "is_resumable": data.get("is_resumable", False),
+                "is_resumable_from_checkpoint": data.get("is_resumable_from_checkpoint", False),
+                "current_node": progress.get("current_node"),
+                "paused_at": progress.get("paused_at"),
+                "steps_executed": progress.get("steps_executed", 0),
+                "execution_quality": progress.get("execution_quality", ""),
+                "has_checkpoints": checkpoint_dir.exists()
+                and any(checkpoint_dir.glob("cp_*.json")),
+            }
+        )
+
+    total = len(summaries)
+    page = summaries[offset : offset + limit]
+    return json.dumps(
+        {"sessions": page, "total": total, "offset": offset, "limit": limit}, indent=2
+    )
+
+
+@mcp.tool()
+def get_agent_session_state(
+    agent_work_dir: Annotated[str, "Path to the agent's working directory"],
+    session_id: Annotated[str, "The session ID (e.g., 'session_20260208_143022_abc12345')"],
+) -> str:
+    """
+    Load full session state for a specific session.
+
+    Returns complete session data including status, progress, result,
+    metrics, and checkpoint info. Memory values are excluded to prevent
+    context bloat -- use get_agent_session_memory to retrieve memory contents.
+    """
+    state_path = Path(agent_work_dir) / "sessions" / session_id / "state.json"
+    data = _read_session_json(state_path)
+    if data is None:
+        return json.dumps({"error": f"Session not found: {session_id}"})
+
+    memory = data.get("memory", {})
+    data["memory_keys"] = list(memory.keys()) if isinstance(memory, dict) else []
+    data["memory_size"] = len(memory) if isinstance(memory, dict) else 0
+    data.pop("memory", None)
+
+    return json.dumps(data, indent=2, default=str)
+
+
+@mcp.tool()
+def get_agent_session_memory(
+    agent_work_dir: Annotated[str, "Path to the agent's working directory"],
+    session_id: Annotated[str, "The session ID"],
+    key: Annotated[str, "Specific memory key to retrieve. Empty for all."] = "",
+) -> str:
+    """
+    Get memory contents from a session.
+
+    Memory stores intermediate results passed between nodes. Use this
+    to inspect what data was produced during execution.
+
+    If key is provided, returns only that memory key's value.
+    If key is empty, returns all memory keys and their values.
+    """
+    state_path = Path(agent_work_dir) / "sessions" / session_id / "state.json"
+    data = _read_session_json(state_path)
+    if data is None:
+        return json.dumps({"error": f"Session not found: {session_id}"})
+
+    memory = data.get("memory", {})
+    if not isinstance(memory, dict):
+        memory = {}
+
+    if key:
+        if key not in memory:
+            return json.dumps(
+                {
+                    "error": f"Memory key not found: '{key}'",
+                    "available_keys": list(memory.keys()),
+                }
+            )
+        value = memory[key]
+        return json.dumps(
+            {
+                "session_id": session_id,
+                "key": key,
+                "value": value,
+                "value_type": type(value).__name__,
+            },
+            indent=2,
+            default=str,
+        )
+
+    return json.dumps(
+        {"session_id": session_id, "memory": memory, "total_keys": len(memory)},
+        indent=2,
+        default=str,
+    )
+
+
+@mcp.tool()
+def list_agent_checkpoints(
+    agent_work_dir: Annotated[str, "Path to the agent's working directory"],
+    session_id: Annotated[str, "The session ID to list checkpoints for"],
+    checkpoint_type: Annotated[
+        str,
+        "Filter by type: 'node_start', 'node_complete', 'loop_iteration'. Empty for all.",
+    ] = "",
+    is_clean: Annotated[str, "Filter by clean status: 'true', 'false', or empty for all."] = "",
+) -> str:
+    """
+    List checkpoints for a specific session.
+
+    Checkpoints capture execution state at node boundaries for
+    crash recovery and resume. Use with get_agent_checkpoint for
+    detailed checkpoint inspection.
+    """
+    session_dir = Path(agent_work_dir) / "sessions" / session_id
+    checkpoint_dir = session_dir / "checkpoints"
+
+    if not session_dir.exists():
+        return json.dumps({"error": f"Session not found: {session_id}"})
+
+    if not checkpoint_dir.exists():
+        return json.dumps(
+            {
+                "session_id": session_id,
+                "checkpoints": [],
+                "total": 0,
+                "latest_checkpoint_id": None,
+            }
+        )
+
+    # Try index.json first
+    index_data = _read_session_json(checkpoint_dir / "index.json")
+    if index_data and "checkpoints" in index_data:
+        checkpoints = index_data["checkpoints"]
+    else:
+        # Fallback: scan individual checkpoint files
+        checkpoints = []
+        for cp_file in sorted(checkpoint_dir.glob("cp_*.json")):
+            cp_data = _read_session_json(cp_file)
+            if cp_data:
+                checkpoints.append(
+                    {
+                        "checkpoint_id": cp_data.get("checkpoint_id", cp_file.stem),
+                        "checkpoint_type": cp_data.get("checkpoint_type", ""),
+                        "created_at": cp_data.get("created_at", ""),
+                        "current_node": cp_data.get("current_node"),
+                        "next_node": cp_data.get("next_node"),
+                        "is_clean": cp_data.get("is_clean", True),
+                        "description": cp_data.get("description", ""),
+                    }
+                )
+
+    # Apply filters
+    if checkpoint_type:
+        checkpoints = [c for c in checkpoints if c.get("checkpoint_type") == checkpoint_type]
+    if is_clean:
+        clean_val = is_clean.lower() == "true"
+        checkpoints = [c for c in checkpoints if c.get("is_clean") == clean_val]
+
+    latest_id = None
+    if index_data:
+        latest_id = index_data.get("latest_checkpoint_id")
+    elif checkpoints:
+        latest_id = checkpoints[-1].get("checkpoint_id")
+
+    return json.dumps(
+        {
+            "session_id": session_id,
+            "checkpoints": checkpoints,
+            "total": len(checkpoints),
+            "latest_checkpoint_id": latest_id,
+        },
+        indent=2,
+    )
+
+
+@mcp.tool()
+def get_agent_checkpoint(
+    agent_work_dir: Annotated[str, "Path to the agent's working directory"],
+    session_id: Annotated[str, "The session ID"],
+    checkpoint_id: Annotated[str, "Specific checkpoint ID, or empty for latest"] = "",
+) -> str:
+    """
+    Load a specific checkpoint with full state data.
+
+    Returns the complete checkpoint including shared memory snapshot,
+    execution path, accumulated outputs, and metrics. If checkpoint_id
+    is empty, loads the latest checkpoint.
+    """
+    session_dir = Path(agent_work_dir) / "sessions" / session_id
+    checkpoint_dir = session_dir / "checkpoints"
+
+    if not checkpoint_dir.exists():
+        return json.dumps({"error": f"No checkpoints found for session: {session_id}"})
+
+    if not checkpoint_id:
+        index_data = _read_session_json(checkpoint_dir / "index.json")
+        if index_data and index_data.get("latest_checkpoint_id"):
+            checkpoint_id = index_data["latest_checkpoint_id"]
+        else:
+            cp_files = sorted(checkpoint_dir.glob("cp_*.json"))
+            if not cp_files:
+                return json.dumps({"error": f"No checkpoints found for session: {session_id}"})
+            checkpoint_id = cp_files[-1].stem
+
+    cp_path = checkpoint_dir / f"{checkpoint_id}.json"
+    data = _read_session_json(cp_path)
+    if data is None:
+        return json.dumps({"error": f"Checkpoint not found: {checkpoint_id}"})
+
+    return json.dumps(data, indent=2, default=str)
+
+
+@mcp.tool()
+def compare_agent_checkpoints(
+    agent_work_dir: Annotated[str, "Path to the agent's working directory"],
+    session_id: Annotated[str, "The session ID"],
+    checkpoint_id_before: Annotated[str, "The earlier checkpoint ID"],
+    checkpoint_id_after: Annotated[str, "The later checkpoint ID"],
+) -> str:
+    """
+    Compare memory state between two checkpoints.
+
+    Shows what memory keys were added, removed, or changed between
+    two points in execution. Useful for understanding how data flows
+    through the agent graph.
+    """
+    checkpoint_dir = Path(agent_work_dir) / "sessions" / session_id / "checkpoints"
+
+    before = _read_session_json(checkpoint_dir / f"{checkpoint_id_before}.json")
+    if before is None:
+        return json.dumps({"error": f"Checkpoint not found: {checkpoint_id_before}"})
+
+    after = _read_session_json(checkpoint_dir / f"{checkpoint_id_after}.json")
+    if after is None:
+        return json.dumps({"error": f"Checkpoint not found: {checkpoint_id_after}"})
+
+    mem_before = before.get("shared_memory", {})
+    mem_after = after.get("shared_memory", {})
+
+    keys_before = set(mem_before.keys())
+    keys_after = set(mem_after.keys())
+
+    added = {k: _truncate_value(mem_after[k]) for k in keys_after - keys_before}
+    removed = list(keys_before - keys_after)
+    unchanged = []
+    changed = {}
+
+    for k in keys_before & keys_after:
+        if mem_before[k] == mem_after[k]:
+            unchanged.append(k)
+        else:
+            changed[k] = {
+                "before": _truncate_value(mem_before[k]),
+                "after": _truncate_value(mem_after[k]),
+            }
+
+    path_before = before.get("execution_path", [])
+    path_after = after.get("execution_path", [])
+    new_nodes = path_after[len(path_before) :]
+
+    return json.dumps(
+        {
+            "session_id": session_id,
+            "before": {
+                "checkpoint_id": checkpoint_id_before,
+                "current_node": before.get("current_node"),
+                "created_at": before.get("created_at", ""),
+            },
+            "after": {
+                "checkpoint_id": checkpoint_id_after,
+                "current_node": after.get("current_node"),
+                "created_at": after.get("created_at", ""),
+            },
+            "memory_diff": {
+                "added": added,
+                "removed": removed,
+                "changed": changed,
+                "unchanged": unchanged,
+            },
+            "execution_path_diff": {
+                "new_nodes": new_nodes,
+                "path_before": path_before,
+                "path_after": path_after,
+            },
+        },
+        indent=2,
+        default=str,
+    )
 
 
 # =============================================================================

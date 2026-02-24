@@ -32,26 +32,26 @@ Each goal has weighted success criteria that define what "done" looks like. Thes
 
 ```python
 Goal(
-    id="twitter-outreach",
-    name="Personalized Twitter Outreach",
+    id="deep-research",
+    name="Deep Research Report",
     success_criteria=[
         SuccessCriterion(
-            id="personalized",
-            description="Messages reference specific details from the prospect's profile",
+            id="comprehensive",
+            description="Report covers all major aspects of the research topic",
             metric="llm_judge",
             weight=0.4
         ),
         SuccessCriterion(
-            id="compliant",
-            description="Messages follow brand voice guidelines",
+            id="cited",
+            description="All claims are backed by cited sources",
             metric="llm_judge",
             weight=0.3
         ),
         SuccessCriterion(
-            id="actionable",
-            description="Each message includes a clear call to action",
+            id="structured",
+            description="Report has clear sections with headings and a summary",
             metric="output_contains",
-            target="CTA",
+            target="## Summary",
             weight=0.3
         ),
     ],

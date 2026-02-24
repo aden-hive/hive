@@ -66,7 +66,7 @@ prompt_choice() {
 
     local choice
     while true; do
-        read -r -p "Enter choice (1-${#options[@]}): " choice
+        read -r -p "Enter choice (1-${#options[@]}): " choice || true
         if [[ "$choice" =~ ^[0-9]+$ ]] && [ "$choice" -ge 1 ] && [ "$choice" -le "${#options[@]}" ]; then
             PROMPT_CHOICE=$((choice - 1))
             return 0
@@ -303,14 +303,72 @@ if [ "$USE_ASSOC_ARRAYS" = true ]; then
     )
 
     declare -A DEFAULT_MODELS=(
-        ["anthropic"]="claude-sonnet-4-5-20250929"
-        ["openai"]="gpt-4o"
-        ["gemini"]="gemini-3.0-flash-preview"
+        ["anthropic"]="claude-haiku-4-5"
+        ["openai"]="gpt-5-mini"
+        ["gemini"]="gemini-3-flash-preview"
         ["groq"]="moonshotai/kimi-k2-instruct-0905"
         ["cerebras"]="zai-glm-4.7"
         ["mistral"]="mistral-large-latest"
         ["together_ai"]="meta-llama/Llama-3.3-70B-Instruct-Turbo"
         ["deepseek"]="deepseek-chat"
+    )
+
+    # Model choices per provider: composite-key associative arrays
+    # Keys: "provider:index" -> value
+    declare -A MODEL_CHOICES_ID=(
+        ["anthropic:0"]="claude-opus-4-6"
+        ["anthropic:1"]="claude-sonnet-4-5-20250929"
+        ["anthropic:2"]="claude-sonnet-4-20250514"
+        ["anthropic:3"]="claude-haiku-4-5-20251001"
+        ["openai:0"]="gpt-5.2"
+        ["openai:1"]="gpt-5-mini"
+        ["openai:2"]="gpt-5-nano"
+        ["gemini:0"]="gemini-3-flash-preview"
+        ["gemini:1"]="gemini-3-pro-preview"
+        ["groq:0"]="moonshotai/kimi-k2-instruct-0905"
+        ["groq:1"]="openai/gpt-oss-120b"
+        ["cerebras:0"]="zai-glm-4.7"
+        ["cerebras:1"]="qwen3-235b-a22b-instruct-2507"
+    )
+
+    declare -A MODEL_CHOICES_LABEL=(
+        ["anthropic:0"]="Opus 4.6 - Most capable (recommended)"
+        ["anthropic:1"]="Sonnet 4.5 - Best balance"
+        ["anthropic:2"]="Sonnet 4 - Fast + capable"
+        ["anthropic:3"]="Haiku 4.5 - Fast + cheap"
+        ["openai:0"]="GPT-5.2 - Most capable (recommended)"
+        ["openai:1"]="GPT-5 Mini - Fast + cheap"
+        ["openai:2"]="GPT-5 Nano - Fastest"
+        ["gemini:0"]="Gemini 3 Flash - Fast (recommended)"
+        ["gemini:1"]="Gemini 3 Pro - Best quality"
+        ["groq:0"]="Kimi K2 - Best quality (recommended)"
+        ["groq:1"]="GPT-OSS 120B - Fast reasoning"
+        ["cerebras:0"]="ZAI-GLM 4.7 - Best quality (recommended)"
+        ["cerebras:1"]="Qwen3 235B - Frontier reasoning"
+    )
+
+    declare -A MODEL_CHOICES_MAXTOKENS=(
+        ["anthropic:0"]=32768
+        ["anthropic:1"]=16384
+        ["anthropic:2"]=8192
+        ["anthropic:3"]=8192
+        ["openai:0"]=16384
+        ["openai:1"]=16384
+        ["openai:2"]=16384
+        ["gemini:0"]=8192
+        ["gemini:1"]=8192
+        ["groq:0"]=8192
+        ["groq:1"]=8192
+        ["cerebras:0"]=8192
+        ["cerebras:1"]=8192
+    )
+
+    declare -A MODEL_CHOICES_COUNT=(
+        ["anthropic"]=4
+        ["openai"]=3
+        ["gemini"]=2
+        ["groq"]=2
+        ["cerebras"]=2
     )
 
     # Helper functions for Bash 4+
@@ -325,6 +383,22 @@ if [ "$USE_ASSOC_ARRAYS" = true ]; then
     get_default_model() {
         echo "${DEFAULT_MODELS[$1]}"
     }
+
+    get_model_choice_count() {
+        echo "${MODEL_CHOICES_COUNT[$1]:-0}"
+    }
+
+    get_model_choice_id() {
+        echo "${MODEL_CHOICES_ID[$1:$2]}"
+    }
+
+    get_model_choice_label() {
+        echo "${MODEL_CHOICES_LABEL[$1:$2]}"
+    }
+
+    get_model_choice_maxtokens() {
+        echo "${MODEL_CHOICES_MAXTOKENS[$1:$2]}"
+    }
 else
     # Bash 3.2 - use parallel indexed arrays
     PROVIDER_ENV_VARS=(ANTHROPIC_API_KEY OPENAI_API_KEY GEMINI_API_KEY GOOGLE_API_KEY GROQ_API_KEY CEREBRAS_API_KEY MISTRAL_API_KEY TOGETHER_API_KEY DEEPSEEK_API_KEY)
@@ -333,7 +407,7 @@ else
 
     # Default models by provider id (parallel arrays)
     MODEL_PROVIDER_IDS=(anthropic openai gemini groq cerebras mistral together_ai deepseek)
-    MODEL_DEFAULTS=("claude-sonnet-4-5-20250929" "gpt-4o" "gemini-3.0-flash-preview" "moonshotai/kimi-k2-instruct-0905" "zai-glm-4.7" "mistral-large-latest" "meta-llama/Llama-3.3-70B-Instruct-Turbo" "deepseek-chat")
+    MODEL_DEFAULTS=("claude-opus-4-6" "gpt-5.2" "gemini-3-flash-preview" "moonshotai/kimi-k2-instruct-0905" "zai-glm-4.7" "mistral-large-latest" "meta-llama/Llama-3.3-70B-Instruct-Turbo" "deepseek-chat")
 
     # Helper: get provider display name for an env var
     get_provider_name() {
@@ -369,6 +443,81 @@ else
             if [ "${MODEL_PROVIDER_IDS[$i]}" = "$provider_id" ]; then
                 echo "${MODEL_DEFAULTS[$i]}"
                 return
+            fi
+            i=$((i + 1))
+        done
+    }
+
+    # Model choices per provider - flat parallel arrays with provider offsets
+    # Provider order: anthropic(4), openai(3), gemini(2), groq(2), cerebras(2)
+    MC_PROVIDERS=(anthropic anthropic anthropic anthropic openai openai openai gemini gemini groq groq cerebras cerebras)
+    MC_IDS=("claude-opus-4-6" "claude-sonnet-4-5-20250929" "claude-sonnet-4-20250514" "claude-haiku-4-5-20251001" "gpt-5.2" "gpt-5-mini" "gpt-5-nano" "gemini-3-flash-preview" "gemini-3-pro-preview" "moonshotai/kimi-k2-instruct-0905" "openai/gpt-oss-120b" "zai-glm-4.7" "qwen3-235b-a22b-instruct-2507")
+    MC_LABELS=("Opus 4.6 - Most capable (recommended)" "Sonnet 4.5 - Best balance" "Sonnet 4 - Fast + capable" "Haiku 4.5 - Fast + cheap" "GPT-5.2 - Most capable (recommended)" "GPT-5 Mini - Fast + cheap" "GPT-5 Nano - Fastest" "Gemini 3 Flash - Fast (recommended)" "Gemini 3 Pro - Best quality" "Kimi K2 - Best quality (recommended)" "GPT-OSS 120B - Fast reasoning" "ZAI-GLM 4.7 - Best quality (recommended)" "Qwen3 235B - Frontier reasoning")
+    MC_MAXTOKENS=(32768 16384 8192 8192 16384 16384 16384 8192 8192 8192 8192 8192 8192)
+
+    # Helper: get number of model choices for a provider
+    get_model_choice_count() {
+        local provider_id="$1"
+        local count=0
+        local i=0
+        while [ $i -lt ${#MC_PROVIDERS[@]} ]; do
+            if [ "${MC_PROVIDERS[$i]}" = "$provider_id" ]; then
+                count=$((count + 1))
+            fi
+            i=$((i + 1))
+        done
+        echo "$count"
+    }
+
+    # Helper: get model choice id by provider and index (0-based within provider)
+    get_model_choice_id() {
+        local provider_id="$1"
+        local idx="$2"
+        local count=0
+        local i=0
+        while [ $i -lt ${#MC_PROVIDERS[@]} ]; do
+            if [ "${MC_PROVIDERS[$i]}" = "$provider_id" ]; then
+                if [ $count -eq "$idx" ]; then
+                    echo "${MC_IDS[$i]}"
+                    return
+                fi
+                count=$((count + 1))
+            fi
+            i=$((i + 1))
+        done
+    }
+
+    # Helper: get model choice label by provider and index
+    get_model_choice_label() {
+        local provider_id="$1"
+        local idx="$2"
+        local count=0
+        local i=0
+        while [ $i -lt ${#MC_PROVIDERS[@]} ]; do
+            if [ "${MC_PROVIDERS[$i]}" = "$provider_id" ]; then
+                if [ $count -eq "$idx" ]; then
+                    echo "${MC_LABELS[$i]}"
+                    return
+                fi
+                count=$((count + 1))
+            fi
+            i=$((i + 1))
+        done
+    }
+
+    # Helper: get model choice max_tokens by provider and index
+    get_model_choice_maxtokens() {
+        local provider_id="$1"
+        local idx="$2"
+        local count=0
+        local i=0
+        while [ $i -lt ${#MC_PROVIDERS[@]} ]; do
+            if [ "${MC_PROVIDERS[$i]}" = "$provider_id" ]; then
+                if [ $count -eq "$idx" ]; then
+                    echo "${MC_MAXTOKENS[$i]}"
+                    return
+                fi
+                count=$((count + 1))
             fi
             i=$((i + 1))
         done
@@ -411,12 +560,76 @@ detect_shell_rc() {
 SHELL_RC_FILE=$(detect_shell_rc)
 SHELL_NAME=$(basename "$SHELL")
 
+# Prompt the user to choose a model for their selected provider.
+# Sets SELECTED_MODEL and SELECTED_MAX_TOKENS.
+prompt_model_selection() {
+    local provider_id="$1"
+    local count
+    count="$(get_model_choice_count "$provider_id")"
+
+    if [ "$count" -eq 0 ]; then
+        # No curated choices for this provider (e.g. Mistral, DeepSeek)
+        SELECTED_MODEL="$(get_default_model "$provider_id")"
+        SELECTED_MAX_TOKENS=8192
+        return
+    fi
+
+    if [ "$count" -eq 1 ]; then
+        # Only one choice — auto-select
+        SELECTED_MODEL="$(get_model_choice_id "$provider_id" 0)"
+        SELECTED_MAX_TOKENS="$(get_model_choice_maxtokens "$provider_id" 0)"
+        return
+    fi
+
+    # Multiple choices — show menu
+    echo ""
+    echo -e "${BOLD}Select a model:${NC}"
+    echo ""
+
+    local i=0
+    while [ $i -lt "$count" ]; do
+        local label
+        label="$(get_model_choice_label "$provider_id" "$i")"
+        local mid
+        mid="$(get_model_choice_id "$provider_id" "$i")"
+        local num=$((i + 1))
+        echo -e "  ${CYAN}$num)${NC} $label  ${DIM}($mid)${NC}"
+        i=$((i + 1))
+    done
+    echo ""
+
+    local choice
+    while true; do
+        read -r -p "Enter choice (1-$count): " choice || true
+        if [[ "$choice" =~ ^[0-9]+$ ]] && [ "$choice" -ge 1 ] && [ "$choice" -le "$count" ]; then
+            local idx=$((choice - 1))
+            SELECTED_MODEL="$(get_model_choice_id "$provider_id" "$idx")"
+            SELECTED_MAX_TOKENS="$(get_model_choice_maxtokens "$provider_id" "$idx")"
+            echo ""
+            echo -e "${GREEN}⬢${NC} Model: ${DIM}$SELECTED_MODEL${NC}"
+            return
+        fi
+        echo -e "${RED}Invalid choice. Please enter 1-$count${NC}"
+    done
+}
+
 # Function to save configuration
+# Args: provider_id env_var model max_tokens [use_claude_code_sub] [api_base]
 save_configuration() {
     local provider_id="$1"
     local env_var="$2"
-    local model
-    model="$(get_default_model "$provider_id")"
+    local model="$3"
+    local max_tokens="$4"
+    local use_claude_code_sub="${5:-}"
+    local api_base="${6:-}"
+
+    # Fallbacks if not provided
+    if [ -z "$model" ]; then
+        model="$(get_default_model "$provider_id")"
+    fi
+    if [ -z "$max_tokens" ]; then
+        max_tokens=8192
+    fi
 
     mkdir -p "$HIVE_CONFIG_DIR"
 
@@ -426,10 +639,17 @@ config = {
     'llm': {
         'provider': '$provider_id',
         'model': '$model',
+        'max_tokens': $max_tokens,
         'api_key_env_var': '$env_var'
     },
     'created_at': '$(date -u +"%Y-%m-%dT%H:%M:%S+00:00")'
 }
+if '$use_claude_code_sub' == 'true':
+    config['llm']['use_claude_code_subscription'] = True
+    # No api_key_env_var needed for Claude Code subscription
+    config['llm'].pop('api_key_env_var', None)
+if '$api_base':
+    config['llm']['api_base'] = '$api_base'
 with open('$HIVE_CONFIG_FILE', 'w') as f:
     json.dump(config, f, indent=2)
 print(json.dumps(config, indent=2))
@@ -449,8 +669,49 @@ FOUND_PROVIDERS=()      # Display names for UI
 FOUND_ENV_VARS=()       # Corresponding env var names
 SELECTED_PROVIDER_ID="" # Will hold the chosen provider ID
 SELECTED_ENV_VAR=""     # Will hold the chosen env var
+SELECTED_MODEL=""       # Will hold the chosen model ID
+SELECTED_MAX_TOKENS=8192 # Will hold the chosen max_tokens
+SUBSCRIPTION_MODE=""    # "claude_code" | "zai_code" | ""
 
-if [ "$USE_ASSOC_ARRAYS" = true ]; then
+# ── Subscription mode detection ──────────────────────────────
+# Claude Code subscription: default when ~/.claude/.credentials.json exists
+CLAUDE_CRED_FILE="$HOME/.claude/.credentials.json"
+if [ -f "$CLAUDE_CRED_FILE" ]; then
+    echo -e "  ${GREEN}⬢${NC} Claude Code subscription detected"
+    echo -e "    ${DIM}~/.claude/.credentials.json${NC}"
+    echo -e "    ${DIM}Default: claude-opus-4-6 | max_tokens: 32768${NC}"
+    echo ""
+    if prompt_yes_no "Use Claude Code subscription? (no API key needed)"; then
+        SUBSCRIPTION_MODE="claude_code"
+        SELECTED_PROVIDER_ID="anthropic"
+        SELECTED_MODEL="claude-opus-4-6"
+        SELECTED_MAX_TOKENS=32768
+        echo ""
+        echo -e "${GREEN}⬢${NC} Using Claude Code subscription"
+    fi
+fi
+
+# ZAI Code subscription: check for ZAI_API_KEY
+if [ -z "$SUBSCRIPTION_MODE" ] && [ -n "${ZAI_API_KEY:-}" ]; then
+    echo -e "  ${GREEN}⬢${NC} Found ZAI Code API key"
+    echo ""
+    if prompt_yes_no "Use your ZAI Code subscription?"; then
+        SUBSCRIPTION_MODE="zai_code"
+        SELECTED_PROVIDER_ID="openai"
+        SELECTED_ENV_VAR="ZAI_API_KEY"
+        SELECTED_MODEL="glm-5"
+        SELECTED_MAX_TOKENS=32768
+        echo ""
+        echo -e "${GREEN}⬢${NC} Using ZAI Code subscription"
+        echo -e "  ${DIM}Model: glm-5 | API: api.z.ai${NC}"
+    fi
+fi
+
+# Skip normal provider detection if a subscription mode was selected
+if [ -n "$SUBSCRIPTION_MODE" ]; then
+    # Jump ahead — SELECTED_PROVIDER_ID is already set
+    :
+elif [ "$USE_ASSOC_ARRAYS" = true ]; then
     # Bash 4+ - iterate over associative array keys
     for env_var in "${!PROVIDER_NAMES[@]}"; do
         value="${!env_var}"
@@ -478,89 +739,140 @@ if [ ${#FOUND_PROVIDERS[@]} -gt 0 ]; then
     done
     echo ""
 
-    if [ ${#FOUND_PROVIDERS[@]} -eq 1 ]; then
-        # Only one provider found, use it automatically
-        if prompt_yes_no "Use this key?"; then
-            SELECTED_ENV_VAR="${FOUND_ENV_VARS[0]}"
+    # Show all found providers + ZAI subscription + Other
+    echo -e "${BOLD}Select your default LLM provider:${NC}"
+    echo ""
+
+    i=1
+    for provider in "${FOUND_PROVIDERS[@]}"; do
+        echo -e "  ${CYAN}$i)${NC} $provider"
+        i=$((i + 1))
+    done
+    ZAI_CHOICE=$i
+    echo -e "  ${CYAN}$i)${NC} ZAI Code Subscription  ${DIM}(use your ZAI Code plan)${NC}"
+    i=$((i + 1))
+    echo -e "  ${CYAN}$i)${NC} Other"
+    max_choice=$i
+    echo ""
+
+    while true; do
+        read -r -p "Enter choice (1-$max_choice): " choice || true
+        if [[ "$choice" =~ ^[0-9]+$ ]] && [ "$choice" -ge 1 ] && [ "$choice" -le "$max_choice" ]; then
+            if [ "$choice" -eq "$max_choice" ]; then
+                # Fall through to the manual provider selection below
+                break
+            elif [ "$choice" -eq "$ZAI_CHOICE" ]; then
+                # ZAI Code Subscription
+                SUBSCRIPTION_MODE="zai_code"
+                SELECTED_PROVIDER_ID="openai"
+                SELECTED_ENV_VAR="ZAI_API_KEY"
+                SELECTED_MODEL="glm-5"
+                SELECTED_MAX_TOKENS=32768
+                echo ""
+                echo -e "${GREEN}⬢${NC} Using ZAI Code subscription"
+                echo -e "  ${DIM}Model: glm-5 | API: api.z.ai${NC}"
+                break
+            fi
+            idx=$((choice - 1))
+            SELECTED_ENV_VAR="${FOUND_ENV_VARS[$idx]}"
             SELECTED_PROVIDER_ID="$(get_provider_id "$SELECTED_ENV_VAR")"
 
             echo ""
-            echo -e "${GREEN}⬢${NC} Using ${FOUND_PROVIDERS[0]}"
+            echo -e "${GREEN}⬢${NC} Selected: ${FOUND_PROVIDERS[$idx]}"
+
+            prompt_model_selection "$SELECTED_PROVIDER_ID"
+            break
         fi
-    else
-        # Multiple providers found, let user pick one
-        echo -e "${BOLD}Select your default LLM provider:${NC}"
-        echo ""
-
-        # Build choice menu from found providers
-        i=1
-        for provider in "${FOUND_PROVIDERS[@]}"; do
-            echo -e "  ${CYAN}$i)${NC} $provider"
-            i=$((i + 1))
-        done
-        echo ""
-
-        while true; do
-            read -r -p "Enter choice (1-${#FOUND_PROVIDERS[@]}): " choice
-            if [[ "$choice" =~ ^[0-9]+$ ]] && [ "$choice" -ge 1 ] && [ "$choice" -le "${#FOUND_PROVIDERS[@]}" ]; then
-                idx=$((choice - 1))
-                SELECTED_ENV_VAR="${FOUND_ENV_VARS[$idx]}"
-                SELECTED_PROVIDER_ID="$(get_provider_id "$SELECTED_ENV_VAR")"
-
-                echo ""
-                echo -e "${GREEN}⬢${NC} Selected: ${FOUND_PROVIDERS[$idx]}"
-                break
-            fi
-            echo -e "${RED}Invalid choice. Please enter 1-${#FOUND_PROVIDERS[@]}${NC}"
-        done
-    fi
+        echo -e "${RED}Invalid choice. Please enter 1-$max_choice${NC}"
+    done
 fi
 
 if [ -z "$SELECTED_PROVIDER_ID" ]; then
-    echo "No API keys found. Let's configure one."
+    echo ""
+    echo -e "${BOLD}Select your LLM provider:${NC}"
+    echo ""
+    echo -e "  ${CYAN}${BOLD}Subscription modes (no API key purchase needed):${NC}"
+    echo -e "  ${CYAN}1)${NC} Claude Code Subscription  ${DIM}(use your Claude Max/Pro plan)${NC}"
+    echo -e "  ${CYAN}2)${NC} ZAI Code Subscription     ${DIM}(use your ZAI Code plan)${NC}"
+    echo ""
+    echo -e "  ${CYAN}${BOLD}API key providers:${NC}"
+    echo -e "  ${CYAN}3)${NC} Anthropic (Claude) - Recommended"
+    echo -e "  ${CYAN}4)${NC} OpenAI (GPT)"
+    echo -e "  ${CYAN}5)${NC} Google Gemini - Free tier available"
+    echo -e "  ${CYAN}6)${NC} Groq - Fast, free tier"
+    echo -e "  ${CYAN}7)${NC} Cerebras - Fast, free tier"
+    echo -e "  ${CYAN}8)${NC} Skip for now"
     echo ""
 
-    prompt_choice "Select your LLM provider:" \
-        "Anthropic (Claude) - Recommended" \
-        "OpenAI (GPT)" \
-        "Google Gemini - Free tier available" \
-        "Groq - Fast, free tier" \
-        "Cerebras - Fast, free tier" \
-        "Skip for now"
-     choice=$PROMPT_CHOICE
+    while true; do
+        read -r -p "Enter choice (1-8): " choice || true
+        if [[ "$choice" =~ ^[0-9]+$ ]] && [ "$choice" -ge 1 ] && [ "$choice" -le 8 ]; then
+            break
+        fi
+        echo -e "${RED}Invalid choice. Please enter 1-8${NC}"
+    done
 
     case $choice in
-        0)
+        1)
+            # Claude Code Subscription
+            CLAUDE_CRED_FILE="$HOME/.claude/.credentials.json"
+            if [ ! -f "$CLAUDE_CRED_FILE" ]; then
+                echo ""
+                echo -e "${YELLOW}  ~/.claude/.credentials.json not found.${NC}"
+                echo -e "  Run ${CYAN}claude${NC} first to authenticate with your Claude subscription,"
+                echo -e "  then run this quickstart again."
+                echo ""
+                SELECTED_PROVIDER_ID=""
+            else
+                SUBSCRIPTION_MODE="claude_code"
+                SELECTED_PROVIDER_ID="anthropic"
+                echo ""
+                echo -e "${GREEN}⬢${NC} Using Claude Code subscription"
+            fi
+            ;;
+        2)
+            # ZAI Code Subscription
+            SUBSCRIPTION_MODE="zai_code"
+            SELECTED_PROVIDER_ID="openai"
+            SELECTED_ENV_VAR="ZAI_API_KEY"
+            SELECTED_MODEL="glm-5"
+            SELECTED_MAX_TOKENS=32768
+            PROVIDER_NAME="ZAI"
+            echo ""
+            echo -e "${GREEN}⬢${NC} Using ZAI Code subscription"
+            echo -e "  ${DIM}Model: glm-5 | API: api.z.ai${NC}"
+            ;;
+        3)
             SELECTED_ENV_VAR="ANTHROPIC_API_KEY"
             SELECTED_PROVIDER_ID="anthropic"
             PROVIDER_NAME="Anthropic"
             SIGNUP_URL="https://console.anthropic.com/settings/keys"
             ;;
-        1)
+        4)
             SELECTED_ENV_VAR="OPENAI_API_KEY"
             SELECTED_PROVIDER_ID="openai"
             PROVIDER_NAME="OpenAI"
             SIGNUP_URL="https://platform.openai.com/api-keys"
             ;;
-        2)
+        5)
             SELECTED_ENV_VAR="GEMINI_API_KEY"
             SELECTED_PROVIDER_ID="gemini"
             PROVIDER_NAME="Google Gemini"
             SIGNUP_URL="https://aistudio.google.com/apikey"
             ;;
-        3)
+        6)
             SELECTED_ENV_VAR="GROQ_API_KEY"
             SELECTED_PROVIDER_ID="groq"
             PROVIDER_NAME="Groq"
             SIGNUP_URL="https://console.groq.com/keys"
             ;;
-        4)
+        7)
             SELECTED_ENV_VAR="CEREBRAS_API_KEY"
             SELECTED_PROVIDER_ID="cerebras"
             PROVIDER_NAME="Cerebras"
             SIGNUP_URL="https://cloud.cerebras.ai/"
             ;;
-        5)
+        8)
             echo ""
             echo -e "${YELLOW}Skipped.${NC} An LLM API key is required to test and use worker agents."
             echo -e "Add your API key later by running:"
@@ -572,7 +884,8 @@ if [ -z "$SELECTED_PROVIDER_ID" ]; then
             ;;
     esac
 
-    if [ -n "$SELECTED_ENV_VAR" ] && [ -z "${!SELECTED_ENV_VAR}" ]; then
+    # For API-key providers: prompt for key if not already set
+    if [ -z "$SUBSCRIPTION_MODE" ] && [ -n "$SELECTED_ENV_VAR" ] && [ -z "${!SELECTED_ENV_VAR}" ]; then
         echo ""
         echo -e "Get your API key from: ${CYAN}$SIGNUP_URL${NC}"
         echo ""
@@ -593,13 +906,47 @@ if [ -z "$SELECTED_PROVIDER_ID" ]; then
             SELECTED_PROVIDER_ID=""
         fi
     fi
+
+fi
+
+# For ZAI subscription: always prompt for API key
+if [ "$SUBSCRIPTION_MODE" = "zai_code" ]; then
+    echo ""
+    read -r -p "Paste your ZAI API key (or press Enter to skip): " API_KEY
+
+    if [ -n "$API_KEY" ]; then
+        echo "" >> "$SHELL_RC_FILE"
+        echo "# Hive Agent Framework - ZAI Code subscription API key" >> "$SHELL_RC_FILE"
+        echo "export ZAI_API_KEY=\"$API_KEY\"" >> "$SHELL_RC_FILE"
+        export ZAI_API_KEY="$API_KEY"
+        echo ""
+        echo -e "${GREEN}⬢${NC} ZAI API key saved to $SHELL_RC_FILE"
+    else
+        echo ""
+        echo -e "${YELLOW}Skipped.${NC} Add your ZAI API key to $SHELL_RC_FILE when ready:"
+        echo -e "  ${CYAN}echo 'export ZAI_API_KEY=\"your-key\"' >> $SHELL_RC_FILE${NC}"
+        SELECTED_ENV_VAR=""
+        SELECTED_PROVIDER_ID=""
+        SUBSCRIPTION_MODE=""
+    fi
+fi
+
+# Prompt for model if not already selected (manual provider path)
+if [ -n "$SELECTED_PROVIDER_ID" ] && [ -z "$SELECTED_MODEL" ]; then
+    prompt_model_selection "$SELECTED_PROVIDER_ID"
 fi
 
 # Save configuration if a provider was selected
 if [ -n "$SELECTED_PROVIDER_ID" ]; then
     echo ""
     echo -n "  Saving configuration... "
-    save_configuration "$SELECTED_PROVIDER_ID" "$SELECTED_ENV_VAR" > /dev/null
+    if [ "$SUBSCRIPTION_MODE" = "claude_code" ]; then
+        save_configuration "$SELECTED_PROVIDER_ID" "" "$SELECTED_MODEL" "$SELECTED_MAX_TOKENS" "true" "" > /dev/null
+    elif [ "$SUBSCRIPTION_MODE" = "zai_code" ]; then
+        save_configuration "$SELECTED_PROVIDER_ID" "$SELECTED_ENV_VAR" "$SELECTED_MODEL" "$SELECTED_MAX_TOKENS" "" "https://api.z.ai/api/coding/paas/v4" > /dev/null
+    else
+        save_configuration "$SELECTED_PROVIDER_ID" "$SELECTED_ENV_VAR" "$SELECTED_MODEL" "$SELECTED_MAX_TOKENS" > /dev/null
+    fi
     echo -e "${GREEN}⬢${NC}"
     echo -e "  ${DIM}~/.hive/configuration.json${NC}"
 fi
@@ -649,7 +996,7 @@ if [ -n "$HIVE_CREDENTIAL_KEY" ]; then
 
     # Initialize the metadata index
     if [ ! -f "$HIVE_CRED_DIR/metadata/index.json" ]; then
-        echo '{}' > "$HIVE_CRED_DIR/metadata/index.json"
+        echo '{"credentials": {}, "version": "1.0"}' > "$HIVE_CRED_DIR/metadata/index.json"
     fi
 
     echo -e "${GREEN}  ✓ Credential store initialized at ~/.hive/credentials/${NC}"
@@ -713,6 +1060,34 @@ echo -n "  ⬡ skills... "
 if [ -d "$SCRIPT_DIR/.claude/skills" ]; then
     SKILL_COUNT=$(ls -1d "$SCRIPT_DIR/.claude/skills"/*/ 2>/dev/null | wc -l)
     echo -e "${GREEN}${SKILL_COUNT} found${NC}"
+else
+    echo -e "${YELLOW}--${NC}"
+fi
+
+echo -n "  ⬡ codex CLI... "
+if command -v codex > /dev/null 2>&1; then
+    CODEX_VERSION=$(codex --version 2>/dev/null | head -1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' || echo "0.0.0")
+    # Compare version >= 0.101.0
+    CODEX_MAJOR=$(echo "$CODEX_VERSION" | cut -d. -f1)
+    CODEX_MINOR=$(echo "$CODEX_VERSION" | cut -d. -f2)
+    if [ "$CODEX_MAJOR" -gt 0 ] 2>/dev/null || { [ "$CODEX_MAJOR" -eq 0 ] && [ "$CODEX_MINOR" -ge 101 ]; } 2>/dev/null; then
+        echo -e "${GREEN}${CODEX_VERSION}${NC}"
+        CODEX_AVAILABLE=true
+    else
+        echo -e "${YELLOW}${CODEX_VERSION} (upgrade to 0.101.0+)${NC}"
+        CODEX_AVAILABLE=false
+    fi
+else
+    echo -e "${YELLOW}--${NC}"
+    CODEX_AVAILABLE=false
+fi
+
+echo -n "  ⬡ local settings... "
+if [ -f "$SCRIPT_DIR/.claude/settings.local.json" ]; then
+    echo -e "${GREEN}ok${NC}"
+elif [ -f "$SCRIPT_DIR/.claude/settings.local.json.example" ]; then
+    cp "$SCRIPT_DIR/.claude/settings.local.json.example" "$SCRIPT_DIR/.claude/settings.local.json"
+    echo -e "${GREEN}copied from example${NC}"
 else
     echo -e "${YELLOW}--${NC}"
 fi
@@ -781,9 +1156,19 @@ echo ""
 
 # Show configured provider
 if [ -n "$SELECTED_PROVIDER_ID" ]; then
-    SELECTED_MODEL="$(get_default_model "$SELECTED_PROVIDER_ID")"
+    if [ -z "$SELECTED_MODEL" ]; then
+        SELECTED_MODEL="$(get_default_model "$SELECTED_PROVIDER_ID")"
+    fi
     echo -e "${BOLD}Default LLM:${NC}"
-    echo -e "  ${CYAN}$SELECTED_PROVIDER_ID${NC} → ${DIM}$SELECTED_MODEL${NC}"
+    if [ "$SUBSCRIPTION_MODE" = "claude_code" ]; then
+        echo -e "  ${GREEN}⬢${NC} Claude Code Subscription → ${DIM}$SELECTED_MODEL${NC}"
+        echo -e "  ${DIM}Token auto-refresh from ~/.claude/.credentials.json${NC}"
+    elif [ "$SUBSCRIPTION_MODE" = "zai_code" ]; then
+        echo -e "  ${GREEN}⬢${NC} ZAI Code Subscription → ${DIM}$SELECTED_MODEL${NC}"
+        echo -e "  ${DIM}API: api.z.ai (OpenAI-compatible)${NC}"
+    else
+        echo -e "  ${CYAN}$SELECTED_PROVIDER_ID${NC} → ${DIM}$SELECTED_MODEL${NC}"
+    fi
     echo ""
 fi
 
@@ -795,7 +1180,7 @@ if [ -n "$HIVE_CREDENTIAL_KEY" ]; then
     echo ""
 fi
 
-echo -e "${BOLD}Build a New Agent:${NC}"
+echo -e "${BOLD}Build a New Agent (Claude):${NC}"
 echo ""
 echo -e "  1. Open Claude Code in this directory:"
 echo -e "     ${CYAN}claude${NC}"
@@ -806,6 +1191,18 @@ echo ""
 echo -e "  3. Test an existing agent:"
 echo -e "     ${CYAN}/hive-test${NC}"
 echo ""
+
+# Show Codex instructions if available
+if [ "$CODEX_AVAILABLE" = true ]; then
+    echo -e "${BOLD}Build a New Agent (Codex):${NC}"
+    echo ""
+    echo -e "  Codex ${GREEN}${CODEX_VERSION}${NC} is available. To use it with Hive:"
+    echo -e "  1. Restart your terminal (or open a new one)"
+    echo -e "  2. Run: ${CYAN}codex${NC}"
+    echo -e "  3. Type: ${CYAN}use hive${NC}"
+    echo ""
+fi
+
 echo -e "${BOLD}Run an Agent:${NC}"
 echo ""
 echo -e "  Launch the interactive dashboard to browse and run agents:"
