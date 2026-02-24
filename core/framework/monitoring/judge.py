@@ -20,11 +20,11 @@ Usage::
 
     # Load judge as secondary graph on the worker runtime
     await worker_runtime.add_graph(
-        graph_id="worker_health_judge",
+        graph_id="judge",
         graph=judge_graph,
         goal=judge_goal,
         entry_points={"health_check": HEALTH_JUDGE_ENTRY_POINT},
-        storage_subpath="graphs/worker_health_judge",
+        storage_subpath="graphs/judge",
     )
 
 Design:
@@ -239,7 +239,7 @@ HEALTH_JUDGE_ENTRY_POINT = AsyncEntryPointSpec(
 # ---------------------------------------------------------------------------
 
 judge_graph = GraphSpec(
-    id="worker-health-judge-graph",
+    id="judge-graph",
     goal_id=judge_goal.id,
     version="1.0.0",
     entry_node="judge",

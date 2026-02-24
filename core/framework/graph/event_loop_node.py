@@ -229,8 +229,9 @@ class EventLoopNode(NodeProtocol):
         start_time = time.time()
         total_input_tokens = 0
         total_output_tokens = 0
-        stream_id = ctx.node_id
+        stream_id = ctx.stream_id or ctx.node_id
         node_id = ctx.node_id
+        execution_id = ctx.execution_id or ""
 
         # Verdict counters for runtime logging
         _accept_count = _retry_count = _escalate_count = _continue_count = 0
@@ -369,7 +370,7 @@ class EventLoopNode(NodeProtocol):
         )
 
         # 4. Publish loop started
-        await self._publish_loop_started(stream_id, node_id)
+        await self._publish_loop_started(stream_id, node_id, execution_id)
 
         # 5. Stall / doom loop detection state (restored from cursor if resuming)
         recent_responses: list[str] = _restored_recent_responses
@@ -411,7 +412,7 @@ class EventLoopNode(NodeProtocol):
             await self._drain_injection_queue(conversation)
 
             # 6c. Publish iteration event
-            await self._publish_iteration(stream_id, node_id, iteration)
+            await self._publish_iteration(stream_id, node_id, iteration, execution_id)
 
             # 6d. Pre-turn compaction check (tiered)
             if conversation.needs_compaction():
@@ -484,6 +485,7 @@ class EventLoopNode(NodeProtocol):
                                 retry_count=_stream_retry_count,
                                 max_retries=self._config.max_stream_retries,
                                 error=str(e)[:500],
+                                execution_id=execution_id,
                             )
                         await asyncio.sleep(delay)
                         continue  # retry same iteration
@@ -560,7 +562,7 @@ class EventLoopNode(NodeProtocol):
                         node_id,
                         iteration,
                     )
-                    await self._publish_loop_completed(stream_id, node_id, iteration + 1)
+                    await self._publish_loop_completed(stream_id, node_id, iteration + 1, execution_id)
                     latency_ms = int((time.time() - start_time) * 1000)
                     return NodeResult(
                         success=True,
@@ -575,7 +577,7 @@ class EventLoopNode(NodeProtocol):
             if len(recent_responses) > self._config.stall_detection_threshold:
                 recent_responses.pop(0)
             if self._is_stalled(recent_responses):
-                await self._publish_stalled(stream_id, node_id)
+                await self._publish_stalled(stream_id, node_id, execution_id)
                 latency_ms = int((time.time() - start_time) * 1000)
                 _continue_count += 1
                 if ctx.runtime_logger:
@@ -646,6 +648,7 @@ class EventLoopNode(NodeProtocol):
                             stream_id=stream_id,
                             node_id=node_id,
                             description=doom_desc,
+                            execution_id=execution_id,
                         )
                     warning_msg = (
                         f"[SYSTEM] {doom_desc}. You are repeating the "
@@ -660,6 +663,7 @@ class EventLoopNode(NodeProtocol):
                                 stream_id=stream_id,
                                 node_id=node_id,
                                 prompt=doom_desc,
+                                execution_id=execution_id,
                             )
                         self._awaiting_input = True
                         try:
@@ -709,7 +713,7 @@ class EventLoopNode(NodeProtocol):
 
             if _cf_block:
                 if self._shutdown:
-                    await self._publish_loop_completed(stream_id, node_id, iteration + 1)
+                    await self._publish_loop_completed(stream_id, node_id, iteration + 1, execution_id)
                     latency_ms = int((time.time() - start_time) * 1000)
                     _continue_count += 1
                     if ctx.runtime_logger:
@@ -759,7 +763,7 @@ class EventLoopNode(NodeProtocol):
                 got_input = await self._await_user_input(ctx)
                 logger.info("[%s] iter=%d: unblocked, got_input=%s", node_id, iteration, got_input)
                 if not got_input:
-                    await self._publish_loop_completed(stream_id, node_id, iteration + 1)
+                    await self._publish_loop_completed(stream_id, node_id, iteration + 1, execution_id)
                     latency_ms = int((time.time() - start_time) * 1000)
                     _continue_count += 1
                     if ctx.runtime_logger:
@@ -878,6 +882,7 @@ class EventLoopNode(NodeProtocol):
                 feedback=fb_preview,
                 judge_type=judge_type,
                 iteration=iteration,
+                execution_id=execution_id,
             )
 
             if verdict.action == "ACCEPT":
@@ -919,7 +924,7 @@ class EventLoopNode(NodeProtocol):
                 for key, value in accumulator.to_dict().items():
                     ctx.memory.write(key, value, validate=False)
 
-                await self._publish_loop_completed(stream_id, node_id, iteration + 1)
+                await self._publish_loop_completed(stream_id, node_id, iteration + 1, execution_id)
                 latency_ms = int((time.time() - start_time) * 1000)
                 _accept_count += 1
                 if ctx.runtime_logger:
@@ -962,7 +967,7 @@ class EventLoopNode(NodeProtocol):
 
             elif verdict.action == "ESCALATE":
                 # Exit point 6: Judge ESCALATE — log step + log_node_complete
-                await self._publish_loop_completed(stream_id, node_id, iteration + 1)
+                await self._publish_loop_completed(stream_id, node_id, iteration + 1, execution_id)
                 latency_ms = int((time.time() - start_time) * 1000)
                 _escalate_count += 1
                 if ctx.runtime_logger:
@@ -1026,7 +1031,7 @@ class EventLoopNode(NodeProtocol):
                 continue
 
         # 7. Max iterations exhausted
-        await self._publish_loop_completed(stream_id, node_id, self._config.max_iterations)
+        await self._publish_loop_completed(stream_id, node_id, self._config.max_iterations, execution_id)
         latency_ms = int((time.time() - start_time) * 1000)
         if ctx.runtime_logger:
             ctx.runtime_logger.log_node_complete(
@@ -1098,9 +1103,10 @@ class EventLoopNode(NodeProtocol):
 
         if self._event_bus:
             await self._event_bus.emit_client_input_requested(
-                stream_id=ctx.node_id,
+                stream_id=ctx.stream_id or ctx.node_id,
                 node_id=ctx.node_id,
                 prompt="",
+                execution_id=ctx.execution_id or "",
             )
 
         self._awaiting_input = True
@@ -1139,8 +1145,9 @@ class EventLoopNode(NodeProtocol):
         ``real_tool_results`` which resets each inner iteration, this list grows
         across the entire turn.
         """
-        stream_id = ctx.node_id
+        stream_id = ctx.stream_id or ctx.node_id
         node_id = ctx.node_id
+        execution_id = ctx.execution_id or ""
         token_counts: dict[str, int] = {"input": 0, "output": 0}
         tool_call_count = 0
         final_text = ""
@@ -1192,7 +1199,8 @@ class EventLoopNode(NodeProtocol):
                 if isinstance(event, TextDeltaEvent):
                     accumulated_text = event.snapshot
                     await self._publish_text_delta(
-                        stream_id, node_id, event.content, event.snapshot, ctx
+                        stream_id, node_id, event.content, event.snapshot, ctx,
+                        execution_id,
                     )
 
                 elif isinstance(event, ToolCallEvent):
@@ -1276,7 +1284,8 @@ class EventLoopNode(NodeProtocol):
                 executed_in_batch += 1
 
                 await self._publish_tool_started(
-                    stream_id, node_id, tc.tool_use_id, tc.tool_name, tc.tool_input
+                    stream_id, node_id, tc.tool_use_id, tc.tool_name, tc.tool_input,
+                    execution_id,
                 )
                 logger.info(
                     "[%s] tool_call: %s(%s)",
@@ -1308,7 +1317,7 @@ class EventLoopNode(NodeProtocol):
                         key = tc.tool_input.get("key", "")
                         await accumulator.set(key, value)
                         outputs_set_this_turn.append(key)
-                        await self._publish_output_key_set(stream_id, node_id, key)
+                        await self._publish_output_key_set(stream_id, node_id, key, execution_id)
                     logged_tool_calls.append(
                         {
                             "tool_use_id": tc.tool_use_id,
@@ -1419,6 +1428,7 @@ class EventLoopNode(NodeProtocol):
                     tc.tool_name,
                     result.content,
                     result.is_error,
+                    execution_id,
                 )
 
             # If the limit was hit, add error results for every remaining
@@ -2138,7 +2148,7 @@ class EventLoopNode(NodeProtocol):
                     await self._event_bus.publish(
                         AgentEvent(
                             type=EventType.CONTEXT_COMPACTED,
-                            stream_id=ctx.node_id,
+                            stream_id=ctx.stream_id or ctx.node_id,
                             node_id=ctx.node_id,
                             data={
                                 "level": "prune_only",
@@ -2194,7 +2204,7 @@ class EventLoopNode(NodeProtocol):
             await self._event_bus.publish(
                 AgentEvent(
                     type=EventType.CONTEXT_COMPACTED,
-                    stream_id=ctx.node_id,
+                    stream_id=ctx.stream_id or ctx.node_id,
                     node_id=ctx.node_id,
                     data={
                         "level": level,
@@ -2516,36 +2526,40 @@ class EventLoopNode(NodeProtocol):
     # EventBus publishing helpers
     # -------------------------------------------------------------------
 
-    async def _publish_loop_started(self, stream_id: str, node_id: str) -> None:
+    async def _publish_loop_started(self, stream_id: str, node_id: str, execution_id: str = "") -> None:
         if self._event_bus:
             await self._event_bus.emit_node_loop_started(
                 stream_id=stream_id,
                 node_id=node_id,
                 max_iterations=self._config.max_iterations,
+                execution_id=execution_id,
             )
 
-    async def _publish_iteration(self, stream_id: str, node_id: str, iteration: int) -> None:
+    async def _publish_iteration(self, stream_id: str, node_id: str, iteration: int, execution_id: str = "") -> None:
         if self._event_bus:
             await self._event_bus.emit_node_loop_iteration(
                 stream_id=stream_id,
                 node_id=node_id,
                 iteration=iteration,
+                execution_id=execution_id,
             )
 
-    async def _publish_loop_completed(self, stream_id: str, node_id: str, iterations: int) -> None:
+    async def _publish_loop_completed(self, stream_id: str, node_id: str, iterations: int, execution_id: str = "") -> None:
         if self._event_bus:
             await self._event_bus.emit_node_loop_completed(
                 stream_id=stream_id,
                 node_id=node_id,
                 iterations=iterations,
+                execution_id=execution_id,
             )
 
-    async def _publish_stalled(self, stream_id: str, node_id: str) -> None:
+    async def _publish_stalled(self, stream_id: str, node_id: str, execution_id: str = "") -> None:
         if self._event_bus:
             await self._event_bus.emit_node_stalled(
                 stream_id=stream_id,
                 node_id=node_id,
                 reason="Consecutive identical responses detected",
+                execution_id=execution_id,
             )
 
     async def _publish_text_delta(
@@ -2555,6 +2569,7 @@ class EventLoopNode(NodeProtocol):
         content: str,
         snapshot: str,
         ctx: NodeContext,
+        execution_id: str = "",
     ) -> None:
         if self._event_bus:
             if ctx.node_spec.client_facing:
@@ -2563,6 +2578,7 @@ class EventLoopNode(NodeProtocol):
                     node_id=node_id,
                     content=content,
                     snapshot=snapshot,
+                    execution_id=execution_id,
                 )
             else:
                 await self._event_bus.emit_llm_text_delta(
@@ -2570,6 +2586,7 @@ class EventLoopNode(NodeProtocol):
                     node_id=node_id,
                     content=content,
                     snapshot=snapshot,
+                    execution_id=execution_id,
                 )
 
     async def _publish_tool_started(
@@ -2579,6 +2596,7 @@ class EventLoopNode(NodeProtocol):
         tool_use_id: str,
         tool_name: str,
         tool_input: dict,
+        execution_id: str = "",
     ) -> None:
         if self._event_bus:
             await self._event_bus.emit_tool_call_started(
@@ -2587,6 +2605,7 @@ class EventLoopNode(NodeProtocol):
                 tool_use_id=tool_use_id,
                 tool_name=tool_name,
                 tool_input=tool_input,
+                execution_id=execution_id,
             )
 
     async def _publish_tool_completed(
@@ -2597,6 +2616,7 @@ class EventLoopNode(NodeProtocol):
         tool_name: str,
         result: str,
         is_error: bool,
+        execution_id: str = "",
     ) -> None:
         if self._event_bus:
             await self._event_bus.emit_tool_call_completed(
@@ -2606,6 +2626,7 @@ class EventLoopNode(NodeProtocol):
                 tool_name=tool_name,
                 result=result,
                 is_error=is_error,
+                execution_id=execution_id,
             )
 
     async def _publish_judge_verdict(
@@ -2616,6 +2637,7 @@ class EventLoopNode(NodeProtocol):
         feedback: str = "",
         judge_type: str = "implicit",
         iteration: int = 0,
+        execution_id: str = "",
     ) -> None:
         if self._event_bus:
             await self._event_bus.emit_judge_verdict(
@@ -2625,6 +2647,7 @@ class EventLoopNode(NodeProtocol):
                 feedback=feedback,
                 judge_type=judge_type,
                 iteration=iteration,
+                execution_id=execution_id,
             )
 
     async def _publish_output_key_set(
@@ -2632,10 +2655,12 @@ class EventLoopNode(NodeProtocol):
         stream_id: str,
         node_id: str,
         key: str,
+        execution_id: str = "",
     ) -> None:
         if self._event_bus:
             await self._event_bus.emit_output_key_set(
                 stream_id=stream_id,
                 node_id=node_id,
                 key=key,
+                execution_id=execution_id,
             )

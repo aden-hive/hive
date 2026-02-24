@@ -498,7 +498,7 @@ class AdenTUI(App):
 
             # 2. Storage dirs — under worker's base path but completely owned
             #    by the judge/queen.  Worker never writes here.
-            judge_dir = storage_path / "graphs" / "worker_health_judge" / "session"
+            judge_dir = storage_path / "graphs" / "judge" / "session"
             judge_dir.mkdir(parents=True, exist_ok=True)
             queen_dir = storage_path / "graphs" / "queen" / "session"
             queen_dir.mkdir(parents=True, exist_ok=True)
@@ -506,9 +506,17 @@ class AdenTUI(App):
             # ---------------------------------------------------------------
             # 3. Health judge — background task, fires every 2 minutes.
             # ---------------------------------------------------------------
-            judge_runtime = Runtime(storage_path / "graphs" / "worker_health_judge")
+            judge_runtime = Runtime(storage_path / "graphs" / "judge")
             monitoring_tools = list(monitoring_registry.get_tools().values())
             monitoring_executor = monitoring_registry.get_executor()
+
+            # Scoped event buses — stamp graph_id on every event so
+            # downstream routing (queen-primary mode) can distinguish
+            # queen/judge/worker events.
+            from framework.runtime.execution_stream import GraphScopedEventBus
+
+            judge_event_bus = GraphScopedEventBus(event_bus, "judge")
+            queen_event_bus = GraphScopedEventBus(event_bus, "queen")
 
             async def _judge_loop():
                 interval = 120  # seconds
@@ -523,8 +531,8 @@ class AdenTUI(App):
                             llm=llm,
                             tools=monitoring_tools,
                             tool_executor=monitoring_executor,
-                            event_bus=event_bus,
-                            stream_id="worker_health_judge",
+                            event_bus=judge_event_bus,
+                            stream_id="judge",
                             storage_path=judge_dir,
                             loop_config=judge_graph.loop_config,
                         )
@@ -543,7 +551,7 @@ class AdenTUI(App):
                 _judge_loop(),
                 agent_loop,
             )
-            self._judge_graph_id = "worker_health_judge"
+            self._judge_graph_id = "judge"
 
             # ---------------------------------------------------------------
             # 4. Queen — persistent interactive conversation.
@@ -631,7 +639,7 @@ class AdenTUI(App):
                         llm=llm,
                         tools=queen_tools,
                         tool_executor=queen_tool_executor,
-                        event_bus=event_bus,
+                        event_bus=queen_event_bus,
                         stream_id="queen",
                         storage_path=queen_dir,
                         loop_config=queen_graph.loop_config,
@@ -1286,7 +1294,7 @@ class AdenTUI(App):
             # The judge runs as a silent background task.  Only surface
             # escalation ticket events on the status bar; everything else
             # (LLM deltas, tool calls, node iterations) goes to logs only.
-            if event.stream_id == "worker_health_judge":
+            if event.stream_id == "judge":
                 if et == EventType.WORKER_ESCALATION_TICKET:
                     ticket = event.data.get("ticket", {})
                     severity = ticket.get("severity", "")

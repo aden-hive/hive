@@ -35,7 +35,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-class _GraphScopedEventBus(EventBus):
+class GraphScopedEventBus(EventBus):
     """Proxy that stamps ``graph_id`` on every published event.
 
     The ``GraphExecutor`` and ``EventLoopNode`` emit events via the
@@ -235,7 +235,7 @@ class ExecutionStream:
         # Graph-scoped event bus (stamps graph_id on published events)
         self._scoped_event_bus = self._event_bus
         if self._event_bus and self.graph_id:
-            self._scoped_event_bus = _GraphScopedEventBus(self._event_bus, self.graph_id)
+            self._scoped_event_bus = GraphScopedEventBus(self._event_bus, self.graph_id)
 
         # State
         self._running = False
@@ -275,6 +275,30 @@ class ExecutionStream:
                 if getattr(node, "_awaiting_input", False):
                     return True
         return False
+
+    def get_waiting_nodes(self) -> list[dict[str, str]]:
+        """Return nodes currently blocked waiting for client input.
+
+        Each entry is ``{"node_id": ..., "execution_id": ...}``.
+        """
+        waiting: list[dict[str, str]] = []
+        for exec_id, executor in self._active_executors.items():
+            for node_id, node in executor.node_registry.items():
+                if getattr(node, "_awaiting_input", False):
+                    waiting.append({"node_id": node_id, "execution_id": exec_id})
+        return waiting
+
+    def get_injectable_nodes(self) -> list[dict[str, str]]:
+        """Return nodes that support message injection (have ``inject_event``).
+
+        Each entry is ``{"node_id": ..., "execution_id": ...}``.
+        """
+        injectable: list[dict[str, str]] = []
+        for exec_id, executor in self._active_executors.items():
+            for node_id, node in executor.node_registry.items():
+                if hasattr(node, "inject_event"):
+                    injectable.append({"node_id": node_id, "execution_id": exec_id})
+        return injectable
 
     def _record_execution_result(self, execution_id: str, result: ExecutionResult) -> None:
         """Record a completed execution result with retention pruning."""
@@ -494,6 +518,7 @@ class ExecutionStream:
                     tool_executor=self._tool_executor,
                     event_bus=self._scoped_event_bus,
                     stream_id=self.stream_id,
+                    execution_id=execution_id,
                     storage_path=exec_storage,
                     runtime_logger=runtime_logger,
                     loop_config=self.graph.loop_config,

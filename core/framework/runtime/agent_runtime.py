@@ -1318,6 +1318,45 @@ class AgentRuntime:
             "state_manager": self._state_manager.get_stats(),
         }
 
+    def get_active_streams(self) -> list[dict[str, Any]]:
+        """Return metadata for every stream that has active executions.
+
+        Each dict contains: ``graph_id``, ``stream_id``, ``entry_point_id``,
+        ``active_execution_ids``, ``is_awaiting_input``, ``waiting_nodes``.
+        """
+        result: list[dict[str, Any]] = []
+        for graph_id, reg in self._graphs.items():
+            for ep_id, stream in reg.streams.items():
+                active = stream.active_execution_ids
+                if not active:
+                    continue
+                result.append({
+                    "graph_id": graph_id,
+                    "stream_id": stream.stream_id,
+                    "entry_point_id": ep_id,
+                    "active_execution_ids": active,
+                    "is_awaiting_input": stream.is_awaiting_input,
+                    "waiting_nodes": stream.get_waiting_nodes(),
+                })
+        return result
+
+    def get_waiting_nodes(self) -> list[dict[str, Any]]:
+        """Return all nodes currently blocked waiting for client input.
+
+        Each dict contains: ``graph_id``, ``stream_id``, ``node_id``,
+        ``execution_id``.
+        """
+        result: list[dict[str, Any]] = []
+        for graph_id, reg in self._graphs.items():
+            for _ep_id, stream in reg.streams.items():
+                for waiting in stream.get_waiting_nodes():
+                    result.append({
+                        "graph_id": graph_id,
+                        "stream_id": stream.stream_id,
+                        **waiting,
+                    })
+        return result
+
     # === PROPERTIES ===
 
     @property

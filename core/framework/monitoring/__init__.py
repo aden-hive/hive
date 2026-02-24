@@ -15,15 +15,15 @@ Usage::
 
     # Load judge as secondary graph on the worker runtime
     await worker_runtime.add_graph(
-        graph_id="worker_health_judge",
+        graph_id="judge",
         graph=judge_graph,
         goal=judge_goal,
         entry_points={"health_check": HEALTH_JUDGE_ENTRY_POINT},
-        storage_subpath="graphs/worker_health_judge",
+        storage_subpath="graphs/judge",
     )
 """
 
-from .worker_health_judge import HEALTH_JUDGE_ENTRY_POINT, judge_goal, judge_graph, judge_node
+from .judge import HEALTH_JUDGE_ENTRY_POINT, judge_goal, judge_graph, judge_node
 
 __all__ = [
     "HEALTH_JUDGE_ENTRY_POINT",

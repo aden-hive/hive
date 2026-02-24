@@ -131,6 +131,7 @@ class GraphExecutor:
         parallel_config: ParallelExecutionConfig | None = None,
         event_bus: Any | None = None,
         stream_id: str = "",
+        execution_id: str = "",
         runtime_logger: Any = None,
         storage_path: str | Path | None = None,
         loop_config: dict[str, Any] | None = None,
@@ -170,6 +171,7 @@ class GraphExecutor:
         self.logger = logging.getLogger(__name__)
         self._event_bus = event_bus
         self._stream_id = stream_id
+        self._execution_id = execution_id or getattr(runtime, "execution_id", "")
         self.runtime_logger = runtime_logger
         self._storage_path = Path(storage_path) if storage_path else None
         self._loop_config = loop_config or {}
@@ -553,6 +555,7 @@ class GraphExecutor:
                 await self._event_bus.emit_execution_resumed(
                     stream_id=self._stream_id,
                     node_id=current_node_id,
+                    execution_id=self._execution_id,
                 )
 
         # Start run
@@ -597,6 +600,7 @@ class GraphExecutor:
                             stream_id=self._stream_id,
                             node_id=current_node_id,
                             reason="User requested pause (Ctrl+Z)",
+                            execution_id=self._execution_id,
                         )
 
                     # Create session state for pause
@@ -767,7 +771,8 @@ class GraphExecutor:
                 # Emit node-started event (skip event_loop nodes — they emit their own)
                 if self._event_bus and node_spec.node_type != "event_loop":
                     await self._event_bus.emit_node_loop_started(
-                        stream_id=self._stream_id, node_id=current_node_id
+                        stream_id=self._stream_id, node_id=current_node_id,
+                        execution_id=self._execution_id,
                     )
 
                 # Execute node
@@ -777,7 +782,8 @@ class GraphExecutor:
                 # Emit node-completed event (skip event_loop nodes)
                 if self._event_bus and node_spec.node_type != "event_loop":
                     await self._event_bus.emit_node_loop_completed(
-                        stream_id=self._stream_id, node_id=current_node_id, iterations=1
+                        stream_id=self._stream_id, node_id=current_node_id, iterations=1,
+                        execution_id=self._execution_id,
                     )
 
                 # Ensure runtime logging has an L2 entry for this node
@@ -897,6 +903,7 @@ class GraphExecutor:
                                 retry_count=retry_count,
                                 max_retries=max_retries,
                                 error=result.error or "",
+                                execution_id=self._execution_id,
                             )
 
                         _is_retry = True
@@ -992,6 +999,7 @@ class GraphExecutor:
                             stream_id=self._stream_id,
                             node_id=node_spec.id,
                             reason="HITL pause node",
+                            execution_id=self._execution_id,
                         )
 
                     saved_memory = memory.read_all()
@@ -1057,6 +1065,7 @@ class GraphExecutor:
                             source_node=current_node_id,
                             target_node=result.next_node,
                             edge_condition="router",
+                            execution_id=self._execution_id,
                         )
 
                     current_node_id = result.next_node
@@ -1092,6 +1101,7 @@ class GraphExecutor:
                                     edge_condition=edge.condition.value
                                     if hasattr(edge.condition, "value")
                                     else str(edge.condition),
+                                    execution_id=self._execution_id,
                                 )
 
                         # Execute branches in parallel
@@ -1143,6 +1153,7 @@ class GraphExecutor:
                                 stream_id=self._stream_id,
                                 source_node=current_node_id,
                                 target_node=next_node,
+                                execution_id=self._execution_id,
                             )
 
                         # CHECKPOINT: node_complete (after determining next node)
@@ -1573,7 +1584,8 @@ class GraphExecutor:
             cumulative_output_keys=cumulative_output_keys or [],
             event_triggered=event_triggered,
             accounts_prompt=node_accounts_prompt,
-            execution_id=self.runtime.execution_id,
+            execution_id=self._execution_id,
+            stream_id=self._stream_id,
         )
 
     VALID_NODE_TYPES = {
@@ -1933,7 +1945,8 @@ class GraphExecutor:
                     # Emit node-started event (skip event_loop nodes)
                     if self._event_bus and node_spec.node_type != "event_loop":
                         await self._event_bus.emit_node_loop_started(
-                            stream_id=self._stream_id, node_id=branch.node_id
+                            stream_id=self._stream_id, node_id=branch.node_id,
+                            execution_id=self._execution_id,
                         )
 
                     self.logger.info(
@@ -1957,7 +1970,8 @@ class GraphExecutor:
                     # Emit node-completed event (skip event_loop nodes)
                     if self._event_bus and node_spec.node_type != "event_loop":
                         await self._event_bus.emit_node_loop_completed(
-                            stream_id=self._stream_id, node_id=branch.node_id, iterations=1
+                            stream_id=self._stream_id, node_id=branch.node_id, iterations=1,
+                            execution_id=self._execution_id,
                         )
 
                     if result.success:

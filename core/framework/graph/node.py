@@ -518,6 +518,10 @@ class NodeContext:
     # Execution ID (from StreamRuntimeAdapter)
     execution_id: str = ""
 
+    # Stream identity — the ExecutionStream this node runs within.
+    # Falls back to node_id when not set (legacy / standalone executor).
+    stream_id: str = ""
+
 
 @dataclass
 class NodeResult:

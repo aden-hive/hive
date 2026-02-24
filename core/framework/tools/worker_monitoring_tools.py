@@ -45,7 +45,7 @@ def register_worker_monitoring_tools(
     registry: ToolRegistry,
     event_bus: EventBus,
     storage_path: Path,
-    stream_id: str = "worker_health_judge",
+    stream_id: str = "judge",
     worker_graph_id: str | None = None,
 ) -> int:
     """Register worker monitoring tools bound to *event_bus* and *storage_path*.

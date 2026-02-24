@@ -172,25 +172,18 @@ def register_queen_lifecycle_tools(
             )
 
         # Check if the worker is waiting for user input
-        waiting_for_input = False
-        waiting_node_id = None
+        waiting_nodes = []
         for _ep_id, stream in reg.streams.items():
-            # Check active executors for pending input
-            for executor in stream._active_executors.values():
-                for node_id, node in executor.node_registry.items():
-                    if hasattr(node, "_waiting_for_input") and node._waiting_for_input:
-                        waiting_for_input = True
-                        waiting_node_id = node_id
-                        break
+            waiting_nodes.extend(stream.get_waiting_nodes())
 
-        status = "waiting_for_input" if waiting_for_input else "running"
+        status = "waiting_for_input" if waiting_nodes else "running"
         result = {
             **base,
             "status": status,
             "active_executions": active_execs,
         }
-        if waiting_node_id:
-            result["waiting_node_id"] = waiting_node_id
+        if waiting_nodes:
+            result["waiting_node_id"] = waiting_nodes[0]["node_id"]
         return json.dumps(result)
 
     _status_tool = Tool(
@@ -220,20 +213,16 @@ def register_queen_lifecycle_tools(
 
         # Find an active node that can accept injected input
         for stream in reg.streams.values():
-            for executor in stream._active_executors.values():
-                for node_id, node in executor.node_registry.items():
-                    if hasattr(node, "inject_event"):
-                        try:
-                            await node.inject_event(content)
-                            return json.dumps(
-                                {
-                                    "status": "delivered",
-                                    "node_id": node_id,
-                                    "content_preview": content[:100],
-                                }
-                            )
-                        except Exception as e:
-                            return json.dumps({"error": f"Injection failed: {e}"})
+            injectable = stream.get_injectable_nodes()
+            if injectable:
+                target_node_id = injectable[0]["node_id"]
+                ok = await stream.inject_input(target_node_id, content)
+                if ok:
+                    return json.dumps({
+                        "status": "delivered",
+                        "node_id": target_node_id,
+                        "content_preview": content[:100],
+                    })
 
         return json.dumps(
             {
