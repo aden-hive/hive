@@ -101,6 +101,28 @@ cd hive
 ./quickstart.sh
 ```
 
+### Windows / WSL Troubleshooting
+
+If you encounter the following error:
+
+/usr/bin/env: ‘bash\r’: No such file or directory
+
+This is caused by Windows CRLF line endings.
+
+To fix:
+
+sudo apt install dos2unix -y
+dos2unix quickstart.sh
+
+We strongly recommend cloning the repository inside WSL to avoid line-ending issues.
+
+Additionally, Ubuntu installs Python 3.10 by default. Hive requires Python 3.11+.
+
+To install Python 3.11:
+
+sudo apt install python3.11 python3.11-venv python3.11-dev -y
+
+
 This sets up:
 
 - **framework** - Core agent runtime and graph executor (in `core/.venv`)
