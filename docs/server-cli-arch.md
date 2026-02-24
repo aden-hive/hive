@@ -297,6 +297,17 @@ One AgentRuntime (shared EventBus)
     isolation_level: isolated
 ```
 
+### GraphScopedEventBus and Event Identity Fields
+
+Every event carries four identity fields: `(graph_id, stream_id, node_id, execution_id)`.
+
+- **`graph_id`** — Set automatically by `GraphScopedEventBus`, a public subclass of `EventBus` that stamps `graph_id` on every `publish()` call. All three components (worker, judge, queen) use a scoped bus so their events are distinguishable.
+- **`stream_id`** — The entry point pipeline. Flows from `EntryPointSpec.id` through `ExecutionStream` → `GraphExecutor` → `NodeContext` → `EventLoopNode`.
+- **`node_id`** — The graph node emitting the event.
+- **`execution_id`** — UUID for a specific execution run, set by `ExecutionStream` and wired through `GraphExecutor` → `EventLoopNode` → all `emit_*` calls.
+
+See [EVENT_TYPES.md](../core/framework/runtime/EVENT_TYPES.md) for the complete event type and schema reference.
+
 ### New EventBus Event Types
 
 Two new events added to `EventType` enum:
@@ -307,7 +318,7 @@ Emitted by the health judge's `emit_escalation_ticket` tool when the judge detec
 
 ```python
 EventBus.emit_worker_escalation_ticket(
-    stream_id: str,        # Judge's stream ID (e.g. "worker_health_judge::health_check")
+    stream_id: str,        # Judge's stream ID (e.g. "judge")
     node_id: str,          # "judge"
     ticket: dict,          # Full EscalationTicket (see data model below)
     execution_id: str | None = None,
@@ -351,8 +362,8 @@ EventBus.emit_queen_intervention_requested(
     ticket_id: str,          # References the original EscalationTicket
     analysis: str,           # Queen's 2-3 sentence analysis
     severity: str,           # "low" | "medium" | "high" | "critical"
-    queen_graph_id: str,     # "hive_coder_queen"
-    queen_stream_id: str,    # "hive_coder_queen::ticket_receiver"
+    queen_graph_id: str,     # "queen"
+    queen_stream_id: str,    # "queen"
     execution_id: str | None = None,
 )
 ```
@@ -364,8 +375,8 @@ EventBus.emit_queen_intervention_requested(
   "ticket_id": "uuid",
   "analysis": "Worker is stuck in a rate-limit retry loop for 6+ minutes. Suggest pausing and retrying with backoff.",
   "severity": "high",
-  "queen_graph_id": "hive_coder_queen",
-  "queen_stream_id": "hive_coder_queen::ticket_receiver"
+  "queen_graph_id": "queen",
+  "queen_stream_id": "queen"
 }
 ```
 
@@ -417,6 +428,15 @@ The following existing methods gained a `graph_id` parameter to support multi-gr
 |---|---|---|
 | `get_active_graph()` | `-> GraphSpec` | Returns the `GraphSpec` for the currently active graph (used by TUI/chat routing) |
 | `active_graph_id` (property) | `str` (get/set) | The graph that receives user input. Set by TUI when switching between worker and queen views |
+| `get_active_streams()` | `-> list[dict]` | Returns metadata for every stream with active executions across all graphs. Each dict contains `graph_id`, `stream_id`, `entry_point_id`, `active_execution_ids`, `is_awaiting_input`, `waiting_nodes`. |
+| `get_waiting_nodes()` | `-> list[dict]` | Flat list of all nodes currently blocked waiting for client input across all graphs/streams. Each dict contains `graph_id`, `stream_id`, `node_id`, `execution_id`. |
+
+### New ExecutionStream APIs
+
+| Method | Signature | Description |
+|---|---|---|
+| `get_waiting_nodes()` | `-> list[dict]` | Returns `[{"node_id": str, "execution_id": str}]` for every `EventLoopNode` with `_awaiting_input == True`. |
+| `get_injectable_nodes()` | `-> list[dict]` | Returns `[{"node_id": str, "execution_id": str}]` for every node that supports message injection (has `inject_event` method). |
 
 ### Proposed HTTP Endpoints
 
@@ -432,6 +452,13 @@ These endpoints are not yet implemented. They expose the new multi-graph and mon
 | `GET /api/agents/{id}/graphs/{gid}/sessions/{sid}` | Graph session details | Graph-specific `SessionStore.read_state()` |
 | `PUT /api/agents/{id}/active-graph` | Switch active graph | `runtime.active_graph_id = graph_id` |
 | `GET /api/agents/{id}/active-graph` | Get active graph | `runtime.active_graph_id` |
+
+#### Stream Introspection
+
+| HTTP Endpoint | Method | Runtime Primitive |
+|---|---|---|
+| `GET /api/agents/{id}/streams` | Active streams | `runtime.get_active_streams()` — all streams with active executions |
+| `GET /api/agents/{id}/waiting-nodes` | Waiting nodes | `runtime.get_waiting_nodes()` — all nodes blocked on client input |
 
 #### Worker Health Monitoring
 
@@ -476,7 +503,7 @@ Secondary graphs have fully isolated storage under `graphs/{graph_id}/` to preve
 |       +-- conversations/
 |       +-- logs/
 +-- graphs/
-|   +-- worker_health_judge/                     # Health judge (secondary)
+|   +-- judge/                     # Health judge (secondary)
 |   |   +-- sessions/
 |   |   |   +-- session_YYYYMMDD_HHMMSS_{uuid}/  # ONE persistent session
 |   |   |       +-- state.json
@@ -485,7 +512,7 @@ Secondary graphs have fully isolated storage under `graphs/{graph_id}/` to preve
 |   |   |           +-- tool_logs.jsonl
 |   |   |           +-- details.jsonl
 |   |   +-- runtime_logs/
-|   +-- hive_coder_queen/                        # Queen triage (secondary)
+|   +-- queen/                        # Queen triage (secondary)
 |       +-- sessions/
 |       |   +-- session_YYYYMMDD_HHMMSS_{uuid}/  # ONE persistent session
 |       |       +-- state.json
@@ -498,7 +525,7 @@ Secondary graphs have fully isolated storage under `graphs/{graph_id}/` to preve
 Each secondary graph gets its own `SessionStore` and `RuntimeLogStore` scoped to `graphs/{graph_id}/`. This is set up in `AgentRuntime.add_graph()`:
 
 ```python
-graph_base = self._session_store.base_path / subpath  # e.g. .../graphs/worker_health_judge
+graph_base = self._session_store.base_path / subpath  # e.g. .../graphs/judge
 graph_session_store = SessionStore(graph_base)
 graph_log_store = RuntimeLogStore(graph_base / "runtime_logs")
 ```
@@ -513,14 +540,27 @@ Three tools registered via `register_worker_monitoring_tools(registry, event_bus
 | `emit_escalation_ticket(ticket_json)` | Health Judge | Validates JSON against `EscalationTicket` schema (Pydantic rejects partial tickets), then calls `EventBus.emit_worker_escalation_ticket()`. |
 | `notify_operator(ticket_id, analysis, urgency)` | Queen | Calls `EventBus.emit_queen_intervention_requested()` so the TUI/frontend surfaces a notification. |
 
+### Queen Lifecycle Tools
+
+Four tools registered via `register_queen_lifecycle_tools(registry, worker_runtime, event_bus)`. These close over the worker's `AgentRuntime` to give the Queen control over the worker agent's lifecycle.
+
+| Tool | Description |
+|---|---|
+| `start_worker(task)` | Trigger the worker's default entry point with a task description. Returns an `execution_id`. |
+| `stop_worker()` | Cancel all active worker executions. Returns IDs of cancelled executions. |
+| `get_worker_status()` | Check if the worker is idle, running, or waiting for input. Returns execution details and waiting node ID if applicable. Uses `stream.get_waiting_nodes()` for accurate detection. |
+| `inject_worker_message(content)` | Send a message to the running worker agent by finding an injectable node via `stream.get_injectable_nodes()` and calling `stream.inject_input()`. |
+
 ### New File Reference
 
 | Component | Path |
 |---|---|
 | EscalationTicket model | `core/framework/runtime/escalation_ticket.py` |
-| Worker Health Judge graph | `core/framework/monitoring/worker_health_judge.py` |
+| Worker Health Judge graph | `core/framework/monitoring/judge.py` |
 | Worker monitoring tools | `core/framework/tools/worker_monitoring_tools.py` |
+| Queen lifecycle tools | `core/framework/tools/queen_lifecycle_tools.py` |
 | Monitoring package init | `core/framework/monitoring/__init__.py` |
+| Event types reference | `core/framework/runtime/EVENT_TYPES.md` |
 
 ---
 
@@ -544,3 +584,11 @@ Three tools registered via `register_worker_monitoring_tools(registry, event_bus
 | SessionStore | `core/framework/storage/session_store.py` |
 | CheckpointStore | `core/framework/storage/checkpoint_store.py` |
 | Runtime logger | `core/framework/runtime/core.py` |
+| EventBus | `core/framework/runtime/event_bus.py` |
+| ExecutionStream | `core/framework/runtime/execution_stream.py` |
+| GraphScopedEventBus | `core/framework/runtime/execution_stream.py` |
+| EscalationTicket | `core/framework/runtime/escalation_ticket.py` |
+| Queen lifecycle tools | `core/framework/tools/queen_lifecycle_tools.py` |
+| Worker monitoring tools | `core/framework/tools/worker_monitoring_tools.py` |
+| Health Judge graph | `core/framework/monitoring/judge.py` |
+| Event types reference | `core/framework/runtime/EVENT_TYPES.md` |
