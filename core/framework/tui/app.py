@@ -468,6 +468,8 @@ class AdenTUI(App):
         into the worker runtime.  The worker is completely untouched.
         """
         import asyncio
+        import uuid
+        from datetime import datetime
         from pathlib import Path
 
         from framework.graph.executor import GraphExecutor
@@ -486,6 +488,10 @@ class AdenTUI(App):
             llm = self.runtime._llm
             agent_loop = self.chat_repl._agent_loop
 
+            # Generate a shared session ID for queen, judge, and worker.
+            ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+            session_id = f"session_{ts}_{uuid.uuid4().hex[:8]}"
+
             # 1. Monitoring tools (health summary, emit ticket, notify operator).
             #    Registered on a standalone registry — NOT merged into the worker.
             monitoring_registry = ToolRegistry()
@@ -496,11 +502,11 @@ class AdenTUI(App):
                 worker_graph_id=self.runtime._graph_id,
             )
 
-            # 2. Storage dirs — under worker's base path but completely owned
-            #    by the judge/queen.  Worker never writes here.
-            judge_dir = storage_path / "graphs" / "judge" / "session"
+            # 2. Storage dirs — scoped by session_id so each agent load
+            #    gets fresh queen/judge conversations.
+            judge_dir = storage_path / "graphs" / "judge" / "session" / session_id
             judge_dir.mkdir(parents=True, exist_ok=True)
-            queen_dir = storage_path / "graphs" / "queen" / "session"
+            queen_dir = storage_path / "graphs" / "queen" / "session" / session_id
             queen_dir.mkdir(parents=True, exist_ok=True)
 
             # ---------------------------------------------------------------
@@ -542,7 +548,7 @@ class AdenTUI(App):
                             input_data={
                                 "event": {"source": "timer", "reason": "scheduled"},
                             },
-                            session_state={"resume_session_id": "persistent"},
+                            session_state={"resume_session_id": session_id},
                         )
                     except Exception:
                         log.error("Health judge tick failed", exc_info=True)
@@ -584,6 +590,7 @@ class AdenTUI(App):
                 worker_runtime=self.runtime,
                 event_bus=event_bus,
                 storage_path=storage_path,
+                session_id=session_id,
             )
             register_worker_monitoring_tools(
                 queen_registry,
@@ -596,9 +603,6 @@ class AdenTUI(App):
             queen_tool_executor = queen_registry.get_executor()
 
             # Build worker identity to inject into the queen's system prompt.
-            # This must be in the system prompt (not input_data) because
-            # persistent sessions restore the old conversation and skip
-            # _build_initial_message — the queen would lose context.
             worker_graph_id = self.runtime._graph_id
             worker_goal_name = getattr(self.runtime.goal, "name", worker_graph_id)
             worker_goal_desc = getattr(self.runtime.goal, "description", "")
@@ -657,7 +661,7 @@ class AdenTUI(App):
                         graph=queen_graph,
                         goal=queen_goal,
                         input_data={"greeting": "Session started."},
-                        session_state={"resume_session_id": "persistent"},
+                        session_state={"resume_session_id": session_id},
                     )
                     # Should never reach here — queen is forever-alive.
                     log.warning(

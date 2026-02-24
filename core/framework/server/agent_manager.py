@@ -61,7 +61,7 @@ async def _extract_subgraph_steps(nodes: list, llm: Any) -> None:
 
             response = await llm.acomplete(
                 messages=[{"role": "user", "content": prompt}],
-                max_tokens=1000,
+                max_tokens=4096,
                 json_mode=True,
             )
 
@@ -172,13 +172,6 @@ class AgentManager:
             if runner._agent_runtime is None:
                 await loop.run_in_executor(None, runner._setup)
 
-            # Extract subgraph steps for frontend visualization (non-critical)
-            if runner.graph and runner._llm:
-                try:
-                    await _extract_subgraph_steps(runner.graph.nodes, runner._llm)
-                except Exception as e:
-                    logger.warning(f"Subgraph extraction skipped: {e}")
-
             runtime = runner._agent_runtime
 
             # Start runtime on event loop
@@ -224,6 +217,9 @@ class AgentManager:
         - **Judge**: timer-driven background GraphExecutor (silent monitoring)
         - **Worker**: the existing AgentRuntime (unchanged)
         """
+        import uuid
+        from datetime import datetime
+
         from framework.graph.executor import GraphExecutor
         from framework.monitoring import judge_goal, judge_graph
         from framework.runner.tool_registry import ToolRegistry
@@ -238,6 +234,12 @@ class AgentManager:
             event_bus = runtime._event_bus
             llm = runtime._llm
 
+            # Generate a shared session ID for queen, judge, and worker.
+            # All three use the same ID so conversations are scoped to this
+            # agent load and start fresh each time.
+            ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+            session_id = f"session_{ts}_{uuid.uuid4().hex[:8]}"
+
             # 1. Monitoring tools — standalone registry, NOT merged into worker
             monitoring_registry = ToolRegistry()
             register_worker_monitoring_tools(
@@ -247,14 +249,15 @@ class AgentManager:
                 worker_graph_id=runtime._graph_id,
             )
 
-            # 2. Storage dirs
-            judge_dir = storage_path / "graphs" / "worker_health_judge" / "session"
+            # 2. Storage dirs — scoped by session_id so each agent load
+            #    gets fresh queen/judge conversations.
+            judge_dir = storage_path / "graphs" / "judge" / "session" / session_id
             judge_dir.mkdir(parents=True, exist_ok=True)
-            queen_dir = storage_path / "graphs" / "queen" / "session"
+            queen_dir = storage_path / "graphs" / "queen" / "session" / session_id
             queen_dir.mkdir(parents=True, exist_ok=True)
 
             # 3. Health judge — background task, fires every 2 minutes
-            judge_runtime = Runtime(storage_path / "graphs" / "worker_health_judge")
+            judge_runtime = Runtime(storage_path / "graphs" / "judge")
             monitoring_tools = list(monitoring_registry.get_tools().values())
             monitoring_executor = monitoring_registry.get_executor()
 
@@ -272,7 +275,7 @@ class AgentManager:
                             tools=monitoring_tools,
                             tool_executor=monitoring_executor,
                             event_bus=event_bus,
-                            stream_id="worker_health_judge",
+                            stream_id="judge",
                             storage_path=judge_dir,
                             loop_config=judge_graph.loop_config,
                         )
@@ -282,7 +285,7 @@ class AgentManager:
                             input_data={
                                 "event": {"source": "timer", "reason": "scheduled"},
                             },
-                            session_state={"resume_session_id": "persistent"},
+                            session_state={"resume_session_id": session_id},
                         )
                     except Exception:
                         logger.error("Health judge tick failed", exc_info=True)
@@ -300,6 +303,7 @@ class AgentManager:
                 worker_runtime=runtime,
                 event_bus=event_bus,
                 storage_path=storage_path,
+                session_id=session_id,
             )
             register_worker_monitoring_tools(
                 queen_registry,
@@ -365,7 +369,7 @@ class AgentManager:
                         graph=queen_graph,
                         goal=queen_goal,
                         input_data={"greeting": "Session started."},
-                        session_state={"resume_session_id": "persistent"},
+                        session_state={"resume_session_id": session_id},
                     )
                     logger.warning("Queen executor returned (should be forever-alive)")
                 except Exception:

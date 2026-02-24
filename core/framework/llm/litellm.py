@@ -328,6 +328,20 @@ class LiteLLMProvider(LLMProvider):
                         f"Full request dumped to: {dump_path}"
                     )
 
+                    # finish_reason=length means the model exhausted max_tokens
+                    # before producing content. Retrying with the same max_tokens
+                    # will never help — return immediately instead of looping.
+                    if finish_reason == "length":
+                        max_tok = kwargs.get("max_tokens", "unset")
+                        logger.error(
+                            f"[retry] {model} returned empty content with "
+                            f"finish_reason=length (max_tokens={max_tok}). "
+                            f"The model exhausted its token budget before "
+                            f"producing visible output. Increase max_tokens "
+                            f"or use a different model. Not retrying."
+                        )
+                        return response
+
                     if attempt == retries:
                         logger.error(
                             f"[retry] GAVE UP on {model} after {retries + 1} "
@@ -621,6 +635,20 @@ class LiteLLMProvider(LLMProvider):
                         f"Full request dumped to: {dump_path}"
                     )
 
+                    # finish_reason=length means the model exhausted max_tokens
+                    # before producing content. Retrying with the same max_tokens
+                    # will never help — return immediately instead of looping.
+                    if finish_reason == "length":
+                        max_tok = kwargs.get("max_tokens", "unset")
+                        logger.error(
+                            f"[async-retry] {model} returned empty content with "
+                            f"finish_reason=length (max_tokens={max_tok}). "
+                            f"The model exhausted its token budget before "
+                            f"producing visible output. Increase max_tokens "
+                            f"or use a different model. Not retrying."
+                        )
+                        return response
+
                     if attempt == retries:
                         logger.error(
                             f"[async-retry] GAVE UP on {model} after {retries + 1} "
@@ -903,6 +931,7 @@ class LiteLLMProvider(LLMProvider):
             tool_calls_acc: dict[int, dict[str, str]] = {}
             input_tokens = 0
             output_tokens = 0
+            stream_finish_reason: str | None = None
 
             try:
                 response = await litellm.acompletion(**kwargs)  # type: ignore[union-attr]
@@ -938,6 +967,7 @@ class LiteLLMProvider(LLMProvider):
 
                     # --- Finish ---
                     if choice.finish_reason:
+                        stream_finish_reason = choice.finish_reason
                         for _idx, tc_data in sorted(tool_calls_acc.items()):
                             try:
                                 parsed_args = json.loads(tc_data["arguments"])
@@ -992,6 +1022,24 @@ class LiteLLMProvider(LLMProvider):
                         for event in tail_events:
                             yield event
                         return
+
+                    # finish_reason=length means the model exhausted
+                    # max_tokens before producing content. Retrying with
+                    # the same max_tokens will never help.
+                    if stream_finish_reason == "length":
+                        max_tok = kwargs.get("max_tokens", "unset")
+                        logger.error(
+                            f"[stream] {self.model} returned empty content "
+                            f"with finish_reason=length "
+                            f"(max_tokens={max_tok}). The model exhausted "
+                            f"its token budget before producing visible "
+                            f"output. Increase max_tokens or use a "
+                            f"different model. Not retrying."
+                        )
+                        for event in tail_events:
+                            yield event
+                        return
+
                     wait = _compute_retry_delay(attempt)
                     token_count, token_method = _estimate_tokens(
                         self.model,
