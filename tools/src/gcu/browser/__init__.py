@@ -5,7 +5,7 @@ Provides comprehensive browser automation capabilities:
 - Browser lifecycle management (start/stop/status)
 - Tab management (open/close/focus/list)
 - Navigation and history
-- Content extraction (snapshot, screenshot, console, pdf)
+- Content extraction (screenshot, console, pdf)
 - Element interaction (click, type, fill, etc.)
 - Advanced operations (wait, evaluate, upload, dialog)
 - Agent contexts (isolated sessions spawned from shared profiles)
@@ -50,7 +50,7 @@ def register_tools(mcp: FastMCP) -> None:
     - Lifecycle: browser_start, browser_stop, browser_status, browser_profiles
     - Tabs: browser_tabs, browser_open, browser_close, browser_focus
     - Navigation: browser_navigate, browser_go_back, browser_go_forward, browser_reload
-    - Inspection: browser_snapshot, browser_screenshot, browser_console, browser_pdf
+    - Inspection: browser_screenshot, browser_console, browser_pdf
     - Interactions: browser_click, browser_type, browser_fill, browser_press,
                     browser_hover, browser_select, browser_scroll, browser_drag
     - Advanced: browser_wait, browser_evaluate, browser_get_text, browser_get_attribute,

@@ -1,5 +1,5 @@
 """
-Browser inspection tools - snapshot, screenshot, console, pdf.
+Browser inspection tools - screenshot, console, pdf.
 
 Tools for extracting content and capturing page state.
 """
@@ -18,76 +18,6 @@ from ..session import get_session
 
 def register_inspection_tools(mcp: FastMCP) -> None:
     """Register browser inspection tools."""
-
-    @mcp.tool()
-    async def browser_snapshot(
-        target_id: str | None = None,
-        profile: str = "default",
-        selector: str | None = None,
-        max_chars: int = 50000,
-    ) -> dict:
-        """
-        Get an accessibility tree snapshot of the current page.
-
-        Use this to understand the page structure and find elements to interact with.
-        Returns element refs (like 'e12') that can be used with browser_click, etc.
-
-        Args:
-            target_id: Tab ID (default: active tab)
-            profile: Browser profile name (default: "default")
-            selector: CSS selector to scope snapshot (optional)
-            max_chars: Maximum characters to return (default: 50000)
-
-        Returns:
-            Dict with snapshot (text representation) and metadata
-        """
-        try:
-            session = get_session(profile)
-            page = session.get_page(target_id)
-            if not page:
-                return {"ok": False, "error": "No active tab"}
-
-            # Get accessibility tree
-            snapshot = await page.accessibility.snapshot()
-            if not snapshot:
-                return {"ok": False, "error": "Could not get accessibility snapshot"}
-
-            # Format snapshot as text with refs
-            refs: dict[str, dict] = {}
-            lines: list[str] = []
-
-            def format_node(node: dict, depth: int = 0) -> None:
-                indent = "  " * depth
-                role = node.get("role", "")
-                name = node.get("name", "")
-                ref = f"e{len(refs)}"
-                refs[ref] = {"role": role, "name": name}
-
-                line = f"{indent}[{ref}] {role}"
-                if name:
-                    line += f': "{name[:100]}"'
-                lines.append(line)
-
-                for child in node.get("children", []):
-                    format_node(child, depth + 1)
-
-            format_node(snapshot)
-            text = "\n".join(lines)
-
-            # Truncate if needed
-            if len(text) > max_chars:
-                text = text[:max_chars] + "\n... (truncated)"
-
-            return {
-                "ok": True,
-                "targetId": target_id or session.active_page_id,
-                "url": page.url,
-                "snapshot": text,
-                "refs": refs,
-                "refCount": len(refs),
-            }
-        except PlaywrightError as e:
-            return {"ok": False, "error": f"Browser error: {e!s}"}
 
     @mcp.tool()
     async def browser_screenshot(

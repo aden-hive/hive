@@ -690,7 +690,7 @@ class EventLoopNode(NodeProtocol):
             # filter to real MCP tools (exclude set_output, ask_user).
             # NOTE: errored tool calls ARE included — a tool that keeps
             # failing with the same args is the canonical doom loop case
-            # (e.g. browser_snapshot repeatedly hitting the same error).
+            # (e.g. a tool repeatedly hitting the same error).
             mcp_tool_calls = [
                 tc
                 for tc in logged_tool_calls

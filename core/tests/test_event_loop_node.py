@@ -1702,7 +1702,7 @@ class TestToolDoomLoopIntegration:
 
         Regression test: previously, errored tool calls were excluded from
         doom loop fingerprinting (``not tc.get("is_error")``), so a tool like
-        browser_snapshot failing with the same accessibility error every turn
+        a tool failing with the same error every turn
         would never be detected.
         """
         node_spec.output_keys = []
@@ -1719,7 +1719,7 @@ class TestToolDoomLoopIntegration:
         judge.evaluate = judge_eval
 
         # 4 turns of the same failing tool call, then text
-        llm = ToolRepeatLLM("browser_snapshot", {}, tool_turns=4)
+        llm = ToolRepeatLLM("failing_tool", {}, tool_turns=4)
         bus = EventBus()
         doom_events: list = []
         bus.subscribe(
@@ -1739,7 +1739,7 @@ class TestToolDoomLoopIntegration:
             node_spec,
             memory,
             llm,
-            tools=[Tool(name="browser_snapshot", description="s", parameters={})],
+            tools=[Tool(name="failing_tool", description="s", parameters={})],
         )
         node = EventLoopNode(
             judge=judge,
@@ -1754,7 +1754,7 @@ class TestToolDoomLoopIntegration:
         assert result.success is True
         # Doom loop MUST fire for repeatedly-failing tool calls
         assert len(doom_events) >= 1
-        assert "browser_snapshot" in doom_events[0].data["description"]
+        assert "failing_tool" in doom_events[0].data["description"]
 
 
 # ===========================================================================
