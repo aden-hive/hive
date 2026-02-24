@@ -3108,6 +3108,7 @@ class EventLoopNode(NodeProtocol):
             config=LoopConfig(
                 max_iterations=max_iter,  # Tighter budget
                 max_tool_calls_per_turn=self._config.max_tool_calls_per_turn,
+                tool_call_overflow_margin=self._config.tool_call_overflow_margin,
                 max_history_tokens=self._config.max_history_tokens,
                 stall_detection_threshold=self._config.stall_detection_threshold,
                 max_tool_result_chars=self._config.max_tool_result_chars,
