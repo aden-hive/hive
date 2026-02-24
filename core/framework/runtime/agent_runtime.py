@@ -142,13 +142,14 @@ class AgentRuntime:
             runtime_log_store: Optional RuntimeLogStore for per-execution logging
             checkpoint_config: Optional checkpoint configuration for resumable sessions
             graph_id: Optional identifier for the primary graph (defaults to "primary")
-            accounts_prompt: Connected accounts block for system prompt injection
+            accounts_prompt: Optional connected-accounts context for system prompt injection
         """
         self.graph = graph
         self.goal = goal
         self._config = config or AgentRuntimeConfig()
         self._runtime_log_store = runtime_log_store
         self._checkpoint_config = checkpoint_config
+        self.accounts_prompt = accounts_prompt
 
         # Primary graph identity
         self._graph_id: str = graph_id or "primary"
@@ -180,7 +181,6 @@ class AgentRuntime:
         self._llm = llm
         self._tools = tools or []
         self._tool_executor = tool_executor
-        self._accounts_prompt = accounts_prompt
 
         # Entry points and streams (primary graph)
         self._entry_points: dict[str, EntryPointSpec] = {}
@@ -276,7 +276,7 @@ class AgentRuntime:
                     session_store=self._session_store,
                     checkpoint_config=self._checkpoint_config,
                     graph_id=self._graph_id,
-                    accounts_prompt=self._accounts_prompt,
+                    accounts_prompt=self.accounts_prompt,
                 )
                 await stream.start()
                 self._streams[ep_id] = stream
@@ -678,7 +678,7 @@ class AgentRuntime:
                 session_store=self._session_store,
                 checkpoint_config=self._checkpoint_config,
                 graph_id=graph_id,
-                accounts_prompt=self._accounts_prompt,
+                accounts_prompt=self.accounts_prompt,
             )
             if self._running:
                 await stream.start()
@@ -1176,6 +1176,7 @@ def create_agent_runtime(
         checkpoint_config: Optional checkpoint configuration for resumable sessions.
             If None, uses default checkpointing behavior.
         graph_id: Optional identifier for the primary graph (defaults to "primary").
+        accounts_prompt: Optional connected-accounts context for system prompt injection.
 
     Returns:
         Configured AgentRuntime (not yet started)
