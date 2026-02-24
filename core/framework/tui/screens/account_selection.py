@@ -66,16 +66,32 @@ class AccountSelectionScreen(ModalScreen[dict | None]):
                 id="acct-subtitle",
             )
             option_list = OptionList(id="acct-list")
-            for i, acct in enumerate(self._accounts):
+            # Group: Aden accounts first, then local
+            aden = [a for a in self._accounts if a.get("source") != "local"]
+            local = [a for a in self._accounts if a.get("source") == "local"]
+            ordered = aden + local
+            for i, acct in enumerate(ordered):
                 provider = acct.get("provider", "unknown")
                 alias = acct.get("alias", "unknown")
-                email = acct.get("identity", {}).get("email", "")
+                identity = acct.get("identity", {})
+                source = acct.get("source", "aden")
+                # Build identity label: prefer email, then username/workspace
+                identity_label = (
+                    identity.get("email")
+                    or identity.get("username")
+                    or identity.get("workspace")
+                    or ""
+                )
                 label = Text()
                 label.append(f"{provider}/", style="bold")
                 label.append(alias, style="bold cyan")
-                if email:
-                    label.append(f"  ({email})", style="dim")
+                if source == "local":
+                    label.append("  [local]", style="dim yellow")
+                if identity_label:
+                    label.append(f"  ({identity_label})", style="dim")
                 option_list.add_option(Option(label, id=f"acct-{i}"))
+            # Keep ordered list for index lookups
+            self._accounts = ordered
             yield option_list
             yield Label(
                 "[dim]Enter[/dim] Select  [dim]Esc[/dim] Cancel",

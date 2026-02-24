@@ -378,16 +378,16 @@ flowchart TB
     SA -->|"Inform"| ELN_EL
     SA -->|"Starts"| B
     B -->|"Report"| ELN_EL
-    TR -->|"Assigned"| EventLoopNode
-    CB -->|"Modify Worker Bee"| WorkerBees
+    TR -->|"Assigned"| ELN_EL
+    CB -->|"Modify Worker Bee"| WB_C
 
     %% =========================================
     %% SHARED MEMORY & LOGS ACCESS
     %% =========================================
 
-    %% Worker Bees Access
-    Graph <-->|"Read/Write"| WTM
-    Graph <-->|"Read/Write"| SM
+    %% Worker Bees Access (link to node inside Graph subgraph)
+    AN <-->|"Read/Write"| WTM
+    AN <-->|"Read/Write"| SM
 
     %% Queen Bee Access
     QB_C <-->|"Read/Write"| WTM
