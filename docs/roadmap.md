@@ -7,68 +7,51 @@ flowchart TB
     %% Main Entity
     User([User])
 
-    %% =========================================
-    %% EXTERNAL EVENT SOURCES
-    %% =========================================
-    subgraph ExtEventSource [External Event Source]
-        E_Sch["Schedulers"]
-        E_WH["Webhook"]
-        E_SSE["SSE"]
-    end
+    %% External Event Sources
+    E_Sch["Schedulers"]
+    E_WH["Webhook"]
+    E_SSE["SSE"]
 
-    %% =========================================
-    %% SYSTEM NODES
-    %% =========================================
-    subgraph WorkerBees [Worker Bees]
-        WB_C["Conversation"]
-        WB_SP["System prompt"]
+    %% Worker Bees Components
+    WB_C["Conversation"]
+    WB_SP["System prompt"]
+    N1["Node"]
+    N2["Node"]
+    N3["Node"]
+    AN["Active Node"]
+    ELN_L["listener"]
+    ELN_SP["System Prompt (Task)"]
+    ELN_EL["Event loop"]
+    ELN_C["Conversation"]
 
-        subgraph Graph [Graph]
-            direction TB
-            N1["Node"] --> N2["Node"] --> N3["Node"]
-            N1 -.-> AN["Active Node"]
-            N2 -.-> AN
-            N3 -.-> AN
+    %% Judge Components
+    J_C["Criteria"]
+    J_P["Principles"]
+    J_EL["Event loop"]
+    J_S["Scheduler"]
 
-            %% Nested Event Loop Node
-            subgraph EventLoopNode [Event Loop Node]
-                ELN_L["listener"]
-                ELN_SP["System Prompt<br/>(Task)"]
-                ELN_EL["Event loop"]
-                ELN_C["Conversation"]
-            end
-        end
-    end
+    %% Queen Bee Components
+    QB_SP["System prompt"]
+    QB_EL["Event loop"]
+    QB_C["Conversation"]
 
-    subgraph JudgeNode [Judge]
-        J_C["Criteria"]
-        J_P["Principles"]
-        J_EL["Event loop"] <--> J_S["Scheduler"]
-    end
+    %% Infra Components
+    SA["Sub Agent"]
+    TR["Tool Registry"]
+    WTM["Write through Conversation Memory"]
+    SM["Shared Memory"]
+    EB["Event Bus"]
+    CS["Credential Store"]
 
-    subgraph QueenBee [Queen Bee]
-        QB_SP["System prompt"]
-        QB_EL["Event loop"]
-        QB_C["Conversation"]
-    end
+    %% PC Components
+    B["Browser"]
+    CB["Codebase"]
 
-    subgraph Infra [Infra]
-        SA["Sub Agent"]
-        TR["Tool Registry"]
-        WTM["Write through Conversation Memory<br/>(Logs/RAM/Harddrive)"]
-        SM["Shared Memory<br/>(State/Harddrive)"]
-        EB["Event Bus<br/>(RAM)"]
-        CS["Credential Store<br/>(Harddrive/Cloud)"]
-    end
-
-    subgraph PC [PC]
-        B["Browser"]
-        CB["Codebase<br/>v 0.0.x ... v n.n.n"]
-    end
-
-    %% =========================================
-    %% CONNECTIONS & DATA FLOW
-    %% =========================================
+    %% Node connections
+    N1 --> N2 --> N3
+    N1 -.-> AN
+    N2 -.-> AN
+    N3 -.-> AN
 
     %% External Event Routing
     E_Sch --> ELN_L
@@ -85,12 +68,10 @@ flowchart TB
     ELN_C <-->|"Mirror"| WB_C
     WB_C -->|"Focus"| AN
 
-    WorkerBees -->|"Inquire"| JudgeNode
-    JudgeNode -->|"Approve"| WorkerBees
-
-    %% Judge Alignments
-    J_C <-.->|"aligns"| WB_SP
-    J_P <-.->|"aligns"| QB_SP
+    %% Judge connections
+    J_EL <--> J_S
+    WB_SP <-.->|"aligns"| J_C
+    QB_SP <-.->|"aligns"| J_P
 
     %% Escalate path
     J_EL -->|"Report (Escalate)"| QB_EL
@@ -104,22 +85,13 @@ flowchart TB
     SA -->|"Inform"| ELN_EL
     SA -->|"Starts"| B
     B -->|"Report"| ELN_EL
-    TR -->|"Assigned"| EventLoopNode
-    CB -->|"Modify Worker Bee"| WorkerBees
+    TR -->|"Assigned"| ELN_L
 
-    %% =========================================
-    %% SHARED MEMORY & LOGS ACCESS
-    %% =========================================
-
-    %% Worker Bees Access
-    Graph <-->|"Read/Write"| WTM
-    Graph <-->|"Read/Write"| SM
-
-    %% Queen Bee Access
+    %% Shared Memory & Logs Access
+    WTM <-->|"Read/Write"| ELN_C
+    SM <-->|"Read/Write"| ELN_EL
     QB_C <-->|"Read/Write"| WTM
     QB_EL <-->|"Read/Write"| SM
-
-    %% Credentials Access
     CS -->|"Read Access"| QB_C
 ```
 
