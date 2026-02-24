@@ -748,9 +748,14 @@ if [ ${#FOUND_PROVIDERS[@]} -gt 0 ]; then
         echo -e "  ${CYAN}$i)${NC} $provider"
         i=$((i + 1))
     done
-    ZAI_CHOICE=$i
-    echo -e "  ${CYAN}$i)${NC} ZAI Code Subscription  ${DIM}(use your ZAI Code plan)${NC}"
-    i=$((i + 1))
+    # Only show ZAI Code Subscription if the API key already exists
+    if [ -n "${ZAI_API_KEY:-}" ]; then
+        ZAI_CHOICE=$i
+        echo -e "  ${CYAN}$i)${NC} ZAI Code Subscription  ${DIM}(use your ZAI Code plan)${NC}"
+        i=$((i + 1))
+    else
+        ZAI_CHOICE=-1  # invalid choice, won't match
+    fi
     echo -e "  ${CYAN}$i)${NC} Other"
     max_choice=$i
     echo ""
@@ -1208,12 +1213,5 @@ echo -e "  Launch the interactive dashboard to browse and run agents:"
 echo -e "  You can start a example agent or an agent built by yourself:"
 echo -e "     ${CYAN}hive tui${NC}"
 echo ""
-# Show shell sourcing reminder if we added environment variables
-if [ -n "$SELECTED_PROVIDER_ID" ] || [ -n "$HIVE_CREDENTIAL_KEY" ]; then
-    echo -e "${BOLD}Note:${NC} To use the new environment variables in this shell, run:"
-    echo -e "  ${CYAN}source $SHELL_RC_FILE${NC}"
-    echo ""
-fi
-
 echo -e "${DIM}Run ./quickstart.sh again to reconfigure.${NC}"
 echo ""
