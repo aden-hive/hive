@@ -13,6 +13,7 @@ export interface GraphNode {
   iterations?: number;
   maxIterations?: number;
   statusLabel?: string;
+  edgeLabels?: Record<string, string>;
 }
 
 type RunState = "idle" | "deploying" | "running";
@@ -127,11 +128,19 @@ export default function AgentGraph({ nodes, title, onNodeClick, onVersionBump, v
   }, [nodes, idxMap]);
 
   const forwardEdges = useMemo(() => {
-    const edges: { fromIdx: number; toIdx: number }[] = [];
+    const edges: { fromIdx: number; toIdx: number; fanCount: number; fanIndex: number; label?: string }[] = [];
     nodes.forEach((n, i) => {
-      (n.next || []).forEach((toId) => {
-        const toIdx = idxMap[toId];
-        if (toIdx !== undefined && toIdx > i) edges.push({ fromIdx: i, toIdx });
+      const targets = (n.next || [])
+        .map((toId) => ({ toId, toIdx: idxMap[toId] }))
+        .filter((t): t is { toId: string; toIdx: number } => t.toIdx !== undefined && t.toIdx > i);
+      targets.forEach(({ toId, toIdx }, fi) => {
+        edges.push({
+          fromIdx: i,
+          toIdx,
+          fanCount: targets.length,
+          fanIndex: fi,
+          label: n.edgeLabels?.[toId],
+        });
       });
     });
     return edges;
@@ -269,29 +278,47 @@ export default function AgentGraph({ nodes, title, onNodeClick, onVersionBump, v
 
   const svgHeight = TOP_Y * 2 + nodes.length * NODE_H + (nodes.length - 1) * GAP_Y + 10;
 
-  const renderForwardEdge = (edge: { fromIdx: number; toIdx: number }, i: number) => {
+  const renderForwardEdge = (edge: { fromIdx: number; toIdx: number; fanCount: number; fanIndex: number; label?: string }, i: number) => {
     const from = nodePos(edge.fromIdx);
     const to = nodePos(edge.toIdx);
-    const x = from.x + NODE_W / 2;
+    const centerX = from.x + NODE_W / 2;
     const y1 = from.y + NODE_H;
     const y2 = to.y;
+
+    // Fan-out: spread exit points across the source node's bottom
+    let startX = centerX;
+    if (edge.fanCount > 1) {
+      const spread = NODE_W * 0.5;
+      const step = edge.fanCount > 1 ? spread / (edge.fanCount - 1) : 0;
+      startX = centerX - spread / 2 + edge.fanIndex * step;
+    }
+
     const midY = (y1 + y2) / 2;
+    const d = `M ${startX} ${y1} C ${startX} ${midY}, ${centerX} ${midY}, ${centerX} ${y2}`;
 
     const fromNode = nodes[edge.fromIdx];
     const isActive = fromNode.status === "complete" || fromNode.status === "running" || fromNode.status === "looping";
+    const strokeColor = isActive ? "hsl(43,70%,45%,0.35)" : "hsl(35,10%,20%)";
+    const arrowColor = isActive ? "hsl(43,70%,45%,0.5)" : "hsl(35,10%,22%)";
 
     return (
       <g key={`fwd-${i}`}>
-        <path
-          d={`M ${x} ${y1} C ${x} ${midY}, ${x} ${midY}, ${x} ${y2}`}
-          fill="none"
-          stroke={isActive ? "hsl(43,70%,45%,0.35)" : "hsl(35,10%,20%)"}
-          strokeWidth={1.5}
-        />
+        <path d={d} fill="none" stroke={strokeColor} strokeWidth={1.5} />
         <polygon
-          points={`${x - 4},${y2 - 6} ${x + 4},${y2 - 6} ${x},${y2 - 1}`}
-          fill={isActive ? "hsl(43,70%,45%,0.5)" : "hsl(35,10%,22%)"}
+          points={`${centerX - 4},${y2 - 6} ${centerX + 4},${y2 - 6} ${centerX},${y2 - 1}`}
+          fill={arrowColor}
         />
+        {edge.label && (
+          <text
+            x={(startX + centerX) / 2 + 8}
+            y={midY - 2}
+            fill="hsl(35,15%,40%)"
+            fontSize={9}
+            fontStyle="italic"
+          >
+            {edge.label}
+          </text>
+        )}
       </g>
     );
   };

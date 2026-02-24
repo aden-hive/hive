@@ -1,9 +1,9 @@
 import { api } from "./client";
-import type { NodeSpec, NodeDetail, NodeCriteria } from "./types";
+import type { GraphTopology, NodeDetail, NodeCriteria } from "./types";
 
 export const graphsApi = {
   nodes: (agentId: string, graphId: string, sessionId?: string) =>
-    api.get<{ nodes: NodeSpec[] }>(
+    api.get<GraphTopology>(
       `/agents/${agentId}/graphs/${graphId}/nodes${sessionId ? `?session_id=${sessionId}` : ""}`,
     ),
 

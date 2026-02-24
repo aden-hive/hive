@@ -8,10 +8,12 @@ import NodeDetailPanel from "@/components/NodeDetailPanel";
 import CredentialsModal, { type Credential, createFreshCredentials, cloneCredentials, allRequiredCredentialsMet } from "@/components/CredentialsModal";
 import { agentsApi } from "@/api/agents";
 import { executionApi } from "@/api/execution";
+import { graphsApi } from "@/api/graphs";
 import { sessionsApi } from "@/api/sessions";
 import { useSSE } from "@/hooks/use-sse";
 import type { Agent, AgentEvent, Message } from "@/api/types";
 import { backendMessageToChatMessage, sseEventToChatMessage, formatAgentDisplayName } from "@/lib/chat-helpers";
+import { topologyToGraphNodes } from "@/lib/graph-converter";
 
 const makeId = () => Math.random().toString(36).slice(2, 9);
 
@@ -533,6 +535,41 @@ export default function Workspace() {
     loadAgent();
     return () => { cancelled = true; };
   }, [rawAgent, initialAgent]);
+
+  // --- Fetch real graph topology when backend is ready ---
+  useEffect(() => {
+    if (!backendAgentId || !backendReady) return;
+    let cancelled = false;
+
+    (async () => {
+      try {
+        // Discover the actual primary graph ID (not always "primary")
+        const { graphs } = await agentsApi.graphs(backendAgentId);
+        if (cancelled || !graphs.length) return;
+
+        const topology = await graphsApi.nodes(backendAgentId, graphs[0]);
+        if (cancelled) return;
+
+        const graphNodes = topologyToGraphNodes(topology);
+        if (graphNodes.length === 0) return;
+
+        setSessionsByAgent((prev) => {
+          const sessions = prev[initialAgent] || [];
+          if (!sessions.length) return prev;
+          return {
+            ...prev,
+            [initialAgent]: sessions.map((s, i) =>
+              i === 0 ? { ...s, graphNodes } : s,
+            ),
+          };
+        });
+      } catch {
+        // Graph fetch failed — keep using mock/empty data
+      }
+    })();
+
+    return () => { cancelled = true; };
+  }, [backendAgentId, backendReady, initialAgent]);
 
   // --- SSE event handler (Phase 5) ---
   const handleSSEEvent = useCallback(
