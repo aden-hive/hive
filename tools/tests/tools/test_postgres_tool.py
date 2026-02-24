@@ -132,7 +132,6 @@ class TestPgQuery:
         assert "error" in result
 
     def test_query_timeout(self, pg_query_fn, monkeypatch):
-
         class TimeoutCursor:
             def execute(self, *args, **kwargs):
                 raise psycopg.errors.QueryCanceled()
@@ -190,7 +189,6 @@ class TestPgListTables:
 
 class TestPgDescribeTable:
     def test_describe_table_success(self, pg_describe_table_fn, monkeypatch):
-
         class DescribeCursor:
             def execute(self, *args, **kwargs):
                 pass

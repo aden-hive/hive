@@ -23,11 +23,7 @@ def register_tools(mcp: FastMCP) -> None:
         return re.sub(r"<[^>]+>", "", text)
 
     @mcp.tool()
-    def search_wikipedia(
-        query: str,
-        lang: str = "en",
-        num_results: int = 3
-    ) -> dict:
+    def search_wikipedia(query: str, lang: str = "en", num_results: int = 3) -> dict:
         """
         Search Wikipedia for a given query and return summaries of top matching articles.
 
@@ -51,7 +47,7 @@ def register_tools(mcp: FastMCP) -> None:
                 base_url,
                 params={"q": query, "limit": num_results},
                 timeout=10.0,
-                headers={"User-Agent": "AdenAgentFramework/1.0 (https://adenhq.com)"}
+                headers={"User-Agent": "AdenAgentFramework/1.0 (https://adenhq.com)"},
             )
 
             if response.status_code != 200:
@@ -73,19 +69,16 @@ def register_tools(mcp: FastMCP) -> None:
                 # Clean up HTML from excerpt (e.g. <span class="searchmatch">)
                 snippet = _strip_html(excerpt)
 
-                results.append({
-                    "title": title,
-                    "url": f"https://{lang}.wikipedia.org/wiki/{key}",
-                    "description": description,
-                    "snippet": snippet
-                })
+                results.append(
+                    {
+                        "title": title,
+                        "url": f"https://{lang}.wikipedia.org/wiki/{key}",
+                        "description": description,
+                        "snippet": snippet,
+                    }
+                )
 
-            return {
-                "query": query,
-                "lang": lang,
-                "count": len(results),
-                "results": results
-            }
+            return {"query": query, "lang": lang, "count": len(results), "results": results}
 
         except httpx.TimeoutException:
             return {"error": "Request timed out"}
