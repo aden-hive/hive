@@ -27,11 +27,14 @@ interface AgentGraphProps {
   version?: string;
 }
 
-const NODE_W = 180;
+const NODE_W_MAX = 180;
 const NODE_H = 44;
 const GAP_Y = 48;
-const LEFT_X = 40;
 const TOP_Y = 30;
+const MARGIN_LEFT = 20;
+const MARGIN_RIGHT = 50; // space for back-edge arcs
+const SVG_BASE_W = 320;
+const GAP_X = 12;
 
 // Unified amber/gold palette
 const statusColors: Record<NodeStatus, { dot: string; bg: string; border: string; glow: string }> = {
@@ -145,6 +148,74 @@ export default function AgentGraph({ nodes, title, onNodeClick, onVersionBump, v
     });
     return edges;
   }, [nodes, idxMap]);
+
+  // --- Layer-based layout computation ---
+  const layout = useMemo(() => {
+    if (nodes.length === 0) {
+      return { layers: [] as number[], cols: [] as number[], maxCols: 1, nodeW: NODE_W_MAX, colSpacing: 0, firstColX: MARGIN_LEFT };
+    }
+
+    // 1. Build reverse adjacency from forward edges (who are the parents of each node)
+    const parents = new Map<number, number[]>();
+    nodes.forEach((_, i) => parents.set(i, []));
+    forwardEdges.forEach((e) => {
+      parents.get(e.toIdx)!.push(e.fromIdx);
+    });
+
+    // 2. Assign layers via longest-path from entry
+    const layers = new Array(nodes.length).fill(0);
+    for (let i = 0; i < nodes.length; i++) {
+      const pars = parents.get(i) || [];
+      if (pars.length > 0) {
+        layers[i] = Math.max(...pars.map((p) => layers[p])) + 1;
+      }
+    }
+
+    // 3. Group nodes by layer
+    const layerGroups = new Map<number, number[]>();
+    layers.forEach((l, i) => {
+      const group = layerGroups.get(l) || [];
+      group.push(i);
+      layerGroups.set(l, group);
+    });
+
+    // 4. Compute max columns and dynamic node width
+    let maxCols = 1;
+    layerGroups.forEach((group) => {
+      maxCols = Math.max(maxCols, group.length);
+    });
+
+    const usableW = SVG_BASE_W - MARGIN_LEFT - MARGIN_RIGHT;
+    const nodeW = Math.min(NODE_W_MAX, Math.floor((usableW - (maxCols - 1) * GAP_X) / maxCols));
+    const colSpacing = nodeW + GAP_X;
+    const totalNodesW = maxCols * nodeW + (maxCols - 1) * GAP_X;
+    const firstColX = MARGIN_LEFT + (usableW - totalNodesW) / 2;
+
+    // 5. Assign columns within each layer (centered, ordered by parent column)
+    const cols = new Array(nodes.length).fill(0);
+    layerGroups.forEach((group) => {
+      if (group.length === 1) {
+        // Center single node: place at middle column
+        cols[group[0]] = (maxCols - 1) / 2;
+      } else {
+        // Sort group by average parent column to reduce crossings
+        const sorted = [...group].sort((a, b) => {
+          const aParents = parents.get(a) || [];
+          const bParents = parents.get(b) || [];
+          const aAvg = aParents.length > 0 ? aParents.reduce((s, p) => s + cols[p], 0) / aParents.length : 0;
+          const bAvg = bParents.length > 0 ? bParents.reduce((s, p) => s + cols[p], 0) / bParents.length : 0;
+          return aAvg - bAvg;
+        });
+        // Spread evenly, centered within maxCols
+        const offset = (maxCols - group.length) / 2;
+        sorted.forEach((nodeIdx, i) => {
+          cols[nodeIdx] = offset + i;
+        });
+      }
+    });
+
+    return { layers, cols, maxCols, nodeW, colSpacing, firstColX };
+  }, [nodes, forwardEdges]);
 
   const RunButton = () => (
     <button
@@ -271,30 +342,63 @@ export default function AgentGraph({ nodes, title, onNodeClick, onVersionBump, v
     );
   }
 
+  const { layers, cols, nodeW, colSpacing, firstColX } = layout;
+
   const nodePos = (i: number) => ({
-    x: LEFT_X,
-    y: TOP_Y + i * (NODE_H + GAP_Y),
+    x: firstColX + cols[i] * colSpacing,
+    y: TOP_Y + layers[i] * (NODE_H + GAP_Y),
   });
 
-  const svgHeight = TOP_Y * 2 + nodes.length * NODE_H + (nodes.length - 1) * GAP_Y + 10;
+  const maxLayer = nodes.length > 0 ? Math.max(...layers) : 0;
+  const svgHeight = TOP_Y * 2 + (maxLayer + 1) * NODE_H + maxLayer * GAP_Y + 10;
+  const backEdgeSpace = backEdges.length > 0 ? MARGIN_RIGHT + backEdges.length * 18 : 20;
+  const svgWidth = Math.max(SVG_BASE_W, firstColX + layout.maxCols * nodeW + (layout.maxCols - 1) * GAP_X + backEdgeSpace);
+
+  // Check if a skip-level forward edge would collide with intermediate nodes
+  const hasCollision = (fromLayer: number, toLayer: number, fromX: number, toX: number): boolean => {
+    const minX = Math.min(fromX, toX);
+    const maxX = Math.max(fromX, toX) + nodeW;
+    for (let i = 0; i < nodes.length; i++) {
+      const l = layers[i];
+      if (l > fromLayer && l < toLayer) {
+        const nx = firstColX + cols[i] * colSpacing;
+        // Check horizontal overlap
+        if (nx < maxX && nx + nodeW > minX) return true;
+      }
+    }
+    return false;
+  };
 
   const renderForwardEdge = (edge: { fromIdx: number; toIdx: number; fanCount: number; fanIndex: number; label?: string }, i: number) => {
     const from = nodePos(edge.fromIdx);
     const to = nodePos(edge.toIdx);
-    const centerX = from.x + NODE_W / 2;
+    const fromCenterX = from.x + nodeW / 2;
+    const toCenterX = to.x + nodeW / 2;
     const y1 = from.y + NODE_H;
     const y2 = to.y;
 
     // Fan-out: spread exit points across the source node's bottom
-    let startX = centerX;
+    let startX = fromCenterX;
     if (edge.fanCount > 1) {
-      const spread = NODE_W * 0.5;
+      const spread = nodeW * 0.5;
       const step = edge.fanCount > 1 ? spread / (edge.fanCount - 1) : 0;
-      startX = centerX - spread / 2 + edge.fanIndex * step;
+      startX = fromCenterX - spread / 2 + edge.fanIndex * step;
     }
 
     const midY = (y1 + y2) / 2;
-    const d = `M ${startX} ${y1} C ${startX} ${midY}, ${centerX} ${midY}, ${centerX} ${y2}`;
+    const fromLayer = layers[edge.fromIdx];
+    const toLayer = layers[edge.toIdx];
+    const skipsLayers = toLayer - fromLayer > 1;
+
+    let d: string;
+    if (skipsLayers && hasCollision(fromLayer, toLayer, from.x, to.x)) {
+      // Route around intermediate nodes: curve to the left
+      const detourX = Math.min(from.x, to.x) - nodeW * 0.4;
+      d = `M ${startX} ${y1} C ${startX} ${y1 + 20}, ${detourX} ${y1 + 20}, ${detourX} ${midY} S ${toCenterX} ${y2 - 20} ${toCenterX} ${y2}`;
+    } else {
+      // Standard bezier: from source bottom to target top
+      d = `M ${startX} ${y1} C ${startX} ${midY}, ${toCenterX} ${midY}, ${toCenterX} ${y2}`;
+    }
 
     const fromNode = nodes[edge.fromIdx];
     const isActive = fromNode.status === "complete" || fromNode.status === "running" || fromNode.status === "looping";
@@ -305,12 +409,12 @@ export default function AgentGraph({ nodes, title, onNodeClick, onVersionBump, v
       <g key={`fwd-${i}`}>
         <path d={d} fill="none" stroke={strokeColor} strokeWidth={1.5} />
         <polygon
-          points={`${centerX - 4},${y2 - 6} ${centerX + 4},${y2 - 6} ${centerX},${y2 - 1}`}
+          points={`${toCenterX - 4},${y2 - 6} ${toCenterX + 4},${y2 - 6} ${toCenterX},${y2 - 1}`}
           fill={arrowColor}
         />
         {edge.label && (
           <text
-            x={(startX + centerX) / 2 + 8}
+            x={(startX + toCenterX) / 2 + 8}
             y={midY - 2}
             fill="hsl(35,15%,40%)"
             fontSize={9}
@@ -327,12 +431,13 @@ export default function AgentGraph({ nodes, title, onNodeClick, onVersionBump, v
     const from = nodePos(edge.fromIdx);
     const to = nodePos(edge.toIdx);
 
-    const rightOffset = NODE_W + 28 + i * 18;
-    const startX = from.x + NODE_W;
+    const rightX = Math.max(from.x, to.x) + nodeW;
+    const rightOffset = 28 + i * 18;
+    const startX = from.x + nodeW;
     const startY = from.y + NODE_H / 2;
-    const endX = to.x + NODE_W;
+    const endX = to.x + nodeW;
     const endY = to.y + NODE_H / 2;
-    const curveX = from.x + rightOffset;
+    const curveX = rightX + rightOffset;
     const r = 12;
 
     const fromNode = nodes[edge.fromIdx];
@@ -358,6 +463,7 @@ export default function AgentGraph({ nodes, title, onNodeClick, onVersionBump, v
     const isActive = node.status === "running" || node.status === "looping";
     const isDone = node.status === "complete";
     const colors = statusColors[node.status];
+    const clipId = `clip-label-${node.id}`;
 
     return (
       <g key={node.id} onClick={() => onNodeClick?.(node)} style={{ cursor: onNodeClick ? "pointer" : "default" }}>
@@ -366,12 +472,12 @@ export default function AgentGraph({ nodes, title, onNodeClick, onVersionBump, v
           <>
             <rect
               x={pos.x - 4} y={pos.y - 4}
-              width={NODE_W + 8} height={NODE_H + 8}
+              width={nodeW + 8} height={NODE_H + 8}
               rx={16} fill={colors.glow}
             />
             <rect
               x={pos.x - 2} y={pos.y - 2}
-              width={NODE_W + 4} height={NODE_H + 4}
+              width={nodeW + 4} height={NODE_H + 4}
               rx={14} fill="none" stroke={colors.dot} strokeWidth={1} opacity={0.25}
               style={{ animation: "pulse-ring 2.5s ease-out infinite" }}
             />
@@ -381,7 +487,7 @@ export default function AgentGraph({ nodes, title, onNodeClick, onVersionBump, v
         {/* Node background */}
         <rect
           x={pos.x} y={pos.y}
-          width={NODE_W} height={NODE_H}
+          width={nodeW} height={NODE_H}
           rx={12}
           fill={colors.bg}
           stroke={colors.border}
@@ -408,14 +514,18 @@ export default function AgentGraph({ nodes, title, onNodeClick, onVersionBump, v
           </text>
         )}
 
-        {/* Label -- properly capitalized */}
+        {/* Label -- properly capitalized, clipped for narrow nodes */}
+        <clipPath id={clipId}>
+          <rect x={pos.x + 30} y={pos.y} width={nodeW - 38} height={NODE_H} />
+        </clipPath>
         <text
           x={pos.x + 32} y={pos.y + NODE_H / 2}
           fill={isActive ? "hsl(45,90%,85%)" : isDone ? "hsl(40,20%,75%)" : "hsl(35,10%,45%)"}
-          fontSize={12.5}
+          fontSize={nodeW < 140 ? 10.5 : 12.5}
           fontWeight={isActive ? 600 : isDone ? 500 : 400}
           dominantBaseline="middle"
           letterSpacing="0.01em"
+          clipPath={`url(#${clipId})`}
         >
           {formatLabel(node.id)}
         </text>
@@ -423,7 +533,7 @@ export default function AgentGraph({ nodes, title, onNodeClick, onVersionBump, v
         {/* Status label for active nodes */}
         {node.statusLabel && isActive && (
           <text
-            x={pos.x + NODE_W + 10} y={pos.y + NODE_H / 2}
+            x={pos.x + nodeW + 10} y={pos.y + NODE_H / 2}
             fill="hsl(45,80%,60%)" fontSize={10.5} fontStyle="italic"
             dominantBaseline="middle" opacity={0.8}
           >
@@ -435,12 +545,12 @@ export default function AgentGraph({ nodes, title, onNodeClick, onVersionBump, v
         {node.iterations !== undefined && node.iterations > 0 && (
           <g>
             <rect
-              x={pos.x + NODE_W - 36} y={pos.y + NODE_H / 2 - 8}
+              x={pos.x + nodeW - 36} y={pos.y + NODE_H / 2 - 8}
               width={26} height={16} rx={8}
               fill={colors.dot} opacity={0.15}
             />
             <text
-              x={pos.x + NODE_W - 23} y={pos.y + NODE_H / 2}
+              x={pos.x + nodeW - 23} y={pos.y + NODE_H / 2}
               fill={colors.dot} fontSize={9} fontWeight={600}
               textAnchor="middle" dominantBaseline="middle" opacity={0.8}
             >
@@ -477,9 +587,9 @@ export default function AgentGraph({ nodes, title, onNodeClick, onVersionBump, v
       {/* Graph */}
       <div className="flex-1 overflow-auto px-3 pb-5">
         <svg
-          width={LEFT_X + NODE_W + 100}
+          width={svgWidth}
           height={svgHeight}
-          viewBox={`0 0 ${LEFT_X + NODE_W + 100} ${svgHeight}`}
+          viewBox={`0 0 ${svgWidth} ${svgHeight}`}
           className="select-none"
           style={{ fontFamily: "'Inter', system-ui, sans-serif" }}
         >
