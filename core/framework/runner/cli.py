@@ -814,7 +814,7 @@ def cmd_list(args: argparse.Namespace) -> int:
 
     agents = []
     for path in directory.iterdir():
-        if path.is_dir() and (path / "agent.json").exists():
+        if _is_valid_agent_dir(path):
             try:
                 runner = AgentRunner.load(path)
                 info = runner.info()
@@ -881,14 +881,14 @@ def cmd_dispatch(args: argparse.Namespace) -> int:
         # Use specific agents
         for agent_name in args.agents:
             agent_path = agents_dir / agent_name
-            if not (agent_path / "agent.json").exists():
+            if not _is_valid_agent_dir(agent_path):
                 print(f"Agent not found: {agent_path}", file=sys.stderr)
                 return 1
             agent_paths.append((agent_name, agent_path))
     else:
         # Discover all agents
         for path in agents_dir.iterdir():
-            if path.is_dir() and (path / "agent.json").exists():
+            if _is_valid_agent_dir(path):
                 agent_paths.append((path.name, path))
 
     if not agent_paths:
