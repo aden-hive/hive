@@ -4,7 +4,7 @@ from dataclasses import dataclass
 
 from framework.config import RuntimeConfig
 
-default_config = RuntimeConfig()
+default_config = RuntimeConfig(max_tokens=4000)
 
 
 @dataclass

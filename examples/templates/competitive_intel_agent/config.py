@@ -3,11 +3,13 @@
 from dataclasses import dataclass
 from framework.config import RuntimeConfig
 
-default_config: RuntimeConfig = RuntimeConfig()
+default_config: RuntimeConfig = RuntimeConfig(max_tokens=4000)
+
 
 @dataclass
 class AgentMetadata:
     """Metadata for the Competitive Intelligence Agent."""
+
     name: str = "Competitive Intelligence Agent"
     version: str = "1.0.0"
     description: str = (
@@ -20,5 +22,6 @@ class AgentMetadata:
         "to monitor and what areas to focus on (pricing, features, hiring, partnerships, etc.) "
         "and I'll research them across websites, news, and GitHub to produce a detailed digest."
     )
+
 
 metadata: AgentMetadata = AgentMetadata()
