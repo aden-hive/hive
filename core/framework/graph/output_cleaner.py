@@ -10,6 +10,7 @@ This prevents cascading failures and dramatically improves execution success rat
 import json
 import logging
 import re
+from collections import OrderedDict
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -99,9 +100,12 @@ class OutputCleaner:
             llm_provider: Optional LLM provider.
         """
         self.config = config
-        self.success_cache: dict[str, Any] = {}  # Cache successful patterns
+        self.success_cache = OrderedDict()  # LRU Cache for successful patterns
+        self.max_cache_size = 1000          # Prevent memory leaks (#756)
+        self.cache_hits = 0
+        self.cache_misses = 0
         self.failure_count: dict[str, int] = {}  # Track edge failures
-        self.cleansing_count = 0  # Track total cleanings performed
+        self.cleansing_count = 0  # Track total cleanings performed 
 
         # Initialize LLM provider for cleaning
         if llm_provider:
@@ -228,7 +232,17 @@ class OutputCleaner:
         if not self.config.enabled:
             logger.warning("⚠ Output cleansing disabled in config")
             return output
-
+        
+        # --- PHASE 0: Cache Lookup ---
+        cache_key = f"{source_node_id}:{target_node_spec.id}:{hash(str(output))}"
+        if cache_key in self.success_cache:
+            self.cache_hits += 1
+            # Move to end (most recent)
+            result = self.success_cache.pop(cache_key)
+            self.success_cache[cache_key] = result
+            return result
+        
+        self.cache_misses += 1
         # --- PHASE 1: Fast Heuristic Repair (Avoids LLM call) ---
         # Often the output is just a string containing JSON, or has minor syntax errors
         # If output is a dictionary but malformed, we might need to serialize it first
@@ -249,7 +263,13 @@ class OutputCleaner:
                     heuristic_fixed = True
 
         # If we fixed something, re-validate manually to see if it's enough
+        # If we fixed something, re-validate manually to see if it's enough
         if heuristic_fixed:
+            if self.config.cache_successful_patterns:
+                self.success_cache[cache_key] = fixed_output
+                if len(self.success_cache) > self.max_cache_size:
+                    self.success_cache.popitem(last=False)
+            
             logger.info("⚡ Heuristic repair applied (nested JSON expansion)")
             return fixed_output
 
@@ -308,6 +328,14 @@ Return ONLY valid JSON matching the expected schema. No explanations, no markdow
 
             if isinstance(cleaned, dict):
                 self.cleansing_count += 1
+                # --- Save to Cache ---
+                if self.config.cache_successful_patterns:
+                    self.success_cache[cache_key] = cleaned
+                    # Evict oldest if full
+                    if len(self.success_cache) > self.max_cache_size:
+                        self.success_cache.popitem(last=False)
+                # -------------------------------
+
                 if self.config.log_cleanings:
                     logger.info(
                         f"✓ Output cleaned successfully (total cleanings: {self.cleansing_count})"
@@ -390,6 +418,8 @@ Return ONLY valid JSON matching the expected schema. No explanations, no markdow
         """Get cleansing statistics."""
         return {
             "total_cleanings": self.cleansing_count,
-            "failure_count": dict(self.failure_count),
+            "cache_hits": self.cache_hits,
+            "cache_misses": self.cache_misses,
             "cache_size": len(self.success_cache),
+            "failure_count": dict(self.failure_count),
         }
