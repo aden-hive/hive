@@ -162,6 +162,19 @@ export interface NodeDetail extends NodeSpec {
   edges: EdgeInfo[];
 }
 
+export interface GraphEdge {
+  source: string;
+  target: string;
+  condition: string;
+  priority: number;
+}
+
+export interface GraphTopology {
+  nodes: NodeSpec[];
+  edges: GraphEdge[];
+  entry_node: string;
+}
+
 export interface NodeCriteria {
   node_id: string;
   success_criteria: string | null;

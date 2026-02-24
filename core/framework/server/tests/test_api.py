@@ -51,6 +51,7 @@ class MockEdgeSpec:
 class MockGraphSpec:
     nodes: list = field(default_factory=list)
     edges: list = field(default_factory=list)
+    entry_node: str = ""
 
     def get_node(self, node_id: str):
         for n in self.nodes:
@@ -1021,6 +1022,33 @@ class TestGraphNodes:
             node_ids = [n["id"] for n in data["nodes"]]
             assert "node_a" in node_ids
             assert "node_b" in node_ids
+            # Edges and entry_node must be present
+            assert "edges" in data
+            assert "entry_node" in data
+
+    @pytest.mark.asyncio
+    async def test_list_nodes_includes_edges(self, nodes_and_edges):
+        nodes, edges = nodes_and_edges
+        graph = MockGraphSpec(nodes=nodes, edges=edges, entry_node="node_a")
+        rt = MockRuntime(graph=graph)
+        slot = _make_slot(runtime=rt)
+        app = _make_app_with_agent(slot)
+
+        async with TestClient(TestServer(app)) as client:
+            resp = await client.get("/api/agents/test_agent/graphs/primary/nodes")
+            assert resp.status == 200
+            data = await resp.json()
+
+            # Edges present and correct
+            assert "edges" in data
+            assert len(data["edges"]) == 1
+            assert data["edges"][0]["source"] == "node_a"
+            assert data["edges"][0]["target"] == "node_b"
+            assert data["edges"][0]["condition"] == "on_success"
+            assert data["edges"][0]["priority"] == 0
+
+            # Entry node present
+            assert data["entry_node"] == "node_a"
 
     @pytest.mark.asyncio
     async def test_list_nodes_with_session_enrichment(

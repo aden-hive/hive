@@ -96,7 +96,17 @@ async def handle_list_nodes(request: web.Request) -> web.Response:
             except (json.JSONDecodeError, OSError):
                 pass  # Skip enrichment on error
 
-    return web.json_response({"nodes": nodes})
+    edges = [
+        {"source": e.source, "target": e.target, "condition": e.condition, "priority": e.priority}
+        for e in graph.edges
+    ]
+    return web.json_response(
+        {
+            "nodes": nodes,
+            "edges": edges,
+            "entry_node": graph.entry_node,
+        }
+    )
 
 
 async def handle_get_node(request: web.Request) -> web.Response:

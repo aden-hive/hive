@@ -97,8 +97,12 @@ async def handle_events(request: web.Request) -> web.StreamResponse:
                 await sse.send_event(data)
             except TimeoutError:
                 await sse.send_keepalive()
-            except ConnectionResetError:
+            except (ConnectionResetError, ConnectionError):
                 break
+            except RuntimeError as exc:
+                if "closing transport" in str(exc).lower():
+                    break
+                raise
     except asyncio.CancelledError:
         pass
     finally:
