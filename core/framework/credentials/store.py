@@ -422,6 +422,10 @@ class CredentialStore:
         """
         return self.get_credential(credential_id, refresh_if_needed=False) is not None
 
+    def exists(self, credential_id: str) -> bool:
+        """Check if a credential exists in storage without triggering provider fetches."""
+        return self._storage.exists(credential_id)
+
     # --- Validation ---
 
     def validate_for_usage(self, credential_id: str) -> list[str]:

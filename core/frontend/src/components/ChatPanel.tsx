@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect } from "react";
 import { Send, Crown, Cpu } from "lucide-react";
+import { formatAgentDisplayName } from "@/lib/chat-helpers";
 
 export interface ChatMessage {
   id: string;
@@ -18,6 +19,10 @@ interface ChatPanelProps {
   onSend: (message: string, thread: string) => void;
   isWaiting?: boolean;
   activeThread: string;
+  /** When true, the agent is waiting for user input — changes placeholder text */
+  awaitingInput?: boolean;
+  /** When true, the input is disabled (e.g. during loading) */
+  disabled?: boolean;
 }
 
 const queenColor = "hsl(45,95%,58%)";
@@ -61,7 +66,7 @@ function MessageBubble({ msg }: { msg: ChatMessage }) {
     return (
       <div className="flex justify-end">
         <div className="max-w-[75%] bg-primary text-primary-foreground text-sm leading-relaxed rounded-2xl rounded-br-md px-4 py-3">
-          <p className="whitespace-pre-wrap">{msg.content}</p>
+          <p className="whitespace-pre-wrap break-words">{msg.content}</p>
         </div>
       </div>
     );
@@ -101,14 +106,14 @@ function MessageBubble({ msg }: { msg: ChatMessage }) {
             isQueen ? "border border-primary/20 bg-primary/5" : "bg-muted/60"
           }`}
         >
-          <p className="whitespace-pre-wrap text-foreground">{msg.content}</p>
+          <p className="whitespace-pre-wrap break-words text-foreground">{msg.content}</p>
         </div>
       </div>
     </div>
   );
 }
 
-export default function ChatPanel({ messages, onSend, isWaiting, activeThread }: ChatPanelProps) {
+export default function ChatPanel({ messages, onSend, isWaiting, activeThread, awaitingInput, disabled }: ChatPanelProps) {
   const [input, setInput] = useState("");
   const [readMap, setReadMap] = useState<Record<string, number>>({});
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -138,7 +143,8 @@ export default function ChatPanel({ messages, onSend, isWaiting, activeThread }:
     setInput("");
   };
 
-  const activeWorker = workerList.find((w) => w.id === activeThread);
+  const activeWorkerLabel = workerList.find((w) => w.id === activeThread)?.label
+    || formatAgentDisplayName(activeThread);
 
   return (
     <div className="flex flex-col h-full min-w-0">
@@ -148,7 +154,7 @@ export default function ChatPanel({ messages, onSend, isWaiting, activeThread }:
       </div>
 
       {/* Messages */}
-      <div className="flex-1 overflow-auto px-5 py-4 space-y-3">
+      <div className="flex-1 overflow-auto scrollbar-hide px-5 py-4 space-y-3">
         {threadMessages.map((msg) => (
           <MessageBubble key={msg.id} msg={msg} />
         ))}
@@ -176,12 +182,19 @@ export default function ChatPanel({ messages, onSend, isWaiting, activeThread }:
           <input
             value={input}
             onChange={(e) => setInput(e.target.value)}
-            placeholder={`Message ${activeWorker?.label}...`}
-            className="flex-1 bg-transparent text-sm text-foreground outline-none placeholder:text-muted-foreground"
+            placeholder={
+              disabled
+                ? "Connecting to agent..."
+                : awaitingInput
+                  ? "Agent is waiting for your response..."
+                  : `Message ${activeWorkerLabel}...`
+            }
+            disabled={disabled}
+            className="flex-1 bg-transparent text-sm text-foreground outline-none placeholder:text-muted-foreground disabled:opacity-50 disabled:cursor-not-allowed"
           />
           <button
             type="submit"
-            disabled={!input.trim()}
+            disabled={!input.trim() || disabled}
             className="p-2 rounded-lg bg-primary text-primary-foreground disabled:opacity-30 hover:opacity-90 transition-opacity"
           >
             <Send className="w-4 h-4" />

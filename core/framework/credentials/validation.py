@@ -70,6 +70,11 @@ def _presync_aden_tokens(credential_specs: dict) -> None:
         if os.environ.get(spec.env_var):
             continue  # Already set — don't overwrite
         cred_id = spec.credential_id or name
+        # sync_all() already fetched everything available from Aden.
+        # Skip credentials not in the store — they aren't connected,
+        # so fetching individually would fail with "Invalid integration ID".
+        if not aden_store.exists(cred_id):
+            continue
         try:
             value = aden_store.get_key(cred_id, spec.credential_key)
             if value:

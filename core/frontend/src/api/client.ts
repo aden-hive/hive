@@ -3,7 +3,7 @@ const API_BASE = "/api";
 export class ApiError extends Error {
   constructor(
     public status: number,
-    public body: { error: string; type?: string },
+    public body: { error: string; type?: string; [key: string]: unknown },
   ) {
     super(body.error);
     this.name = "ApiError";

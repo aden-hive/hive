@@ -67,8 +67,10 @@ class AgentManager:
         resolved_model = model or self._model
 
         async with self._lock:
-            if resolved_id in self._slots or resolved_id in self._loading:
+            if resolved_id in self._slots:
                 raise ValueError(f"Agent '{resolved_id}' is already loaded")
+            if resolved_id in self._loading:
+                raise ValueError(f"Agent '{resolved_id}' is currently loading")
             self._loading.add(resolved_id)  # claim slot
 
         try:

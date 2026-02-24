@@ -25,6 +25,7 @@ def _slot_to_dict(slot) -> dict:
         "node_count": slot.info.node_count,
         "loaded_at": slot.loaded_at,
         "uptime_seconds": round(time.time() - slot.loaded_at, 1),
+        "intro_message": getattr(slot.runner, "intro_message", "") or "",
     }
 
 
@@ -81,7 +82,26 @@ async def handle_load_agent(request: web.Request) -> web.Response:
     try:
         slot = await manager.load_agent(agent_path, agent_id=agent_id, model=model)
     except ValueError as e:
-        return web.json_response({"error": str(e)}, status=409)
+        from pathlib import Path
+
+        resolved_id = agent_id or Path(agent_path).name
+        msg = str(e)
+
+        if "currently loading" in msg:
+            # Agent is mid-load — tell frontend to poll until ready
+            return web.json_response(
+                {"error": msg, "id": resolved_id, "loading": True},
+                status=409,
+            )
+
+        # Agent fully loaded — return its existing slot data
+        existing = manager.get_agent(resolved_id)
+        if existing:
+            return web.json_response(
+                {"error": msg, **_slot_to_dict(existing)},
+                status=409,
+            )
+        return web.json_response({"error": msg}, status=409)
     except FileNotFoundError as e:
         return web.json_response({"error": str(e)}, status=404)
     except Exception as e:

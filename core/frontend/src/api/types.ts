@@ -9,6 +9,7 @@ export interface Agent {
   node_count: number;
   loaded_at: number;
   uptime_seconds: number;
+  intro_message?: string;
 }
 
 export interface EntryPoint {

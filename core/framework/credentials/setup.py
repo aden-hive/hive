@@ -164,8 +164,20 @@ class CredentialSetupSession:
         return cls(missing)
 
     @classmethod
-    def from_agent_path(cls, agent_path: str | Path) -> CredentialSetupSession:
-        """Create a setup session for an agent by path."""
+    def from_agent_path(
+        cls,
+        agent_path: str | Path,
+        *,
+        missing_only: bool = True,
+    ) -> CredentialSetupSession:
+        """Create a setup session for an agent by path.
+
+        Args:
+            agent_path: Path to agent folder.
+            missing_only: If True (default), only include credentials that
+                are NOT yet available. If False, include all required
+                credentials regardless of availability.
+        """
         agent_path = Path(agent_path)
 
         # Load agent to get nodes
@@ -180,8 +192,8 @@ class CredentialSetupSession:
             # JSON-based agent
             nodes = _load_nodes_from_json_agent(agent_json)
 
-        missing = detect_missing_credentials_from_nodes(nodes)
-        return cls(missing)
+        creds = detect_missing_credentials_from_nodes(nodes, missing_only=missing_only)
+        return cls(creds)
 
     def run_interactive(self) -> SetupResult:
         """Run the interactive setup flow."""
@@ -552,15 +564,23 @@ class CredentialSetupSession:
         self._print("")
 
 
-def detect_missing_credentials_from_nodes(nodes: list) -> list[MissingCredential]:
+def detect_missing_credentials_from_nodes(
+    nodes: list,
+    *,
+    missing_only: bool = True,
+) -> list[MissingCredential]:
     """
-    Detect missing credentials for a list of nodes.
+    Detect credentials required by a list of nodes.
 
     Args:
         nodes: List of NodeSpec objects
+        missing_only: If True (default), only return credentials that are
+            NOT yet available. If False, return ALL required credentials
+            regardless of availability.
 
     Returns:
         List of MissingCredential objects for credentials that need setup
+        (or all required credentials when missing_only=False).
     """
     try:
         from aden_tools.credentials import CREDENTIAL_SPECS
@@ -617,7 +637,7 @@ def detect_missing_credentials_from_nodes(nodes: list) -> list[MissingCredential
 
         spec = CREDENTIAL_SPECS[cred_name]
         cred_id = spec.credential_id or cred_name
-        if spec.required and not store.is_available(cred_id):
+        if spec.required and (not missing_only or not store.is_available(cred_id)):
             affected_tools = sorted(t for t in required_tools if t in spec.tools)
             missing.append(
                 MissingCredential(
@@ -643,7 +663,7 @@ def detect_missing_credentials_from_nodes(nodes: list) -> list[MissingCredential
 
         spec = CREDENTIAL_SPECS[cred_name]
         cred_id = spec.credential_id or cred_name
-        if spec.required and not store.is_available(cred_id):
+        if spec.required and (not missing_only or not store.is_available(cred_id)):
             affected_types = sorted(t for t in node_types if t in spec.node_types)
             missing.append(
                 MissingCredential(

@@ -61,6 +61,10 @@ interface CredentialRow {
   adenSupported: boolean; // whether this credential uses OAuth via Aden
 }
 
+// Module-level cache: credential requirements are static per agent path.
+// Cleared on save/delete so the next fetch picks up updated availability.
+const credentialCache = new Map<string, AgentCredentialRequirement[]>();
+
 interface CredentialsModalProps {
   agentType: string;
   agentLabel: string;
@@ -91,12 +95,30 @@ export default function CredentialsModal({
   const [saving, setSaving] = useState(false);
 
   const fetchStatus = useCallback(async () => {
-    setLoading(true);
     setError(null);
     try {
       if (agentPath) {
+        // Check cache first — credential requirements are static per agent
+        const cached = credentialCache.get(agentPath);
+        if (cached) {
+          setRows(cached.map((r: AgentCredentialRequirement) => ({
+            id: r.credential_id,
+            name: r.credential_name,
+            description: r.description,
+            icon: "\uD83D\uDD11",
+            connected: r.available,
+            required: true,
+            credentialKey: r.credential_key || "api_key",
+            adenSupported: r.aden_supported,
+          })));
+          setLoading(false);
+          return;
+        }
+
         // Real agent — ask backend what credentials it actually needs
+        setLoading(true);
         const { required } = await credentialsApi.checkAgent(agentPath);
+        credentialCache.set(agentPath, required);
         const newRows: CredentialRow[] = required.map((r: AgentCredentialRequirement) => ({
           id: r.credential_id,
           name: r.credential_name,
@@ -110,6 +132,7 @@ export default function CredentialsModal({
         setRows(newRows);
       } else {
         // No real path — fall back to templates + list
+        setLoading(true);
         const { credentials: stored } = await credentialsApi.list();
         const storedIds = new Set(stored.map((c: CredentialInfo) => c.credential_id));
         const templates = credentialTemplates[agentType] || [];
@@ -167,6 +190,7 @@ export default function CredentialsModal({
         await credentialsApi.save(row.id, { [row.credentialKey]: inputValue.trim() });
         setEditingId(null);
         setInputValue("");
+        if (agentPath) credentialCache.delete(agentPath);
         onCredentialChange?.();
         await fetchStatus();
       } catch {
@@ -185,6 +209,7 @@ export default function CredentialsModal({
     setSaving(true);
     try {
       await credentialsApi.delete(row.id);
+      if (agentPath) credentialCache.delete(agentPath);
       onCredentialChange?.();
       await fetchStatus();
     } catch {

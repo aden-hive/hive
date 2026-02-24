@@ -1,11 +1,17 @@
 import { useState, useCallback, useRef, useEffect } from "react";
 import ReactDOM from "react-dom";
 import { useSearchParams, useNavigate } from "react-router-dom";
-import { Crown, Plus, X, KeyRound, Sparkles, Layers, ChevronLeft, Bot } from "lucide-react";
+import { Crown, Plus, X, KeyRound, Sparkles, Layers, ChevronLeft, Bot, Loader2, WifiOff } from "lucide-react";
 import AgentGraph, { type GraphNode } from "@/components/AgentGraph";
 import ChatPanel, { type ChatMessage, workerList } from "@/components/ChatPanel";
 import NodeDetailPanel from "@/components/NodeDetailPanel";
 import CredentialsModal, { type Credential, createFreshCredentials, cloneCredentials, allRequiredCredentialsMet } from "@/components/CredentialsModal";
+import { agentsApi } from "@/api/agents";
+import { executionApi } from "@/api/execution";
+import { sessionsApi } from "@/api/sessions";
+import { useSSE } from "@/hooks/use-sse";
+import type { Agent, AgentEvent, Message } from "@/api/types";
+import { backendMessageToChatMessage, sseEventToChatMessage, formatAgentDisplayName } from "@/lib/chat-helpers";
 
 const makeId = () => Math.random().toString(36).slice(2, 9);
 
@@ -120,12 +126,12 @@ interface Session {
 }
 
 function createSession(agentType: string, index: number, existingCredentials?: Credential[]): Session {
-  const graph = workerGraphs[agentType] || workerGraphs["inbox-management"];
-  const agentLabel = workerList.find(w => w.id === agentType)?.label || agentType;
+  const graph = workerGraphs[agentType] || { title: agentType, nodes: [] };
+  const agentLabel = workerList.find(w => w.id === agentType)?.label || formatAgentDisplayName(agentType);
   return {
     id: makeId(),
     agentType,
-    label: `${agentLabel} #${index}`,
+    label: index === 1 ? agentLabel : `${agentLabel} #${index}`,
     messages: index === 1 ? (seedMessages[agentType] || []) : [],
     graphNodes: graph.nodes.map(n => ({ ...n })),
     credentials: existingCredentials ? cloneCredentials(existingCredentials) : createFreshCredentials(agentType),
@@ -319,6 +325,20 @@ export default function Workspace() {
       }
       initial[w.id] = [session];
     });
+
+    // If the initial agent is not in workerList, create an empty session.
+    // The intro_message will be injected once the backend responds.
+    if (!initial[initialAgent]) {
+      initial[initialAgent] = [{
+        id: makeId(),
+        agentType: initialAgent,
+        label: formatAgentDisplayName(initialAgent),
+        messages: [],
+        graphNodes: [],
+        credentials: [],
+      }];
+    }
+
     return initial;
   });
 
@@ -328,6 +348,10 @@ export default function Workspace() {
     workerList.forEach(w => {
       initial[w.id] = sessionsByAgent[w.id][0].id;
     });
+    // Also set active session for dynamic agent not in workerList
+    if (sessionsByAgent[initialAgent] && !initial[initialAgent]) {
+      initial[initialAgent] = sessionsByAgent[initialAgent][0].id;
+    }
     return initial;
   });
 
@@ -337,6 +361,15 @@ export default function Workspace() {
   const [selectedNode, setSelectedNode] = useState<GraphNode | null>(null);
   const [newTabOpen, setNewTabOpen] = useState(false);
   const newTabBtnRef = useRef<HTMLButtonElement>(null);
+
+  // --- Backend state ---
+  const [backendAgentId, setBackendAgentId] = useState<string | null>(null);
+  const [backendLoading, setBackendLoading] = useState(true);
+  const [backendReady, setBackendReady] = useState(false);
+  const [backendError, setBackendError] = useState<string | null>(null);
+  const [awaitingInput, setAwaitingInput] = useState(false);
+  // Resolved display name for the loaded agent (e.g. "Competitive Intel Agent")
+  const [agentDisplayName, setAgentDisplayName] = useState<string | null>(null);
 
   // Version state per agent type: [major, minor]
   const [agentVersions, setAgentVersions] = useState<Record<string, [number, number]>>(() => {
@@ -355,6 +388,210 @@ export default function Workspace() {
     });
   }, [activeWorker]);
 
+  // --- Agent loading on mount (Phase 4) ---
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadAgent() {
+      setBackendLoading(true);
+      setBackendError(null);
+      setBackendReady(false);
+      setBackendAgentId(null);
+
+      try {
+        // Try loading the agent on the backend
+        let agent: Agent;
+        try {
+          agent = await agentsApi.load(rawAgent);
+        } catch (loadErr: unknown) {
+          const { ApiError } = await import("@/api/client");
+          if (!(loadErr instanceof ApiError) || loadErr.status !== 409) {
+            throw loadErr;
+          }
+
+          const agentId = loadErr.body.id as string | undefined;
+          if (!agentId) throw loadErr;
+
+          if (loadErr.body.loading) {
+            // Agent is mid-load — poll GET /api/agents/{id} until it appears
+            agent = await (async () => {
+              const maxAttempts = 15;
+              const delay = 1000;
+              for (let i = 0; i < maxAttempts; i++) {
+                if (cancelled) throw new Error("cancelled");
+                await new Promise((r) => setTimeout(r, delay));
+                try {
+                  return await agentsApi.get(agentId);
+                } catch {
+                  if (i === maxAttempts - 1) throw loadErr;
+                }
+              }
+              throw loadErr; // unreachable, satisfies TS
+            })();
+          } else {
+            // Already fully loaded — 409 body contains the agent data
+            agent = loadErr.body as unknown as Agent;
+          }
+        }
+
+        if (cancelled) return;
+        setBackendAgentId(agent.id);
+
+        // Resolve a human-readable display name for this agent.
+        // Prefer workerList label, then format the backend name / agent id.
+        const displayName =
+          workerList.find((w) => w.id === initialAgent)?.label ||
+          formatAgentDisplayName(agent.name || initialAgent);
+        setAgentDisplayName(displayName);
+
+        // Update the session label to use the display name
+        setSessionsByAgent((prev) => {
+          const sessions = prev[initialAgent] || [];
+          if (!sessions.length) return prev;
+          return {
+            ...prev,
+            [initialAgent]: sessions.map((s, i) =>
+              i === 0 ? { ...s, label: sessions.length === 1 ? displayName : `${displayName} #${i + 1}` } : s,
+            ),
+          };
+        });
+
+        // Inject intro_message as seed message (only if session is empty)
+        if (agent.intro_message) {
+          const introMsg: ChatMessage = {
+            id: `intro-${agent.id}`,
+            agent: displayName,
+            agentColor: "",
+            content: agent.intro_message,
+            timestamp: "",
+            role: "worker" as const,
+            thread: initialAgent,
+          };
+          setSessionsByAgent((prev) => {
+            const sessions = prev[initialAgent] || [];
+            if (!sessions.length || sessions[0].messages.length > 0) return prev;
+            return {
+              ...prev,
+              [initialAgent]: [{ ...sessions[0], messages: [introMsg] }, ...sessions.slice(1)],
+            };
+          });
+        }
+
+        // Check for existing sessions and load message history
+        try {
+          const { sessions } = await sessionsApi.list(agent.id);
+          const resumable = sessions.find(
+            (s) => s.status === "running" || s.status === "paused",
+          );
+          if (resumable && !cancelled) {
+            // Load message history from the existing session
+            const { messages } = await sessionsApi.messages(
+              agent.id,
+              resumable.session_id,
+            );
+            if (!cancelled && messages.length > 0) {
+              const chatMsgs = messages.map((m: Message) =>
+                backendMessageToChatMessage(m, initialAgent, displayName),
+              );
+              setSessionsByAgent((prev) => ({
+                ...prev,
+                [initialAgent]: (prev[initialAgent] || []).map((s, i) =>
+                  i === 0
+                    ? { ...s, messages: [...s.messages, ...chatMsgs] }
+                    : s,
+                ),
+              }));
+            }
+          }
+        } catch {
+          // Session listing failed — not critical, continue without history
+        }
+
+        if (!cancelled) {
+          setBackendReady(true);
+          setBackendLoading(false);
+        }
+      } catch (err: unknown) {
+        if (!cancelled) {
+          const msg = err instanceof Error ? err.message : String(err);
+          setBackendError(msg);
+          setBackendLoading(false);
+        }
+      }
+    }
+
+    loadAgent();
+    return () => { cancelled = true; };
+  }, [rawAgent, initialAgent]);
+
+  // --- SSE event handler (Phase 5) ---
+  const handleSSEEvent = useCallback(
+    (event: AgentEvent) => {
+      switch (event.type) {
+        case "execution_started":
+          setIsTyping(true);
+          setAwaitingInput(false);
+          break;
+
+        case "execution_completed":
+          setIsTyping(false);
+          setAwaitingInput(false);
+          break;
+
+        case "execution_failed":
+        case "client_output_delta":
+        case "client_input_requested": {
+          // Convert event to a chat message (if applicable)
+          const chatMsg = sseEventToChatMessage(event, activeWorker, agentDisplayName || undefined);
+          if (chatMsg) {
+            // Upsert: if a message with this ID already exists, replace it (streaming)
+            setSessionsByAgent((prev) => {
+              const sessions = prev[activeWorker] || [];
+              return {
+                ...prev,
+                [activeWorker]: sessions.map((s) => {
+                  const activeId = activeSessionByAgent[activeWorker] || sessions[0]?.id;
+                  if (s.id !== activeId) return s;
+                  const idx = s.messages.findIndex((m) => m.id === chatMsg.id);
+                  const newMessages =
+                    idx >= 0
+                      ? s.messages.map((m, i) => (i === idx ? chatMsg : m))
+                      : [...s.messages, chatMsg];
+                  return { ...s, messages: newMessages };
+                }),
+              };
+            });
+          }
+
+          if (event.type === "client_input_requested") {
+            setAwaitingInput(true);
+            setIsTyping(false);
+          }
+          if (event.type === "execution_failed") {
+            setIsTyping(false);
+            setAwaitingInput(false);
+          }
+          break;
+        }
+
+        case "node_loop_started":
+          setIsTyping(true);
+          break;
+
+        default:
+          break;
+      }
+    },
+    [activeWorker, activeSessionByAgent, agentDisplayName],
+  );
+
+  // SSE subscription
+  useSSE({
+    agentId: backendAgentId || "",
+    onEvent: handleSSEEvent,
+    enabled: !!backendAgentId && backendReady,
+  });
+
   const currentSessions = sessionsByAgent[activeWorker] || [];
   const activeSessionId = activeSessionByAgent[activeWorker] || currentSessions[0]?.id;
   const activeSession = currentSessions.find(s => s.id === activeSessionId) || currentSessions[0];
@@ -363,6 +600,7 @@ export default function Workspace() {
     ? { nodes: activeSession.graphNodes, title: workerGraphs[activeWorker]?.title || "" }
     : workerGraphs[activeWorker] || workerGraphs["inbox-management"];
 
+  // --- handleSend: real backend call or mock fallback (Phase 6) ---
   const handleSend = useCallback((text: string, thread: string) => {
     if (!activeSession) return;
 
@@ -386,6 +624,7 @@ export default function Workspace() {
       return;
     }
 
+    // Add user message to UI immediately (optimistic)
     const userMsg: ChatMessage = {
       id: makeId(), agent: "You", agentColor: "",
       content: text, timestamp: "", type: "user", thread,
@@ -398,20 +637,41 @@ export default function Workspace() {
     }));
     setIsTyping(true);
 
-    setTimeout(() => {
-      const reply: ChatMessage = {
-        id: makeId(), agent: "Queen Bee", agentColor: "",
-        content: "Acknowledged. Dispatching worker swarm...", timestamp: "", role: "queen" as const, thread,
-      };
-      setSessionsByAgent(prev => ({
-        ...prev,
-        [activeWorker]: prev[activeWorker].map(s =>
-          s.id === activeSession.id ? { ...s, messages: [...s.messages, reply] } : s
-        ),
-      }));
-      setIsTyping(false);
-    }, 800);
-  }, [activeWorker, activeSession]);
+    // Real backend call if connected, otherwise mock fallback
+    if (backendAgentId && backendReady) {
+      executionApi.chat(backendAgentId, text).catch((err: unknown) => {
+        const errMsg = err instanceof Error ? err.message : String(err);
+        const errorChatMsg: ChatMessage = {
+          id: makeId(), agent: "System", agentColor: "",
+          content: `Failed to send message: ${errMsg}`,
+          timestamp: "", type: "system", thread,
+        };
+        setSessionsByAgent(prev => ({
+          ...prev,
+          [activeWorker]: prev[activeWorker].map(s =>
+            s.id === activeSession.id ? { ...s, messages: [...s.messages, errorChatMsg] } : s
+          ),
+        }));
+        setIsTyping(false);
+      });
+      // Response content will arrive via SSE events
+    } else {
+      // Mock fallback when backend isn't available
+      setTimeout(() => {
+        const reply: ChatMessage = {
+          id: makeId(), agent: "Queen Bee", agentColor: "",
+          content: "Acknowledged. Dispatching worker swarm...", timestamp: "", role: "queen" as const, thread,
+        };
+        setSessionsByAgent(prev => ({
+          ...prev,
+          [activeWorker]: prev[activeWorker].map(s =>
+            s.id === activeSession.id ? { ...s, messages: [...s.messages, reply] } : s
+          ),
+        }));
+        setIsTyping(false);
+      }, 800);
+    }
+  }, [activeWorker, activeSession, backendAgentId, backendReady]);
 
   const addSession = useCallback(() => {
     const sessions = sessionsByAgent[activeWorker] || [];
@@ -434,7 +694,7 @@ export default function Workspace() {
     }
     setSessionsByAgent(prev => ({
       ...prev,
-      [activeWorker]: [...prev[activeWorker], newSession],
+      [activeWorker]: [...(prev[activeWorker] || []), newSession],
     }));
     setActiveSessionByAgent(prev => ({ ...prev, [activeWorker]: newSession.id }));
   }, [activeWorker, sessionsByAgent]);
@@ -492,7 +752,9 @@ export default function Workspace() {
     setActiveWorker(agentType);
   }, [sessionsByAgent]);
 
-  const activeWorkerLabel = workerList.find(w => w.id === activeWorker)?.label || activeWorker;
+  const activeWorkerLabel = agentDisplayName
+    || workerList.find(w => w.id === activeWorker)?.label
+    || formatAgentDisplayName(activeWorker);
 
 
   return (
@@ -585,13 +847,33 @@ export default function Workspace() {
           </div>
         </div>
         <div className="flex-1 min-w-0 flex">
-          <div className="flex-1 min-w-0">
+          <div className="flex-1 min-w-0 relative">
+            {/* Loading overlay */}
+            {backendLoading && (
+              <div className="absolute inset-0 z-10 flex items-center justify-center bg-background/60 backdrop-blur-sm">
+                <div className="flex items-center gap-3 text-muted-foreground">
+                  <Loader2 className="w-5 h-5 animate-spin" />
+                  <span className="text-sm">Connecting to agent...</span>
+                </div>
+              </div>
+            )}
+
+            {/* Connection error banner */}
+            {backendError && !backendLoading && (
+              <div className="absolute top-0 left-0 right-0 z-10 px-4 py-2 bg-destructive/10 border-b border-destructive/30 flex items-center gap-2">
+                <WifiOff className="w-4 h-4 text-destructive" />
+                <span className="text-xs text-destructive">Backend unavailable: {backendError}</span>
+              </div>
+            )}
+
             {activeSession && (
               <ChatPanel
                 messages={activeSession.messages}
                 onSend={handleSend}
                 activeThread={activeWorker}
                 isWaiting={isTyping}
+                awaitingInput={awaitingInput}
+                disabled={backendLoading}
               />
             )}
           </div>

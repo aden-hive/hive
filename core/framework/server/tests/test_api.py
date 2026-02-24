@@ -144,10 +144,12 @@ def _make_slot(
     agent_path = Path(tmp_dir) if tmp_dir else Path("/tmp/test_agent")
     graph = MockGraphSpec(nodes=nodes or [], edges=edges or [])
     rt = runtime or MockRuntime(graph=graph, log_store=log_store)
+    runner = MagicMock()
+    runner.intro_message = "Test intro"
     return AgentSlot(
         id=agent_id,
         agent_path=agent_path,
-        runner=MagicMock(),
+        runner=runner,
         runtime=rt,
         info=MockAgentInfo(),
         loaded_at=1000000.0,
@@ -331,6 +333,7 @@ class TestAgentCRUD:
             data = await resp.json()
             assert len(data["agents"]) == 1
             assert data["agents"][0]["id"] == "test_agent"
+            assert data["agents"][0]["intro_message"] == "Test intro"
 
     @pytest.mark.asyncio
     async def test_get_agent_found(self):
@@ -466,6 +469,23 @@ class TestExecution:
             data = await resp.json()
             assert data["status"] == "started"
             assert "execution_id" in data
+
+    @pytest.mark.asyncio
+    async def test_chat_injects_when_node_waiting(self):
+        """When a node is awaiting input, /chat should inject instead of trigger."""
+        slot = _make_slot()
+        slot.runtime.find_awaiting_node = lambda: ("chat_node", "primary")
+        app = _make_app_with_agent(slot)
+        async with TestClient(TestServer(app)) as client:
+            resp = await client.post(
+                "/api/agents/test_agent/chat",
+                json={"message": "user reply"},
+            )
+            assert resp.status == 200
+            data = await resp.json()
+            assert data["status"] == "injected"
+            assert data["node_id"] == "chat_node"
+            assert data["delivered"] is True
 
     @pytest.mark.asyncio
     async def test_chat_missing_message(self):
@@ -1266,6 +1286,55 @@ class TestCredentials:
 
             store = app["credential_store"]
             assert store.get_key("test_cred", "api_key") == "new-value"
+
+
+class TestSSEFormat:
+    """Tests for SSE event wire format — events must be unnamed (data-only)
+    so the frontend's es.onmessage handler receives them."""
+
+    @pytest.mark.asyncio
+    async def test_send_event_without_event_field(self):
+        """SSE events without event= should NOT include 'event:' line."""
+        from framework.server.sse import SSEResponse
+
+        sse = SSEResponse()
+        mock_response = MagicMock()
+        mock_response.write = AsyncMock()
+        sse._response = mock_response
+
+        await sse.send_event({"type": "client_output_delta", "data": {"content": "hello"}})
+
+        written = mock_response.write.call_args[0][0].decode()
+        assert "event:" not in written
+        assert "data:" in written
+        assert "client_output_delta" in written
+
+    @pytest.mark.asyncio
+    async def test_send_event_with_event_field_present(self):
+        """Passing event= produces 'event:' line (documents named event behavior)."""
+        from framework.server.sse import SSEResponse
+
+        sse = SSEResponse()
+        mock_response = MagicMock()
+        mock_response.write = AsyncMock()
+        sse._response = mock_response
+
+        await sse.send_event({"type": "test"}, event="test")
+
+        written = mock_response.write.call_args[0][0].decode()
+        assert "event: test" in written
+
+    def test_events_route_does_not_pass_event_param(self):
+        """Guardrail: routes_events.py must call send_event(data) without event=."""
+        import inspect
+
+        from framework.server import routes_events
+
+        source = inspect.getsource(routes_events.handle_events)
+        # Should NOT contain send_event(data, event=...)
+        assert "send_event(data," not in source
+        # Should contain the simple call
+        assert "send_event(data)" in source
 
 
 class TestErrorMiddleware:

@@ -97,7 +97,9 @@ async def handle_check_agent(request: web.Request) -> web.Response:
             CredentialSetupSession,
         )
 
-        session = CredentialSetupSession.from_agent_path(agent_path)
+        session = CredentialSetupSession.from_agent_path(
+            agent_path, missing_only=False
+        )
         required = []
         for mc in session.missing:
             cred_id = mc.credential_id or mc.credential_name
