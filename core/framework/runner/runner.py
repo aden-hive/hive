@@ -729,7 +729,7 @@ class AgentRunner:
         """
         self._approval_callback = callback
 
-    def _setup(self) -> None:
+    def _setup(self, event_bus=None) -> None:
         """Set up runtime, LLM, and executor."""
         # Configure structured logging (auto-detects JSON vs human-readable)
         from framework.observability import configure_logging
@@ -863,6 +863,7 @@ class AgentRunner:
             accounts_prompt=accounts_prompt,
             accounts_data=accounts_data,
             tool_provider_map=tool_provider_map,
+            event_bus=event_bus,
         )
 
     def _get_api_key_env_var(self, model: str) -> str | None:
@@ -947,6 +948,7 @@ class AgentRunner:
         accounts_prompt: str = "",
         accounts_data: list[dict] | None = None,
         tool_provider_map: dict[str, str] | None = None,
+        event_bus=None,
     ) -> None:
         """Set up multi-entry-point execution using AgentRuntime."""
         # Convert AsyncEntryPointSpec to EntryPointSpec for AgentRuntime
@@ -1021,6 +1023,7 @@ class AgentRunner:
             accounts_prompt=accounts_prompt,
             accounts_data=accounts_data,
             tool_provider_map=tool_provider_map,
+            event_bus=event_bus,
         )
 
         # Pass intro_message through for TUI display

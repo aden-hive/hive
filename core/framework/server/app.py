@@ -5,7 +5,7 @@ from pathlib import Path
 
 from aiohttp import web
 
-from framework.server.agent_manager import AgentManager
+from framework.server.session_manager import Session, SessionManager
 
 logger = logging.getLogger(__name__)
 
@@ -22,12 +22,15 @@ def safe_path_segment(value: str) -> str:
     return value
 
 
-def sessions_dir(slot) -> Path:
-    """Resolve the sessions directory for an agent slot.
+def sessions_dir(session: Session) -> Path:
+    """Resolve the worker sessions directory for a session.
 
     Storage layout: ~/.hive/agents/{agent_name}/sessions/
+    Requires a worker to be loaded (worker_path must be set).
     """
-    agent_name = slot.agent_path.name
+    if session.worker_path is None:
+        raise ValueError("No worker loaded — no worker sessions directory")
+    agent_name = session.worker_path.name
     return Path.home() / ".hive" / "agents" / agent_name / "sessions"
 
 
@@ -85,17 +88,19 @@ async def error_middleware(request: web.Request, handler):
 
 async def _on_shutdown(app: web.Application) -> None:
     """Gracefully unload all agents on server shutdown."""
-    manager: AgentManager = app["manager"]
+    manager: SessionManager = app["manager"]
     await manager.shutdown_all()
 
 
 async def handle_health(request: web.Request) -> web.Response:
     """GET /api/health — simple health check."""
-    manager: AgentManager = request.app["manager"]
+    manager: SessionManager = request.app["manager"]
+    sessions = manager.list_sessions()
     return web.json_response(
         {
             "status": "ok",
-            "agents_loaded": len(manager.list_agents()),
+            "sessions": len(sessions),
+            "agents_loaded": sum(1 for s in sessions if s.worker_runtime is not None),
         }
     )
 
@@ -112,7 +117,7 @@ def create_app(model: str | None = None) -> web.Application:
     app = web.Application(middlewares=[cors_middleware, error_middleware])
 
     # Store manager on app for handlers
-    app["manager"] = AgentManager(model=model)
+    app["manager"] = SessionManager(model=model)
 
     # Initialize credential store
     from framework.credentials.store import CredentialStore

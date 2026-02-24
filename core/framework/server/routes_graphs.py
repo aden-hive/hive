@@ -5,19 +5,21 @@ import logging
 
 from aiohttp import web
 
-from framework.server.agent_manager import AgentManager
 from framework.server.app import safe_path_segment
+from framework.server.session_manager import SessionManager
 
 logger = logging.getLogger(__name__)
 
 
-def _get_manager(request: web.Request) -> AgentManager:
+def _get_manager(request: web.Request) -> SessionManager:
     return request.app["manager"]
 
 
-def _get_graph_spec(slot, graph_id: str):
+def _get_graph_spec(session, graph_id: str):
     """Get GraphSpec for a graph_id. Returns (graph_spec, None) or (None, error_response)."""
-    reg = slot.runtime.get_graph_registration(graph_id)
+    if not session.worker_runtime:
+        return None, web.json_response({"error": "No worker loaded in this session"}, status=503)
+    reg = session.worker_runtime.get_graph_registration(graph_id)
     if reg is None:
         return None, web.json_response({"error": f"Graph '{graph_id}' not found"}, status=404)
     return reg.graph, None
@@ -44,39 +46,34 @@ def _node_to_dict(node) -> dict:
 
 
 async def handle_list_nodes(request: web.Request) -> web.Response:
-    """GET /api/agents/{agent_id}/graphs/{graph_id}/nodes — list nodes.
-
-    Returns all nodes in the graph with their static spec. If a session_id
-    query param is provided, enriches each node with runtime status from
-    the session's progress data.
-    """
+    """GET /api/agents/{agent_id}/graphs/{graph_id}/nodes — list nodes."""
     manager = _get_manager(request)
     agent_id = request.match_info["agent_id"]
     graph_id = request.match_info["graph_id"]
-    slot = manager.get_agent(agent_id)
+    session = manager.get_session_for_agent(agent_id)
 
-    if slot is None:
+    if session is None:
         return web.json_response({"error": f"Agent '{agent_id}' not found"}, status=404)
 
-    graph, err = _get_graph_spec(slot, graph_id)
+    graph, err = _get_graph_spec(session, graph_id)
     if err:
         return err
 
     nodes = [_node_to_dict(n) for n in graph.nodes]
 
     # Optionally enrich with session progress
-    session_id = request.query.get("session_id")
-    if session_id:
-        session_id = safe_path_segment(session_id)
+    worker_session_id = request.query.get("session_id")
+    if worker_session_id and session.worker_path:
+        worker_session_id = safe_path_segment(worker_session_id)
         from pathlib import Path
 
         state_path = (
             Path.home()
             / ".hive"
             / "agents"
-            / slot.agent_path.name
+            / session.worker_path.name
             / "sessions"
-            / session_id
+            / worker_session_id
             / "state.json"
         )
         if state_path.exists():
@@ -95,7 +92,7 @@ async def handle_list_nodes(request: web.Request) -> web.Response:
                     node["is_current"] = nid == current
                     node["in_path"] = nid in path
             except (json.JSONDecodeError, OSError):
-                pass  # Skip enrichment on error
+                pass
 
     edges = [
         {"source": e.source, "target": e.target, "condition": e.condition, "priority": e.priority}
@@ -116,12 +113,12 @@ async def handle_get_node(request: web.Request) -> web.Response:
     agent_id = request.match_info["agent_id"]
     graph_id = request.match_info["graph_id"]
     node_id = request.match_info["node_id"]
-    slot = manager.get_agent(agent_id)
+    session = manager.get_session_for_agent(agent_id)
 
-    if slot is None:
+    if session is None:
         return web.json_response({"error": f"Agent '{agent_id}' not found"}, status=404)
 
-    graph, err = _get_graph_spec(slot, graph_id)
+    graph, err = _get_graph_spec(session, graph_id)
     if err:
         return err
 
@@ -130,8 +127,6 @@ async def handle_get_node(request: web.Request) -> web.Response:
         return web.json_response({"error": f"Node '{node_id}' not found"}, status=404)
 
     data = _node_to_dict(node_spec)
-
-    # Include edges originating from this node
     edges = [
         {"target": e.target, "condition": e.condition, "priority": e.priority}
         for e in graph.edges
@@ -143,21 +138,17 @@ async def handle_get_node(request: web.Request) -> web.Response:
 
 
 async def handle_node_criteria(request: web.Request) -> web.Response:
-    """GET /api/agents/{agent_id}/graphs/{graph_id}/nodes/{node_id}/criteria
-
-    Returns the success criteria for a node plus any judge verdicts from
-    logs (if session_id is provided).
-    """
+    """GET /api/agents/{agent_id}/graphs/{graph_id}/nodes/{node_id}/criteria"""
     manager = _get_manager(request)
     agent_id = request.match_info["agent_id"]
     graph_id = request.match_info["graph_id"]
     node_id = request.match_info["node_id"]
-    slot = manager.get_agent(agent_id)
+    session = manager.get_session_for_agent(agent_id)
 
-    if slot is None:
+    if session is None:
         return web.json_response({"error": f"Agent '{agent_id}' not found"}, status=404)
 
-    graph, err = _get_graph_spec(slot, graph_id)
+    graph, err = _get_graph_spec(session, graph_id)
     if err:
         return err
 
@@ -171,12 +162,11 @@ async def handle_node_criteria(request: web.Request) -> web.Response:
         "output_keys": node_spec.output_keys,
     }
 
-    # If session_id provided, look for judge verdicts in logs
-    session_id = request.query.get("session_id")
-    if session_id:
-        log_store = getattr(slot.runtime, "_runtime_log_store", None)
+    worker_session_id = request.query.get("session_id")
+    if worker_session_id and session.worker_runtime:
+        log_store = getattr(session.worker_runtime, "_runtime_log_store", None)
         if log_store:
-            details = await log_store.load_details(session_id)
+            details = await log_store.load_details(worker_session_id)
             if details:
                 node_details = [n for n in details.nodes if n.node_id == node_id]
                 if node_details:
@@ -193,21 +183,17 @@ async def handle_node_criteria(request: web.Request) -> web.Response:
 
 
 async def handle_node_tools(request: web.Request) -> web.Response:
-    """GET /api/agents/{agent_id}/graphs/{graph_id}/nodes/{node_id}/tools
-
-    Returns resolved tool metadata (name, description, parameters) for
-    the tools assigned to a node, looked up from the ToolRegistry.
-    """
+    """GET /api/agents/{agent_id}/graphs/{graph_id}/nodes/{node_id}/tools"""
     manager = _get_manager(request)
     agent_id = request.match_info["agent_id"]
     graph_id = request.match_info["graph_id"]
     node_id = request.match_info["node_id"]
-    slot = manager.get_agent(agent_id)
+    session = manager.get_session_for_agent(agent_id)
 
-    if slot is None:
+    if session is None:
         return web.json_response({"error": f"Agent '{agent_id}' not found"}, status=404)
 
-    graph, err = _get_graph_spec(slot, graph_id)
+    graph, err = _get_graph_spec(session, graph_id)
     if err:
         return err
 
@@ -216,7 +202,7 @@ async def handle_node_tools(request: web.Request) -> web.Response:
         return web.json_response({"error": f"Node '{node_id}' not found"}, status=404)
 
     tools_out = []
-    registry = getattr(slot.runner, "_tool_registry", None)
+    registry = getattr(session.runner, "_tool_registry", None) if session.runner else None
     all_tools = registry.get_tools() if registry else {}
 
     for name in node_spec.tools:
@@ -230,7 +216,6 @@ async def handle_node_tools(request: web.Request) -> web.Response:
                 }
             )
         else:
-            # Tool listed in node but not yet in registry (MCP not connected, etc.)
             tools_out.append({"name": name, "description": "", "parameters": {}})
 
     return web.json_response({"tools": tools_out})

@@ -6,8 +6,7 @@ import logging
 from aiohttp import web
 
 from framework.runtime.event_bus import EventType
-from framework.server.agent_manager import AgentManager
-from framework.server.sse import SSEResponse
+from framework.server.session_manager import SessionManager
 
 logger = logging.getLogger(__name__)
 
@@ -66,17 +65,15 @@ async def handle_events(request: web.Request) -> web.StreamResponse:
     Query params:
         types: Comma-separated event type names to filter (optional).
     """
-    manager: AgentManager = request.app["manager"]
+    manager: SessionManager = request.app["manager"]
     agent_id = request.match_info["agent_id"]
-    slot = manager.get_agent(agent_id)
+    session = manager.get_session_for_agent(agent_id)
 
-    if slot is None:
+    if session is None:
         return web.json_response({"error": f"Agent '{agent_id}' not found"}, status=404)
 
-    if not slot.runtime:
-        return web.json_response({"error": "Agent runtime not started"}, status=503)
-
-    event_bus = slot.runtime.event_bus
+    # Session always has an event_bus — no runtime guard needed
+    event_bus = session.event_bus
     event_types = _parse_event_types(request.query.get("types"))
 
     # Per-client buffer queue
@@ -90,6 +87,8 @@ async def handle_events(request: web.Request) -> web.StreamResponse:
             pass  # Drop oldest-undelivered; client will catch up
 
     # Subscribe to EventBus
+    from framework.server.sse import SSEResponse
+
     sub_id = event_bus.subscribe(
         event_types=event_types,
         handler=on_event,

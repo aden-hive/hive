@@ -1,18 +1,33 @@
 """Queen lifecycle tools for worker management.
 
 These tools give the Queen agent control over the worker agent's lifecycle.
-They close over a reference to the worker's ``AgentRuntime`` and the shared
-``EventBus``, following the same pattern as ``session_graph_tools.py``.
+They close over a session-like object that provides ``worker_runtime``,
+allowing late-binding access to the worker (which may be loaded/unloaded
+dynamically).
 
 Usage::
 
     from framework.tools.queen_lifecycle_tools import register_queen_lifecycle_tools
 
+    # Server path — pass a Session object
     register_queen_lifecycle_tools(
         registry=queen_tool_registry,
-        worker_runtime=worker_runtime,
+        session=session,
+        session_id=session._session_id,
+    )
+
+    # TUI path — wrap bare references in an adapter
+    from framework.tools.queen_lifecycle_tools import WorkerSessionAdapter
+
+    adapter = WorkerSessionAdapter(
+        worker_runtime=runtime,
         event_bus=event_bus,
-        storage_path=storage_path,
+        worker_path=storage_path,
+    )
+    register_queen_lifecycle_tools(
+        registry=queen_tool_registry,
+        session=adapter,
+        session_id=session_id,
     )
 """
 
@@ -20,8 +35,9 @@ from __future__ import annotations
 
 import json
 import logging
+from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from framework.runner.tool_registry import ToolRegistry
@@ -29,6 +45,19 @@ if TYPE_CHECKING:
     from framework.runtime.event_bus import EventBus
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass
+class WorkerSessionAdapter:
+    """Adapter for TUI compatibility.
+
+    Wraps bare worker_runtime + event_bus + storage_path into a
+    session-like object that queen lifecycle tools can use.
+    """
+
+    worker_runtime: Any  # AgentRuntime
+    event_bus: Any  # EventBus
+    worker_path: Path | None = None
 
 
 def build_worker_profile(runtime: AgentRuntime) -> str:
@@ -74,22 +103,44 @@ def build_worker_profile(runtime: AgentRuntime) -> str:
 
 def register_queen_lifecycle_tools(
     registry: ToolRegistry,
-    worker_runtime: AgentRuntime,
-    event_bus: EventBus,
-    storage_path: Path | None = None,
+    session: Any = None,
     session_id: str | None = None,
+    # Legacy params — used by TUI when not passing a session object
+    worker_runtime: AgentRuntime | None = None,
+    event_bus: EventBus | None = None,
+    storage_path: Path | None = None,
 ) -> int:
-    """Register queen lifecycle tools bound to *worker_runtime*.
+    """Register queen lifecycle tools.
 
     Args:
+        session: A Session or WorkerSessionAdapter with ``worker_runtime``
+            attribute. The tools read ``session.worker_runtime`` on each
+            call, supporting late-binding (worker loaded/unloaded).
         session_id: Shared session ID so the worker uses the same session
-                    scope as the queen and judge.
+            scope as the queen and judge.
+        worker_runtime: (Legacy) Direct runtime reference. If ``session``
+            is not provided, a WorkerSessionAdapter is created from
+            worker_runtime + event_bus + storage_path.
 
     Returns the number of tools registered.
     """
+    # Build session adapter from legacy params if needed
+    if session is None:
+        if worker_runtime is None:
+            raise ValueError("Either session or worker_runtime must be provided")
+        session = WorkerSessionAdapter(
+            worker_runtime=worker_runtime,
+            event_bus=event_bus,
+            worker_path=storage_path,
+        )
+
     from framework.llm.provider import Tool
 
     tools_registered = 0
+
+    def _get_runtime():
+        """Get current worker runtime from session (late-binding)."""
+        return getattr(session, "worker_runtime", None)
 
     # --- start_worker ---------------------------------------------------------
 
@@ -99,16 +150,20 @@ def register_queen_lifecycle_tools(
         Triggers the worker's default entry point with the given task.
         Returns immediately — the worker runs asynchronously.
         """
+        runtime = _get_runtime()
+        if runtime is None:
+            return json.dumps({"error": "No worker loaded in this session."})
+
         try:
             # Get session state from any prior execution for memory continuity
-            session_state = worker_runtime._get_primary_session_state("default") or {}
+            session_state = runtime._get_primary_session_state("default") or {}
 
             # Use the shared session ID so queen, judge, and worker all
             # scope their conversations to the same session.
             if session_id:
                 session_state["resume_session_id"] = session_id
 
-            exec_id = await worker_runtime.trigger(
+            exec_id = await runtime.trigger(
                 entry_point_id="default",
                 input_data={"user_request": task},
                 session_state=session_state,
@@ -150,11 +205,15 @@ def register_queen_lifecycle_tools(
 
         Stops the worker gracefully. Returns the IDs of cancelled executions.
         """
+        runtime = _get_runtime()
+        if runtime is None:
+            return json.dumps({"error": "No worker loaded in this session."})
+
         cancelled = []
-        graph_id = worker_runtime.graph_id
+        graph_id = runtime.graph_id
 
         # Get the primary graph's streams
-        reg = worker_runtime.get_graph_registration(graph_id)
+        reg = runtime.get_graph_registration(graph_id)
         if reg is None:
             return json.dumps({"error": "Worker graph not found"})
 
@@ -192,9 +251,13 @@ def register_queen_lifecycle_tools(
 
         Returns worker identity, execution state, active node, and iteration count.
         """
-        graph_id = worker_runtime.graph_id
-        goal = worker_runtime.goal
-        reg = worker_runtime.get_graph_registration(graph_id)
+        runtime = _get_runtime()
+        if runtime is None:
+            return json.dumps({"status": "not_loaded", "message": "No worker loaded."})
+
+        graph_id = runtime.graph_id
+        goal = runtime.goal
+        reg = runtime.get_graph_registration(graph_id)
         if reg is None:
             return json.dumps({"status": "not_loaded"})
 
@@ -257,8 +320,12 @@ def register_queen_lifecycle_tools(
         Injects the message into the worker's active node conversation.
         Use this to relay user instructions or concerns to the worker.
         """
-        graph_id = worker_runtime.graph_id
-        reg = worker_runtime.get_graph_registration(graph_id)
+        runtime = _get_runtime()
+        if runtime is None:
+            return json.dumps({"error": "No worker loaded in this session."})
+
+        graph_id = runtime.graph_id
+        reg = runtime.get_graph_registration(graph_id)
         if reg is None:
             return json.dumps({"error": "Worker graph not found"})
 

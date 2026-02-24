@@ -1951,8 +1951,10 @@ def cmd_serve(args: argparse.Namespace) -> int:
         # Preload agents specified via --agent
         for agent_path in args.agent:
             try:
-                slot = await manager.load_agent(agent_path, model=model)
-                print(f"Loaded agent: {slot.id} ({slot.info.name})")
+                session = await manager.create_session_with_worker(agent_path, model=model)
+                info = session.worker_info
+                name = info.name if info else session.worker_id
+                print(f"Loaded agent: {session.worker_id} ({name})")
             except Exception as e:
                 print(f"Error loading {agent_path}: {e}")
 
@@ -1965,7 +1967,7 @@ def cmd_serve(args: argparse.Namespace) -> int:
         print()
         print(f"Hive API server running on http://{args.host}:{args.port}")
         print(f"Health: http://{args.host}:{args.port}/api/health")
-        print(f"Agents loaded: {len(manager.list_agents())}")
+        print(f"Agents loaded: {sum(1 for s in manager.list_sessions() if s.worker_runtime)}")
         print()
         print("Press Ctrl+C to stop")
 

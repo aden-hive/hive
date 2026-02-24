@@ -1,7 +1,7 @@
 """
 Comprehensive tests for the Hive HTTP API server.
 
-Uses aiohttp TestClient with mocked agent slots to test all endpoints
+Uses aiohttp TestClient with mocked sessions to test all endpoints
 without requiring actual LLM calls or agent loading.
 """
 
@@ -13,7 +13,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from aiohttp.test_utils import TestClient, TestServer
 
-from framework.server.agent_manager import AgentSlot
+from framework.server.session_manager import Session
 from framework.server.app import create_app
 
 # ---------------------------------------------------------------------------
@@ -134,27 +134,47 @@ class MockAgentInfo:
     node_count: int = 2
 
 
-def _make_slot(
+def _make_queen_executor():
+    """Create a mock queen executor with an injectable queen node."""
+    mock_node = MagicMock()
+    mock_node.inject_event = AsyncMock()
+    executor = MagicMock()
+    executor.node_registry = {"queen": mock_node}
+    return executor
+
+
+def _make_session(
     agent_id="test_agent",
     tmp_dir=None,
     runtime=None,
     nodes=None,
     edges=None,
     log_store=None,
+    with_queen=True,
 ):
-    """Create a mock AgentSlot backed by a temp directory."""
+    """Create a mock Session backed by a temp directory."""
     agent_path = Path(tmp_dir) if tmp_dir else Path("/tmp/test_agent")
     graph = MockGraphSpec(nodes=nodes or [], edges=edges or [])
     rt = runtime or MockRuntime(graph=graph, log_store=log_store)
     runner = MagicMock()
     runner.intro_message = "Test intro"
-    return AgentSlot(
+
+    mock_event_bus = MagicMock()
+    mock_llm = MagicMock()
+
+    queen_executor = _make_queen_executor() if with_queen else None
+
+    return Session(
         id=agent_id,
-        agent_path=agent_path,
-        runner=runner,
-        runtime=rt,
-        info=MockAgentInfo(),
+        event_bus=mock_event_bus,
+        llm=mock_llm,
         loaded_at=1000000.0,
+        queen_executor=queen_executor,
+        worker_id=agent_id,
+        worker_path=agent_path,
+        runner=runner,
+        worker_runtime=rt,
+        worker_info=MockAgentInfo(),
     )
 
 
@@ -263,11 +283,11 @@ def sample_session(tmp_agent_dir):
     return session_id, session_dir, state
 
 
-def _make_app_with_agent(slot, manager=None):
-    """Create an aiohttp app with a pre-loaded agent slot."""
+def _make_app_with_session(session):
+    """Create an aiohttp app with a pre-loaded session."""
     app = create_app()
     mgr = app["manager"]
-    mgr._slots[slot.id] = slot
+    mgr._sessions[session.id] = session
     return app
 
 
@@ -314,6 +334,7 @@ class TestHealth:
             data = await resp.json()
             assert data["status"] == "ok"
             assert data["agents_loaded"] == 0
+            assert data["sessions"] == 0
 
 
 class TestAgentCRUD:
@@ -328,8 +349,8 @@ class TestAgentCRUD:
 
     @pytest.mark.asyncio
     async def test_list_agents_with_loaded(self):
-        slot = _make_slot()
-        app = _make_app_with_agent(slot)
+        session = _make_session()
+        app = _make_app_with_session(session)
         async with TestClient(TestServer(app)) as client:
             resp = await client.get("/api/agents")
             assert resp.status == 200
@@ -340,8 +361,8 @@ class TestAgentCRUD:
 
     @pytest.mark.asyncio
     async def test_get_agent_found(self):
-        slot = _make_slot()
-        app = _make_app_with_agent(slot)
+        session = _make_session()
+        app = _make_app_with_session(session)
         async with TestClient(TestServer(app)) as client:
             resp = await client.get("/api/agents/test_agent")
             assert resp.status == 200
@@ -371,9 +392,9 @@ class TestAgentCRUD:
 
     @pytest.mark.asyncio
     async def test_unload_agent(self):
-        slot = _make_slot()
-        slot.runner.cleanup_async = AsyncMock()
-        app = _make_app_with_agent(slot)
+        session = _make_session()
+        session.runner.cleanup_async = AsyncMock()
+        app = _make_app_with_session(session)
         async with TestClient(TestServer(app)) as client:
             resp = await client.delete("/api/agents/test_agent")
             assert resp.status == 200
@@ -393,8 +414,8 @@ class TestAgentCRUD:
 
     @pytest.mark.asyncio
     async def test_stats(self):
-        slot = _make_slot()
-        app = _make_app_with_agent(slot)
+        session = _make_session()
+        app = _make_app_with_session(session)
         async with TestClient(TestServer(app)) as client:
             resp = await client.get("/api/agents/test_agent/stats")
             assert resp.status == 200
@@ -403,8 +424,8 @@ class TestAgentCRUD:
 
     @pytest.mark.asyncio
     async def test_entry_points(self):
-        slot = _make_slot()
-        app = _make_app_with_agent(slot)
+        session = _make_session()
+        app = _make_app_with_session(session)
         async with TestClient(TestServer(app)) as client:
             resp = await client.get("/api/agents/test_agent/entry-points")
             assert resp.status == 200
@@ -414,8 +435,8 @@ class TestAgentCRUD:
 
     @pytest.mark.asyncio
     async def test_graphs(self):
-        slot = _make_slot()
-        app = _make_app_with_agent(slot)
+        session = _make_session()
+        app = _make_app_with_session(session)
         async with TestClient(TestServer(app)) as client:
             resp = await client.get("/api/agents/test_agent/graphs")
             assert resp.status == 200
@@ -426,8 +447,8 @@ class TestAgentCRUD:
 class TestExecution:
     @pytest.mark.asyncio
     async def test_trigger(self):
-        slot = _make_slot()
-        app = _make_app_with_agent(slot)
+        session = _make_session()
+        app = _make_app_with_session(session)
         async with TestClient(TestServer(app)) as client:
             resp = await client.post(
                 "/api/agents/test_agent/trigger",
@@ -449,8 +470,8 @@ class TestExecution:
 
     @pytest.mark.asyncio
     async def test_inject(self):
-        slot = _make_slot()
-        app = _make_app_with_agent(slot)
+        session = _make_session()
+        app = _make_app_with_session(session)
         async with TestClient(TestServer(app)) as client:
             resp = await client.post(
                 "/api/agents/test_agent/inject",
@@ -462,8 +483,8 @@ class TestExecution:
 
     @pytest.mark.asyncio
     async def test_inject_missing_node_id(self):
-        slot = _make_slot()
-        app = _make_app_with_agent(slot)
+        session = _make_session()
+        app = _make_app_with_session(session)
         async with TestClient(TestServer(app)) as client:
             resp = await client.post(
                 "/api/agents/test_agent/inject",
@@ -472,9 +493,10 @@ class TestExecution:
             assert resp.status == 400
 
     @pytest.mark.asyncio
-    async def test_chat_triggers_when_not_waiting(self):
-        slot = _make_slot()
-        app = _make_app_with_agent(slot)
+    async def test_chat_goes_to_queen_when_not_waiting(self):
+        """When worker is not awaiting input, chat goes to queen."""
+        session = _make_session()
+        app = _make_app_with_session(session)
         async with TestClient(TestServer(app)) as client:
             resp = await client.post(
                 "/api/agents/test_agent/chat",
@@ -482,15 +504,15 @@ class TestExecution:
             )
             assert resp.status == 200
             data = await resp.json()
-            assert data["status"] == "started"
-            assert "execution_id" in data
+            assert data["status"] == "queen"
+            assert data["delivered"] is True
 
     @pytest.mark.asyncio
     async def test_chat_injects_when_node_waiting(self):
         """When a node is awaiting input, /chat should inject instead of trigger."""
-        slot = _make_slot()
-        slot.runtime.find_awaiting_node = lambda: ("chat_node", "primary")
-        app = _make_app_with_agent(slot)
+        session = _make_session()
+        session.worker_runtime.find_awaiting_node = lambda: ("chat_node", "primary")
+        app = _make_app_with_session(session)
         async with TestClient(TestServer(app)) as client:
             resp = await client.post(
                 "/api/agents/test_agent/chat",
@@ -503,9 +525,21 @@ class TestExecution:
             assert data["delivered"] is True
 
     @pytest.mark.asyncio
+    async def test_chat_503_when_no_queen_or_worker(self):
+        """Without queen or waiting worker, chat returns 503."""
+        session = _make_session(with_queen=False)
+        app = _make_app_with_session(session)
+        async with TestClient(TestServer(app)) as client:
+            resp = await client.post(
+                "/api/agents/test_agent/chat",
+                json={"message": "hello"},
+            )
+            assert resp.status == 503
+
+    @pytest.mark.asyncio
     async def test_chat_missing_message(self):
-        slot = _make_slot()
-        app = _make_app_with_agent(slot)
+        session = _make_session()
+        app = _make_app_with_session(session)
         async with TestClient(TestServer(app)) as client:
             resp = await client.post(
                 "/api/agents/test_agent/chat",
@@ -515,8 +549,8 @@ class TestExecution:
 
     @pytest.mark.asyncio
     async def test_pause_not_found(self):
-        slot = _make_slot()
-        app = _make_app_with_agent(slot)
+        session = _make_session()
+        app = _make_app_with_session(session)
         async with TestClient(TestServer(app)) as client:
             resp = await client.post(
                 "/api/agents/test_agent/pause",
@@ -526,8 +560,8 @@ class TestExecution:
 
     @pytest.mark.asyncio
     async def test_pause_missing_execution_id(self):
-        slot = _make_slot()
-        app = _make_app_with_agent(slot)
+        session = _make_session()
+        app = _make_app_with_session(session)
         async with TestClient(TestServer(app)) as client:
             resp = await client.post(
                 "/api/agents/test_agent/pause",
@@ -537,8 +571,8 @@ class TestExecution:
 
     @pytest.mark.asyncio
     async def test_goal_progress(self):
-        slot = _make_slot()
-        app = _make_app_with_agent(slot)
+        session = _make_session()
+        app = _make_app_with_session(session)
         async with TestClient(TestServer(app)) as client:
             resp = await client.get("/api/agents/test_agent/goal-progress")
             assert resp.status == 200
@@ -553,8 +587,8 @@ class TestResume:
         session_id, session_dir, state = sample_session
         tmp_path, agent_name, base = tmp_agent_dir
 
-        slot = _make_slot(tmp_dir=tmp_path / ".hive" / "agents" / agent_name)
-        app = _make_app_with_agent(slot)
+        session = _make_session(tmp_dir=tmp_path / ".hive" / "agents" / agent_name)
+        app = _make_app_with_session(session)
 
         async with TestClient(TestServer(app)) as client:
             resp = await client.post(
@@ -573,8 +607,8 @@ class TestResume:
         session_id, session_dir, state = sample_session
         tmp_path, agent_name, base = tmp_agent_dir
 
-        slot = _make_slot(tmp_dir=tmp_path / ".hive" / "agents" / agent_name)
-        app = _make_app_with_agent(slot)
+        session = _make_session(tmp_dir=tmp_path / ".hive" / "agents" / agent_name)
+        app = _make_app_with_session(session)
 
         async with TestClient(TestServer(app)) as client:
             resp = await client.post(
@@ -590,8 +624,8 @@ class TestResume:
 
     @pytest.mark.asyncio
     async def test_resume_missing_session_id(self):
-        slot = _make_slot()
-        app = _make_app_with_agent(slot)
+        session = _make_session()
+        app = _make_app_with_session(session)
         async with TestClient(TestServer(app)) as client:
             resp = await client.post(
                 "/api/agents/test_agent/resume",
@@ -601,8 +635,8 @@ class TestResume:
 
     @pytest.mark.asyncio
     async def test_resume_session_not_found(self):
-        slot = _make_slot()
-        app = _make_app_with_agent(slot)
+        session = _make_session()
+        app = _make_app_with_session(session)
         async with TestClient(TestServer(app)) as client:
             resp = await client.post(
                 "/api/agents/test_agent/resume",
@@ -614,10 +648,10 @@ class TestResume:
 class TestStop:
     @pytest.mark.asyncio
     async def test_stop_found(self):
-        slot = _make_slot()
+        session = _make_session()
         # Put a mock task in the stream so cancel_execution returns True
-        slot.runtime._mock_streams["default"]._execution_tasks["exec_abc"] = MagicMock()
-        app = _make_app_with_agent(slot)
+        session.worker_runtime._mock_streams["default"]._execution_tasks["exec_abc"] = MagicMock()
+        app = _make_app_with_session(session)
         async with TestClient(TestServer(app)) as client:
             resp = await client.post(
                 "/api/agents/test_agent/stop",
@@ -629,8 +663,8 @@ class TestStop:
 
     @pytest.mark.asyncio
     async def test_stop_not_found(self):
-        slot = _make_slot()
-        app = _make_app_with_agent(slot)
+        session = _make_session()
+        app = _make_app_with_session(session)
         async with TestClient(TestServer(app)) as client:
             resp = await client.post(
                 "/api/agents/test_agent/stop",
@@ -640,8 +674,8 @@ class TestStop:
 
     @pytest.mark.asyncio
     async def test_stop_missing_execution_id(self):
-        slot = _make_slot()
-        app = _make_app_with_agent(slot)
+        session = _make_session()
+        app = _make_app_with_session(session)
         async with TestClient(TestServer(app)) as client:
             resp = await client.post(
                 "/api/agents/test_agent/stop",
@@ -656,8 +690,8 @@ class TestReplay:
         session_id, session_dir, state = sample_session
         tmp_path, agent_name, base = tmp_agent_dir
 
-        slot = _make_slot(tmp_dir=tmp_path / ".hive" / "agents" / agent_name)
-        app = _make_app_with_agent(slot)
+        session = _make_session(tmp_dir=tmp_path / ".hive" / "agents" / agent_name)
+        app = _make_app_with_session(session)
 
         async with TestClient(TestServer(app)) as client:
             resp = await client.post(
@@ -674,8 +708,8 @@ class TestReplay:
 
     @pytest.mark.asyncio
     async def test_replay_missing_fields(self):
-        slot = _make_slot()
-        app = _make_app_with_agent(slot)
+        session = _make_session()
+        app = _make_app_with_session(session)
         async with TestClient(TestServer(app)) as client:
             resp = await client.post(
                 "/api/agents/test_agent/replay",
@@ -694,8 +728,8 @@ class TestReplay:
         session_id, session_dir, state = sample_session
         tmp_path, agent_name, base = tmp_agent_dir
 
-        slot = _make_slot(tmp_dir=tmp_path / ".hive" / "agents" / agent_name)
-        app = _make_app_with_agent(slot)
+        session = _make_session(tmp_dir=tmp_path / ".hive" / "agents" / agent_name)
+        app = _make_app_with_session(session)
 
         async with TestClient(TestServer(app)) as client:
             resp = await client.post(
@@ -714,8 +748,8 @@ class TestSessions:
         session_id, session_dir, state = sample_session
         tmp_path, agent_name, base = tmp_agent_dir
 
-        slot = _make_slot(tmp_dir=tmp_path / ".hive" / "agents" / agent_name)
-        app = _make_app_with_agent(slot)
+        session = _make_session(tmp_dir=tmp_path / ".hive" / "agents" / agent_name)
+        app = _make_app_with_session(session)
 
         async with TestClient(TestServer(app)) as client:
             resp = await client.get("/api/agents/test_agent/sessions")
@@ -729,8 +763,8 @@ class TestSessions:
     @pytest.mark.asyncio
     async def test_list_sessions_empty(self, tmp_agent_dir):
         tmp_path, agent_name, base = tmp_agent_dir
-        slot = _make_slot(tmp_dir=tmp_path / ".hive" / "agents" / agent_name)
-        app = _make_app_with_agent(slot)
+        session = _make_session(tmp_dir=tmp_path / ".hive" / "agents" / agent_name)
+        app = _make_app_with_session(session)
 
         async with TestClient(TestServer(app)) as client:
             resp = await client.get("/api/agents/test_agent/sessions")
@@ -743,8 +777,8 @@ class TestSessions:
         session_id, session_dir, state = sample_session
         tmp_path, agent_name, base = tmp_agent_dir
 
-        slot = _make_slot(tmp_dir=tmp_path / ".hive" / "agents" / agent_name)
-        app = _make_app_with_agent(slot)
+        session = _make_session(tmp_dir=tmp_path / ".hive" / "agents" / agent_name)
+        app = _make_app_with_session(session)
 
         async with TestClient(TestServer(app)) as client:
             resp = await client.get(f"/api/agents/test_agent/sessions/{session_id}")
@@ -756,8 +790,8 @@ class TestSessions:
     @pytest.mark.asyncio
     async def test_get_session_not_found(self, tmp_agent_dir):
         tmp_path, agent_name, base = tmp_agent_dir
-        slot = _make_slot(tmp_dir=tmp_path / ".hive" / "agents" / agent_name)
-        app = _make_app_with_agent(slot)
+        session = _make_session(tmp_dir=tmp_path / ".hive" / "agents" / agent_name)
+        app = _make_app_with_session(session)
 
         async with TestClient(TestServer(app)) as client:
             resp = await client.get("/api/agents/test_agent/sessions/nonexistent")
@@ -768,8 +802,8 @@ class TestSessions:
         session_id, session_dir, state = sample_session
         tmp_path, agent_name, base = tmp_agent_dir
 
-        slot = _make_slot(tmp_dir=tmp_path / ".hive" / "agents" / agent_name)
-        app = _make_app_with_agent(slot)
+        session = _make_session(tmp_dir=tmp_path / ".hive" / "agents" / agent_name)
+        app = _make_app_with_session(session)
 
         async with TestClient(TestServer(app)) as client:
             resp = await client.delete(f"/api/agents/test_agent/sessions/{session_id}")
@@ -783,8 +817,8 @@ class TestSessions:
     @pytest.mark.asyncio
     async def test_delete_session_not_found(self, tmp_agent_dir):
         tmp_path, agent_name, base = tmp_agent_dir
-        slot = _make_slot(tmp_dir=tmp_path / ".hive" / "agents" / agent_name)
-        app = _make_app_with_agent(slot)
+        session = _make_session(tmp_dir=tmp_path / ".hive" / "agents" / agent_name)
+        app = _make_app_with_session(session)
 
         async with TestClient(TestServer(app)) as client:
             resp = await client.delete("/api/agents/test_agent/sessions/nonexistent")
@@ -795,8 +829,8 @@ class TestSessions:
         session_id, session_dir, state = sample_session
         tmp_path, agent_name, base = tmp_agent_dir
 
-        slot = _make_slot(tmp_dir=tmp_path / ".hive" / "agents" / agent_name)
-        app = _make_app_with_agent(slot)
+        session = _make_session(tmp_dir=tmp_path / ".hive" / "agents" / agent_name)
+        app = _make_app_with_session(session)
 
         async with TestClient(TestServer(app)) as client:
             resp = await client.get(f"/api/agents/test_agent/sessions/{session_id}/checkpoints")
@@ -813,8 +847,8 @@ class TestSessions:
         session_id, session_dir, state = sample_session
         tmp_path, agent_name, base = tmp_agent_dir
 
-        slot = _make_slot(tmp_dir=tmp_path / ".hive" / "agents" / agent_name)
-        app = _make_app_with_agent(slot)
+        session = _make_session(tmp_dir=tmp_path / ".hive" / "agents" / agent_name)
+        app = _make_app_with_session(session)
 
         async with TestClient(TestServer(app)) as client:
             resp = await client.post(
@@ -832,8 +866,8 @@ class TestSessions:
         session_id, session_dir, state = sample_session
         tmp_path, agent_name, base = tmp_agent_dir
 
-        slot = _make_slot(tmp_dir=tmp_path / ".hive" / "agents" / agent_name)
-        app = _make_app_with_agent(slot)
+        session = _make_session(tmp_dir=tmp_path / ".hive" / "agents" / agent_name)
+        app = _make_app_with_session(session)
 
         async with TestClient(TestServer(app)) as client:
             resp = await client.post(
@@ -848,8 +882,8 @@ class TestMessages:
         session_id, session_dir, state = sample_session
         tmp_path, agent_name, base = tmp_agent_dir
 
-        slot = _make_slot(tmp_dir=tmp_path / ".hive" / "agents" / agent_name)
-        app = _make_app_with_agent(slot)
+        session = _make_session(tmp_dir=tmp_path / ".hive" / "agents" / agent_name)
+        app = _make_app_with_session(session)
 
         async with TestClient(TestServer(app)) as client:
             resp = await client.get(f"/api/agents/test_agent/sessions/{session_id}/messages")
@@ -871,8 +905,8 @@ class TestMessages:
         session_id, session_dir, state = sample_session
         tmp_path, agent_name, base = tmp_agent_dir
 
-        slot = _make_slot(tmp_dir=tmp_path / ".hive" / "agents" / agent_name)
-        app = _make_app_with_agent(slot)
+        session = _make_session(tmp_dir=tmp_path / ".hive" / "agents" / agent_name)
+        app = _make_app_with_session(session)
 
         async with TestClient(TestServer(app)) as client:
             resp = await client.get(
@@ -888,16 +922,18 @@ class TestMessages:
     async def test_get_messages_no_conversations(self, tmp_agent_dir):
         """Session without conversations directory returns empty list."""
         tmp_path, agent_name, base = tmp_agent_dir
-        session_id = "session_empty"
-        session_dir = base / "sessions" / session_id
+        worker_session_id = "session_empty"
+        session_dir = base / "sessions" / worker_session_id
         session_dir.mkdir(parents=True)
         (session_dir / "state.json").write_text(json.dumps({"status": "completed"}))
 
-        slot = _make_slot(tmp_dir=tmp_path / ".hive" / "agents" / agent_name)
-        app = _make_app_with_agent(slot)
+        session = _make_session(tmp_dir=tmp_path / ".hive" / "agents" / agent_name)
+        app = _make_app_with_session(session)
 
         async with TestClient(TestServer(app)) as client:
-            resp = await client.get(f"/api/agents/test_agent/sessions/{session_id}/messages")
+            resp = await client.get(
+                f"/api/agents/test_agent/sessions/{worker_session_id}/messages"
+            )
             assert resp.status == 200
             data = await resp.json()
             assert data["messages"] == []
@@ -906,8 +942,8 @@ class TestMessages:
     async def test_get_messages_client_only(self, tmp_agent_dir):
         """client_only=true keeps user+client-facing assistant."""
         tmp_path, agent_name, base = tmp_agent_dir
-        session_id = "session_client_only"
-        session_dir = base / "sessions" / session_id
+        worker_session_id = "session_client_only"
+        session_dir = base / "sessions" / worker_session_id
         session_dir.mkdir(parents=True)
         (session_dir / "state.json").write_text(json.dumps({"status": "completed"}))
 
@@ -957,16 +993,16 @@ class TestMessages:
             MockNodeSpec(id="node_a", name="Node A", client_facing=False),
             MockNodeSpec(id="chat_node", name="Chat", client_facing=True),
         ]
-        slot = _make_slot(
+        session = _make_session(
             tmp_dir=tmp_path / ".hive" / "agents" / agent_name,
             nodes=nodes,
         )
-        slot.runner.graph = MockGraphSpec(nodes=nodes)
-        app = _make_app_with_agent(slot)
+        session.runner.graph = MockGraphSpec(nodes=nodes)
+        app = _make_app_with_session(session)
 
         async with TestClient(TestServer(app)) as client:
             resp = await client.get(
-                f"/api/agents/test_agent/sessions/{session_id}/messages?client_only=true"
+                f"/api/agents/test_agent/sessions/{worker_session_id}/messages?client_only=true"
             )
             assert resp.status == 200
             msgs = (await resp.json())["messages"]
@@ -983,8 +1019,8 @@ class TestMessages:
     async def test_get_messages_client_only_no_runner_returns_all(self, tmp_agent_dir):
         """client_only=true with no runner skips filtering (returns all messages)."""
         tmp_path, agent_name, base = tmp_agent_dir
-        session_id = "session_no_runner"
-        session_dir = base / "sessions" / session_id
+        worker_session_id = "session_no_runner"
+        session_dir = base / "sessions" / worker_session_id
         session_dir.mkdir(parents=True)
         (session_dir / "state.json").write_text(json.dumps({"status": "completed"}))
 
@@ -995,13 +1031,13 @@ class TestMessages:
             json.dumps({"seq": 2, "role": "assistant", "content": "response"})
         )
 
-        slot = _make_slot(tmp_dir=tmp_path / ".hive" / "agents" / agent_name)
-        slot.runner = None  # Simulate runner not available
-        app = _make_app_with_agent(slot)
+        session = _make_session(tmp_dir=tmp_path / ".hive" / "agents" / agent_name)
+        session.runner = None  # Simulate runner not available
+        app = _make_app_with_session(session)
 
         async with TestClient(TestServer(app)) as client:
             resp = await client.get(
-                f"/api/agents/test_agent/sessions/{session_id}/messages?client_only=true"
+                f"/api/agents/test_agent/sessions/{worker_session_id}/messages?client_only=true"
             )
             assert resp.status == 200
             msgs = (await resp.json())["messages"]
@@ -1013,8 +1049,8 @@ class TestGraphNodes:
     @pytest.mark.asyncio
     async def test_list_nodes(self, nodes_and_edges):
         nodes, edges = nodes_and_edges
-        slot = _make_slot(nodes=nodes, edges=edges)
-        app = _make_app_with_agent(slot)
+        session = _make_session(nodes=nodes, edges=edges)
+        app = _make_app_with_session(session)
 
         async with TestClient(TestServer(app)) as client:
             resp = await client.get("/api/agents/test_agent/graphs/primary/nodes")
@@ -1033,8 +1069,8 @@ class TestGraphNodes:
         nodes, edges = nodes_and_edges
         graph = MockGraphSpec(nodes=nodes, edges=edges, entry_node="node_a")
         rt = MockRuntime(graph=graph)
-        slot = _make_slot(runtime=rt)
-        app = _make_app_with_agent(slot)
+        session = _make_session(runtime=rt)
+        app = _make_app_with_session(session)
 
         async with TestClient(TestServer(app)) as client:
             resp = await client.get("/api/agents/test_agent/graphs/primary/nodes")
@@ -1060,12 +1096,12 @@ class TestGraphNodes:
         tmp_path, agent_name, base = tmp_agent_dir
         nodes, edges = nodes_and_edges
 
-        slot = _make_slot(
+        session = _make_session(
             tmp_dir=tmp_path / ".hive" / "agents" / agent_name,
             nodes=nodes,
             edges=edges,
         )
-        app = _make_app_with_agent(slot)
+        app = _make_app_with_session(session)
 
         async with TestClient(TestServer(app)) as client:
             resp = await client.get(
@@ -1082,8 +1118,8 @@ class TestGraphNodes:
 
     @pytest.mark.asyncio
     async def test_list_nodes_graph_not_found(self):
-        slot = _make_slot()
-        app = _make_app_with_agent(slot)
+        session = _make_session()
+        app = _make_app_with_session(session)
         async with TestClient(TestServer(app)) as client:
             resp = await client.get("/api/agents/test_agent/graphs/nonexistent/nodes")
             assert resp.status == 404
@@ -1091,8 +1127,8 @@ class TestGraphNodes:
     @pytest.mark.asyncio
     async def test_get_node(self, nodes_and_edges):
         nodes, edges = nodes_and_edges
-        slot = _make_slot(nodes=nodes, edges=edges)
-        app = _make_app_with_agent(slot)
+        session = _make_session(nodes=nodes, edges=edges)
+        app = _make_app_with_session(session)
 
         async with TestClient(TestServer(app)) as client:
             resp = await client.get("/api/agents/test_agent/graphs/primary/nodes/node_a")
@@ -1111,8 +1147,8 @@ class TestGraphNodes:
     async def test_node_detail_includes_system_prompt(self, nodes_and_edges):
         """system_prompt should appear in the single-node GET response."""
         nodes, edges = nodes_and_edges
-        slot = _make_slot(nodes=nodes, edges=edges)
-        app = _make_app_with_agent(slot)
+        session = _make_session(nodes=nodes, edges=edges)
+        app = _make_app_with_session(session)
 
         async with TestClient(TestServer(app)) as client:
             resp = await client.get("/api/agents/test_agent/graphs/primary/nodes/node_a")
@@ -1132,8 +1168,8 @@ class TestGraphNodes:
     @pytest.mark.asyncio
     async def test_get_node_not_found(self, nodes_and_edges):
         nodes, edges = nodes_and_edges
-        slot = _make_slot(nodes=nodes, edges=edges)
-        app = _make_app_with_agent(slot)
+        session = _make_session(nodes=nodes, edges=edges)
+        app = _make_app_with_session(session)
 
         async with TestClient(TestServer(app)) as client:
             resp = await client.get("/api/agents/test_agent/graphs/primary/nodes/nonexistent")
@@ -1144,8 +1180,8 @@ class TestNodeCriteria:
     @pytest.mark.asyncio
     async def test_criteria_static(self, nodes_and_edges):
         nodes, edges = nodes_and_edges
-        slot = _make_slot(nodes=nodes, edges=edges)
-        app = _make_app_with_agent(slot)
+        session = _make_session(nodes=nodes, edges=edges)
+        app = _make_app_with_session(session)
 
         async with TestClient(TestServer(app)) as client:
             resp = await client.get("/api/agents/test_agent/graphs/primary/nodes/node_a/criteria")
@@ -1169,13 +1205,13 @@ class TestNodeCriteria:
 
         log_store = RuntimeLogStore(base)
 
-        slot = _make_slot(
+        session = _make_session(
             tmp_dir=tmp_path / ".hive" / "agents" / agent_name,
             nodes=nodes,
             edges=edges,
             log_store=log_store,
         )
-        app = _make_app_with_agent(slot)
+        app = _make_app_with_session(session)
 
         async with TestClient(TestServer(app)) as client:
             resp = await client.get(
@@ -1193,8 +1229,8 @@ class TestNodeCriteria:
     @pytest.mark.asyncio
     async def test_criteria_node_not_found(self, nodes_and_edges):
         nodes, edges = nodes_and_edges
-        slot = _make_slot(nodes=nodes, edges=edges)
-        app = _make_app_with_agent(slot)
+        session = _make_session(nodes=nodes, edges=edges)
+        app = _make_app_with_session(session)
 
         async with TestClient(TestServer(app)) as client:
             resp = await client.get(
@@ -1207,9 +1243,9 @@ class TestLogs:
     @pytest.mark.asyncio
     async def test_logs_no_log_store(self):
         """Agent without log store returns 404."""
-        slot = _make_slot()
-        slot.runtime._runtime_log_store = None
-        app = _make_app_with_agent(slot)
+        session = _make_session()
+        session.worker_runtime._runtime_log_store = None
+        app = _make_app_with_session(session)
 
         async with TestClient(TestServer(app)) as client:
             resp = await client.get("/api/agents/test_agent/logs")
@@ -1223,11 +1259,11 @@ class TestLogs:
         from framework.runtime.runtime_log_store import RuntimeLogStore
 
         log_store = RuntimeLogStore(base)
-        slot = _make_slot(
+        session = _make_session(
             tmp_dir=tmp_path / ".hive" / "agents" / agent_name,
             log_store=log_store,
         )
-        app = _make_app_with_agent(slot)
+        app = _make_app_with_session(session)
 
         async with TestClient(TestServer(app)) as client:
             resp = await client.get("/api/agents/test_agent/logs")
@@ -1245,11 +1281,11 @@ class TestLogs:
         from framework.runtime.runtime_log_store import RuntimeLogStore
 
         log_store = RuntimeLogStore(base)
-        slot = _make_slot(
+        session = _make_session(
             tmp_dir=tmp_path / ".hive" / "agents" / agent_name,
             log_store=log_store,
         )
-        app = _make_app_with_agent(slot)
+        app = _make_app_with_session(session)
 
         async with TestClient(TestServer(app)) as client:
             resp = await client.get(
@@ -1268,11 +1304,11 @@ class TestLogs:
         from framework.runtime.runtime_log_store import RuntimeLogStore
 
         log_store = RuntimeLogStore(base)
-        slot = _make_slot(
+        session = _make_session(
             tmp_dir=tmp_path / ".hive" / "agents" / agent_name,
             log_store=log_store,
         )
-        app = _make_app_with_agent(slot)
+        app = _make_app_with_session(session)
 
         async with TestClient(TestServer(app)) as client:
             resp = await client.get(
@@ -1292,11 +1328,11 @@ class TestLogs:
         from framework.runtime.runtime_log_store import RuntimeLogStore
 
         log_store = RuntimeLogStore(base)
-        slot = _make_slot(
+        session = _make_session(
             tmp_dir=tmp_path / ".hive" / "agents" / agent_name,
             log_store=log_store,
         )
-        app = _make_app_with_agent(slot)
+        app = _make_app_with_session(session)
 
         async with TestClient(TestServer(app)) as client:
             resp = await client.get(
@@ -1318,13 +1354,13 @@ class TestNodeLogs:
         from framework.runtime.runtime_log_store import RuntimeLogStore
 
         log_store = RuntimeLogStore(base)
-        slot = _make_slot(
+        session = _make_session(
             tmp_dir=tmp_path / ".hive" / "agents" / agent_name,
             nodes=nodes,
             edges=edges,
             log_store=log_store,
         )
-        app = _make_app_with_agent(slot)
+        app = _make_app_with_session(session)
 
         async with TestClient(TestServer(app)) as client:
             resp = await client.get(
@@ -1347,8 +1383,8 @@ class TestNodeLogs:
         from framework.runtime.runtime_log_store import RuntimeLogStore
 
         log_store = RuntimeLogStore(Path("/tmp/dummy"))
-        slot = _make_slot(nodes=nodes, edges=edges, log_store=log_store)
-        app = _make_app_with_agent(slot)
+        session = _make_session(nodes=nodes, edges=edges, log_store=log_store)
+        app = _make_app_with_session(session)
 
         async with TestClient(TestServer(app)) as client:
             resp = await client.get("/api/agents/test_agent/graphs/primary/nodes/node_a/logs")
