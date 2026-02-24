@@ -159,6 +159,9 @@ HIVE_START_PAGE = """
 DEFAULT_TIMEOUT_MS = 30000
 DEFAULT_NAVIGATION_TIMEOUT_MS = 60000
 
+# Valid wait_until values for Playwright navigation
+VALID_WAIT_UNTIL = {"commit", "domcontentloaded", "load", "networkidle"}
+
 # ---------------------------------------------------------------------------
 # Shared browser for agent contexts
 # ---------------------------------------------------------------------------
@@ -251,6 +254,67 @@ class BrowserSession:
             # Persistent context doesn't have a separate browser object
             return self.context is not None
         return self.browser is not None and self.browser.is_connected()
+
+    async def _health_check(self) -> None:
+        """Verify the browser is responsive by evaluating JS on a page.
+
+        Uses an existing page if available (persistent contexts always have at
+        least one), otherwise creates and closes a temporary page.
+
+        Raises:
+            RuntimeError: If the browser doesn't respond to JS evaluation.
+        """
+        page = None
+        temp = False
+        if self.context.pages:
+            page = self.context.pages[0]
+        else:
+            page = await self.context.new_page()
+            temp = True
+        try:
+            result = await page.evaluate("document.readyState")
+            if result not in ("loading", "interactive", "complete"):
+                raise RuntimeError(f"Unexpected readyState: {result}")
+        finally:
+            if temp:
+                await page.close()
+
+    async def _cleanup_after_failed_start(self) -> None:
+        """Release resources after a health-check failure inside start().
+
+        We're already inside ``self._lock`` so we can't call ``stop()``.
+        This mirrors the teardown logic without re-acquiring the lock.
+        """
+        if self.cdp_port:
+            from .port_manager import release_port
+
+            release_port(self.cdp_port)
+            self.cdp_port = None
+
+        if self.context:
+            try:
+                await self.context.close()
+            except Exception:
+                pass
+            self.context = None
+
+        if self.browser:
+            try:
+                await self.browser.close()
+            except Exception:
+                pass
+            self.browser = None
+
+        if self._playwright:
+            try:
+                await self._playwright.stop()
+            except Exception:
+                pass
+            self._playwright = None
+
+        self.pages.clear()
+        self.active_page_id = None
+        self.console_messages.clear()
 
     async def start(self, headless: bool = True, persistent: bool = True) -> dict:
         """
@@ -360,6 +424,17 @@ class BrowserSession:
 
                 # Inject stealth script to hide automation detection
                 await self.context.add_init_script(STEALTH_SCRIPT)
+
+            # Health check: confirm the browser is actually responsive
+            try:
+                await self._health_check()
+            except Exception as exc:
+                logger.error(f"Browser health check failed: {exc}")
+                await self._cleanup_after_failed_start()
+                return {
+                    "ok": False,
+                    "error": f"Browser started but health check failed: {exc}",
+                }
 
             return {
                 "ok": True,
@@ -475,20 +550,29 @@ class BrowserSession:
         if not self._is_running():
             await self.start(persistent=self.persistent)
 
-    async def open_tab(self, url: str, background: bool = False) -> dict:
+    async def open_tab(self, url: str, background: bool = False, wait_until: str = "load") -> dict:
         """Open a new tab with the given URL.
 
         Args:
             url: URL to navigate to.
             background: If True, open the tab via CDP Target.createTarget with
                 background=True so it does not steal focus from the current tab.
+            wait_until: When to consider navigation complete. One of
+                ``"commit"``, ``"domcontentloaded"``, ``"load"`` (default),
+                ``"networkidle"``.
         """
+        if wait_until not in VALID_WAIT_UNTIL:
+            raise ValueError(
+                f"Invalid wait_until={wait_until!r}. "
+                f"Must be one of: {', '.join(sorted(VALID_WAIT_UNTIL))}"
+            )
+
         await self.ensure_running()
         if not self.context:
             raise RuntimeError("Browser context not initialized")
 
         if background:
-            return await self._open_tab_background(url)
+            return await self._open_tab_background(url, wait_until=wait_until)
 
         page = await self.context.new_page()
         target_id = f"tab_{id(page)}"
@@ -499,7 +583,7 @@ class BrowserSession:
         # Set up console message capture
         page.on("console", lambda msg: self._capture_console(target_id, msg))
 
-        await page.goto(url, wait_until="domcontentloaded", timeout=DEFAULT_NAVIGATION_TIMEOUT_MS)
+        await page.goto(url, wait_until=wait_until, timeout=DEFAULT_NAVIGATION_TIMEOUT_MS)
 
         return {
             "ok": True,
@@ -508,7 +592,7 @@ class BrowserSession:
             "title": await page.title(),
         }
 
-    async def _open_tab_background(self, url: str) -> dict:
+    async def _open_tab_background(self, url: str, wait_until: str = "load") -> dict:
         """Open a tab in the background using CDP Target.createTarget.
 
         Uses CDP to create the target with background=True so the current
@@ -527,7 +611,7 @@ class BrowserSession:
             self.active_page_id = target_id
             self.console_messages[target_id] = []
             page.on("console", lambda msg: self._capture_console(target_id, msg))
-            await page.goto(url, wait_until="domcontentloaded", timeout=DEFAULT_NAVIGATION_TIMEOUT_MS)
+            await page.goto(url, wait_until=wait_until, timeout=DEFAULT_NAVIGATION_TIMEOUT_MS)
             return {
                 "ok": True,
                 "targetId": target_id,
@@ -555,7 +639,7 @@ class BrowserSession:
 
             # Playwright picks up the new target automatically
             page = await page_promise
-            await page.wait_for_load_state("domcontentloaded", timeout=DEFAULT_NAVIGATION_TIMEOUT_MS)
+            await page.wait_for_load_state(wait_until, timeout=DEFAULT_NAVIGATION_TIMEOUT_MS)
         finally:
             await cdp.detach()
 

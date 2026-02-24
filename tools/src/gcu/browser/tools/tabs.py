@@ -30,7 +30,12 @@ def register_tab_tools(mcp: FastMCP) -> None:
         return {"ok": True, "tabs": tabs}
 
     @mcp.tool()
-    async def browser_open(url: str, background: bool = False, profile: str = "default") -> dict:
+    async def browser_open(
+        url: str,
+        background: bool = False,
+        profile: str = "default",
+        wait_until: str = "load",
+    ) -> dict:
         """
         Open a new browser tab and navigate to the given URL.
 
@@ -38,13 +43,16 @@ def register_tab_tools(mcp: FastMCP) -> None:
             url: URL to navigate to
             background: Open in background without stealing focus from the current tab (default: False)
             profile: Browser profile name (default: "default")
+            wait_until: Wait condition - "commit", "domcontentloaded", "load" (default), or "networkidle"
 
         Returns:
             Dict with new tab info (targetId, url, title, background)
         """
         try:
             session = get_session(profile)
-            return await session.open_tab(url, background=background)
+            return await session.open_tab(url, background=background, wait_until=wait_until)
+        except ValueError as e:
+            return {"ok": False, "error": str(e)}
         except PlaywrightTimeout:
             return {"ok": False, "error": "Navigation timed out"}
         except PlaywrightError as e:
