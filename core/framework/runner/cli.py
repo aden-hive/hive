@@ -6,6 +6,27 @@ import json
 import sys
 from pathlib import Path
 
+_NO_AGENTS_GUIDANCE = """\
+No agents found in {directory}
+
+To get started, try one of the following:
+
+  1. Run an example agent:
+       hive run examples/templates/deep_research_agent
+
+  2. Export an agent to the directory:
+       mkdir -p {directory}
+       cp -r examples/templates/deep_research_agent {directory}/
+
+  3. Build a new agent using a coding agent (Claude Code, Codex CLI, etc.)
+     and export it to {directory}/
+
+  4. See available example templates:
+       ls examples/templates/
+
+For more information, visit: https://docs.adenhq.com/
+"""
+
 
 def register_commands(subparsers: argparse._SubParsersAction) -> None:
     """Register runner commands with the main CLI."""
@@ -808,8 +829,7 @@ def cmd_list(args: argparse.Namespace) -> int:
 
     directory = Path(args.directory)
     if not directory.exists():
-        # FIX: Handle missing directory gracefully on fresh install
-        print(f"No agents found in {directory}")
+        print(_NO_AGENTS_GUIDANCE.format(directory=directory))
         return 0
 
     agents = []
@@ -839,7 +859,7 @@ def cmd_list(args: argparse.Namespace) -> int:
                 )
 
     if not agents:
-        print(f"No agents found in {directory}")
+        print(_NO_AGENTS_GUIDANCE.format(directory=directory))
         return 0
 
     print(f"Agents in {directory}:\n")
@@ -892,7 +912,10 @@ def cmd_dispatch(args: argparse.Namespace) -> int:
                 agent_paths.append((path.name, path))
 
     if not agent_paths:
-        print(f"No agents found in {agents_dir}", file=sys.stderr)
+        print(
+            _NO_AGENTS_GUIDANCE.format(directory=agents_dir),
+            file=sys.stderr,
+        )
         return 1
 
     # Register agents
@@ -1626,7 +1649,10 @@ def _select_agent(agents_dir: Path) -> str | None:
     agents.sort(key=lambda p: p.name)
 
     if not agents:
-        print(f"No agents found in {agents_dir}", file=sys.stderr)
+        print(
+            _NO_AGENTS_GUIDANCE.format(directory=agents_dir),
+            file=sys.stderr,
+        )
         return None
 
     # Pagination setup
@@ -1765,7 +1791,10 @@ def _interactive_multi(agents_dir: Path) -> int:
                 print(f"Warning: Failed to register {path.name}: {e}")
 
     if agent_count == 0:
-        print(f"No agents found in {agents_dir}", file=sys.stderr)
+        print(
+            _NO_AGENTS_GUIDANCE.format(directory=agents_dir),
+            file=sys.stderr,
+        )
         return 1
 
     print(f"\n{'=' * 60}")

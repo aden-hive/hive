@@ -526,7 +526,11 @@ class AdenTUI(App):
 
         agents = discover_agents()
         if not agents:
-            self.notify("No agents found in exports/ or examples/", severity="error", timeout=5)
+            self.notify(
+                "No agents found in exports/ or examples/. Run 'hive list' for setup guidance.",
+                severity="error",
+                timeout=8,
+            )
             self.set_timer(2.0, self.exit)
             return
 
@@ -565,7 +569,11 @@ class AdenTUI(App):
 
         agents = discover_agents()
         if not agents:
-            self.notify("No agents found", severity="error", timeout=5)
+            self.notify(
+                "No agents found. Try 'hive list' or copy an example to exports/.",
+                severity="error",
+                timeout=8,
+            )
             return
 
         def _on_pick(result: str | None) -> None:
@@ -609,7 +617,11 @@ class AdenTUI(App):
 
         agents = discover_agents()
         if not agents:
-            self.notify("No agents found", severity="error", timeout=5)
+            self.notify(
+                "No agents found. Try 'hive list' or copy an example to exports/.",
+                severity="error",
+                timeout=8,
+            )
             return
 
         def _on_pick(result: str | None) -> None:
