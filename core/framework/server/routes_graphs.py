@@ -40,7 +40,6 @@ def _node_to_dict(node) -> dict:
         "client_facing": node.client_facing,
         "success_criteria": node.success_criteria,
         "system_prompt": node.system_prompt or "",
-        "subgraph_steps": node.subgraph_steps or [],
     }
 
 

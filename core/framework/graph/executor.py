@@ -771,7 +771,8 @@ class GraphExecutor:
                 # Emit node-started event (skip event_loop nodes — they emit their own)
                 if self._event_bus and node_spec.node_type != "event_loop":
                     await self._event_bus.emit_node_loop_started(
-                        stream_id=self._stream_id, node_id=current_node_id,
+                        stream_id=self._stream_id,
+                        node_id=current_node_id,
                         execution_id=self._execution_id,
                     )
 
@@ -782,7 +783,9 @@ class GraphExecutor:
                 # Emit node-completed event (skip event_loop nodes)
                 if self._event_bus and node_spec.node_type != "event_loop":
                     await self._event_bus.emit_node_loop_completed(
-                        stream_id=self._stream_id, node_id=current_node_id, iterations=1,
+                        stream_id=self._stream_id,
+                        node_id=current_node_id,
+                        iterations=1,
                         execution_id=self._execution_id,
                     )
 
@@ -1945,7 +1948,8 @@ class GraphExecutor:
                     # Emit node-started event (skip event_loop nodes)
                     if self._event_bus and node_spec.node_type != "event_loop":
                         await self._event_bus.emit_node_loop_started(
-                            stream_id=self._stream_id, node_id=branch.node_id,
+                            stream_id=self._stream_id,
+                            node_id=branch.node_id,
                             execution_id=self._execution_id,
                         )
 
@@ -1970,7 +1974,9 @@ class GraphExecutor:
                     # Emit node-completed event (skip event_loop nodes)
                     if self._event_bus and node_spec.node_type != "event_loop":
                         await self._event_bus.emit_node_loop_completed(
-                            stream_id=self._stream_id, node_id=branch.node_id, iterations=1,
+                            stream_id=self._stream_id,
+                            node_id=branch.node_id,
+                            iterations=1,
                             execution_id=self._execution_id,
                         )
 

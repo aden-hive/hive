@@ -4,7 +4,7 @@ import type { GraphNode, NodeStatus } from "./AgentGraph";
 import type { NodeSpec, ToolInfo, NodeCriteria } from "../api/types";
 import { graphsApi } from "../api/graphs";
 import { logsApi } from "../api/logs";
-import ExecutionSubGraph from "./ExecutionSubGraph";
+import MarkdownContent from "./MarkdownContent";
 
 interface Tool {
   name: string;
@@ -27,6 +27,7 @@ interface NodeDetailPanelProps {
   graphId?: string;
   sessionId?: string | null;
   nodeLogs?: string[];
+  actionPlan?: string;
   onClose: () => void;
 }
 
@@ -212,7 +213,7 @@ const tabs: { id: Tab; label: string; Icon: React.FC<{ className?: string }> }[]
   { id: "subagents", label: "Subagents", Icon: ({ className }) => <Bot className={className} /> },
 ];
 
-export default function NodeDetailPanel({ node, nodeSpec, agentId, graphId, sessionId, nodeLogs, onClose }: NodeDetailPanelProps) {
+export default function NodeDetailPanel({ node, nodeSpec, agentId, graphId, sessionId, nodeLogs, actionPlan, onClose }: NodeDetailPanelProps) {
   const [activeTab, setActiveTab] = useState<Tab>("overview");
   const [realTools, setRealTools] = useState<ToolInfo[] | null>(null);
   const [realCriteria, setRealCriteria] = useState<NodeCriteria | null>(null);
@@ -314,12 +315,14 @@ export default function NodeDetailPanel({ node, nodeSpec, agentId, graphId, sess
       <div className="flex-1 overflow-auto px-4 py-4 flex flex-col gap-3">
         {activeTab === "overview" && (
           <>
-            <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider">Internal Steps</p>
-            {nodeSpec?.subgraph_steps?.length ? (
-              <ExecutionSubGraph steps={nodeSpec.subgraph_steps} status={node.status} />
+            <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider">Action Plan</p>
+            {actionPlan ? (
+              <div className="rounded-lg border border-border/30 bg-background/60 px-3 py-2.5 text-[11px] leading-relaxed text-foreground/80">
+                <MarkdownContent content={actionPlan} />
+              </div>
             ) : (
               <div className="flex items-center justify-center py-6">
-                <p className="text-[11px] text-muted-foreground/50 italic">No workflow steps extracted</p>
+                <p className="text-[11px] text-muted-foreground/50 italic">Action plan will appear when node starts running</p>
               </div>
             )}
             {(() => {

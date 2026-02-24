@@ -146,7 +146,6 @@ export interface NodeSpec {
   client_facing: boolean;
   success_criteria: string | null;
   system_prompt: string;
-  subgraph_steps?: SubgraphStep[];
   // Runtime enrichment (when session_id provided)
   visit_count?: number;
   has_failures?: boolean;
@@ -188,16 +187,6 @@ export interface NodeCriteria {
     needs_attention: boolean;
     attention_reasons: string[];
   };
-}
-
-// --- Subgraph visualization types ---
-
-export interface SubgraphStep {
-  id: string;
-  label: string;
-  tool: string | null;
-  depends_on: string[];
-  type: "action" | "decision" | "loop" | "output";
 }
 
 // --- Tool info types ---
@@ -250,6 +239,7 @@ export type EventTypeName =
   | "node_loop_started"
   | "node_loop_iteration"
   | "node_loop_completed"
+  | "node_action_plan"
   | "llm_text_delta"
   | "llm_reasoning_delta"
   | "tool_call_started"

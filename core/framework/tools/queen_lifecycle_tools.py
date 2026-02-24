@@ -228,11 +228,13 @@ def register_queen_lifecycle_tools(
                 target_node_id = injectable[0]["node_id"]
                 ok = await stream.inject_input(target_node_id, content)
                 if ok:
-                    return json.dumps({
-                        "status": "delivered",
-                        "node_id": target_node_id,
-                        "content_preview": content[:100],
-                    })
+                    return json.dumps(
+                        {
+                            "status": "delivered",
+                            "node_id": target_node_id,
+                            "content_preview": content[:100],
+                        }
+                    )
 
         return json.dumps(
             {

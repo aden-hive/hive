@@ -83,6 +83,7 @@ class EventType(StrEnum):
     NODE_LOOP_STARTED = "node_loop_started"
     NODE_LOOP_ITERATION = "node_loop_iteration"
     NODE_LOOP_COMPLETED = "node_loop_completed"
+    NODE_ACTION_PLAN = "node_action_plan"
 
     # LLM streaming observability
     LLM_TEXT_DELTA = "llm_text_delta"
@@ -530,6 +531,24 @@ class EventBus:
                 node_id=node_id,
                 execution_id=execution_id,
                 data={"iterations": iterations},
+            )
+        )
+
+    async def emit_node_action_plan(
+        self,
+        stream_id: str,
+        node_id: str,
+        plan: str,
+        execution_id: str | None = None,
+    ) -> None:
+        """Emit node action plan event."""
+        await self.publish(
+            AgentEvent(
+                type=EventType.NODE_ACTION_PLAN,
+                stream_id=stream_id,
+                node_id=node_id,
+                execution_id=execution_id,
+                data={"plan": plan},
             )
         )
 

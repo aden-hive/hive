@@ -38,6 +38,35 @@ function createSession(agentType: string, label: string, existingCredentials?: C
   };
 }
 
+// --- Tab persistence ---
+const TAB_STORAGE_KEY = "hive:workspace-tabs";
+
+interface PersistedTabState {
+  tabs: Array<{ id: string; agentType: string; label: string }>;
+  activeSessionByAgent: Record<string, string>;
+  activeWorker: string;
+}
+
+function loadPersistedTabs(): PersistedTabState | null {
+  try {
+    const raw = localStorage.getItem(TAB_STORAGE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed.tabs) || parsed.tabs.length === 0) return null;
+    return parsed as PersistedTabState;
+  } catch {
+    return null;
+  }
+}
+
+function savePersistedTabs(state: PersistedTabState): void {
+  try {
+    localStorage.setItem(TAB_STORAGE_KEY, JSON.stringify(state));
+  } catch {
+    // localStorage full or unavailable — silently ignore
+  }
+}
+
 // --- NewTabPopover ---
 type PopoverStep = "root" | "new-agent-choice" | "clone-pick";
 
@@ -198,10 +227,27 @@ export default function Workspace() {
   const initialAgent = rawAgent;
   const initialPrompt = searchParams.get("prompt") || "";
 
-  // Sessions grouped by agent type — only create one for the initial agent
+  // Sessions grouped by agent type — restore from localStorage if available
   const [sessionsByAgent, setSessionsByAgent] = useState<Record<string, Session[]>>(() => {
+    const persisted = loadPersistedTabs();
     const initial: Record<string, Session[]> = {};
 
+    // Restore persisted tabs as skeleton sessions (messages/graph come from backend)
+    if (persisted) {
+      for (const tab of persisted.tabs) {
+        if (!initial[tab.agentType]) initial[tab.agentType] = [];
+        const session = createSession(tab.agentType, tab.label);
+        session.id = tab.id; // preserve ID so activeSessionByAgent refs stay valid
+        initial[tab.agentType].push(session);
+      }
+    }
+
+    // Check if the URL-requested agent already has a tab (deduplication)
+    if (initial[initialAgent]?.length) {
+      return initial;
+    }
+
+    // No existing tab for this agent — create one
     if (initialAgent === "new-agent") {
       const session = createSession("new-agent", "New Agent");
       session.messages = [
@@ -224,17 +270,27 @@ export default function Workspace() {
           },
         );
       }
-      initial["new-agent"] = [session];
+      initial["new-agent"] = [...(initial["new-agent"] || []), session];
     } else {
-      // Real agent: start empty, backend will populate via intro_message + session history
-      initial[initialAgent] = [createSession(initialAgent, formatAgentDisplayName(initialAgent))];
+      initial[initialAgent] = [...(initial[initialAgent] || []),
+        createSession(initialAgent, formatAgentDisplayName(initialAgent))];
     }
 
     return initial;
   });
 
-  // Active session ID per agent type
+  // Active session ID per agent type — restore from localStorage if available
   const [activeSessionByAgent, setActiveSessionByAgent] = useState<Record<string, string>>(() => {
+    const persisted = loadPersistedTabs();
+    if (persisted) {
+      const restored = { ...persisted.activeSessionByAgent };
+      // Ensure the URL agent has a valid active session mapping
+      const urlSessions = sessionsByAgent[initialAgent];
+      if (urlSessions?.length && !restored[initialAgent]) {
+        restored[initialAgent] = urlSessions[0].id;
+      }
+      return restored;
+    }
     const sessions = sessionsByAgent[initialAgent];
     return sessions ? { [initialAgent]: sessions[0].id } : {};
   });
@@ -273,6 +329,8 @@ export default function Workspace() {
   const [currentExecutionId, setCurrentExecutionId] = useState<string | null>(null);
   // Per-node live log lines accumulated from SSE events
   const [nodeLogs, setNodeLogs] = useState<Record<string, string[]>>({});
+  // Per-node action plans generated at runtime via SSE
+  const [nodeActionPlans, setNodeActionPlans] = useState<Record<string, string>>({});
   // Resolved display name for the loaded agent (e.g. "Competitive Intel Agent")
   const [agentDisplayName, setAgentDisplayName] = useState<string | null>(null);
   // Graph context for NodeDetailPanel
@@ -293,6 +351,19 @@ export default function Workspace() {
       };
     });
   }, [activeWorker]);
+
+  // Persist tab metadata to localStorage on every relevant change
+  useEffect(() => {
+    const tabs: PersistedTabState["tabs"] = [];
+    for (const sessions of Object.values(sessionsByAgent)) {
+      for (const s of sessions) {
+        tabs.push({ id: s.id, agentType: s.agentType, label: s.label });
+      }
+    }
+    if (tabs.length > 0) {
+      savePersistedTabs({ tabs, activeSessionByAgent, activeWorker });
+    }
+  }, [sessionsByAgent, activeSessionByAgent, activeWorker]);
 
   const handleRun = useCallback(async () => {
     if (!backendAgentId || !backendReady) return;
@@ -783,6 +854,15 @@ export default function Workspace() {
           }
           break;
 
+        case "node_action_plan":
+          if (!isQueen && event.node_id) {
+            const plan = (event.data?.plan as string) || "";
+            if (plan.trim()) {
+              setNodeActionPlans(prev => ({ ...prev, [event.node_id!]: plan }));
+            }
+          }
+          break;
+
         default:
           break;
       }
@@ -804,6 +884,21 @@ export default function Workspace() {
   const currentGraph = activeSession
     ? { nodes: activeSession.graphNodes, title: agentDisplayName || formatAgentDisplayName(activeWorker) }
     : { nodes: [] as GraphNode[], title: "" };
+
+  // Build a flat list of all agent-type tabs for the tab bar
+  const agentTabs = Object.entries(sessionsByAgent)
+    .filter(([, sessions]) => sessions.length > 0)
+    .map(([agentType, sessions]) => {
+      const activeId = activeSessionByAgent[agentType] || sessions[0]?.id;
+      const session = sessions.find(s => s.id === activeId) || sessions[0];
+      return {
+        agentType,
+        sessionId: session.id,
+        label: session.label,
+        isActive: agentType === activeWorker,
+        hasRunning: session.graphNodes.some(n => n.status === "running" || n.status === "looping"),
+      };
+    });
 
   // --- handleSend: real backend call or mock fallback (Phase 6) ---
   const handleSend = useCallback((text: string, thread: string) => {
@@ -893,15 +988,28 @@ export default function Workspace() {
     }
   }, [activeWorker, activeSession, backendAgentId, backendReady]);
 
-  const closeSession = useCallback((sessionId: string) => {
-    const sessions = sessionsByAgent[activeWorker] || [];
-    if (sessions.length <= 1) return; // Don't close last tab
-    const filtered = sessions.filter(s => s.id !== sessionId);
-    setSessionsByAgent(prev => ({ ...prev, [activeWorker]: filtered }));
-    if (activeSessionId === sessionId) {
-      setActiveSessionByAgent(prev => ({ ...prev, [activeWorker]: filtered[0].id }));
+  const closeAgentTab = useCallback((agentType: string) => {
+    const allTypes = Object.keys(sessionsByAgent).filter(k => (sessionsByAgent[k] || []).length > 0);
+    if (allTypes.length <= 1) return; // Don't close the last tab
+
+    setSessionsByAgent(prev => {
+      const next = { ...prev };
+      delete next[agentType];
+      return next;
+    });
+    setActiveSessionByAgent(prev => {
+      const next = { ...prev };
+      delete next[agentType];
+      return next;
+    });
+
+    if (activeWorker === agentType) {
+      const remaining = allTypes.filter(k => k !== agentType);
+      if (remaining.length > 0) {
+        setActiveWorker(remaining[0]);
+      }
     }
-  }, [activeWorker, sessionsByAgent, activeSessionId]);
+  }, [sessionsByAgent, activeWorker]);
 
   // Create a new session for any agent type (used by NewTabPopover)
   const addAgentSession = useCallback((agentType: string, agentLabel?: string, cloned = false) => {
@@ -952,41 +1060,36 @@ export default function Workspace() {
           </button>
           <span className="text-border text-xs flex-shrink-0">|</span>
 
-          {/* Instance tabs */}
+          {/* Agent tabs — one per agent type */}
           <div className="flex items-center gap-0.5 min-w-0 overflow-x-auto scrollbar-hide">
-            {currentSessions.map((session) => {
-              const sessionIsActive = session.graphNodes.some(n => n.status === "running" || n.status === "looping");
-              return (
-                <button
-                  key={session.id}
-                  onClick={() => {
-                    setActiveSessionByAgent(prev => ({ ...prev, [activeWorker]: session.id }));
-                    // Open the first active/running node detail, or clear it
-                    const activeNode = session.graphNodes.find(n => n.status === "running" || n.status === "looping") || session.graphNodes[0] || null;
-                    setSelectedNode(activeNode);
-                  }}
-                  className={`group flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-colors whitespace-nowrap flex-shrink-0 ${
-                    session.id === activeSessionId
-                      ? "bg-primary/15 text-primary"
-                      : "text-muted-foreground hover:text-foreground hover:bg-muted/50"
-                  }`}
-                >
-                  {sessionIsActive && (
-                    <span className="relative flex h-1.5 w-1.5 flex-shrink-0">
-                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary opacity-60" />
-                      <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-primary" />
-                    </span>
-                  )}
-                  <span>{session.label}</span>
-                  {currentSessions.length > 1 && (
-                    <X
-                      className="w-3 h-3 opacity-0 group-hover:opacity-60 hover:!opacity-100 transition-opacity"
-                      onClick={(e) => { e.stopPropagation(); closeSession(session.id); }}
-                    />
-                  )}
-                </button>
-              );
-            })}
+            {agentTabs.map((tab) => (
+              <button
+                key={tab.agentType}
+                onClick={() => {
+                  setActiveWorker(tab.agentType);
+                  setActiveSessionByAgent(prev => ({ ...prev, [tab.agentType]: tab.sessionId }));
+                }}
+                className={`group flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-colors whitespace-nowrap flex-shrink-0 ${
+                  tab.isActive
+                    ? "bg-primary/15 text-primary"
+                    : "text-muted-foreground hover:text-foreground hover:bg-muted/50"
+                }`}
+              >
+                {tab.hasRunning && (
+                  <span className="relative flex h-1.5 w-1.5 flex-shrink-0">
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary opacity-60" />
+                    <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-primary" />
+                  </span>
+                )}
+                <span>{tab.label}</span>
+                {agentTabs.length > 1 && (
+                  <X
+                    className="w-3 h-3 opacity-0 group-hover:opacity-60 hover:!opacity-100 transition-opacity"
+                    onClick={(e) => { e.stopPropagation(); closeAgentTab(tab.agentType); }}
+                  />
+                )}
+              </button>
+            ))}
             <button
               ref={newTabBtnRef}
               onClick={() => setNewTabOpen(o => !o)}
@@ -1073,6 +1176,7 @@ export default function Workspace() {
                 graphId={backendGraphId || undefined}
                 sessionId={null}
                 nodeLogs={nodeLogs[selectedNode.id] || []}
+                actionPlan={nodeActionPlans[selectedNode.id]}
                 onClose={() => setSelectedNode(null)}
               />
             </div>

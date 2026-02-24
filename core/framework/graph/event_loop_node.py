@@ -207,6 +207,8 @@ class EventLoopNode(NodeProtocol):
         self._input_ready = asyncio.Event()
         self._awaiting_input = False
         self._shutdown = False
+        # Track which nodes already have an action plan emitted (skip on revisit)
+        self._action_plan_emitted: set[str] = set()
 
     def validate_input(self, ctx: NodeContext) -> list[str]:
         """Validate hard requirements only.
@@ -371,6 +373,16 @@ class EventLoopNode(NodeProtocol):
 
         # 4. Publish loop started
         await self._publish_loop_started(stream_id, node_id, execution_id)
+
+        # 4b. Fire-and-forget action plan generation (once per node per lifetime)
+        if (
+            start_iteration == 0
+            and ctx.llm
+            and self._event_bus
+            and node_id not in self._action_plan_emitted
+        ):
+            self._action_plan_emitted.add(node_id)
+            asyncio.create_task(self._generate_action_plan(ctx, stream_id, node_id, execution_id))
 
         # 5. Stall / doom loop detection state (restored from cursor if resuming)
         recent_responses: list[str] = _restored_recent_responses
@@ -562,7 +574,9 @@ class EventLoopNode(NodeProtocol):
                         node_id,
                         iteration,
                     )
-                    await self._publish_loop_completed(stream_id, node_id, iteration + 1, execution_id)
+                    await self._publish_loop_completed(
+                        stream_id, node_id, iteration + 1, execution_id
+                    )
                     latency_ms = int((time.time() - start_time) * 1000)
                     return NodeResult(
                         success=True,
@@ -713,7 +727,9 @@ class EventLoopNode(NodeProtocol):
 
             if _cf_block:
                 if self._shutdown:
-                    await self._publish_loop_completed(stream_id, node_id, iteration + 1, execution_id)
+                    await self._publish_loop_completed(
+                        stream_id, node_id, iteration + 1, execution_id
+                    )
                     latency_ms = int((time.time() - start_time) * 1000)
                     _continue_count += 1
                     if ctx.runtime_logger:
@@ -763,7 +779,9 @@ class EventLoopNode(NodeProtocol):
                 got_input = await self._await_user_input(ctx)
                 logger.info("[%s] iter=%d: unblocked, got_input=%s", node_id, iteration, got_input)
                 if not got_input:
-                    await self._publish_loop_completed(stream_id, node_id, iteration + 1, execution_id)
+                    await self._publish_loop_completed(
+                        stream_id, node_id, iteration + 1, execution_id
+                    )
                     latency_ms = int((time.time() - start_time) * 1000)
                     _continue_count += 1
                     if ctx.runtime_logger:
@@ -1031,7 +1049,9 @@ class EventLoopNode(NodeProtocol):
                 continue
 
         # 7. Max iterations exhausted
-        await self._publish_loop_completed(stream_id, node_id, self._config.max_iterations, execution_id)
+        await self._publish_loop_completed(
+            stream_id, node_id, self._config.max_iterations, execution_id
+        )
         latency_ms = int((time.time() - start_time) * 1000)
         if ctx.runtime_logger:
             ctx.runtime_logger.log_node_complete(
@@ -1199,7 +1219,11 @@ class EventLoopNode(NodeProtocol):
                 if isinstance(event, TextDeltaEvent):
                     accumulated_text = event.snapshot
                     await self._publish_text_delta(
-                        stream_id, node_id, event.content, event.snapshot, ctx,
+                        stream_id,
+                        node_id,
+                        event.content,
+                        event.snapshot,
+                        ctx,
                         execution_id,
                     )
 
@@ -1284,7 +1308,11 @@ class EventLoopNode(NodeProtocol):
                 executed_in_batch += 1
 
                 await self._publish_tool_started(
-                    stream_id, node_id, tc.tool_use_id, tc.tool_name, tc.tool_input,
+                    stream_id,
+                    node_id,
+                    tc.tool_use_id,
+                    tc.tool_name,
+                    tc.tool_input,
                     execution_id,
                 )
                 logger.info(
@@ -2526,7 +2554,9 @@ class EventLoopNode(NodeProtocol):
     # EventBus publishing helpers
     # -------------------------------------------------------------------
 
-    async def _publish_loop_started(self, stream_id: str, node_id: str, execution_id: str = "") -> None:
+    async def _publish_loop_started(
+        self, stream_id: str, node_id: str, execution_id: str = ""
+    ) -> None:
         if self._event_bus:
             await self._event_bus.emit_node_loop_started(
                 stream_id=stream_id,
@@ -2535,7 +2565,56 @@ class EventLoopNode(NodeProtocol):
                 execution_id=execution_id,
             )
 
-    async def _publish_iteration(self, stream_id: str, node_id: str, iteration: int, execution_id: str = "") -> None:
+    async def _generate_action_plan(
+        self,
+        ctx: NodeContext,
+        stream_id: str,
+        node_id: str,
+        execution_id: str,
+    ) -> None:
+        """Generate a brief action plan via LLM and emit it as an SSE event.
+
+        Runs as a fire-and-forget task so it never blocks the main loop.
+        """
+        try:
+            system_prompt = ctx.node_spec.system_prompt or ""
+            # Trim to keep the prompt small
+            prompt_summary = system_prompt[:500]
+            if len(system_prompt) > 500:
+                prompt_summary += "..."
+
+            tool_names = [t.name for t in ctx.available_tools]
+            output_keys = ctx.node_spec.output_keys or []
+
+            prompt = (
+                f'You are about to work on a task as node "{node_id}".\n\n'
+                f"System prompt:\n{prompt_summary}\n\n"
+                f"Tools available: {tool_names}\n"
+                f"Required outputs: {output_keys}\n\n"
+                f"Write a brief action plan (2-5 bullet points) describing "
+                f"what you will do to complete this task. Be specific and concise.\n"
+                f"Return ONLY the plan text, no preamble."
+            )
+
+            response = await ctx.llm.acomplete(
+                messages=[{"role": "user", "content": prompt}],
+                max_tokens=300,
+            )
+
+            plan = response.content.strip()
+            if plan and self._event_bus:
+                await self._event_bus.emit_node_action_plan(
+                    stream_id=stream_id,
+                    node_id=node_id,
+                    plan=plan,
+                    execution_id=execution_id,
+                )
+        except Exception as e:
+            logger.warning("Action plan generation failed for node '%s': %s", node_id, e)
+
+    async def _publish_iteration(
+        self, stream_id: str, node_id: str, iteration: int, execution_id: str = ""
+    ) -> None:
         if self._event_bus:
             await self._event_bus.emit_node_loop_iteration(
                 stream_id=stream_id,
@@ -2544,7 +2623,9 @@ class EventLoopNode(NodeProtocol):
                 execution_id=execution_id,
             )
 
-    async def _publish_loop_completed(self, stream_id: str, node_id: str, iterations: int, execution_id: str = "") -> None:
+    async def _publish_loop_completed(
+        self, stream_id: str, node_id: str, iterations: int, execution_id: str = ""
+    ) -> None:
         if self._event_bus:
             await self._event_bus.emit_node_loop_completed(
                 stream_id=stream_id,
