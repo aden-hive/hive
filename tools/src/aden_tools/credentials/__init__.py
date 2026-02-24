@@ -75,6 +75,7 @@ from .health_check import (
 from .hubspot import HUBSPOT_CREDENTIALS
 from .llm import LLM_CREDENTIALS
 from .news import NEWS_CREDENTIALS
+from .postgres import POSTGRES_CREDENTIALS
 from .razorpay import RAZORPAY_CREDENTIALS
 from .search import SEARCH_CREDENTIALS
 from .serpapi import SERPAPI_CREDENTIALS
@@ -111,6 +112,7 @@ CREDENTIAL_SPECS = {
     **CALCOM_CREDENTIALS,
     **STRIPE_CREDENTIALS,
     **BREVO_CREDENTIALS,
+    **POSTGRES_CREDENTIALS,
 }
 
 __all__ = [
@@ -157,4 +159,5 @@ __all__ = [
     "DISCORD_CREDENTIALS",
     "STRIPE_CREDENTIALS",
     "BREVO_CREDENTIALS",
+    "POSTGRES_CREDENTIALS",
 ]
