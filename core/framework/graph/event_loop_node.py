@@ -3094,6 +3094,14 @@ class EventLoopNode(NodeProtocol):
                 subagent_store_path = parent_base / "subagents" / agent_id
                 subagent_conv_store = FileConversationStore(base_path=subagent_store_path)
 
+        # Derive a subagent-scoped spillover dir so large tool results
+        # (e.g. browser_snapshot) get written to disk instead of being
+        # silently truncated.  Scoped under /subagents/<id> to avoid
+        # file collisions between concurrent subagents.
+        subagent_spillover = None
+        if self._config.spillover_dir:
+            subagent_spillover = str(Path(self._config.spillover_dir) / "subagents" / agent_id)
+
         subagent_node = EventLoopNode(
             event_bus=None,  # Subagents don't emit events to parent's bus
             judge=SubagentJudge(task=task, max_iterations=max_iter),
@@ -3102,6 +3110,8 @@ class EventLoopNode(NodeProtocol):
                 max_tool_calls_per_turn=self._config.max_tool_calls_per_turn,
                 max_history_tokens=self._config.max_history_tokens,
                 stall_detection_threshold=self._config.stall_detection_threshold,
+                max_tool_result_chars=self._config.max_tool_result_chars,
+                spillover_dir=subagent_spillover,
             ),
             tool_executor=self._tool_executor,
             conversation_store=subagent_conv_store,
