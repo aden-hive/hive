@@ -502,17 +502,18 @@ class AdenTUI(App):
                 worker_graph_id=self.runtime._graph_id,
             )
 
-            # 2. Storage dirs — scoped by session_id so each agent load
-            #    gets fresh queen/judge conversations.
-            judge_dir = storage_path / "graphs" / "judge" / "session" / session_id
+            # 2. Storage dirs — global, not per-agent. Queen and judge are
+            #    supervisory components that outlive any single worker.
+            hive_home = Path.home() / ".hive"
+            judge_dir = hive_home / "judge" / "session" / session_id
             judge_dir.mkdir(parents=True, exist_ok=True)
-            queen_dir = storage_path / "graphs" / "queen" / "session" / session_id
+            queen_dir = hive_home / "queen" / "session" / session_id
             queen_dir.mkdir(parents=True, exist_ok=True)
 
             # ---------------------------------------------------------------
             # 3. Health judge — background task, fires every 2 minutes.
             # ---------------------------------------------------------------
-            judge_runtime = Runtime(storage_path / "graphs" / "judge")
+            judge_runtime = Runtime(hive_home / "judge")
             monitoring_tools = list(monitoring_registry.get_tools().values())
             monitoring_executor = monitoring_registry.get_executor()
 
@@ -602,18 +603,9 @@ class AdenTUI(App):
             queen_tools = list(queen_registry.get_tools().values())
             queen_tool_executor = queen_registry.get_executor()
 
-            # Build worker identity to inject into the queen's system prompt.
-            worker_graph_id = self.runtime._graph_id
-            worker_goal_name = getattr(self.runtime.goal, "name", worker_graph_id)
-            worker_goal_desc = getattr(self.runtime.goal, "description", "")
-            worker_identity = (
-                f"\n\n# Current Session\n"
-                f"Worker agent: {worker_graph_id}\n"
-                f"Goal: {worker_goal_name}\n"
-            )
-            if worker_goal_desc:
-                worker_identity += f"Description: {worker_goal_desc}\n"
-            worker_identity += "Status at session start: idle (not started)."
+            # Build worker profile for queen's system prompt.
+            from framework.tools.queen_lifecycle_tools import build_worker_profile
+            worker_identity = build_worker_profile(self.runtime)
 
             # Adjust queen graph: filter tools to what's registered and
             # append worker identity to the system prompt.
@@ -634,7 +626,7 @@ class AdenTUI(App):
             adjusted_node = _orig_queen_node.model_copy(update=node_updates)
             queen_graph = queen_graph.model_copy(update={"nodes": [adjusted_node]})
 
-            queen_runtime = Runtime(storage_path / "graphs" / "queen")
+            queen_runtime = Runtime(hive_home / "queen")
 
             async def _queen_loop():
                 try:

@@ -31,6 +31,47 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+def build_worker_profile(runtime: AgentRuntime) -> str:
+    """Build a worker capability profile from its graph/goal definition.
+
+    Injected into the queen's system prompt so it knows what the worker
+    can and cannot do — enabling correct delegation decisions.
+    """
+    graph = runtime.graph
+    goal = runtime.goal
+
+    lines = ["\n\n# Worker Profile"]
+    lines.append(f"Agent: {runtime.graph_id}")
+    lines.append(f"Goal: {goal.name}")
+    if goal.description:
+        lines.append(f"Description: {goal.description}")
+
+    if goal.success_criteria:
+        lines.append("\n## Success Criteria")
+        for sc in goal.success_criteria:
+            lines.append(f"- {sc.description}")
+
+    if goal.constraints:
+        lines.append("\n## Constraints")
+        for c in goal.constraints:
+            lines.append(f"- {c.description}")
+
+    if graph.nodes:
+        lines.append("\n## Processing Stages")
+        for node in graph.nodes:
+            lines.append(f"- {node.id}: {node.description or node.name}")
+
+    all_tools: set[str] = set()
+    for node in graph.nodes:
+        if node.tools:
+            all_tools.update(node.tools)
+    if all_tools:
+        lines.append(f"\n## Worker Tools\n{', '.join(sorted(all_tools))}")
+
+    lines.append("\nStatus at session start: idle (not started).")
+    return "\n".join(lines)
+
+
 def register_queen_lifecycle_tools(
     registry: ToolRegistry,
     worker_runtime: AgentRuntime,

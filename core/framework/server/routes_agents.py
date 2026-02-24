@@ -16,17 +16,36 @@ def _get_manager(request: web.Request) -> AgentManager:
 
 def _slot_to_dict(slot) -> dict:
     """Serialize an AgentSlot to a JSON-friendly dict."""
+    info = slot.info
     return {
         "id": slot.id,
         "agent_path": str(slot.agent_path),
-        "name": slot.info.name,
-        "description": slot.info.description,
-        "goal": slot.info.goal_name,
-        "node_count": slot.info.node_count,
+        "name": info.name if info else slot.id,
+        "description": info.description if info else "",
+        "goal": info.goal_name if info else "",
+        "node_count": info.node_count if info else 0,
         "loaded_at": slot.loaded_at,
         "uptime_seconds": round(time.time() - slot.loaded_at, 1),
         "intro_message": getattr(slot.runner, "intro_message", "") or "",
     }
+
+
+async def handle_queen_session(request: web.Request) -> web.Response:
+    """POST /api/sessions/queen — start a queen-only session."""
+    manager = _get_manager(request)
+    body = await request.json() if request.can_read_body else {}
+    model = body.get("model")
+    session_id = body.get("session_id")
+
+    try:
+        slot = await manager.load_queen_session(session_id=session_id, model=model)
+    except ValueError as e:
+        return web.json_response({"error": str(e)}, status=409)
+    except Exception as e:
+        logger.exception(f"Error starting queen session: {e}")
+        return web.json_response({"error": str(e)}, status=500)
+
+    return web.json_response(_slot_to_dict(slot), status=201)
 
 
 async def handle_discover(request: web.Request) -> web.Response:
@@ -205,6 +224,7 @@ async def handle_graphs(request: web.Request) -> web.Response:
 
 def register_routes(app: web.Application) -> None:
     """Register agent CRUD routes on the application."""
+    app.router.add_post("/api/sessions/queen", handle_queen_session)
     app.router.add_get("/api/discover", handle_discover)
     app.router.add_get("/api/agents", handle_list_agents)
     app.router.add_post("/api/agents", handle_load_agent)

@@ -248,15 +248,16 @@ class AgentManager:
                 worker_graph_id=runtime._graph_id,
             )
 
-            # 2. Storage dirs — scoped by session_id so each agent load
-            #    gets fresh queen/judge conversations.
-            judge_dir = storage_path / "graphs" / "judge" / "session" / session_id
+            # 2. Storage dirs — global, not per-agent. Queen and judge are
+            #    supervisory components that outlive any single worker.
+            hive_home = Path.home() / ".hive"
+            judge_dir = hive_home / "judge" / "session" / session_id
             judge_dir.mkdir(parents=True, exist_ok=True)
-            queen_dir = storage_path / "graphs" / "queen" / "session" / session_id
+            queen_dir = hive_home / "queen" / "session" / session_id
             queen_dir.mkdir(parents=True, exist_ok=True)
 
             # 3. Health judge — background task, fires every 2 minutes
-            judge_runtime = Runtime(storage_path / "graphs" / "judge")
+            judge_runtime = Runtime(hive_home / "judge")
             monitoring_tools = list(monitoring_registry.get_tools().values())
             monitoring_executor = monitoring_registry.get_executor()
 
@@ -296,7 +297,17 @@ class AgentManager:
 
             queen_registry = ToolRegistry()
 
-            # No MCP tools on server — queen gets only lifecycle + monitoring tools
+            # Coding tools from hive_coder's MCP config (read_file, write_file, etc.)
+            import framework.agents.hive_coder as _hive_coder_pkg
+            hive_coder_dir = Path(_hive_coder_pkg.__file__).parent
+            mcp_config = hive_coder_dir / "mcp_servers.json"
+            if mcp_config.exists():
+                try:
+                    queen_registry.load_mcp_config(mcp_config)
+                    logger.info("Queen: loaded MCP tools from %s", mcp_config)
+                except Exception:
+                    logger.warning("Queen: MCP config failed to load", exc_info=True)
+
             register_queen_lifecycle_tools(
                 queen_registry,
                 worker_runtime=runtime,
@@ -314,18 +325,9 @@ class AgentManager:
             queen_tools = list(queen_registry.get_tools().values())
             queen_tool_executor = queen_registry.get_executor()
 
-            # Build worker identity for queen's system prompt
-            worker_graph_id = runtime._graph_id
-            worker_goal_name = getattr(runtime.goal, "name", worker_graph_id)
-            worker_goal_desc = getattr(runtime.goal, "description", "")
-            worker_identity = (
-                f"\n\n# Current Session\n"
-                f"Worker agent: {worker_graph_id}\n"
-                f"Goal: {worker_goal_name}\n"
-            )
-            if worker_goal_desc:
-                worker_identity += f"Description: {worker_goal_desc}\n"
-            worker_identity += "Status at session start: idle (not started)."
+            # Build worker profile for queen's system prompt
+            from framework.tools.queen_lifecycle_tools import build_worker_profile
+            worker_identity = build_worker_profile(runtime)
 
             # Filter queen graph tools to what's registered and inject identity
             registered_tool_names = set(queen_registry.get_tools().keys())
@@ -344,7 +346,7 @@ class AgentManager:
             adjusted_node = _orig_queen_node.model_copy(update=node_updates)
             queen_graph = _queen_graph.model_copy(update={"nodes": [adjusted_node]})
 
-            queen_runtime = Runtime(storage_path / "graphs" / "queen")
+            queen_runtime = Runtime(hive_home / "queen")
 
             async def _queen_loop():
                 try:
@@ -405,6 +407,129 @@ class AgentManager:
 
         except Exception as e:
             logger.error("Failed to load queen/judge for '%s': %s", slot.id, e, exc_info=True)
+
+    async def load_queen_session(
+        self,
+        session_id: str | None = None,
+        model: str | None = None,
+    ) -> AgentSlot:
+        """Start a queen-only session with coding tools but no worker agent.
+
+        Creates a standalone queen conversation backed by MCP coding tools
+        (read_file, write_file, etc.) without requiring a loaded worker.
+        Useful for building agents from scratch or general coding tasks.
+        """
+        import uuid
+        from datetime import datetime
+
+        from framework.agents.hive_coder.agent import queen_goal, queen_graph as _queen_graph
+        from framework.graph.executor import GraphExecutor
+        from framework.llm.litellm import LiteLLMProvider
+        from framework.runner.tool_registry import ToolRegistry
+        from framework.runtime.core import Runtime
+        from framework.runtime.event_bus import EventBus
+
+        resolved_id = session_id or "queen"
+        resolved_model = model or self._model
+
+        async with self._lock:
+            if resolved_id in self._slots:
+                raise ValueError(f"Session '{resolved_id}' is already active")
+
+        # Session ID for storage scoping
+        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+        sid = f"session_{ts}_{uuid.uuid4().hex[:8]}"
+
+        # Create standalone LLM + event bus (no worker runtime needed)
+        llm = LiteLLMProvider(model=resolved_model) if resolved_model else LiteLLMProvider()
+        event_bus = EventBus()
+
+        # Storage path — global, same location as queen-with-worker
+        hive_home = Path.home() / ".hive"
+        queen_dir = hive_home / "queen" / "session" / sid
+        queen_dir.mkdir(parents=True, exist_ok=True)
+
+        # Register MCP coding tools
+        queen_registry = ToolRegistry()
+        import framework.agents.hive_coder as _hive_coder_pkg
+
+        hive_coder_dir = Path(_hive_coder_pkg.__file__).parent
+        mcp_config = hive_coder_dir / "mcp_servers.json"
+        if mcp_config.exists():
+            try:
+                queen_registry.load_mcp_config(mcp_config)
+                logger.info("Queen session: loaded MCP tools from %s", mcp_config)
+            except Exception:
+                logger.warning("Queen session: MCP config failed to load", exc_info=True)
+
+        queen_tools = list(queen_registry.get_tools().values())
+        queen_tool_executor = queen_registry.get_executor()
+
+        # Adjust queen prompt: no worker, no delegation
+        _orig_node = _queen_graph.nodes[0]
+        no_worker_identity = (
+            "\n\n# Worker Profile\n"
+            "No worker agent loaded. You are operating independently.\n"
+            "Handle all tasks directly using your coding tools."
+        )
+        base_prompt = _orig_node.system_prompt or ""
+        registered_tool_names = set(queen_registry.get_tools().keys())
+        adjusted_node = _orig_node.model_copy(
+            update={
+                "system_prompt": base_prompt + no_worker_identity,
+                "tools": [t for t in (_orig_node.tools or []) if t in registered_tool_names],
+            }
+        )
+        queen_graph = _queen_graph.model_copy(update={"nodes": [adjusted_node]})
+
+        queen_runtime = Runtime(queen_dir)
+
+        slot = AgentSlot(
+            id=resolved_id,
+            agent_path=queen_dir,
+            runner=None,
+            runtime=None,
+            info=None,
+            loaded_at=time.time(),
+        )
+
+        async def _queen_loop():
+            try:
+                executor = GraphExecutor(
+                    runtime=queen_runtime,
+                    llm=llm,
+                    tools=queen_tools,
+                    tool_executor=queen_tool_executor,
+                    event_bus=event_bus,
+                    stream_id="queen",
+                    storage_path=queen_dir,
+                    loop_config=queen_graph.loop_config,
+                )
+                slot.queen_executor = executor
+                logger.info(
+                    "Queen session starting with %d tools: %s",
+                    len(queen_tools),
+                    [t.name for t in queen_tools],
+                )
+                await executor.execute(
+                    graph=queen_graph,
+                    goal=queen_goal,
+                    input_data={"greeting": "Session started. No worker agent loaded."},
+                    session_state={"resume_session_id": sid},
+                )
+                logger.warning("Queen session executor returned (should be forever-alive)")
+            except Exception:
+                logger.error("Queen session crashed", exc_info=True)
+            finally:
+                slot.queen_executor = None
+
+        slot.queen_task = asyncio.create_task(_queen_loop())
+
+        async with self._lock:
+            self._slots[resolved_id] = slot
+
+        logger.info("Queen-only session '%s' started", resolved_id)
+        return slot
 
     async def unload_agent(self, agent_id: str) -> bool:
         """Unload an agent and release its resources.
