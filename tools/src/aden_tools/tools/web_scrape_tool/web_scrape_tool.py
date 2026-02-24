@@ -9,7 +9,8 @@ Uses BeautifulSoup for HTML parsing and content extraction.
 from __future__ import annotations
 
 from typing import Any
-from urllib.parse import urljoin
+from urllib.parse import urljoin, urlparse
+from urllib.robotparser import RobotFileParser
 
 from bs4 import BeautifulSoup
 from fastmcp import FastMCP
@@ -37,6 +38,7 @@ def register_tools(mcp: FastMCP) -> None:
         selector: str | None = None,
         include_links: bool = False,
         max_length: int = 50000,
+        respect_robots_txt: bool = True,
     ) -> dict:
         """
         Scrape and extract text content from a webpage.
@@ -50,6 +52,7 @@ def register_tools(mcp: FastMCP) -> None:
             selector: CSS selector to target specific content (e.g., 'article', '.main-content')
             include_links: Include extracted links in the response
             max_length: Maximum length of extracted text (1000-500000)
+            respect_robots_txt: Whether to respect robots.txt rules (default True)
 
         Returns:
             Dict with scraped content (url, title, description, content, length) or error dict
@@ -61,6 +64,23 @@ def register_tools(mcp: FastMCP) -> None:
 
             # Validate max_length
             max_length = max(1000, min(max_length, 500000))
+
+            # Check robots.txt before launching browser
+            if respect_robots_txt:
+                try:
+                    parsed = urlparse(url)
+                    robots_url = f"{parsed.scheme}://{parsed.netloc}/robots.txt"
+                    rp = RobotFileParser()
+                    rp.set_url(robots_url)
+                    rp.read()
+                    if not rp.can_fetch(BROWSER_USER_AGENT, url):
+                        return {
+                            "error": f"Blocked by robots.txt: {url}",
+                            "url": url,
+                            "skipped": True,
+                        }
+                except Exception:
+                    pass  # If robots.txt can't be fetched, proceed anyway
 
             # Launch headless browser with stealth
             async with async_playwright() as p:
@@ -88,16 +108,13 @@ def register_tools(mcp: FastMCP) -> None:
                         timeout=60000,
                     )
 
-                    # Give JS a moment to render dynamic content
-                    await page.wait_for_timeout(2000)
-
+                    # Validate response before waiting for JS render
                     if response is None:
                         return {"error": "Navigation failed: no response received"}
 
                     if response.status != 200:
                         return {"error": f"HTTP {response.status}: Failed to fetch URL"}
 
-                    # Validate Content-Type
                     content_type = response.headers.get("content-type", "").lower()
                     if not any(t in content_type for t in ["text/html", "application/xhtml+xml"]):
                         return {
@@ -105,6 +122,12 @@ def register_tools(mcp: FastMCP) -> None:
                             "url": url,
                             "skipped": True,
                         }
+
+                    # Wait for JS to finish rendering dynamic content
+                    try:
+                        await page.wait_for_load_state("networkidle", timeout=3000)
+                    except PlaywrightTimeout:
+                        pass  # Proceed with whatever has loaded
 
                     # Get fully rendered HTML
                     html_content = await page.content()
