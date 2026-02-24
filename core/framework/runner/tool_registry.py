@@ -6,11 +6,10 @@ import importlib.util
 import inspect
 import json
 import logging
-import types
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Union, get_args, get_origin
+from typing import Any
 
 from framework.llm.provider import Tool, ToolResult, ToolUse
 
@@ -70,101 +69,6 @@ class ToolRegistry:
         """
         self._tools[name] = RegisteredTool(tool=tool, executor=executor)
 
-    def _infer_schema(self, annotation: Any) -> tuple[dict[str, Any], bool]:
-        """
-        Infer JSON schema from a type annotation.
-
-        Args:
-            annotation: Type annotation to infer schema from
-
-        Returns:
-            Tuple of (schema_dict, is_optional) where:
-            - schema_dict: JSON schema dictionary
-            - is_optional: True if the type is optional (Union[T, None] or Optional[T])
-        """
-        # Handle None (shouldn't happen, but safe fallback)
-        if annotation is None or annotation is type(None):
-            return {"type": "string"}, True
-
-        # Check for Union types (including Optional)
-        origin = get_origin(annotation)
-        args = get_args(annotation)
-
-        # Handle Union types (Union[T, U] or T | U)
-        # PEP 604 syntax (int | None) uses types.UnionType in Python 3.10+
-        is_union = origin is Union or origin is types.UnionType
-        if is_union:
-            # Check if this is Optional[T] (Union[T, None] or T | None)
-            non_none_args = [arg for arg in args if arg is not type(None)]
-            if len(non_none_args) < len(args):
-                # Contains None, so it's optional
-                if len(non_none_args) == 1:
-                    # Optional[T] - recurse on the non-None type
-                    schema, _ = self._infer_schema(non_none_args[0])
-                    return schema, True
-                else:
-                    # Union[T, U, None] - use first non-None type
-                    schema, _ = self._infer_schema(non_none_args[0])
-                    return schema, True
-
-            # Union[T, U] without None - use first type
-            if args:
-                schema, _ = self._infer_schema(args[0])
-                return schema, False
-
-        # Handle Optional[T] (which is Union[T, None])
-        # This is already handled above, but check for typing.Optional explicitly
-        if hasattr(annotation, "__origin__") and annotation.__origin__ is Union:
-            non_none_args = [arg for arg in get_args(annotation) if arg is not type(None)]
-            if non_none_args:
-                schema, _ = self._infer_schema(non_none_args[0])
-                return schema, True
-
-        # Handle generic types (list[T], dict[K, V])
-        if origin is list or origin is type(list):
-            if args:
-                item_schema, _ = self._infer_schema(args[0])
-                return {"type": "array", "items": item_schema}, False
-            return {"type": "array"}, False
-
-        if origin is dict or origin is type(dict):
-            if len(args) >= 2:
-                # dict[K, V] - infer value type
-                value_schema, _ = self._infer_schema(args[1])
-                return {"type": "object", "additionalProperties": value_schema}, False
-            return {"type": "object"}, False
-
-        # Check for Pydantic BaseModel
-        try:
-            from pydantic import BaseModel
-
-            if isinstance(annotation, type) and issubclass(annotation, BaseModel):
-                # Use Pydantic's JSON schema
-                schema = annotation.model_json_schema()
-                return schema, False
-        except (ImportError, TypeError, AttributeError):
-            pass
-
-        # Handle primitive types
-        if annotation is int or annotation is type(int):
-            return {"type": "integer"}, False
-        if annotation is float or annotation is type(float):
-            return {"type": "number"}, False
-        if annotation is bool or annotation is type(bool):
-            return {"type": "boolean"}, False
-        if annotation is str or annotation is type(str):
-            return {"type": "string"}, False
-        if annotation is dict or annotation is type(dict):
-            return {"type": "object"}, False
-        if annotation is list or annotation is type(list):
-            return {"type": "array"}, False
-
-        # Fallback for unsupported types
-        logger.warning(
-            f"Unsupported type annotation: {annotation}, defaulting to string type"
-        )
-        return {"type": "string"}, False
-
     def register_function(
         self,
         func: Callable,
@@ -191,20 +95,22 @@ class ToolRegistry:
             if param_name in ("self", "cls"):
                 continue
 
-            # Infer schema from annotation
+            param_type = "string"  # Default
             if param.annotation != inspect.Parameter.empty:
-                schema, is_optional = self._infer_schema(param.annotation)
-                properties[param_name] = schema
-            else:
-                # No annotation - default to string
-                properties[param_name] = {"type": "string"}
-                is_optional = False
+                if param.annotation is int:
+                    param_type = "integer"
+                elif param.annotation is float:
+                    param_type = "number"
+                elif param.annotation is bool:
+                    param_type = "boolean"
+                elif param.annotation is dict:
+                    param_type = "object"
+                elif param.annotation is list:
+                    param_type = "array"
 
-            # Determine if parameter is required
-            # Parameter is required if:
-            # 1. No default value is provided, AND
-            # 2. The type is not optional (doesn't contain None)
-            if param.default == inspect.Parameter.empty and not is_optional:
+            properties[param_name] = {"type": param_type}
+
+            if param.default == inspect.Parameter.empty:
                 required.append(param_name)
 
         tool = Tool(
