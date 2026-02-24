@@ -456,6 +456,7 @@ class ExecutionStream:
                     storage_path=exec_storage,
                     runtime_logger=runtime_logger,
                     loop_config=self.graph.loop_config,
+                    accounts_prompt=self.accounts_prompt,
                 )
                 # Track executor so inject_input() can reach EventLoopNode instances
                 self._active_executors[execution_id] = executor
