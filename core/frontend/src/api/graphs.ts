@@ -1,5 +1,5 @@
 import { api } from "./client";
-import type { GraphTopology, NodeDetail, NodeCriteria } from "./types";
+import type { GraphTopology, NodeDetail, NodeCriteria, ToolInfo } from "./types";
 
 export const graphsApi = {
   nodes: (agentId: string, graphId: string, sessionId?: string) =>
@@ -20,5 +20,10 @@ export const graphsApi = {
   ) =>
     api.get<NodeCriteria>(
       `/agents/${agentId}/graphs/${graphId}/nodes/${nodeId}/criteria${sessionId ? `?session_id=${sessionId}` : ""}`,
+    ),
+
+  nodeTools: (agentId: string, graphId: string, nodeId: string) =>
+    api.get<{ tools: ToolInfo[] }>(
+      `/agents/${agentId}/graphs/${graphId}/nodes/${nodeId}/tools`,
     ),
 };

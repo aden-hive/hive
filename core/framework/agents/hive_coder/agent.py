@@ -13,6 +13,7 @@ from framework.runtime.execution_stream import EntryPointSpec
 
 from .config import default_config, metadata
 from .nodes import coder_node, queen_node
+
 # ticket_receiver is no longer needed — the queen runs as an independent
 # GraphExecutor and receives escalation tickets via inject_event().
 # Keeping the import commented for reference:

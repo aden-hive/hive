@@ -72,7 +72,10 @@ async def handle_inject(request: web.Request) -> web.Response:
 async def handle_chat(request: web.Request) -> web.Response:
     """POST /api/agents/{agent_id}/chat — convenience endpoint.
 
-    Auto-routes: inject if a node is awaiting input, else trigger.
+    Routing priority:
+    1. Worker awaiting input → inject into worker node
+    2. Queen active → inject into queen conversation
+    3. Fallback → trigger worker entry point directly
     Body: {"message": "hello"}
     """
     slot, err = _get_slot_or_404(request)
@@ -85,7 +88,7 @@ async def handle_chat(request: web.Request) -> web.Response:
     if not message:
         return web.json_response({"error": "message is required"}, status=400)
 
-    # Check if any node is awaiting input
+    # 1. Check if worker is awaiting input → inject to worker
     node_id, graph_id = slot.runtime.find_awaiting_node()
 
     if node_id:
@@ -102,19 +105,33 @@ async def handle_chat(request: web.Request) -> web.Response:
                 "delivered": delivered,
             }
         )
-    else:
-        entry_points = slot.runtime.get_entry_points()
-        ep_id = entry_points[0].id if entry_points else "default"
-        execution_id = await slot.runtime.trigger(
-            ep_id,
-            {"user_request": message},
-        )
-        return web.json_response(
-            {
-                "status": "started",
-                "execution_id": execution_id,
-            }
-        )
+
+    # 2. Queen active → inject into queen conversation
+    queen_executor = getattr(slot, "queen_executor", None)
+    if queen_executor is not None:
+        node = queen_executor.node_registry.get("queen")
+        if node is not None and hasattr(node, "inject_event"):
+            await node.inject_event(message)
+            return web.json_response(
+                {
+                    "status": "queen",
+                    "delivered": True,
+                }
+            )
+
+    # 3. Fallback: no queen, trigger worker directly (legacy)
+    entry_points = slot.runtime.get_entry_points()
+    ep_id = entry_points[0].id if entry_points else "default"
+    execution_id = await slot.runtime.trigger(
+        ep_id,
+        {"user_request": message},
+    )
+    return web.json_response(
+        {
+            "status": "started",
+            "execution_id": execution_id,
+        }
+    )
 
 
 async def handle_goal_progress(request: web.Request) -> web.Response:

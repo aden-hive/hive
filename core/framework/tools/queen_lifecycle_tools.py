@@ -32,9 +32,9 @@ logger = logging.getLogger(__name__)
 
 
 def register_queen_lifecycle_tools(
-    registry: "ToolRegistry",
-    worker_runtime: "AgentRuntime",
-    event_bus: "EventBus",
+    registry: ToolRegistry,
+    worker_runtime: AgentRuntime,
+    event_bus: EventBus,
     storage_path: Path | None = None,
 ) -> int:
     """Register queen lifecycle tools bound to *worker_runtime*.
@@ -62,11 +62,13 @@ def register_queen_lifecycle_tools(
                 input_data={"user_request": task},
                 session_state=session_state,
             )
-            return json.dumps({
-                "status": "started",
-                "execution_id": exec_id,
-                "task": task,
-            })
+            return json.dumps(
+                {
+                    "status": "started",
+                    "execution_id": exec_id,
+                    "task": task,
+                }
+            )
         except Exception as e:
             return json.dumps({"error": f"Failed to start worker: {e}"})
 
@@ -105,7 +107,7 @@ def register_queen_lifecycle_tools(
         if reg is None:
             return json.dumps({"error": "Worker graph not found"})
 
-        for ep_id, stream in reg.streams.items():
+        for _ep_id, stream in reg.streams.items():
             for exec_id in list(stream.active_execution_ids):
                 try:
                     ok = await stream.cancel_execution(exec_id)
@@ -114,10 +116,12 @@ def register_queen_lifecycle_tools(
                 except Exception as e:
                     logger.warning("Failed to cancel %s: %s", exec_id, e)
 
-        return json.dumps({
-            "status": "stopped" if cancelled else "no_active_executions",
-            "cancelled": cancelled,
-        })
+        return json.dumps(
+            {
+                "status": "stopped" if cancelled else "no_active_executions",
+                "cancelled": cancelled,
+            }
+        )
 
     _stop_tool = Tool(
         name="stop_worker",
@@ -151,22 +155,26 @@ def register_queen_lifecycle_tools(
         active_execs = []
         for ep_id, stream in reg.streams.items():
             for exec_id in stream.active_execution_ids:
-                active_execs.append({
-                    "execution_id": exec_id,
-                    "entry_point": ep_id,
-                })
+                active_execs.append(
+                    {
+                        "execution_id": exec_id,
+                        "entry_point": ep_id,
+                    }
+                )
 
         if not active_execs:
-            return json.dumps({
-                **base,
-                "status": "idle",
-                "message": "Worker has no active executions.",
-            })
+            return json.dumps(
+                {
+                    **base,
+                    "status": "idle",
+                    "message": "Worker has no active executions.",
+                }
+            )
 
         # Check if the worker is waiting for user input
         waiting_for_input = False
         waiting_node_id = None
-        for ep_id, stream in reg.streams.items():
+        for _ep_id, stream in reg.streams.items():
             # Check active executors for pending input
             for executor in stream._active_executors.values():
                 for node_id, node in executor.node_registry.items():
@@ -217,17 +225,21 @@ def register_queen_lifecycle_tools(
                     if hasattr(node, "inject_event"):
                         try:
                             await node.inject_event(content)
-                            return json.dumps({
-                                "status": "delivered",
-                                "node_id": node_id,
-                                "content_preview": content[:100],
-                            })
+                            return json.dumps(
+                                {
+                                    "status": "delivered",
+                                    "node_id": node_id,
+                                    "content_preview": content[:100],
+                                }
+                            )
                         except Exception as e:
                             return json.dumps({"error": f"Injection failed: {e}"})
 
-        return json.dumps({
-            "error": "No active worker node found — worker may be idle.",
-        })
+        return json.dumps(
+            {
+                "error": "No active worker node found — worker may be idle.",
+            }
+        )
 
     _inject_tool = Tool(
         name="inject_worker_message",

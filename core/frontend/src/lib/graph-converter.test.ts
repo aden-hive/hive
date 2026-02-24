@@ -21,6 +21,7 @@ function makeNode(id: string, overrides: Partial<NodeSpec> = {}): NodeSpec {
     max_node_visits: 0,
     client_facing: false,
     success_criteria: null,
+    system_prompt: "",
     ...overrides,
   };
 }

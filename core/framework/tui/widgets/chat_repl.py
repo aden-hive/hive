@@ -1294,10 +1294,7 @@ class ChatRepl(Vertical):
             # Get entry points for the active graph, preferring manual
             # (interactive) ones over event/timer-driven ones.
             entry_points = self.runtime.get_entry_points()
-            manual_eps = [
-                ep for ep in entry_points
-                if ep.trigger_type in ("manual", "api")
-            ]
+            manual_eps = [ep for ep in entry_points if ep.trigger_type in ("manual", "api")]
             if not manual_eps:
                 manual_eps = entry_points  # fallback: use whatever is available
             if not manual_eps:

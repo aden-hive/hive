@@ -36,6 +36,7 @@ class MockNodeSpec:
     max_node_visits: int = 0
     client_facing: bool = False
     success_criteria: str | None = None
+    system_prompt: str | None = None
 
 
 @dataclass
@@ -281,6 +282,7 @@ def nodes_and_edges():
             input_keys=["user_request"],
             output_keys=["result"],
             success_criteria="Produce a valid result",
+            system_prompt="You are a helpful assistant that produces valid results.",
         ),
         MockNodeSpec(
             id="node_b",
@@ -1104,6 +1106,28 @@ class TestGraphNodes:
             # Should include edges from this node
             assert len(data["edges"]) == 1
             assert data["edges"][0]["target"] == "node_b"
+
+    @pytest.mark.asyncio
+    async def test_node_detail_includes_system_prompt(self, nodes_and_edges):
+        """system_prompt should appear in the single-node GET response."""
+        nodes, edges = nodes_and_edges
+        slot = _make_slot(nodes=nodes, edges=edges)
+        app = _make_app_with_agent(slot)
+
+        async with TestClient(TestServer(app)) as client:
+            resp = await client.get("/api/agents/test_agent/graphs/primary/nodes/node_a")
+            assert resp.status == 200
+            data = await resp.json()
+            assert "system_prompt" in data
+            assert (
+                data["system_prompt"] == "You are a helpful assistant that produces valid results."
+            )
+
+            # Node without system_prompt should return empty string
+            resp2 = await client.get("/api/agents/test_agent/graphs/primary/nodes/node_b")
+            assert resp2.status == 200
+            data2 = await resp2.json()
+            assert data2["system_prompt"] == ""
 
     @pytest.mark.asyncio
     async def test_get_node_not_found(self, nodes_and_edges):

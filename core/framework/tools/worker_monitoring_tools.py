@@ -42,8 +42,8 @@ _DEFAULT_LAST_N_STEPS = 40
 
 
 def register_worker_monitoring_tools(
-    registry: "ToolRegistry",
-    event_bus: "EventBus",
+    registry: ToolRegistry,
+    event_bus: EventBus,
     storage_path: Path,
     stream_id: str = "worker_health_judge",
     worker_graph_id: str | None = None,
@@ -101,8 +101,7 @@ def register_worker_monitoring_tools(
                 return json.dumps({"error": "No sessions found — worker has not started yet"})
 
             candidates = [
-                d for d in sessions_dir.iterdir()
-                if d.is_dir() and (d / "state.json").exists()
+                d for d in sessions_dir.iterdir() if d.is_dir() and (d / "state.json").exists()
             ]
             if not candidates:
                 return json.dumps({"error": "No sessions found — worker has not started yet"})
@@ -219,7 +218,9 @@ def register_worker_monitoring_tools(
                 },
                 "last_n_steps": {
                     "type": "integer",
-                    "description": f"How many recent log steps to include (default {_DEFAULT_LAST_N_STEPS})",
+                    "description": (
+                        f"How many recent log steps to include (default {_DEFAULT_LAST_N_STEPS})"
+                    ),
                 },
             },
             "required": [],

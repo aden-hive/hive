@@ -24,7 +24,9 @@ interface AgentGraphProps {
   title: string;
   onNodeClick?: (node: GraphNode) => void;
   onVersionBump?: (type: VersionBump) => void;
+  onRun?: () => void;
   version?: string;
+  runState?: RunState;
 }
 
 const NODE_W_MAX = 180;
@@ -77,8 +79,9 @@ function formatLabel(id: string): string {
     .join(" ");
 }
 
-export default function AgentGraph({ nodes, title, onNodeClick, onVersionBump, version }: AgentGraphProps) {
-  const [runState, setRunState] = useState<RunState>("idle");
+export default function AgentGraph({ nodes, title: _title, onNodeClick, onVersionBump, onRun, version, runState: externalRunState }: AgentGraphProps) {
+  const [localRunState, setLocalRunState] = useState<RunState>("idle");
+  const runState = externalRunState ?? localRunState;
   const [versionPopover, setVersionPopover] = useState<"hidden" | "confirm" | "pick">("hidden");
   const [popoverPos, setPopoverPos] = useState<{ top: number; left: number } | null>(null);
   const runBtnRef = useRef<HTMLButtonElement>(null);
@@ -108,9 +111,14 @@ export default function AgentGraph({ nodes, title, onNodeClick, onVersionBump, v
 
   const startRun = () => {
     setVersionPopover("hidden");
-    setRunState("deploying");
-    setTimeout(() => setRunState("running"), 1800);
-    setTimeout(() => setRunState("idle"), 5000);
+    if (onRun) {
+      onRun();
+    } else {
+      // Fallback: local state animation when no backend callback provided
+      setLocalRunState("deploying");
+      setTimeout(() => setLocalRunState("running"), 1800);
+      setTimeout(() => setLocalRunState("idle"), 5000);
+    }
   };
 
   const idxMap = useMemo(() => Object.fromEntries(nodes.map((n, i) => [n.id, i])), [nodes]);
@@ -561,12 +569,6 @@ export default function AgentGraph({ nodes, title, onNodeClick, onVersionBump, v
       </g>
     );
   };
-
-  const _runningNode = nodes.find((n) => n.status === "running" || n.status === "looping");
-  const _formattedTitle = title.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
-  // Suppress unused warnings — these are available for future use
-  void _runningNode;
-  void _formattedTitle;
 
   return (
     <div className="flex flex-col h-full">

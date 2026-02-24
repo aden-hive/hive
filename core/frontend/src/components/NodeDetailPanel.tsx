@@ -1,6 +1,12 @@
 import { useState, useEffect, useRef } from "react";
 import { X, Cpu, Zap, Clock, RotateCcw, CheckCircle2, AlertCircle, Loader2, ChevronDown, ChevronRight, Copy, Check, Terminal, Wrench, BookOpen, GitBranch, Bot } from "lucide-react";
 import type { GraphNode, NodeStatus } from "./AgentGraph";
+import type { NodeSpec, ToolInfo, NodeCriteria } from "../api/types";
+import { graphsApi } from "../api/graphs";
+import { logsApi } from "../api/logs";
+import { sgPort, computeEdgePath, computeArrowhead } from "./sgPrimitives";
+import type { PortSide } from "./sgPrimitives";
+import ExecutionSubGraph from "./ExecutionSubGraph";
 
 interface Tool {
   name: string;
@@ -18,6 +24,10 @@ interface ToolCredential {
 
 interface NodeDetailPanelProps {
   node: GraphNode | null;
+  nodeSpec?: NodeSpec | null;
+  agentId?: string;
+  graphId?: string;
+  sessionId?: string | null;
   onClose: () => void;
 }
 
@@ -69,12 +79,7 @@ function sgNodePos(n: SGNode) {
   return { x: SG_COL[n.col], y: row * SG_ROW_H + (isTool ? (SG_STEP_H - SG_TOOL_H) / 2 : 0), w, h };
 }
 
-function sgPort(pos: { x: number; y: number; w: number; h: number }, port: string): [number, number] {
-  if (port === "top")    return [pos.x + pos.w / 2, pos.y];
-  if (port === "bottom") return [pos.x + pos.w / 2, pos.y + pos.h];
-  if (port === "left")   return [pos.x, pos.y + pos.h / 2];
-  return [pos.x + pos.w, pos.y + pos.h / 2]; // right
-}
+
 
 const sgDefs: Record<string, SGDef> = {
   "fetch-mail": {
@@ -506,42 +511,16 @@ function SubGraph({ nodeId, status }: { nodeId: string; status: NodeStatus }) {
     if (!fromNode || !toNode) return null;
     const fp = posMap[edge.from];
     const tp = posMap[edge.to];
-    const fromPortKey = edge.fromPort || "bottom";
-    const toPortKey = edge.toPort || "top";
+    const fromPortKey = (edge.fromPort || "bottom") as PortSide;
+    const toPortKey = (edge.toPort || "top") as PortSide;
     const [fx, fy] = sgPort(fp, fromPortKey);
     const [tx, ty] = sgPort(tp, toPortKey);
 
     const stroke = edge.done ? `${color}55` : "hsl(35,10%,22%)";
     const arrowFill = edge.done ? `${color}70` : "hsl(35,10%,26%)";
 
-    let d: string;
-    if (fromPortKey === "right" && toPortKey === "left") {
-      const midX = (fx + tx) / 2;
-      d = `M ${fx} ${fy} C ${midX} ${fy}, ${midX} ${ty}, ${tx} ${ty}`;
-    } else if (fromPortKey === "bottom" && toPortKey === "top") {
-      if (Math.abs(tx - fx) < 10) {
-        d = `M ${fx} ${fy} L ${tx} ${ty}`;
-      } else {
-        const cY = fy + (ty - fy) * 0.5;
-        d = `M ${fx} ${fy} C ${fx} ${cY}, ${tx} ${cY}, ${tx} ${ty}`;
-      }
-    } else if (fromPortKey === "bottom" && toPortKey === "left") {
-      d = `M ${fx} ${fy} C ${fx} ${fy + 20}, ${tx - 20} ${ty}, ${tx} ${ty}`;
-    } else if (fromPortKey === "bottom" && toPortKey === "right") {
-      d = `M ${fx} ${fy} C ${fx} ${fy + 20}, ${tx + 20} ${ty}, ${tx} ${ty}`;
-    } else if (fromPortKey === "right" && toPortKey === "top") {
-      d = `M ${fx} ${fy} C ${fx + 20} ${fy}, ${tx} ${ty - 20}, ${tx} ${ty}`;
-    } else {
-      const cX = (fx + tx) / 2;
-      d = `M ${fx} ${fy} C ${cX} ${fy}, ${cX} ${ty}, ${tx} ${ty}`;
-    }
-
-    const A = 4.5;
-    let arrowPoints = "";
-    if (toPortKey === "top")    arrowPoints = `${tx - A},${ty + A * 1.4} ${tx + A},${ty + A * 1.4} ${tx},${ty + 1}`;
-    else if (toPortKey === "left")  arrowPoints = `${tx + A * 1.4},${ty - A} ${tx + A * 1.4},${ty + A} ${tx + 1},${ty}`;
-    else if (toPortKey === "right") arrowPoints = `${tx - A * 1.4},${ty - A} ${tx - A * 1.4},${ty + A} ${tx - 1},${ty}`;
-    else arrowPoints = `${tx - A},${ty - A * 1.4} ${tx + A},${ty - A * 1.4} ${tx},${ty - 1}`;
+    const d = computeEdgePath(fromPortKey, toPortKey, fx, fy, tx, ty);
+    const arrowPoints = computeArrowhead(toPortKey, tx, ty);
 
     const midX = (fx + tx) / 2;
     const midY = (fy + ty) / 2;
@@ -823,7 +802,7 @@ const seedLogs: Record<string, string[]> = {
   ],
 };
 
-function LogsTab({ nodeId, isActive }: { nodeId: string; isActive: boolean }) {
+function LogsTab({ nodeId, isActive, agentId, graphId, sessionId }: { nodeId: string; isActive: boolean; agentId?: string; graphId?: string; sessionId?: string | null }) {
   const base = seedLogs[nodeId] || [
     "[00:00:01] INFO  Node initialised",
     "[00:00:01] INFO  Awaiting input from upstream",
@@ -849,6 +828,30 @@ function LogsTab({ nodeId, isActive }: { nodeId: string; isActive: boolean }) {
     return () => { if (intervalRef.current) clearInterval(intervalRef.current); };
   }, [isActive]);
 
+  // Fetch real historical logs when agent is loaded
+  useEffect(() => {
+    if (agentId && graphId && sessionId) {
+      logsApi.nodeLogs(agentId, graphId, nodeId, sessionId)
+        .then(r => {
+          const realLines: string[] = [];
+          if (r.details) {
+            for (const d of r.details) {
+              realLines.push(`[LOG] ${d.node_name} — ${d.success ? "SUCCESS" : "FAILED"}${d.error ? ` (${d.error})` : ""} — ${d.total_steps} steps`);
+            }
+          }
+          if (r.tool_logs) {
+            for (const s of r.tool_logs) {
+              realLines.push(`[STEP ${s.step_index}] ${s.llm_text.slice(0, 120)}${s.llm_text.length > 120 ? "..." : ""}`);
+            }
+          }
+          if (realLines.length > 0) {
+            setLines(realLines);
+          }
+        })
+        .catch(() => { /* keep mock data on error */ });
+    }
+  }, [agentId, graphId, nodeId, sessionId]);
+
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [lines]);
@@ -873,8 +876,8 @@ function LogsTab({ nodeId, isActive }: { nodeId: string; isActive: boolean }) {
   );
 }
 
-function SystemPromptTab({ nodeId }: { nodeId: string }) {
-  const prompt = nodeSystemPrompts[nodeId] || defaultSystemPrompt;
+function SystemPromptTab({ nodeId, systemPrompt }: { nodeId: string; systemPrompt?: string }) {
+  const prompt = systemPrompt || nodeSystemPrompts[nodeId] || defaultSystemPrompt;
   const [copied, setCopied] = useState(false);
 
   const handleCopy = () => {
@@ -1156,12 +1159,34 @@ const tabs: { id: Tab; label: string; Icon: React.FC<{ className?: string }> }[]
   { id: "subagents", label: "Subagents", Icon: ({ className }) => <Bot className={className} /> },
 ];
 
-export default function NodeDetailPanel({ node, onClose }: NodeDetailPanelProps) {
+export default function NodeDetailPanel({ node, nodeSpec, agentId, graphId, sessionId, onClose }: NodeDetailPanelProps) {
   const [activeTab, setActiveTab] = useState<Tab>("overview");
+  const [realTools, setRealTools] = useState<ToolInfo[] | null>(null);
+  const [realCriteria, setRealCriteria] = useState<NodeCriteria | null>(null);
 
   useEffect(() => {
     setActiveTab("overview");
+    setRealTools(null);
+    setRealCriteria(null);
   }, [node?.id]);
+
+  // Fetch real tool descriptions when Tools tab is active and agent is loaded
+  useEffect(() => {
+    if (activeTab === "tools" && agentId && graphId && node) {
+      graphsApi.nodeTools(agentId, graphId, node.id)
+        .then(r => setRealTools(r.tools))
+        .catch(() => setRealTools(null));
+    }
+  }, [activeTab, agentId, graphId, node?.id]);
+
+  // Fetch real criteria when Overview tab is active and agent is loaded
+  useEffect(() => {
+    if (activeTab === "overview" && agentId && graphId && node) {
+      graphsApi.nodeCriteria(agentId, graphId, node.id, sessionId || undefined)
+        .then(r => setRealCriteria(r))
+        .catch(() => setRealCriteria(null));
+    }
+  }, [activeTab, agentId, graphId, node?.id, sessionId]);
 
   if (!node) return null;
 
@@ -1217,7 +1242,11 @@ export default function NodeDetailPanel({ node, onClose }: NodeDetailPanelProps)
 
       {/* Tab bar */}
       <div className="flex border-b border-border/30 flex-shrink-0 px-2 pt-1 overflow-x-auto scrollbar-hide">
-        {tabs.map(tab => (
+        {tabs.filter(tab => {
+          // Hide subagents tab for real agents (no subagent concept in runtime)
+          if (tab.id === "subagents" && agentId) return false;
+          return true;
+        }).map(tab => (
           <button
             key={tab.id}
             onClick={() => setActiveTab(tab.id)}
@@ -1238,8 +1267,49 @@ export default function NodeDetailPanel({ node, onClose }: NodeDetailPanelProps)
         {activeTab === "overview" && (
           <>
             <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider">Internal Steps</p>
-            <SubGraph nodeId={node.id} status={node.status} />
+            {nodeSpec?.subgraph_steps?.length ? (
+              <ExecutionSubGraph steps={nodeSpec.subgraph_steps} status={node.status} />
+            ) : agentId ? (
+              <div className="flex items-center justify-center py-6">
+                <p className="text-[11px] text-muted-foreground/50 italic">No workflow steps extracted</p>
+              </div>
+            ) : (
+              <SubGraph nodeId={node.id} status={node.status} />
+            )}
             {(() => {
+              // Use real criteria from API when available, fall back to mock
+              if (realCriteria && realCriteria.success_criteria) {
+                const criteriaLines = realCriteria.success_criteria.split("\n").filter(l => l.trim());
+                const passed = realCriteria.last_execution?.success ?? null;
+                return (
+                  <div className="mt-1">
+                    <div className="flex items-center justify-between mb-2">
+                      <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider">Judge Criteria</p>
+                      {passed !== null && (
+                        <span className={`text-[10px] font-medium px-2 py-0.5 rounded-full ${passed ? "bg-[hsl(43,70%,45%)]/15 text-[hsl(43,70%,45%)]" : "bg-red-500/15 text-red-400"}`}>
+                          {passed ? "Passed" : "Failed"}
+                        </span>
+                      )}
+                    </div>
+                    <div className="flex flex-col gap-1.5">
+                      {criteriaLines.map((line, i) => (
+                        <div key={i} className="flex items-start gap-2">
+                          <div className={`mt-0.5 w-3.5 h-3.5 rounded-full flex-shrink-0 flex items-center justify-center border ${passed ? "border-transparent bg-[hsl(43,70%,45%)]" : "border-border/40 bg-muted/30"}`}>
+                            {passed && (
+                              <svg viewBox="0 0 8 8" className="w-2 h-2" fill="none">
+                                <path d="M1.5 4l2 2 3-3" stroke="white" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round"/>
+                              </svg>
+                            )}
+                          </div>
+                          <span className={`text-[11px] leading-relaxed ${passed ? "text-foreground/70" : "text-foreground/80"}`}>{line}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                );
+              }
+
+              // Fall back to mock data
               const criteria = judgeCriteria[node.id];
               if (!criteria || criteria.length === 0) return null;
               const metCount = criteria.filter(c => c.met).length;
@@ -1284,16 +1354,21 @@ export default function NodeDetailPanel({ node, onClose }: NodeDetailPanelProps)
         {activeTab === "tools" && (
           <div className="space-y-2">
             <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider mb-1">Tools & Integrations</p>
-            {tools.map((tool, i) => <ToolRow key={i} tool={tool} />)}
+            {realTools
+              ? realTools.map((t, i) => (
+                  <ToolRow key={i} tool={{ name: t.name, description: t.description || "No description available", icon: "\ud83d\udd27" }} />
+                ))
+              : tools.map((tool, i) => <ToolRow key={i} tool={tool} />)
+            }
           </div>
         )}
 
         {activeTab === "logs" && (
-          <LogsTab nodeId={node.id} isActive={isActive} />
+          <LogsTab nodeId={node.id} isActive={isActive} agentId={agentId} graphId={graphId} sessionId={sessionId} />
         )}
 
         {activeTab === "prompt" && (
-          <SystemPromptTab nodeId={node.id} />
+          <SystemPromptTab nodeId={node.id} systemPrompt={nodeSpec?.system_prompt} />
         )}
 
         {activeTab === "subagents" && (

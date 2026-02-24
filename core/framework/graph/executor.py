@@ -1350,9 +1350,7 @@ class GraphExecutor:
                 try:
                     import json as _json
 
-                    cursor_path = (
-                        self._storage_path / "conversations" / "cursor.json"
-                    )
+                    cursor_path = self._storage_path / "conversations" / "cursor.json"
                     if cursor_path.exists():
                         cursor_data = _json.loads(cursor_path.read_text(encoding="utf-8"))
                         wip_outputs = cursor_data.get("outputs", {})
@@ -1453,9 +1451,7 @@ class GraphExecutor:
                 try:
                     import json as _json
 
-                    cursor_path = (
-                        self._storage_path / "conversations" / "cursor.json"
-                    )
+                    cursor_path = self._storage_path / "conversations" / "cursor.json"
                     if cursor_path.exists():
                         cursor_data = _json.loads(cursor_path.read_text(encoding="utf-8"))
                         for key, value in cursor_data.get("outputs", {}).items():

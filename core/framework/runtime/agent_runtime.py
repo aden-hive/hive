@@ -19,9 +19,9 @@ from framework.graph.executor import ExecutionResult
 from framework.runtime.event_bus import EventBus
 from framework.runtime.execution_stream import EntryPointSpec, ExecutionStream
 from framework.runtime.outcome_aggregator import OutcomeAggregator
+from framework.runtime.runtime_log_store import RuntimeLogStore
 from framework.runtime.shared_state import SharedStateManager
 from framework.storage.concurrent import ConcurrentStorage
-from framework.runtime.runtime_log_store import RuntimeLogStore
 from framework.storage.session_store import SessionStore
 
 if TYPE_CHECKING:
@@ -426,7 +426,9 @@ class AgentRuntime:
                                     is_isolated = ep_spec and ep_spec.isolation_level == "isolated"
                                     if is_isolated:
                                         if _persistent_session_id:
-                                            session_state = {"resume_session_id": _persistent_session_id}
+                                            session_state = {
+                                                "resume_session_id": _persistent_session_id
+                                            }
                                         else:
                                             session_state = None
                                     else:
@@ -496,7 +498,9 @@ class AgentRuntime:
                                     is_isolated = ep_spec and ep_spec.isolation_level == "isolated"
                                     if is_isolated:
                                         if _persistent_session_id:
-                                            session_state = {"resume_session_id": _persistent_session_id}
+                                            session_state = {
+                                                "resume_session_id": _persistent_session_id
+                                            }
                                         else:
                                             session_state = None
                                     else:
@@ -847,12 +851,18 @@ class AgentRuntime:
             if interval and interval > 0 and self._running:
                 logger.info(
                     "Creating timer for '%s::%s': interval=%s min, immediate=%s, loop=%s",
-                    graph_id, ep_id, interval, run_immediately,
+                    graph_id,
+                    ep_id,
+                    interval,
+                    run_immediately,
                     id(asyncio.get_event_loop()),
                 )
 
                 def _make_timer(
-                    gid: str, local_ep: str, mins: float, immediate: bool,
+                    gid: str,
+                    local_ep: str,
+                    mins: float,
+                    immediate: bool,
                 ):
                     async def _timer_loop():
                         interval_secs = mins * 60
@@ -863,7 +873,9 @@ class AgentRuntime:
 
                         logger.info(
                             "Timer loop started for '%s::%s' (sleep %ss)",
-                            gid, local_ep, interval_secs,
+                            gid,
+                            local_ep,
+                            interval_secs,
                         )
                         if not immediate:
                             timer_next_fire[local_ep] = time.monotonic() + interval_secs
@@ -878,14 +890,18 @@ class AgentRuntime:
                                     break
                                 stream = reg.streams.get(local_ep)
                                 if not stream:
-                                    logger.warning("Timer: no stream '%s' in '%s', stopping", local_ep, gid)
+                                    logger.warning(
+                                        "Timer: no stream '%s' in '%s', stopping", local_ep, gid
+                                    )
                                     break
                                 # Isolated entry points get their own session;
                                 # shared ones join the primary session.
                                 ep_spec = reg.entry_points.get(local_ep)
                                 if ep_spec and ep_spec.isolation_level == "isolated":
                                     if _persistent_session_id:
-                                        session_state = {"resume_session_id": _persistent_session_id}
+                                        session_state = {
+                                            "resume_session_id": _persistent_session_id
+                                        }
                                     else:
                                         session_state = None
                                 else:
@@ -897,9 +913,13 @@ class AgentRuntime:
                                     session_state=session_state,
                                 )
                                 # Remember session ID for reuse on next tick
-                                if not _persistent_session_id and ep_spec and ep_spec.isolation_level == "isolated":
+                                if (
+                                    not _persistent_session_id
+                                    and ep_spec
+                                    and ep_spec.isolation_level == "isolated"
+                                ):
                                     _persistent_session_id = exec_id
-                            except Exception as exc:
+                            except Exception:
                                 logger.error(
                                     "Timer trigger failed for '%s::%s'",
                                     gid,
@@ -1218,6 +1238,23 @@ class AgentRuntime:
     def get_stream(self, entry_point_id: str) -> ExecutionStream | None:
         """Get a specific execution stream."""
         return self._streams.get(entry_point_id)
+
+    def find_awaiting_node(self) -> tuple[str | None, str | None]:
+        """Find a node that is currently awaiting user input.
+
+        Searches all graphs and their streams for any active executor
+        whose node has ``_awaiting_input`` set to ``True``.
+
+        Returns:
+            (node_id, graph_id) if found, else (None, None).
+        """
+        for graph_id, reg in self._graphs.items():
+            for stream in reg.streams.values():
+                for executor in stream._active_executors.values():
+                    for node_id, node in executor.node_registry.items():
+                        if getattr(node, "_awaiting_input", False):
+                            return node_id, graph_id
+        return None, None
 
     def get_execution_result(
         self,

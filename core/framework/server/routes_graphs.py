@@ -39,6 +39,8 @@ def _node_to_dict(node) -> dict:
         "max_node_visits": node.max_node_visits,
         "client_facing": node.client_facing,
         "success_criteria": node.success_criteria,
+        "system_prompt": node.system_prompt or "",
+        "subgraph_steps": node.subgraph_steps or [],
     }
 
 
@@ -191,6 +193,51 @@ async def handle_node_criteria(request: web.Request) -> web.Response:
     return web.json_response(result, dumps=lambda obj: json.dumps(obj, default=str))
 
 
+async def handle_node_tools(request: web.Request) -> web.Response:
+    """GET /api/agents/{agent_id}/graphs/{graph_id}/nodes/{node_id}/tools
+
+    Returns resolved tool metadata (name, description, parameters) for
+    the tools assigned to a node, looked up from the ToolRegistry.
+    """
+    manager = _get_manager(request)
+    agent_id = request.match_info["agent_id"]
+    graph_id = request.match_info["graph_id"]
+    node_id = request.match_info["node_id"]
+    slot = manager.get_agent(agent_id)
+
+    if slot is None:
+        return web.json_response({"error": f"Agent '{agent_id}' not found"}, status=404)
+
+    graph, err = _get_graph_spec(slot, graph_id)
+    if err:
+        return err
+
+    node_spec = graph.get_node(node_id)
+    if node_spec is None:
+        return web.json_response({"error": f"Node '{node_id}' not found"}, status=404)
+
+    tools_out = []
+    registry = getattr(slot.runner, "_tool_registry", None)
+    all_tools = registry.get_tools() if registry else {}
+
+    for name in node_spec.tools:
+        registered = all_tools.get(name)
+        if registered:
+            tool = registered.tool
+            tools_out.append(
+                {
+                    "name": tool.name,
+                    "description": tool.description,
+                    "parameters": tool.parameters,
+                }
+            )
+        else:
+            # Tool listed in node but not yet in registry (MCP not connected, etc.)
+            tools_out.append({"name": name, "description": "", "parameters": {}})
+
+    return web.json_response({"tools": tools_out})
+
+
 def register_routes(app: web.Application) -> None:
     """Register graph/node inspection routes."""
     app.router.add_get("/api/agents/{agent_id}/graphs/{graph_id}/nodes", handle_list_nodes)
@@ -198,4 +245,8 @@ def register_routes(app: web.Application) -> None:
     app.router.add_get(
         "/api/agents/{agent_id}/graphs/{graph_id}/nodes/{node_id}/criteria",
         handle_node_criteria,
+    )
+    app.router.add_get(
+        "/api/agents/{agent_id}/graphs/{graph_id}/nodes/{node_id}/tools",
+        handle_node_tools,
     )

@@ -2390,7 +2390,8 @@ class EventLoopNode(NodeProtocol):
         _is_continuous = getattr(ctx, "continuous_mode", False)
         phase_filter = None if _is_continuous else ctx.node_id
         conversation = await NodeConversation.restore(
-            self._conversation_store, phase_id=phase_filter,
+            self._conversation_store,
+            phase_id=phase_filter,
         )
         if conversation is None:
             return None

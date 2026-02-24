@@ -108,8 +108,8 @@ judge_node = NodeSpec(
         "degradation pattern is detected."
     ),
     node_type="event_loop",
-    client_facing=False,   # Autonomous monitor, not interactive
-    max_node_visits=0,     # Unbounded — runs on every timer tick
+    client_facing=False,  # Autonomous monitor, not interactive
+    max_node_visits=0,  # Unbounded — runs on every timer tick
     input_keys=[],
     output_keys=["health_verdict"],
     nullable_output_keys=["health_verdict"],
@@ -244,15 +244,15 @@ judge_graph = GraphSpec(
     version="1.0.0",
     entry_node="judge",
     entry_points={"health_check": "judge"},
-    terminal_nodes=[],   # Forever-alive: fires on every timer tick
+    terminal_nodes=[],  # Forever-alive: fires on every timer tick
     pause_nodes=[],
     nodes=[judge_node],
     edges=[],
     conversation_mode="continuous",  # Conversation persists across timer ticks
     async_entry_points=[HEALTH_JUDGE_ENTRY_POINT],
     loop_config={
-        "max_iterations": 10,          # One check shouldn't take many turns
+        "max_iterations": 10,  # One check shouldn't take many turns
         "max_tool_calls_per_turn": 3,  # get_summary + optionally emit_ticket
-        "max_history_tokens": 16000,   # Compact — judge only needs recent context
+        "max_history_tokens": 16000,  # Compact — judge only needs recent context
     },
 )

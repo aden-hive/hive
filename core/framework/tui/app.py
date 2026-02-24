@@ -241,8 +241,8 @@ class AdenTUI(App):
         # Health judge + queen monitoring graphs (loaded alongside worker agents)
         self._queen_graph_id: str | None = None
         self._judge_graph_id: str | None = None
-        self._judge_task = None   # concurrent.futures.Future for the judge loop
-        self._queen_task = None   # concurrent.futures.Future for the queen loop
+        self._judge_task = None  # concurrent.futures.Future for the judge loop
+        self._queen_task = None  # concurrent.futures.Future for the queen loop
         self._queen_executor = None  # GraphExecutor for queen input injection
         self._queen_escalation_sub = None  # EventBus subscription for queen
 
@@ -434,9 +434,7 @@ class AdenTUI(App):
         if self.runtime and not self.runtime.is_running:
             try:
                 agent_loop = self.chat_repl._agent_loop
-                future = asyncio.run_coroutine_threadsafe(
-                    self.runtime.start(), agent_loop
-                )
+                future = asyncio.run_coroutine_threadsafe(self.runtime.start(), agent_loop)
                 await asyncio.wrap_future(future)
             except Exception as e:
                 self.status_bar.set_graph_id("")
@@ -542,7 +540,8 @@ class AdenTUI(App):
                         log.error("Health judge tick failed", exc_info=True)
 
             self._judge_task = asyncio.run_coroutine_threadsafe(
-                _judge_loop(), agent_loop,
+                _judge_loop(),
+                agent_loop,
             )
             self._judge_graph_id = "worker_health_judge"
 
@@ -663,7 +662,8 @@ class AdenTUI(App):
                     self._queen_executor = None
 
             self._queen_task = asyncio.run_coroutine_threadsafe(
-                _queen_loop(), agent_loop,
+                _queen_loop(),
+                agent_loop,
             )
             self._queen_graph_id = "queen"
 
@@ -692,9 +692,9 @@ class AdenTUI(App):
                 node = executor.node_registry.get("queen")
                 if node is not None and hasattr(node, "inject_event"):
                     import json as _json
-                    msg = (
-                        "[ESCALATION TICKET from Health Judge]\n"
-                        + _json.dumps(ticket, indent=2, ensure_ascii=False)
+
+                    msg = "[ESCALATION TICKET from Health Judge]\n" + _json.dumps(
+                        ticket, indent=2, ensure_ascii=False
                     )
                     await node.inject_event(msg)
                 else:
@@ -1033,9 +1033,7 @@ class AdenTUI(App):
         if not coder_runtime.is_running:
             try:
                 agent_loop = self.chat_repl._agent_loop
-                future = asyncio.run_coroutine_threadsafe(
-                    coder_runtime.start(), agent_loop
-                )
+                future = asyncio.run_coroutine_threadsafe(coder_runtime.start(), agent_loop)
                 await asyncio.wrap_future(future)
             except Exception as e:
                 self.notify(f"Failed to start coder runtime: {e}", severity="error")
@@ -1332,9 +1330,7 @@ class AdenTUI(App):
                         return
                     elif et == EventType.EXECUTION_FAILED:
                         error = event.data.get("error", "Unknown error")[:200]
-                        self._inject_worker_status_into_queen(
-                            f"Worker execution failed: {error}"
-                        )
+                        self._inject_worker_status_into_queen(f"Worker execution failed: {error}")
                         return
                     elif et in (
                         EventType.LLM_TEXT_DELTA,
@@ -1357,7 +1353,11 @@ class AdenTUI(App):
             # --- Multi-graph filtering (non-queen mode) ---
             # If the event has a graph_id and it's not the active graph,
             # show a notification for important events and drop the rest.
-            if not _queen_active and event.graph_id is not None and event.graph_id != self.runtime.active_graph_id:
+            if (
+                not _queen_active
+                and event.graph_id is not None
+                and event.graph_id != self.runtime.active_graph_id
+            ):
                 if et == EventType.CLIENT_INPUT_REQUESTED:
                     self.notify(
                         f"[bold]{event.graph_id}[/bold] is waiting for input",

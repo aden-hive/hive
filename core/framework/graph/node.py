@@ -252,6 +252,13 @@ class NodeSpec(BaseModel):
         ),
     )
 
+    # Visualization: extracted workflow steps for the frontend DAG renderer
+    subgraph_steps: list[dict[str, Any]] | None = Field(
+        default=None,
+        description="Extracted workflow steps for visualization. "
+        "Generated at agent load time from system_prompt.",
+    )
+
     model_config = {"extra": "allow", "arbitrary_types_allowed": True}
 
 

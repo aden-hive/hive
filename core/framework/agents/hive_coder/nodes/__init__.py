@@ -426,7 +426,7 @@ ticket_triage_node = NodeSpec(
         "via event-driven entry point and decides: dismiss or notify the operator."
     ),
     node_type="event_loop",
-    client_facing=True,    # Operator can chat with queen once connected (Ctrl+Q)
+    client_facing=True,  # Operator can chat with queen once connected (Ctrl+Q)
     max_node_visits=0,
     input_keys=["ticket"],
     output_keys=["intervention_decision"],

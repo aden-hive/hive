@@ -145,6 +145,8 @@ export interface NodeSpec {
   max_node_visits: number;
   client_facing: boolean;
   success_criteria: string | null;
+  system_prompt: string;
+  subgraph_steps?: SubgraphStep[];
   // Runtime enrichment (when session_id provided)
   visit_count?: number;
   has_failures?: boolean;
@@ -186,6 +188,24 @@ export interface NodeCriteria {
     needs_attention: boolean;
     attention_reasons: string[];
   };
+}
+
+// --- Subgraph visualization types ---
+
+export interface SubgraphStep {
+  id: string;
+  label: string;
+  tool: string | null;
+  depends_on: string[];
+  type: "action" | "decision" | "loop" | "output";
+}
+
+// --- Tool info types ---
+
+export interface ToolInfo {
+  name: string;
+  description: string;
+  parameters: Record<string, unknown>;
 }
 
 // --- Log types ---
