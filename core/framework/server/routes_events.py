@@ -30,6 +30,11 @@ DEFAULT_EVENT_TYPES = [
     EventType.GOAL_PROGRESS,
     EventType.QUEEN_INTERVENTION_REQUESTED,
     EventType.WORKER_ESCALATION_TICKET,
+    EventType.NODE_INTERNAL_OUTPUT,
+    EventType.NODE_STALLED,
+    EventType.NODE_RETRY,
+    EventType.NODE_TOOL_DOOM_LOOP,
+    EventType.CONTEXT_COMPACTED,
 ]
 
 # Keepalive interval in seconds

@@ -51,7 +51,7 @@ export interface InjectResult {
 }
 
 export interface ChatResult {
-  status: "started" | "injected";
+  status: "started" | "injected" | "queen";
   execution_id?: string;
   node_id?: string;
   delivered?: boolean;

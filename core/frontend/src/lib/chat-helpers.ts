@@ -110,6 +110,18 @@ export function sseEventToChatMessage(
       };
     }
 
+    case "execution_paused": {
+      return {
+        id: `paused-${event.execution_id}`,
+        agent: "System",
+        agentColor: "",
+        content: "Execution paused by user",
+        timestamp: "",
+        type: "system",
+        thread,
+      };
+    }
+
     case "execution_failed": {
       const error = (event.data?.error as string) || "Execution failed";
       return {

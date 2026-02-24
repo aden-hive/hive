@@ -399,7 +399,7 @@ class CredentialStore:
         # LLMs sometimes pass "provider/alias" as the alias (e.g. "google/wrok"
         # instead of just "wrok").  Strip the provider prefix when present.
         if alias.startswith(f"{provider_name}/"):
-            alias = alias[len(provider_name) + 1:]
+            alias = alias[len(provider_name) + 1 :]
 
         if hasattr(self._storage, "load_by_alias"):
             return self._storage.load_by_alias(provider_name, alias)

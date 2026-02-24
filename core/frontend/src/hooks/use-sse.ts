@@ -64,3 +64,64 @@ export function useSSE({
 
   return { connected, lastEvent, close };
 }
+
+// --- Multi-agent SSE hook ---
+
+interface UseMultiSSEOptions {
+  /** Map of agentType → backendAgentId. Only non-empty IDs get an EventSource. */
+  agents: Record<string, string>;
+  onEvent: (agentType: string, event: AgentEvent) => void;
+}
+
+/**
+ * Manages one EventSource per loaded agent. Diffs `agents` on each render:
+ * opens new connections, closes removed ones, leaves existing ones alone.
+ */
+export function useMultiSSE({ agents, onEvent }: UseMultiSSEOptions) {
+  const onEventRef = useRef(onEvent);
+  onEventRef.current = onEvent;
+
+  const sourcesRef = useRef(new Map<string, EventSource>());
+
+  // Diff-based open/close — runs on every `agents` change
+  useEffect(() => {
+    const current = sourcesRef.current;
+    const desired = new Set(Object.keys(agents));
+
+    // Close connections for agents no longer in the map
+    for (const [agentType, es] of current) {
+      if (!desired.has(agentType)) {
+        es.close();
+        current.delete(agentType);
+      }
+    }
+
+    // Open connections for newly added agents
+    for (const [agentType, agentId] of Object.entries(agents)) {
+      if (!agentId || current.has(agentType)) continue;
+
+      const url = `/api/agents/${agentId}/events`;
+      const es = new EventSource(url);
+
+      es.onmessage = (e: MessageEvent) => {
+        try {
+          const event: AgentEvent = JSON.parse(e.data);
+          onEventRef.current(agentType, event);
+        } catch {
+          // Ignore parse errors (keepalive comments)
+        }
+      };
+
+      current.set(agentType, es);
+    }
+    // No cleanup here — diff logic handles open/close incrementally
+  }, [agents]);
+
+  // Close all on unmount only
+  useEffect(() => {
+    return () => {
+      for (const es of sourcesRef.current.values()) es.close();
+      sourcesRef.current.clear();
+    };
+  }, []);
+}

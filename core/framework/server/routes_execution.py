@@ -111,7 +111,7 @@ async def handle_chat(request: web.Request) -> web.Response:
     if queen_executor is not None:
         node = queen_executor.node_registry.get("queen")
         if node is not None and hasattr(node, "inject_event"):
-            await node.inject_event(message)
+            await node.inject_event(message, is_client_input=True)
             return web.json_response(
                 {
                     "status": "queen",

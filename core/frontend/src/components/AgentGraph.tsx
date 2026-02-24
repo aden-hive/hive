@@ -1,6 +1,5 @@
-import { useMemo, useState, useRef, useEffect } from "react";
-import ReactDOM from "react-dom";
-import { Play, Pause, Loader2, CheckCircle2, GitBranch, Zap, Layers } from "lucide-react";
+import { memo, useMemo, useState, useRef } from "react";
+import { Play, Pause, Loader2, CheckCircle2 } from "lucide-react";
 
 export type NodeStatus = "running" | "complete" | "pending" | "error" | "looping";
 
@@ -17,18 +16,62 @@ export interface GraphNode {
 }
 
 type RunState = "idle" | "deploying" | "running";
-type VersionBump = "major" | "minor";
 
 interface AgentGraphProps {
   nodes: GraphNode[];
   title: string;
   onNodeClick?: (node: GraphNode) => void;
-  onVersionBump?: (type: VersionBump) => void;
   onRun?: () => void;
   onPause?: () => void;
   version?: string;
   runState?: RunState;
 }
+
+// --- Extracted RunButton so hover state survives parent re-renders ---
+interface RunButtonProps {
+  runState: RunState;
+  disabled: boolean;
+  onRun: () => void;
+  onPause: () => void;
+  btnRef: React.Ref<HTMLButtonElement>;
+}
+
+const RunButton = memo(function RunButton({ runState, disabled, onRun, onPause, btnRef }: RunButtonProps) {
+  const [hovered, setHovered] = useState(false);
+  const showPause = runState === "running" && hovered;
+
+  return (
+    <button
+      ref={btnRef}
+      onClick={runState === "running" ? onPause : onRun}
+      disabled={runState === "deploying" || disabled}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+      className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[11px] font-semibold transition-all duration-200 ${
+        showPause
+          ? "bg-amber-500/15 text-amber-400 border border-amber-500/40 hover:bg-amber-500/25 active:scale-95 cursor-pointer"
+          : runState === "running"
+          ? "bg-green-500/15 text-green-400 border border-green-500/30 cursor-pointer"
+          : runState === "deploying"
+          ? "bg-primary/10 text-primary border border-primary/20 cursor-default"
+          : disabled
+          ? "bg-muted/30 text-muted-foreground/40 border border-border/20 cursor-not-allowed"
+          : "bg-primary/10 text-primary border border-primary/20 hover:bg-primary/20 hover:border-primary/40 active:scale-95"
+      }`}
+    >
+      {runState === "deploying" ? (
+        <Loader2 className="w-3 h-3 animate-spin" />
+      ) : showPause ? (
+        <Pause className="w-3 h-3 fill-current" />
+      ) : runState === "running" ? (
+        <CheckCircle2 className="w-3 h-3" />
+      ) : (
+        <Play className="w-3 h-3 fill-current" />
+      )}
+      {runState === "deploying" ? "Deploying\u2026" : showPause ? "Pause" : runState === "running" ? "Running" : "Run"}
+    </button>
+  );
+});
 
 const NODE_W_MAX = 180;
 const NODE_H = 44;
@@ -80,42 +123,16 @@ function formatLabel(id: string): string {
     .join(" ");
 }
 
-export default function AgentGraph({ nodes, title: _title, onNodeClick, onVersionBump, onRun, onPause, version, runState: externalRunState }: AgentGraphProps) {
+export default function AgentGraph({ nodes, title: _title, onNodeClick, onRun, onPause, version, runState: externalRunState }: AgentGraphProps) {
   const [localRunState, setLocalRunState] = useState<RunState>("idle");
   const runState = externalRunState ?? localRunState;
-  const [versionPopover, setVersionPopover] = useState<"hidden" | "confirm" | "pick">("hidden");
-  const [popoverPos, setPopoverPos] = useState<{ top: number; left: number } | null>(null);
   const runBtnRef = useRef<HTMLButtonElement>(null);
-  const popoverRef = useRef<HTMLDivElement>(null);
-
-  // Close popover on outside click
-  useEffect(() => {
-    if (versionPopover === "hidden") return;
-    const handler = (e: MouseEvent) => {
-      if (
-        popoverRef.current && !popoverRef.current.contains(e.target as Node) &&
-        runBtnRef.current && !runBtnRef.current.contains(e.target as Node)
-      ) setVersionPopover("hidden");
-    };
-    document.addEventListener("mousedown", handler);
-    return () => document.removeEventListener("mousedown", handler);
-  }, [versionPopover]);
 
   const handleRun = () => {
     if (runState !== "idle") return;
-    if (runBtnRef.current) {
-      const rect = runBtnRef.current.getBoundingClientRect();
-      setPopoverPos({ top: rect.bottom + 6, left: rect.right });
-    }
-    setVersionPopover("confirm");
-  };
-
-  const startRun = () => {
-    setVersionPopover("hidden");
     if (onRun) {
       onRun();
     } else {
-      // Fallback: local state animation when no backend callback provided
       setLocalRunState("deploying");
       setTimeout(() => setLocalRunState("running"), 1800);
       setTimeout(() => setLocalRunState("idle"), 5000);
@@ -226,120 +243,6 @@ export default function AgentGraph({ nodes, title: _title, onNodeClick, onVersio
     return { layers, cols, maxCols, nodeW, colSpacing, firstColX };
   }, [nodes, forwardEdges]);
 
-  const RunButton = () => {
-    const [hovered, setHovered] = useState(false);
-    const showPause = runState === "running" && hovered;
-
-    return (
-      <button
-        ref={runBtnRef}
-        onClick={runState === "running" ? onPause : handleRun}
-        disabled={runState === "deploying" || nodes.length === 0}
-        onMouseEnter={() => setHovered(true)}
-        onMouseLeave={() => setHovered(false)}
-        className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[11px] font-semibold transition-all duration-200 ${
-          showPause
-            ? "bg-amber-500/15 text-amber-400 border border-amber-500/40 hover:bg-amber-500/25 active:scale-95 cursor-pointer"
-            : runState === "running"
-            ? "bg-green-500/15 text-green-400 border border-green-500/30 cursor-pointer"
-            : runState === "deploying"
-            ? "bg-primary/10 text-primary border border-primary/20 cursor-default"
-            : nodes.length === 0
-            ? "bg-muted/30 text-muted-foreground/40 border border-border/20 cursor-not-allowed"
-            : "bg-primary/10 text-primary border border-primary/20 hover:bg-primary/20 hover:border-primary/40 active:scale-95"
-        }`}
-      >
-        {runState === "deploying" ? (
-          <Loader2 className="w-3 h-3 animate-spin" />
-        ) : showPause ? (
-          <Pause className="w-3 h-3 fill-current" />
-        ) : runState === "running" ? (
-          <CheckCircle2 className="w-3 h-3" />
-        ) : (
-          <Play className="w-3 h-3 fill-current" />
-        )}
-        {runState === "deploying" ? "Deploying\u2026" : showPause ? "Pause" : runState === "running" ? "Running" : "Run"}
-      </button>
-    );
-  };
-
-  // Version bump popover (portalled)
-  const VersionPopover = () => {
-    if (versionPopover === "hidden" || !popoverPos) return null;
-    return ReactDOM.createPortal(
-      <div
-        ref={popoverRef}
-        style={{ position: "fixed", top: popoverPos.top, right: window.innerWidth - popoverPos.left, zIndex: 9999 }}
-        className="w-64 rounded-xl border border-border/60 bg-card shadow-xl shadow-black/30 overflow-hidden"
-      >
-        {versionPopover === "confirm" && (
-          <>
-            <div className="px-3.5 py-3 border-b border-border/40">
-              <div className="flex items-center gap-2 mb-1">
-                <GitBranch className="w-3.5 h-3.5 text-primary" />
-                <span className="text-xs font-semibold text-foreground">Changes Detected</span>
-              </div>
-              <p className="text-[11px] text-muted-foreground leading-relaxed">
-                The pipeline has been modified since the last run. Would you like to save this as a new version?
-              </p>
-            </div>
-            <div className="p-1.5 flex flex-col gap-0.5">
-              <button
-                onClick={() => setVersionPopover("pick")}
-                className="flex items-center gap-2.5 w-full px-3 py-2 rounded-lg text-sm text-left transition-colors hover:bg-muted/60 text-foreground font-medium"
-              >
-                Yes, create new version
-              </button>
-              <button
-                onClick={startRun}
-                className="flex items-center gap-2.5 w-full px-3 py-2 rounded-lg text-sm text-left transition-colors hover:bg-muted/60 text-muted-foreground"
-              >
-                No, run as-is
-              </button>
-            </div>
-          </>
-        )}
-        {versionPopover === "pick" && (
-          <>
-            <div className="px-3.5 py-3 border-b border-border/40">
-              <span className="text-xs font-semibold text-foreground">Select Change Type</span>
-              {version && (
-                <p className="text-[11px] text-muted-foreground mt-0.5">Current version: <span className="text-foreground font-medium">{version}</span></p>
-              )}
-            </div>
-            <div className="p-1.5 flex flex-col gap-0.5">
-              <button
-                onClick={() => { onVersionBump?.("major"); startRun(); }}
-                className="flex items-center gap-2.5 w-full px-3 py-2 rounded-lg text-left transition-colors hover:bg-muted/60"
-              >
-                <div className="w-7 h-7 rounded-md bg-primary/10 flex items-center justify-center flex-shrink-0">
-                  <Zap className="w-3.5 h-3.5 text-primary" />
-                </div>
-                <div>
-                  <div className="text-sm font-medium text-foreground">Major change</div>
-                  <div className="text-[11px] text-muted-foreground">Resets minor (e.g. v2.3 &rarr; v3.0)</div>
-                </div>
-              </button>
-              <button
-                onClick={() => { onVersionBump?.("minor"); startRun(); }}
-                className="flex items-center gap-2.5 w-full px-3 py-2 rounded-lg text-left transition-colors hover:bg-muted/60"
-              >
-                <div className="w-7 h-7 rounded-md bg-muted/60 flex items-center justify-center flex-shrink-0">
-                  <Layers className="w-3.5 h-3.5 text-muted-foreground" />
-                </div>
-                <div>
-                  <div className="text-sm font-medium text-foreground">Minor change</div>
-                  <div className="text-[11px] text-muted-foreground">Increments patch (e.g. v2.3 &rarr; v2.4)</div>
-                </div>
-              </button>
-            </div>
-          </>
-        )}
-      </div>,
-      document.body
-    );
-  };
-
   if (nodes.length === 0) {
     return (
       <div className="flex flex-col h-full">
@@ -352,9 +255,8 @@ export default function AgentGraph({ nodes, title: _title, onNodeClick, onVersio
               </span>
             )}
           </div>
-          <RunButton />
+          <RunButton runState={runState} disabled={nodes.length === 0} onRun={handleRun} onPause={onPause ?? (() => {})} btnRef={runBtnRef} />
         </div>
-        <VersionPopover />
         <div className="flex-1 flex items-center justify-center px-5">
           <p className="text-xs text-muted-foreground/60 text-center italic">No pipeline configured yet.<br/>Chat with the Queen to get started.</p>
         </div>
@@ -594,9 +496,8 @@ export default function AgentGraph({ nodes, title: _title, onNodeClick, onVersio
             </span>
           )}
         </div>
-        <RunButton />
+        <RunButton runState={runState} disabled={nodes.length === 0} onRun={handleRun} onPause={onPause ?? (() => {})} btnRef={runBtnRef} />
       </div>
-      <VersionPopover />
 
       {/* Graph */}
       <div className="flex-1 overflow-y-auto overflow-x-hidden px-3 pb-5">

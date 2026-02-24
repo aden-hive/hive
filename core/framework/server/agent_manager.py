@@ -221,6 +221,7 @@ class AgentManager:
 
             # Coding tools from hive_coder's MCP config (read_file, write_file, etc.)
             import framework.agents.hive_coder as _hive_coder_pkg
+
             hive_coder_dir = Path(_hive_coder_pkg.__file__).parent
             mcp_config = hive_coder_dir / "mcp_servers.json"
             if mcp_config.exists():
@@ -249,6 +250,7 @@ class AgentManager:
 
             # Build worker profile for queen's system prompt
             from framework.tools.queen_lifecycle_tools import build_worker_profile
+
             worker_identity = build_worker_profile(runtime)
 
             # Filter queen graph tools to what's registered and inject identity

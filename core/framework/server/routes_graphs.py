@@ -220,9 +220,8 @@ async def handle_node_tools(request: web.Request) -> web.Response:
     all_tools = registry.get_tools() if registry else {}
 
     for name in node_spec.tools:
-        registered = all_tools.get(name)
-        if registered:
-            tool = registered.tool
+        tool = all_tools.get(name)
+        if tool:
             tools_out.append(
                 {
                     "name": tool.name,
