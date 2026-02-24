@@ -13,7 +13,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from framework.observability import set_trace_context
+from framework.observability import clear_trace_context, set_trace_context
 from framework.schemas.decision import Decision, DecisionType, Option, Outcome
 from framework.schemas.run import Run, RunStatus
 from framework.storage.backend import FileStorage
@@ -135,6 +135,9 @@ class Runtime:
         # Save to storage
         self.storage.save_run(self._current_run)
         self._current_run = None
+
+        # Close any open Langfuse/OTel span for this run (no-op when Langfuse not configured).
+        clear_trace_context()
 
     def set_node(self, node_id: str) -> None:
         """Set the current node context for subsequent decisions."""

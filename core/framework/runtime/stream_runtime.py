@@ -12,7 +12,7 @@ import uuid
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
-from framework.observability import set_trace_context
+from framework.observability import clear_trace_context, set_trace_context
 from framework.schemas.decision import Decision, DecisionType, Option, Outcome
 from framework.schemas.run import Run, RunStatus
 from framework.storage.concurrent import ConcurrentStorage
@@ -188,6 +188,8 @@ class StreamRuntime:
             self._runs.pop(execution_id, None)
             self._run_locks.pop(execution_id, None)
             self._current_nodes.pop(execution_id, None)
+            # Close any open Langfuse/OTel span for this run (no-op when Langfuse not configured).
+            clear_trace_context()
 
     def set_node(self, execution_id: str, node_id: str) -> None:
         """Set the current node context for an execution."""
