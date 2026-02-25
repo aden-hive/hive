@@ -10,8 +10,8 @@ Auto-detection: If provider="auto", tries Brave first (backward compatible), the
 
 from __future__ import annotations
 
+import asyncio
 import os
-import time
 from typing import TYPE_CHECKING, Literal
 
 import httpx
@@ -27,7 +27,7 @@ def register_tools(
 ) -> None:
     """Register web search tools with the MCP server."""
 
-    def _search_google(
+    async def _search_google(
         query: str,
         num_results: int,
         country: str,
@@ -37,34 +37,36 @@ def register_tools(
     ) -> dict:
         """Execute search using Google Custom Search API."""
         max_retries = 3
-        for attempt in range(max_retries + 1):
-            response = httpx.get(
-                "https://www.googleapis.com/customsearch/v1",
-                params={
-                    "key": api_key,
-                    "cx": cse_id,
-                    "q": query,
-                    "num": min(num_results, 10),
-                    "lr": f"lang_{language}",
-                    "gl": country,
-                },
-                timeout=30.0,
-            )
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            for attempt in range(max_retries + 1):
+                response = await client.get(
+                    "https://www.googleapis.com/customsearch/v1",
+                    params={
+                        "key": api_key,
+                        "cx": cse_id,
+                        "q": query,
+                        "num": min(num_results, 10),
+                        "lr": f"lang_{language}",
+                        "gl": country,
+                    },
+                )
 
-            if response.status_code == 429 and attempt < max_retries:
-                time.sleep(2**attempt)
-                continue
+                if response.status_code == 429 and attempt < max_retries:
+                    await asyncio.sleep(2**attempt)
+                    continue
 
-            if response.status_code == 401:
-                return {"error": "Invalid Google API key"}
-            elif response.status_code == 403:
-                return {"error": "Google API key not authorized or quota exceeded"}
-            elif response.status_code == 429:
-                return {"error": "Google rate limit exceeded. Try again later."}
-            elif response.status_code != 200:
-                return {"error": f"Google API request failed: HTTP {response.status_code}"}
+                if response.status_code == 401:
+                    return {"error": "Invalid Google API key"}
+                elif response.status_code == 403:
+                    return {"error": "Google API key not authorized or quota exceeded"}
+                elif response.status_code == 429:
+                    return {"error": "Google rate limit exceeded. Try again later."}
+                elif response.status_code != 200:
+                    return {
+                        "error": f"Google API request failed: HTTP {response.status_code}"
+                    }
 
-            break
+                break
 
         data = response.json()
         results = []
@@ -84,7 +86,7 @@ def register_tools(
             "provider": "google",
         }
 
-    def _search_brave(
+    async def _search_brave(
         query: str,
         num_results: int,
         country: str,
@@ -92,33 +94,35 @@ def register_tools(
     ) -> dict:
         """Execute search using Brave Search API."""
         max_retries = 3
-        for attempt in range(max_retries + 1):
-            response = httpx.get(
-                "https://api.search.brave.com/res/v1/web/search",
-                params={
-                    "q": query,
-                    "count": min(num_results, 20),
-                    "country": country,
-                },
-                headers={
-                    "X-Subscription-Token": api_key,
-                    "Accept": "application/json",
-                },
-                timeout=30.0,
-            )
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            for attempt in range(max_retries + 1):
+                response = await client.get(
+                    "https://api.search.brave.com/res/v1/web/search",
+                    params={
+                        "q": query,
+                        "count": min(num_results, 20),
+                        "country": country,
+                    },
+                    headers={
+                        "X-Subscription-Token": api_key,
+                        "Accept": "application/json",
+                    },
+                )
 
-            if response.status_code == 429 and attempt < max_retries:
-                time.sleep(2**attempt)
-                continue
+                if response.status_code == 429 and attempt < max_retries:
+                    await asyncio.sleep(2**attempt)
+                    continue
 
-            if response.status_code == 401:
-                return {"error": "Invalid Brave API key"}
-            elif response.status_code == 429:
-                return {"error": "Brave rate limit exceeded. Try again later."}
-            elif response.status_code != 200:
-                return {"error": f"Brave API request failed: HTTP {response.status_code}"}
+                if response.status_code == 401:
+                    return {"error": "Invalid Brave API key"}
+                elif response.status_code == 429:
+                    return {"error": "Brave rate limit exceeded. Try again later."}
+                elif response.status_code != 200:
+                    return {
+                        "error": f"Brave API request failed: HTTP {response.status_code}"
+                    }
 
-            break
+                break
 
         data = response.json()
         results = []
@@ -153,7 +157,7 @@ def register_tools(
         }
 
     @mcp.tool()
-    def web_search(
+    async def web_search(
         query: str,
         num_results: int = 10,
         country: str = "us",
@@ -192,7 +196,7 @@ def register_tools(
                         "error": "Google credentials not configured",
                         "help": "Set GOOGLE_API_KEY and GOOGLE_CSE_ID environment variables",
                     }
-                return _search_google(
+                return await _search_google(
                     query,
                     num_results,
                     country,
@@ -207,13 +211,17 @@ def register_tools(
                         "error": "Brave credentials not configured",
                         "help": "Set BRAVE_SEARCH_API_KEY environment variable",
                     }
-                return _search_brave(query, num_results, country, creds["brave_api_key"])
+                return await _search_brave(
+                    query, num_results, country, creds["brave_api_key"]
+                )
 
             else:  # auto - try Brave first for backward compatibility
                 if brave_available:
-                    return _search_brave(query, num_results, country, creds["brave_api_key"])
+                    return await _search_brave(
+                        query, num_results, country, creds["brave_api_key"]
+                    )
                 elif google_available:
-                    return _search_google(
+                    return await _search_google(
                         query,
                         num_results,
                         country,
