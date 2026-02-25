@@ -485,6 +485,14 @@ export default function Workspace() {
         liveSession = await sessionsApi.create(agentType);
       } catch (loadErr: unknown) {
         const { ApiError } = await import("@/api/client");
+
+        // 424 = credentials required — open the credentials modal
+        if (loadErr instanceof ApiError && loadErr.status === 424) {
+          updateAgentState(agentType, { loading: false, error: "credentials_required" });
+          setCredentialsOpen(true);
+          return;
+        }
+
         if (!(loadErr instanceof ApiError) || loadErr.status !== 409) {
           throw loadErr;
         }
@@ -1220,6 +1228,14 @@ export default function Workspace() {
       await sessionsApi.loadWorker(state.sessionId, agentPath);
       // Success: worker_loaded SSE event will handle UI updates automatically
     } catch (err) {
+      // 424 = credentials required — open the credentials modal
+      const { ApiError } = await import("@/api/client");
+      if (err instanceof ApiError && err.status === 424) {
+        setCredentialsOpen(true);
+        setLoadingWorker(false);
+        return;
+      }
+
       const errMsg = err instanceof Error ? err.message : String(err);
       const activeId = activeSessionRef.current[activeWorker];
       const errorMsg: ChatMessage = {
@@ -1395,10 +1411,23 @@ export default function Workspace() {
 
             {/* Connection error banner */}
             {activeAgentState?.error && !activeAgentState?.loading && (
-              <div className="absolute top-0 left-0 right-0 z-10 px-4 py-2 bg-destructive/10 border-b border-destructive/30 flex items-center gap-2">
-                <WifiOff className="w-4 h-4 text-destructive" />
-                <span className="text-xs text-destructive">Backend unavailable: {activeAgentState.error}</span>
-              </div>
+              activeAgentState.error === "credentials_required" ? (
+                <div className="absolute top-0 left-0 right-0 z-10 px-4 py-2 bg-amber-500/10 border-b border-amber-500/30 flex items-center gap-2">
+                  <KeyRound className="w-4 h-4 text-amber-600" />
+                  <span className="text-xs text-amber-700">Missing credentials — configure them to continue</span>
+                  <button
+                    onClick={() => setCredentialsOpen(true)}
+                    className="ml-auto text-xs font-medium text-primary hover:underline"
+                  >
+                    Open Credentials
+                  </button>
+                </div>
+              ) : (
+                <div className="absolute top-0 left-0 right-0 z-10 px-4 py-2 bg-destructive/10 border-b border-destructive/30 flex items-center gap-2">
+                  <WifiOff className="w-4 h-4 text-destructive" />
+                  <span className="text-xs text-destructive">Backend unavailable: {activeAgentState.error}</span>
+                </div>
+              )
             )}
 
             {activeSession && (
@@ -1441,6 +1470,10 @@ export default function Workspace() {
         credentials={activeSession?.credentials || []}
         onCredentialChange={() => {
           if (!activeSession) return;
+          // Clear credential error so the auto-load effect retries session creation
+          if (agentStates[activeWorker]?.error === "credentials_required") {
+            updateAgentState(activeWorker, { error: null });
+          }
           setSessionsByAgent(prev => ({
             ...prev,
             [activeWorker]: prev[activeWorker].map(s =>
