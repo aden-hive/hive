@@ -64,6 +64,7 @@ from .gcp_vision import GCP_VISION_CREDENTIALS
 from .github import GITHUB_CREDENTIALS
 from .google_calendar import GOOGLE_CALENDAR_CREDENTIALS
 from .google_docs import GOOGLE_DOCS_CREDENTIALS
+from .google_drive import GOOGLE_DRIVE_CREDENTIALS
 from .google_maps import GOOGLE_MAPS_CREDENTIALS
 from .health_check import HealthCheckResult, check_credential_health
 from .hubspot import HUBSPOT_CREDENTIALS
@@ -94,6 +95,7 @@ CREDENTIAL_SPECS = {
     **GITHUB_CREDENTIALS,
     **GOOGLE_DOCS_CREDENTIALS,
     **GOOGLE_MAPS_CREDENTIALS,
+    **GOOGLE_DRIVE_CREDENTIALS,
     **HUBSPOT_CREDENTIALS,
     **GOOGLE_CALENDAR_CREDENTIALS,
     **SLACK_CREDENTIALS,
@@ -134,6 +136,7 @@ __all__ = [
     "GITHUB_CREDENTIALS",
     "GOOGLE_DOCS_CREDENTIALS",
     "GOOGLE_MAPS_CREDENTIALS",
+    "GOOGLE_DRIVE_CREDENTIALS",
     "HUBSPOT_CREDENTIALS",
     "GOOGLE_CALENDAR_CREDENTIALS",
     "SLACK_CREDENTIALS",
