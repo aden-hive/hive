@@ -375,11 +375,13 @@ class EventLoopNode(NodeProtocol):
         await self._publish_loop_started(stream_id, node_id, execution_id)
 
         # 4b. Fire-and-forget action plan generation (once per node per lifetime)
+        # Skip for queen/judge — action plans are only meaningful for worker nodes.
         if (
             start_iteration == 0
             and ctx.llm
             and self._event_bus
             and node_id not in self._action_plan_emitted
+            and stream_id not in ("queen", "judge")
         ):
             self._action_plan_emitted.add(node_id)
             asyncio.create_task(self._generate_action_plan(ctx, stream_id, node_id, execution_id))
@@ -447,6 +449,7 @@ class EventLoopNode(NodeProtocol):
                         turn_tokens,
                         logged_tool_calls,
                         user_input_requested,
+                        ask_user_prompt,
                     ) = await self._run_single_turn(
                         ctx, conversation, tools, iteration, accumulator
                     )
@@ -718,9 +721,11 @@ class EventLoopNode(NodeProtocol):
             # conversation — they flow through without blocking.
             _cf_block = False
             _cf_auto = False
+            _cf_prompt = ""
             if ctx.node_spec.client_facing and not ctx.event_triggered:
                 if user_input_requested:
                     _cf_block = True
+                    _cf_prompt = ask_user_prompt
                 elif assistant_text and not real_tool_results and not outputs_set:
                     _cf_block = True
                     _cf_auto = True
@@ -776,7 +781,7 @@ class EventLoopNode(NodeProtocol):
                     iteration,
                     _cf_auto,
                 )
-                got_input = await self._await_user_input(ctx)
+                got_input = await self._await_user_input(ctx, prompt=_cf_prompt)
                 logger.info("[%s] iter=%d: unblocked, got_input=%s", node_id, iteration, got_input)
                 if not got_input:
                     await self._publish_loop_completed(
@@ -1104,7 +1109,7 @@ class EventLoopNode(NodeProtocol):
         self._shutdown = True
         self._input_ready.set()
 
-    async def _await_user_input(self, ctx: NodeContext) -> bool:
+    async def _await_user_input(self, ctx: NodeContext, prompt: str = "") -> bool:
         """Block until user input arrives or shutdown is signaled.
 
         Called in two situations:
@@ -1125,7 +1130,7 @@ class EventLoopNode(NodeProtocol):
             await self._event_bus.emit_client_input_requested(
                 stream_id=ctx.stream_id or ctx.node_id,
                 node_id=ctx.node_id,
-                prompt="",
+                prompt=prompt,
                 execution_id=ctx.execution_id or "",
             )
 
@@ -1147,11 +1152,11 @@ class EventLoopNode(NodeProtocol):
         tools: list[Tool],
         iteration: int,
         accumulator: OutputAccumulator,
-    ) -> tuple[str, list[dict], list[str], dict[str, int], list[dict], bool]:
+    ) -> tuple[str, list[dict], list[str], dict[str, int], list[dict], bool, str]:
         """Run a single LLM turn with streaming and tool execution.
 
         Returns (assistant_text, real_tool_results, outputs_set, token_counts, logged_tool_calls,
-        user_input_requested).
+        user_input_requested, ask_user_prompt).
 
         ``real_tool_results`` contains only results from actual tools (web_search,
         etc.), NOT from the synthetic ``set_output`` or ``ask_user`` tools.
@@ -1174,6 +1179,7 @@ class EventLoopNode(NodeProtocol):
         # Track output keys set via set_output across all inner iterations
         outputs_set_this_turn: list[str] = []
         user_input_requested = False
+        ask_user_prompt = ""
         # Accumulate ALL tool calls across inner iterations for L3 logging.
         # Unlike real_tool_results (reset each inner iteration), this persists.
         logged_tool_calls: list[dict] = []
@@ -1284,6 +1290,7 @@ class EventLoopNode(NodeProtocol):
                     token_counts,
                     logged_tool_calls,
                     user_input_requested,
+                    ask_user_prompt,
                 )
 
             # Execute tool calls — framework tools (set_output, ask_user)
@@ -1360,6 +1367,7 @@ class EventLoopNode(NodeProtocol):
                 elif tc.tool_name == "ask_user":
                     # --- Framework-level ask_user handling ---
                     user_input_requested = True
+                    ask_user_prompt = tc.tool_input.get("question", "")
                     result = ToolResult(
                         tool_use_id=tc.tool_use_id,
                         content="Waiting for user input...",
@@ -1518,6 +1526,7 @@ class EventLoopNode(NodeProtocol):
                     token_counts,
                     logged_tool_calls,
                     user_input_requested,
+                    ask_user_prompt,
                 )
 
             # --- Mid-turn pruning: prevent context blowup within a single turn ---
@@ -1544,6 +1553,7 @@ class EventLoopNode(NodeProtocol):
                     token_counts,
                     logged_tool_calls,
                     user_input_requested,
+                    ask_user_prompt,
                 )
 
             # Tool calls processed -- loop back to stream with updated conversation
