@@ -257,6 +257,34 @@ class TestSetTraceContextOtel:
         # Span in stack must be the original sentinel, not a new one.
         assert obs._otel_span_stack[trace_id][0] is sentinel_span
 
+    def test_previous_span_closed_when_trace_id_replaced(self):
+        """Old span is closed when a new trace_id replaces it (sequential runs)."""
+        self._install_mock_tracer()
+        old_trace_id = "a" * 32
+        new_trace_id = "b" * 32
+
+        # Simulate an existing run already open in this context.
+        obs.trace_context.set({"trace_id": old_trace_id})
+
+        with patch("framework.observability.logging._otel_close_trace") as mock_close:
+            with patch("framework.observability.logging._otel_open_trace") as mock_open:
+                obs.set_trace_context(trace_id=new_trace_id, goal_id="run-2")
+
+        mock_close.assert_called_once_with(old_trace_id)
+        mock_open.assert_called_once_with(new_trace_id, "run-2")
+
+    def test_no_close_when_trace_id_unchanged(self):
+        """Span is not closed when trace_id is the same (mid-run enrichment call)."""
+        self._install_mock_tracer()
+        trace_id = "a" * 32
+        obs.trace_context.set({"trace_id": trace_id})
+
+        with patch("framework.observability.logging._otel_close_trace") as mock_close:
+            with patch("framework.observability.logging._otel_open_trace"):
+                obs.set_trace_context(trace_id=trace_id, goal_id="same-run")
+
+        mock_close.assert_not_called()
+
 
 # ─── clear_trace_context() + _otel_close_trace() ─────────────────────────────
 
@@ -291,3 +319,57 @@ class TestClearTraceContextOtel:
         obs.trace_context.set({"trace_id": "f" * 32})
         # _otel_span_stack is empty — should not raise
         obs.clear_trace_context()
+
+
+# ─── _langfuse_shutdown() ─────────────────────────────────────────────────────
+
+
+class TestLangfuseShutdown:
+    def test_ends_all_open_spans_and_calls_shutdown(self):
+        """_langfuse_shutdown() ends every open span and calls provider.shutdown()."""
+        span_a, token_a = MagicMock(), MagicMock()
+        span_b, token_b = MagicMock(), MagicMock()
+        obs._otel_span_stack["a" * 32] = (span_a, token_a)
+        obs._otel_span_stack["b" * 32] = (span_b, token_b)
+
+        mock_provider = MagicMock()
+        with patch("opentelemetry.context.detach"):
+            with patch("opentelemetry.trace.get_tracer_provider", return_value=mock_provider):
+                obs._langfuse_shutdown()
+
+        span_a.end.assert_called_once()
+        span_b.end.assert_called_once()
+        mock_provider.shutdown.assert_called_once()
+        assert len(obs._otel_span_stack) == 0
+
+    def test_shutdown_safe_when_no_open_spans(self):
+        """_langfuse_shutdown() is a no-op when no spans are open."""
+        mock_provider = MagicMock()
+        with patch("opentelemetry.trace.get_tracer_provider", return_value=mock_provider):
+            obs._langfuse_shutdown()  # must not raise
+
+        mock_provider.shutdown.assert_called_once()
+
+    def test_atexit_registered_on_configure(self):
+        """configure_langfuse() registers _langfuse_shutdown with atexit."""
+        mock_provider = MagicMock()
+        mock_provider.get_tracer.return_value = MagicMock()
+        MockTracerProvider = MagicMock(return_value=mock_provider)
+        MockResource = MagicMock()
+        MockResource.create.return_value = MagicMock()
+
+        modules = {
+            "opentelemetry.trace": MagicMock(),
+            "opentelemetry.exporter.otlp.proto.http.trace_exporter": MagicMock(
+                OTLPSpanExporter=MagicMock()
+            ),
+            "opentelemetry.sdk.resources": MagicMock(Resource=MockResource),
+            "opentelemetry.sdk.trace": MagicMock(TracerProvider=MockTracerProvider),
+            "opentelemetry.sdk.trace.export": MagicMock(),
+        }
+        with patch.dict("sys.modules", modules):
+            with patch("base64.b64encode", return_value=b"dGVzdA=="):
+                with patch("atexit.register") as mock_atexit:
+                    obs.configure_langfuse(public_key="pk", secret_key="sk")
+
+        mock_atexit.assert_called_once_with(obs._langfuse_shutdown)
