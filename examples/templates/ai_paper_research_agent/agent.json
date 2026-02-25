@@ -1,0 +1,261 @@
+{
+  "agent": {
+    "id": "ai_paper_research_agent",
+    "name": "AI Paper Research Agent",
+    "version": "1.0.0",
+    "description": "Autonomous deep-research agent for helping ML researchers understand difficult and massive AI papers."
+  },
+  "graph": {
+    "id": "ai-paper-research-agent-graph",
+    "goal_id": "deep-ai-paper-understanding",
+    "version": "1.0.0",
+    "entry_node": "intake",
+    "entry_points": {
+      "start": "intake"
+    },
+    "pause_nodes": [],
+    "terminal_nodes": [
+      "deliver-brief"
+    ],
+    "nodes": [
+      {
+        "id": "intake",
+        "name": "Research Objective Intake",
+        "description": "Clarify the ML research objective, target audience background, and desired depth",
+        "node_type": "event_loop",
+        "input_keys": [
+          "objective",
+          "paper_pdf_paths"
+        ],
+        "output_keys": [
+          "research_objective",
+          "target_topics",
+          "difficulty_profile"
+        ],
+        "nullable_output_keys": [
+          "paper_pdf_paths"
+        ],
+        "tools": [],
+        "client_facing": true
+      },
+      {
+        "id": "discover-papers",
+        "name": "Discover Candidate Papers",
+        "description": "Find high-value recent and foundational papers from academic and web search",
+        "node_type": "event_loop",
+        "input_keys": [
+          "research_objective",
+          "target_topics"
+        ],
+        "output_keys": [
+          "paper_candidates",
+          "selection_rationale"
+        ],
+        "nullable_output_keys": [],
+        "tools": [
+          "scholar_search",
+          "web_search",
+          "web_scrape"
+        ],
+        "client_facing": false
+      },
+      {
+        "id": "analyze-papers",
+        "name": "Analyze Paper Content",
+        "description": "Extract key methods, assumptions, results, and limitations from selected papers",
+        "node_type": "event_loop",
+        "input_keys": [
+          "paper_candidates",
+          "paper_pdf_paths",
+          "research_objective",
+          "difficulty_profile"
+        ],
+        "output_keys": [
+          "paper_breakdowns",
+          "cross_paper_map",
+          "open_questions"
+        ],
+        "nullable_output_keys": [
+          "paper_pdf_paths"
+        ],
+        "tools": [
+          "web_scrape",
+          "pdf_read"
+        ],
+        "client_facing": false
+      },
+      {
+        "id": "build-learning-brief",
+        "name": "Build Learning Brief",
+        "description": "Translate deep analysis into clear explanations and a practical study path",
+        "node_type": "event_loop",
+        "input_keys": [
+          "paper_breakdowns",
+          "cross_paper_map",
+          "open_questions",
+          "research_objective"
+        ],
+        "output_keys": [
+          "teaching_note",
+          "study_plan",
+          "recommended_next_papers"
+        ],
+        "nullable_output_keys": [],
+        "tools": [],
+        "client_facing": false
+      },
+      {
+        "id": "deliver-brief",
+        "name": "Deliver Research Brief",
+        "description": "Write and deliver a structured HTML brief, then answer follow-up questions",
+        "node_type": "event_loop",
+        "input_keys": [
+          "teaching_note",
+          "study_plan",
+          "recommended_next_papers",
+          "open_questions"
+        ],
+        "output_keys": [
+          "delivery_status"
+        ],
+        "nullable_output_keys": [],
+        "tools": [
+          "save_data",
+          "serve_file_to_user"
+        ],
+        "client_facing": true
+      }
+    ],
+    "edges": [
+      {
+        "id": "intake-to-discover",
+        "source": "intake",
+        "target": "discover-papers",
+        "condition": "on_success",
+        "priority": 1,
+        "input_mapping": {}
+      },
+      {
+        "id": "discover-to-analyze",
+        "source": "discover-papers",
+        "target": "analyze-papers",
+        "condition": "on_success",
+        "priority": 1,
+        "input_mapping": {}
+      },
+      {
+        "id": "analyze-to-learning-brief",
+        "source": "analyze-papers",
+        "target": "build-learning-brief",
+        "condition": "on_success",
+        "priority": 1,
+        "input_mapping": {}
+      },
+      {
+        "id": "learning-brief-to-deliver",
+        "source": "build-learning-brief",
+        "target": "deliver-brief",
+        "condition": "on_success",
+        "priority": 1,
+        "input_mapping": {}
+      }
+    ],
+    "max_steps": 100,
+    "max_retries_per_node": 3,
+    "description": "Deep research workflow for AI papers with academic search and paper synthesis.",
+    "created_at": "2026-02-11T00:00:00.000000"
+  },
+  "goal": {
+    "id": "deep-ai-paper-understanding",
+    "name": "Deep AI Paper Understanding",
+    "description": "Help ML researchers understand difficult, high-volume AI papers through discovery, analysis, and synthesis.",
+    "status": "draft",
+    "success_criteria": [
+      {
+        "id": "paper-coverage",
+        "description": "Select and analyze a strong set of relevant papers",
+        "metric": "papers_analyzed",
+        "target": ">=6",
+        "weight": 0.2,
+        "met": false
+      },
+      {
+        "id": "technical-depth",
+        "description": "Explain methods, assumptions, and results at researcher level",
+        "metric": "depth_score",
+        "target": ">=8/10",
+        "weight": 0.2,
+        "met": false
+      },
+      {
+        "id": "cross-paper-synthesis",
+        "description": "Provide a meaningful comparison across papers",
+        "metric": "comparison_completeness",
+        "target": ">=90%",
+        "weight": 0.2,
+        "met": false
+      },
+      {
+        "id": "clarity-for-learning",
+        "description": "Deliver a digestible explanation and study plan",
+        "metric": "researcher_usefulness",
+        "target": "high",
+        "weight": 0.2,
+        "met": false
+      },
+      {
+        "id": "cited-delivery",
+        "description": "Generate a delivered report with clear source links",
+        "metric": "deliverable_ready",
+        "target": "true",
+        "weight": 0.2,
+        "met": false
+      }
+    ],
+    "constraints": [
+      {
+        "id": "no-invented-claims",
+        "description": "Do not fabricate methods, metrics, or findings",
+        "constraint_type": "quality",
+        "category": "accuracy",
+        "check": ""
+      },
+      {
+        "id": "source-grounding",
+        "description": "Ground explanations in retrieved paper sources",
+        "constraint_type": "quality",
+        "category": "traceability",
+        "check": ""
+      },
+      {
+        "id": "objective-alignment",
+        "description": "Stay aligned to the user-defined research objective",
+        "constraint_type": "functional",
+        "category": "scope",
+        "check": ""
+      }
+    ],
+    "context": {},
+    "required_capabilities": [],
+    "input_schema": {},
+    "output_schema": {},
+    "version": "1.0.0",
+    "parent_version": null,
+    "evolution_reason": null,
+    "created_at": "2026-02-11 00:00:00.000000",
+    "updated_at": "2026-02-11 00:00:00.000000"
+  },
+  "required_tools": [
+    "pdf_read",
+    "save_data",
+    "scholar_search",
+    "serve_file_to_user",
+    "web_scrape",
+    "web_search"
+  ],
+  "metadata": {
+    "created_at": "2026-02-11T00:00:00.000000",
+    "node_count": 5,
+    "edge_count": 4
+  }
+}
