@@ -39,8 +39,11 @@ export const credentialsApi = {
     api.delete<{ deleted: boolean }>(`/credentials/${credentialId}`),
 
   checkAgent: (agentPath: string) =>
-    api.post<{ required: AgentCredentialRequirement[] }>(
+    api.post<{ required: AgentCredentialRequirement[]; has_aden_key: boolean }>(
       "/credentials/check-agent",
       { agent_path: agentPath },
     ),
+
+  saveAdenKey: (key: string) =>
+    api.post<{ saved: boolean }>("/credentials/aden-key", { key }),
 };

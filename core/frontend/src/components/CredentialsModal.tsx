@@ -72,6 +72,9 @@ export default function CredentialsModal({
   const [editingId, setEditingId] = useState<string | null>(null);
   const [inputValue, setInputValue] = useState("");
   const [saving, setSaving] = useState(false);
+  const [hasAdenKey, setHasAdenKey] = useState(true); // assume true until backend says otherwise
+  const [adenKeyInput, setAdenKeyInput] = useState("");
+  const [savingAdenKey, setSavingAdenKey] = useState(false);
 
   const fetchStatus = useCallback(async () => {
     setError(null);
@@ -96,7 +99,8 @@ export default function CredentialsModal({
 
         // Real agent — ask backend what credentials it actually needs
         setLoading(true);
-        const { required } = await credentialsApi.checkAgent(agentPath);
+        const { required, has_aden_key } = await credentialsApi.checkAgent(agentPath);
+        setHasAdenKey(has_aden_key);
         credentialCache.set(agentPath, required);
         const newRows: CredentialRow[] = required.map((r: AgentCredentialRequirement) => ({
           id: r.credential_id,
@@ -135,8 +139,25 @@ export default function CredentialsModal({
       fetchStatus();
       setEditingId(null);
       setInputValue("");
+      setAdenKeyInput("");
     }
   }, [open, fetchStatus]);
+
+  const handleSaveAdenKey = async () => {
+    if (!adenKeyInput.trim()) return;
+    setSavingAdenKey(true);
+    try {
+      await credentialsApi.saveAdenKey(adenKeyInput.trim());
+      setAdenKeyInput("");
+      if (agentPath) credentialCache.delete(agentPath);
+      onCredentialChange?.();
+      await fetchStatus();
+    } catch {
+      setError("Failed to save Aden API Key");
+    } finally {
+      setSavingAdenKey(false);
+    }
+  };
 
   const handleConnect = async (row: CredentialRow) => {
     if (row.adenSupported) {
@@ -189,6 +210,7 @@ export default function CredentialsModal({
   const requiredCount = rows.filter(c => c.required).length;
   const requiredConnected = rows.filter(c => c.required && c.connected).length;
   const allRequiredMet = requiredConnected === requiredCount;
+  const needsAdenKeyInput = !hasAdenKey && rows.some(r => r.adenSupported);
 
   return (
     <>
@@ -246,6 +268,50 @@ export default function CredentialsModal({
           {loading && (
             <div className="p-8 flex items-center justify-center">
               <Loader2 className="w-5 h-5 animate-spin text-muted-foreground" />
+            </div>
+          )}
+
+          {/* Aden API Key section */}
+          {!loading && needsAdenKeyInput && (
+            <div className="mx-5 mt-4 px-3 py-3 rounded-lg border border-amber-500/30 bg-amber-500/5">
+              <div className="flex items-center gap-2 mb-1">
+                <KeyRound className="w-3.5 h-3.5 text-amber-600" />
+                <span className="text-sm font-medium text-foreground">Aden API Key</span>
+                <span className="text-[9px] font-semibold uppercase tracking-wider px-1.5 py-0.5 rounded text-destructive/70 bg-destructive/10">
+                  Required
+                </span>
+              </div>
+              <p className="text-[11px] text-muted-foreground mb-2">
+                Required to connect OAuth integrations below.{" "}
+                <a
+                  href="https://hive.adenhq.com/"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-primary hover:underline inline-flex items-center gap-0.5"
+                >
+                  Get your key at hive.adenhq.com
+                  <ExternalLink className="w-2.5 h-2.5" />
+                </a>
+              </p>
+              <div className="flex gap-2">
+                <input
+                  type="password"
+                  value={adenKeyInput}
+                  onChange={(e) => setAdenKeyInput(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") handleSaveAdenKey();
+                  }}
+                  placeholder="Paste your ADEN_API_KEY..."
+                  className="flex-1 px-3 py-1.5 rounded-md border border-border bg-background text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary/40"
+                />
+                <button
+                  onClick={handleSaveAdenKey}
+                  disabled={savingAdenKey || !adenKeyInput.trim()}
+                  className="px-3 py-1.5 rounded-md text-xs font-medium bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                >
+                  {savingAdenKey ? <Loader2 className="w-3 h-3 animate-spin" /> : "Save"}
+                </button>
+              </div>
             </div>
           )}
 

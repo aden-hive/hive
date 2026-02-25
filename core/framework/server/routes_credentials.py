@@ -100,7 +100,11 @@ async def handle_check_agent(request: web.Request) -> web.Response:
         import os
 
         from framework.credentials.setup import CredentialSetupSession
-        from framework.credentials.storage import CompositeStorage, EncryptedFileStorage, EnvVarStorage
+        from framework.credentials.storage import (
+            CompositeStorage,
+            EncryptedFileStorage,
+            EnvVarStorage,
+        )
         from framework.credentials.validation import _presync_aden_tokens, ensure_credential_key_env
 
         # Load env vars from shell config (same as runtime startup)
@@ -116,8 +120,7 @@ async def handle_check_agent(request: web.Request) -> web.Response:
             _presync_aden_tokens(CREDENTIAL_SPECS)
 
         env_mapping = {
-            (spec.credential_id or name): spec.env_var
-            for name, spec in CREDENTIAL_SPECS.items()
+            (spec.credential_id or name): spec.env_var for name, spec in CREDENTIAL_SPECS.items()
         }
         env_storage = EnvVarStorage(env_mapping=env_mapping)
         if os.environ.get("HIVE_CREDENTIAL_KEY"):
@@ -134,6 +137,7 @@ async def handle_check_agent(request: web.Request) -> web.Response:
         if verify:
             try:
                 from aden_tools.credentials import check_credential_health
+
                 check_health = check_credential_health
             except ImportError:
                 pass
@@ -179,16 +183,62 @@ async def handle_check_agent(request: web.Request) -> web.Response:
                             entry["validation_message"] = f"Health check error: {exc}"
 
             required.append(entry)
-        return web.json_response({"required": required})
+        return web.json_response({
+            "required": required,
+            "has_aden_key": bool(os.environ.get("ADEN_API_KEY")),
+        })
     except Exception as e:
         logger.exception(f"Error checking agent credentials: {e}")
         return web.json_response({"error": str(e)}, status=500)
 
 
+async def handle_save_aden_key(request: web.Request) -> web.Response:
+    """POST /api/credentials/aden-key — save the user's ADEN_API_KEY.
+
+    Sets the key in the current process environment and persists it to shell
+    config so future terminals pick it up.  Then triggers an Aden token sync
+    so OAuth credentials resolve immediately.
+
+    Body: {"key": "..."}
+    """
+    import os
+
+    body = await request.json()
+    key = body.get("key", "").strip()
+    if not key:
+        return web.json_response({"error": "key is required"}, status=400)
+
+    os.environ["ADEN_API_KEY"] = key
+
+    # Persist to shell config (best-effort, same pattern as TUI setup)
+    try:
+        from aden_tools.credentials.shell_config import add_env_var_to_shell_config
+
+        add_env_var_to_shell_config(
+            "ADEN_API_KEY",
+            key,
+            comment="Aden Platform API key",
+        )
+    except Exception as exc:
+        logger.warning("Could not persist ADEN_API_KEY to shell config: %s", exc)
+
+    # Immediately sync OAuth tokens from Aden
+    try:
+        from aden_tools.credentials import CREDENTIAL_SPECS
+        from framework.credentials.validation import _presync_aden_tokens
+
+        _presync_aden_tokens(CREDENTIAL_SPECS)
+    except Exception as exc:
+        logger.warning("Aden token sync after key save failed: %s", exc)
+
+    return web.json_response({"saved": True}, status=201)
+
+
 def register_routes(app: web.Application) -> None:
     """Register credential routes on the application."""
-    # check-agent must be registered BEFORE the {credential_id} wildcard
+    # check-agent and aden-key must be registered BEFORE the {credential_id} wildcard
     app.router.add_post("/api/credentials/check-agent", handle_check_agent)
+    app.router.add_post("/api/credentials/aden-key", handle_save_aden_key)
     app.router.add_get("/api/credentials", handle_list_credentials)
     app.router.add_post("/api/credentials", handle_save_credential)
     app.router.add_get("/api/credentials/{credential_id}", handle_get_credential)
