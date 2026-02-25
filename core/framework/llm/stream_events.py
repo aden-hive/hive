@@ -71,6 +71,9 @@ class FinishEvent:
     stop_reason: str = ""
     input_tokens: int = 0
     output_tokens: int = 0
+    reasoning_tokens: int = 0       # thinking/reasoning budget tokens (0 for non-reasoning models)
+    cache_read_tokens: int = 0      # prompt-cache hit tokens (0 when not applicable)
+    cache_creation_tokens: int = 0  # prompt-cache write tokens (0 when not applicable)
     model: str = ""
 
 

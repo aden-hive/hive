@@ -29,6 +29,27 @@ from framework.llm.stream_events import StreamEvent
 logger = logging.getLogger(__name__)
 
 
+def _extract_token_details(usage: Any) -> tuple[int, int, int]:
+    """Extract reasoning, cache_read, and cache_creation token counts from a LiteLLM usage object.
+
+    Returns (reasoning_tokens, cache_read_tokens, cache_creation_tokens).
+    All counts default to 0 when the field is absent or None.
+
+    Field paths verified against LiteLLM 1.81.7:
+    - reasoning:      usage.completion_tokens_details.reasoning_tokens
+    - cache_read:     usage.prompt_tokens_details.cached_tokens
+    - cache_creation: usage.prompt_tokens_details.cache_creation_tokens
+    """
+    if usage is None:
+        return 0, 0, 0
+    completion_details = getattr(usage, "completion_tokens_details", None)
+    reasoning = getattr(completion_details, "reasoning_tokens", None) or 0
+    prompt_details = getattr(usage, "prompt_tokens_details", None)
+    cache_read = getattr(prompt_details, "cached_tokens", None) or 0
+    cache_creation = getattr(prompt_details, "cache_creation_tokens", None) or 0
+    return reasoning, cache_read, cache_creation
+
+
 def _patch_litellm_anthropic_oauth() -> None:
     """Patch litellm's Anthropic header construction to fix OAuth token handling.
 
@@ -442,12 +463,16 @@ class LiteLLMProvider(LLMProvider):
         usage = response.usage
         input_tokens = usage.prompt_tokens if usage else 0
         output_tokens = usage.completion_tokens if usage else 0
+        reasoning_tokens, cache_read_tokens, cache_creation_tokens = _extract_token_details(usage)
 
         return LLMResponse(
             content=content,
             model=response.model or self.model,
             input_tokens=input_tokens,
             output_tokens=output_tokens,
+            reasoning_tokens=reasoning_tokens,
+            cache_read_tokens=cache_read_tokens,
+            cache_creation_tokens=cache_creation_tokens,
             stop_reason=response.choices[0].finish_reason or "",
             raw_response=response,
         )
@@ -470,6 +495,9 @@ class LiteLLMProvider(LLMProvider):
 
         total_input_tokens = 0
         total_output_tokens = 0
+        total_reasoning_tokens = 0
+        total_cache_read_tokens = 0
+        total_cache_creation_tokens = 0
 
         # Convert tools to OpenAI format
         openai_tools = [self._tool_to_openai_format(t) for t in tools]
@@ -496,6 +524,10 @@ class LiteLLMProvider(LLMProvider):
             if usage:
                 total_input_tokens += usage.prompt_tokens
                 total_output_tokens += usage.completion_tokens
+                r, cr, cc = _extract_token_details(usage)
+                total_reasoning_tokens += r
+                total_cache_read_tokens += cr
+                total_cache_creation_tokens += cc
 
             choice = response.choices[0]
             message = choice.message
@@ -507,6 +539,9 @@ class LiteLLMProvider(LLMProvider):
                     model=response.model or self.model,
                     input_tokens=total_input_tokens,
                     output_tokens=total_output_tokens,
+                    reasoning_tokens=total_reasoning_tokens,
+                    cache_read_tokens=total_cache_read_tokens,
+                    cache_creation_tokens=total_cache_creation_tokens,
                     stop_reason=choice.finish_reason or "stop",
                     raw_response=response,
                 )
@@ -569,6 +604,9 @@ class LiteLLMProvider(LLMProvider):
             model=self.model,
             input_tokens=total_input_tokens,
             output_tokens=total_output_tokens,
+            reasoning_tokens=total_reasoning_tokens,
+            cache_read_tokens=total_cache_read_tokens,
+            cache_creation_tokens=total_cache_creation_tokens,
             stop_reason="max_iterations",
             raw_response=None,
         )
@@ -715,12 +753,16 @@ class LiteLLMProvider(LLMProvider):
         usage = response.usage
         input_tokens = usage.prompt_tokens if usage else 0
         output_tokens = usage.completion_tokens if usage else 0
+        reasoning_tokens, cache_read_tokens, cache_creation_tokens = _extract_token_details(usage)
 
         return LLMResponse(
             content=content,
             model=response.model or self.model,
             input_tokens=input_tokens,
             output_tokens=output_tokens,
+            reasoning_tokens=reasoning_tokens,
+            cache_read_tokens=cache_read_tokens,
+            cache_creation_tokens=cache_creation_tokens,
             stop_reason=response.choices[0].finish_reason or "",
             raw_response=response,
         )
@@ -742,6 +784,9 @@ class LiteLLMProvider(LLMProvider):
 
         total_input_tokens = 0
         total_output_tokens = 0
+        total_reasoning_tokens = 0
+        total_cache_read_tokens = 0
+        total_cache_creation_tokens = 0
         openai_tools = [self._tool_to_openai_format(t) for t in tools]
 
         for _ in range(max_iterations):
@@ -764,6 +809,10 @@ class LiteLLMProvider(LLMProvider):
             if usage:
                 total_input_tokens += usage.prompt_tokens
                 total_output_tokens += usage.completion_tokens
+                r, cr, cc = _extract_token_details(usage)
+                total_reasoning_tokens += r
+                total_cache_read_tokens += cr
+                total_cache_creation_tokens += cc
 
             choice = response.choices[0]
             message = choice.message
@@ -774,6 +823,9 @@ class LiteLLMProvider(LLMProvider):
                     model=response.model or self.model,
                     input_tokens=total_input_tokens,
                     output_tokens=total_output_tokens,
+                    reasoning_tokens=total_reasoning_tokens,
+                    cache_read_tokens=total_cache_read_tokens,
+                    cache_creation_tokens=total_cache_creation_tokens,
                     stop_reason=choice.finish_reason or "stop",
                     raw_response=response,
                 )
@@ -830,6 +882,9 @@ class LiteLLMProvider(LLMProvider):
             model=self.model,
             input_tokens=total_input_tokens,
             output_tokens=total_output_tokens,
+            reasoning_tokens=total_reasoning_tokens,
+            cache_read_tokens=total_cache_read_tokens,
+            cache_creation_tokens=total_cache_creation_tokens,
             stop_reason="max_iterations",
             raw_response=None,
         )
@@ -903,6 +958,9 @@ class LiteLLMProvider(LLMProvider):
             tool_calls_acc: dict[int, dict[str, str]] = {}
             input_tokens = 0
             output_tokens = 0
+            reasoning_tokens = 0
+            cache_read_tokens = 0
+            cache_creation_tokens = 0
 
             try:
                 response = await litellm.acompletion(**kwargs)  # type: ignore[union-attr]
@@ -958,12 +1016,18 @@ class LiteLLMProvider(LLMProvider):
                         if usage:
                             input_tokens = getattr(usage, "prompt_tokens", 0) or 0
                             output_tokens = getattr(usage, "completion_tokens", 0) or 0
+                        reasoning_tokens, cache_read_tokens, cache_creation_tokens = (
+                            _extract_token_details(usage)
+                        )
 
                         tail_events.append(
                             FinishEvent(
                                 stop_reason=choice.finish_reason,
                                 input_tokens=input_tokens,
                                 output_tokens=output_tokens,
+                                reasoning_tokens=reasoning_tokens,
+                                cache_read_tokens=cache_read_tokens,
+                                cache_creation_tokens=cache_creation_tokens,
                                 model=self.model,
                             )
                         )
