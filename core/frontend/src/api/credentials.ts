@@ -17,6 +17,8 @@ export interface AgentCredentialRequirement {
   tools: string[];
   node_types: string[];
   available: boolean;
+  valid: boolean | null;
+  validation_message: string | null;
   direct_api_key_supported: boolean;
   aden_supported: boolean;
   credential_key: string;

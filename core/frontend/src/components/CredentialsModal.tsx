@@ -38,6 +38,23 @@ interface CredentialRow {
   required: boolean;
   credentialKey: string; // key name within the credential (e.g., "api_key")
   adenSupported: boolean; // whether this credential uses OAuth via Aden
+  valid: boolean | null; // true = health check passed, false = failed, null = not checked
+  validationMessage: string | null;
+}
+
+function requirementToRow(r: AgentCredentialRequirement): CredentialRow {
+  return {
+    id: r.credential_id,
+    name: r.credential_name,
+    description: r.description,
+    icon: "\uD83D\uDD11",
+    connected: r.available,
+    required: true,
+    credentialKey: r.credential_key || "api_key",
+    adenSupported: r.aden_supported,
+    valid: r.valid,
+    validationMessage: r.validation_message,
+  };
 }
 
 // Module-level cache: credential requirements are static per agent path.
@@ -83,16 +100,7 @@ export default function CredentialsModal({
         // Check cache first — credential requirements are static per agent
         const cached = credentialCache.get(agentPath);
         if (cached) {
-          setRows(cached.map((r: AgentCredentialRequirement) => ({
-            id: r.credential_id,
-            name: r.credential_name,
-            description: r.description,
-            icon: "\uD83D\uDD11",
-            connected: r.available,
-            required: true,
-            credentialKey: r.credential_key || "api_key",
-            adenSupported: r.aden_supported,
-          })));
+          setRows(cached.map(requirementToRow));
           setLoading(false);
           return;
         }
@@ -102,17 +110,7 @@ export default function CredentialsModal({
         const { required, has_aden_key } = await credentialsApi.checkAgent(agentPath);
         setHasAdenKey(has_aden_key);
         credentialCache.set(agentPath, required);
-        const newRows: CredentialRow[] = required.map((r: AgentCredentialRequirement) => ({
-          id: r.credential_id,
-          name: r.credential_name,
-          description: r.description,
-          icon: "\uD83D\uDD11",
-          connected: r.available,
-          required: true,
-          credentialKey: r.credential_key || "api_key",
-          adenSupported: r.aden_supported,
-        }));
-        setRows(newRows);
+        setRows(required.map(requirementToRow));
       } else {
         // No real path — no credentials to show
         setRows([]);
@@ -124,6 +122,8 @@ export default function CredentialsModal({
           ...c,
           credentialKey: "api_key",
           adenSupported: false,
+          valid: null,
+          validationMessage: null,
         })));
       } else {
         setRows([]);
@@ -209,7 +209,9 @@ export default function CredentialsModal({
   const connectedCount = rows.filter(c => c.connected).length;
   const requiredCount = rows.filter(c => c.required).length;
   const requiredConnected = rows.filter(c => c.required && c.connected).length;
-  const allRequiredMet = requiredConnected === requiredCount;
+  const invalidCount = rows.filter(c => c.valid === false).length;
+  const missingCount = requiredCount - requiredConnected;
+  const allRequiredMet = requiredConnected === requiredCount && invalidCount === 0;
   const needsAdenKeyInput = !hasAdenKey && rows.some(r => r.adenSupported);
 
   return (
@@ -251,7 +253,9 @@ export default function CredentialsModal({
               ) : (
                 <>
                   <AlertCircle className="w-3.5 h-3.5" />
-                  {requiredCount - requiredConnected} required credential{requiredCount - requiredConnected !== 1 ? "s" : ""} missing
+                  {missingCount > 0 && `${missingCount} missing`}
+                  {missingCount > 0 && invalidCount > 0 && ", "}
+                  {invalidCount > 0 && `${invalidCount} invalid`}
                 </>
               )}
             </div>
@@ -322,9 +326,11 @@ export default function CredentialsModal({
                 <div key={row.id}>
                   <div
                     className={`flex items-center gap-3 px-3 py-3 rounded-lg border transition-colors ${
-                      row.connected
+                      row.connected && row.valid !== false
                         ? "border-primary/20 bg-primary/[0.03]"
-                        : "border-border/60 bg-muted/20"
+                        : row.valid === false
+                          ? "border-destructive/30 bg-destructive/[0.03]"
+                          : "border-border/60 bg-muted/20"
                     }`}
                   >
                     <span className="text-lg flex-shrink-0">{row.icon}</span>
@@ -342,13 +348,23 @@ export default function CredentialsModal({
                         )}
                       </div>
                       <p className="text-[11px] text-muted-foreground mt-0.5">{row.description}</p>
+                      {row.valid === false && row.validationMessage && (
+                        <p className="text-[11px] text-destructive mt-0.5">{row.validationMessage}</p>
+                      )}
                     </div>
                     {row.connected ? (
                       <div className="flex items-center gap-1 flex-shrink-0">
-                        <span className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium bg-primary/10 text-primary">
-                          <Check className="w-3 h-3" />
-                          Connected
-                        </span>
+                        {row.valid === false ? (
+                          <span className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium bg-destructive/10 text-destructive" title={row.validationMessage || "Invalid"}>
+                            <AlertCircle className="w-3 h-3" />
+                            Invalid
+                          </span>
+                        ) : (
+                          <span className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium bg-primary/10 text-primary">
+                            <Check className="w-3 h-3" />
+                            Connected
+                          </span>
+                        )}
                         <button
                           onClick={() => handleDisconnect(row)}
                           disabled={saving}
@@ -426,7 +442,7 @@ export default function CredentialsModal({
                     : "bg-muted text-muted-foreground cursor-not-allowed"
                 }`}
               >
-                {allRequiredMet ? "Done" : "Connect required credentials to continue"}
+                {allRequiredMet ? "Done" : missingCount > 0 ? "Connect required credentials to continue" : "Fix invalid credentials to continue"}
               </button>
             </div>
           )}
