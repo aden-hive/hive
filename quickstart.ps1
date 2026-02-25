@@ -614,17 +614,45 @@ $imports = @(
     @{ Module = "framework.mcp.agent_builder_server"; Label = "MCP server module"; Required = $true }
 )
 
-foreach ($imp in $imports) {
-    Write-Host "  $($imp.Label)... " -NoNewline
-    $null = & uv run python -c "import $($imp.Module)" 2>&1
-    if ($LASTEXITCODE -eq 0) {
-        Write-Ok "ok"
-    } elseif ($imp.Required) {
-        Write-Fail "failed"
-        $importErrors++
-    } else {
-        Write-Warn "issues (may be OK)"
+# Batch check all imports in single process (reduces subprocess spawning overhead)
+$modulesToCheck = @("framework", "aden_tools", "litellm", "framework.mcp.agent_builder_server")
+
+try {
+    $checkOutput = & uv run $PythonCmd scripts/check_requirements.py @modulesToCheck 2>&1 | Out-String
+    $resultJson = $null
+    
+    # Try to parse JSON result
+    try {
+        $resultJson = $checkOutput | ConvertFrom-Json
+    } catch {
+        Write-Fail "Failed to parse import check results"
+        Write-Host $checkOutput
+        exit 1
     }
+    
+    # Display results for each module
+    foreach ($imp in $imports) {
+        Write-Host "  $($imp.Label)... " -NoNewline
+        $status = $resultJson.$($imp.Module)
+        
+        if ($status -eq "ok") {
+            Write-Ok "ok"
+        } elseif ($imp.Required) {
+            Write-Fail "failed"
+            if ($status) {
+                Write-Host "    $status" -ForegroundColor Red
+            }
+            $importErrors++
+        } else {
+            Write-Warn "issues (may be OK)"
+            if ($status -and $status -ne "ok") {
+                Write-Host "    $status" -ForegroundColor Yellow
+            }
+        }
+    }
+} catch {
+    Write-Fail "Import check failed: $($_.Exception.Message)"
+    exit 1
 }
 
 if ($importErrors -gt 0) {
@@ -975,16 +1003,37 @@ Write-Step -Number "7" -Text "Step 7: Verifying installation..."
 
 $verifyErrors = 0
 
-$verifications = @(
-    @{ Cmd = "import framework";   Label = "framework" },
-    @{ Cmd = "import aden_tools";  Label = "aden_tools" }
-)
+# Batch verification using same check_requirements script
+$verifyModules = @("framework", "aden_tools")
 
-foreach ($v in $verifications) {
-    Write-Host "  $([char]0x2B21) $($v.Label)... " -NoNewline
-    $null = & uv run python -c $v.Cmd 2>&1
-    if ($LASTEXITCODE -eq 0) { Write-Ok "ok" }
-    else { Write-Fail "failed"; $verifyErrors++ }
+try {
+    $verifyOutput = & uv run $PythonCmd scripts/check_requirements.py @verifyModules 2>&1 | Out-String
+    $verifyJson = $null
+    
+    try {
+        $verifyJson = $verifyOutput | ConvertFrom-Json
+    } catch {
+        Write-Host "  Warning: Could not parse verification results" -ForegroundColor Yellow
+        # Fall back to basic checks if JSON parsing fails
+        foreach ($mod in $verifyModules) {
+            Write-Host "  $([char]0x2B21) $mod... " -NoNewline
+            $null = & uv run $PythonCmd -c "import $mod" 2>&1
+            if ($LASTEXITCODE -eq 0) { Write-Ok "ok" }
+            else { Write-Fail "failed"; $verifyErrors++ }
+        }
+    }
+    
+    if ($verifyJson) {
+        Write-Host "  $([char]0x2B21) framework... " -NoNewline
+        if ($verifyJson.framework -eq "ok") { Write-Ok "ok" }
+        else { Write-Fail "failed"; $verifyErrors++ }
+        
+        Write-Host "  $([char]0x2B21) aden_tools... " -NoNewline
+        if ($verifyJson.aden_tools -eq "ok") { Write-Ok "ok" }
+        else { Write-Fail "failed"; $verifyErrors++ }
+    }
+} catch {
+    Write-Host "  Warning: Verification check encountered an error" -ForegroundColor Yellow
 }
 
 Write-Host "  $([char]0x2B21) litellm... " -NoNewline
