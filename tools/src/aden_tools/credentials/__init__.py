@@ -89,6 +89,7 @@ from .slack import SLACK_CREDENTIALS
 from .store_adapter import CredentialStoreAdapter
 from .stripe import STRIPE_CREDENTIALS
 from .telegram import TELEGRAM_CREDENTIALS
+from .ticktick import TICKTICK_CREDENTIALS
 
 # Merged registry of all credentials
 CREDENTIAL_SPECS = {
@@ -160,4 +161,5 @@ __all__ = [
     "STRIPE_CREDENTIALS",
     "BREVO_CREDENTIALS",
     "POSTGRES_CREDENTIALS",
+    "TICKTICK_CREDENTIALS",
 ]

@@ -22,12 +22,13 @@ Some tools require API keys to function. Credentials are managed through the enc
 ./quickstart.sh
 ```
 
-| Variable               | Required For                  | Get Key                                                 |
-| ---------------------- | ----------------------------- | ------------------------------------------------------- |
-| `ANTHROPIC_API_KEY`    | MCP server startup, LLM nodes | [console.anthropic.com](https://console.anthropic.com/) |
-| `BRAVE_SEARCH_API_KEY` | `web_search` tool (Brave)     | [brave.com/search/api](https://brave.com/search/api/)   |
-| `GOOGLE_API_KEY`       | `web_search` tool (Google)    | [console.cloud.google.com](https://console.cloud.google.com/) |
-| `GOOGLE_CSE_ID`        | `web_search` tool (Google)    | [programmablesearchengine.google.com](https://programmablesearchengine.google.com/) |
+| Variable                  | Required For                  | Get Key                                                 |
+| ------------------------- | ----------------------------- | ------------------------------------------------------- |
+| `ANTHROPIC_API_KEY`       | MCP server startup, LLM nodes | [console.anthropic.com](https://console.anthropic.com/) |
+| `BRAVE_SEARCH_API_KEY`    | `web_search` tool (Brave)     | [brave.com/search/api](https://brave.com/search/api/)   |
+| `GOOGLE_API_KEY`          | `web_search` tool (Google)    | [console.cloud.google.com](https://console.cloud.google.com/) |
+| `GOOGLE_CSE_ID`           | `web_search` tool (Google)    | [programmablesearchengine.google.com](https://programmablesearchengine.google.com/) |
+| `TICKTICK_ACCESS_TOKEN`   | `ticktick_*` tools            | [developer.ticktick.com/manage](https://developer.ticktick.com/manage) |
 
 > **Note:** `web_search` supports multiple providers. Set either Brave OR Google credentials. Brave is preferred for backward compatibility.
 
@@ -134,6 +135,7 @@ python mcp_server.py
 | `hubspot_*` | HubSpot CRM: contacts, companies, deals, notes |
 | `apollo_*` | Apollo.io: prospect search and enrichment |
 | `calcom_*` | Cal.com: scheduling and bookings |
+| `ticktick_create_task`, `ticktick_list_tasks`, `ticktick_update_task`, `ticktick_complete_task`, `ticktick_delete_task`, `ticktick_list_projects`, `ticktick_create_project`, `ticktick_list_tags` | TickTick: task and project management via Open API v1 |
 
 ### Cloud & APIs
 
@@ -188,6 +190,7 @@ tools/
 │       ├── pdf_read_tool/
 │       ├── wikipedia_tool/
 │       ├── time_tool/
+│       ├── ticktick_tool/
 │       └── calendar_tool/
 ├── tests/                   # Test suite
 ├── mcp_server.py            # MCP server entry point

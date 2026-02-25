@@ -58,6 +58,9 @@ export BRAVE_SEARCH_API_KEY="..."
 
 # Exa Search (alternative web search)
 export EXA_API_KEY="..."
+
+# TickTick task management
+export TICKTICK_ACCESS_TOKEN="..."
 ```
 
 ### Runtime Flags
