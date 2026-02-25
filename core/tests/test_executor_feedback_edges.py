@@ -80,9 +80,11 @@ def goal():
 
 
 def test_max_node_visits_default():
-    """NodeSpec.max_node_visits should default to 1."""
-    spec = NodeSpec(id="n", name="N", description="test", node_type="function", output_keys=["out"])
-    assert spec.max_node_visits == 1
+    """NodeSpec.max_node_visits should default to 0 (unbounded, for forever-alive agents)."""
+    spec = NodeSpec(
+        id="n", name="N", description="test", node_type="event_loop", output_keys=["out"]
+    )
+    assert spec.max_node_visits == 0
 
 
 # ---------------------------------------------------------------------------
@@ -101,7 +103,7 @@ async def test_visit_limit_skips_node(runtime, goal):
         id="a",
         name="A",
         description="entry with visit limit",
-        node_type="function",
+        node_type="event_loop",
         output_keys=["a_out"],
         max_node_visits=1,
     )
@@ -109,7 +111,7 @@ async def test_visit_limit_skips_node(runtime, goal):
         id="b",
         name="B",
         description="middle node",
-        node_type="function",
+        node_type="event_loop",
         output_keys=["b_out"],
         max_node_visits=0,  # unlimited — let max_steps guard
     )
@@ -159,7 +161,7 @@ async def test_visit_limit_allows_multiple(runtime, goal):
         id="a",
         name="A",
         description="entry allows two visits",
-        node_type="function",
+        node_type="event_loop",
         output_keys=["a_out"],
         max_node_visits=2,
     )
@@ -167,7 +169,7 @@ async def test_visit_limit_allows_multiple(runtime, goal):
         id="b",
         name="B",
         description="middle node",
-        node_type="function",
+        node_type="event_loop",
         output_keys=["b_out"],
         max_node_visits=0,  # unlimited
     )
@@ -215,7 +217,7 @@ async def test_visit_limit_zero_unlimited(runtime, goal):
         id="a",
         name="A",
         description="unlimited visits",
-        node_type="function",
+        node_type="event_loop",
         output_keys=["a_out"],
         max_node_visits=0,
     )
@@ -223,7 +225,7 @@ async def test_visit_limit_zero_unlimited(runtime, goal):
         id="b",
         name="B",
         description="middle node",
-        node_type="function",
+        node_type="event_loop",
         output_keys=["b_out"],
         max_node_visits=0,
     )
@@ -274,7 +276,7 @@ async def test_conditional_feedback_edge(runtime, goal):
         id="director",
         name="Director",
         description="plans work",
-        node_type="function",
+        node_type="event_loop",
         output_keys=["plan"],
         max_node_visits=2,
     )
@@ -282,7 +284,7 @@ async def test_conditional_feedback_edge(runtime, goal):
         id="writer",
         name="Writer",
         description="writes draft",
-        node_type="function",
+        node_type="event_loop",
         output_keys=["draft", "needs_revision"],
         max_node_visits=2,
     )
@@ -290,7 +292,7 @@ async def test_conditional_feedback_edge(runtime, goal):
         id="output",
         name="Output",
         description="final output",
-        node_type="function",
+        node_type="event_loop",
         output_keys=["final"],
     )
 
@@ -370,7 +372,7 @@ async def test_conditional_feedback_false(runtime, goal):
         id="director",
         name="Director",
         description="plans work",
-        node_type="function",
+        node_type="event_loop",
         output_keys=["plan"],
         max_node_visits=2,
     )
@@ -378,14 +380,14 @@ async def test_conditional_feedback_false(runtime, goal):
         id="writer",
         name="Writer",
         description="writes draft",
-        node_type="function",
+        node_type="event_loop",
         output_keys=["draft", "needs_revision"],
     )
     output_node = NodeSpec(
         id="output",
         name="Output",
         description="final output",
-        node_type="function",
+        node_type="event_loop",
         output_keys=["final"],
     )
 
@@ -458,14 +460,14 @@ async def test_visit_counts_in_result(runtime, goal):
         id="a",
         name="A",
         description="entry",
-        node_type="function",
+        node_type="event_loop",
         output_keys=["a_out"],
     )
     node_b = NodeSpec(
         id="b",
         name="B",
         description="terminal",
-        node_type="function",
+        node_type="event_loop",
         input_keys=["a_out"],
         output_keys=["b_out"],
     )
@@ -509,21 +511,21 @@ async def test_conditional_priority_prevents_fanout(runtime, goal):
         id="writer",
         name="Writer",
         description="produces output",
-        node_type="function",
+        node_type="event_loop",
         output_keys=["draft", "needs_revision"],
     )
     output_node = NodeSpec(
         id="output",
         name="Output",
         description="forward target",
-        node_type="function",
+        node_type="event_loop",
         output_keys=["final"],
     )
     director = NodeSpec(
         id="director",
         name="Director",
         description="feedback target",
-        node_type="function",
+        node_type="event_loop",
         output_keys=["plan"],
         max_node_visits=2,
     )

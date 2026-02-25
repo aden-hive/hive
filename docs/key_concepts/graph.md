@@ -10,17 +10,15 @@ Edges can loop back, creating feedback cycles where an agent retries a step or t
 
 ## Nodes
 
-A node is a unit of work. Each node reads inputs from shared memory, does something, and writes outputs back. There are a handful of node types, each suited to a different kind of work:
+A node is a unit of work. Each node reads inputs from shared memory, does something, and writes outputs back.
 
-**`event_loop`** — The workhorse. This is a multi-turn LLM loop: the model reasons about the current state, calls tools, observes results, and keeps going until it has produced the required outputs. Most of the interesting agent behavior happens in these nodes. They handle long-running tasks, manage their own context window, and can recover from crashes mid-conversation.
+**`event_loop`** — This is the only node type in Hive. It's a multi-turn LLM loop where the model reasons about the current state, calls tools, observes results, and keeps going until it has produced the required outputs. All agent behavior happens in these nodes. They handle long-running tasks, manage their own context window, and can recover from crashes mid-conversation.
 
-**`function`** — A plain Python function. No LLM involved. Use these for anything deterministic: data transformation, API calls with known parameters, validation logic, or any step where you don't want a language model making judgment calls.
-
-**`router`** — A decision point that directs execution down different paths. Can be rule-based ("if confidence is high, go left; otherwise, go right") or LLM-powered ("given the goal and what we know so far, which path makes sense?").
-
-**`human_input`** — A pause point where the agent stops and asks a human for input before continuing. See [Human-in-the-Loop](#human-in-the-loop) below.
-
-There are also simpler LLM node types (`llm_tool_use` for a single LLM call with tools, `llm_generate` for pure text generation) for steps that don't need the full event loop.
+Event loop nodes are highly configurable:
+- **Tools** — Give the node access to specific capabilities (web search, API calls, database queries, etc.)
+- **Client-facing** — Set `client_facing=True` to make the node interact directly with humans (see [Human-in-the-Loop](#human-in-the-loop))
+- **Custom logic** — Implement the `NodeProtocol` interface to wrap deterministic functions or any custom behavior
+- **Judge** — Configure evaluation criteria to control when the node accepts its output vs. retries
 
 ### Self-Correction Within a Node
 
@@ -57,11 +55,11 @@ Data flows through the graph in a natural way: input arrives at the start, each 
 
 ## Human-in-the-Loop
 
-Human-in-the-loop (HITL) nodes are where the agent pauses and asks a person for input. This isn't a blunt "stop everything" — the framework supports structured questions: open-ended text, multiple choice, yes/no approvals, and multi-field forms.
+Human-in-the-loop (HITL) is enabled by setting `client_facing=True` on an event loop node. These nodes pause and ask a person for input. This isn't a blunt "stop everything" — the framework supports structured questions: open-ended text, multiple choice, yes/no approvals, and multi-field forms.
 
-When the agent hits a HITL node, it saves its entire state and presents the questions. The session can sit paused for minutes, hours, or days. When the human responds, execution picks up exactly where it left off.
+When the agent hits a client-facing node, it saves its entire state and presents the output or questions directly to the user. The session can sit paused for minutes, hours, or days. When the human responds, execution picks up exactly where it left off.
 
-This is what makes Hive agents supervisable in production. You place HITL nodes at critical decision points — before sending a message, before making a purchase, before any action that's hard to undo. The agent handles the routine work autonomously; humans weigh in on the decisions that matter. And every time a human provides input, that decision becomes data the [evolution](./evolution.md) process can learn from.
+This is what makes Hive agents supervisable in production. You place client-facing nodes at critical decision points — before sending a message, before making a purchase, before any action that's hard to undo. The agent handles the routine work autonomously; humans weigh in on the decisions that matter. And every time a human provides input, that decision becomes data the [evolution](./evolution.md) process can learn from.
 
 ## The Shape of an Agent
 

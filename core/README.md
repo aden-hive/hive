@@ -73,7 +73,7 @@ To use the agent builder with Claude Desktop or other MCP clients, add this to y
 The MCP server provides tools for:
 - Creating agent building sessions
 - Defining goals with success criteria
-- Adding nodes (llm_generate, llm_tool_use, router, function)
+- Adding nodes (event_loop only)
 - Connecting nodes with edges
 - Validating and exporting agent graphs
 - Testing nodes and full agent graphs

@@ -143,6 +143,7 @@ def _has_api_key(env_var: str) -> bool:
 # ---------------------------------------------------------------------------
 # Real API tests — text streaming
 # ---------------------------------------------------------------------------
+@pytest.mark.skip(reason="Requires valid live API keys — run manually")
 class TestRealAPITextStreaming:
     """Stream a simple text response from each provider and dump events."""
 
@@ -204,6 +205,7 @@ class TestRealAPITextStreaming:
 # ---------------------------------------------------------------------------
 # Real API tests — tool call streaming
 # ---------------------------------------------------------------------------
+@pytest.mark.skip(reason="Requires valid live API keys — run manually")
 class TestRealAPIToolCallStreaming:
     """Stream a tool call response from each provider and dump events."""
 

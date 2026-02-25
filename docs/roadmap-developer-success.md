@@ -236,6 +236,17 @@ By default, Hive supports deployment through Docker.
 
 If you want zero-ops deployment, easier integration and credential management, and built-in logging, Aden Cloud is ideal. You get secure defaults, scaling, and observability out of the box—at the cost of less low-level control and some vendor lock-in.
 
+## Autonomous Agent Deployment
+
+Hive is designed to support 
+
+- Memory sustainalibility (what are the memory to keep and what to discard)
+- Event source management
+- Recoverablility
+- Repeatability
+- Volume - Multiple approach to support batch operation
+
+
 ## Deployment Strategy
 
 Autonomous and interactive modes look different, but the core remains the same, and your deployment strategy should be consistent across both.

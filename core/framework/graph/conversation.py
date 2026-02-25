@@ -27,6 +27,9 @@ class Message:
     tool_use_id: str | None = None
     tool_calls: list[dict[str, Any]] | None = None
     is_error: bool = False
+    # Phase-aware compaction metadata (continuous mode)
+    phase_id: str | None = None
+    is_transition_marker: bool = False
 
     def to_llm_dict(self) -> dict[str, Any]:
         """Convert to OpenAI-format message dict."""
@@ -60,6 +63,10 @@ class Message:
             d["tool_calls"] = self.tool_calls
         if self.is_error:
             d["is_error"] = self.is_error
+        if self.phase_id is not None:
+            d["phase_id"] = self.phase_id
+        if self.is_transition_marker:
+            d["is_transition_marker"] = self.is_transition_marker
         return d
 
     @classmethod
@@ -72,6 +79,8 @@ class Message:
             tool_use_id=data.get("tool_use_id"),
             tool_calls=data.get("tool_calls"),
             is_error=data.get("is_error", False),
+            phase_id=data.get("phase_id"),
+            is_transition_marker=data.get("is_transition_marker", False),
         )
 
 
@@ -188,12 +197,40 @@ class NodeConversation:
         self._next_seq: int = 0
         self._meta_persisted: bool = False
         self._last_api_input_tokens: int | None = None
+        self._current_phase: str | None = None
 
     # --- Properties --------------------------------------------------------
 
     @property
     def system_prompt(self) -> str:
         return self._system_prompt
+
+    def update_system_prompt(self, new_prompt: str) -> None:
+        """Update the system prompt.
+
+        Used in continuous conversation mode at phase transitions to swap
+        Layer 3 (focus) while preserving the conversation history.
+        """
+        self._system_prompt = new_prompt
+
+    def set_current_phase(self, phase_id: str) -> None:
+        """Set the current phase ID. Subsequent messages will be stamped with it."""
+        self._current_phase = phase_id
+
+    async def switch_store(self, new_store: ConversationStore) -> None:
+        """Switch to a new persistence store at a phase transition.
+
+        Subsequent messages are written to *new_store*.  Meta (system
+        prompt, config) is re-persisted on the next write so the new
+        store's ``meta.json`` reflects the updated prompt.
+        """
+        self._store = new_store
+        self._meta_persisted = False
+        await new_store.write_cursor({"next_seq": self._next_seq})
+
+    @property
+    def current_phase(self) -> str | None:
+        return self._current_phase
 
     @property
     def messages(self) -> list[Message]:
@@ -216,8 +253,19 @@ class NodeConversation:
 
     # --- Add messages ------------------------------------------------------
 
-    async def add_user_message(self, content: str) -> Message:
-        msg = Message(seq=self._next_seq, role="user", content=content)
+    async def add_user_message(
+        self,
+        content: str,
+        *,
+        is_transition_marker: bool = False,
+    ) -> Message:
+        msg = Message(
+            seq=self._next_seq,
+            role="user",
+            content=content,
+            phase_id=self._current_phase,
+            is_transition_marker=is_transition_marker,
+        )
         self._messages.append(msg)
         self._next_seq += 1
         await self._persist(msg)
@@ -233,6 +281,7 @@ class NodeConversation:
             role="assistant",
             content=content,
             tool_calls=tool_calls,
+            phase_id=self._current_phase,
         )
         self._messages.append(msg)
         self._next_seq += 1
@@ -251,6 +300,7 @@ class NodeConversation:
             content=content,
             tool_use_id=tool_use_id,
             is_error=is_error,
+            phase_id=self._current_phase,
         )
         self._messages.append(msg)
         self._next_seq += 1
@@ -380,6 +430,11 @@ class NodeConversation:
         spillover filename reference (if any). Message structure (role,
         seq, tool_use_id) stays valid for the LLM API.
 
+        Phase-aware behavior (continuous mode): when messages have ``phase_id``
+        metadata, all messages in the current phase are protected regardless of
+        token budget. Transition markers are never pruned. Older phases' tool
+        results are pruned more aggressively.
+
         Error tool results are never pruned — they prevent re-calling
         failing tools.
 
@@ -388,19 +443,28 @@ class NodeConversation:
         if not self._messages:
             return 0
 
-        # Phase 1: Walk backward, classify tool results as protected vs pruneable
+        # Walk backward, classify tool results as protected vs pruneable
         protected_tokens = 0
         pruneable: list[int] = []  # indices into self._messages
         pruneable_tokens = 0
 
         for i in range(len(self._messages) - 1, -1, -1):
             msg = self._messages[i]
+
+            # Transition markers are never pruned (any role)
+            if msg.is_transition_marker:
+                continue
+
             if msg.role != "tool":
                 continue
             if msg.is_error:
                 continue  # never prune errors
             if msg.content.startswith("[Pruned tool result"):
                 continue  # already pruned
+
+            # Phase-aware: protect current phase messages
+            if self._current_phase and msg.phase_id == self._current_phase:
+                continue
 
             est = len(msg.content) // 4
             if protected_tokens < protect_tokens:
@@ -409,11 +473,11 @@ class NodeConversation:
                 pruneable.append(i)
                 pruneable_tokens += est
 
-        # Phase 2: Only prune if enough to be worthwhile
+        # Only prune if enough to be worthwhile
         if pruneable_tokens < min_prune_tokens:
             return 0
 
-        # Phase 3: Replace content with compact placeholder
+        # Replace content with compact placeholder
         count = 0
         for i in pruneable:
             msg = self._messages[i]
@@ -436,6 +500,8 @@ class NodeConversation:
                 tool_use_id=msg.tool_use_id,
                 tool_calls=msg.tool_calls,
                 is_error=msg.is_error,
+                phase_id=msg.phase_id,
+                is_transition_marker=msg.is_transition_marker,
             )
             count += 1
 
@@ -446,22 +512,38 @@ class NodeConversation:
         self._last_api_input_tokens = None
         return count
 
-    async def compact(self, summary: str, keep_recent: int = 2) -> None:
+    async def compact(
+        self,
+        summary: str,
+        keep_recent: int = 2,
+        phase_graduated: bool = False,
+    ) -> None:
         """Replace old messages with a summary, optionally keeping recent ones.
 
         Args:
             summary: Caller-provided summary text.
             keep_recent: Number of recent messages to preserve (default 2).
                          Clamped to [0, len(messages) - 1].
+            phase_graduated: When True and messages have phase_id metadata,
+                split at phase boundaries instead of using keep_recent.
+                Keeps current + previous phase intact; compacts older phases.
         """
         if not self._messages:
             return
 
-        # Clamp: must discard at least 1 message
-        keep_recent = max(0, min(keep_recent, len(self._messages) - 1))
-
         total = len(self._messages)
-        split = total - keep_recent if keep_recent > 0 else total
+
+        # Phase-graduated: find the split point based on phase boundaries.
+        # Keeps current phase + previous phase intact, compacts older phases.
+        if phase_graduated and self._current_phase:
+            split = self._find_phase_graduated_split()
+        else:
+            split = None
+
+        if split is None:
+            # Fallback: use keep_recent (non-phase or single-phase conversation)
+            keep_recent = max(0, min(keep_recent, total - 1))
+            split = total - keep_recent if keep_recent > 0 else total
 
         # Advance split past orphaned tool results at the boundary.
         # Tool-role messages reference a tool_use from the preceding
@@ -469,6 +551,10 @@ class NodeConversation:
         # compacted (old) portion the tool_result becomes invalid.
         while split < total and self._messages[split].role == "tool":
             split += 1
+
+        # Nothing to compact
+        if split == 0:
+            return
 
         old_messages = list(self._messages[:split])
         recent_messages = list(self._messages[split:])
@@ -503,6 +589,33 @@ class NodeConversation:
 
         self._messages = [summary_msg] + recent_messages
         self._last_api_input_tokens = None  # reset; next LLM call will recalibrate
+
+    def _find_phase_graduated_split(self) -> int | None:
+        """Find split point that preserves current + previous phase.
+
+        Returns the index of the first message in the protected set,
+        or None if phase graduation doesn't apply (< 3 phases).
+        """
+        # Collect distinct phases in order of first appearance
+        phases_seen: list[str] = []
+        for msg in self._messages:
+            if msg.phase_id and msg.phase_id not in phases_seen:
+                phases_seen.append(msg.phase_id)
+
+        # Need at least 3 phases for graduation to be meaningful
+        # (current + previous are protected, older get compacted)
+        if len(phases_seen) < 3:
+            return None
+
+        # Protect: current phase + previous phase
+        protected_phases = {phases_seen[-1], phases_seen[-2]}
+
+        # Find split: first message belonging to a protected phase
+        for i, msg in enumerate(self._messages):
+            if msg.phase_id in protected_phases:
+                return i
+
+        return None
 
     async def clear(self) -> None:
         """Remove all messages, keep system prompt, preserve ``_next_seq``."""
