@@ -232,32 +232,51 @@ echo ""
 
 IMPORT_ERRORS=0
 
-# Test imports using workspace venv via uv run
-if uv run python -c "import framework" > /dev/null 2>&1; then
-    echo -e "${GREEN}  ✓ framework imports OK${NC}"
-else
-    echo -e "${RED}  ✗ framework import failed${NC}"
-    IMPORT_ERRORS=$((IMPORT_ERRORS + 1))
-fi
+# Batch check all imports in single process (reduces subprocess spawning overhead)
+CHECK_RESULT=$(uv run python scripts/check_requirements.py framework aden_tools litellm framework.mcp.agent_builder_server 2>&1)
+CHECK_EXIT=$?
 
-if uv run python -c "import aden_tools" > /dev/null 2>&1; then
-    echo -e "${GREEN}  ✓ aden_tools imports OK${NC}"
-else
-    echo -e "${RED}  ✗ aden_tools import failed${NC}"
-    IMPORT_ERRORS=$((IMPORT_ERRORS + 1))
-fi
+# Parse and display results
+if [ $CHECK_EXIT -eq 0 ] || echo "$CHECK_RESULT" | grep -q "^{"; then
+    # Try to parse JSON and display formatted results
+    python -c "
+import json
+import sys
 
-if uv run python -c "import litellm" > /dev/null 2>&1; then
-    echo -e "${GREEN}  ✓ litellm imports OK${NC}"
+try:
+    data = json.loads('''$CHECK_RESULT''')
+    
+    modules = [
+        ('framework', 'framework imports OK', True),
+        ('aden_tools', 'aden_tools imports OK', True),
+        ('litellm', 'litellm imports OK', False),
+        ('framework.mcp.agent_builder_server', 'MCP server module OK', True)
+    ]
+    
+    import_errors = 0
+    for mod, label, required in modules:
+        status = data.get(mod, 'error: not checked')
+        if status == 'ok':
+            print('${GREEN}  ✓ ' + label + '${NC}')
+        elif required:
+            print('${RED}  ✗ ' + label + ' failed${NC}')
+            if status != 'error: not checked':
+                print('    ' + status)
+            import_errors += 1
+        else:
+            print('${YELLOW}  ⚠ ' + label + ' (may be OK)${NC}')
+    
+    sys.exit(import_errors)
+except json.JSONDecodeError:
+    print('${RED}Error: Could not parse import check results${NC}', file=sys.stderr)
+    print('$CHECK_RESULT', file=sys.stderr)
+    sys.exit(1)
+" 2>&1
+    IMPORT_ERRORS=$?
 else
-    echo -e "${YELLOW}  ⚠ litellm import issues (may be OK)${NC}"
-fi
-
-if uv run python -c "from framework.mcp import agent_builder_server" > /dev/null 2>&1; then
-    echo -e "${GREEN}  ✓ MCP server module OK${NC}"
-else
-    echo -e "${RED}  ✗ MCP server module failed${NC}"
-    IMPORT_ERRORS=$((IMPORT_ERRORS + 1))
+    echo -e "${RED}  ✗ Import check failed${NC}"
+    echo "$CHECK_RESULT"
+    IMPORT_ERRORS=1
 fi
 
 if [ $IMPORT_ERRORS -gt 0 ]; then
