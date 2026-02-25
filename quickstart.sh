@@ -802,17 +802,26 @@ if [ ${#FOUND_PROVIDERS[@]} -gt 0 ]; then
         echo -e "  ${CYAN}$i)${NC} $provider"
         i=$((i + 1))
     done
-    # Only show ZAI Code Subscription if the API key already exists
+    ZAI_CHOICE=$i
     if [ -n "${ZAI_API_KEY:-}" ]; then
-        ZAI_CHOICE=$i
+        echo -e "  ${CYAN}$i)${NC} ZAI Code Subscription  ${DIM}(use your ZAI Code plan)${NC}  ${GREEN}(credential found)${NC}"
+    else
         echo -e "  ${CYAN}$i)${NC} ZAI Code Subscription  ${DIM}(use your ZAI Code plan)${NC}"
+    fi
     i=$((i + 1))
     CODEX_CHOICE=$i
-    echo -e "  ${CYAN}$i)${NC} OpenAI Codex Subscription  ${DIM}(use your Codex/ChatGPT Plus plan)${NC}"
-        i=$((i + 1))
-    else
-        ZAI_CHOICE=-1  # invalid choice, won't match
+    CODEX_CRED_FOUND=false
+    if command -v security &>/dev/null && security find-generic-password -s "Codex Auth" &>/dev/null 2>&1; then
+        CODEX_CRED_FOUND=true
+    elif [ -f "$HOME/.codex/auth.json" ]; then
+        CODEX_CRED_FOUND=true
     fi
+    if [ "$CODEX_CRED_FOUND" = true ]; then
+        echo -e "  ${CYAN}$i)${NC} OpenAI Codex Subscription  ${DIM}(use your Codex/ChatGPT Plus plan)${NC}  ${GREEN}(credential found)${NC}"
+    else
+        echo -e "  ${CYAN}$i)${NC} OpenAI Codex Subscription  ${DIM}(use your Codex/ChatGPT Plus plan)${NC}"
+    fi
+    i=$((i + 1))
     echo -e "  ${CYAN}$i)${NC} Other"
     max_choice=$i
     echo ""
@@ -887,9 +896,30 @@ if [ -z "$SELECTED_PROVIDER_ID" ]; then
     echo -e "${BOLD}Select your LLM provider:${NC}"
     echo ""
     echo -e "  ${CYAN}${BOLD}Subscription modes (no API key purchase needed):${NC}"
-    echo -e "  ${CYAN}1)${NC} Claude Code Subscription  ${DIM}(use your Claude Max/Pro plan)${NC}"
-    echo -e "  ${CYAN}2)${NC} ZAI Code Subscription     ${DIM}(use your ZAI Code plan)${NC}"
-    echo -e "  ${CYAN}3)${NC} OpenAI Codex Subscription  ${DIM}(use your Codex/ChatGPT Plus plan)${NC}"
+    # Claude Code
+    if [ -f "$HOME/.claude/.credentials.json" ]; then
+        echo -e "  ${CYAN}1)${NC} Claude Code Subscription  ${DIM}(use your Claude Max/Pro plan)${NC}  ${GREEN}(credential found)${NC}"
+    else
+        echo -e "  ${CYAN}1)${NC} Claude Code Subscription  ${DIM}(use your Claude Max/Pro plan)${NC}"
+    fi
+    # ZAI Code
+    if [ -n "${ZAI_API_KEY:-}" ]; then
+        echo -e "  ${CYAN}2)${NC} ZAI Code Subscription     ${DIM}(use your ZAI Code plan)${NC}  ${GREEN}(credential found)${NC}"
+    else
+        echo -e "  ${CYAN}2)${NC} ZAI Code Subscription     ${DIM}(use your ZAI Code plan)${NC}"
+    fi
+    # Codex
+    CODEX_CRED_FOUND=false
+    if command -v security &>/dev/null && security find-generic-password -s "Codex Auth" &>/dev/null 2>&1; then
+        CODEX_CRED_FOUND=true
+    elif [ -f "$HOME/.codex/auth.json" ]; then
+        CODEX_CRED_FOUND=true
+    fi
+    if [ "$CODEX_CRED_FOUND" = true ]; then
+        echo -e "  ${CYAN}3)${NC} OpenAI Codex Subscription  ${DIM}(use your Codex/ChatGPT Plus plan)${NC}  ${GREEN}(credential found)${NC}"
+    else
+        echo -e "  ${CYAN}3)${NC} OpenAI Codex Subscription  ${DIM}(use your Codex/ChatGPT Plus plan)${NC}"
+    fi
     echo ""
     echo -e "  ${CYAN}${BOLD}API key providers:${NC}"
     echo -e "  ${CYAN}4)${NC} Anthropic (Claude) - Recommended"
