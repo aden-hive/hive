@@ -21,15 +21,15 @@ from typing import Dict
 def check_imports(modules: list[str]) -> Dict[str, str]:
     """
     Attempt to import each module and return status.
-    
+
     Args:
         modules: List of module names to check
-        
+
     Returns:
         Dictionary mapping module name to "ok" or error message
     """
     results = {}
-    
+
     for module_name in modules:
         try:
             # Handle both simple imports and from imports
@@ -44,7 +44,7 @@ def check_imports(modules: list[str]) -> Dict[str, str]:
             results[module_name] = f"error: {str(e)}"
         except Exception as e:
             results[module_name] = f"error: {type(e).__name__}: {str(e)}"
-    
+
     return results
 
 
@@ -53,13 +53,13 @@ def main():
     if len(sys.argv) < 2:
         print(json.dumps({"error": "No modules specified"}), file=sys.stderr)
         sys.exit(1)
-    
+
     modules_to_check = sys.argv[1:]
     results = check_imports(modules_to_check)
-    
+
     # Print results as JSON
     print(json.dumps(results, indent=2))
-    
+
     # Exit with error code if any imports failed
     has_errors = any(status != "ok" for status in results.values())
     sys.exit(1 if has_errors else 0)
