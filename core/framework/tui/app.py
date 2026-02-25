@@ -606,7 +606,11 @@ class AdenTUI(App):
             # Build worker profile for queen's system prompt.
             from framework.tools.queen_lifecycle_tools import build_worker_profile
 
-            worker_identity = build_worker_profile(self.runtime)
+            worker_identity = build_worker_profile(
+                self.runtime,
+                agent_path=getattr(self, '_runner', None) and self._runner.agent_path,
+                storage_path=storage_path,
+            )
 
             # Adjust queen graph: filter tools to what's registered and
             # append worker identity to the system prompt.

@@ -1801,6 +1801,21 @@ def export_graph() -> str:
 
         mcp_servers_size = mcp_servers_path.stat().st_size
 
+    # === GIT VERSIONING ===
+    git_info: dict = {"initialized": False, "commit": None}
+    try:
+        from framework.utils.git import commit_all, init_repo
+
+        init_repo(exports_dir)
+        git_info["initialized"] = True
+        commit_sha = commit_all(
+            exports_dir,
+            f"Export: {session.goal.name} ({len(session.nodes)} nodes, {len(edges_list)} edges)",
+        )
+        git_info["commit"] = commit_sha
+    except Exception as e:
+        logger.warning("Git versioning skipped: %s", e)
+
     # Get file sizes
     agent_json_size = agent_json_path.stat().st_size
     readme_size = readme_path.stat().st_size
@@ -1833,6 +1848,7 @@ def export_graph() -> str:
             "node_count": len(session.nodes),
             "edge_count": len(edges_list),
             "mcp_servers_count": len(session.mcp_servers),
+            "git": git_info,
             "note": f"Agent exported to {exports_dir}. Files: agent.json, README.md"
             + (", mcp_servers.json" if session.mcp_servers else ""),
         },

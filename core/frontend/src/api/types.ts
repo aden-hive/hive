@@ -39,6 +39,7 @@ export interface DiscoverEntry {
   tags: string[];
   last_active: string | null;
   is_loaded: boolean;
+  version?: string | null;
 }
 
 /** Keyed by category name. */

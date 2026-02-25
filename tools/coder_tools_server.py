@@ -117,6 +117,88 @@ PROJECT_ROOT: str = ""
 SNAPSHOT_DIR: str = ""
 
 
+# ── Auto-commit tracking for agent versioning ─────────────────────────────
+
+_dirty_agent_dirs: set[str] = set()
+
+
+def _is_agent_dir(resolved_path: str) -> str | None:
+    """If *resolved_path* is under exports/{agent}/, return the agent dir."""
+    exports_dir = os.path.join(PROJECT_ROOT, "exports")
+    if not resolved_path.startswith(exports_dir + os.sep):
+        return None
+    rel = os.path.relpath(resolved_path, exports_dir)
+    agent_name = rel.split(os.sep)[0]
+    return os.path.join(exports_dir, agent_name)
+
+
+def _track_agent_write(resolved_path: str) -> None:
+    """Mark an agent dir as dirty after a write/edit."""
+    agent_dir = _is_agent_dir(resolved_path)
+    if agent_dir:
+        _dirty_agent_dirs.add(agent_dir)
+
+
+def _flush_agent_commits() -> None:
+    """Commit all pending agent directory changes (called before reads)."""
+    if not _dirty_agent_dirs:
+        return
+    for agent_dir in list(_dirty_agent_dirs):
+        if os.path.isdir(agent_dir):
+            _git_auto_commit(agent_dir)
+    _dirty_agent_dirs.clear()
+
+
+def _git_auto_commit(repo_dir: str) -> str | None:
+    """Init repo if needed and commit all changes with an auto message."""
+    try:
+        # Init if needed
+        if not os.path.isdir(os.path.join(repo_dir, ".git")):
+            subprocess.run(["git", "init"], cwd=repo_dir, capture_output=True)
+            gitignore_path = os.path.join(repo_dir, ".gitignore")
+            if not os.path.exists(gitignore_path):
+                with open(gitignore_path, "w") as f:
+                    f.write("__pycache__/\n*.pyc\n*.pyo\n.DS_Store\n")
+
+        # Check for changes
+        result = subprocess.run(
+            ["git", "status", "--porcelain"],
+            cwd=repo_dir,
+            capture_output=True,
+            text=True,
+        )
+        if not result.stdout.strip():
+            return None
+
+        # Auto-generate message from changed files
+        lines = [l for l in result.stdout.strip().split("\n") if l.strip()]
+        changed = [l[3:].strip() for l in lines]
+        message = "Auto: " + ", ".join(changed[:5])
+        if len(changed) > 5:
+            message += f" (+{len(changed) - 5} more)"
+
+        # Stage and commit
+        subprocess.run(["git", "add", "-A"], cwd=repo_dir, capture_output=True)
+        subprocess.run(
+            ["git", "commit", "-m", message],
+            cwd=repo_dir,
+            capture_output=True,
+        )
+        sha = subprocess.run(
+            ["git", "rev-parse", "--short", "HEAD"],
+            cwd=repo_dir,
+            capture_output=True,
+            text=True,
+        )
+        return sha.stdout.strip()
+    except FileNotFoundError:
+        logger.warning("git not found — agent auto-commit skipped")
+        return None
+    except Exception as e:
+        logger.warning("agent auto-commit failed: %s", e)
+        return None
+
+
 # ── Path resolution ───────────────────────────────────────────────────────
 
 
@@ -319,6 +401,7 @@ def read_file(path: str, offset: int = 1, limit: int = 0) -> str:
     Returns:
         File contents with line numbers, or error message
     """
+    _flush_agent_commits()
     resolved = _resolve_path(path)
 
     if os.path.isdir(resolved):
@@ -408,6 +491,7 @@ def write_file(path: str, content: str) -> str:
 
         line_count = content.count("\n") + (1 if content and not content.endswith("\n") else 0)
         action = "Updated" if existed else "Created"
+        _track_agent_write(resolved)
         return f"{action} {path} ({len(content):,} bytes, {line_count} lines)"
     except Exception as e:
         return f"Error writing file: {e}"
@@ -502,6 +586,7 @@ def edit_file(path: str, old_text: str, new_text: str, replace_all: bool = False
         result = f"Replaced {count} occurrence(s) in {path}{match_info}"
         if diff:
             result += f"\n\n{diff}"
+        _track_agent_write(resolved)
         return result
     except Exception as e:
         return f"Error editing file: {e}"
@@ -521,6 +606,7 @@ def list_directory(path: str = ".", recursive: bool = False) -> str:
     Returns:
         Sorted directory listing with / suffix for directories
     """
+    _flush_agent_commits()
     resolved = _resolve_path(path)
     if not os.path.isdir(resolved):
         return f"Error: Directory not found: {path}"
@@ -579,6 +665,7 @@ def search_files(pattern: str, path: str = ".", include: str = "") -> str:
     Returns:
         Matching lines grouped by file with line numbers
     """
+    _flush_agent_commits()
     resolved = _resolve_path(path)
     if not os.path.isdir(resolved):
         return f"Error: Directory not found: {path}"
@@ -668,6 +755,7 @@ def run_command(command: str, cwd: str = "", timeout: int = 120) -> str:
     Returns:
         Combined stdout/stderr with exit code
     """
+    _flush_agent_commits()
     timeout = min(timeout, 300)  # Cap at 5 minutes
     work_dir = _resolve_path(cwd) if cwd else PROJECT_ROOT
 

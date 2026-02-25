@@ -645,6 +645,7 @@ async def handle_discover(request: web.Request) -> web.Response:
                 "tags": entry.tags,
                 "last_active": entry.last_active,
                 "is_loaded": str(entry.path) in loaded_paths,
+                "version": entry.version,
             }
             for entry in entries
         ]

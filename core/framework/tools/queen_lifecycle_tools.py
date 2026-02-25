@@ -60,17 +60,28 @@ class WorkerSessionAdapter:
     worker_path: Path | None = None
 
 
-def build_worker_profile(runtime: AgentRuntime) -> str:
+def build_worker_profile(
+    runtime: AgentRuntime,
+    *,
+    agent_path: Path | str | None = None,
+    storage_path: Path | str | None = None,
+) -> str:
     """Build a worker capability profile from its graph/goal definition.
 
     Injected into the queen's system prompt so it knows what the worker
     can and cannot do — enabling correct delegation decisions.
+
+    Args:
+        runtime: The worker's AgentRuntime.
+        agent_path: Path to the agent source directory (e.g. exports/my_agent).
+        storage_path: Path to runtime storage (e.g. ~/.hive/agents/my_agent).
     """
     graph = runtime.graph
     goal = runtime.goal
+    agent_name = runtime.graph_id
 
     lines = ["\n\n# Worker Profile"]
-    lines.append(f"Agent: {runtime.graph_id}")
+    lines.append(f"Agent: {agent_name}")
     lines.append(f"Goal: {goal.name}")
     if goal.description:
         lines.append(f"Description: {goal.description}")
@@ -96,6 +107,26 @@ def build_worker_profile(runtime: AgentRuntime) -> str:
             all_tools.update(node.tools)
     if all_tools:
         lines.append(f"\n## Worker Tools\n{', '.join(sorted(all_tools))}")
+
+    # Operational context — paths and inspection guidance
+    lines.append("\n## Worker Runtime Context")
+    if agent_path:
+        lines.append(f"- Source: {agent_path}")
+    if storage_path:
+        lines.append(f"- Storage: {storage_path}")
+        lines.append(f"- Sessions: {storage_path}/sessions/")
+        lines.append(f"- Logs: {{session_dir}}/logs/ (summary.json, details.jsonl, tool_logs.jsonl)")
+        lines.append(f"- Checkpoints: {{session_dir}}/checkpoints/")
+
+    lines.append(f"\n## Inspecting This Worker")
+    lines.append(f'- list_agent_sessions("{agent_name}") — find sessions')
+    lines.append(f'- get_agent_session_state("{agent_name}", "{{session_id}}") — see status')
+    lines.append(f'- get_agent_session_memory("{agent_name}", "{{session_id}}") — inspect data')
+    lines.append(f'- list_agent_checkpoints("{agent_name}", "{{session_id}}") — trace execution')
+    lines.append(f'- get_agent_checkpoint("{agent_name}", "{{session_id}}") — load checkpoint')
+    if agent_path:
+        lines.append(f'- read_file("{agent_path}/agent.py") — read agent source')
+        lines.append(f'- read_file("{agent_path}/nodes/__init__.py") — read node definitions')
 
     lines.append("\nStatus at session start: idle (not started).")
     return "\n".join(lines)

@@ -157,6 +157,7 @@ def create_app(model: str | None = None) -> web.Application:
     from framework.server.routes_graphs import register_routes as register_graph_routes
     from framework.server.routes_logs import register_routes as register_log_routes
     from framework.server.routes_sessions import register_routes as register_session_routes
+    from framework.server.routes_versions import register_routes as register_version_routes
 
     register_credential_routes(app)
     register_execution_routes(app)
@@ -164,6 +165,7 @@ def create_app(model: str | None = None) -> web.Application:
     register_session_routes(app)
     register_graph_routes(app)
     register_log_routes(app)
+    register_version_routes(app)
 
     # Static file serving — Option C production mode
     # If frontend/dist/ exists, serve built frontend files on /

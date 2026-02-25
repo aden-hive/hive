@@ -159,7 +159,13 @@ class SessionManager:
 
             # Start queen with worker profile + lifecycle + monitoring tools
             worker_identity = (
-                build_worker_profile(session.worker_runtime) if session.worker_runtime else None
+                build_worker_profile(
+                    session.worker_runtime,
+                    agent_path=session.worker_path,
+                    storage_path=session.runner._storage_path if session.runner else None,
+                )
+                if session.worker_runtime
+                else None
             )
             await self._start_queen(session, worker_identity=worker_identity, initial_prompt=initial_prompt)
 
@@ -596,7 +602,11 @@ class SessionManager:
         if node is None or not hasattr(node, "inject_event"):
             return
 
-        profile = build_worker_profile(session.worker_runtime)
+        profile = build_worker_profile(
+            session.worker_runtime,
+            agent_path=session.worker_path,
+            storage_path=session.runner._storage_path if session.runner else None,
+        )
         await node.inject_event(f"[SYSTEM] Worker loaded.{profile}")
 
     async def _emit_worker_loaded(self, session: Session) -> None:

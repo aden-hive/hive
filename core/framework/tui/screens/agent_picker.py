@@ -38,6 +38,7 @@ class AgentEntry:
     tool_count: int = 0
     tags: list[str] = field(default_factory=list)
     last_active: str | None = None
+    version: str | None = None
 
 
 def _get_last_active(agent_name: str) -> str | None:
@@ -157,6 +158,16 @@ def discover_agents() -> dict[str, list[AgentEntry]]:
                     except Exception:
                         pass
 
+            # Get version from git if available
+            version = None
+            try:
+                from framework.utils.git import is_git_repo, latest_version
+
+                if is_git_repo(path):
+                    version = latest_version(path)
+            except Exception:
+                pass
+
             entries.append(
                 AgentEntry(
                     path=path,
@@ -168,6 +179,7 @@ def discover_agents() -> dict[str, list[AgentEntry]]:
                     tool_count=tool_count,
                     tags=tags,
                     last_active=_get_last_active(path.name),
+                    version=version,
                 )
             )
         if entries:
