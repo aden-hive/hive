@@ -1,0 +1,10 @@
+
+services:
+  hive:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    volumes:
+      - .:/app
+    working_dir: /app
+    tty: true

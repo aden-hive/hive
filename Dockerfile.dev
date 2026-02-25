@@ -1,0 +1,30 @@
+# Dockerfile.dev
+FROM python:3.11-slim
+
+# Prevent interactive prompts
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Install system deps required for uv + build
+RUN apt-get update && apt-get install -y \
+    curl \
+    git \
+    build-essential \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install uv
+RUN curl -Ls https://astral.sh/uv/install.sh | sh
+
+# Add uv to PATH
+ENV PATH="/root/.local/bin:$PATH"
+ENV UV_LINK_MODE=copy
+# Set working directory
+WORKDIR /app
+
+# Copy project files
+COPY . .
+
+# Install workspace dependencies
+RUN uv sync
+
+# Default to interactive shell
+CMD ["bash"]
