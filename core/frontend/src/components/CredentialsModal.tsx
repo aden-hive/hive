@@ -89,6 +89,7 @@ export default function CredentialsModal({
   const [editingId, setEditingId] = useState<string | null>(null);
   const [inputValue, setInputValue] = useState("");
   const [saving, setSaving] = useState(false);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
   const [hasAdenKey, setHasAdenKey] = useState(true); // assume true until backend says otherwise
   const [adenKeyInput, setAdenKeyInput] = useState("");
   const [savingAdenKey, setSavingAdenKey] = useState(false);
@@ -140,6 +141,7 @@ export default function CredentialsModal({
       setEditingId(null);
       setInputValue("");
       setAdenKeyInput("");
+      setDeletingId(null);
     }
   }, [open, fetchStatus]);
 
@@ -186,6 +188,7 @@ export default function CredentialsModal({
       // Start editing — show inline API key input
       setEditingId(row.id);
       setInputValue("");
+      setDeletingId(null);
     }
   };
 
@@ -357,10 +360,15 @@ export default function CredentialsModal({
                     {row.connected ? (
                       <div className="flex items-center gap-1 flex-shrink-0">
                         {row.valid === false ? (
-                          <span className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium bg-destructive/10 text-destructive" title={row.validationMessage || "Invalid"}>
+                          <button
+                            onClick={() => handleConnect(row)}
+                            disabled={saving}
+                            className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium bg-destructive/10 text-destructive hover:bg-destructive/15 transition-colors"
+                            title={row.validationMessage || "Invalid — click to update"}
+                          >
                             <AlertCircle className="w-3 h-3" />
-                            Invalid
-                          </span>
+                            {row.adenSupported ? "Reauthorize" : "Update Key"}
+                          </button>
                         ) : (
                           <span className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium bg-primary/10 text-primary">
                             <Check className="w-3 h-3" />
@@ -368,10 +376,13 @@ export default function CredentialsModal({
                           </span>
                         )}
                         <button
-                          onClick={() => handleDisconnect(row)}
+                          onClick={() => {
+                            setDeletingId(deletingId === row.id ? null : row.id);
+                            if (editingId) { setEditingId(null); setInputValue(""); }
+                          }}
                           disabled={saving}
                           className="p-1.5 rounded-md text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors"
-                          title="Disconnect"
+                          title="Delete credential"
                         >
                           <Trash2 className="w-3 h-3" />
                         </button>
@@ -397,8 +408,34 @@ export default function CredentialsModal({
                     )}
                   </div>
 
+                  {/* Inline delete confirmation */}
+                  {deletingId === row.id && (
+                    <div className="mt-1.5 flex items-center gap-2 px-3 py-2 rounded-lg border border-destructive/30 bg-destructive/5">
+                      <AlertCircle className="w-3.5 h-3.5 text-destructive flex-shrink-0" />
+                      <span className="text-xs text-destructive flex-1">
+                        Permanently delete this API key?
+                      </span>
+                      <button
+                        onClick={() => {
+                          setDeletingId(null);
+                          handleDisconnect(row);
+                        }}
+                        disabled={saving}
+                        className="px-3 py-1 rounded-md text-xs font-medium bg-destructive text-destructive-foreground hover:bg-destructive/90 disabled:opacity-50 transition-colors"
+                      >
+                        {saving ? <Loader2 className="w-3 h-3 animate-spin" /> : "Delete"}
+                      </button>
+                      <button
+                        onClick={() => setDeletingId(null)}
+                        className="px-2 py-1 rounded-md text-xs text-muted-foreground hover:bg-muted transition-colors"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  )}
+
                   {/* Inline API key input */}
-                  {editingId === row.id && !row.connected && (
+                  {editingId === row.id && (!row.connected || row.valid === false) && (
                     <div className="mt-1.5 flex gap-2 px-3">
                       <input
                         type="password"
@@ -408,7 +445,7 @@ export default function CredentialsModal({
                           if (e.key === "Enter") handleConnect(row);
                           if (e.key === "Escape") { setEditingId(null); setInputValue(""); }
                         }}
-                        placeholder={`Paste your ${row.name} API key...`}
+                        placeholder={`${row.connected ? "Enter new" : "Paste your"} ${row.name} API key...`}
                         autoFocus
                         className="flex-1 px-3 py-1.5 rounded-md border border-border bg-background text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary/40"
                       />
