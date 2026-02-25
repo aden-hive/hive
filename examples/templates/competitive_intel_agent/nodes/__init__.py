@@ -10,7 +10,12 @@ intake_node: NodeSpec = NodeSpec(
     node_type="event_loop",
     client_facing=True,
     input_keys=["competitors_input"],
-    output_keys=["competitors", "focus_areas", "report_frequency", "has_github_competitors"],
+    output_keys=[
+        "competitors",
+        "focus_areas",
+        "report_frequency",
+        "has_github_competitors",
+    ],
     system_prompt="""\
 You are a competitive intelligence intake specialist. Your job is to gather the
 information needed to run a competitive analysis.

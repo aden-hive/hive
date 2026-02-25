@@ -1,7 +1,14 @@
 """Agent graph construction for Competitive Intelligence Agent."""
 
 from typing import Any, TYPE_CHECKING
-from framework.graph import EdgeSpec, EdgeCondition, Goal, SuccessCriterion, Constraint, NodeSpec
+from framework.graph import (
+    EdgeSpec,
+    EdgeCondition,
+    Goal,
+    SuccessCriterion,
+    Constraint,
+    NodeSpec,
+)
 from framework.graph.edge import GraphSpec
 from framework.graph.executor import ExecutionResult, GraphExecutor
 from framework.runtime.event_bus import EventBus
@@ -296,7 +303,9 @@ class CompetitiveIntelAgent:
             session_state=session_state,
         )
 
-    async def run(self, context: dict[str, Any], session_state: dict[str, Any] | None = None) -> ExecutionResult:
+    async def run(
+        self, context: dict[str, Any], session_state: dict[str, Any] | None = None
+    ) -> ExecutionResult:
         """
         Run the agent (convenience method for single execution).
 
@@ -370,6 +379,7 @@ class CompetitiveIntelAgent:
             "errors": errors,
             "warnings": warnings,
         }
+
 
 # Create default instance
 default_agent: CompetitiveIntelAgent = CompetitiveIntelAgent()

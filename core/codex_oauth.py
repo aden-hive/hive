@@ -163,13 +163,9 @@ def open_browser(url: str) -> bool:
         if system == "Darwin":
             subprocess.Popen(["open", url], stdout=devnull, stderr=devnull)
         elif system == "Windows":
-            subprocess.Popen(
-                ["cmd", "/c", "start", url], stdout=devnull, stderr=devnull
-            )
+            subprocess.Popen(["cmd", "/c", "start", url], stdout=devnull, stderr=devnull)
         else:
-            subprocess.Popen(
-                ["xdg-open", url], stdout=devnull, stderr=devnull
-            )
+            subprocess.Popen(["xdg-open", url], stdout=devnull, stderr=devnull)
         return True
     except OSError:
         return False
@@ -285,6 +281,7 @@ def main() -> int:
         server_available = True
         # Quick test that port is free
         import socket
+
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         sock.settimeout(1)
         result = sock.connect_ex(("127.0.0.1", CALLBACK_PORT))
@@ -328,6 +325,7 @@ def main() -> int:
         # We poll for both the server result and stdin
         try:
             import select
+
             while server_thread.is_alive():
                 # Check if stdin has data (non-blocking on unix)
                 if hasattr(select, "select"):

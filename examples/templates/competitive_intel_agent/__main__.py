@@ -84,11 +84,13 @@ def run(
             sys.exit(1)
 
     context: dict[str, Any] = {
-        "competitors_input": json.dumps({
-            "competitors": competitors_data,
-            "focus_areas": [a.strip() for a in focus_areas.split(",")],
-            "report_frequency": frequency,
-        })
+        "competitors_input": json.dumps(
+            {
+                "competitors": competitors_data,
+                "focus_areas": [a.strip() for a in focus_areas.split(",")],
+                "report_frequency": frequency,
+            }
+        )
     }
 
     result = asyncio.run(default_agent.run(context))

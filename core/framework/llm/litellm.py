@@ -277,9 +277,7 @@ class LiteLLMProvider(LLMProvider):
         self.extra_kwargs = kwargs
         # The Codex ChatGPT backend (chatgpt.com/backend-api/codex) rejects
         # several standard OpenAI params: max_output_tokens, stream_options.
-        self._codex_backend = bool(
-            api_base and "chatgpt.com/backend-api/codex" in api_base
-        )
+        self._codex_backend = bool(api_base and "chatgpt.com/backend-api/codex" in api_base)
 
         if litellm is None:
             raise ImportError(
