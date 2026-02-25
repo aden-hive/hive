@@ -261,7 +261,8 @@ export type EventTypeName =
   | "context_compacted"
   | "webhook_received"
   | "custom"
-  | "escalation_requested";
+  | "escalation_requested"
+  | "worker_loaded";
 
 export interface AgentEvent {
   type: EventTypeName;

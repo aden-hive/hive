@@ -87,12 +87,15 @@ async def handle_create_session(request: web.Request) -> web.Response:
         if agent_path:
             # One-step: create session + load worker
             session = await manager.create_session_with_worker(
-                agent_path, agent_id=agent_id, model=model,
+                agent_path,
+                agent_id=agent_id,
+                model=model,
             )
         else:
             # Queen-only session
             session = await manager.create_session(
-                session_id=session_id, model=model,
+                session_id=session_id,
+                model=model,
             )
     except ValueError as e:
         msg = str(e)
@@ -128,10 +131,12 @@ async def handle_get_live_session(request: web.Request) -> web.Response:
     if session is None:
         if manager.is_loading(session_id):
             return web.json_response(
-                {"session_id": session_id, "loading": True}, status=202,
+                {"session_id": session_id, "loading": True},
+                status=202,
             )
         return web.json_response(
-            {"error": f"Session '{session_id}' not found"}, status=404,
+            {"error": f"Session '{session_id}' not found"},
+            status=404,
         )
 
     data = _session_to_live_dict(session)
@@ -159,7 +164,8 @@ async def handle_stop_session(request: web.Request) -> web.Response:
     stopped = await manager.stop_session(session_id)
     if not stopped:
         return web.json_response(
-            {"error": f"Session '{session_id}' not found"}, status=404,
+            {"error": f"Session '{session_id}' not found"},
+            status=404,
         )
 
     return web.json_response({"session_id": session_id, "stopped": True})
@@ -188,7 +194,10 @@ async def handle_load_worker(request: web.Request) -> web.Response:
 
     try:
         session = await manager.load_worker(
-            session_id, agent_path, worker_id=worker_id, model=model,
+            session_id,
+            agent_path,
+            worker_id=worker_id,
+            model=model,
         )
     except ValueError as e:
         return web.json_response({"error": str(e)}, status=409)
@@ -211,10 +220,12 @@ async def handle_unload_worker(request: web.Request) -> web.Response:
         session = manager.get_session(session_id)
         if session is None:
             return web.json_response(
-                {"error": f"Session '{session_id}' not found"}, status=404,
+                {"error": f"Session '{session_id}' not found"},
+                status=404,
             )
         return web.json_response(
-            {"error": "No worker loaded in this session"}, status=409,
+            {"error": "No worker loaded in this session"},
+            status=409,
         )
 
     return web.json_response({"session_id": session_id, "worker_unloaded": True})
@@ -233,7 +244,8 @@ async def handle_session_stats(request: web.Request) -> web.Response:
 
     if session is None:
         return web.json_response(
-            {"error": f"Session '{session_id}' not found"}, status=404,
+            {"error": f"Session '{session_id}' not found"},
+            status=404,
         )
 
     stats = session.worker_runtime.get_stats() if session.worker_runtime else {}
@@ -248,7 +260,8 @@ async def handle_session_entry_points(request: web.Request) -> web.Response:
 
     if session is None:
         return web.json_response(
-            {"error": f"Session '{session_id}' not found"}, status=404,
+            {"error": f"Session '{session_id}' not found"},
+            status=404,
         )
 
     eps = session.worker_runtime.get_entry_points() if session.worker_runtime else []
@@ -275,7 +288,8 @@ async def handle_session_graphs(request: web.Request) -> web.Response:
 
     if session is None:
         return web.json_response(
-            {"error": f"Session '{session_id}' not found"}, status=404,
+            {"error": f"Session '{session_id}' not found"},
+            status=404,
         )
 
     graphs = session.worker_runtime.list_graphs() if session.worker_runtime else []
@@ -529,9 +543,7 @@ async def handle_discover(request: web.Request) -> web.Response:
     from framework.tui.screens.agent_picker import discover_agents
 
     manager = _get_manager(request)
-    loaded_paths = {
-        str(s.worker_path) for s in manager.list_sessions() if s.worker_path
-    }
+    loaded_paths = {str(s.worker_path) for s in manager.list_sessions() if s.worker_path}
 
     groups = discover_agents()
     result = {}
@@ -581,8 +593,12 @@ def register_routes(app: web.Application) -> None:
 
     # Worker session browsing (session-primary)
     app.router.add_get("/api/sessions/{session_id}/worker-sessions", handle_list_worker_sessions)
-    app.router.add_get("/api/sessions/{session_id}/worker-sessions/{ws_id}", handle_get_worker_session)
-    app.router.add_delete("/api/sessions/{session_id}/worker-sessions/{ws_id}", handle_delete_worker_session)
+    app.router.add_get(
+        "/api/sessions/{session_id}/worker-sessions/{ws_id}", handle_get_worker_session
+    )
+    app.router.add_delete(
+        "/api/sessions/{session_id}/worker-sessions/{ws_id}", handle_delete_worker_session
+    )
     app.router.add_get(
         "/api/sessions/{session_id}/worker-sessions/{ws_id}/checkpoints",
         handle_list_checkpoints,
@@ -595,4 +611,3 @@ def register_routes(app: web.Application) -> None:
         "/api/sessions/{session_id}/worker-sessions/{ws_id}/messages",
         handle_messages,
     )
-

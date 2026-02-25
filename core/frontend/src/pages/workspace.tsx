@@ -209,7 +209,6 @@ interface AgentBackendState {
   nodeLogs: Record<string, string[]>;
   nodeActionPlans: Record<string, string>;
   isTyping: boolean;
-  streamTurnCounter: number;
   llmSnapshots: Record<string, string>;
 }
 
@@ -229,7 +228,6 @@ function defaultAgentState(): AgentBackendState {
     nodeLogs: {},
     nodeActionPlans: {},
     isTyping: false,
-    streamTurnCounter: 0,
     llmSnapshots: {},
   };
 }
@@ -239,7 +237,6 @@ export default function Workspace() {
   const [searchParams] = useSearchParams();
   const rawAgent = searchParams.get("agent") || "new-agent";
   const initialAgent = rawAgent;
-  const initialPrompt = searchParams.get("prompt") || "";
 
   // Sessions grouped by agent type — restore from localStorage if available
   const [sessionsByAgent, setSessionsByAgent] = useState<Record<string, Session[]>>(() => {
@@ -251,12 +248,8 @@ export default function Workspace() {
         if (!initial[tab.agentType]) initial[tab.agentType] = [];
         const session = createSession(tab.agentType, tab.label);
         session.id = tab.id;
-        // Restore messages and graph nodes from persisted session data
-        const saved = persisted.sessions?.[tab.id];
-        if (saved) {
-          session.messages = saved.messages || [];
-          session.graphNodes = saved.graphNodes || [];
-        }
+        // Tab structure restored; messages stay empty.
+        // Messages are only restored in loadAgentForType when rejoining an existing backend session.
         initial[tab.agentType].push(session);
       }
     }
@@ -266,28 +259,7 @@ export default function Workspace() {
     }
 
     if (initialAgent === "new-agent") {
-      const session = createSession("new-agent", "New Agent");
-      session.messages = [
-        {
-          id: "na-1", agent: "Queen Bee", agentColor: "",
-          content: "Welcome! I'm the Queen Bee \u2014 I'll help you set up your new agent.\n\nWould you like to:\n\n**1. Build from scratch** \u2014 Define a custom pipeline and workers tailored to your needs.\n\n**2. Start from an existing agent** \u2014 Clone one of your current agents and modify it.\n\nJust let me know which option you'd prefer, or describe what you'd like your agent to do and I'll suggest a setup.",
-          timestamp: "", role: "queen", thread: "new-agent",
-        },
-      ];
-      if (initialPrompt) {
-        session.messages.push(
-          {
-            id: makeId(), agent: "You", agentColor: "",
-            content: initialPrompt, timestamp: "", type: "user" as const, thread: "new-agent",
-          },
-          {
-            id: makeId(), agent: "Queen Bee", agentColor: "",
-            content: `Great idea! Let me think about how to set up an agent for that.\n\nI'll design a pipeline to handle: **"${initialPrompt}"**\n\nGive me a moment to put together the right workers and steps for you.`,
-            timestamp: "", role: "queen" as const, thread: "new-agent",
-          },
-        );
-      }
-      initial["new-agent"] = [...(initial["new-agent"] || []), session];
+      initial["new-agent"] = [...(initial["new-agent"] || []), createSession("new-agent", "New Agent")];
     } else {
       initial[initialAgent] = [...(initial[initialAgent] || []),
         createSession(initialAgent, formatAgentDisplayName(initialAgent))];
@@ -320,6 +292,17 @@ export default function Workspace() {
   // state without adding sessionsByAgent to its dependency array.
   const sessionsRef = useRef(sessionsByAgent);
   sessionsRef.current = sessionsByAgent;
+
+  // Ref mirror of activeSessionByAgent so setSessionsByAgent updater
+  // functions always read the *current* active session id, avoiding stale
+  // closures that can silently drop messages / graph updates.
+  const activeSessionRef = useRef(activeSessionByAgent);
+  activeSessionRef.current = activeSessionByAgent;
+
+  // Synchronous per-agent turn counter for SSE message IDs.
+  // Using a ref avoids stale-closure bugs when multiple SSE events
+  // arrive in the same React batch.
+  const turnCounterRef = useRef<Record<string, number>>({});
 
   // --- Consolidated per-agent backend state ---
   const [agentStates, setAgentStates] = useState<Record<string, AgentBackendState>>({});
@@ -362,10 +345,10 @@ export default function Workspace() {
       const errMsg = err instanceof Error ? err.message : String(err);
       setSessionsByAgent((prev) => {
         const sessions = prev[activeWorker] || [];
+        const activeId = activeSessionRef.current[activeWorker] || sessions[0]?.id;
         return {
           ...prev,
           [activeWorker]: sessions.map((s) => {
-            const activeId = activeSessionByAgent[activeWorker] || sessions[0]?.id;
             if (s.id !== activeId) return s;
             const errorMsg: ChatMessage = {
               id: makeId(), agent: "System", agentColor: "",
@@ -378,7 +361,7 @@ export default function Workspace() {
       });
       updateAgentState(activeWorker, { workerRunState: "idle" });
     }
-  }, [agentStates, activeWorker, activeSessionByAgent, updateAgentState]);
+  }, [agentStates, activeWorker, updateAgentState]);
 
   // --- Fetch discovered agents for NewTabPopover ---
   const [discoverAgents, setDiscoverAgents] = useState<DiscoverEntry[]>([]);
@@ -394,7 +377,21 @@ export default function Workspace() {
   const loadingRef = useRef(new Set<string>());
   const loadAgentForType = useCallback(async (agentType: string) => {
     if (agentType === "new-agent") {
-      updateAgentState(agentType, { loading: false });
+      // Create a queen-only session (no worker) for agent building
+      updateAgentState(agentType, { loading: true, error: null, ready: false, sessionId: null });
+      try {
+        const liveSession = await sessionsApi.create();
+        updateAgentState(agentType, {
+          sessionId: liveSession.session_id,
+          displayName: "Queen Bee",
+          ready: true,
+          loading: false,
+          queenReady: true,
+        });
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err);
+        updateAgentState(agentType, { error: msg, loading: false });
+      }
       return;
     }
 
@@ -406,6 +403,7 @@ export default function Workspace() {
 
     try {
       let liveSession: LiveSession;
+      let isResumedSession = false;
       try {
         liveSession = await sessionsApi.create(agentType);
       } catch (loadErr: unknown) {
@@ -418,6 +416,7 @@ export default function Workspace() {
         const existingSessionId = body.session_id as string | undefined;
         if (!existingSessionId) throw loadErr;
 
+        isResumedSession = true;
         if (body.loading) {
           liveSession = await (async () => {
             const maxAttempts = 30;
@@ -455,7 +454,7 @@ export default function Workspace() {
       });
 
       // Check worker session status (detects running worker).
-      // Only load messages if we don't already have them from localStorage.
+      // Only restore messages when rejoining an existing backend session.
       let isWorkerRunning = false;
       try {
         const { sessions: workerSessions } = await sessionsApi.workerSessions(liveSession.session_id);
@@ -464,9 +463,7 @@ export default function Workspace() {
         );
         isWorkerRunning = resumable?.status === "active";
 
-        const currentSessions = sessionsRef.current[agentType] || [];
-        const hasRestoredMessages = currentSessions.some(s => s.messages.length > 0);
-        if (!hasRestoredMessages && resumable) {
+        if (isResumedSession && resumable) {
           const { messages } = await sessionsApi.messages(liveSession.session_id, resumable.session_id);
           if (messages.length > 0) {
             const chatMsgs = messages.map((m: Message) =>
@@ -501,12 +498,6 @@ export default function Workspace() {
   // Auto-load agents when new tabs appear in sessionsByAgent
   useEffect(() => {
     for (const agentType of Object.keys(sessionsByAgent)) {
-      if (agentType === "new-agent") {
-        if (!agentStates[agentType]) {
-          updateAgentState(agentType, { loading: false });
-        }
-        continue;
-      }
       if (agentStates[agentType]?.sessionId || agentStates[agentType]?.loading || agentStates[agentType]?.error) continue;
       loadAgentForType(agentType);
     }
@@ -526,13 +517,9 @@ export default function Workspace() {
       const graphNodes = topologyToGraphNodes(topology);
       if (graphNodes.length === 0) return;
 
-      // Only overwrite graph nodes if the session doesn't already have them
-      // (e.g. restored from localStorage)
       setSessionsByAgent((prev) => {
         const sessions = prev[agentType] || [];
         if (!sessions.length) return prev;
-        const first = sessions[0];
-        if (first.graphNodes.length > 0) return prev;
         return {
           ...prev,
           [agentType]: sessions.map((s, i) =>
@@ -557,10 +544,10 @@ export default function Workspace() {
     (agentType: string, nodeId: string, status: NodeStatus, extra?: Partial<GraphNode>) => {
       setSessionsByAgent((prev) => {
         const sessions = prev[agentType] || [];
+        const activeId = activeSessionRef.current[agentType] || sessions[0]?.id;
         return {
           ...prev,
           [agentType]: sessions.map((s) => {
-            const activeId = activeSessionByAgent[agentType] || sessions[0]?.id;
             if (s.id !== activeId) return s;
             return {
               ...s,
@@ -572,7 +559,7 @@ export default function Workspace() {
         };
       });
     },
-    [activeSessionByAgent],
+    [],
   );
 
   const markAllNodesAs = useCallback(
@@ -580,10 +567,10 @@ export default function Workspace() {
       const fromArr = Array.isArray(fromStatus) ? fromStatus : [fromStatus];
       setSessionsByAgent((prev) => {
         const sessions = prev[agentType] || [];
+        const activeId = activeSessionRef.current[agentType] || sessions[0]?.id;
         return {
           ...prev,
           [agentType]: sessions.map((s) => {
-            const activeId = activeSessionByAgent[agentType] || sessions[0]?.id;
             if (s.id !== activeId) return s;
             return {
               ...s,
@@ -595,7 +582,7 @@ export default function Workspace() {
         };
       });
     },
-    [activeSessionByAgent],
+    [],
   );
 
   const handlePause = useCallback(async () => {
@@ -628,10 +615,10 @@ export default function Workspace() {
       const errMsg = err instanceof Error ? err.message : String(err);
       setSessionsByAgent((prev) => {
         const sessions = prev[activeWorker] || [];
+        const activeId = activeSessionRef.current[activeWorker] || sessions[0]?.id;
         return {
           ...prev,
           [activeWorker]: sessions.map((s) => {
-            const activeId = activeSessionByAgent[activeWorker] || sessions[0]?.id;
             if (s.id !== activeId) return s;
             const errorMsg: ChatMessage = {
               id: makeId(), agent: "System", agentColor: "",
@@ -643,7 +630,7 @@ export default function Workspace() {
         };
       });
     }
-  }, [agentStates, activeWorker, activeSessionByAgent, markAllNodesAs, updateAgentState]);
+  }, [agentStates, activeWorker, markAllNodesAs, updateAgentState]);
 
   // --- Node log helper (writes into agentStates) ---
   const appendNodeLog = useCallback((agentType: string, nodeId: string, line: string) => {
@@ -670,7 +657,7 @@ export default function Workspace() {
       console.log('[UPSERT] agentType:', agentType, 'msgId:', chatMsg.id, 'thread:', chatMsg.thread, 'role:', chatMsg.role, 'content:', chatMsg.content?.slice(0, 40));
       setSessionsByAgent((prev) => {
         const sessions = prev[agentType] || [];
-        const activeId = activeSessionByAgent[agentType] || sessions[0]?.id;
+        const activeId = activeSessionRef.current[agentType] || sessions[0]?.id;
         console.log('[UPSERT-inner] sessions:', sessions.length, 'activeId:', activeId, 'sessionIds:', sessions.map(s => s.id));
         return {
           ...prev,
@@ -686,7 +673,7 @@ export default function Workspace() {
         };
       });
     },
-    [activeSessionByAgent],
+    [],
   );
 
   const handleSSEEvent = useCallback(
@@ -700,7 +687,7 @@ export default function Workspace() {
       const displayName = isQueen ? "Queen Bee" : (agentDisplayName || undefined);
       const role = isQueen ? "queen" as const : "worker" as const;
       const ts = fmtLogTs(event.timestamp);
-      const currentTurn = agentStates[agentType]?.streamTurnCounter ?? 0;
+      const currentTurn = turnCounterRef.current[agentType] ?? 0;
 
       // Mark queen as ready on the first queen SSE event
       if (isQueen && !agentStates[agentType]?.queenReady) {
@@ -710,18 +697,19 @@ export default function Workspace() {
       switch (event.type) {
         case "execution_started":
           if (isQueen) {
-            updateAgentState(agentType, { isTyping: true, streamTurnCounter: currentTurn + 1 });
+            turnCounterRef.current[agentType] = currentTurn + 1;
+            updateAgentState(agentType, { isTyping: true });
           } else {
             // Warn if prior LLM snapshots are being dropped (edge case: execution_completed never arrived)
             const priorSnapshots = agentStates[agentType]?.llmSnapshots || {};
             if (Object.keys(priorSnapshots).length > 0) {
               console.debug(`[hive] execution_started: dropping ${Object.keys(priorSnapshots).length} unflushed LLM snapshot(s)`);
             }
+            turnCounterRef.current[agentType] = currentTurn + 1;
             updateAgentState(agentType, {
               isTyping: true,
               awaitingInput: false,
               workerRunState: "running",
-              streamTurnCounter: currentTurn + 1,
               currentExecutionId: event.execution_id || agentStates[agentType]?.currentExecutionId || null,
               nodeLogs: {},
               llmSnapshots: {},
@@ -807,10 +795,11 @@ export default function Workspace() {
         }
 
         case "node_loop_started":
-          updateAgentState(agentType, { isTyping: true, streamTurnCounter: currentTurn + 1 });
+          turnCounterRef.current[agentType] = currentTurn + 1;
+          updateAgentState(agentType, { isTyping: true });
           if (!isQueen && event.node_id) {
             const sessions = sessionsRef.current[agentType] || [];
-            const activeId = activeSessionByAgent[agentType] || sessions[0]?.id;
+            const activeId = activeSessionRef.current[agentType] || sessions[0]?.id;
             const session = sessions.find((s) => s.id === activeId);
             const existing = session?.graphNodes.find((n) => n.id === event.node_id);
             const isRevisit = existing?.status === "complete";
@@ -822,7 +811,7 @@ export default function Workspace() {
           break;
 
         case "node_loop_iteration":
-          updateAgentState(agentType, { streamTurnCounter: currentTurn + 1 });
+          turnCounterRef.current[agentType] = currentTurn + 1;
           if (!isQueen && event.node_id) {
             const pendingText = agentStates[agentType]?.llmSnapshots[event.node_id];
             if (pendingText?.trim()) {
@@ -959,11 +948,43 @@ export default function Workspace() {
           }
           break;
 
+        case "worker_loaded": {
+          const workerName = event.data?.worker_name as string | undefined;
+          const displayName = formatAgentDisplayName(workerName || agentType);
+
+          // Update agent state: new display name, reset graph so topology refetch triggers
+          updateAgentState(agentType, {
+            displayName,
+            workerRunState: "idle",
+            graphId: null,
+            nodeSpecs: [],
+          });
+
+          // Update session label (tab name) and clear graph nodes for fresh fetch
+          setSessionsByAgent(prev => ({
+            ...prev,
+            [agentType]: (prev[agentType] || []).map(s => ({
+              ...s,
+              label: displayName,
+              graphNodes: [],
+            })),
+          }));
+
+          // Explicitly fetch graph topology for the newly loaded worker
+          // (don't rely solely on the effect — state may already be null/empty)
+          const sessionId = agentStates[agentType]?.sessionId;
+          if (sessionId) {
+            fetchGraphForAgent(agentType, sessionId);
+          }
+
+          break;
+        }
+
         default:
           break;
       }
     },
-    [agentStates, activeSessionByAgent, updateAgentState, updateGraphNodeStatus, markAllNodesAs, upsertChatMessage, appendNodeLog],
+    [agentStates, updateAgentState, updateGraphNodeStatus, markAllNodesAs, upsertChatMessage, appendNodeLog, fetchGraphForAgent],
   );
 
   // --- Multi-session SSE subscription ---
@@ -1073,21 +1094,6 @@ export default function Workspace() {
         }));
         updateAgentState(activeWorker, { isTyping: false });
       });
-    } else if (activeWorker === "new-agent") {
-      setTimeout(() => {
-        const reply: ChatMessage = {
-          id: makeId(), agent: "Queen Bee", agentColor: "",
-          content: "Got it! Let me design a pipeline for that. (Builder mode — backend integration coming soon.)",
-          timestamp: "", role: "queen" as const, thread,
-        };
-        setSessionsByAgent(prev => ({
-          ...prev,
-          [activeWorker]: prev[activeWorker].map(s =>
-            s.id === activeSession.id ? { ...s, messages: [...s.messages, reply] } : s
-          ),
-        }));
-        updateAgentState(activeWorker, { isTyping: false });
-      }, 800);
     } else {
       const errorMsg: ChatMessage = {
         id: makeId(), agent: "System", agentColor: "",
@@ -1133,27 +1139,13 @@ export default function Workspace() {
   }, [sessionsByAgent, activeWorker, navigate]);
 
   // Create a new session for any agent type (used by NewTabPopover)
-  const addAgentSession = useCallback((agentType: string, agentLabel?: string, cloned = false) => {
+  const addAgentSession = useCallback((agentType: string, agentLabel?: string) => {
     const sessions = sessionsByAgent[agentType] || [];
     const newIndex = sessions.length + 1;
     const existingCreds = sessions.length > 0 ? sessions[0].credentials : undefined;
     const displayLabel = agentLabel || formatAgentDisplayName(agentType);
     const label = newIndex === 1 ? displayLabel : `${displayLabel} #${newIndex}`;
     const newSession = createSession(agentType, label, existingCreds);
-
-    if (cloned) {
-      newSession.messages = [{
-        id: makeId(), agent: "Queen Bee", agentColor: "",
-        content: `Welcome to a new **${displayLabel}** session.\n\nConfigure any credentials if needed, then kick off a run whenever you're ready.`,
-        timestamp: "", role: "queen" as const, thread: agentType,
-      }];
-    } else if (agentType === "new-agent") {
-      newSession.messages = [{
-        id: makeId(), agent: "Queen Bee", agentColor: "",
-        content: "Hey there! I'm the Queen Bee \u2014 let's build your new agent together.\n\n**What would you like your agent to do?** Here are a few ideas to get you started:\n\n- **Email manager** \u2014 triage inboxes, draft replies, auto-archive\n- **Job hunter** \u2014 scan job boards, match roles, auto-apply\n- **Security auditor** \u2014 run recon, score risks, generate reports\n- **Content writer** \u2014 research, outline, and draft long-form content\n- **Data analyst** \u2014 pull metrics, detect anomalies, summarize trends\n- **E-commerce monitor** \u2014 track prices, restock alerts, competitor analysis\n\nJust describe what you want to automate and I'll design the pipeline for you.",
-        timestamp: "", role: "queen" as const, thread: "new-agent",
-      }];
-    }
 
     setSessionsByAgent(prev => ({
       ...prev,
@@ -1195,7 +1187,7 @@ export default function Workspace() {
               activeWorker={activeWorker}
               discoverAgents={discoverAgents}
               onFromScratch={() => { addAgentSession("new-agent"); }}
-              onCloneAgent={(agentPath, agentName) => { addAgentSession(agentPath, agentName, true); }}
+              onCloneAgent={(agentPath, agentName) => { addAgentSession(agentPath, agentName); }}
             />
           </>
         }
@@ -1236,7 +1228,7 @@ export default function Workspace() {
             )}
 
             {/* Queen connecting overlay — agent loaded but queen not yet alive */}
-            {!activeAgentState?.loading && activeAgentState?.ready && !activeAgentState?.queenReady && activeWorker !== "new-agent" && (
+            {!activeAgentState?.loading && activeAgentState?.ready && !activeAgentState?.queenReady && (
               <div className="absolute top-0 left-0 right-0 z-10 px-4 py-2 bg-primary/5 border-b border-primary/20 flex items-center gap-2">
                 <Loader2 className="w-3.5 h-3.5 animate-spin text-primary/60" />
                 <span className="text-xs text-primary/80">Connecting to queen...</span>
@@ -1260,7 +1252,7 @@ export default function Workspace() {
                 awaitingInput={activeAgentState?.awaitingInput ?? false}
                 disabled={
                   (activeAgentState?.loading ?? true) ||
-                  (activeWorker !== "new-agent" && !(activeAgentState?.queenReady))
+                  !(activeAgentState?.queenReady)
                 }
               />
             )}

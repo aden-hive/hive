@@ -211,7 +211,9 @@ def register_routes(app: web.Application) -> None:
     """Register graph/node inspection routes."""
     # Session-primary routes
     app.router.add_get("/api/sessions/{session_id}/graphs/{graph_id}/nodes", handle_list_nodes)
-    app.router.add_get("/api/sessions/{session_id}/graphs/{graph_id}/nodes/{node_id}", handle_get_node)
+    app.router.add_get(
+        "/api/sessions/{session_id}/graphs/{graph_id}/nodes/{node_id}", handle_get_node
+    )
     app.router.add_get(
         "/api/sessions/{session_id}/graphs/{graph_id}/nodes/{node_id}/criteria",
         handle_node_criteria,

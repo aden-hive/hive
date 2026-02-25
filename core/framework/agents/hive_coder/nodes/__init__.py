@@ -387,22 +387,20 @@ set_output until the user is done.
 
 ## 7. Live Test (optional)
 
-After the user approves, offer to load and run the agent in-session. \
-This runs it alongside you.
+After the user approves, offer to load and run the agent in-session.
 
+If running with a queen (server/frontend):
+```
+load_built_agent("exports/{name}")  # loads as the session worker
+```
+The frontend updates automatically — the user sees the agent's graph, \
+the tab renames, and you can delegate via start_worker(task).
+
+If running standalone (TUI):
 ```
 load_agent("exports/{name}")   # registers as secondary graph
 start_agent("{name}")           # triggers default entry point
 ```
-
-You can also:
-- `list_agents()` — see all loaded graphs and status
-- `restart_agent("{name}")` then `load_agent` — pick up code changes
-- `unload_agent("{name}")` — remove it from the session
-- `get_user_presence()` — check if user is around
-
-The agent runs in a shared session: it can read memory you've set and \
-its outputs are visible to you.
 """,
     tools=[
         "read_file",
@@ -531,6 +529,8 @@ queen_node = NodeSpec(
         # Monitoring
         "get_worker_health_summary",
         "notify_operator",
+        # Agent loading
+        "load_built_agent",
     ],
     system_prompt="""\
 You are the Queen — the user's primary interface. You are a coding agent \
@@ -590,6 +590,12 @@ Use this to relay user instructions or concerns.
 - get_worker_health_summary() — Read the latest health data from the judge.
 - notify_operator(ticket_id, analysis, urgency) — Alert the user about a \
 critical issue. Use sparingly.
+
+## Agent Loading
+- load_built_agent(agent_path) — Load a newly built agent as the worker in \
+this session. Call after building and validating an agent to make it \
+available immediately. The user sees the graph update and can interact \
+with it without leaving the session.
 
 # Behavior
 
@@ -657,6 +663,13 @@ Run FOUR validation steps:
   validate_agent_tools("exports/{name}")
   run_agent_tests("{name}")
 
+## 5. Load into Session
+After building and verifying, load the agent into the current session:
+  load_built_agent("exports/{name}")
+This makes the agent available immediately — the user sees its graph, \
+the tab name updates, and you can delegate to it via start_worker(). \
+Do NOT tell the user to run `python -m {name} run` — load it here.
+
 # Style
 
 - Concise. No fluff. Direct.
@@ -695,6 +708,8 @@ ALL_QUEEN_TOOLS = [
     # Monitoring
     "get_worker_health_summary",
     "notify_operator",
+    # Agent loading
+    "load_built_agent",
 ]
 
 __all__ = [

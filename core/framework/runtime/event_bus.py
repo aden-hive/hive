@@ -129,6 +129,9 @@ class EventType(StrEnum):
     WORKER_ESCALATION_TICKET = "worker_escalation_ticket"
     QUEEN_INTERVENTION_REQUESTED = "queen_intervention_requested"
 
+    # Worker lifecycle (session manager → frontend)
+    WORKER_LOADED = "worker_loaded"
+
 
 @dataclass
 class AgentEvent:

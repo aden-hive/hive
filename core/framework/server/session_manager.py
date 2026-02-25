@@ -149,14 +149,15 @@ class SessionManager:
         try:
             # Load worker FIRST (before queen) so queen gets full tools
             await self._load_worker_core(
-                session, agent_path, worker_id=resolved_worker_id, model=model,
+                session,
+                agent_path,
+                worker_id=resolved_worker_id,
+                model=model,
             )
 
             # Start queen with worker profile + lifecycle + monitoring tools
             worker_identity = (
-                build_worker_profile(session.worker_runtime)
-                if session.worker_runtime
-                else None
+                build_worker_profile(session.worker_runtime) if session.worker_runtime else None
             )
             await self._start_queen(session, worker_identity=worker_identity)
 
@@ -192,9 +193,7 @@ class SessionManager:
         resolved_worker_id = worker_id or agent_path.name
 
         if session.worker_runtime is not None:
-            raise ValueError(
-                f"Session '{session.id}' already has worker '{session.worker_id}'"
-            )
+            raise ValueError(f"Session '{session.id}' already has worker '{session.worker_id}'")
 
         async with self._lock:
             if session.id in self._loading:
@@ -268,13 +267,19 @@ class SessionManager:
             raise ValueError(f"Session '{session_id}' not found")
 
         await self._load_worker_core(
-            session, agent_path, worker_id=worker_id, model=model,
+            session,
+            agent_path,
+            worker_id=worker_id,
+            model=model,
         )
 
         # Start judge + notify queen (skip for hive_coder itself)
         if agent_path.name != "hive_coder" and session.worker_runtime:
             await self._start_judge(session, session.runner._storage_path)
             await self._notify_queen_worker_loaded(session)
+
+        # Emit SSE event so the frontend can update UI
+        await self._emit_worker_loaded(session)
 
         return session
 
@@ -589,6 +594,25 @@ class SessionManager:
 
         profile = build_worker_profile(session.worker_runtime)
         await node.inject_event(f"[SYSTEM] Worker loaded.{profile}")
+
+    async def _emit_worker_loaded(self, session: Session) -> None:
+        """Publish a WORKER_LOADED event so the frontend can update."""
+        from framework.runtime.event_bus import AgentEvent, EventType
+
+        info = session.worker_info
+        await session.event_bus.publish(
+            AgentEvent(
+                type=EventType.WORKER_LOADED,
+                stream_id="queen",
+                data={
+                    "worker_id": session.worker_id,
+                    "worker_name": info.name if info else session.worker_id,
+                    "agent_path": str(session.worker_path) if session.worker_path else "",
+                    "goal": info.goal_name if info else "",
+                    "node_count": info.node_count if info else 0,
+                },
+            )
+        )
 
     async def _notify_queen_worker_unloaded(self, session: Session) -> None:
         """Notify the queen that the worker has been unloaded."""

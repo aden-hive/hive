@@ -109,6 +109,9 @@ def register_queen_lifecycle_tools(
     worker_runtime: AgentRuntime | None = None,
     event_bus: EventBus | None = None,
     storage_path: Path | None = None,
+    # Server context — enables load_built_agent tool
+    session_manager: Any = None,
+    manager_session_id: str | None = None,
 ) -> int:
     """Register queen lifecycle tools.
 
@@ -121,6 +124,10 @@ def register_queen_lifecycle_tools(
         worker_runtime: (Legacy) Direct runtime reference. If ``session``
             is not provided, a WorkerSessionAdapter is created from
             worker_runtime + event_bus + storage_path.
+        session_manager: (Server only) The SessionManager instance, needed
+            for ``load_built_agent`` to hot-load a worker.
+        manager_session_id: (Server only) The session's ID in the manager,
+            used with ``session_manager.load_worker()``.
 
     Returns the number of tools registered.
     """
@@ -379,6 +386,74 @@ def register_queen_lifecycle_tools(
         "inject_worker_message", _inject_tool, lambda inputs: inject_worker_message(**inputs)
     )
     tools_registered += 1
+
+    # --- load_built_agent (server context only) --------------------------------
+
+    if session_manager is not None and manager_session_id is not None:
+
+        async def load_built_agent(agent_path: str) -> str:
+            """Load a newly built agent as the worker in this session.
+
+            After building and validating an agent, call this to make it
+            available immediately. The user will see the agent's graph and
+            can interact with it without opening a new tab.
+            """
+            runtime = _get_runtime()
+            if runtime is not None:
+                return json.dumps(
+                    {
+                        "error": "A worker is already loaded in this session. "
+                        "Unload it first or open a new tab."
+                    }
+                )
+
+            resolved_path = Path(agent_path).resolve()
+            if not resolved_path.exists():
+                return json.dumps({"error": f"Agent path does not exist: {resolved_path}"})
+
+            try:
+                updated_session = await session_manager.load_worker(
+                    manager_session_id,
+                    str(resolved_path),
+                )
+                info = updated_session.worker_info
+                return json.dumps(
+                    {
+                        "status": "loaded",
+                        "worker_id": updated_session.worker_id,
+                        "worker_name": info.name if info else updated_session.worker_id,
+                        "goal": info.goal_name if info else "",
+                        "node_count": info.node_count if info else 0,
+                    }
+                )
+            except Exception as e:
+                return json.dumps({"error": f"Failed to load agent: {e}"})
+
+        _load_built_tool = Tool(
+            name="load_built_agent",
+            description=(
+                "Load a newly built agent as the worker in this session. "
+                "After building and validating an agent, call this with the agent's "
+                "path (e.g. 'exports/my_agent') to make it available immediately. "
+                "The user will see the agent's graph and can interact with it."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "agent_path": {
+                        "type": "string",
+                        "description": ("Path to the agent directory (e.g. 'exports/my_agent')"),
+                    },
+                },
+                "required": ["agent_path"],
+            },
+        )
+        registry.register(
+            "load_built_agent",
+            _load_built_tool,
+            lambda inputs: load_built_agent(**inputs),
+        )
+        tools_registered += 1
 
     logger.info("Registered %d queen lifecycle tools", tools_registered)
     return tools_registered

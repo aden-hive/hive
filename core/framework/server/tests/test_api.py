@@ -822,7 +822,9 @@ class TestWorkerSessions:
         app = _make_app_with_session(session)
 
         async with TestClient(TestServer(app)) as client:
-            resp = await client.get(f"/api/sessions/test_agent/worker-sessions/{session_id}/checkpoints")
+            resp = await client.get(
+                f"/api/sessions/test_agent/worker-sessions/{session_id}/checkpoints"
+            )
             assert resp.status == 200
             data = await resp.json()
             assert len(data["checkpoints"]) == 1
@@ -875,7 +877,9 @@ class TestMessages:
         app = _make_app_with_session(session)
 
         async with TestClient(TestServer(app)) as client:
-            resp = await client.get(f"/api/sessions/test_agent/worker-sessions/{session_id}/messages")
+            resp = await client.get(
+                f"/api/sessions/test_agent/worker-sessions/{session_id}/messages"
+            )
             assert resp.status == 200
             data = await resp.json()
             msgs = data["messages"]

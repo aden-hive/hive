@@ -34,6 +34,7 @@ DEFAULT_EVENT_TYPES = [
     EventType.NODE_RETRY,
     EventType.NODE_TOOL_DOOM_LOOP,
     EventType.CONTEXT_COMPACTED,
+    EventType.WORKER_LOADED,
 ]
 
 # Keepalive interval in seconds
