@@ -238,21 +238,24 @@ CHECK_EXIT=$?
 
 # Parse and display results
 if [ $CHECK_EXIT -eq 0 ] || echo "$CHECK_RESULT" | grep -q "^{"; then
-    # Try to parse JSON and display formatted results
-    python -c "
+    # Try to parse JSON and display formatted results using the detected Python interpreter.
+    # Feed CHECK_RESULT via stdin to avoid shell-quoting issues.
+    IMPORT_PARSE_OUTPUT=$(printf '%s\n' "$CHECK_RESULT" | "$PYTHON_CMD" -c "
 import json
 import sys
 
+raw = sys.stdin.read()
+
 try:
-    data = json.loads('''$CHECK_RESULT''')
-    
+    data = json.loads(raw)
+
     modules = [
         ('framework', 'framework imports OK', True),
         ('aden_tools', 'aden_tools imports OK', True),
         ('litellm', 'litellm imports OK', False),
-        ('framework.mcp.agent_builder_server', 'MCP server module OK', True)
+        ('framework.mcp.agent_builder_server', 'MCP server module OK', True),
     ]
-    
+
     import_errors = 0
     for mod, label, required in modules:
         status = data.get(mod, 'error: not checked')
@@ -265,14 +268,15 @@ try:
             import_errors += 1
         else:
             print('${YELLOW}  ⚠ ' + label + ' (may be OK)${NC}')
-    
+
     sys.exit(import_errors)
 except json.JSONDecodeError:
     print('${RED}Error: Could not parse import check results${NC}', file=sys.stderr)
-    print('$CHECK_RESULT', file=sys.stderr)
+    print(raw, file=sys.stderr)
     sys.exit(1)
-" 2>&1
+")
     IMPORT_ERRORS=$?
+    echo "$IMPORT_PARSE_OUTPUT"
 else
     echo -e "${RED}  ✗ Import check failed${NC}"
     echo "$CHECK_RESULT"
