@@ -56,6 +56,16 @@ class ValidationResult:
     missing_credentials: list[str] = field(default_factory=list)
 
 
+def _require_key(obj: dict, key: str, context: str) -> Any:
+    """Get required key from dict; raise ValueError with clear message if missing."""
+    if key not in obj:
+        raise ValueError(
+            f"Invalid agent export: missing required key '{key}' in {context}. "
+            f"Keys present: {list(obj.keys())}"
+        )
+    return obj[key]
+
+
 def load_agent_export(data: str | dict) -> tuple[GraphSpec, Goal]:
     """
     Load GraphSpec and Goal from export_graph() output.
@@ -65,53 +75,111 @@ def load_agent_export(data: str | dict) -> tuple[GraphSpec, Goal]:
 
     Returns:
         Tuple of (GraphSpec, Goal)
+
+    Raises:
+        json.JSONDecodeError: If data is invalid JSON (when data is str).
+        ValueError: If required graph/goal fields are missing or malformed.
     """
     if isinstance(data, str):
-        data = json.loads(data)
+        try:
+            data = json.loads(data)
+        except json.JSONDecodeError as e:
+            raise ValueError(f"Invalid agent export JSON: {e}") from e
+
+    if not isinstance(data, dict):
+        raise ValueError(
+            f"Invalid agent export: expected dict or JSON object, got {type(data).__name__}"
+        )
 
     # Extract graph and goal
     graph_data = data.get("graph", {})
     goal_data = data.get("goal", {})
 
+    if not isinstance(graph_data, dict):
+        raise ValueError(
+            f"Invalid agent export: 'graph' must be an object, got {type(graph_data).__name__}"
+        )
+    if not isinstance(goal_data, dict):
+        raise ValueError(
+            f"Invalid agent export: 'goal' must be an object, got {type(goal_data).__name__}"
+        )
+
     # Build NodeSpec objects
     nodes = []
-    for node_data in graph_data.get("nodes", []):
-        nodes.append(NodeSpec(**node_data))
+    for i, node_data in enumerate(graph_data.get("nodes", [])):
+        if not isinstance(node_data, dict):
+            raise ValueError(
+                f"Invalid agent export: graph.nodes[{i}] must be an object, got {type(node_data).__name__}"
+            )
+        try:
+            nodes.append(NodeSpec(**node_data))
+        except Exception as e:
+            raise ValueError(
+                f"Invalid agent export: graph.nodes[{i}] has invalid node spec: {e}"
+            ) from e
 
     # Build EdgeSpec objects
+    condition_map = {
+        "always": EdgeCondition.ALWAYS,
+        "on_success": EdgeCondition.ON_SUCCESS,
+        "on_failure": EdgeCondition.ON_FAILURE,
+        "conditional": EdgeCondition.CONDITIONAL,
+    }
     edges = []
-    for edge_data in graph_data.get("edges", []):
-        condition_str = edge_data.get("condition", "on_success")
-        condition_map = {
-            "always": EdgeCondition.ALWAYS,
-            "on_success": EdgeCondition.ON_SUCCESS,
-            "on_failure": EdgeCondition.ON_FAILURE,
-            "conditional": EdgeCondition.CONDITIONAL,
-        }
-        edge = EdgeSpec(
-            id=edge_data["id"],
-            source=edge_data["source"],
-            target=edge_data["target"],
-            condition=condition_map.get(condition_str, EdgeCondition.ON_SUCCESS),
-            condition_expr=edge_data.get("condition_expr"),
-            priority=edge_data.get("priority", 0),
-            input_mapping=edge_data.get("input_mapping", {}),
-        )
-        edges.append(edge)
+    for i, edge_data in enumerate(graph_data.get("edges", [])):
+        if not isinstance(edge_data, dict):
+            raise ValueError(
+                f"Invalid agent export: graph.edges[{i}] must be an object, got {type(edge_data).__name__}"
+            )
+        try:
+            edge = EdgeSpec(
+                id=_require_key(edge_data, "id", f"graph.edges[{i}]"),
+                source=_require_key(edge_data, "source", f"graph.edges[{i}]"),
+                target=_require_key(edge_data, "target", f"graph.edges[{i}]"),
+                condition=condition_map.get(
+                    edge_data.get("condition", "on_success"), EdgeCondition.ON_SUCCESS
+                ),
+                condition_expr=edge_data.get("condition_expr"),
+                priority=edge_data.get("priority", 0),
+                input_mapping=edge_data.get("input_mapping", {}),
+            )
+            edges.append(edge)
+        except ValueError:
+            raise
+        except Exception as e:
+            raise ValueError(
+                f"Invalid agent export: graph.edges[{i}] has invalid edge spec: {e}"
+            ) from e
 
     # Build AsyncEntryPointSpec objects for multi-entry-point support
     async_entry_points = []
-    for aep_data in graph_data.get("async_entry_points", []):
-        async_entry_points.append(AsyncEntryPointSpec(
-            id=aep_data["id"],
-            name=aep_data.get("name", aep_data["id"]),
-            entry_node=aep_data["entry_node"],
-            trigger_type=aep_data.get("trigger_type", "manual"),
-            trigger_config=aep_data.get("trigger_config", {}),
-            isolation_level=aep_data.get("isolation_level", "shared"),
-            priority=aep_data.get("priority", 0),
-            max_concurrent=aep_data.get("max_concurrent", 10),
-        ))
+    for i, aep_data in enumerate(graph_data.get("async_entry_points", [])):
+        if not isinstance(aep_data, dict):
+            raise ValueError(
+                f"Invalid agent export: graph.async_entry_points[{i}] must be an object, "
+                f"got {type(aep_data).__name__}"
+            )
+        try:
+            aep_id = _require_key(aep_data, "id", f"graph.async_entry_points[{i}]")
+            aep_entry_node = _require_key(
+                aep_data, "entry_node", f"graph.async_entry_points[{i}]"
+            )
+            async_entry_points.append(AsyncEntryPointSpec(
+                id=aep_id,
+                name=aep_data.get("name", aep_id),
+                entry_node=aep_entry_node,
+                trigger_type=aep_data.get("trigger_type", "manual"),
+                trigger_config=aep_data.get("trigger_config", {}),
+                isolation_level=aep_data.get("isolation_level", "shared"),
+                priority=aep_data.get("priority", 0),
+                max_concurrent=aep_data.get("max_concurrent", 10),
+            ))
+        except ValueError:
+            raise
+        except Exception as e:
+            raise ValueError(
+                f"Invalid agent export: graph.async_entry_points[{i}] invalid: {e}"
+            ) from e
 
     # Build GraphSpec
     graph = GraphSpec(
@@ -134,24 +202,50 @@ def load_agent_export(data: str | dict) -> tuple[GraphSpec, Goal]:
     from framework.graph.goal import SuccessCriterion, Constraint
 
     success_criteria = []
-    for sc_data in goal_data.get("success_criteria", []):
-        success_criteria.append(SuccessCriterion(
-            id=sc_data["id"],
-            description=sc_data["description"],
-            metric=sc_data.get("metric", ""),
-            target=sc_data.get("target", ""),
-            weight=sc_data.get("weight", 1.0),
-        ))
+    for i, sc_data in enumerate(goal_data.get("success_criteria", [])):
+        if not isinstance(sc_data, dict):
+            raise ValueError(
+                f"Invalid agent export: goal.success_criteria[{i}] must be an object, "
+                f"got {type(sc_data).__name__}"
+            )
+        try:
+            success_criteria.append(SuccessCriterion(
+                id=_require_key(sc_data, "id", f"goal.success_criteria[{i}]"),
+                description=_require_key(
+                    sc_data, "description", f"goal.success_criteria[{i}]"
+                ),
+                metric=sc_data.get("metric", ""),
+                target=sc_data.get("target", ""),
+                weight=sc_data.get("weight", 1.0),
+            ))
+        except ValueError:
+            raise
+        except Exception as e:
+            raise ValueError(
+                f"Invalid agent export: goal.success_criteria[{i}] invalid: {e}"
+            ) from e
 
     constraints = []
-    for c_data in goal_data.get("constraints", []):
-        constraints.append(Constraint(
-            id=c_data["id"],
-            description=c_data["description"],
-            constraint_type=c_data.get("constraint_type", "hard"),
-            category=c_data.get("category", "safety"),
-            check=c_data.get("check", ""),
-        ))
+    for i, c_data in enumerate(goal_data.get("constraints", [])):
+        if not isinstance(c_data, dict):
+            raise ValueError(
+                f"Invalid agent export: goal.constraints[{i}] must be an object, "
+                f"got {type(c_data).__name__}"
+            )
+        try:
+            constraints.append(Constraint(
+                id=_require_key(c_data, "id", f"goal.constraints[{i}]"),
+                description=_require_key(c_data, "description", f"goal.constraints[{i}]"),
+                constraint_type=c_data.get("constraint_type", "hard"),
+                category=c_data.get("category", "safety"),
+                check=c_data.get("check", ""),
+            ))
+        except ValueError:
+            raise
+        except Exception as e:
+            raise ValueError(
+                f"Invalid agent export: goal.constraints[{i}] invalid: {e}"
+            ) from e
 
     goal = Goal(
         id=goal_data.get("id", ""),
