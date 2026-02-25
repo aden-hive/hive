@@ -394,6 +394,11 @@ def register_commands(subparsers: argparse._SubParsersAction) -> None:
         default=None,
         help="LLM model for preloaded agents",
     )
+    serve_parser.add_argument(
+        "--open",
+        action="store_true",
+        help="Open dashboard in browser after server starts",
+    )
     serve_parser.set_defaults(func=cmd_serve)
 
 
@@ -1929,6 +1934,22 @@ def cmd_setup_credentials(args: argparse.Namespace) -> int:
     return 0 if result.success else 1
 
 
+def _open_browser(url: str) -> None:
+    """Open URL in the default browser (best-effort, non-blocking)."""
+    import subprocess
+    import sys
+
+    try:
+        if sys.platform == "darwin":
+            subprocess.Popen(["open", url], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        elif sys.platform == "linux":
+            subprocess.Popen(
+                ["xdg-open", url], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+            )
+    except Exception:
+        pass  # Best-effort — don't crash if browser can't open
+
+
 def cmd_serve(args: argparse.Namespace) -> int:
     """Start the HTTP API server."""
     import logging
@@ -1964,12 +1985,28 @@ def cmd_serve(args: argparse.Namespace) -> int:
         site = web.TCPSite(runner, args.host, args.port)
         await site.start()
 
+        # Check if frontend is being served
+        dist_candidates = [
+            Path("frontend/dist"),
+            Path("core/frontend/dist"),
+        ]
+        has_frontend = any(
+            (c / "index.html").exists() for c in dist_candidates if c.is_dir()
+        )
+        dashboard_url = f"http://{args.host}:{args.port}"
+
         print()
-        print(f"Hive API server running on http://{args.host}:{args.port}")
-        print(f"Health: http://{args.host}:{args.port}/api/health")
+        print(f"Hive API server running on {dashboard_url}")
+        if has_frontend:
+            print(f"Dashboard: {dashboard_url}")
+        print(f"Health: {dashboard_url}/api/health")
         print(f"Agents loaded: {sum(1 for s in manager.list_sessions() if s.worker_runtime)}")
         print()
         print("Press Ctrl+C to stop")
+
+        # Auto-open browser if --open flag is set and frontend exists
+        if getattr(args, "open", False) and has_frontend:
+            _open_browser(dashboard_url)
 
         # Run forever until interrupted
         try:
