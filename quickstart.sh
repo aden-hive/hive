@@ -239,37 +239,32 @@ CHECK_EXIT=$?
 # Parse and display results
 if [ $CHECK_EXIT -eq 0 ] || echo "$CHECK_RESULT" | grep -q "^{"; then
     # Try to parse JSON and display formatted results
-    python -c "
-import json
-import sys
+    echo "$CHECK_RESULT" | uv run python -c "
+import json, sys
 
 try:
-    data = json.loads('''$CHECK_RESULT''')
-    
+    data = json.loads(sys.stdin.read())
     modules = [
         ('framework', 'framework imports OK', True),
         ('aden_tools', 'aden_tools imports OK', True),
         ('litellm', 'litellm imports OK', False),
         ('framework.mcp.agent_builder_server', 'MCP server module OK', True)
     ]
-    
     import_errors = 0
     for mod, label, required in modules:
         status = data.get(mod, 'error: not checked')
         if status == 'ok':
-            print('${GREEN}  ✓ ' + label + '${NC}')
+            print('\033[0;32m  ✓ ' + label + '\033[0m')
         elif required:
-            print('${RED}  ✗ ' + label + ' failed${NC}')
+            print('\033[0;31m  ✗ ' + label + ' failed\033[0m')
             if status != 'error: not checked':
                 print('    ' + status)
             import_errors += 1
         else:
-            print('${YELLOW}  ⚠ ' + label + ' (may be OK)${NC}')
-    
+            print('\033[1;33m  ⚠ ' + label + ' (may be OK)\033[0m')
     sys.exit(import_errors)
 except json.JSONDecodeError:
-    print('${RED}Error: Could not parse import check results${NC}', file=sys.stderr)
-    print('$CHECK_RESULT', file=sys.stderr)
+    print('\033[0;31mError: Could not parse import check results\033[0m', file=sys.stderr)
     sys.exit(1)
 " 2>&1
     IMPORT_ERRORS=$?
@@ -697,44 +692,141 @@ SELECTED_MODEL=""       # Will hold the chosen model ID
 SELECTED_MAX_TOKENS=8192 # Will hold the chosen max_tokens
 SUBSCRIPTION_MODE=""    # "claude_code" | "codex" | "zai_code" | ""
 
-# ── Subscription mode detection ──────────────────────────────
-# Claude Code subscription: default when ~/.claude/.credentials.json exists
-CLAUDE_CRED_FILE="$HOME/.claude/.credentials.json"
-if [ -f "$CLAUDE_CRED_FILE" ]; then
-    echo -e "  ${GREEN}⬢${NC} Claude Code subscription detected"
-    echo -e "    ${DIM}~/.claude/.credentials.json${NC}"
-    echo -e "    ${DIM}Default: claude-opus-4-6 | max_tokens: 32768${NC}"
-    echo ""
-    if prompt_yes_no "Use Claude Code subscription? (no API key needed)"; then
-        SUBSCRIPTION_MODE="claude_code"
-        SELECTED_PROVIDER_ID="anthropic"
-        SELECTED_MODEL="claude-opus-4-6"
-        SELECTED_MAX_TOKENS=32768
-        echo ""
-        echo -e "${GREEN}⬢${NC} Using Claude Code subscription"
-    fi
+# ── Credential detection (silent — just set flags) ───────────
+CLAUDE_CRED_DETECTED=false
+if [ -f "$HOME/.claude/.credentials.json" ]; then
+    CLAUDE_CRED_DETECTED=true
 fi
 
-# Codex (OpenAI) subscription: check macOS Keychain and ~/.codex/auth.json
-if [ -z "$SUBSCRIPTION_MODE" ]; then
-    CODEX_DETECTED=false
-    # Try macOS Keychain first
-    if command -v security &>/dev/null; then
-        if security find-generic-password -s "Codex Auth" &>/dev/null 2>&1; then
-            CODEX_DETECTED=true
-        fi
-    fi
-    # Fallback: check auth file
-    if [ "$CODEX_DETECTED" = false ] && [ -f "$HOME/.codex/auth.json" ]; then
-        CODEX_DETECTED=true
-    fi
+CODEX_CRED_DETECTED=false
+if command -v security &>/dev/null && security find-generic-password -s "Codex Auth" &>/dev/null 2>&1; then
+    CODEX_CRED_DETECTED=true
+elif [ -f "$HOME/.codex/auth.json" ]; then
+    CODEX_CRED_DETECTED=true
+fi
 
-    if [ "$CODEX_DETECTED" = true ]; then
-        echo -e "  ${GREEN}⬢${NC} OpenAI Codex subscription detected"
-        echo -e "    ${DIM}~/.codex/auth.json${NC}"
-        echo -e "    ${DIM}Default: gpt-5.3-codex | max_tokens: 16384${NC}"
+ZAI_CRED_DETECTED=false
+if [ -n "${ZAI_API_KEY:-}" ]; then
+    ZAI_CRED_DETECTED=true
+fi
+
+# Detect API key providers
+if [ "$USE_ASSOC_ARRAYS" = true ]; then
+    for env_var in "${!PROVIDER_NAMES[@]}"; do
+        if [ -n "${!env_var}" ]; then
+            FOUND_PROVIDERS+=("$(get_provider_name "$env_var")")
+            FOUND_ENV_VARS+=("$env_var")
+        fi
+    done
+else
+    for env_var in "${PROVIDER_ENV_VARS[@]}"; do
+        if [ -n "${!env_var}" ]; then
+            FOUND_PROVIDERS+=("$(get_provider_name "$env_var")")
+            FOUND_ENV_VARS+=("$env_var")
+        fi
+    done
+fi
+
+# ── Show unified provider selection menu ─────────────────────
+echo -e "${BOLD}Select your default LLM provider:${NC}"
+echo ""
+echo -e "  ${CYAN}${BOLD}Subscription modes (no API key purchase needed):${NC}"
+
+# 1) Claude Code
+if [ "$CLAUDE_CRED_DETECTED" = true ]; then
+    echo -e "  ${CYAN}1)${NC} Claude Code Subscription  ${DIM}(use your Claude Max/Pro plan)${NC}  ${GREEN}(credential detected)${NC}"
+else
+    echo -e "  ${CYAN}1)${NC} Claude Code Subscription  ${DIM}(use your Claude Max/Pro plan)${NC}"
+fi
+
+# 2) ZAI Code
+if [ "$ZAI_CRED_DETECTED" = true ]; then
+    echo -e "  ${CYAN}2)${NC} ZAI Code Subscription     ${DIM}(use your ZAI Code plan)${NC}  ${GREEN}(credential detected)${NC}"
+else
+    echo -e "  ${CYAN}2)${NC} ZAI Code Subscription     ${DIM}(use your ZAI Code plan)${NC}"
+fi
+
+# 3) Codex
+if [ "$CODEX_CRED_DETECTED" = true ]; then
+    echo -e "  ${CYAN}3)${NC} OpenAI Codex Subscription  ${DIM}(use your Codex/ChatGPT Plus plan)${NC}  ${GREEN}(credential detected)${NC}"
+else
+    echo -e "  ${CYAN}3)${NC} OpenAI Codex Subscription  ${DIM}(use your Codex/ChatGPT Plus plan)${NC}"
+fi
+
+echo ""
+echo -e "  ${CYAN}${BOLD}API key providers:${NC}"
+
+# 4-8) API key providers — show (credential detected) if key already set
+PROVIDER_MENU_ENVS=(ANTHROPIC_API_KEY OPENAI_API_KEY GEMINI_API_KEY GROQ_API_KEY CEREBRAS_API_KEY)
+PROVIDER_MENU_NAMES=("Anthropic (Claude) - Recommended" "OpenAI (GPT)" "Google Gemini - Free tier available" "Groq - Fast, free tier" "Cerebras - Fast, free tier")
+for idx in 0 1 2 3 4; do
+    num=$((idx + 4))
+    if [ -n "${!PROVIDER_MENU_ENVS[$idx]}" ]; then
+        echo -e "  ${CYAN}$num)${NC} ${PROVIDER_MENU_NAMES[$idx]}  ${GREEN}(credential detected)${NC}"
+    else
+        echo -e "  ${CYAN}$num)${NC} ${PROVIDER_MENU_NAMES[$idx]}"
+    fi
+done
+
+echo -e "  ${CYAN}9)${NC} Skip for now"
+echo ""
+
+while true; do
+    read -r -p "Enter choice (1-9): " choice || true
+    if [[ "$choice" =~ ^[0-9]+$ ]] && [ "$choice" -ge 1 ] && [ "$choice" -le 9 ]; then
+        break
+    fi
+    echo -e "${RED}Invalid choice. Please enter 1-9${NC}"
+done
+
+case $choice in
+    1)
+        # Claude Code Subscription
+        if [ "$CLAUDE_CRED_DETECTED" = false ]; then
+            echo ""
+            echo -e "${YELLOW}  ~/.claude/.credentials.json not found.${NC}"
+            echo -e "  Run ${CYAN}claude${NC} first to authenticate with your Claude subscription,"
+            echo -e "  then run this quickstart again."
+            echo ""
+            SELECTED_PROVIDER_ID=""
+        else
+            SUBSCRIPTION_MODE="claude_code"
+            SELECTED_PROVIDER_ID="anthropic"
+            SELECTED_MODEL="claude-opus-4-6"
+            SELECTED_MAX_TOKENS=32768
+            echo ""
+            echo -e "${GREEN}⬢${NC} Using Claude Code subscription"
+        fi
+        ;;
+    2)
+        # ZAI Code Subscription
+        SUBSCRIPTION_MODE="zai_code"
+        SELECTED_PROVIDER_ID="openai"
+        SELECTED_ENV_VAR="ZAI_API_KEY"
+        SELECTED_MODEL="glm-5"
+        SELECTED_MAX_TOKENS=32768
+        PROVIDER_NAME="ZAI"
         echo ""
-        if prompt_yes_no "Use Codex subscription? (no API key needed)"; then
+        echo -e "${GREEN}⬢${NC} Using ZAI Code subscription"
+        echo -e "  ${DIM}Model: glm-5 | API: api.z.ai${NC}"
+        ;;
+    3)
+        # OpenAI Codex Subscription
+        if [ "$CODEX_CRED_DETECTED" = false ]; then
+            echo ""
+            echo -e "${YELLOW}  Codex credentials not found. Starting OAuth login...${NC}"
+            echo ""
+            if uv run python "$SCRIPT_DIR/codex_oauth.py"; then
+                CODEX_CRED_DETECTED=true
+            else
+                echo ""
+                echo -e "${RED}  OAuth login failed.${NC}"
+                echo -e "  You can also run ${CYAN}codex${NC} to authenticate, then run this quickstart again."
+                echo ""
+                SELECTED_PROVIDER_ID=""
+            fi
+        fi
+        if [ "$CODEX_CRED_DETECTED" = true ]; then
             SUBSCRIPTION_MODE="codex"
             SELECTED_PROVIDER_ID="openai"
             SELECTED_MODEL="gpt-5.3-codex"
@@ -742,332 +834,69 @@ if [ -z "$SUBSCRIPTION_MODE" ]; then
             echo ""
             echo -e "${GREEN}⬢${NC} Using OpenAI Codex subscription"
         fi
-    fi
-fi
-
-# ZAI Code subscription: check for ZAI_API_KEY
-if [ -z "$SUBSCRIPTION_MODE" ] && [ -n "${ZAI_API_KEY:-}" ]; then
-    echo -e "  ${GREEN}⬢${NC} Found ZAI Code API key"
-    echo ""
-    if prompt_yes_no "Use your ZAI Code subscription?"; then
-        SUBSCRIPTION_MODE="zai_code"
+        ;;
+    4)
+        SELECTED_ENV_VAR="ANTHROPIC_API_KEY"
+        SELECTED_PROVIDER_ID="anthropic"
+        PROVIDER_NAME="Anthropic"
+        SIGNUP_URL="https://console.anthropic.com/settings/keys"
+        ;;
+    5)
+        SELECTED_ENV_VAR="OPENAI_API_KEY"
         SELECTED_PROVIDER_ID="openai"
-        SELECTED_ENV_VAR="ZAI_API_KEY"
-        SELECTED_MODEL="glm-5"
-        SELECTED_MAX_TOKENS=32768
+        PROVIDER_NAME="OpenAI"
+        SIGNUP_URL="https://platform.openai.com/api-keys"
+        ;;
+    6)
+        SELECTED_ENV_VAR="GEMINI_API_KEY"
+        SELECTED_PROVIDER_ID="gemini"
+        PROVIDER_NAME="Google Gemini"
+        SIGNUP_URL="https://aistudio.google.com/apikey"
+        ;;
+    7)
+        SELECTED_ENV_VAR="GROQ_API_KEY"
+        SELECTED_PROVIDER_ID="groq"
+        PROVIDER_NAME="Groq"
+        SIGNUP_URL="https://console.groq.com/keys"
+        ;;
+    8)
+        SELECTED_ENV_VAR="CEREBRAS_API_KEY"
+        SELECTED_PROVIDER_ID="cerebras"
+        PROVIDER_NAME="Cerebras"
+        SIGNUP_URL="https://cloud.cerebras.ai/"
+        ;;
+    9)
         echo ""
-        echo -e "${GREEN}⬢${NC} Using ZAI Code subscription"
-        echo -e "  ${DIM}Model: glm-5 | API: api.z.ai${NC}"
-    fi
-fi
-
-# Skip normal provider detection if a subscription mode was selected
-if [ -n "$SUBSCRIPTION_MODE" ]; then
-    # Jump ahead — SELECTED_PROVIDER_ID is already set
-    :
-elif [ "$USE_ASSOC_ARRAYS" = true ]; then
-    # Bash 4+ - iterate over associative array keys
-    for env_var in "${!PROVIDER_NAMES[@]}"; do
-        value="${!env_var}"
-        if [ -n "$value" ]; then
-            FOUND_PROVIDERS+=("$(get_provider_name "$env_var")")
-            FOUND_ENV_VARS+=("$env_var")
-        fi
-    done
-else
-    # Bash 3.2 - iterate over indexed array
-    for env_var in "${PROVIDER_ENV_VARS[@]}"; do
-        value="${!env_var}"
-        if [ -n "$value" ]; then
-            FOUND_PROVIDERS+=("$(get_provider_name "$env_var")")
-            FOUND_ENV_VARS+=("$env_var")
-        fi
-    done
-fi
-
-if [ ${#FOUND_PROVIDERS[@]} -gt 0 ]; then
-    echo "Found API keys:"
-    echo ""
-    for provider in "${FOUND_PROVIDERS[@]}"; do
-        echo -e "  ${GREEN}⬢${NC} $provider"
-    done
-    echo ""
-
-    # Show all found providers + subscription options + Other
-    echo -e "${BOLD}Select your default LLM provider:${NC}"
-    echo ""
-
-    i=1
-    for provider in "${FOUND_PROVIDERS[@]}"; do
-        echo -e "  ${CYAN}$i)${NC} $provider"
-        i=$((i + 1))
-    done
-    ZAI_CHOICE=$i
-    if [ -n "${ZAI_API_KEY:-}" ]; then
-        echo -e "  ${CYAN}$i)${NC} ZAI Code Subscription  ${DIM}(use your ZAI Code plan)${NC}  ${GREEN}(credential found)${NC}"
-    else
-        echo -e "  ${CYAN}$i)${NC} ZAI Code Subscription  ${DIM}(use your ZAI Code plan)${NC}"
-    fi
-    i=$((i + 1))
-    CODEX_CHOICE=$i
-    CODEX_CRED_FOUND=false
-    if command -v security &>/dev/null && security find-generic-password -s "Codex Auth" &>/dev/null 2>&1; then
-        CODEX_CRED_FOUND=true
-    elif [ -f "$HOME/.codex/auth.json" ]; then
-        CODEX_CRED_FOUND=true
-    fi
-    if [ "$CODEX_CRED_FOUND" = true ]; then
-        echo -e "  ${CYAN}$i)${NC} OpenAI Codex Subscription  ${DIM}(use your Codex/ChatGPT Plus plan)${NC}  ${GREEN}(credential found)${NC}"
-    else
-        echo -e "  ${CYAN}$i)${NC} OpenAI Codex Subscription  ${DIM}(use your Codex/ChatGPT Plus plan)${NC}"
-    fi
-    i=$((i + 1))
-    echo -e "  ${CYAN}$i)${NC} Other"
-    max_choice=$i
-    echo ""
-
-    while true; do
-        read -r -p "Enter choice (1-$max_choice): " choice || true
-        if [[ "$choice" =~ ^[0-9]+$ ]] && [ "$choice" -ge 1 ] && [ "$choice" -le "$max_choice" ]; then
-            if [ "$choice" -eq "$max_choice" ]; then
-                # Fall through to the manual provider selection below
-                break
-            elif [ "$choice" -eq "$ZAI_CHOICE" ]; then
-                # ZAI Code Subscription
-                SUBSCRIPTION_MODE="zai_code"
-                SELECTED_PROVIDER_ID="openai"
-                SELECTED_ENV_VAR="ZAI_API_KEY"
-                SELECTED_MODEL="glm-5"
-                SELECTED_MAX_TOKENS=32768
-                echo ""
-                echo -e "${GREEN}⬢${NC} Using ZAI Code subscription"
-                echo -e "  ${DIM}Model: glm-5 | API: api.z.ai${NC}"
-                break
-            elif [ "$choice" -eq "$CODEX_CHOICE" ]; then
-                # OpenAI Codex Subscription - check credentials or run OAuth
-                CODEX_FOUND=false
-                if command -v security &>/dev/null; then
-                    if security find-generic-password -s "Codex Auth" &>/dev/null 2>&1; then
-                        CODEX_FOUND=true
-                    fi
-                fi
-                if [ "$CODEX_FOUND" = false ] && [ -f "$HOME/.codex/auth.json" ]; then
-                    CODEX_FOUND=true
-                fi
-                if [ "$CODEX_FOUND" = false ]; then
-                    echo ""
-                    echo -e "${YELLOW}  Codex credentials not found. Starting OAuth login...${NC}"
-                    echo ""
-                    if uv run python "$SCRIPT_DIR/codex_oauth.py"; then
-                        CODEX_FOUND=true
-                    else
-                        echo ""
-                        echo -e "${RED}  OAuth login failed.${NC}"
-                        echo -e "  You can also run ${CYAN}codex${NC} to authenticate, then run this quickstart again."
-                        echo ""
-                    fi
-                fi
-                if [ "$CODEX_FOUND" = true ]; then
-                    SUBSCRIPTION_MODE="codex"
-                    SELECTED_PROVIDER_ID="openai"
-                    SELECTED_MODEL="gpt-5.3-codex"
-                    SELECTED_MAX_TOKENS=16384
-                    echo ""
-                    echo -e "${GREEN}⬢${NC} Using OpenAI Codex subscription"
-                fi
-                break
-            fi
-            idx=$((choice - 1))
-            SELECTED_ENV_VAR="${FOUND_ENV_VARS[$idx]}"
-            SELECTED_PROVIDER_ID="$(get_provider_id "$SELECTED_ENV_VAR")"
-
-            echo ""
-            echo -e "${GREEN}⬢${NC} Selected: ${FOUND_PROVIDERS[$idx]}"
-
-            prompt_model_selection "$SELECTED_PROVIDER_ID"
-            break
-        fi
-        echo -e "${RED}Invalid choice. Please enter 1-$max_choice${NC}"
-    done
-fi
-
-if [ -z "$SELECTED_PROVIDER_ID" ]; then
-    echo ""
-    echo -e "${BOLD}Select your LLM provider:${NC}"
-    echo ""
-    echo -e "  ${CYAN}${BOLD}Subscription modes (no API key purchase needed):${NC}"
-    # Claude Code
-    if [ -f "$HOME/.claude/.credentials.json" ]; then
-        echo -e "  ${CYAN}1)${NC} Claude Code Subscription  ${DIM}(use your Claude Max/Pro plan)${NC}  ${GREEN}(credential found)${NC}"
-    else
-        echo -e "  ${CYAN}1)${NC} Claude Code Subscription  ${DIM}(use your Claude Max/Pro plan)${NC}"
-    fi
-    # ZAI Code
-    if [ -n "${ZAI_API_KEY:-}" ]; then
-        echo -e "  ${CYAN}2)${NC} ZAI Code Subscription     ${DIM}(use your ZAI Code plan)${NC}  ${GREEN}(credential found)${NC}"
-    else
-        echo -e "  ${CYAN}2)${NC} ZAI Code Subscription     ${DIM}(use your ZAI Code plan)${NC}"
-    fi
-    # Codex
-    CODEX_CRED_FOUND=false
-    if command -v security &>/dev/null && security find-generic-password -s "Codex Auth" &>/dev/null 2>&1; then
-        CODEX_CRED_FOUND=true
-    elif [ -f "$HOME/.codex/auth.json" ]; then
-        CODEX_CRED_FOUND=true
-    fi
-    if [ "$CODEX_CRED_FOUND" = true ]; then
-        echo -e "  ${CYAN}3)${NC} OpenAI Codex Subscription  ${DIM}(use your Codex/ChatGPT Plus plan)${NC}  ${GREEN}(credential found)${NC}"
-    else
-        echo -e "  ${CYAN}3)${NC} OpenAI Codex Subscription  ${DIM}(use your Codex/ChatGPT Plus plan)${NC}"
-    fi
-    echo ""
-    echo -e "  ${CYAN}${BOLD}API key providers:${NC}"
-    echo -e "  ${CYAN}4)${NC} Anthropic (Claude) - Recommended"
-    echo -e "  ${CYAN}5)${NC} OpenAI (GPT)"
-    echo -e "  ${CYAN}6)${NC} Google Gemini - Free tier available"
-    echo -e "  ${CYAN}7)${NC} Groq - Fast, free tier"
-    echo -e "  ${CYAN}8)${NC} Cerebras - Fast, free tier"
-    echo -e "  ${CYAN}9)${NC} Skip for now"
-    echo ""
-
-    while true; do
-        read -r -p "Enter choice (1-9): " choice || true
-        if [[ "$choice" =~ ^[0-9]+$ ]] && [ "$choice" -ge 1 ] && [ "$choice" -le 9 ]; then
-            break
-        fi
-        echo -e "${RED}Invalid choice. Please enter 1-9${NC}"
-    done
-
-    case $choice in
-        1)
-            # Claude Code Subscription
-            CLAUDE_CRED_FILE="$HOME/.claude/.credentials.json"
-            if [ ! -f "$CLAUDE_CRED_FILE" ]; then
-                echo ""
-                echo -e "${YELLOW}  ~/.claude/.credentials.json not found.${NC}"
-                echo -e "  Run ${CYAN}claude${NC} first to authenticate with your Claude subscription,"
-                echo -e "  then run this quickstart again."
-                echo ""
-                SELECTED_PROVIDER_ID=""
-            else
-                SUBSCRIPTION_MODE="claude_code"
-                SELECTED_PROVIDER_ID="anthropic"
-                echo ""
-                echo -e "${GREEN}⬢${NC} Using Claude Code subscription"
-            fi
-            ;;
-        2)
-            # ZAI Code Subscription
-            SUBSCRIPTION_MODE="zai_code"
-            SELECTED_PROVIDER_ID="openai"
-            SELECTED_ENV_VAR="ZAI_API_KEY"
-            SELECTED_MODEL="glm-5"
-            SELECTED_MAX_TOKENS=32768
-            PROVIDER_NAME="ZAI"
-            echo ""
-            echo -e "${GREEN}⬢${NC} Using ZAI Code subscription"
-            echo -e "  ${DIM}Model: glm-5 | API: api.z.ai${NC}"
-            ;;
-        3)
-            # OpenAI Codex Subscription
-            CODEX_FOUND=false
-            if command -v security &>/dev/null; then
-                if security find-generic-password -s "Codex Auth" &>/dev/null 2>&1; then
-                    CODEX_FOUND=true
-                fi
-            fi
-            if [ "$CODEX_FOUND" = false ] && [ -f "$HOME/.codex/auth.json" ]; then
-                CODEX_FOUND=true
-            fi
-
-            if [ "$CODEX_FOUND" = false ]; then
-                echo ""
-                echo -e "${YELLOW}  Codex credentials not found. Starting OAuth login...${NC}"
-                echo ""
-                if uv run python "$SCRIPT_DIR/codex_oauth.py"; then
-                    CODEX_FOUND=true
-                else
-                    echo ""
-                    echo -e "${RED}  OAuth login failed.${NC}"
-                    echo -e "  You can also run ${CYAN}codex${NC} to authenticate, then run this quickstart again."
-                    echo ""
-                    SELECTED_PROVIDER_ID=""
-                fi
-            fi
-            if [ "$CODEX_FOUND" = true ]; then
-                SUBSCRIPTION_MODE="codex"
-                SELECTED_PROVIDER_ID="openai"
-                SELECTED_MODEL="gpt-5.3-codex"
-                SELECTED_MAX_TOKENS=16384
-                echo ""
-                echo -e "${GREEN}⬢${NC} Using OpenAI Codex subscription"
-            fi
-            ;;
-        4)
-            SELECTED_ENV_VAR="ANTHROPIC_API_KEY"
-            SELECTED_PROVIDER_ID="anthropic"
-            PROVIDER_NAME="Anthropic"
-            SIGNUP_URL="https://console.anthropic.com/settings/keys"
-            ;;
-        5)
-            SELECTED_ENV_VAR="OPENAI_API_KEY"
-            SELECTED_PROVIDER_ID="openai"
-            PROVIDER_NAME="OpenAI"
-            SIGNUP_URL="https://platform.openai.com/api-keys"
-            ;;
-        6)
-            SELECTED_ENV_VAR="GEMINI_API_KEY"
-            SELECTED_PROVIDER_ID="gemini"
-            PROVIDER_NAME="Google Gemini"
-            SIGNUP_URL="https://aistudio.google.com/apikey"
-            ;;
-        7)
-            SELECTED_ENV_VAR="GROQ_API_KEY"
-            SELECTED_PROVIDER_ID="groq"
-            PROVIDER_NAME="Groq"
-            SIGNUP_URL="https://console.groq.com/keys"
-            ;;
-        8)
-            SELECTED_ENV_VAR="CEREBRAS_API_KEY"
-            SELECTED_PROVIDER_ID="cerebras"
-            PROVIDER_NAME="Cerebras"
-            SIGNUP_URL="https://cloud.cerebras.ai/"
-            ;;
-        9)
-            echo ""
-            echo -e "${YELLOW}Skipped.${NC} An LLM API key is required to test and use worker agents."
-            echo -e "Add your API key later by running:"
-            echo ""
-            echo -e "  ${CYAN}echo 'export ANTHROPIC_API_KEY=\"your-key\"' >> $SHELL_RC_FILE${NC}"
-            echo ""
-            SELECTED_ENV_VAR=""
-            SELECTED_PROVIDER_ID=""
-            ;;
-    esac
-
-    # For API-key providers: prompt for key if not already set
-    if [ -z "$SUBSCRIPTION_MODE" ] && [ -n "$SELECTED_ENV_VAR" ] && [ -z "${!SELECTED_ENV_VAR}" ]; then
+        echo -e "${YELLOW}Skipped.${NC} An LLM API key is required to test and use worker agents."
+        echo -e "Add your API key later by running:"
         echo ""
-        echo -e "Get your API key from: ${CYAN}$SIGNUP_URL${NC}"
+        echo -e "  ${CYAN}echo 'export ANTHROPIC_API_KEY=\"your-key\"' >> $SHELL_RC_FILE${NC}"
         echo ""
-        read -r -p "Paste your $PROVIDER_NAME API key (or press Enter to skip): " API_KEY
+        SELECTED_ENV_VAR=""
+        SELECTED_PROVIDER_ID=""
+        ;;
+esac
 
-        if [ -n "$API_KEY" ]; then
-            # Save to shell rc file
-            echo "" >> "$SHELL_RC_FILE"
-            echo "# Hive Agent Framework - $PROVIDER_NAME API key" >> "$SHELL_RC_FILE"
-            echo "export $SELECTED_ENV_VAR=\"$API_KEY\"" >> "$SHELL_RC_FILE"
-            export "$SELECTED_ENV_VAR=$API_KEY"
-            echo ""
-            echo -e "${GREEN}⬢${NC} API key saved to $SHELL_RC_FILE"
-        else
-            echo ""
-            echo -e "${YELLOW}Skipped.${NC} Add your API key to $SHELL_RC_FILE when ready."
-            SELECTED_ENV_VAR=""
-            SELECTED_PROVIDER_ID=""
-        fi
+# For API-key providers: prompt for key if not already set
+if [ -z "$SUBSCRIPTION_MODE" ] && [ -n "$SELECTED_ENV_VAR" ] && [ -z "${!SELECTED_ENV_VAR}" ]; then
+    echo ""
+    echo -e "Get your API key from: ${CYAN}$SIGNUP_URL${NC}"
+    echo ""
+    read -r -p "Paste your $PROVIDER_NAME API key (or press Enter to skip): " API_KEY
+
+    if [ -n "$API_KEY" ]; then
+        echo "" >> "$SHELL_RC_FILE"
+        echo "# Hive Agent Framework - $PROVIDER_NAME API key" >> "$SHELL_RC_FILE"
+        echo "export $SELECTED_ENV_VAR=\"$API_KEY\"" >> "$SHELL_RC_FILE"
+        export "$SELECTED_ENV_VAR=$API_KEY"
+        echo ""
+        echo -e "${GREEN}⬢${NC} API key saved to $SHELL_RC_FILE"
+    else
+        echo ""
+        echo -e "${YELLOW}Skipped.${NC} Add your API key to $SHELL_RC_FILE when ready."
+        SELECTED_ENV_VAR=""
+        SELECTED_PROVIDER_ID=""
     fi
-
 fi
 
 # For ZAI subscription: always prompt for API key
