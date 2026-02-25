@@ -2,6 +2,7 @@ import { useState, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { Crown, X } from "lucide-react";
 import { loadPersistedTabs, savePersistedTabs, TAB_STORAGE_KEY, type PersistedTabState } from "@/lib/tab-persistence";
+import { sessionsApi } from "@/api/sessions";
 
 export interface TopBarTab {
   agentType: string;
@@ -50,6 +51,14 @@ export default function TopBar({ tabs: tabsProp, onTabClick, onCloseTab, canClos
       onCloseTab(agentType);
       return;
     }
+    // Kill the backend session (queen/judge/worker) even outside workspace
+    sessionsApi.list()
+      .then(({ sessions }) => {
+        const match = sessions.find(s => s.agent_path === agentType);
+        if (match) return sessionsApi.stop(match.session_id);
+      })
+      .catch(() => {});  // fire-and-forget
+
     // Fallback: update localStorage directly (non-workspace pages)
     setPersisted(prev => {
       if (!prev) return null;

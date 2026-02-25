@@ -248,7 +248,9 @@ export default function CredentialsModal({
               {allRequiredMet ? (
                 <>
                   <Shield className="w-3.5 h-3.5" />
-                  All required credentials connected ({connectedCount}/{rows.length} total)
+                  {rows.length === 0
+                    ? "No required credentials!"
+                    : `All required credentials connected (${connectedCount}/${rows.length} total)`}
                 </>
               ) : (
                 <>

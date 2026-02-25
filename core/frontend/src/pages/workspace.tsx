@@ -358,6 +358,13 @@ export default function Workspace() {
   });
 
   const [activeWorker, setActiveWorker] = useState(initialAgent);
+
+  // Clear URL params after mount — they're consumed during initialization
+  // and leaving them causes confusion (stale ?agent= after tab switches, etc.)
+  useEffect(() => {
+    navigate("/workspace", { replace: true });
+  }, []);
+
   const [credentialsOpen, setCredentialsOpen] = useState(false);
   const [selectedNode, setSelectedNode] = useState<GraphNode | null>(null);
   const [newTabOpen, setNewTabOpen] = useState(false);
@@ -473,10 +480,6 @@ export default function Workspace() {
               ...s, messages: [...s.messages, userMsg],
             })),
           }));
-          // Clean prompt from URL to prevent re-send on refresh
-          const params = new URLSearchParams(searchParams);
-          params.delete("prompt");
-          navigate(`/workspace?${params.toString()}`, { replace: true });
         }
 
         updateAgentState(agentType, {
@@ -623,7 +626,7 @@ export default function Workspace() {
     } finally {
       loadingRef.current.delete(agentType);
     }
-  }, [updateAgentState, initialPrompt, searchParams, navigate]);
+  }, [updateAgentState, initialPrompt]);
 
   // Auto-load agents when new tabs appear in sessionsByAgent
   useEffect(() => {
@@ -1279,7 +1282,6 @@ export default function Workspace() {
     // Pause worker execution if running (saves checkpoint), then kill the
     // entire backend session so the queen and judge don't keep running.
     const state = agentStates[agentType];
-    console.log('[closeAgentTab]', agentType, 'sessionId:', state?.sessionId, 'state:', state);
     if (state?.sessionId) {
       const pausePromise = (state.currentExecutionId && state.workerRunState === "running")
         ? executionApi.pause(state.sessionId, state.currentExecutionId)
