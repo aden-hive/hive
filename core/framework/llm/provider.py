@@ -16,6 +16,9 @@ class LLMResponse:
     model: str
     input_tokens: int = 0
     output_tokens: int = 0
+    reasoning_tokens: int = 0       # thinking/reasoning budget (o3, gemini-2.5, extended thinking)
+    cache_read_tokens: int = 0      # prompt-cache hit tokens (Anthropic auto-cache, OpenAI cached)
+    cache_creation_tokens: int = 0  # prompt-cache write tokens (Anthropic)
     stop_reason: str = ""
     raw_response: Any = None
 
