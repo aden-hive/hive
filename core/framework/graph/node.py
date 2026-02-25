@@ -199,7 +199,27 @@ class NodeSpec(BaseModel):
 
     # For LLM nodes
     system_prompt: str | None = Field(default=None, description="System prompt for LLM nodes")
-    tools: list[str] = Field(default_factory=list, description="Tool names this node can use")
+    tools: list[str | list[str]] = Field(
+        default_factory=list,
+        description=(
+            "Tool names this node can use. "
+            "Tier 1: exact name — tools=['web_search']. "
+            "Tier 2: fallback group — tools=[['web_search', 'exa_search']], "
+            "framework picks first tool whose credential is set."
+        ),
+    )
+
+    @property
+    def all_tool_names(self) -> list[str]:
+        """Flat list of all candidate tool names (flattens Tier 2 groups)."""
+        result = []
+        for entry in self.tools:
+            if isinstance(entry, list):
+                result.extend(entry)
+            else:
+                result.append(entry)
+        return result
+
     model: str | None = Field(
         default=None, description="Specific model to use (defaults to graph default)"
     )

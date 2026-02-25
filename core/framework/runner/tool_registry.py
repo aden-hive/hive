@@ -15,6 +15,30 @@ from framework.llm.provider import Tool, ToolResult, ToolUse
 
 logger = logging.getLogger(__name__)
 
+# Auth error markers — HTTP standards, not tool-specific strings
+_AUTH_ERROR_MARKERS = frozenset(
+    [
+        "401",
+        "403",
+        "unauthorized",
+        "invalid api key",
+        "invalid_api_key",
+        "authentication failed",
+        "authentication error",
+        "forbidden",
+        "incorrect api key",
+        "invalid key",
+        "api key invalid",
+    ]
+)
+
+
+def _is_auth_error(error_msg: str) -> bool:
+    """Return True if the error message indicates an invalid/missing credential."""
+    lowered = error_msg.lower()
+    return any(marker in lowered for marker in _AUTH_ERROR_MARKERS)
+
+
 # Per-execution context overrides.  Each asyncio task (and thus each
 # concurrent graph execution) gets its own copy, so there are no races
 # when multiple ExecutionStreams run in parallel.
@@ -269,9 +293,14 @@ class ToolRegistry:
 
                 return _wrap_result(tool_use.id, result)
             except Exception as e:
+                error_msg = str(e)
+                is_credential_error = _is_auth_error(error_msg)
+                content: dict = {"error": error_msg}
+                if is_credential_error:
+                    content["credential_error"] = True
                 return ToolResult(
                     tool_use_id=tool_use.id,
-                    content=json.dumps({"error": str(e)}),
+                    content=json.dumps(content),
                     is_error=True,
                 )
 
@@ -429,7 +458,7 @@ class ToolRegistry:
                             return result
                         except Exception as e:
                             logger.error(f"MCP tool '{tool_name}' execution failed: {e}")
-                            return {"error": str(e)}
+                            raise
 
                     return executor
 

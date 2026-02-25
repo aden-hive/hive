@@ -1371,6 +1371,22 @@ class EventLoopNode(NodeProtocol):
                         result = raw
                     results_by_id[tc.tool_use_id] = self._truncate_tool_result(result, tc.tool_name)
 
+            # Credential error check: if any tool signalled credential_error,
+            # stop immediately — do not let the LLM continue with training data.
+            for tc in pending_real:
+                r = results_by_id.get(tc.tool_use_id)
+                if r and r.is_error:
+                    try:
+                        parsed = json.loads(r.content)
+                        if parsed.get("credential_error"):
+                            raise RuntimeError(
+                                f"Tool '{tc.tool_name}' failed: credential is invalid or "
+                                f"unauthorized. Check your API key and re-run the agent.\n"
+                                f"Details: {parsed.get('error', r.content)}"
+                            )
+                    except (json.JSONDecodeError, AttributeError):
+                        pass
+
             # Phase 3: record results into conversation in original order,
             # build logged/real lists, and publish completed events.
             for tc in tool_calls[:executed_in_batch]:
@@ -2291,7 +2307,7 @@ class EventLoopNode(NodeProtocol):
 
         # 4. Available tools reminder
         if spec.tools:
-            parts.append(f"AVAILABLE TOOLS: {', '.join(spec.tools)}")
+            parts.append(f"AVAILABLE TOOLS: {', '.join(spec.all_tool_names)}")
 
         # 5. Spillover files — list actual files so the LLM can load
         # them immediately instead of having to call list_data_files first.

@@ -1552,8 +1552,8 @@ class AgentRunner:
             }
 
             if node.tools:
-                required_tools.update(node.tools)
-                node_info["tools"] = node.tools
+                required_tools.update(node.all_tool_names)
+                node_info["tools"] = node.all_tool_names
 
             nodes_info.append(node_info)
 
