@@ -76,7 +76,9 @@ class TestCredentialObject:
         cred = CredentialObject(
             id="brave_search",
             credential_type=CredentialType.API_KEY,
-            keys={"api_key": CredentialKey(name="api_key", value=SecretStr("test-key"))},
+            keys={
+                "api_key": CredentialKey(name="api_key", value=SecretStr("test-key"))
+            },
         )
         assert cred.id == "brave_search"
         assert cred.credential_type == CredentialType.API_KEY
@@ -88,8 +90,12 @@ class TestCredentialObject:
             id="github_oauth",
             credential_type=CredentialType.OAUTH2,
             keys={
-                "access_token": CredentialKey(name="access_token", value=SecretStr("ghp_xxx")),
-                "refresh_token": CredentialKey(name="refresh_token", value=SecretStr("ghr_xxx")),
+                "access_token": CredentialKey(
+                    name="access_token", value=SecretStr("ghp_xxx")
+                ),
+                "refresh_token": CredentialKey(
+                    name="refresh_token", value=SecretStr("ghr_xxx")
+                ),
             },
         )
         assert cred.get_key("access_token") == "ghp_xxx"
@@ -114,7 +120,11 @@ class TestCredentialObject:
         past = datetime.now(UTC) - timedelta(hours=1)
         cred = CredentialObject(
             id="test",
-            keys={"token": CredentialKey(name="token", value=SecretStr("xxx"), expires_at=past)},
+            keys={
+                "token": CredentialKey(
+                    name="token", value=SecretStr("xxx"), expires_at=past
+                )
+            },
         )
         assert cred.needs_refresh
 
@@ -123,7 +133,9 @@ class TestCredentialObject:
         # With api_key
         cred = CredentialObject(
             id="test",
-            keys={"api_key": CredentialKey(name="api_key", value=SecretStr("key-value"))},
+            keys={
+                "api_key": CredentialKey(name="api_key", value=SecretStr("key-value"))
+            },
         )
         assert cred.get_default_key() == "key-value"
 
@@ -131,7 +143,9 @@ class TestCredentialObject:
         cred2 = CredentialObject(
             id="test",
             keys={
-                "access_token": CredentialKey(name="access_token", value=SecretStr("token-value"))
+                "access_token": CredentialKey(
+                    name="access_token", value=SecretStr("token-value")
+                )
             },
         )
         assert cred2.get_default_key() == "token-value"
@@ -260,6 +274,20 @@ class TestEnvVarStorage:
         with pytest.raises(NotImplementedError):
             storage.delete("test")
 
+    def test_exists_empty_string(self):
+        """Test that empty string is treated as nonexistent."""
+        with patch.dict(os.environ, {"TEST_EMPTY_KEY": ""}):
+            storage = EnvVarStorage(env_mapping={"test": "TEST_EMPTY_KEY"})
+            assert not storage.exists("test")
+            assert storage.load("test") is None
+
+    def test_exists_whitespace(self):
+        """Test that whitespace string is treated as nonexistent."""
+        with patch.dict(os.environ, {"TEST_SPACE_KEY": "   "}):
+            storage = EnvVarStorage(env_mapping={"test": "TEST_SPACE_KEY"})
+            assert not storage.exists("test")
+            assert storage.load("test") is None
+
 
 class TestEncryptedFileStorage:
     """Tests for EncryptedFileStorage."""
@@ -280,7 +308,11 @@ class TestEncryptedFileStorage:
         cred = CredentialObject(
             id="test",
             credential_type=CredentialType.API_KEY,
-            keys={"api_key": CredentialKey(name="api_key", value=SecretStr("secret-value"))},
+            keys={
+                "api_key": CredentialKey(
+                    name="api_key", value=SecretStr("secret-value")
+                )
+            },
         )
 
         storage.save(cred)
@@ -332,14 +364,16 @@ class TestCompositeStorage:
         primary = InMemoryStorage()
         primary.save(
             CredentialObject(
-                id="test", keys={"k": CredentialKey(name="k", value=SecretStr("primary"))}
+                id="test",
+                keys={"k": CredentialKey(name="k", value=SecretStr("primary"))},
             )
         )
 
         fallback = InMemoryStorage()
         fallback.save(
             CredentialObject(
-                id="test", keys={"k": CredentialKey(name="k", value=SecretStr("fallback"))}
+                id="test",
+                keys={"k": CredentialKey(name="k", value=SecretStr("fallback"))},
             )
         )
 
@@ -355,7 +389,8 @@ class TestCompositeStorage:
         fallback = InMemoryStorage()
         fallback.save(
             CredentialObject(
-                id="test", keys={"k": CredentialKey(name="k", value=SecretStr("fallback"))}
+                id="test",
+                keys={"k": CredentialKey(name="k", value=SecretStr("fallback"))},
             )
         )
 
@@ -449,7 +484,9 @@ class TestTemplateResolver:
 
     def test_resolve_multiple(self, resolver):
         """Test resolving multiple templates."""
-        result = resolver.resolve("{{github_oauth.access_token}} and {{brave_search.api_key}}")
+        result = resolver.resolve(
+            "{{github_oauth.access_token}} and {{brave_search.api_key}}"
+        )
         assert "ghp_xxx" in result
         assert "test-brave-key" in result
 
@@ -520,7 +557,9 @@ class TestCredentialStore:
         """Test saving and loading a credential."""
         store = CredentialStore.for_testing({})
 
-        cred = CredentialObject(id="new", keys={"k": CredentialKey(name="k", value=SecretStr("v"))})
+        cred = CredentialObject(
+            id="new", keys={"k": CredentialKey(name="k", value=SecretStr("v"))}
+        )
         store.save_credential(cred)
 
         loaded = store.get_credential("new")
@@ -607,7 +646,9 @@ class TestCredentialStore:
         store = CredentialStore(storage=storage, cache_ttl_seconds=60)
 
         storage.save(
-            CredentialObject(id="test", keys={"k": CredentialKey(name="k", value=SecretStr("v"))})
+            CredentialObject(
+                id="test", keys={"k": CredentialKey(name="k", value=SecretStr("v"))}
+            )
         )
 
         # First load
@@ -687,7 +728,9 @@ class TestOAuth2Module:
 
         # Valid config
         config = OAuth2Config(
-            token_url="https://example.com/token", client_id="id", client_secret="secret"
+            token_url="https://example.com/token",
+            client_id="id",
+            client_secret="secret",
         )
         assert config.token_url == "https://example.com/token"
 

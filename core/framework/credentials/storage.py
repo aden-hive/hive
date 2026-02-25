@@ -20,7 +20,12 @@ from typing import Any
 
 from pydantic import SecretStr
 
-from .models import CredentialDecryptionError, CredentialKey, CredentialObject, CredentialType
+from .models import (
+    CredentialDecryptionError,
+    CredentialKey,
+    CredentialObject,
+    CredentialType,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -360,7 +365,7 @@ class EnvVarStorage(CredentialStorage):
         env_var = self._get_env_var_name(credential_id)
         value = self._read_env_value(env_var)
 
-        if not value:
+        if not value or not value.strip():
             return None
 
         return CredentialObject(
@@ -390,7 +395,8 @@ class EnvVarStorage(CredentialStorage):
     def exists(self, credential_id: str) -> bool:
         """Check if credential is available in environment."""
         env_var = self._get_env_var_name(credential_id)
-        return self._read_env_value(env_var) is not None
+        value = self._read_env_value(env_var)
+        return bool(value and value.strip())
 
     def add_mapping(self, credential_id: str, env_var: str) -> None:
         """
