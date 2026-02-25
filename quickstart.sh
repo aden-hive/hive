@@ -835,13 +835,37 @@ if [ ${#FOUND_PROVIDERS[@]} -gt 0 ]; then
                 echo -e "  ${DIM}Model: glm-5 | API: api.z.ai${NC}"
                 break
             elif [ "$choice" -eq "$CODEX_CHOICE" ]; then
-                # OpenAI Codex Subscription
-                SUBSCRIPTION_MODE="codex"
-                SELECTED_PROVIDER_ID="openai"
-                SELECTED_MODEL="gpt-5.3-codex"
-                SELECTED_MAX_TOKENS=16384
-                echo ""
-                echo -e "${GREEN}⬢${NC} Using OpenAI Codex subscription"
+                # OpenAI Codex Subscription - check credentials or run OAuth
+                CODEX_FOUND=false
+                if command -v security &>/dev/null; then
+                    if security find-generic-password -s "Codex Auth" &>/dev/null 2>&1; then
+                        CODEX_FOUND=true
+                    fi
+                fi
+                if [ "$CODEX_FOUND" = false ] && [ -f "$HOME/.codex/auth.json" ]; then
+                    CODEX_FOUND=true
+                fi
+                if [ "$CODEX_FOUND" = false ]; then
+                    echo ""
+                    echo -e "${YELLOW}  Codex credentials not found. Starting OAuth login...${NC}"
+                    echo ""
+                    if uv run python "$SCRIPT_DIR/codex_oauth.py"; then
+                        CODEX_FOUND=true
+                    else
+                        echo ""
+                        echo -e "${RED}  OAuth login failed.${NC}"
+                        echo -e "  You can also run ${CYAN}codex${NC} to authenticate, then run this quickstart again."
+                        echo ""
+                    fi
+                fi
+                if [ "$CODEX_FOUND" = true ]; then
+                    SUBSCRIPTION_MODE="codex"
+                    SELECTED_PROVIDER_ID="openai"
+                    SELECTED_MODEL="gpt-5.3-codex"
+                    SELECTED_MAX_TOKENS=16384
+                    echo ""
+                    echo -e "${GREEN}⬢${NC} Using OpenAI Codex subscription"
+                fi
                 break
             fi
             idx=$((choice - 1))
@@ -928,12 +952,19 @@ if [ -z "$SELECTED_PROVIDER_ID" ]; then
 
             if [ "$CODEX_FOUND" = false ]; then
                 echo ""
-                echo -e "${YELLOW}  Codex credentials not found.${NC}"
-                echo -e "  Run ${CYAN}codex${NC} first to authenticate with your ChatGPT Plus/Pro subscription,"
-                echo -e "  then run this quickstart again."
+                echo -e "${YELLOW}  Codex credentials not found. Starting OAuth login...${NC}"
                 echo ""
-                SELECTED_PROVIDER_ID=""
-            else
+                if uv run python "$SCRIPT_DIR/codex_oauth.py"; then
+                    CODEX_FOUND=true
+                else
+                    echo ""
+                    echo -e "${RED}  OAuth login failed.${NC}"
+                    echo -e "  You can also run ${CYAN}codex${NC} to authenticate, then run this quickstart again."
+                    echo ""
+                    SELECTED_PROVIDER_ID=""
+                fi
+            fi
+            if [ "$CODEX_FOUND" = true ]; then
                 SUBSCRIPTION_MODE="codex"
                 SELECTED_PROVIDER_ID="openai"
                 SELECTED_MODEL="gpt-5.3-codex"

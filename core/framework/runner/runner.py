@@ -371,8 +371,42 @@ def get_codex_token() -> str | None:
     return access_token
 
 
+def _get_account_id_from_jwt(access_token: str) -> str | None:
+    """Extract the ChatGPT account_id from the access token JWT.
+
+    The OpenAI access token JWT contains a claim at
+    ``https://api.openai.com/auth`` with a ``chatgpt_account_id`` field.
+    This is used as a fallback when the auth.json doesn't store the
+    account_id explicitly.
+    """
+    import base64
+
+    try:
+        parts = access_token.split(".")
+        if len(parts) != 3:
+            return None
+        payload = parts[1]
+        # Add base64 padding
+        padding = 4 - len(payload) % 4
+        if padding != 4:
+            payload += "=" * padding
+        decoded = base64.urlsafe_b64decode(payload)
+        claims = json.loads(decoded)
+        auth = claims.get("https://api.openai.com/auth")
+        if isinstance(auth, dict):
+            account_id = auth.get("chatgpt_account_id")
+            if isinstance(account_id, str) and account_id:
+                return account_id
+    except Exception:
+        pass
+    return None
+
+
 def get_codex_account_id() -> str | None:
     """Extract the account ID from Codex auth data for the ChatGPT-Account-Id header.
+
+    Checks the ``tokens.account_id`` field first, then falls back to
+    decoding the account ID from the access token JWT.
 
     Returns:
         The account_id string if available, None otherwise.
@@ -380,7 +414,15 @@ def get_codex_account_id() -> str | None:
     auth_data = _read_codex_keychain() or _read_codex_auth_file()
     if not auth_data:
         return None
-    return auth_data.get("tokens", {}).get("account_id")
+    tokens = auth_data.get("tokens", {})
+    account_id = tokens.get("account_id")
+    if account_id:
+        return account_id
+    # Fallback: extract from JWT
+    access_token = tokens.get("access_token")
+    if access_token:
+        return _get_account_id_from_jwt(access_token)
+    return None
 
 
 @dataclass
