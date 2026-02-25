@@ -903,12 +903,16 @@ case $choice in
             echo ""
             echo -e "${YELLOW}  Codex credentials not found. Starting OAuth login...${NC}"
             echo ""
-            if uv run python "$SCRIPT_DIR/codex_oauth.py"; then
+            if uv run python "$SCRIPT_DIR/core/codex_oauth.py"; then
                 CODEX_CRED_DETECTED=true
             else
                 echo ""
-                echo -e "${RED}  OAuth login failed.${NC}"
-                echo -e "  You can also run ${CYAN}codex${NC} to authenticate, then run this quickstart again."
+                echo -e "${RED}  OAuth login failed or was cancelled.${NC}"
+                echo ""
+                echo -e "  To authenticate manually, visit:"
+                echo -e "  ${CYAN}https://auth.openai.com/authorize?client_id=app_EMoamEEZ73f0CkXaXp7hrann&response_type=code&redirect_uri=http://localhost:1455/auth/callback&scope=openid%20profile%20email%20offline_access${NC}"
+                echo ""
+                echo -e "  Or run ${CYAN}codex${NC} to authenticate, then run this quickstart again."
                 echo ""
                 SELECTED_PROVIDER_ID=""
             fi
