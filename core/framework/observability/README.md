@@ -196,6 +196,77 @@ def setup_logging():
     configure_logging(level="DEBUG", format="human")
 ```
 
+## Langfuse Integration (Optional)
+
+Send every agent run to [Langfuse](https://langfuse.com) as an OTel trace — including all log records as events — with a single call at startup. No changes to runtime scripts or agent code required.
+
+### Install
+
+```bash
+pip install 'framework[langfuse]'
+# installs opentelemetry-sdk + opentelemetry-exporter-otlp-proto-http
+# the Langfuse SDK itself is not required
+```
+
+### Configure
+
+```bash
+export LANGFUSE_PUBLIC_KEY="pk-lf-..."
+export LANGFUSE_SECRET_KEY="sk-lf-..."
+# Optional: override for self-hosted instances (default: https://cloud.langfuse.com)
+export LANGFUSE_HOST="http://localhost:3000"
+```
+
+### Enable
+
+Call `configure_langfuse()` once at startup alongside `configure_logging()`:
+
+```python
+from framework.observability import configure_logging, configure_langfuse
+
+configure_logging(level="INFO")
+configure_langfuse()  # reads keys from env vars
+```
+
+Or pass credentials directly:
+
+```python
+configure_langfuse(
+    public_key="pk-lf-...",
+    secret_key="sk-lf-...",
+    host="https://cloud.langfuse.com",  # or self-hosted URL
+)
+```
+
+### What you get in Langfuse
+
+- **One trace per agent run** — identified by the same `trace_id` hive uses internally
+- **All log records as events** — every `logger.info()` / `logger.warning()` / `logger.error()` call appears as a correlated event on the trace
+- **Run metadata as span attributes** — `goal_id`, `agent_id`, and other context fields are attached automatically
+
+### How it works
+
+The integration is entirely within the logger. Hive's logger and Langfuse both speak the OpenTelemetry standard:
+
+```
+Runtime.start_run()
+  └─ set_trace_context(trace_id=..., goal_id=...)   ← existing call, unchanged
+       └─ opens an OTel span anchored to hive's trace_id
+
+  Every logger.info() / logger.warning() / ...
+       └─ OTel LoggingHandler → Langfuse event (correlated to the trace)
+
+Runtime.end_run()
+  └─ clear_trace_context()
+       └─ closes the OTel span → BatchSpanProcessor flushes to Langfuse
+```
+
+Gracefully no-ops if:
+- `opentelemetry-sdk` / `opentelemetry-exporter-otlp-proto-http` are not installed
+- `LANGFUSE_PUBLIC_KEY` or `LANGFUSE_SECRET_KEY` are not set
+
+---
+
 ## Best Practices
 
 1. **Production**: Use JSON format (`LOG_FORMAT=json` or `ENV=production`)
@@ -203,6 +274,7 @@ def setup_logging():
 3. **Don't manually set context**: Let the framework manage it
 4. **Use standard logging**: No special APIs needed - just `logger.info()`
 5. **Add custom fields**: Use `extra` dict for additional metadata
+6. **Langfuse**: Call `configure_langfuse()` right after `configure_logging()` — order matters
 
 ## Troubleshooting
 

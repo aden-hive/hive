@@ -10,6 +10,7 @@ This module provides zero-friction observability:
 
 from framework.observability.logging import (
     clear_trace_context,
+    configure_langfuse,
     configure_logging,
     get_trace_context,
     set_trace_context,
@@ -17,6 +18,7 @@ from framework.observability.logging import (
 
 __all__ = [
     "configure_logging",
+    "configure_langfuse",
     "get_trace_context",
     "set_trace_context",
     "clear_trace_context",

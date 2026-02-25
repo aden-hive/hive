@@ -6,6 +6,7 @@ Key Features:
 - ContextVar-based propagation: Thread-safe and async-safe
 - Dual output modes: JSON for production, human-readable for development
 - Correlation IDs: trace_id follows entire request flow automatically
+- Optional Langfuse observability via OTEL (configure_langfuse())
 
 Architecture:
     Runtime.start_run() → Generates trace_id, sets context once
@@ -15,8 +16,17 @@ Architecture:
     Node.execute() → Adds node_id to context
         ↓ (automatic propagation)
     User code → logger.info("message") → Gets ALL context automatically!
+
+Langfuse (optional):
+    configure_langfuse() → OTel SDK → Langfuse OTLP endpoint
+    set_trace_context(trace_id=...) → opens OTel span (hive trace_id preserved);
+                                      closes any prior span in the same context
+    atexit handler                  → ends remaining open spans, calls
+                                      tracer_provider.shutdown() which does a
+                                      blocking force_flush before process exit
 """
 
+import atexit
 import json
 import logging
 import os
@@ -243,6 +253,218 @@ def _disable_third_party_colors() -> None:
         pass
 
 
+# ─── Langfuse / OTel integration ─────────────────────────────────────────────
+# Populated only when configure_langfuse() has been called; None otherwise.
+# Keyed by trace_id_hex so concurrent runs each have their own span.
+_otel_tracer: Any = None
+_otel_span_stack: dict[str, tuple[Any, Any]] = {}  # trace_id_hex → (span, ctx_token)
+
+
+def configure_langfuse(
+    public_key: str | None = None,
+    secret_key: str | None = None,
+    host: str = "https://cloud.langfuse.com",
+) -> None:
+    """
+    Enable Langfuse observability via the OpenTelemetry standard.
+
+    Routes every hive agent run to Langfuse as an OTel trace, with all
+    Python log records attached as log events — without touching any runtime
+    script.  Call once at application startup alongside configure_logging().
+
+    Credentials are resolved in priority order:
+      1. Arguments passed to this function
+      2. ``LANGFUSE_PUBLIC_KEY`` / ``LANGFUSE_SECRET_KEY`` environment variables
+
+    Args:
+        public_key: Langfuse project public key  (starts with ``pk-lf-``).
+        secret_key: Langfuse project secret key  (starts with ``sk-lf-``).
+        host:       Langfuse host URL.  Defaults to ``https://cloud.langfuse.com``.
+                    Override for self-hosted deployments, e.g. ``http://localhost:3000``.
+
+    Requires (optional dependency group)::
+
+        pip install 'framework[langfuse]'
+        # installs opentelemetry-sdk + opentelemetry-exporter-otlp-proto-http
+
+    Example::
+
+        configure_logging(level="INFO")
+        configure_langfuse()   # reads LANGFUSE_PUBLIC_KEY / LANGFUSE_SECRET_KEY from env
+    """
+    global _otel_tracer
+
+    try:
+        import base64
+
+        from opentelemetry import trace as otel_trace
+        from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
+        from opentelemetry.sdk.resources import Resource
+        from opentelemetry.sdk.trace import TracerProvider
+        from opentelemetry.sdk.trace.export import BatchSpanProcessor
+    except ImportError:
+        logging.getLogger(__name__).warning(
+            "Langfuse integration requires opentelemetry-sdk and "
+            "opentelemetry-exporter-otlp-proto-http. "
+            "Install with: pip install 'framework[langfuse]'"
+        )
+        return
+
+    pub = public_key or os.getenv("LANGFUSE_PUBLIC_KEY", "")
+    sec = secret_key or os.getenv("LANGFUSE_SECRET_KEY", "")
+    if not pub or not sec:
+        logging.getLogger(__name__).warning(
+            "Langfuse integration is disabled: "
+            "set LANGFUSE_PUBLIC_KEY and LANGFUSE_SECRET_KEY "
+            "(or pass public_key/secret_key to configure_langfuse)."
+        )
+        return
+
+    auth = base64.b64encode(f"{pub}:{sec}".encode()).decode()
+    headers = {"Authorization": f"Basic {auth}"}
+    base = host.rstrip("/")
+
+    # ── Trace exporter → Langfuse OTLP endpoint ──────────────────────────────
+    span_exporter = OTLPSpanExporter(
+        endpoint=f"{base}/api/public/otel/v1/traces",
+        headers=headers,
+    )
+    resource = Resource.create({"service.name": "hive"})
+    tracer_provider = TracerProvider(resource=resource)
+    tracer_provider.add_span_processor(BatchSpanProcessor(span_exporter))
+    otel_trace.set_tracer_provider(tracer_provider)
+    _otel_tracer = tracer_provider.get_tracer("hive.framework")
+
+    # ── Log bridge: Python logging → OTel logs → Langfuse ────────────────────
+    # The OTel logs SDK is still experimental; wrap in try/except so traces
+    # still flow even if the log bridge isn't available.
+    try:
+        from opentelemetry._logs import set_logger_provider
+        from opentelemetry.exporter.otlp.proto.http._log_exporter import OTLPLogExporter
+        from opentelemetry.sdk._logs import LoggerProvider, LoggingHandler as OTelLoggingHandler
+        from opentelemetry.sdk._logs.export import BatchLogRecordProcessor
+
+        log_exporter = OTLPLogExporter(
+            endpoint=f"{base}/api/public/otel/v1/logs",
+            headers=headers,
+        )
+        log_provider = LoggerProvider(resource=resource)
+        log_provider.add_log_record_processor(BatchLogRecordProcessor(log_exporter))
+        set_logger_provider(log_provider)
+        logging.getLogger().addHandler(OTelLoggingHandler(logger_provider=log_provider))
+    except Exception as exc:
+        logging.getLogger(__name__).debug(
+            "OTel log bridge unavailable — log events will not appear in Langfuse "
+            "(traces still flow): %s",
+            exc,
+        )
+
+    # ── Process-exit flush ───────────────────────────────────────────────────
+    # BatchSpanProcessor.shutdown() does a blocking force_flush, draining the
+    # export queue before the process exits.  This is the idiomatic OTel pattern
+    # for scripts; no runtime script needs to call clear_trace_context().
+    atexit.register(_langfuse_shutdown)
+
+    logging.getLogger(__name__).info(
+        "Langfuse OTEL integration enabled",
+        extra={"langfuse_host": base},
+    )
+
+
+def _langfuse_shutdown() -> None:
+    """
+    End all open OTel spans and flush to Langfuse at process exit.
+
+    Registered automatically by configure_langfuse() via atexit.
+    Calls tracer_provider.shutdown(), which performs a blocking force_flush
+    on the BatchSpanProcessor, draining the export queue before the process
+    terminates.
+    """
+    for trace_id_hex in list(_otel_span_stack):
+        _otel_close_trace(trace_id_hex)
+
+    from opentelemetry import trace as otel_trace
+
+    provider = otel_trace.get_tracer_provider()
+    if hasattr(provider, "shutdown"):
+        try:
+            provider.shutdown()
+        except Exception as exc:
+            logging.getLogger(__name__).debug("Langfuse shutdown error: %s", exc)
+
+
+def _otel_open_trace(trace_id_hex: str, goal_id: str = "") -> None:
+    """
+    Open an OTel recording span anchored to *our* trace_id.
+
+    A NonRecordingSpan carrying our trace_id acts as a virtual remote parent.
+    The real recording child span inherits that trace_id, so Langfuse shows
+    the exact same ID that hive uses internally — no runtime changes required.
+    """
+    if trace_id_hex in _otel_span_stack:
+        return  # already open for this trace
+
+    from opentelemetry import context as otel_ctx, trace as otel_trace
+    from opentelemetry.trace import NonRecordingSpan, SpanContext, TraceFlags
+
+    # Virtual remote parent — carries our trace_id, never exported.
+    virtual_parent = NonRecordingSpan(
+        SpanContext(
+            trace_id=int(trace_id_hex, 16),
+            span_id=int(os.urandom(8).hex(), 16),
+            is_remote=True,
+            trace_flags=TraceFlags(TraceFlags.SAMPLED),
+        )
+    )
+    parent_ctx = otel_trace.set_span_in_context(virtual_parent)
+
+    # Real recording span — inherits trace_id from virtual parent above.
+    span = _otel_tracer.start_span(
+        goal_id or "agent.run",
+        context=parent_ctx,
+        attributes={"hive.trace_id": trace_id_hex},
+    )
+    token = otel_ctx.attach(otel_trace.set_span_in_context(span))
+    _otel_span_stack[trace_id_hex] = (span, token)
+
+
+def _otel_enrich_span(attrs: dict[str, Any]) -> None:
+    """
+    Add new context fields as attributes on the span for the current hive trace.
+
+    Uses the trace_id from the hive ContextVar to look up the span directly in
+    _otel_span_stack instead of relying on OTel's thread-local get_current_span(),
+    which is unsafe under concurrent async execution (StreamRuntime).
+    """
+    ctx = trace_context.get() or {}
+    trace_id = ctx.get("trace_id")
+    if not trace_id:
+        return
+    entry = _otel_span_stack.get(trace_id)
+    if entry is None:
+        return
+    span, _ = entry
+    if span.is_recording():
+        for k, v in attrs.items():
+            if isinstance(v, (str, bool, int, float)):
+                span.set_attribute(f"hive.{k}", v)
+
+
+def _otel_close_trace(trace_id_hex: str) -> None:
+    """End the OTel span and detach its context, flushing to Langfuse."""
+    from opentelemetry import context as otel_ctx
+
+    entry = _otel_span_stack.pop(trace_id_hex, None)
+    if entry is None:
+        return
+    span, token = entry
+    span.end()
+    otel_ctx.detach(token)
+
+
+# ─── Trace context helpers ────────────────────────────────────────────────────
+
+
 def set_trace_context(**kwargs: Any) -> None:
     """
     Set trace context for current execution.
@@ -274,6 +496,19 @@ def set_trace_context(**kwargs: Any) -> None:
     current = trace_context.get() or {}
     trace_context.set({**current, **kwargs})
 
+    if _otel_tracer is not None:
+        if "trace_id" in kwargs:
+            # Close the previous span if a different trace_id is replacing it in
+            # this context (sequential run pattern: run A ends, run B starts).
+            prev_trace_id = current.get("trace_id")
+            if prev_trace_id and prev_trace_id != kwargs["trace_id"]:
+                _otel_close_trace(prev_trace_id)
+            # Open a new OTel span for this trace.
+            _otel_open_trace(kwargs["trace_id"], kwargs.get("goal_id", ""))
+        else:
+            # Subsequent calls (e.g. agent_id added by executor) — enrich span.
+            _otel_enrich_span(kwargs)
+
 
 def get_trace_context() -> dict:
     """
@@ -296,7 +531,14 @@ def clear_trace_context() -> None:
     - Starting a completely new execution context
     - Manual context management (rare)
 
-    Note: Framework typically doesn't need to call this - ContextVar
-    is execution-scoped and cleans itself up automatically.
+    Note: Framework code does not need to call this — ContextVar is
+    execution-scoped and cleans itself up automatically.  When Langfuse is
+    enabled, open spans are closed at process exit by the atexit handler
+    registered in configure_langfuse(); calling clear_trace_context()
+    earlier (e.g. in tests) will also close them eagerly.
     """
+    ctx = trace_context.get() or {}
+    trace_id = ctx.get("trace_id")
     trace_context.set(None)
+    if _otel_tracer is not None and trace_id:
+        _otel_close_trace(trace_id)

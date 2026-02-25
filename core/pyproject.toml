@@ -21,6 +21,10 @@ dependencies = [
 [project.optional-dependencies]
 tui = ["textual>=0.75.0"]
 webhook = ["aiohttp>=3.9.0"]
+langfuse = [
+  "opentelemetry-sdk>=1.20.0",
+  "opentelemetry-exporter-otlp-proto-http>=1.20.0",
+]
 
 [project.scripts]
 hive = "framework.cli:main"
