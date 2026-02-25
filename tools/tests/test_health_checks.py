@@ -8,6 +8,7 @@ from aden_tools.credentials.health_check import (
     HEALTH_CHECKERS,
     ApolloHealthChecker,
     AnthropicHealthChecker,
+    BrevoHealthChecker,
     CalcomHealthChecker,
     DiscordHealthChecker,
     ExaSearchHealthChecker,
@@ -87,6 +88,7 @@ class TestHealthCheckerRegistry:
             "telegram",
             "newsdata",
             "finlight",
+            "brevo",
         }
         assert set(HEALTH_CHECKERS.keys()) == expected
 
@@ -695,4 +697,9 @@ class TestNewsdataHealthChecker(HealthCheckerTestSuite):
 
 class TestFinlightHealthChecker(HealthCheckerTestSuite):
     CHECKER_CLASS = FinlightHealthChecker
+    HTTP_METHOD = "get"
+
+
+class TestBrevoHealthChecker(HealthCheckerTestSuite):
+    CHECKER_CLASS = BrevoHealthChecker
     HTTP_METHOD = "get"
