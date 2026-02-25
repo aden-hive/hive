@@ -37,14 +37,9 @@ graph LR
 export TAVILY_API_KEY="tvly-..."
 ```
 
-### Run with demo input
+### Run
 
 ```bash
-# Using the included demo brief
-python -m curriculum_research_agent run \
-  --brief-file demo_brief.json
-
-# Or specify fields directly
 python -m curriculum_research_agent run \
   --topic "Medication Safety for Registered Nurses" \
   --level "Continuing Education" \
@@ -72,16 +67,17 @@ python -m curriculum_research_agent validate
 
 ## Configuration
 
-### `demo_brief.json`
+### Input format
 
-```json
-{
-    "topic": "Medication Safety for Registered Nurses",
-    "level": "Continuing Education",
-    "audience": "RNs with 2-5 years experience in acute care settings",
-    "accreditation_context": "Canadian Nurses Association (CNA) continuing education requirements"
-}
-```
+Pass a JSON file via `--brief-file` or supply fields directly as CLI flags.
+Expected fields:
+
+| Field | Description |
+|-------|-------------|
+| `topic` | Subject area (e.g. "Medication Safety for Registered Nurses") |
+| `level` | Education level: Continuing Education, Certificate, Diploma |
+| `audience` | Target learners |
+| `accreditation_context` | Standards body or requirements |
 
 ### Domain scoping
 
@@ -123,13 +119,12 @@ curriculum_research_agent/
 ├── __init__.py          # Package exports
 ├── __main__.py          # CLI entry point (click)
 ├── agent.py             # Graph construction, Goal, Edges, Agent class
-├── agent.json           # Auto-generated agent descriptor
+├── agent.json           # Declarative agent descriptor
 ├── config.py            # RuntimeConfig + CurriculumConfig + AgentMetadata
 ├── mcp_servers.json     # Points to hive-tools MCP server
 ├── nodes/
 │   └── __init__.py      # 5 NodeSpec definitions
 ├── tools.py             # load_curriculum_brief, save_curriculum_brief
-├── demo_brief.json      # Sample input for testing
 └── README.md            # This file
 ```
 

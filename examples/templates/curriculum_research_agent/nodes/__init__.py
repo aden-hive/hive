@@ -107,11 +107,13 @@ For each query, call tavily_search with:
   ["cna-aiic.ca", "who.int", "ismp.org", "nursingworld.org", "ncbi.nlm.nih.gov"])
   Choose domains appropriate to the topic and accreditation context.
 
-**STEP 3 — Process and store results:**
+**STEP 3 — Process and store results with provenance:**
 
-For each search result, extract:
+For each search result, extract a provenance-enriched record:
 - title: the page title
-- url: the source URL
+- url: the full source URL
+- domain: the root domain (e.g. "ncbi.nlm.nih.gov", "who.int")
+- retrieved_at: today's date in ISO format (YYYY-MM-DD)
 - content: key excerpt or summary
 - relevance: "high", "medium", or "low" based on how directly it addresses the topic
 - category: "standard", "best_practice", "competency", "assessment", or "regulatory"
@@ -123,6 +125,7 @@ Call append_data(filename="research_results.jsonl", data=<JSON result object>) f
 
 **IMPORTANT:** Prioritize sources from recognized professional bodies, government \
 agencies, and peer-reviewed publications. Exclude commercial marketing content.
+**IMPORTANT:** Every result MUST include domain and retrieved_at for audit traceability.
 """,
     tools=["tavily_search", "append_data"],
 )
@@ -159,7 +162,7 @@ Process all chunks if has_more=true.
 
 Group the research findings into 3-6 thematic clusters. For each cluster:
 - theme_name: a descriptive label (e.g. "Medication Administration Safety Protocols")
-- sources: list of URLs supporting this theme
+- sources: list of provenance objects [{url, domain, retrieved_at}] supporting this theme
 - key_findings: 2-4 bullet points summarizing the evidence
 
 **STEP 3 — Map to learning outcomes:**
@@ -184,7 +187,8 @@ Cross-reference themes with the accreditation context to identify:
 
 **STEP 5 — Write aligned standards and set output:**
 For each theme, call append_data(filename="aligned_standards.jsonl", data=<JSON object with:
-  theme_name, sources, key_findings, learning_outcomes, competency_level,
+  theme_name, sources (carrying forward provenance: [{url, domain, retrieved_at}]),
+  key_findings, learning_outcomes, competency_level,
   required_competencies, recommended_competencies, gap_areas
 >)
 - Call set_output("aligned_standards", "aligned_standards.jsonl")
@@ -240,6 +244,8 @@ Organize the learning outcomes into 3-6 modules. For each module:
   (e.g. "quiz", "case analysis", "skills demonstration", "reflection paper", "portfolio")
 - assessment_description: specific assessment activity description
 - resources_needed: materials, technology, or equipment required
+- source_provenance: list of [{url, domain, retrieved_at}] from the aligned standards
+  that inform this module's content — carry forward from the themes used
 
 **STEP 4 — Sequencing:**
 
@@ -323,6 +329,8 @@ For each module:
 **Assessment:** [type] — [description]
 **Resources:** [list]
 
+> 📌 **Sources:** [domain1] (retrieved [date]) — [URL1] | [domain2] (retrieved [date]) — [URL2]
+
 ---
 
 **Assessment Strategy**
@@ -332,6 +340,11 @@ For each module:
 [Curated list of sources with URLs from the research phase]
 
 ---
+
+**IMPORTANT:** Each module section MUST include an inline provenance block \
+(📌 Sources) listing the domain, retrieval date, and citation URL for every \
+source that informed that module. This ensures audit traceability for \
+compliance-heavy programs.
 
 **STEP 3 — Save the brief:**
 Call save_curriculum_brief(content=<the full brief text>, filename="content_brief.md")
