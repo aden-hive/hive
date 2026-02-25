@@ -160,7 +160,39 @@ describe("sseEventToChatMessage", () => {
     expect(result!.id).toBe("stream-exec-123-chat");
   });
 
-  it("falls back to '0' when both turnId and execution_id are null", () => {
+  it("combines execution_id and turnId to differentiate loop iterations", () => {
+    const event = makeEvent({
+      type: "client_output_delta",
+      node_id: "chat",
+      execution_id: "exec-1",
+      data: { snapshot: "hello" },
+    });
+    const r1 = sseEventToChatMessage(event, "t", undefined, 1);
+    const r2 = sseEventToChatMessage(event, "t", undefined, 2);
+    expect(r1!.id).toBe("stream-exec-1-1-chat");
+    expect(r2!.id).toBe("stream-exec-1-2-chat");
+    expect(r1!.id).not.toBe(r2!.id);
+  });
+
+  it("same execution_id + same turnId produces same ID (streaming upsert within iteration)", () => {
+    const e1 = makeEvent({
+      type: "client_output_delta",
+      node_id: "chat",
+      execution_id: "exec-1",
+      data: { snapshot: "partial" },
+    });
+    const e2 = makeEvent({
+      type: "client_output_delta",
+      node_id: "chat",
+      execution_id: "exec-1",
+      data: { snapshot: "partial response" },
+    });
+    expect(sseEventToChatMessage(e1, "t", undefined, 3)!.id).toBe(
+      sseEventToChatMessage(e2, "t", undefined, 3)!.id,
+    );
+  });
+
+  it("uses timestamp fallback when both turnId and execution_id are null", () => {
     const event = makeEvent({
       type: "client_output_delta",
       node_id: "chat",
@@ -168,7 +200,7 @@ describe("sseEventToChatMessage", () => {
       data: { snapshot: "hello" },
     });
     const result = sseEventToChatMessage(event, "t");
-    expect(result!.id).toBe("stream-0-chat");
+    expect(result!.id).toMatch(/^stream-t-\d+-chat$/);
   });
 
   it("converts client_input_requested with prompt to message", () => {

@@ -770,7 +770,8 @@ class AgentRunner:
         # deep_research_agent.agent) so the top-level reload picks up
         # changes in the entire package — not just __init__.py.
         stale = [
-            name for name in sys.modules
+            name
+            for name in sys.modules
             if name == package_name or name.startswith(f"{package_name}.")
         ]
         for name in stale:

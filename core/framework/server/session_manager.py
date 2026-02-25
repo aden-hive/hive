@@ -161,7 +161,9 @@ class SessionManager:
             worker_identity = (
                 build_worker_profile(session.worker_runtime) if session.worker_runtime else None
             )
-            await self._start_queen(session, worker_identity=worker_identity, initial_prompt=initial_prompt)
+            await self._start_queen(
+                session, worker_identity=worker_identity, initial_prompt=initial_prompt
+            )
 
             # Start health judge
             if agent_path.name != "hive_coder" and session.worker_runtime:

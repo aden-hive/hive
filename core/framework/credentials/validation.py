@@ -272,7 +272,9 @@ def validate_agent_credentials(
     # Credentials that are present and should be health-checked
     to_verify: list[int] = []  # indices into all_credentials
 
-    def _check_credential(spec, cred_name: str, affected_tools: list[str], affected_node_types: list[str]) -> None:
+    def _check_credential(
+        spec, cred_name: str, affected_tools: list[str], affected_node_types: list[str]
+    ) -> None:
         cred_id = spec.credential_id or cred_name
         available = store.is_available(cred_id)
 
@@ -400,12 +402,10 @@ def build_setup_session_from_error(
         nodes: Graph nodes (preferred — avoids re-loading from disk).
         agent_path: Agent directory path (used when nodes aren't available).
     """
-    from framework.credentials.setup import CredentialSetupSession, MissingCredential
+    from framework.credentials.setup import CredentialSetupSession
 
     # Prefer the validation result attached to the exception
-    result: CredentialValidationResult | None = getattr(
-        credential_error, "validation_result", None
-    )
+    result: CredentialValidationResult | None = getattr(credential_error, "validation_result", None)
     if result is not None:
         missing = [_status_to_missing(c) for c in result.failed]
         return CredentialSetupSession(missing)

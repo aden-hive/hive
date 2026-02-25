@@ -61,11 +61,12 @@ export function sseEventToChatMessage(
   agentDisplayName?: string,
   turnId?: number,
 ): ChatMessage | null {
-  // turnId disambiguates messages across response turns.  Within a single
-  // turn the ID stays stable so the upsert logic can replace the previous
-  // snapshot (streaming).  Across turns, different turnIds produce different
-  // IDs so each response gets its own bubble.
-  const idKey = turnId != null ? String(turnId) : (event.execution_id ?? "0");
+  // Combine execution_id (unique per execution) with turnId (increments per
+  // loop iteration) so each iteration gets its own bubble while streaming
+  // deltas within one iteration still share the same ID for upsert.
+  const eid = event.execution_id ?? "";
+  const tid = turnId != null ? String(turnId) : "";
+  const idKey = eid && tid ? `${eid}-${tid}` : eid || tid || `t-${Date.now()}`;
 
   switch (event.type) {
     case "client_output_delta": {
