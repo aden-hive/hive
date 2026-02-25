@@ -15,7 +15,6 @@ import base64
 import hashlib
 import http.server
 import json
-import os
 import platform
 import secrets
 import subprocess
@@ -25,7 +24,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 # OAuth constants (from the Codex CLI binary)
@@ -146,7 +145,7 @@ def save_credentials(token_data: dict, account_id: str) -> None:
             "account_id": account_id,
         },
         "auth_mode": "chatgpt",
-        "last_refresh": datetime.now(timezone.utc).isoformat(),
+        "last_refresh": datetime.now(UTC).isoformat(),
     }
     if "id_token" in token_data:
         auth_data["tokens"]["id_token"] = token_data["id_token"]
@@ -160,12 +159,17 @@ def open_browser(url: str) -> bool:
     """Open the URL in the user's default browser."""
     system = platform.system()
     try:
+        devnull = subprocess.DEVNULL
         if system == "Darwin":
-            subprocess.Popen(["open", url], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            subprocess.Popen(["open", url], stdout=devnull, stderr=devnull)
         elif system == "Windows":
-            subprocess.Popen(["cmd", "/c", "start", url], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            subprocess.Popen(
+                ["cmd", "/c", "start", url], stdout=devnull, stderr=devnull
+            )
         else:
-            subprocess.Popen(["xdg-open", url], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            subprocess.Popen(
+                ["xdg-open", url], stdout=devnull, stderr=devnull
+            )
         return True
     except OSError:
         return False
@@ -299,7 +303,7 @@ def main() -> int:
         print("  Could not open browser automatically.")
 
     print()
-    print(f"  If the browser didn't open, visit this URL:")
+    print("  If the browser didn't open, visit this URL:")
     print(f"  \033[0;36m{auth_url}\033[0m")
     print()
 
@@ -374,7 +378,7 @@ def main() -> int:
 
     # Save credentials
     save_credentials(token_data, account_id)
-    print(f"  \033[0;32mAuthentication successful!\033[0m")
+    print("  \033[0;32mAuthentication successful!\033[0m")
     print(f"  Credentials saved to {CODEX_AUTH_FILE}")
     return 0
 

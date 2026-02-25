@@ -5,6 +5,7 @@ import logging
 import os
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from datetime import UTC
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -244,7 +245,7 @@ def _is_codex_token_expired(auth_data: dict) -> bool:
     to the file mtime when ``last_refresh`` is absent.
     """
     import time
-    from datetime import datetime, timezone
+    from datetime import datetime
 
     now = time.time()
     last_refresh = auth_data.get("last_refresh")
@@ -309,7 +310,7 @@ def _save_refreshed_codex_credentials(auth_data: dict, token_data: dict) -> None
     The Codex CLI manages its own Keychain entries, so we only update the
     file-based credentials.
     """
-    from datetime import datetime, timezone
+    from datetime import datetime
 
     try:
         tokens = auth_data.get("tokens", {})
@@ -319,7 +320,7 @@ def _save_refreshed_codex_credentials(auth_data: dict, token_data: dict) -> None
         if "id_token" in token_data:
             tokens["id_token"] = token_data["id_token"]
         auth_data["tokens"] = tokens
-        auth_data["last_refresh"] = datetime.now(timezone.utc).isoformat()
+        auth_data["last_refresh"] = datetime.now(UTC).isoformat()
 
         CODEX_AUTH_FILE.parent.mkdir(parents=True, exist_ok=True)
         with open(CODEX_AUTH_FILE, "w") as f:

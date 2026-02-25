@@ -242,6 +242,8 @@ if [ $CHECK_EXIT -eq 0 ] || echo "$CHECK_RESULT" | grep -q "^{"; then
     echo "$CHECK_RESULT" | uv run python -c "
 import json, sys
 
+GREEN, RED, YELLOW, NC = '\033[0;32m', '\033[0;31m', '\033[1;33m', '\033[0m'
+
 try:
     data = json.loads(sys.stdin.read())
     modules = [
@@ -254,17 +256,17 @@ try:
     for mod, label, required in modules:
         status = data.get(mod, 'error: not checked')
         if status == 'ok':
-            print('\033[0;32m  ✓ ' + label + '\033[0m')
+            print(f'{GREEN}  ✓ {label}{NC}')
         elif required:
-            print('\033[0;31m  ✗ ' + label + ' failed\033[0m')
+            print(f'{RED}  ✗ {label} failed{NC}')
             if status != 'error: not checked':
-                print('    ' + status)
+                print(f'    {status}')
             import_errors += 1
         else:
-            print('\033[1;33m  ⚠ ' + label + ' (may be OK)\033[0m')
+            print(f'{YELLOW}  ⚠ {label} (may be OK){NC}')
     sys.exit(import_errors)
 except json.JSONDecodeError:
-    print('\033[0;31mError: Could not parse import check results\033[0m', file=sys.stderr)
+    print(f'{RED}Error: Could not parse import check results{NC}', file=sys.stderr)
     sys.exit(1)
 " 2>&1
     IMPORT_ERRORS=$?
