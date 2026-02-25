@@ -17,9 +17,17 @@ export interface AgentCredentialRequirement {
   tools: string[];
   node_types: string[];
   available: boolean;
+  valid: boolean | null;
+  validation_message: string | null;
   direct_api_key_supported: boolean;
   aden_supported: boolean;
   credential_key: string;
+}
+
+export interface CheckAgentResponse {
+  required: AgentCredentialRequirement[];
+  all_valid: boolean;
+  error?: string;
 }
 
 export const credentialsApi = {
@@ -38,9 +46,18 @@ export const credentialsApi = {
   delete: (credentialId: string) =>
     api.delete<{ deleted: boolean }>(`/credentials/${credentialId}`),
 
-  checkAgent: (agentPath: string) =>
-    api.post<{ required: AgentCredentialRequirement[] }>(
-      "/credentials/check-agent",
-      { agent_path: agentPath },
-    ),
+  checkAgent: async (agentPath: string): Promise<CheckAgentResponse> => {
+    const url = `/api/credentials/check-agent`;
+    const response = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ agent_path: agentPath }),
+    });
+    const body = await response.json();
+    // 424 = validation failures, but body still has the required array
+    if (response.ok || response.status === 424) {
+      return body as CheckAgentResponse;
+    }
+    throw new Error(body.error || response.statusText);
+  },
 };

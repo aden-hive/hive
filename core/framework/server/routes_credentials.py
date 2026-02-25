@@ -179,7 +179,25 @@ async def handle_check_agent(request: web.Request) -> web.Response:
                             entry["validation_message"] = f"Health check error: {exc}"
 
             required.append(entry)
-        return web.json_response({"required": required})
+
+        # Determine overall status
+        any_missing = any(not r["available"] for r in required)
+        any_invalid = any(r["valid"] is False for r in required)
+        all_valid = not any_missing and not any_invalid
+
+        response = {"required": required, "all_valid": all_valid}
+        if any_missing or any_invalid:
+            reasons = []
+            if any_missing:
+                names = [r["credential_name"] for r in required if not r["available"]]
+                reasons.append(f"missing: {', '.join(names)}")
+            if any_invalid:
+                names = [r["credential_name"] for r in required if r["valid"] is False]
+                reasons.append(f"invalid: {', '.join(names)}")
+            response["error"] = "; ".join(reasons)
+            return web.json_response(response, status=424)
+
+        return web.json_response(response)
     except Exception as e:
         logger.exception(f"Error checking agent credentials: {e}")
         return web.json_response({"error": str(e)}, status=500)
