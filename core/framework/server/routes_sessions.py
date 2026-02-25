@@ -10,6 +10,7 @@ Session-primary routes:
 - GET    /api/sessions/{session_id}/stats            — runtime statistics
 - GET    /api/sessions/{session_id}/entry-points     — list entry points
 - GET    /api/sessions/{session_id}/graphs           — list graph IDs
+- GET    /api/sessions/{session_id}/queen-messages   — queen conversation history
 
 Worker session browsing (persisted execution runs on disk):
 - GET    /api/sessions/{session_id}/worker-sessions                             — list
@@ -533,6 +534,48 @@ async def handle_messages(request: web.Request) -> web.Response:
     return web.json_response({"messages": all_messages})
 
 
+async def handle_queen_messages(request: web.Request) -> web.Response:
+    """GET /api/sessions/{session_id}/queen-messages — get queen conversation."""
+    session, err = resolve_session(request)
+    if err:
+        return err
+
+    queen_dir = Path.home() / ".hive" / "queen" / "session" / session.id
+    convs_dir = queen_dir / "conversations"
+    if not convs_dir.exists():
+        return web.json_response({"messages": []})
+
+    all_messages: list[dict] = []
+    for node_dir in convs_dir.iterdir():
+        if not node_dir.is_dir():
+            continue
+        parts_dir = node_dir / "parts"
+        if not parts_dir.exists():
+            continue
+        for part_file in sorted(parts_dir.iterdir()):
+            if part_file.suffix != ".json":
+                continue
+            try:
+                part = json.loads(part_file.read_text())
+                part["_node_id"] = node_dir.name
+                all_messages.append(part)
+            except (json.JSONDecodeError, OSError):
+                continue
+
+    all_messages.sort(key=lambda m: m.get("seq", 0))
+
+    # Filter to client-facing messages only
+    all_messages = [
+        m
+        for m in all_messages
+        if not m.get("is_transition_marker")
+        and m["role"] != "tool"
+        and not (m["role"] == "assistant" and m.get("tool_calls"))
+    ]
+
+    return web.json_response({"messages": all_messages})
+
+
 # ------------------------------------------------------------------
 # Agent discovery (not session-specific)
 # ------------------------------------------------------------------
@@ -590,6 +633,7 @@ def register_routes(app: web.Application) -> None:
     app.router.add_get("/api/sessions/{session_id}/stats", handle_session_stats)
     app.router.add_get("/api/sessions/{session_id}/entry-points", handle_session_entry_points)
     app.router.add_get("/api/sessions/{session_id}/graphs", handle_session_graphs)
+    app.router.add_get("/api/sessions/{session_id}/queen-messages", handle_queen_messages)
 
     # Worker session browsing (session-primary)
     app.router.add_get("/api/sessions/{session_id}/worker-sessions", handle_list_worker_sessions)

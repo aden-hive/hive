@@ -13,8 +13,8 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from aiohttp.test_utils import TestClient, TestServer
 
-from framework.server.session_manager import Session
 from framework.server.app import create_app
+from framework.server.session_manager import Session
 
 # ---------------------------------------------------------------------------
 # Mock helpers

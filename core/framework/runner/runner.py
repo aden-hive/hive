@@ -979,17 +979,14 @@ class AgentRunner:
             async_checkpoint=True,  # Non-blocking
         )
 
-        # Handle runtime_config - ensure it's AgentRuntimeConfig, not RuntimeConfig
-        # RuntimeConfig is for LLM settings; AgentRuntimeConfig is for AgentRuntime settings
+        # Handle runtime_config - only pass through if it's actually an AgentRuntimeConfig.
+        # Agents may export a RuntimeConfig (LLM settings) or queen-generated custom classes
+        # that would crash AgentRuntime if passed through.
         runtime_config = None
         if self.runtime_config is not None:
-            from framework.config import RuntimeConfig
+            from framework.runtime.agent_runtime import AgentRuntimeConfig
 
-            # If it's a RuntimeConfig (LLM config), don't pass it
-            if isinstance(self.runtime_config, RuntimeConfig):
-                runtime_config = None
-            else:
-                # It's already an AgentRuntimeConfig or compatible type
+            if isinstance(self.runtime_config, AgentRuntimeConfig):
                 runtime_config = self.runtime_config
 
         self._agent_runtime = create_agent_runtime(

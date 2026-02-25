@@ -141,7 +141,7 @@ export default function ChatPanel({ messages, onSend, isWaiting, activeThread, a
       </div>
 
       {/* Messages */}
-      <div className="flex-1 overflow-auto scrollbar-hide px-5 py-4 space-y-3">
+      <div className="flex-1 overflow-auto px-5 py-4 space-y-3">
         {threadMessages.map((msg) => (
           <MessageBubble key={msg.id} msg={msg} />
         ))}

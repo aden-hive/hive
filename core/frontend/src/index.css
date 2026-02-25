@@ -89,7 +89,56 @@
   }
 }
 
-/* Scrollbar hide utility */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: transparent transparent;
+}
+
+*:hover,
+*:active {
+  scrollbar-color: rgba(255, 255, 255, 0.15) transparent;
+}
+
+/* Webkit (Chrome/Safari/Edge) — thin overlay track */
+*::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+*::-webkit-scrollbar-thumb {
+  background: transparent;
+  border-radius: 3px;
+}
+
+*:hover::-webkit-scrollbar-thumb,
+*:active::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.15);
+}
+
+*::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.3);
+}
+
+/* Light mode adjustments */
+:root:not(.dark) *:hover,
+:root:not(.dark) *:active {
+  scrollbar-color: rgba(0, 0, 0, 0.2) transparent;
+}
+
+:root:not(.dark) *:hover::-webkit-scrollbar-thumb,
+:root:not(.dark) *:active::-webkit-scrollbar-thumb {
+  background: rgba(0, 0, 0, 0.2);
+}
+
+:root:not(.dark) *::-webkit-scrollbar-thumb:hover {
+  background: rgba(0, 0, 0, 0.35);
+}
+
+/* Keep scrollbar-hide for elements that truly need no scrollbar (e.g. tab bars) */
 .scrollbar-hide {
   -ms-overflow-style: none;
   scrollbar-width: none;

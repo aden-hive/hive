@@ -388,6 +388,8 @@ class SessionManager:
             queen_registry,
             session=session,
             session_id=session.id,
+            session_manager=self,
+            manager_session_id=session.id,
         )
 
         # Monitoring tools need concrete worker paths — only register when present

@@ -65,6 +65,10 @@ export const sessionsApi = {
   graphs: (sessionId: string) =>
     api.get<{ graphs: string[] }>(`/sessions/${sessionId}/graphs`),
 
+  /** Get queen conversation history for a session. */
+  queenMessages: (sessionId: string) =>
+    api.get<{ messages: Message[] }>(`/sessions/${sessionId}/queen-messages`),
+
   // --- Worker session browsing (persisted execution runs) ---
 
   workerSessions: (sessionId: string) =>

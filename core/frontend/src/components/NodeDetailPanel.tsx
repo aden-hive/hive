@@ -137,7 +137,7 @@ function LogsTab({ nodeId, isActive: _isActive, sessionId, graphId, workerSessio
   }, [lines]);
 
   return (
-    <div className="flex-1 overflow-auto scrollbar-hide bg-background/80 rounded-xl border border-border/20 font-mono text-[10.5px] leading-relaxed p-3">
+    <div className="flex-1 overflow-auto bg-background/80 rounded-xl border border-border/20 font-mono text-[10.5px] leading-relaxed p-3">
       {lines.map((line, i) => {
         const isWarn = line.includes(" WARN ");
         const isErr = line.includes(" ERROR ");
@@ -175,7 +175,7 @@ function SystemPromptTab({ systemPrompt }: { systemPrompt?: string }) {
   }
 
   return (
-    <div className="flex-1 overflow-auto scrollbar-hide flex flex-col gap-2">
+    <div className="flex-1 overflow-auto flex flex-col gap-2">
       <div className="flex items-center justify-between">
         <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider">System Prompt</p>
         <button
@@ -312,7 +312,7 @@ export default function NodeDetailPanel({ node, nodeSpec, sessionId, graphId, wo
       </div>
 
       {/* Tab content */}
-      <div className="flex-1 overflow-auto scrollbar-hide px-4 py-4 flex flex-col gap-3">
+      <div className="flex-1 overflow-auto px-4 py-4 flex flex-col gap-3">
         {activeTab === "overview" && (
           <>
             <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider">Action Plan</p>
