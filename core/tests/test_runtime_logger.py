@@ -51,7 +51,7 @@ class TestRuntimeLogStore:
         detail2 = NodeDetail(
             node_id="node-2",
             node_name="Process Node",
-            node_type="function",
+            node_type="event_loop",
             success=True,
             total_steps=1,
         )
@@ -64,7 +64,7 @@ class TestRuntimeLogStore:
         assert len(loaded.nodes) == 2
         assert loaded.nodes[0].node_id == "node-1"
         assert loaded.nodes[0].exit_status == "success"
-        assert loaded.nodes[1].node_type == "function"
+        assert loaded.nodes[1].node_type == "event_loop"
 
     @pytest.mark.asyncio
     async def test_append_and_load_tool_logs(self, tmp_path: Path):
@@ -606,14 +606,14 @@ class TestRuntimeLogger:
         # Node 2: function
         rt_logger.log_step(
             node_id="node-2",
-            node_type="function",
+            node_type="event_loop",
             step_index=0,
             latency_ms=50,
         )
         rt_logger.log_node_complete(
             node_id="node-2",
             node_name="Process",
-            node_type="function",
+            node_type="event_loop",
             success=True,
             total_steps=1,
             latency_ms=50,

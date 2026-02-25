@@ -82,9 +82,9 @@ learn from the corrections to improve accuracy.
 | Feature | AutoGen | Aden |
 |---------|---------|------|
 | Agent-to-agent | Natural language | Generated connections |
-| Conversation history | Built-in | Via memory nodes |
+| Conversation history | Built-in | Via shared memory |
 | Message passing | Sequential turns | Async/event-driven |
-| Human interaction | Via UserProxyAgent | Native HITL nodes |
+| Human interaction | Via UserProxyAgent | Client-facing nodes |
 
 **Verdict:** AutoGen is more natural for dialogue; Aden is more flexible for diverse patterns.
 

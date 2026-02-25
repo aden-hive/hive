@@ -30,14 +30,14 @@ class NodeStepLog(BaseModel):
     """Full tool and LLM details for one step within a node.
 
     For EventLoopNode, each iteration is a step. For single-step nodes
-    (LLMNode, FunctionNode, RouterNode), step_index is 0.
+    (e.g. RouterNode), step_index is 0.
 
     OTel-aligned fields (trace_id, span_id, execution_id) enable correlation
     and future OpenTelemetry export without schema changes.
     """
 
     node_id: str
-    node_type: str = ""  # "event_loop"|"llm_tool_use"|"llm_generate"|"function"|"router"
+    node_type: str = ""  # "event_loop" (the only valid type)
     step_index: int = 0  # iteration number for event_loop, 0 for single-step nodes
     llm_text: str = ""
     tool_calls: list[ToolCallLog] = Field(default_factory=list)

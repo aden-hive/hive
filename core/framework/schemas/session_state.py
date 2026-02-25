@@ -156,8 +156,13 @@ class SessionState(BaseModel):
     @computed_field
     @property
     def is_resumable(self) -> bool:
-        """Can this session be resumed?"""
-        return self.status == SessionStatus.PAUSED and self.progress.resume_from is not None
+        """Can this session be resumed?
+
+        Every non-completed session is resumable. If resume_from/paused_at
+        aren't set, the executor falls back to the graph entry point —
+        so we don't gate on those. Even catastrophic failures are resumable.
+        """
+        return self.status != SessionStatus.COMPLETED
 
     @computed_field
     @property
@@ -279,9 +284,16 @@ class SessionState(BaseModel):
 
     def to_session_state_dict(self) -> dict[str, Any]:
         """Convert to session_state format for GraphExecutor.execute()."""
+        # Derive resume target: explicit > last node in path > entry point
+        resume_from = (
+            self.progress.resume_from
+            or self.progress.paused_at
+            or (self.progress.path[-1] if self.progress.path else None)
+        )
         return {
-            "paused_at": self.progress.paused_at,
-            "resume_from": self.progress.resume_from,
+            "paused_at": resume_from,
+            "resume_from": resume_from,
             "memory": self.memory,
-            "next_node": None,
+            "execution_path": self.progress.path,
+            "node_visit_counts": self.progress.node_visit_counts,
         }
