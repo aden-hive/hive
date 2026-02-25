@@ -473,7 +473,7 @@ class AgentRuntime:
                                         # Gate: skip tick if no active session
                                         if session_state is None:
                                             logger.debug(
-                                                "Cron '%s': no active primary session, skipping tick",
+                                                "Cron '%s': no active session, skipping",
                                                 entry_point_id,
                                             )
                                             self._timer_next_fire[entry_point_id] = (
@@ -582,7 +582,7 @@ class AgentRuntime:
                                         # Gate: skip tick if no active session
                                         if session_state is None:
                                             logger.debug(
-                                                "Timer '%s': no active primary session, skipping tick",
+                                                "Timer '%s': no active session, skipping",
                                                 entry_point_id,
                                             )
                                             self._timer_next_fire[entry_point_id] = (
@@ -1033,7 +1033,7 @@ class AgentRuntime:
                                     # Gate: skip tick if no active session
                                     if session_state is None:
                                         logger.debug(
-                                            "Timer '%s::%s': no active primary session, skipping tick",
+                                            "Timer '%s::%s': no active session, skipping",
                                             gid,
                                             local_ep,
                                         )

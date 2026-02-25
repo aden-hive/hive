@@ -1990,9 +1990,7 @@ def cmd_serve(args: argparse.Namespace) -> int:
             Path("frontend/dist"),
             Path("core/frontend/dist"),
         ]
-        has_frontend = any(
-            (c / "index.html").exists() for c in dist_candidates if c.is_dir()
-        )
+        has_frontend = any((c / "index.html").exists() for c in dist_candidates if c.is_dir())
         dashboard_url = f"http://{args.host}:{args.port}"
 
         print()

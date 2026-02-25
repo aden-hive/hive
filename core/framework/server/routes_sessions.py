@@ -78,19 +78,21 @@ def _credential_error_response(exc: Exception, agent_path: str | None) -> web.Re
             spec = CREDENTIAL_SPECS.get(name)
             if spec is None:
                 continue
-            required.append({
-                "credential_name": name,
-                "credential_id": spec.credential_id or name,
-                "env_var": spec.env_var,
-                "description": spec.description,
-                "help_url": spec.help_url,
-                "tools": list(spec.tools),
-                "node_types": list(spec.node_types),
-                "available": False,
-                "direct_api_key_supported": spec.direct_api_key_supported,
-                "aden_supported": spec.aden_supported,
-                "credential_key": spec.credential_key,
-            })
+            required.append(
+                {
+                    "credential_name": name,
+                    "credential_id": spec.credential_id or name,
+                    "env_var": spec.env_var,
+                    "description": spec.description,
+                    "help_url": spec.help_url,
+                    "tools": list(spec.tools),
+                    "node_types": list(spec.node_types),
+                    "available": False,
+                    "direct_api_key_supported": spec.direct_api_key_supported,
+                    "aden_supported": spec.aden_supported,
+                    "credential_key": spec.credential_key,
+                }
+            )
     except ImportError:
         pass
 
@@ -118,6 +120,7 @@ async def handle_create_session(request: web.Request) -> web.Response:
         "agent_id": "..." (optional — worker ID override),
         "session_id": "..." (optional — custom session ID),
         "model": "..." (optional),
+        "initial_prompt": "..." (optional — first user message for the queen),
     }
 
     When agent_path is provided, creates a session with a worker in one step
@@ -130,6 +133,7 @@ async def handle_create_session(request: web.Request) -> web.Response:
     agent_id = body.get("agent_id")
     session_id = body.get("session_id")
     model = body.get("model")
+    initial_prompt = body.get("initial_prompt")
 
     try:
         if agent_path:
@@ -138,12 +142,14 @@ async def handle_create_session(request: web.Request) -> web.Response:
                 agent_path,
                 agent_id=agent_id,
                 model=model,
+                initial_prompt=initial_prompt,
             )
         else:
             # Queen-only session
             session = await manager.create_session(
                 session_id=session_id,
                 model=model,
+                initial_prompt=initial_prompt,
             )
     except ValueError as e:
         msg = str(e)

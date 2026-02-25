@@ -110,6 +110,7 @@ class SessionManager:
         self,
         session_id: str | None = None,
         model: str | None = None,
+        initial_prompt: str | None = None,
     ) -> Session:
         """Create a new session with a queen but no worker.
 
@@ -119,7 +120,7 @@ class SessionManager:
         session = await self._create_session_core(session_id=session_id, model=model)
 
         # Start queen immediately (queen-only, no worker tools yet)
-        await self._start_queen(session, worker_identity=None)
+        await self._start_queen(session, worker_identity=None, initial_prompt=initial_prompt)
 
         logger.info("Session '%s' created (queen-only)", session.id)
         return session
@@ -129,6 +130,7 @@ class SessionManager:
         agent_path: str | Path,
         agent_id: str | None = None,
         model: str | None = None,
+        initial_prompt: str | None = None,
     ) -> Session:
         """Create a session and load a worker in one step.
 
@@ -159,7 +161,7 @@ class SessionManager:
             worker_identity = (
                 build_worker_profile(session.worker_runtime) if session.worker_runtime else None
             )
-            await self._start_queen(session, worker_identity=worker_identity)
+            await self._start_queen(session, worker_identity=worker_identity, initial_prompt=initial_prompt)
 
             # Start health judge
             if agent_path.name != "hive_coder" and session.worker_runtime:
@@ -353,6 +355,7 @@ class SessionManager:
         self,
         session: Session,
         worker_identity: str | None,
+        initial_prompt: str | None = None,
     ) -> None:
         """Start the queen executor for a session."""
         from framework.agents.hive_coder.agent import (
@@ -457,7 +460,7 @@ class SessionManager:
                 await executor.execute(
                     graph=queen_graph,
                     goal=queen_goal,
-                    input_data={"greeting": "Session started."},
+                    input_data={"greeting": initial_prompt or "Session started."},
                     session_state={"resume_session_id": session.id},
                 )
                 logger.warning("Queen executor returned (should be forever-alive)")

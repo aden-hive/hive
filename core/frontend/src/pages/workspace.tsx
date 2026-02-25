@@ -311,6 +311,7 @@ export default function Workspace() {
   const [searchParams] = useSearchParams();
   const rawAgent = searchParams.get("agent") || "new-agent";
   const initialAgent = rawAgent;
+  const initialPrompt = searchParams.get("prompt") || "";
 
   // Sessions grouped by agent type — restore from localStorage if available
   const [sessionsByAgent, setSessionsByAgent] = useState<Record<string, Session[]>>(() => {
@@ -457,7 +458,27 @@ export default function Workspace() {
       // Create a queen-only session (no worker) for agent building
       updateAgentState(agentType, { loading: true, error: null, ready: false, sessionId: null });
       try {
-        const liveSession = await sessionsApi.create();
+        const prompt = initialPrompt || undefined;
+        const liveSession = await sessionsApi.create(undefined, undefined, undefined, prompt);
+
+        // Show the initial prompt as a user message in chat
+        if (prompt) {
+          const userMsg: ChatMessage = {
+            id: makeId(), agent: "You", agentColor: "",
+            content: prompt, timestamp: "", type: "user", thread: agentType,
+          };
+          setSessionsByAgent(prev => ({
+            ...prev,
+            [agentType]: (prev[agentType] || []).map(s => ({
+              ...s, messages: [...s.messages, userMsg],
+            })),
+          }));
+          // Clean prompt from URL to prevent re-send on refresh
+          const params = new URLSearchParams(searchParams);
+          params.delete("prompt");
+          navigate(`/workspace?${params.toString()}`, { replace: true });
+        }
+
         updateAgentState(agentType, {
           sessionId: liveSession.session_id,
           displayName: "Queen Bee",
@@ -602,7 +623,7 @@ export default function Workspace() {
     } finally {
       loadingRef.current.delete(agentType);
     }
-  }, [updateAgentState]);
+  }, [updateAgentState, initialPrompt, searchParams, navigate]);
 
   // Auto-load agents when new tabs appear in sessionsByAgent
   useEffect(() => {
@@ -1258,6 +1279,7 @@ export default function Workspace() {
     // Pause worker execution if running (saves checkpoint), then kill the
     // entire backend session so the queen and judge don't keep running.
     const state = agentStates[agentType];
+    console.log('[closeAgentTab]', agentType, 'sessionId:', state?.sessionId, 'state:', state);
     if (state?.sessionId) {
       const pausePromise = (state.currentExecutionId && state.workerRunState === "running")
         ? executionApi.pause(state.sessionId, state.currentExecutionId)

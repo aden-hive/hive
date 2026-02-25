@@ -13,11 +13,12 @@ export const sessionsApi = {
   // --- Session lifecycle ---
 
   /** Create a session. If agentPath is provided, loads worker in one step. */
-  create: (agentPath?: string, agentId?: string, model?: string) =>
+  create: (agentPath?: string, agentId?: string, model?: string, initialPrompt?: string) =>
     api.post<LiveSession>("/sessions", {
       agent_path: agentPath,
       agent_id: agentId,
       model,
+      initial_prompt: initialPrompt,
     }),
 
   /** List all active sessions. */

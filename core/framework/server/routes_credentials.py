@@ -185,10 +185,12 @@ async def handle_check_agent(request: web.Request) -> web.Response:
             required.append(entry)
 
         has_aden_key = bool(os.environ.get("ADEN_API_KEY"))
-        return web.json_response({
-            "required": required,
-            "has_aden_key": has_aden_key,
-        })
+        return web.json_response(
+            {
+                "required": required,
+                "has_aden_key": has_aden_key,
+            }
+        )
     except Exception as e:
         logger.exception(f"Error checking agent credentials: {e}")
         return web.json_response({"error": str(e)}, status=500)
@@ -227,6 +229,7 @@ async def handle_save_aden_key(request: web.Request) -> web.Response:
     # Immediately sync OAuth tokens from Aden
     try:
         from aden_tools.credentials import CREDENTIAL_SPECS
+
         from framework.credentials.validation import _presync_aden_tokens
 
         _presync_aden_tokens(CREDENTIAL_SPECS)
