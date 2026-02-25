@@ -24,21 +24,14 @@ Traditional application monitoring tracks requests and responses. Agent monitori
 
 ## The Four Pillars of Agent Observability
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│                 Agent Observability Stack                   │
-│                                                             │
-│  ┌─────────────┐  ┌─────────────┐  ┌─────────────────────┐ │
-│  │   Metrics   │  │    Logs     │  │      Traces         │ │
-│  │  (Numbers)  │  │   (Events)  │  │  (Execution Flow)   │ │
-│  └─────────────┘  └─────────────┘  └─────────────────────┘ │
-│                          │                                  │
-│                          ▼                                  │
-│              ┌───────────────────────┐                     │
-│              │    Quality Evals      │                     │
-│              │  (Output Assessment)  │                     │
-│              └───────────────────────┘                     │
-└─────────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TB
+    subgraph Stack [Agent Observability Stack]
+        Metrics["Metrics\n(Numbers)"]
+        Logs["Logs\n(Events)"]
+        Traces["Traces\n(Execution Flow)"]
+        Metrics & Logs & Traces --> QE["Quality Evals\n(Output Assessment)"]
+    end
 ```
 
 ### 1. Metrics
@@ -202,65 +195,65 @@ Trace: "Process customer refund"
 ## Dashboard Design
 
 ### Dashboard 1: Operations Overview
-```
-┌─────────────────────────────────────────────────────────────┐
-│                    Agent Operations                         │
-├─────────────────┬─────────────────┬─────────────────────────┤
-│  Active Agents  │  Requests/Min   │  Error Rate             │
-│      42         │      1,234      │     0.3%  ✓             │
-├─────────────────┴─────────────────┴─────────────────────────┤
-│                                                             │
-│   Request Latency (p50/p99)        Success Rate (24h)      │
-│   ████████████████░░░░             ██████████████████████   │
-│   1.2s / 4.5s                      99.2%                   │
-│                                                             │
-├─────────────────────────────────────────────────────────────┤
-│   Top Errors                       Active Alerts            │
-│   • Rate limit exceeded (12)       ⚠️ High latency p99     │
-│   • Tool timeout (5)               ⚠️ Budget at 85%        │
-│   • Validation failed (3)                                   │
-└─────────────────────────────────────────────────────────────┘
+```mermaid
+block-beta
+    columns 3
+    block:header:3
+        columns 3
+        A["Active Agents: 42"]
+        B["Requests/Min: 1,234"]
+        C["Error Rate: 0.3% ✓"]
+    end
+    block:mid:3
+        columns 2
+        D["Request Latency p50/p99\n1.2s / 4.5s"]
+        E["Success Rate 24h\n99.2%"]
+    end
+    block:bottom:3
+        columns 2
+        F["Top Errors\n• Rate limit exceeded (12)\n• Tool timeout (5)\n• Validation failed (3)"]
+        G["⚠️ Active Alerts\n• High latency p99\n• Budget at 85%"]
+    end
 ```
 
 ### Dashboard 2: Cost & Usage
-```
-┌─────────────────────────────────────────────────────────────┐
-│                    Cost & Usage                             │
-├─────────────────┬─────────────────┬─────────────────────────┤
-│  Today's Spend  │  Budget Used    │  Projected Monthly      │
-│     $127.50     │     67%         │      $3,825             │
-├─────────────────┴─────────────────┴─────────────────────────┤
-│                                                             │
-│   Cost by Model            │  Cost by Agent                 │
-│   ■ GPT-4: $89            │  ■ Support: $45                │
-│   ■ Claude: $28           │  ■ Research: $52               │
-│   ■ GPT-3.5: $10          │  ■ Writer: $30                 │
-│                                                             │
-├─────────────────────────────────────────────────────────────┤
-│   Token Usage Trend (7 days)                               │
-│   ▁▂▃▄▅▆▇█▇▆▅▄▃▂▁▂▃▄▅▆                                     │
-└─────────────────────────────────────────────────────────────┘
+```mermaid
+block-beta
+    columns 3
+    block:header:3
+        columns 3
+        A["Today's Spend: $127.50"]
+        B["Budget Used: 67%"]
+        C["Projected Monthly: $3,825"]
+    end
+    block:mid:3
+        columns 2
+        D["Cost by Model\n■ GPT-4: $89\n■ Claude: $28\n■ GPT-3.5: $10"]
+        E["Cost by Agent\n■ Support: $45\n■ Research: $52\n■ Writer: $30"]
+    end
+    block:bottom:3
+        F["Token Usage Trend (7 days)"]:3
+    end
 ```
 
 ### Dashboard 3: Quality & Reliability
-```
-┌─────────────────────────────────────────────────────────────┐
-│                   Quality & Reliability                     │
-├─────────────────┬─────────────────┬─────────────────────────┤
-│ Quality Score   │  Task Complete  │  User Satisfaction      │
-│    0.92/1.0     │     94.5%       │      4.6/5.0            │
-├─────────────────┴─────────────────┴─────────────────────────┤
-│                                                             │
-│   Quality Trend (30 days)      │  Failure Analysis          │
-│   ████████████████████████     │  ■ LLM errors: 2%         │
-│   ▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔     │  ■ Tool errors: 1%        │
-│   Target: 0.90                 │  ■ Timeouts: 0.5%         │
-│                                │  ■ Logic errors: 0.5%     │
-├─────────────────────────────────────────────────────────────┤
-│   Recent Quality Issues                                     │
-│   • Agent-42 hallucination detected (15 min ago)           │
-│   • Agent-17 task incomplete (1 hour ago)                  │
-└─────────────────────────────────────────────────────────────┘
+```mermaid
+block-beta
+    columns 3
+    block:header:3
+        columns 3
+        A["Quality Score: 0.92/1.0"]
+        B["Task Complete: 94.5%"]
+        C["User Satisfaction: 4.6/5.0"]
+    end
+    block:mid:3
+        columns 2
+        D["Quality Trend (30 days)\nTarget: 0.90"]
+        E["Failure Analysis\n■ LLM errors: 2%\n■ Tool errors: 1%\n■ Timeouts: 0.5%\n■ Logic errors: 0.5%"]
+    end
+    block:bottom:3
+        F["Recent Quality Issues\n• Agent-42 hallucination detected (15 min ago)\n• Agent-17 task incomplete (1 hour ago)"]:3
+    end
 ```
 
 ---
@@ -311,23 +304,18 @@ Trace: "Process customer refund"
 Aden provides built-in observability without additional setup:
 
 ### Automatic Collection
-```
-┌─────────────────────────────────────────────────────────────┐
-│                    Aden Observability                       │
-│                                                             │
-│  ┌───────────────┐       ┌───────────────────────────────┐ │
-│  │  SDK-Wrapped  │──────▶│     Event Stream              │ │
-│  │    Nodes      │       │  • Metrics  • Logs  • Traces  │ │
-│  └───────────────┘       └───────────────────────────────┘ │
-│                                    │                        │
-│                                    ▼                        │
-│  ┌───────────────────────────────────────────────────────┐ │
-│  │                   Honeycomb Dashboard                 │ │
-│  │  ┌─────────┐  ┌─────────┐  ┌─────────┐  ┌─────────┐ │ │
-│  │  │ Metrics │  │  Costs  │  │ Quality │  │ Alerts  │ │ │
-│  │  └─────────┘  └─────────┘  └─────────┘  └─────────┘ │ │
-│  └───────────────────────────────────────────────────────┘ │
-└─────────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TB
+    subgraph AdenObs [Aden Observability]
+        Nodes["SDK-Wrapped\nNodes"] --> Stream["Event Stream\n• Metrics  • Logs  • Traces"]
+        Stream --> Dashboard
+        subgraph Dashboard [Honeycomb Dashboard]
+            M["Metrics"]
+            Co["Costs"]
+            Q["Quality"]
+            Al["Alerts"]
+        end
+    end
 ```
 
 ### What Aden Tracks Automatically

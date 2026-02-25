@@ -32,40 +32,29 @@ This document describes the design for a production-ready credential store for t
 
 ## Architecture Overview
 
-```
-┌─────────────────────────────────────────────────────────────────────┐
-│                         CredentialStore                              │
-│  ┌─────────────────────────────────────────────────────────────┐   │
-│  │                    Template Resolver                         │   │
-│  │         {{cred.key}} → actual value resolution               │   │
-│  └─────────────────────────────────────────────────────────────┘   │
-│                                                                      │
-│  ┌─────────────────┐    ┌─────────────────┐    ┌────────────────┐  │
-│  │ CredentialObject│    │ CredentialObject│    │CredentialObject│  │
-│  │   brave_search  │    │  github_oauth   │    │  salesforce    │  │
-│  │ ┌─────────────┐│    │ ┌─────────────┐ │    │ ┌────────────┐ │  │
-│  │ │api_key: xxx ││    │ │access_token │ │    │ │access_token│ │  │
-│  │ └─────────────┘│    │ │refresh_token│ │    │ │instance_url│ │  │
-│  └─────────────────┘    │ │expires_at   │ │    │ └────────────┘ │  │
-│                         │ └─────────────┘ │    └────────────────┘  │
-│                         └─────────────────┘                         │
-│                                                                      │
-│  ┌─────────────────────────────────────────────────────────────┐   │
-│  │                       Providers                              │   │
-│  │  ┌──────────────┐  ┌──────────────┐  ┌──────────────────┐   │   │
-│  │  │StaticProvider│  │OAuth2Provider│  │ CustomProvider   │   │   │
-│  │  │ (no refresh) │  │(auto-refresh)│  │ (user-defined)   │   │   │
-│  │  └──────────────┘  └──────────────┘  └──────────────────┘   │   │
-│  └─────────────────────────────────────────────────────────────┘   │
-│                                                                      │
-│  ┌─────────────────────────────────────────────────────────────┐   │
-│  │                   Storage Backends                           │   │
-│  │  ┌────────────────┐  ┌────────────────┐  ┌───────────────┐  │   │
-│  │  │EncryptedFile   │  │  EnvVar        │  │HashiCorpVault │  │   │
-│  │  │ (Fernet AES)   │  │  (read-only)   │  │  (external)   │  │   │
-│  │  └────────────────┘  └────────────────┘  └───────────────┘  │   │
-│  └─────────────────────────────────────────────────────────────┘   │
-└─────────────────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TB
+    subgraph CS [CredentialStore]
+        TR["Template Resolver\n{{cred.key}} → actual value resolution"]
+
+        subgraph Creds [Credential Objects]
+            C1["brave_search\n\u2022 api_key: xxx"]
+            C2["github_oauth\n\u2022 access_token\n\u2022 refresh_token\n\u2022 expires_at"]
+            C3["salesforce\n\u2022 access_token\n\u2022 instance_url"]
+        end
+
+        subgraph Providers [Providers]
+            SP["StaticProvider\n(no refresh)"]
+            OP["OAuth2Provider\n(auto-refresh)"]
+            CP["CustomProvider\n(user-defined)"]
+        end
+
+        subgraph Backends [Storage Backends]
+            EF["EncryptedFile\n(Fernet AES)"]
+            EV["EnvVar\n(read-only)"]
+            HV["HashiCorpVault\n(external)"]
+        end
+    end
 ```
 
 ---

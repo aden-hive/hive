@@ -47,17 +47,11 @@ Agent working → Critical decision → PAUSE → Human reviews → Continue/Mod
 ### Pattern 1: Approval Gates
 Agent completes work, then waits for human approval before proceeding.
 
-```
-┌─────────────┐     ┌─────────────┐     ┌─────────────┐
-│   Agent     │────▶│   APPROVE?  │────▶│   Action    │
-│   works     │     │   (Human)   │     │   taken     │
-└─────────────┘     └─────────────┘     └─────────────┘
-                           │
-                           │ Reject
-                           ▼
-                    ┌─────────────┐
-                    │   Revise    │
-                    └─────────────┘
+```mermaid
+flowchart LR
+    Agent["Agent works"] --> Approve{APPROVE?\nHuman}
+    Approve -->|Approve| Action["Action taken"]
+    Approve -->|Reject| Revise["Revise"]
 ```
 
 **Use when:** Actions are irreversible or high-impact
@@ -70,17 +64,11 @@ Agent completes work, then waits for human approval before proceeding.
 ### Pattern 2: Confidence-Based Escalation
 Agent handles confident decisions autonomously, escalates uncertain ones.
 
-```
-Agent decision
-      │
-      ▼
-┌─────────────────┐
-│  Confidence?    │
-└─────────────────┘
-      │
-      ├── High ──▶ Proceed autonomously
-      │
-      └── Low ───▶ Request human input
+```mermaid
+flowchart TD
+    Decision["Agent decision"] --> Confidence{Confidence?}
+    Confidence -->|High| Proceed["Proceed autonomously"]
+    Confidence -->|Low| Human["Request human input"]
 ```
 
 **Use when:** Volume is high, most cases are straightforward
@@ -113,14 +101,11 @@ Agent decisions: [1] [2] [3] [4] [5] [6] [7] [8] [9] [10]
 ### Pattern 4: Collaborative Editing
 Human and agent work together in real-time.
 
-```
-┌─────────────────────────────────────┐
-│                                     │
-│   Agent suggests ←→ Human edits     │
-│                                     │
-│         Iterative refinement        │
-│                                     │
-└─────────────────────────────────────┘
+```mermaid
+flowchart TB
+    subgraph Collab [Collaborative Editing]
+        Agent["Agent suggests"] <-->|Iterative refinement| Human["Human edits"]
+    end
 ```
 
 **Use when:** Output quality is paramount

@@ -2,33 +2,14 @@
 
 ## Architecture Overview
 
-```
-                      ┌──────────────┐
-                      │  AgentRunner  │  runner.py:_validate_credentials()
-                      └──────┬───────┘
-                             │
-                      ┌──────▼───────┐
-                      │  validation  │  validate_agent_credentials()
-                      │  (2-phase)   │  Phase 1: presence  Phase 2: health check
-                      └──────┬───────┘
-                             │
-               ┌─────────────▼─────────────┐
-               │     CredentialStore        │  store.py
-               │  (cache + provider mgmt)   │
-               └─────────────┬─────────────┘
-                             │
-         ┌───────────────────┼───────────────────┐
-         │                   │                   │
-  ┌──────▼──────┐    ┌──────▼──────┐    ┌───────▼───────┐
-  │ EnvVarStorage│    │ Encrypted   │    │ AdenCached    │
-  │ (primary)    │    │ FileStorage │    │ Storage       │
-  └─────────────┘    │ (fallback)  │    │ (Aden sync)   │
-                     └─────────────┘    └───────┬───────┘
-                                                │
-                                        ┌───────▼───────┐
-                                        │AdenSyncProvider│
-                                        │+ AdenClient    │
-                                        └───────────────┘
+```mermaid
+flowchart TD
+    AR["AgentRunner\nrunner.py:_validate_credentials()"] --> V["validation (2-phase)\nvalidate_agent_credentials()\nPhase 1: presence  Phase 2: health check"]
+    V --> CS["CredentialStore\n(cache + provider mgmt)\nstore.py"]
+    CS --> EVS["EnvVarStorage\n(primary)"]
+    CS --> EFS["Encrypted\nFileStorage\n(fallback)"]
+    CS --> ACS["AdenCached\nStorage\n(Aden sync)"]
+    ACS --> ASP["AdenSyncProvider\n+ AdenClient"]
 ```
 
 ### Key Files

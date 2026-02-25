@@ -57,22 +57,14 @@ User Request → Adaptive Logic → Response
 ## How Static Agents Work
 
 ### Architecture
-```
-┌─────────────────────────────────────┐
-│           Static Agent              │
-├─────────────────────────────────────┤
-│  ┌─────────────────────────────┐   │
-│  │    Hardcoded Workflow       │   │
-│  │    ┌───┐ ┌───┐ ┌───┐       │   │
-│  │    │ A │→│ B │→│ C │       │   │
-│  │    └───┘ └───┘ └───┘       │   │
-│  └─────────────────────────────┘   │
-│                                     │
-│  • Fixed decision logic             │
-│  • Predefined tool usage            │
-│  • Static prompts                   │
-│  • Manual error handling            │
-└─────────────────────────────────────┘
+```mermaid
+flowchart TB
+    subgraph StaticAgent [Static Agent]
+        subgraph Workflow [Hardcoded Workflow]
+            A["A"] --> B["B"] --> C["C"]
+        end
+        Info["• Fixed decision logic\n• Predefined tool usage\n• Static prompts\n• Manual error handling"]
+    end
 ```
 
 ### Typical Improvement Cycle
@@ -98,34 +90,16 @@ User Request → Adaptive Logic → Response
 ## How Self-Improving Agents Work
 
 ### Architecture
-```
-┌─────────────────────────────────────────────────┐
-│           Self-Improving Agent System           │
-├─────────────────────────────────────────────────┤
-│  ┌─────────────────────────────────────────┐   │
-│  │         Adaptive Agent Graph            │   │
-│  │    ┌───┐ ┌───┐ ┌───┐                   │   │
-│  │    │ A │→│ B │→│ C │  ← Can change     │   │
-│  │    └───┘ └───┘ └───┘                   │   │
-│  └─────────────────────────────────────────┘   │
-│                    ↑                            │
-│                    │ Evolution                  │
-│                    │                            │
-│  ┌─────────────────────────────────────────┐   │
-│  │         Coding Agent                    │   │
-│  │    • Analyzes failures                  │   │
-│  │    • Generates improvements             │   │
-│  │    • Updates agent graph                │   │
-│  └─────────────────────────────────────────┘   │
-│                    ↑                            │
-│                    │                            │
-│  ┌─────────────────────────────────────────┐   │
-│  │         Failure Capture                 │   │
-│  │    • Error context                      │   │
-│  │    • Input/output data                  │   │
-│  │    • User feedback                      │   │
-│  └─────────────────────────────────────────┘   │
-└─────────────────────────────────────────────────┘
+```mermaid
+flowchart TB
+    subgraph SIS [Self-Improving Agent System]
+        subgraph AAG [Adaptive Agent Graph]
+            A["A"] --> B["B"] --> C["C"]
+        end
+        CA["Coding Agent\n• Analyzes failures\n• Generates improvements\n• Updates agent graph"]
+        FC["Failure Capture\n• Error context\n• Input/output data\n• User feedback"]
+        FC -->|feeds| CA -->|Evolution| AAG
+    end
 ```
 
 ### Typical Improvement Cycle

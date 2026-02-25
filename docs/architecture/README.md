@@ -170,29 +170,17 @@ We call this approach **Triangulated Verification**—borrowing from navigation,
 
 ### The Triangulation Principle
 
-```
-                    ┌─────────────────┐
-                    │  GOAL INTENT    │
-                    │  (User's true   │
-                    │   objective)    │
-                    └────────┬────────┘
-                             │
-              ┌──────────────┼──────────────┐
-              │              │              │
-              ▼              ▼              ▼
-       ┌──────────┐   ┌──────────┐   ┌──────────┐
-       │Deterministic│   │ Semantic │   │  Human   │
-       │   Rules   │   │Evaluation│   │ Judgment │
-       └──────────┘   └──────────┘   └──────────┘
-              │              │              │
-              └──────────────┼──────────────┘
-                             │
-                             ▼
-                    ┌─────────────────┐
-                    │   CONFIDENCE    │
-                    │  (Agreement =   │
-                    │   reliability)  │
-                    └─────────────────┘
+```mermaid
+flowchart TB
+    GoalIntent["GOAL INTENT\n(User's true objective)"]
+
+    GoalIntent --> Rules["Deterministic\nRules"]
+    GoalIntent --> Semantic["Semantic\nEvaluation"]
+    GoalIntent --> Human["Human\nJudgment"]
+
+    Rules --> Confidence["CONFIDENCE\n(Agreement = reliability)"]
+    Semantic --> Confidence
+    Human --> Confidence
 ```
 
 **Key insight**: When multiple independent verification methods agree, confidence is justified. When they disagree, uncertainty should trigger escalation—not confident wrong answers.
@@ -270,40 +258,21 @@ Human oversight for **high-stakes or uncertain decisions**:
 
 ## The Triangulation Algorithm
 
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                     TRIANGULATED EVALUATION                      │
-├─────────────────────────────────────────────────────────────────┤
-│                                                                  │
-│  1. RULE EVALUATION (Priority-ordered)                          │
-│     ┌─────────────────────────────────────────────┐             │
-│     │ For each rule in priority order:            │             │
-│     │   if rule.matches(result):                  │             │
-│     │     return Definitive(rule.action)     ────────► DONE     │
-│     └─────────────────────────────────────────────┘             │
-│                          │                                       │
-│                    No rule matched                               │
-│                          ▼                                       │
-│  2. LLM EVALUATION (With confidence gating)                     │
-│     ┌─────────────────────────────────────────────┐             │
-│     │ judgment = llm.evaluate(goal, result)       │             │
-│     │                                             │             │
-│     │ if judgment.confidence >= threshold:        │             │
-│     │   return judgment                      ────────► DONE     │
-│     │                                             │             │
-│     │ if judgment.confidence < threshold:         │             │
-│     │   return Escalate("Low confidence")    ────────► HUMAN    │
-│     └─────────────────────────────────────────────┘             │
-│                                                                  │
-│  3. HUMAN ESCALATION                                            │
-│     ┌─────────────────────────────────────────────┐             │
-│     │ Pause execution                             │             │
-│     │ Present context + signals to human          │             │
-│     │ Human provides authoritative judgment       │             │
-│     │ Record decision for future rule generation  │             │
-│     └─────────────────────────────────────────────┘             │
-│                                                                  │
-└─────────────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TD
+    subgraph TriangulatedEvaluation [TRIANGULATED EVALUATION]
+        direction TB
+        RuleEval["1. RULE EVALUATION\n(Priority-ordered)\nFor each rule in priority order:\nif rule.matches(result):\nreturn Definitive(rule.action)"]
+        RuleEval -->|"Rule matched"| Done1([DONE])
+        RuleEval -->|"No rule matched"| LLMEval
+
+        LLMEval["2. LLM EVALUATION\n(With confidence gating)\njudgment = llm.evaluate(goal, result)"]
+        LLMEval -->|"confidence >= threshold"| Done2([DONE])
+        LLMEval -->|"confidence < threshold"| HumanEsc
+
+        HumanEsc["3. HUMAN ESCALATION\nPause execution\nPresent context + signals to human\nHuman provides authoritative judgment\nRecord decision for future rule generation"]
+        HumanEsc --> HumanDecision([HUMAN])
+    end
 ```
 
 ### Why This Order Matters
@@ -387,29 +356,15 @@ Research shows that **iterative refinement beats expensive search**. Reflexion (
 
 ### Worker-Judge Architecture
 
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                      REFLEXION LOOP                              │
-├─────────────────────────────────────────────────────────────────┤
-│                                                                  │
-│   ┌──────────┐         ┌──────────┐         ┌──────────┐        │
-│   │  WORKER  │────────►│  JUDGE   │────────►│ DECISION │        │
-│   │ Execute  │         │ Evaluate │         │          │        │
-│   │   step   │         │  result  │         │          │        │
-│   └──────────┘         └──────────┘         └────┬─────┘        │
-│        ▲                                         │               │
-│        │                                         ▼               │
-│        │    ┌─────────────────────────────────────────┐         │
-│        │    │  ACCEPT: Continue to next step          │         │
-│        │    ├─────────────────────────────────────────┤         │
-│        └────│  RETRY:  Try again with feedback        │◄─┐      │
-│             ├─────────────────────────────────────────┤  │      │
-│             │  REPLAN: Strategy failed, regenerate    │──┘      │
-│             ├─────────────────────────────────────────┤         │
-│             │  ESCALATE: Human judgment needed        │────►HITL│
-│             └─────────────────────────────────────────┘         │
-│                                                                  │
-└─────────────────────────────────────────────────────────────────┘
+```mermaid
+flowchart LR
+    subgraph ReflexionLoop [REFLEXION LOOP]
+        Worker["WORKER\nExecute step"] --> Judge["JUDGE\nEvaluate result"] --> Decision{DECISION}
+        Decision -->|ACCEPT| Next["Continue to next step"]
+        Decision -->|RETRY| Worker
+        Decision -->|REPLAN| Worker
+        Decision -->|ESCALATE| HITL([HITL])
+    end
 ```
 
 ### Feedback Context for Replanning
@@ -449,18 +404,22 @@ class CapabilityLevel(Enum):
 
 ### Graceful Degradation
 
-```
-High Confidence ──────────────────────────────► Low Confidence
+```mermaid
+flowchart LR
+    direction LR
+    Accept["ACCEPT\nContinue"] --> Retry["RETRY\nwith feedback"]
+    Retry --> Replan["REPLAN\nwith context"]
+    Replan --> Escalate["ESCALATE\nto human"]
 
-┌──────────┐    ┌──────────┐    ┌──────────┐    ┌──────────┐
-│ ACCEPT   │    │  RETRY   │    │ REPLAN   │    │ ESCALATE │
-│          │    │  with    │    │  with    │    │  to      │
-│ Continue │    │ feedback │    │ context  │    │  human   │
-└──────────┘    └──────────┘    └──────────┘    └──────────┘
-     │               │               │               │
-     ▼               ▼               ▼               ▼
-  Proceed      Learn from       Change          Ask for
-              minor error      approach          help
+    Accept -.->|Proceed| A1(" ")
+    Retry -.->|Learn from minor error| A2(" ")
+    Replan -.->|Change approach| A3(" ")
+    Escalate -.->|Ask for help| A4(" ")
+
+    style Accept fill:#2d6a4f,color:#fff
+    style Retry fill:#40916c,color:#fff
+    style Replan fill:#e9c46a,color:#000
+    style Escalate fill:#e76f51,color:#fff
 ```
 
 **Key principle**: An agent that knows when it doesn't know is more valuable than one that confidently fails.
@@ -471,56 +430,39 @@ High Confidence ─────────────────────�
 
 The system architecture (see diagram above) maps onto four logical layers. The **Goal Layer** defines what the Queen Bee and Judge align on. The **Execution Layer** is the Worker Bees graph. The **Verification Layer** is the Judge with its triangulated signals. The **Reflexion Layer** is the feedback loop between Worker Bees and Judge.
 
-```
-┌─────────────────────────────────────────────────────────────────────┐
-│                         HIVE AGENT FRAMEWORK                         │
-├─────────────────────────────────────────────────────────────────────┤
-│                                                                      │
-│  ┌─────────────────────────────────────────────────────────────┐    │
-│  │                    GOAL LAYER (Queen Bee)                     │    │
-│  │  • Success criteria (weighted, multi-metric)                 │    │
-│  │  • Constraints (hard/soft boundaries)                        │    │
-│  │  • Principles aligned with Queen Bee system prompt           │    │
-│  │  • Context (domain knowledge, preferences)                   │    │
-│  └─────────────────────────────────────────────────────────────┘    │
-│                              │                                       │
-│                              ▼                                       │
-│  ┌─────────────────────────────────────────────────────────────┐    │
-│  │              EXECUTION LAYER (Worker Bees)                    │    │
-│  │  ┌──────────┐    ┌──────────┐    ┌──────────┐               │    │
-│  │  │  Graph   │───►│  Active  │───►│  Shared  │               │    │
-│  │  │ Executor │    │   Node   │    │  Memory  │               │    │
-│  │  └──────────┘    └──────────┘    └──────────┘               │    │
-│  │  Event Loop Node triggers │ Sub Agents, Browser tasks        │    │
-│  │  Tool Registry provides tools │ Event Bus publishes events   │    │
-│  └─────────────────────────────────────────────────────────────┘    │
-│                              │                                       │
-│                              ▼                                       │
-│  ┌─────────────────────────────────────────────────────────────┐    │
-│  │              TRIANGULATED VERIFICATION (Judge)                │    │
-│  │                                                              │    │
-│  │   Signal 1          Signal 2           Signal 3             │    │
-│  │  ┌────────┐       ┌──────────┐       ┌─────────┐            │    │
-│  │  │ Rules  │──────►│ LLM Judge│──────►│  Human  │            │    │
-│  │  │ (fast) │       │(flexible)│       │ (final) │            │    │
-│  │  └────────┘       └──────────┘       └─────────┘            │    │
-│  │       │                │                  │                  │    │
-│  │       └────────────────┴──────────────────┘                  │    │
-│  │  Criteria aligned with Worker Bee system prompt              │    │
-│  │  Principles aligned with Queen Bee system prompt             │    │
-│  │  Confidence from agreement across signals                    │    │
-│  └─────────────────────────────────────────────────────────────┘    │
-│                              │                                       │
-│                              ▼                                       │
-│  ┌─────────────────────────────────────────────────────────────┐    │
-│  │                     REFLEXION LAYER                          │    │
-│  │  • ACCEPT: Proceed with confidence                          │    │
-│  │  • RETRY: Learn from failure, try again                     │    │
-│  │  • REPLAN: Strategy failed, change approach                 │    │
-│  │  • ESCALATE: Report to Queen Bee, ask human                 │    │
-│  └─────────────────────────────────────────────────────────────┘    │
-│                                                                      │
-└─────────────────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TB
+    subgraph HiveFramework [HIVE AGENT FRAMEWORK]
+        direction TB
+        subgraph GoalLayer [GOAL LAYER - Queen Bee]
+            GL1["Success criteria (weighted, multi-metric)"]
+            GL2["Constraints (hard/soft boundaries)"]
+            GL3["Principles aligned with Queen Bee system prompt"]
+            GL4["Context (domain knowledge, preferences)"]
+        end
+
+        subgraph ExecutionLayer [EXECUTION LAYER - Worker Bees]
+            GE["Graph Executor"] --> AN["Active Node"] --> SM["Shared Memory"]
+            ELN["Event Loop Node triggers Sub Agents, Browser tasks"]
+            TR2["Tool Registry provides tools · Event Bus publishes events"]
+        end
+
+        subgraph VerificationLayer [TRIANGULATED VERIFICATION - Judge]
+            S1["Signal 1: Rules (fast)"] --> S2["Signal 2: LLM Judge (flexible)"] --> S3["Signal 3: Human (final)"]
+            VC1["Criteria aligned with Worker Bee system prompt"]
+            VC2["Principles aligned with Queen Bee system prompt"]
+            VC3["Confidence from agreement across signals"]
+        end
+
+        subgraph ReflexionLayer [REFLEXION LAYER]
+            RL1["ACCEPT: Proceed with confidence"]
+            RL2["RETRY: Learn from failure, try again"]
+            RL3["REPLAN: Strategy failed, change approach"]
+            RL4["ESCALATE: Report to Queen Bee, ask human"]
+        end
+
+        GoalLayer --> ExecutionLayer --> VerificationLayer --> ReflexionLayer
+    end
 ```
 
 ---
@@ -531,37 +473,18 @@ Triangulated verification provides the foundation for a more ambitious capabilit
 
 ### The Learning Loop Vision
 
-```
-┌─────────────────────────────────────────────────────────────────────────┐
-│                      ONLINE LEARNING LOOP                                │
-├─────────────────────────────────────────────────────────────────────────┤
-│                                                                          │
-│                         ┌───────────────┐                                │
-│                         │   EXECUTION   │                                │
-│                         │  Agent acts   │                                │
-│                         └───────┬───────┘                                │
-│                                 │                                        │
-│                                 ▼                                        │
-│   ┌─────────────┐      ┌───────────────┐      ┌─────────────┐           │
-│   │    RULE     │◄─────│ TRIANGULATED  │─────►│  CALIBRATE  │           │
-│   │  GENERATION │      │  EVALUATION   │      │  CONFIDENCE │           │
-│   │             │      └───────┬───────┘      │  THRESHOLDS │           │
-│   └──────┬──────┘              │              └──────┬──────┘           │
-│          │                     ▼                     │                   │
-│          │            ┌───────────────┐              │                   │
-│          │            │    HUMAN      │              │                   │
-│          └───────────►│   DECISION    │◄─────────────┘                   │
-│                       │  (when needed)│                                  │
-│                       └───────┬───────┘                                  │
-│                               │                                          │
-│                               ▼                                          │
-│                    Human decision becomes                                │
-│                    training signal for:                                  │
-│                    • New deterministic rules                             │
-│                    • Adjusted confidence thresholds                      │
-│                    • Signal weighting updates                            │
-│                                                                          │
-└─────────────────────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TB
+    subgraph OnlineLearning [ONLINE LEARNING LOOP]
+        direction TB
+        Exec["EXECUTION\nAgent acts"] --> TriEval["TRIANGULATED\nEVALUATION"]
+        TriEval --> RuleGen["RULE\nGENERATION"]
+        TriEval --> Calibrate["CALIBRATE\nCONFIDENCE THRESHOLDS"]
+        TriEval --> HumanDec["HUMAN DECISION\n(when needed)"]
+        RuleGen --> HumanDec
+        Calibrate --> HumanDec
+        HumanDec --> TrainingSignal["Human decision becomes training signal for:\n• New deterministic rules\n• Adjusted confidence thresholds\n• Signal weighting updates"]
+    end
 ```
 
 ### Phase 1: Robust Evaluation (Current)
@@ -651,56 +574,18 @@ class RuleProposal:
 
 **Rule generation pipeline**:
 
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                    RULE GENERATION PIPELINE                      │
-├─────────────────────────────────────────────────────────────────┤
-│                                                                  │
-│  1. PATTERN MINING                                              │
-│     ┌─────────────────────────────────────────────┐             │
-│     │ Analyze escalated results for common traits: │             │
-│     │ • Code patterns (regex over result.code)    │             │
-│     │ • Error signatures (result.error types)     │             │
-│     │ • Goal categories (security, performance)   │             │
-│     └─────────────────────────────────────────────┘             │
-│                          │                                       │
-│                          ▼                                       │
-│  2. CONSISTENCY CHECK                                           │
-│     ┌─────────────────────────────────────────────┐             │
-│     │ For each pattern, check human consistency:   │             │
-│     │ • Did humans always decide the same way?    │             │
-│     │ • Minimum N occurrences for confidence      │             │
-│     │ • No contradictory decisions                │             │
-│     └─────────────────────────────────────────────┘             │
-│                          │                                       │
-│                          ▼                                       │
-│  3. RULE PROPOSAL                                               │
-│     ┌─────────────────────────────────────────────┐             │
-│     │ Generate candidate rule:                     │             │
-│     │ • condition: pattern as Python expression   │             │
-│     │ • action: consistent human decision         │             │
-│     │ • priority: based on coverage + confidence  │             │
-│     └─────────────────────────────────────────────┘             │
-│                          │                                       │
-│                          ▼                                       │
-│  4. HUMAN APPROVAL (HITL)                                       │
-│     ┌─────────────────────────────────────────────┐             │
-│     │ Present rule to human for review:           │             │
-│     │ • Show examples it would have caught        │             │
-│     │ • Show edge cases for consideration         │             │
-│     │ • Require explicit approval before active   │             │
-│     └─────────────────────────────────────────────┘             │
-│                          │                                       │
-│                          ▼                                       │
-│  5. DEPLOYMENT                                                  │
-│     ┌─────────────────────────────────────────────┐             │
-│     │ Add approved rule to evaluation pipeline:   │             │
-│     │ • Shadow mode first (log but don't act)     │             │
-│     │ • Gradual rollout with monitoring           │             │
-│     │ • Automatic rollback if accuracy drops      │             │
-│     └─────────────────────────────────────────────┘             │
-│                                                                  │
-└─────────────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TD
+    subgraph RulePipeline [RULE GENERATION PIPELINE]
+        direction TB
+        PM["1. PATTERN MINING\nAnalyze escalated results for common traits:\n• Code patterns (regex over result.code)\n• Error signatures (result.error types)\n• Goal categories (security, performance)"]
+        CC["2. CONSISTENCY CHECK\nFor each pattern, check human consistency:\n• Did humans always decide the same way?\n• Minimum N occurrences for confidence\n• No contradictory decisions"]
+        RP["3. RULE PROPOSAL\nGenerate candidate rule:\n• condition: pattern as Python expression\n• action: consistent human decision\n• priority: based on coverage + confidence"]
+        HA["4. HUMAN APPROVAL (HITL)\nPresent rule to human for review:\n• Show examples it would have caught\n• Show edge cases for consideration\n• Require explicit approval before active"]
+        Deploy["5. DEPLOYMENT\nAdd approved rule to evaluation pipeline:\n• Shadow mode first (log but don't act)\n• Gradual rollout with monitoring\n• Automatic rollback if accuracy drops"]
+
+        PM --> CC --> RP --> HA --> Deploy
+    end
 ```
 
 **Example learned rule**:

@@ -11,34 +11,20 @@ The Aden server handles OAuth2 authorization code flows (user login, consent, to
 3. Delegates refresh operations to the Aden server
 4. Optionally reports usage statistics back to Aden
 
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                    Local Agent Environment                      │
-│                                                                 │
-│  ┌──────────────────────────────────────────────────────────┐   │
-│  │                   CredentialStore                        │   │
-│  │  ┌────────────────────┐  ┌────────────────────────────┐  │   │
-│  │  │EncryptedFileStorage│  │    AdenSyncProvider        │  │   │
-│  │  │  (local cache)     │  │  - Fetches from Aden       │  │   │
-│  │  │ ~/.hive/credentials│  │  - Delegates refresh       │  │   │
-│  │  └────────────────────┘  │  - Reports usage           │  │   │
-│  │                          └─────────────┬──────────────┘  │   │
-│  └────────────────────────────────────────┼─────────────────┘   │
-│                                           │                     │
-└───────────────────────────────────────────┼─────────────────────┘
-                                            │ HTTPS
-                                            ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                       Aden Server                               │
-│                                                                 │
-│  ┌──────────────────────────────────────────────────────────┐   │
-│  │              Integration Management                      │   │
-│  │  - HubSpot, GitHub, Slack, etc.                          │   │
-│  │  - Handles OAuth2 auth code flow                         │   │
-│  │  - Stores refresh tokens securely                        │   │
-│  │  - Performs token refresh on request                     │   │
-│  └──────────────────────────────────────────────────────────┘   │
-└─────────────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TB
+    subgraph Local [Local Agent Environment]
+        subgraph CS [CredentialStore]
+            EFS["EncryptedFileStorage\n(local cache)\n~/.hive/credentials"]
+            ASP["AdenSyncProvider\n\u2022 Fetches from Aden\n\u2022 Delegates refresh\n\u2022 Reports usage"]
+        end
+    end
+
+    ASP -->|HTTPS| Aden
+
+    subgraph Aden [Aden Server]
+        IM["Integration Management\n\u2022 HubSpot, GitHub, Slack, etc.\n\u2022 Handles OAuth2 auth code flow\n\u2022 Stores refresh tokens securely\n\u2022 Performs token refresh on request"]
+    end
 ```
 
 ---

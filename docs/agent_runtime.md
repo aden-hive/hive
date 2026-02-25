@@ -4,22 +4,20 @@ Unified execution system for all Hive agents. Every agent — single-entry or mu
 
 ## Topology
 
-```
-                     AgentRunner.load(agent_path)
-                              |
-                         AgentRunner
-                     (factory + public API)
-                              |
-                       _setup_agent_runtime()
-                              |
-                        AgentRuntime
-                   (lifecycle + orchestration)
-                      /       |       \\
-               Stream A   Stream B   Stream C    ← one per entry point
-                  |           |          |
-            GraphExecutor  GraphExecutor  GraphExecutor
-                  |           |          |
-              Node → Node → Node  (graph traversal)
+```mermaid
+flowchart TB
+    Load["AgentRunner.load(agent_path)"] --> AR["AgentRunner\n(factory + public API)"]
+    AR --> Setup["_setup_agent_runtime()"]
+    Setup --> ART["AgentRuntime\n(lifecycle + orchestration)"]
+    ART --> SA["Stream A\n← one per entry point"]
+    ART --> SB["Stream B"]
+    ART --> SC["Stream C"]
+    SA --> GE1["GraphExecutor"]
+    SB --> GE2["GraphExecutor"]
+    SC --> GE3["GraphExecutor"]
+    GE1 --> Nodes1["Node → Node → Node\n(graph traversal)"]
+    GE2 --> Nodes2["Node → Node → Node"]
+    GE3 --> Nodes3["Node → Node → Node"]
 ```
 
 Single-entry agents get a `"default"` entry point automatically. There is no separate code path.

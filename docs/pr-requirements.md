@@ -11,29 +11,13 @@ For a PR to be accepted, it must:
 
 ## How It Works
 
-```
-┌─────────────────┐
-│  PR Opened/     │
-│  Reopened       │
-└────────┬────────┘
-         │
-         ▼
-┌─────────────────┐     No      ┌─────────────────┐
-│ Has issue       │────────────►│ Close PR +      │
-│ reference?      │             │ Comment         │
-└────────┬────────┘             └─────────────────┘
-         │ Yes
-         ▼
-┌─────────────────┐     No      ┌─────────────────┐
-│ PR author is    │────────────►│ Close PR +      │
-│ assigned to     │             │ Comment         │
-│ the issue?      │             │                 │
-└────────┬────────┘             └─────────────────┘
-         │ Yes
-         ▼
-┌─────────────────┐
-│ PR Passes       │
-└─────────────────┘
+```mermaid
+flowchart TD
+    Start["PR Opened /\nReopened"] --> HasRef{Has issue\nreference?}
+    HasRef -->|No| Close1["Close PR +\nComment"]
+    HasRef -->|Yes| Assigned{PR author is\nassigned to\nthe issue?}
+    Assigned -->|No| Close2["Close PR +\nComment"]
+    Assigned -->|Yes| Pass["PR Passes"]
 ```
 
 ## Workflow Triggers

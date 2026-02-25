@@ -153,28 +153,19 @@ assert await memory.read("key") == "value"
 
 The new architecture introduces explicit state management with proper isolation:
 
-```
-┌─────────────────────────────────────────────────────┐
-│                  AgentRuntime                       │
-│  - Manages agent lifecycle                          │
-│  - Coordinates ExecutionStreams                     │
-│  - Aggregates outcomes for goal evaluation          │
-├─────────────────────────────────────────────────────┤
-│  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐ │
-│  │  Stream A   │  │  Stream B   │  │  Stream C   │ │
-│  │ (webhook)   │  │   (api)     │  │  (timer)    │ │
-│  │             │  │             │  │             │ │
-│  │ Concurrent  │  │ Concurrent  │  │ Concurrent  │ │
-│  │ Executions  │  │ Executions  │  │ Executions  │ │
-│  └──────┬──────┘  └──────┬──────┘  └──────┬──────┘ │
-│         └────────────────┼────────────────┘        │
-│                          ↓                         │
-│              SharedStateManager                    │
-│              (Isolation Levels)                    │
-│                                                    │
-│              OutcomeAggregator                     │
-│              (Cross-Stream Goals)                  │
-└─────────────────────────────────────────────────────┘
+```mermaid
+flowchart TB
+    subgraph AgentRuntime [AgentRuntime]
+        direction TB
+        Info["Manages agent lifecycle\nCoordinates ExecutionStreams\nAggregates outcomes for goal evaluation"]
+
+        SA["Stream A\n(webhook)\nConcurrent Executions"]
+        SB["Stream B\n(api)\nConcurrent Executions"]
+        SC["Stream C\n(timer)\nConcurrent Executions"]
+
+        SA & SB & SC --> SSM["SharedStateManager\n(Isolation Levels)"]
+        SSM --> OA["OutcomeAggregator\n(Cross-Stream Goals)"]
+    end
 ```
 
 ### Key Components

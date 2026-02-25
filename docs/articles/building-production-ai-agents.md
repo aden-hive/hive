@@ -76,83 +76,49 @@ Getting an AI agent working in a demo is easy. Getting it to work reliably in pr
 
 ### Pattern 1: Simple Agent Service
 
-```
-┌──────────────────────────────────────────┐
-│               Agent Service              │
-│  ┌────────────────────────────────────┐ │
-│  │  Request Handler                    │ │
-│  │  ┌──────┐  ┌──────┐  ┌──────┐     │ │
-│  │  │Validate│→│Agent │→│Format │     │ │
-│  │  │ Input │ │Execute│ │Output│     │ │
-│  │  └──────┘  └──────┘  └──────┘     │ │
-│  └────────────────────────────────────┘ │
-│                    │                     │
-│  ┌─────────────────────────────────────┐│
-│  │  Dependencies                       ││
-│  │  • LLM API  • Tools  • Database    ││
-│  └─────────────────────────────────────┘│
-└──────────────────────────────────────────┘
+```mermaid
+flowchart TB
+    subgraph AgentService [Agent Service]
+        subgraph Handler [Request Handler]
+            V["Validate Input"] --> Exec["Agent Execute"] --> Fmt["Format Output"]
+        end
+        Deps["Dependencies\n• LLM API  • Tools  • Database"]
+    end
 ```
 
 **Best for:** Simple use cases, low volume
 
 ### Pattern 2: Queue-Based Processing
 
-```
-┌───────┐    ┌───────┐    ┌───────────────┐
-│Request│───▶│ Queue │───▶│ Agent Workers │
-│  API  │    │       │    │   (N copies)  │
-└───────┘    └───────┘    └───────────────┘
-                               │
-                               ▼
-                          ┌─────────┐
-                          │ Results │
-                          │   DB    │
-                          └─────────┘
+```mermaid
+flowchart LR
+    API["Request API"] --> Q["Queue"] --> Workers["Agent Workers\n(N copies)"]
+    Workers --> DB[("Results DB")]
 ```
 
 **Best for:** High volume, async processing
 
 ### Pattern 3: Event-Driven Agents
 
-```
-┌─────────────┐
-│ Event Source│─────┐
-└─────────────┘     │
-                    ▼
-┌─────────────┐ ┌─────────┐ ┌─────────────┐
-│ Event Source│─▶│  Event  │─▶│   Agent     │
-└─────────────┘ │   Bus   │ │ Processors  │
-                └─────────┘ └─────────────┘
-┌─────────────┐     │
-│ Event Source│─────┘
-└─────────────┘
+```mermaid
+flowchart LR
+    ES1["Event Source"] --> EB["Event Bus"]
+    ES2["Event Source"] --> EB
+    ES3["Event Source"] --> EB
+    EB --> AP["Agent Processors"]
 ```
 
 **Best for:** Reactive systems, integrations
 
 ### Pattern 4: Full Platform (Aden)
 
-```
-┌────────────────────────────────────────────────────────┐
-│                    Aden Platform                       │
-│                                                        │
-│  ┌──────────────┐  ┌──────────────┐  ┌─────────────┐ │
-│  │ Coding Agent │  │Worker Agents │  │  Dashboard  │ │
-│  │  (Generate)  │  │  (Execute)   │  │  (Monitor)  │ │
-│  └──────────────┘  └──────────────┘  └─────────────┘ │
-│         │                │                  │         │
-│         ▼                ▼                  ▼         │
-│  ┌────────────────────────────────────────────────┐  │
-│  │            Control Plane                       │  │
-│  │  • Budget  • Policies  • Metrics  • HITL     │  │
-│  └────────────────────────────────────────────────┘  │
-│                         │                            │
-│  ┌────────────────────────────────────────────────┐  │
-│  │            Storage Layer                       │  │
-│  │  • Events  • Policies  • Config              │  │
-│  └────────────────────────────────────────────────┘  │
-└────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TB
+    subgraph Aden [Aden Platform]
+        CA["Coding Agent\n(Generate)"] & WA["Worker Agents\n(Execute)"] & Dash["Dashboard\n(Monitor)"]
+        CA & WA & Dash --> CP["Control Plane\n• Budget  • Policies  • Metrics  • HITL"]
+        CP --> Storage["Storage Layer\n• Events  • Policies  • Config"]
+    end
 ```
 
 **Best for:** Complex systems, self-improving agents
@@ -402,38 +368,28 @@ async def audit_log(event):
 ## Deployment Strategies
 
 ### Blue-Green Deployment
+```mermaid
+flowchart TB
+    LB["Load Balancer"] --> Blue["Blue\n(Current)"]
+    LB --> Green["Green\n(New)"]
 ```
-                    Load Balancer
-                          │
-              ┌───────────┴───────────┐
-              │                       │
-        ┌─────▼─────┐          ┌─────▼─────┐
-        │   Blue    │          │   Green   │
-        │ (Current) │          │   (New)   │
-        └───────────┘          └───────────┘
 
 1. Deploy new version to Green
 2. Test Green environment
 3. Switch traffic Blue → Green
 4. Keep Blue for rollback
-```
 
 ### Canary Deployment
+```mermaid
+flowchart TB
+    LB["Load Balancer"] -->|95%| Stable["Stable\n(v1.0)"]
+    LB -->|5%| Canary["Canary\n(v1.1)"]
 ```
-                    Load Balancer
-                          │
-              ┌───────────┴───────────┐
-              │ 95%                5% │
-        ┌─────▼─────┐          ┌─────▼─────┐
-        │  Stable   │          │  Canary   │
-        │ (v1.0)    │          │  (v1.1)   │
-        └───────────┘          └───────────┘
 
 1. Deploy new version as Canary
 2. Route 5% traffic to Canary
 3. Monitor metrics
 4. Gradually increase or rollback
-```
 
 ### Feature Flags
 ```python

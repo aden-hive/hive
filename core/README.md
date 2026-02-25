@@ -173,20 +173,10 @@ for s in suggestions:
 
 ## Architecture
 
-```
-┌─────────────────┐
-│  Human Engineer │  ← Supervision, approval
-└────────┬────────┘
-         │
-┌────────▼────────┐
-│   Builder LLM   │  ← Analyzes runs, suggests improvements
-│  (BuilderQuery) │
-└────────┬────────┘
-         │
-┌────────▼────────┐
-│   Agent LLM     │  ← Executes tasks, records decisions
-│    (Runtime)    │
-└─────────────────┘
+```mermaid
+flowchart TB
+    HE["Human Engineer\n← Supervision, approval"] --> BL["Builder LLM (BuilderQuery)\n← Analyzes runs, suggests improvements"]
+    BL --> AL["Agent LLM (Runtime)\n← Executes tasks, records decisions"]
 ```
 
 ## Key Concepts
