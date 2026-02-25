@@ -139,6 +139,12 @@ For running agents with real LLMs:
 # Add to your shell profile (~/.bashrc, ~/.zshrc, etc.)
 export ANTHROPIC_API_KEY="your-key-here"
 export OPENAI_API_KEY="your-key-here"        # Optional
+export GEMINI_API_KEY="your-key-here"        # Optional
+export GROQ_API_KEY="your-key-here"          # Optional
+export CEREBRAS_API_KEY="your-key-here"      # Optional
+export MISTRAL_API_KEY="your-key-here"       # Optional
+export TOGETHER_API_KEY="your-key-here"      # Optional
+export DEEPSEEK_API_KEY="your-key-here"      # Optional
 export BRAVE_SEARCH_API_KEY="your-key-here"  # Optional, for web search
 ```
 
@@ -146,6 +152,12 @@ Get your API keys:
 
 - **Anthropic**: [console.anthropic.com](https://console.anthropic.com/)
 - **OpenAI**: [platform.openai.com](https://platform.openai.com/)
+- **Google Gemini**: [aistudio.google.com/apikey](https://aistudio.google.com/apikey)
+- **Groq**: [console.groq.com/keys](https://console.groq.com/keys)
+- **Cerebras**: [cloud.cerebras.ai](https://cloud.cerebras.ai/)
+- **Mistral**: [console.mistral.ai/api-keys](https://console.mistral.ai/api-keys/)
+- **Together AI**: [api.together.ai/settings/api-keys](https://api.together.ai/settings/api-keys)
+- **DeepSeek**: [platform.deepseek.com/api_keys](https://platform.deepseek.com/api_keys)
 - **Brave Search**: [brave.com/search/api](https://brave.com/search/api/)
 
 ## Testing Your Agent
