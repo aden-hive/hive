@@ -32,6 +32,8 @@
   <img src="https://img.shields.io/badge/MCP-Tools-00ADD8?style=flat-square" alt="MCP" />
 </p>
 
+### Hive ayuda a los equipos a construir sistemas de agentes de IA resilientes que se adaptan y mejoran en producción.
+
 ## Descripción General
 
 Construye agentes de IA confiables y auto-mejorables sin codificar flujos de trabajo. Define tu objetivo a través de una conversación con un agente de codificación, y el framework genera un grafo de nodos con código de conexión creado dinámicamente. Cuando algo falla, el framework captura los datos del error, evoluciona el agente a través del agente de codificación y lo vuelve a desplegar. Los nodos de intervención humana integrados, la gestión de credenciales y el monitoreo en tiempo real te dan control sin sacrificar la adaptabilidad.
@@ -180,29 +182,17 @@ flowchart LR
 4. **El Plano de Control Monitorea** → Métricas en tiempo real, aplicación de presupuesto, gestión de políticas
 5. **Auto-Mejora** → En caso de fallo, el sistema evoluciona el grafo y lo vuelve a desplegar automáticamente
 
-## Cómo se Compara Aden
+## ¿Es Hive adecuado para usted?
 
-Aden adopta un enfoque fundamentalmente diferente al desarrollo de agentes. Mientras que la mayoría de los frameworks requieren que codifiques flujos de trabajo o definas manualmente grafos de agentes, Aden usa un **agente de codificación para generar todo tu sistema de agentes** a partir de objetivos en lenguaje natural. Cuando los agentes fallan, el framework no solo registra errores—**evoluciona automáticamente el grafo de agentes** y lo vuelve a desplegar.
+Hive está diseñado para desarrolladores y equipos que desean construir **agentes de IA de nivel de producción** sin cablear manualmente flujos de trabajo complejos.
 
-> **Nota:** Para la tabla de comparación detallada de frameworks y preguntas frecuentes, consulta el [README.md](README.md) en inglés.
-
-### Cuándo Elegir Aden
-
-Elige Aden cuando necesites:
-
-- Agentes que **se auto-mejoren a partir de fallos** sin intervención manual
-- **Desarrollo orientado a objetivos** donde describes resultados, no flujos de trabajo
-- **Confiabilidad en producción** con recuperación y redespliegue automáticos
-- **Iteración rápida** en arquitecturas de agentes sin reescribir código
-- **Observabilidad completa** con monitoreo en tiempo real y supervisión humana
-
-Elige otros frameworks cuando necesites:
-
-- **Flujos de trabajo predecibles y con tipos seguros** (PydanticAI, Mastra)
-- **RAG y procesamiento de documentos** (LlamaIndex, Haystack)
-- **Investigación sobre emergencia de agentes** (CAMEL)
-- **Voz/multimodal en tiempo real** (TEN Framework)
-- **Encadenamiento simple de componentes** (LangChain, Swarm)
+| Característica | Ideal para Hive | No apto para Hive |
+| :--- | :--- | :--- |
+| **Complejidad** | Procesos de negocio reales, flujos multi-agente complejos | Cadenas de agentes simples o scripts de un solo uso |
+| **Ciclo de vida** | Agentes autónomos de larga duración con autocuración | Experimentos temporales o no autónomos |
+| **Fiabilidad** | Entornos de producción con límites de coste y seguridad | Demos de laboratorio sin restricciones de riesgo |
+| **Metodología** | Desarrollo orientado a objetivos que mejora con el tiempo | Flujos de trabajo estáticos y codificados a mano |
+| **Control humano** | Necesidad de intervención humana y observabilidad | Ejecución totalmente oscura/no observada |
 
 ## Estructura del Proyecto
 
