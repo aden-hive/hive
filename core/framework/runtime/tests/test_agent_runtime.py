@@ -11,7 +11,11 @@ Tests:
 """
 
 import asyncio
+import builtins
+import sys
 import tempfile
+import types
+from datetime import timedelta
 from pathlib import Path
 
 import pytest
@@ -647,6 +651,25 @@ class TestCreateAgentRuntime:
 class TestTimerEntryPoints:
     """Tests for timer-driven entry points (interval and cron)."""
 
+    @pytest.fixture
+    def fake_croniter(self, monkeypatch):
+        """Provide a deterministic in-process croniter substitute for tests."""
+
+        class _FakeCroniter:
+            def __init__(self, expr, start):
+                self._expr = expr
+                self._start = start
+
+            @staticmethod
+            def is_valid(expr):
+                return expr != "not a cron expression"
+
+            def get_next(self, _dt_type):
+                return self._start + timedelta(minutes=5)
+
+        monkeypatch.setitem(sys.modules, "croniter", types.SimpleNamespace(croniter=_FakeCroniter))
+        yield
+
     @pytest.mark.asyncio
     async def test_interval_timer_starts_task(self, sample_graph, sample_goal, temp_storage):
         """Test that interval_minutes timer creates an async task."""
@@ -678,7 +701,9 @@ class TestTimerEntryPoints:
         assert len(runtime._timer_tasks) == 0
 
     @pytest.mark.asyncio
-    async def test_cron_timer_starts_task(self, sample_graph, sample_goal, temp_storage):
+    async def test_cron_timer_starts_task(
+        self, sample_graph, sample_goal, temp_storage, fake_croniter
+    ):
         """Test that cron expression timer creates an async task."""
         runtime = AgentRuntime(
             graph=sample_graph,
@@ -706,10 +731,10 @@ class TestTimerEntryPoints:
             await runtime.stop()
 
     @pytest.mark.asyncio
-    async def test_invalid_cron_expression_skipped(
-        self, sample_graph, sample_goal, temp_storage, caplog
+    async def test_invalid_cron_expression_raises(
+        self, sample_graph, sample_goal, temp_storage, fake_croniter
     ):
-        """Test that an invalid cron expression logs a warning and skips."""
+        """Test that invalid cron expression fails fast instead of silently skipping."""
         runtime = AgentRuntime(
             graph=sample_graph,
             goal=sample_goal,
@@ -725,16 +750,15 @@ class TestTimerEntryPoints:
         )
         runtime.register_entry_point(entry_spec)
 
-        await runtime.start()
-        try:
-            assert len(runtime._timer_tasks) == 0
-            assert "invalid cron" in caplog.text.lower() or "Invalid cron" in caplog.text
-        finally:
-            await runtime.stop()
+        with pytest.raises(ValueError, match="invalid cron expression"):
+            await runtime.start()
+
+        assert not runtime.is_running
+        assert len(runtime._timer_tasks) == 0
 
     @pytest.mark.asyncio
     async def test_cron_takes_priority_over_interval(
-        self, sample_graph, sample_goal, temp_storage, caplog
+        self, sample_graph, sample_goal, temp_storage, caplog, fake_croniter
     ):
         """Test that when both cron and interval_minutes are set, cron wins."""
         import logging
@@ -789,7 +813,9 @@ class TestTimerEntryPoints:
             await runtime.stop()
 
     @pytest.mark.asyncio
-    async def test_cron_immediate_fires_first(self, sample_graph, sample_goal, temp_storage):
+    async def test_cron_immediate_fires_first(
+        self, sample_graph, sample_goal, temp_storage, fake_croniter
+    ):
         """Test that run_immediately=True with cron doesn't set next_fire before first run."""
         runtime = AgentRuntime(
             graph=sample_graph,
@@ -819,6 +845,42 @@ class TestTimerEntryPoints:
             assert not runtime._timer_tasks[0].done()
         finally:
             await runtime.stop()
+
+    @pytest.mark.asyncio
+    async def test_missing_croniter_raises_runtime_error(
+        self, sample_graph, sample_goal, temp_storage, monkeypatch
+    ):
+        """Test that missing croniter fails startup with an actionable error."""
+        runtime = AgentRuntime(
+            graph=sample_graph,
+            goal=sample_goal,
+            storage_path=temp_storage,
+        )
+
+        entry_spec = EntryPointSpec(
+            id="timer-missing-croniter",
+            name="Missing Croniter",
+            entry_node="process-webhook",
+            trigger_type="timer",
+            trigger_config={"cron": "0 0 * * *"},
+        )
+        runtime.register_entry_point(entry_spec)
+
+        original_import = builtins.__import__
+
+        def _import_with_missing_croniter(name, globals=None, locals=None, fromlist=(), level=0):
+            if name == "croniter":
+                raise ImportError("No module named 'croniter'")
+            return original_import(name, globals, locals, fromlist, level)
+
+        monkeypatch.setattr(builtins, "__import__", _import_with_missing_croniter)
+        monkeypatch.delitem(sys.modules, "croniter", raising=False)
+
+        with pytest.raises(RuntimeError, match="croniter"):
+            await runtime.start()
+
+        assert not runtime.is_running
+        assert len(runtime._timer_tasks) == 0
 
 
 if __name__ == "__main__":

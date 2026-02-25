@@ -233,6 +233,48 @@ class AgentRuntime:
         self._entry_points[spec.id] = spec
         logger.info(f"Registered entry point: {spec.id} -> {spec.entry_node}")
 
+    @staticmethod
+    def _import_croniter(ep_label: str):
+        """Import croniter or raise a clear runtime error."""
+        try:
+            from croniter import croniter
+        except ImportError as exc:
+            raise RuntimeError(
+                f"Entry point '{ep_label}' uses cron scheduling but 'croniter' is not installed. "
+                "Add 'croniter>=1.4.0' to dependencies."
+            ) from exc
+        return croniter
+
+    @staticmethod
+    def _validate_cron_expression(ep_label: str, cron_expr: str, croniter_cls: Any) -> None:
+        """Validate a cron expression and raise a clear error when invalid."""
+        if not croniter_cls.is_valid(cron_expr):
+            raise ValueError(f"Entry point '{ep_label}' has invalid cron expression: {cron_expr}")
+
+    @staticmethod
+    def _compute_next_cron_sleep_seconds(croniter_cls: Any, expr: str) -> float:
+        """Compute next cron sleep atomically from a single timestamp."""
+        now = datetime.now()
+        cron = croniter_cls(expr, now)
+        next_dt = cron.get_next(datetime)
+        return max(0.0, (next_dt - now).total_seconds())
+
+    def _validate_timer_entry_points(
+        self,
+        entry_points: dict[str, EntryPointSpec],
+        graph_id: str | None = None,
+    ) -> None:
+        """Fail fast for invalid cron timer configs before starting runtime resources."""
+        for ep_id, spec in entry_points.items():
+            if spec.trigger_type != "timer":
+                continue
+            cron_expr = spec.trigger_config.get("cron")
+            if not cron_expr:
+                continue
+            ep_label = f"{graph_id}::{ep_id}" if graph_id else ep_id
+            croniter_cls = self._import_croniter(ep_label)
+            self._validate_cron_expression(ep_label, cron_expr, croniter_cls)
+
     def unregister_entry_point(self, entry_point_id: str) -> bool:
         """
         Unregister an entry point.
@@ -260,6 +302,9 @@ class AgentRuntime:
             return
 
         async with self._lock:
+            # Validate timer cron configs before starting any runtime resources.
+            self._validate_timer_entry_points(self._entry_points)
+
             # Start storage
             await self._storage.start()
 
@@ -377,29 +422,19 @@ class AgentRuntime:
                 run_immediately = tc.get("run_immediately", False)
 
                 if cron_expr:
-                    # Cron expression mode — takes priority over interval_minutes
-                    try:
-                        from croniter import croniter
+                    # Cron expression mode takes priority over interval_minutes.
+                    croniter_cls = self._import_croniter(ep_id)
+                    self._validate_cron_expression(ep_id, cron_expr, croniter_cls)
 
-                        # Validate the expression upfront
-                        if not croniter.is_valid(cron_expr):
-                            raise ValueError(f"Invalid cron expression: {cron_expr}")
-                    except (ImportError, ValueError) as e:
-                        logger.warning(
-                            "Entry point '%s' has invalid cron config: %s",
-                            ep_id,
-                            e,
-                        )
-                        continue
+                    def _make_cron_timer(
+                        entry_point_id: str, expr: str, immediate: bool, croniter_type: Any
+                    ):
 
-                    def _make_cron_timer(entry_point_id: str, expr: str, immediate: bool):
                         async def _cron_loop():
-                            from croniter import croniter
-
                             if not immediate:
-                                cron = croniter(expr, datetime.now())
-                                next_dt = cron.get_next(datetime)
-                                sleep_secs = (next_dt - datetime.now()).total_seconds()
+                                sleep_secs = self._compute_next_cron_sleep_seconds(
+                                    croniter_type, expr
+                                )
                                 self._timer_next_fire[entry_point_id] = (
                                     time.monotonic() + sleep_secs
                                 )
@@ -432,9 +467,9 @@ class AgentRuntime:
                                         exc_info=True,
                                     )
                                 # Calculate next fire from now
-                                cron = croniter(expr, datetime.now())
-                                next_dt = cron.get_next(datetime)
-                                sleep_secs = (next_dt - datetime.now()).total_seconds()
+                                sleep_secs = self._compute_next_cron_sleep_seconds(
+                                    croniter_type, expr
+                                )
                                 self._timer_next_fire[entry_point_id] = (
                                     time.monotonic() + sleep_secs
                                 )
@@ -443,7 +478,7 @@ class AgentRuntime:
                         return _cron_loop
 
                     task = asyncio.create_task(
-                        _make_cron_timer(ep_id, cron_expr, run_immediately)()
+                        _make_cron_timer(ep_id, cron_expr, run_immediately, croniter_cls)()
                     )
                     self._timer_tasks.append(task)
                     logger.info(
@@ -666,6 +701,9 @@ class AgentRuntime:
             if graph.get_node(spec.entry_node) is None:
                 raise ValueError(f"Entry node '{spec.entry_node}' not found in graph '{graph_id}'")
 
+        # Validate timer cron configs before creating streams.
+        self._validate_timer_entry_points(entry_points, graph_id=graph_id)
+
         # Create streams for each entry point
         streams: dict[str, ExecutionStream] = {}
         for ep_id, spec in entry_points.items():
@@ -755,10 +793,62 @@ class AgentRuntime:
             if spec.trigger_type != "timer":
                 continue
             tc = spec.trigger_config
+            cron_expr = tc.get("cron")
             interval = tc.get("interval_minutes")
             run_immediately = tc.get("run_immediately", False)
 
-            if interval and interval > 0 and self._running:
+            if cron_expr and self._running:
+                croniter_cls = self._import_croniter(f"{graph_id}::{ep_id}")
+
+                def _make_cron_timer(
+                    gid: str, local_ep: str, expr: str, immediate: bool, croniter_type: Any
+                ):
+                    async def _cron_loop():
+                        if not immediate:
+                            sleep_secs = self._compute_next_cron_sleep_seconds(croniter_type, expr)
+                            timer_next_fire[local_ep] = time.monotonic() + sleep_secs
+                            await asyncio.sleep(max(0, sleep_secs))
+                        while self._running and gid in self._graphs:
+                            timer_next_fire.pop(local_ep, None)
+                            try:
+                                reg = self._graphs.get(gid)
+                                if not reg:
+                                    break
+                                stream = reg.streams.get(local_ep)
+                                if not stream:
+                                    break
+                                session_state = self._get_primary_session_state(
+                                    local_ep, source_graph_id=gid
+                                )
+                                await stream.execute(
+                                    {"event": {"source": "timer", "reason": "scheduled"}},
+                                    session_state=session_state,
+                                )
+                                logger.info(
+                                    "Cron fired for entry point '%s::%s' (expr: %s)",
+                                    gid,
+                                    local_ep,
+                                    expr,
+                                )
+                            except Exception:
+                                logger.error(
+                                    "Cron trigger failed for '%s::%s'",
+                                    gid,
+                                    local_ep,
+                                    exc_info=True,
+                                )
+                            sleep_secs = self._compute_next_cron_sleep_seconds(croniter_type, expr)
+                            timer_next_fire[local_ep] = time.monotonic() + sleep_secs
+                            await asyncio.sleep(max(0, sleep_secs))
+
+                    return _cron_loop
+
+                task = asyncio.create_task(
+                    _make_cron_timer(graph_id, ep_id, cron_expr, run_immediately, croniter_cls)()
+                )
+                timer_tasks.append(task)
+
+            elif interval and interval > 0 and self._running:
 
                 def _make_timer(gid: str, local_ep: str, mins: float, immediate: bool):
                     async def _timer_loop():
