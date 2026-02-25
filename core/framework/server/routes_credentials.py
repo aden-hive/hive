@@ -81,41 +81,104 @@ async def handle_delete_credential(request: web.Request) -> web.Response:
 
 
 async def handle_check_agent(request: web.Request) -> web.Response:
-    """POST /api/credentials/check-agent — check which credentials an agent needs.
+    """POST /api/credentials/check-agent — check and validate agent credentials.
 
-    Body: {"agent_path": "..."}
+    Uses the same two-phase validation as agent startup:
+    1. Presence — is the credential available (env, encrypted store, Aden)?
+    2. Health check — does the credential actually work (lightweight HTTP call)?
+
+    Body: {"agent_path": "...", "verify": true}
     """
-    store = _get_store(request)
     body = await request.json()
     agent_path = body.get("agent_path")
+    verify = body.get("verify", True)
 
     if not agent_path:
         return web.json_response({"error": "agent_path is required"}, status=400)
 
     try:
-        from framework.credentials.setup import (
-            CredentialSetupSession,
-        )
+        import os
 
+        from framework.credentials.setup import CredentialSetupSession
+        from framework.credentials.storage import CompositeStorage, EncryptedFileStorage, EnvVarStorage
+        from framework.credentials.validation import _presync_aden_tokens, ensure_credential_key_env
+
+        # Load env vars from shell config (same as runtime startup)
+        ensure_credential_key_env()
+
+        # Build a proper store with env + encrypted storage (same as validate_agent_credentials)
+        try:
+            from aden_tools.credentials import CREDENTIAL_SPECS
+        except ImportError:
+            CREDENTIAL_SPECS = {}
+
+        if os.environ.get("ADEN_API_KEY") and CREDENTIAL_SPECS:
+            _presync_aden_tokens(CREDENTIAL_SPECS)
+
+        env_mapping = {
+            (spec.credential_id or name): spec.env_var
+            for name, spec in CREDENTIAL_SPECS.items()
+        }
+        env_storage = EnvVarStorage(env_mapping=env_mapping)
+        if os.environ.get("HIVE_CREDENTIAL_KEY"):
+            storage = CompositeStorage(primary=env_storage, fallbacks=[EncryptedFileStorage()])
+        else:
+            storage = env_storage
+        store = CredentialStore(storage=storage)
+
+        # Detect required credentials from agent graph
         session = CredentialSetupSession.from_agent_path(agent_path, missing_only=False)
+
+        # Health check function (may not be available)
+        check_health = None
+        if verify:
+            try:
+                from aden_tools.credentials import check_credential_health
+                check_health = check_credential_health
+            except ImportError:
+                pass
+
         required = []
         for mc in session.missing:
             cred_id = mc.credential_id or mc.credential_name
-            required.append(
-                {
-                    "credential_name": mc.credential_name,
-                    "credential_id": cred_id,
-                    "env_var": mc.env_var,
-                    "description": mc.description,
-                    "help_url": mc.help_url,
-                    "tools": mc.tools,
-                    "node_types": mc.node_types,
-                    "available": store.is_available(cred_id),
-                    "direct_api_key_supported": mc.direct_api_key_supported,
-                    "aden_supported": mc.aden_supported,
-                    "credential_key": mc.credential_key,
-                }
-            )
+            available = store.is_available(cred_id)
+
+            entry = {
+                "credential_name": mc.credential_name,
+                "credential_id": cred_id,
+                "env_var": mc.env_var,
+                "description": mc.description,
+                "help_url": mc.help_url,
+                "tools": mc.tools,
+                "node_types": mc.node_types,
+                "available": available,
+                "direct_api_key_supported": mc.direct_api_key_supported,
+                "aden_supported": mc.aden_supported,
+                "credential_key": mc.credential_key,
+                "valid": None,  # null = not checked
+                "validation_message": None,
+            }
+
+            # Phase 2: health check for available credentials
+            if available and verify and check_health:
+                spec = CREDENTIAL_SPECS.get(mc.credential_name)
+                if spec and spec.health_check_endpoint:
+                    value = store.get(cred_id)
+                    if value:
+                        try:
+                            result = check_health(
+                                mc.credential_name,
+                                value,
+                                health_check_endpoint=spec.health_check_endpoint,
+                                health_check_method=spec.health_check_method,
+                            )
+                            entry["valid"] = result.valid
+                            entry["validation_message"] = result.message
+                        except Exception as exc:
+                            entry["valid"] = False
+                            entry["validation_message"] = f"Health check error: {exc}"
+
+            required.append(entry)
         return web.json_response({"required": required})
     except Exception as e:
         logger.exception(f"Error checking agent credentials: {e}")
