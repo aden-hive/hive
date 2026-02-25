@@ -62,39 +62,22 @@ def _credential_error_response(exc: Exception, agent_path: str | None) -> web.Re
     """If *exc* is a CredentialError, return a 424 with structured credential info.
 
     Returns None if *exc* is not a credential error (caller should handle it).
+    Uses the CredentialValidationResult attached by validate_agent_credentials.
     """
     from framework.credentials.models import CredentialError
 
     if not isinstance(exc, CredentialError):
         return None
 
-    failed_names: list[str] = getattr(exc, "failed_cred_names", [])
+    from framework.server.routes_credentials import _status_to_dict
 
-    required: list[dict] = []
-    try:
-        from aden_tools.credentials import CREDENTIAL_SPECS
-
-        for name in failed_names:
-            spec = CREDENTIAL_SPECS.get(name)
-            if spec is None:
-                continue
-            required.append(
-                {
-                    "credential_name": name,
-                    "credential_id": spec.credential_id or name,
-                    "env_var": spec.env_var,
-                    "description": spec.description,
-                    "help_url": spec.help_url,
-                    "tools": list(spec.tools),
-                    "node_types": list(spec.node_types),
-                    "available": False,
-                    "direct_api_key_supported": spec.direct_api_key_supported,
-                    "aden_supported": spec.aden_supported,
-                    "credential_key": spec.credential_key,
-                }
-            )
-    except ImportError:
-        pass
+    # Prefer the structured validation result attached to the exception
+    validation_result = getattr(exc, "validation_result", None)
+    if validation_result is not None:
+        required = [_status_to_dict(c) for c in validation_result.failed]
+    else:
+        # Fallback for exceptions without a validation result
+        required = []
 
     return web.json_response(
         {

@@ -160,7 +160,10 @@ class CredentialSetupSession:
     @classmethod
     def from_nodes(cls, nodes: list[NodeSpec]) -> CredentialSetupSession:
         """Create a setup session by detecting missing credentials from nodes."""
-        missing = detect_missing_credentials_from_nodes(nodes)
+        from framework.credentials.validation import _status_to_missing, validate_agent_credentials
+
+        result = validate_agent_credentials(nodes, verify=False, raise_on_error=False)
+        missing = [_status_to_missing(c) for c in result.credentials if not c.available]
         return cls(missing)
 
     @classmethod
@@ -178,22 +181,15 @@ class CredentialSetupSession:
                 are NOT yet available. If False, include all required
                 credentials regardless of availability.
         """
-        agent_path = Path(agent_path)
+        from framework.credentials.validation import _status_to_missing, validate_agent_credentials
 
-        # Load agent to get nodes
-        agent_json = agent_path / "agent.json"
-        agent_py = agent_path / "agent.py"
-
-        nodes = []
-        if agent_py.exists():
-            # Python-based agent
-            nodes = _load_nodes_from_python_agent(agent_path)
-        elif agent_json.exists():
-            # JSON-based agent
-            nodes = _load_nodes_from_json_agent(agent_json)
-
-        creds = detect_missing_credentials_from_nodes(nodes, missing_only=missing_only)
-        return cls(creds)
+        nodes = load_agent_nodes(agent_path)
+        result = validate_agent_credentials(nodes, verify=False, raise_on_error=False)
+        if missing_only:
+            missing = [_status_to_missing(c) for c in result.credentials if not c.available]
+        else:
+            missing = [_status_to_missing(c) for c in result.credentials]
+        return cls(missing)
 
     def run_interactive(self) -> SetupResult:
         """Run the interactive setup flow."""
@@ -564,123 +560,24 @@ class CredentialSetupSession:
         self._print("")
 
 
-def detect_missing_credentials_from_nodes(
-    nodes: list,
-    *,
-    missing_only: bool = True,
-) -> list[MissingCredential]:
-    """
-    Detect credentials required by a list of nodes.
+def load_agent_nodes(agent_path: str | Path) -> list:
+    """Load NodeSpec list from an agent's agent.py or agent.json.
 
     Args:
-        nodes: List of NodeSpec objects
-        missing_only: If True (default), only return credentials that are
-            NOT yet available. If False, return ALL required credentials
-            regardless of availability.
+        agent_path: Path to agent directory.
 
     Returns:
-        List of MissingCredential objects for credentials that need setup
-        (or all required credentials when missing_only=False).
+        List of NodeSpec objects (empty list if agent can't be loaded).
     """
-    try:
-        from aden_tools.credentials import CREDENTIAL_SPECS
+    agent_path = Path(agent_path)
+    agent_py = agent_path / "agent.py"
+    agent_json = agent_path / "agent.json"
 
-        from framework.credentials import CredentialStore
-        from framework.credentials.storage import (
-            CompositeStorage,
-            EncryptedFileStorage,
-            EnvVarStorage,
-        )
-    except ImportError:
-        return []
-
-    # Collect required tools and node types
-    required_tools: set[str] = set()
-    node_types: set[str] = set()
-
-    for node in nodes:
-        if hasattr(node, "tools") and node.tools:
-            required_tools.update(node.tools)
-        if hasattr(node, "node_type"):
-            node_types.add(node.node_type)
-
-    # Build credential store to check availability.
-    # Env vars take priority over encrypted store (fresh key wins over stale).
-    env_mapping = {
-        (spec.credential_id or name): spec.env_var for name, spec in CREDENTIAL_SPECS.items()
-    }
-    env_storage = EnvVarStorage(env_mapping=env_mapping)
-    if os.environ.get("HIVE_CREDENTIAL_KEY"):
-        storage = CompositeStorage(primary=env_storage, fallbacks=[EncryptedFileStorage()])
-    else:
-        storage = env_storage
-    store = CredentialStore(storage=storage)
-
-    # Build reverse mappings
-    tool_to_cred: dict[str, str] = {}
-    node_type_to_cred: dict[str, str] = {}
-    for cred_name, spec in CREDENTIAL_SPECS.items():
-        for tool_name in spec.tools:
-            tool_to_cred[tool_name] = cred_name
-        for nt in spec.node_types:
-            node_type_to_cred[nt] = cred_name
-
-    missing: list[MissingCredential] = []
-    checked: set[str] = set()
-
-    # Check tool credentials
-    for tool_name in sorted(required_tools):
-        cred_name = tool_to_cred.get(tool_name)
-        if cred_name is None or cred_name in checked:
-            continue
-        checked.add(cred_name)
-
-        spec = CREDENTIAL_SPECS[cred_name]
-        cred_id = spec.credential_id or cred_name
-        if spec.required and (not missing_only or not store.is_available(cred_id)):
-            affected_tools = sorted(t for t in required_tools if t in spec.tools)
-            missing.append(
-                MissingCredential(
-                    credential_name=cred_name,
-                    env_var=spec.env_var,
-                    description=spec.description,
-                    help_url=spec.help_url,
-                    api_key_instructions=spec.api_key_instructions,
-                    tools=affected_tools,
-                    aden_supported=spec.aden_supported,
-                    direct_api_key_supported=spec.direct_api_key_supported,
-                    credential_id=spec.credential_id,
-                    credential_key=spec.credential_key,
-                )
-            )
-
-    # Check node type credentials
-    for nt in sorted(node_types):
-        cred_name = node_type_to_cred.get(nt)
-        if cred_name is None or cred_name in checked:
-            continue
-        checked.add(cred_name)
-
-        spec = CREDENTIAL_SPECS[cred_name]
-        cred_id = spec.credential_id or cred_name
-        if spec.required and (not missing_only or not store.is_available(cred_id)):
-            affected_types = sorted(t for t in node_types if t in spec.node_types)
-            missing.append(
-                MissingCredential(
-                    credential_name=cred_name,
-                    env_var=spec.env_var,
-                    description=spec.description,
-                    help_url=spec.help_url,
-                    api_key_instructions=spec.api_key_instructions,
-                    node_types=affected_types,
-                    aden_supported=spec.aden_supported,
-                    direct_api_key_supported=spec.direct_api_key_supported,
-                    credential_id=spec.credential_id,
-                    credential_key=spec.credential_key,
-                )
-            )
-
-    return missing
+    if agent_py.exists():
+        return _load_nodes_from_python_agent(agent_path)
+    elif agent_json.exists():
+        return _load_nodes_from_json_agent(agent_json)
+    return []
 
 
 def _load_nodes_from_python_agent(agent_path: Path) -> list:

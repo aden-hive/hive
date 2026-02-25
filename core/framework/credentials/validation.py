@@ -53,14 +53,97 @@ def ensure_credential_key_env() -> None:
 
 
 @dataclass
-class _CredentialCheck:
-    """Result of checking a single credential."""
+class CredentialStatus:
+    """Status of a single required credential after validation."""
 
+    credential_name: str
+    credential_id: str
     env_var: str
-    source: str
-    used_by: str
+    description: str
+    help_url: str
+    api_key_instructions: str
+    tools: list[str]
+    node_types: list[str]
     available: bool
-    help_url: str = ""
+    valid: bool | None  # None = not checked
+    validation_message: str | None
+    aden_supported: bool
+    direct_api_key_supported: bool
+    credential_key: str
+    aden_not_connected: bool  # Aden-only cred, ADEN_API_KEY set, but integration missing
+
+
+@dataclass
+class CredentialValidationResult:
+    """Result of validating all credentials required by an agent."""
+
+    credentials: list[CredentialStatus]
+    has_aden_key: bool
+
+    @property
+    def failed(self) -> list[CredentialStatus]:
+        """Credentials that are missing, invalid, or Aden-not-connected."""
+        return [c for c in self.credentials if not c.available or c.valid is False]
+
+    @property
+    def has_errors(self) -> bool:
+        return bool(self.failed)
+
+    @property
+    def failed_cred_names(self) -> list[str]:
+        """Credential names that need (re-)collection, excluding Aden-not-connected."""
+        return [c.credential_name for c in self.failed if not c.aden_not_connected]
+
+    def format_error_message(self) -> str:
+        """Format a human-readable error message for CLI/runner output."""
+        missing = [c for c in self.credentials if not c.available and not c.aden_not_connected]
+        invalid = [c for c in self.credentials if c.available and c.valid is False]
+        aden_nc = [c for c in self.credentials if c.aden_not_connected]
+
+        lines: list[str] = []
+        if missing:
+            lines.append("Missing credentials:\n")
+            for c in missing:
+                entry = f"  {c.env_var} for {_label(c)}"
+                if c.help_url:
+                    entry += f"\n    Get it at: {c.help_url}"
+                lines.append(entry)
+        if invalid:
+            if missing:
+                lines.append("")
+            lines.append("Invalid or expired credentials:\n")
+            for c in invalid:
+                entry = f"  {c.env_var} for {_label(c)} — {c.validation_message}"
+                if c.help_url:
+                    entry += f"\n    Get a new key at: {c.help_url}"
+                lines.append(entry)
+        if aden_nc:
+            if missing or invalid:
+                lines.append("")
+            lines.append(
+                "Aden integrations not connected "
+                "(ADEN_API_KEY is set but OAuth tokens unavailable):\n"
+            )
+            for c in aden_nc:
+                lines.append(
+                    f"  {c.env_var} for {_label(c)}"
+                    f"\n    Connect this integration at hive.adenhq.com first."
+                )
+        lines.append(
+            "\nTo fix: run /hive-credentials in Claude Code."
+            "\nIf you've already set up credentials, "
+            "restart your terminal to load them."
+        )
+        return "\n".join(lines)
+
+
+def _label(c: CredentialStatus) -> str:
+    """Build a human-readable label from tools/node_types."""
+    if c.tools:
+        return ", ".join(c.tools)
+    if c.node_types:
+        return ", ".join(c.node_types) + " nodes"
+    return c.credential_name
 
 
 def _presync_aden_tokens(credential_specs: dict) -> None:
@@ -112,7 +195,12 @@ def _presync_aden_tokens(credential_specs: dict) -> None:
             )
 
 
-def validate_agent_credentials(nodes: list, quiet: bool = False, verify: bool = True) -> None:
+def validate_agent_credentials(
+    nodes: list,
+    quiet: bool = False,
+    verify: bool = True,
+    raise_on_error: bool = True,
+) -> CredentialValidationResult:
     """Check that required credentials are available and valid before running an agent.
 
     Two-phase validation:
@@ -124,15 +212,27 @@ def validate_agent_credentials(nodes: list, quiet: bool = False, verify: bool = 
         nodes: List of NodeSpec objects from the agent graph.
         quiet: If True, suppress the credential summary output.
         verify: If True (default), run health checks on present credentials.
+        raise_on_error: If True (default), raise CredentialError when validation
+            fails.  Set to False to get the result without raising.
+
+    Returns:
+        CredentialValidationResult with status of ALL required credentials.
     """
+    empty_result = CredentialValidationResult(credentials=[], has_aden_key=False)
+
     # Collect required tools and node types
-    required_tools = {tool for node in nodes if node.tools for tool in node.tools}
-    node_types = {node.node_type for node in nodes}
+    required_tools: set[str] = set()
+    node_types: set[str] = set()
+    for node in nodes:
+        if hasattr(node, "tools") and node.tools:
+            required_tools.update(node.tools)
+        if hasattr(node, "node_type"):
+            node_types.add(node.node_type)
 
     try:
         from aden_tools.credentials import CREDENTIAL_SPECS
     except ImportError:
-        return  # aden_tools not installed, skip check
+        return empty_result  # aden_tools not installed, skip check
 
     from framework.credentials.storage import CompositeStorage, EncryptedFileStorage, EnvVarStorage
     from framework.credentials.store import CredentialStore
@@ -166,35 +266,45 @@ def validate_agent_credentials(nodes: list, quiet: bool = False, verify: bool = 
         for nt in spec.node_types:
             node_type_to_cred[nt] = cred_name
 
-    missing: list[str] = []
-    invalid: list[str] = []
-    # Aden-backed creds where ADEN_API_KEY is set but integration not connected
-    aden_not_connected: list[str] = []
-    failed_cred_names: list[str] = []  # all cred names that need (re-)collection
     has_aden_key = bool(os.environ.get("ADEN_API_KEY"))
     checked: set[str] = set()
+    all_credentials: list[CredentialStatus] = []
     # Credentials that are present and should be health-checked
-    to_verify: list[tuple[str, str]] = []  # (cred_name, used_by_label)
+    to_verify: list[int] = []  # indices into all_credentials
 
-    def _check_credential(spec, cred_name: str, label: str) -> None:
+    def _check_credential(spec, cred_name: str, affected_tools: list[str], affected_node_types: list[str]) -> None:
         cred_id = spec.credential_id or cred_name
-        if not store.is_available(cred_id):
-            # If ADEN_API_KEY is set and this is an Aden-only credential,
-            # the issue is that the integration isn't connected on hive.adenhq.com,
-            # NOT that the user needs to re-enter ADEN_API_KEY.
-            if has_aden_key and spec.aden_supported and not spec.direct_api_key_supported:
-                aden_not_connected.append(
-                    f"  {spec.env_var} for {label}"
-                    f"\n    Connect this integration at hive.adenhq.com first."
-                )
-            else:
-                entry = f"  {spec.env_var} for {label}"
-                if spec.help_url:
-                    entry += f"\n    Get it at: {spec.help_url}"
-                missing.append(entry)
-                failed_cred_names.append(cred_name)
-        elif verify and spec.health_check_endpoint:
-            to_verify.append((cred_name, label))
+        available = store.is_available(cred_id)
+
+        # Aden-not-connected: ADEN_API_KEY set, Aden-only cred, but integration missing
+        is_aden_nc = (
+            not available
+            and has_aden_key
+            and spec.aden_supported
+            and not spec.direct_api_key_supported
+        )
+
+        status = CredentialStatus(
+            credential_name=cred_name,
+            credential_id=cred_id,
+            env_var=spec.env_var,
+            description=spec.description,
+            help_url=spec.help_url,
+            api_key_instructions=getattr(spec, "api_key_instructions", ""),
+            tools=affected_tools,
+            node_types=affected_node_types,
+            available=available,
+            valid=None,
+            validation_message=None,
+            aden_supported=spec.aden_supported,
+            direct_api_key_supported=spec.direct_api_key_supported,
+            credential_key=spec.credential_key,
+            aden_not_connected=is_aden_nc,
+        )
+        all_credentials.append(status)
+
+        if available and verify and spec.health_check_endpoint:
+            to_verify.append(len(all_credentials) - 1)
 
     # Check tool credentials
     for tool_name in sorted(required_tools):
@@ -206,8 +316,7 @@ def validate_agent_credentials(nodes: list, quiet: bool = False, verify: bool = 
         if not spec.required:
             continue
         affected = sorted(t for t in required_tools if t in spec.tools)
-        label = ", ".join(affected)
-        _check_credential(spec, cred_name, label)
+        _check_credential(spec, cred_name, affected_tools=affected, affected_node_types=[])
 
     # Check node type credentials (e.g., ANTHROPIC_API_KEY for LLM nodes)
     for nt in sorted(node_types):
@@ -219,8 +328,7 @@ def validate_agent_credentials(nodes: list, quiet: bool = False, verify: bool = 
         if not spec.required:
             continue
         affected_types = sorted(t for t in node_types if t in spec.node_types)
-        label = ", ".join(affected_types) + " nodes"
-        _check_credential(spec, cred_name, label)
+        _check_credential(spec, cred_name, affected_tools=[], affected_node_types=affected_types)
 
     # Phase 2: health-check present credentials
     if to_verify:
@@ -230,68 +338,51 @@ def validate_agent_credentials(nodes: list, quiet: bool = False, verify: bool = 
             check_credential_health = None  # type: ignore[assignment]
 
         if check_credential_health is not None:
-            for cred_name, label in to_verify:
-                spec = CREDENTIAL_SPECS[cred_name]
-                cred_id = spec.credential_id or cred_name
-                value = store.get(cred_id)
+            for idx in to_verify:
+                status = all_credentials[idx]
+                spec = CREDENTIAL_SPECS[status.credential_name]
+                value = store.get(status.credential_id)
                 if not value:
                     continue
                 try:
                     result = check_credential_health(
-                        cred_name,
+                        status.credential_name,
                         value,
                         health_check_endpoint=spec.health_check_endpoint,
                         health_check_method=spec.health_check_method,
                     )
-                    if not result.valid:
-                        entry = f"  {spec.env_var} for {label} — {result.message}"
-                        if spec.help_url:
-                            entry += f"\n    Get a new key at: {spec.help_url}"
-                        invalid.append(entry)
-                        failed_cred_names.append(cred_name)
-                    elif result.valid:
+                    status.valid = result.valid
+                    status.validation_message = result.message
+                    if result.valid:
                         # Persist identity from health check (best-effort)
                         identity_data = result.details.get("identity")
                         if identity_data and isinstance(identity_data, dict):
                             try:
-                                cred_obj = store.get_credential(cred_id, refresh_if_needed=False)
+                                cred_obj = store.get_credential(
+                                    status.credential_id, refresh_if_needed=False
+                                )
                                 if cred_obj:
                                     cred_obj.set_identity(**identity_data)
                                     store.save_credential(cred_obj)
                             except Exception:
                                 pass  # Identity persistence is best-effort
                 except Exception as exc:
-                    logger.debug("Health check for %s failed: %s", cred_name, exc)
+                    logger.debug("Health check for %s failed: %s", status.credential_name, exc)
 
-    errors = missing + invalid + aden_not_connected
-    if errors:
+    validation_result = CredentialValidationResult(
+        credentials=all_credentials,
+        has_aden_key=has_aden_key,
+    )
+
+    if raise_on_error and validation_result.has_errors:
         from framework.credentials.models import CredentialError
 
-        lines: list[str] = []
-        if missing:
-            lines.append("Missing credentials:\n")
-            lines.extend(missing)
-        if invalid:
-            if missing:
-                lines.append("")
-            lines.append("Invalid or expired credentials:\n")
-            lines.extend(invalid)
-        if aden_not_connected:
-            if missing or invalid:
-                lines.append("")
-            lines.append(
-                "Aden integrations not connected "
-                "(ADEN_API_KEY is set but OAuth tokens unavailable):\n"
-            )
-            lines.extend(aden_not_connected)
-        lines.append(
-            "\nTo fix: run /hive-credentials in Claude Code."
-            "\nIf you've already set up credentials, "
-            "restart your terminal to load them."
-        )
-        exc = CredentialError("\n".join(lines))
-        exc.failed_cred_names = failed_cred_names  # type: ignore[attr-defined]
+        exc = CredentialError(validation_result.format_error_message())
+        exc.validation_result = validation_result  # type: ignore[attr-defined]
+        exc.failed_cred_names = validation_result.failed_cred_names  # type: ignore[attr-defined]
         raise exc
+
+    return validation_result
 
 
 def build_setup_session_from_error(
@@ -301,12 +392,8 @@ def build_setup_session_from_error(
 ):
     """Build a ``CredentialSetupSession`` that covers all failed credentials.
 
-    ``validate_agent_credentials`` attaches ``failed_cred_names`` (both missing
-    and invalid) to the ``CredentialError``.  This helper converts those names
-    into ``MissingCredential`` entries so the setup screen can re-collect them.
-
-    Falls back to the normal ``from_nodes`` / ``from_agent_path`` detection
-    when the attribute is absent.
+    Uses the ``CredentialValidationResult`` attached to the ``CredentialError``
+    when available.  Falls back to re-detecting from nodes / agent_path.
 
     Args:
         credential_error: The ``CredentialError`` raised by validation.
@@ -315,42 +402,36 @@ def build_setup_session_from_error(
     """
     from framework.credentials.setup import CredentialSetupSession, MissingCredential
 
-    # Start with normal detection (picks up truly missing creds)
+    # Prefer the validation result attached to the exception
+    result: CredentialValidationResult | None = getattr(
+        credential_error, "validation_result", None
+    )
+    if result is not None:
+        missing = [_status_to_missing(c) for c in result.failed]
+        return CredentialSetupSession(missing)
+
+    # Fallback: re-detect from nodes or agent_path
     if nodes is not None:
-        session = CredentialSetupSession.from_nodes(nodes)
+        return CredentialSetupSession.from_nodes(nodes)
     elif agent_path is not None:
-        session = CredentialSetupSession.from_agent_path(agent_path)
-    else:
-        session = CredentialSetupSession(missing=[])
+        return CredentialSetupSession.from_agent_path(agent_path)
+    return CredentialSetupSession(missing=[])
 
-    # Add credentials that are present but failed health checks
-    already = {m.credential_name for m in session.missing}
-    failed_names: list[str] = getattr(credential_error, "failed_cred_names", [])
-    if failed_names:
-        try:
-            from aden_tools.credentials import CREDENTIAL_SPECS
 
-            for name in failed_names:
-                if name in already:
-                    continue
-                spec = CREDENTIAL_SPECS.get(name)
-                if spec is None:
-                    continue
-                session.missing.append(
-                    MissingCredential(
-                        credential_name=name,
-                        env_var=spec.env_var,
-                        description=spec.description,
-                        help_url=spec.help_url,
-                        api_key_instructions=spec.api_key_instructions,
-                        tools=list(spec.tools),
-                        aden_supported=spec.aden_supported,
-                        direct_api_key_supported=spec.direct_api_key_supported,
-                        credential_id=spec.credential_id,
-                        credential_key=spec.credential_key,
-                    )
-                )
-        except ImportError:
-            pass
+def _status_to_missing(c: CredentialStatus):
+    """Convert a CredentialStatus to a MissingCredential for the setup flow."""
+    from framework.credentials.setup import MissingCredential
 
-    return session
+    return MissingCredential(
+        credential_name=c.credential_name,
+        env_var=c.env_var,
+        description=c.description,
+        help_url=c.help_url,
+        api_key_instructions=c.api_key_instructions,
+        tools=c.tools,
+        node_types=c.node_types,
+        aden_supported=c.aden_supported,
+        direct_api_key_supported=c.direct_api_key_supported,
+        credential_id=c.credential_id,
+        credential_key=c.credential_key,
+    )
