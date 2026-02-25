@@ -3,6 +3,7 @@
 import argparse
 import asyncio
 import json
+import subprocess
 import sys
 from pathlib import Path
 
@@ -369,6 +370,19 @@ def register_commands(subparsers: argparse._SubParsersAction) -> None:
         help="Path to agent folder (optional - runs general setup if not specified)",
     )
     setup_creds_parser.set_defaults(func=cmd_setup_credentials)
+
+    # update command
+    update_parser = subparsers.add_parser(
+        "update",
+        help="Update Hive framework",
+        description="Fetch latest changes from origin and sync dependencies.",
+    )
+    update_parser.add_argument(
+        "--no-stash",
+        action="store_true",
+        help="Skip stashing local changes before updating",
+    )
+    update_parser.set_defaults(func=cmd_update)
 
 
 def _load_resume_state(
@@ -1915,3 +1929,77 @@ def cmd_setup_credentials(args: argparse.Namespace) -> int:
 
     result = session.run_interactive()
     return 0 if result.success else 1
+
+
+def cmd_update(args: argparse.Namespace) -> int:
+    """Update Hive framework to the latest version."""
+
+    # Find project root (looking for .git starting from this file's location)
+    current_path = Path(__file__).resolve()
+    project_root = None
+    for parent in current_path.parents:
+        if (parent / ".git").is_dir():
+            project_root = parent
+            break
+
+    if not project_root:
+        # Fallback to CWD if not found
+        project_root = Path.cwd()
+        if not (project_root / ".git").is_dir():
+            print("Error: Could not find project root (.git directory not found).")
+            return 1
+
+    def run_cmd(cmd, cwd=project_root):
+        try:
+            return subprocess.run(cmd, cwd=cwd, check=True, capture_output=True, text=True)
+        except subprocess.CalledProcessError as e:
+            if e.stderr:
+                print(f"Error: {e.stderr}")
+            return None
+        except Exception as e:
+            print(f"Error: {e}")
+            return None
+
+    # Check for local changes
+    status = run_cmd(["git", "status", "--porcelain"])
+    if status is None:
+        print("Error: Failed to check git status. Are you in a git repository?")
+        return 1
+
+    has_changes = status.stdout.strip()
+    stashed = False
+
+    if has_changes and not getattr(args, "no_stash", False):
+        print("Local changes detected. Stashing...")
+        if run_cmd(["git", "stash", "--include-untracked"]):
+            stashed = True
+        else:
+            print("Warning: Failed to stash changes. Update might fail if there are conflicts.")
+
+    print("Fetching latest changes...")
+    if not run_cmd(["git", "pull", "origin", "main"]):
+        print("Error: Failed to pull latest changes.")
+        if stashed:
+            print("Restoring stash...")
+            run_cmd(["git", "stash", "pop"])
+        return 1
+
+    print("Syncing dependencies...")
+    if not run_cmd(["uv", "sync"]):
+        print("Error: Failed to sync dependencies via uv.")
+        if stashed:
+            print("Restoring stash...")
+            run_cmd(["git", "stash", "pop"])
+        return 1
+
+    if stashed:
+        print("Restoring local changes...")
+        run_cmd(["git", "stash", "pop"])
+
+    print("\n" + "=" * 60)
+    print(" Hive successfully updated to latest version!")
+    print("=" * 60)
+    print("\nNote: Please restart any running 'hive' processes (TUI or agents)")
+    print("to ensure they load the updated code.")
+
+    return 0

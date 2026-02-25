@@ -8,6 +8,7 @@ Usage:
     hive list exports/
     hive dispatch exports/ --input '{"key": "value"}'
     hive shell exports/my-agent
+    hive update [--no-stash]
 
 Testing commands:
     hive test-run <agent_path> --goal <goal_id>
