@@ -183,9 +183,11 @@ async def handle_check_agent(request: web.Request) -> web.Response:
                             entry["validation_message"] = f"Health check error: {exc}"
 
             required.append(entry)
+
+        has_aden_key = bool(os.environ.get("ADEN_API_KEY"))
         return web.json_response({
             "required": required,
-            "has_aden_key": bool(os.environ.get("ADEN_API_KEY")),
+            "has_aden_key": has_aden_key,
         })
     except Exception as e:
         logger.exception(f"Error checking agent credentials: {e}")

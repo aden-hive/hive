@@ -506,12 +506,10 @@ class SessionManager:
             monitoring_executor = monitoring_registry.get_executor()
 
             async def _judge_loop():
-                interval = 120
-                first = True
+                interval = 300  # 5 minutes between checks
+                # Wait before the first check — let the worker actually do something
+                await asyncio.sleep(interval)
                 while True:
-                    if not first:
-                        await asyncio.sleep(interval)
-                    first = False
                     try:
                         executor = GraphExecutor(
                             runtime=judge_runtime,
@@ -533,6 +531,7 @@ class SessionManager:
                         )
                     except Exception:
                         logger.error("Health judge tick failed", exc_info=True)
+                    await asyncio.sleep(interval)
 
             session.judge_task = asyncio.create_task(_judge_loop())
 

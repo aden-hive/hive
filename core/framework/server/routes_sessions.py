@@ -58,6 +58,53 @@ def _session_to_live_dict(session) -> dict:
     }
 
 
+def _credential_error_response(exc: Exception, agent_path: str | None) -> web.Response | None:
+    """If *exc* is a CredentialError, return a 424 with structured credential info.
+
+    Returns None if *exc* is not a credential error (caller should handle it).
+    """
+    from framework.credentials.models import CredentialError
+
+    if not isinstance(exc, CredentialError):
+        return None
+
+    failed_names: list[str] = getattr(exc, "failed_cred_names", [])
+
+    required: list[dict] = []
+    try:
+        from aden_tools.credentials import CREDENTIAL_SPECS
+
+        for name in failed_names:
+            spec = CREDENTIAL_SPECS.get(name)
+            if spec is None:
+                continue
+            required.append({
+                "credential_name": name,
+                "credential_id": spec.credential_id or name,
+                "env_var": spec.env_var,
+                "description": spec.description,
+                "help_url": spec.help_url,
+                "tools": list(spec.tools),
+                "node_types": list(spec.node_types),
+                "available": False,
+                "direct_api_key_supported": spec.direct_api_key_supported,
+                "aden_supported": spec.aden_supported,
+                "credential_key": spec.credential_key,
+            })
+    except ImportError:
+        pass
+
+    return web.json_response(
+        {
+            "error": "credentials_required",
+            "message": str(exc),
+            "agent_path": agent_path or "",
+            "required": required,
+        },
+        status=424,
+    )
+
+
 # ------------------------------------------------------------------
 # Session lifecycle
 # ------------------------------------------------------------------
@@ -110,6 +157,9 @@ async def handle_create_session(request: web.Request) -> web.Response:
     except FileNotFoundError as e:
         return web.json_response({"error": str(e)}, status=404)
     except Exception as e:
+        resp = _credential_error_response(e, agent_path)
+        if resp is not None:
+            return resp
         logger.exception("Error creating session: %s", e)
         return web.json_response({"error": str(e)}, status=500)
 
@@ -205,6 +255,9 @@ async def handle_load_worker(request: web.Request) -> web.Response:
     except FileNotFoundError as e:
         return web.json_response({"error": str(e)}, status=404)
     except Exception as e:
+        resp = _credential_error_response(e, agent_path)
+        if resp is not None:
+            return resp
         logger.exception("Error loading worker: %s", e)
         return web.json_response({"error": str(e)}, status=500)
 
