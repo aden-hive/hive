@@ -301,6 +301,9 @@ class ExecutionStream:
         self._execution_tasks.clear()
         self._active_executions.clear()
 
+        # Wait for any in-flight saves to complete
+        await self._runtime.await_pending_saves()
+
         logger.info(f"ExecutionStream '{self.stream_id}' stopped")
 
         # Emit stream stopped event
