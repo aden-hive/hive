@@ -1255,10 +1255,18 @@ export default function Workspace() {
   }, [activeWorker, agentStates]);
 
   const closeAgentTab = useCallback((agentType: string) => {
-    // Pause worker execution if running (saves state to disk for resume)
+    // Pause worker execution if running (saves checkpoint), then kill the
+    // entire backend session so the queen and judge don't keep running.
     const state = agentStates[agentType];
-    if (state?.sessionId && state?.currentExecutionId && state?.workerRunState === "running") {
-      executionApi.pause(state.sessionId, state.currentExecutionId).catch(() => {});
+    if (state?.sessionId) {
+      const pausePromise = (state.currentExecutionId && state.workerRunState === "running")
+        ? executionApi.pause(state.sessionId, state.currentExecutionId)
+        : Promise.resolve();
+
+      pausePromise
+        .catch(() => {})                          // pause failure shouldn't block kill
+        .then(() => sessionsApi.stop(state.sessionId!))
+        .catch(() => {});                         // fire-and-forget
     }
 
     const allTypes = Object.keys(sessionsByAgent).filter(k => (sessionsByAgent[k] || []).length > 0);
