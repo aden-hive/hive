@@ -663,10 +663,10 @@ if ($importErrors -gt 0) {
 Write-Host ""
 
 # ============================================================
-# Step 4: Verify Claude Code Skills
+# Step 4: Verify Agent Skills
 # ============================================================
 
-Write-Step -Number "4" -Text "Step 4: Verifying Claude Code skills..."
+Write-Step -Number "4" -Text "Step 4: Verifying agent skills..."
 
 # (skills check is informational only, shown in final verification)
 
@@ -775,6 +775,7 @@ $SelectedProviderId = ""
 $SelectedEnvVar     = ""
 $SelectedModel      = ""
 $SelectedMaxTokens  = 8192
+$SelectedClientHint = ""
 
 # Scan for existing API keys in the current environment
 $FoundProviders = @()
@@ -936,6 +937,45 @@ if ($SelectedProviderId) {
 }
 Write-Host ""
 
+# Client hint setup: persist HIVE_CLIENT for client-aware runtime guidance
+Write-Color -Text ([char]0x2B22) -Color Yellow -NoNewline
+Write-Host " " -NoNewline
+Write-Color -Text "Client hint setup..." -Color Cyan
+Write-Host ""
+
+$existingClientHint = [System.Environment]::GetEnvironmentVariable("HIVE_CLIENT", "Process")
+if (-not $existingClientHint) {
+    $existingClientHint = [System.Environment]::GetEnvironmentVariable("HIVE_CLIENT", "User")
+}
+
+if ($existingClientHint) {
+    $SelectedClientHint = $existingClientHint.Trim().ToLowerInvariant()
+} else {
+    $clientOptions = @(
+        "Generic terminal / not sure",
+        "Claude Code",
+        "Codex",
+        "Cursor",
+        "Antigravity"
+    )
+    $clientValues = @("generic", "claude", "codex", "cursor", "antigravity")
+    $clientChoice = Prompt-Choice "Select your coding client (used for tailored Hive hints):" $clientOptions
+    $SelectedClientHint = $clientValues[$clientChoice]
+}
+
+switch ($SelectedClientHint) {
+    { $_ -in @("claude", "claude_code", "claude-code") } { $SelectedClientHint = "claude"; break }
+    "codex" { $SelectedClientHint = "codex"; break }
+    "cursor" { $SelectedClientHint = "cursor"; break }
+    { $_ -in @("antigravity", "antigravity-ide", "gemini") } { $SelectedClientHint = "antigravity"; break }
+    default { $SelectedClientHint = "generic"; break }
+}
+
+[System.Environment]::SetEnvironmentVariable("HIVE_CLIENT", $SelectedClientHint, "User")
+$env:HIVE_CLIENT = $SelectedClientHint
+Write-Ok "HIVE_CLIENT=$SelectedClientHint saved as User environment variable"
+Write-Host ""
+
 # ============================================================
 # Step 6: Initialize Credential Store
 # ============================================================
@@ -1043,11 +1083,58 @@ if ($LASTEXITCODE -eq 0) { Write-Ok "ok" } else { Write-Warn "skipped" }
 Write-Host "  $([char]0x2B21) MCP config... " -NoNewline
 if (Test-Path (Join-Path $ScriptDir ".mcp.json")) { Write-Ok "ok" } else { Write-Warn "skipped" }
 
-Write-Host "  $([char]0x2B21) skills... " -NoNewline
-$skillsDir = Join-Path (Join-Path $ScriptDir ".claude") "skills"
-if (Test-Path $skillsDir) {
-    $skillCount = (Get-ChildItem -Directory $skillsDir -ErrorAction SilentlyContinue).Count
-    Write-Ok "$skillCount found"
+Write-Host "  - skills... " -NoNewline
+$skillCandidates = @(
+    (Join-Path (Join-Path $ScriptDir ".agents") "skills"),
+    (Join-Path (Join-Path $ScriptDir ".agent") "skills"),
+    (Join-Path (Join-Path $ScriptDir ".cursor") "skills"),
+    (Join-Path (Join-Path $ScriptDir ".claude") "skills")
+)
+$skillSummaries = @()
+foreach ($candidate in $skillCandidates) {
+    if (Test-Path $candidate) {
+        $skillCount = (Get-ChildItem -Directory $candidate -ErrorAction SilentlyContinue).Count
+        $skillsSource = (Split-Path -Leaf (Split-Path -Parent $candidate)) + "/skills"
+        $skillSummaries += "$skillCount found ($skillsSource)"
+    }
+}
+if ($skillSummaries.Count -gt 0) {
+    Write-Ok ($skillSummaries -join "; ")
+} else {
+    Write-Warn "skipped"
+}
+
+$CodexAvailable = $false
+$CodexVersion = "0.0.0"
+Write-Host "  - codex CLI... " -NoNewline
+$codexCmd = Get-Command codex -ErrorAction SilentlyContinue
+if ($codexCmd) {
+    $codexRaw = (& codex --version 2>$null | Select-Object -First 1)
+    $match = [regex]::Match($codexRaw, '\d+\.\d+\.\d+')
+    if ($match.Success) {
+        $CodexVersion = $match.Value
+    }
+
+    $parts = $CodexVersion.Split('.')
+    $major = [int]$parts[0]
+    $minor = [int]$parts[1]
+
+    if ($major -gt 0 -or ($major -eq 0 -and $minor -ge 101)) {
+        Write-Ok $CodexVersion
+        $CodexAvailable = $true
+    } else {
+        Write-Warn "$CodexVersion (upgrade to 0.101.0+)"
+    }
+} else {
+    Write-Warn "skipped"
+}
+
+$ClaudeAvailable = $false
+Write-Host "  - claude CLI... " -NoNewline
+$claudeCmd = Get-Command claude -ErrorAction SilentlyContinue
+if ($claudeCmd) {
+    Write-Ok "available"
+    $ClaudeAvailable = $true
 } else {
     Write-Warn "skipped"
 }
@@ -1121,21 +1208,52 @@ if ($SelectedProviderId) {
 if ($credKey) {
     Write-Color -Text "Credential Store:" -Color White
     Write-Ok "~/.hive/credentials/  (encrypted)"
-    Write-Color -Text "  Set up agent credentials with: /setup-credentials" -Color DarkGray
+    Write-Color -Text "  Set up agent credentials with: /hive-credentials" -Color DarkGray
     Write-Host ""
 }
 
 Write-Color -Text "Build a New Agent:" -Color White
 Write-Host ""
-Write-Host "  1. Open Claude Code in this directory:"
-Write-Color -Text "     claude" -Color Cyan
-Write-Host ""
-Write-Host "  2. Build a new agent:"
+Write-Host "  If your coding client supports Hive skills, run:"
 Write-Color -Text "     /hive" -Color Cyan
-Write-Host ""
-Write-Host "  3. Test an existing agent:"
 Write-Color -Text "     /hive-test" -Color Cyan
+Write-Color -Text "     /hive-credentials" -Color Cyan
 Write-Host ""
+
+if ($ClaudeAvailable) {
+    Write-Color -Text "Claude Code:" -Color White
+    Write-Host "  1. Run: " -NoNewline
+    Write-Color -Text "claude" -Color Cyan
+    Write-Host "  2. Then run: " -NoNewline
+    Write-Color -Text "/hive" -Color Cyan
+    Write-Host ""
+}
+
+if ($CodexAvailable) {
+    Write-Color -Text "Codex:" -Color White
+    Write-Host "  1. Run: " -NoNewline
+    Write-Color -Text "codex" -Color Cyan
+    Write-Host "  2. Type: " -NoNewline
+    Write-Color -Text "use hive" -Color Cyan
+    Write-Host ""
+}
+
+$cursorSkillsDir = Join-Path (Join-Path $ScriptDir ".cursor") "skills"
+if (Test-Path $cursorSkillsDir) {
+    Write-Color -Text "Cursor:" -Color White
+    Write-Host "  Open this repo in Cursor and use Hive skills from " -NoNewline
+    Write-Color -Text ".cursor/skills" -Color Cyan
+    Write-Host ""
+}
+
+$antigravityConfig = Join-Path (Join-Path (Join-Path $env:USERPROFILE ".gemini") "antigravity") "mcp_config.json"
+if ($SelectedClientHint -eq "antigravity" -or (Test-Path $antigravityConfig)) {
+    Write-Color -Text "Antigravity:" -Color White
+    Write-Host "  Run: " -NoNewline
+    Write-Color -Text ".\scripts\setup-antigravity-mcp.sh" -Color Cyan
+    Write-Host "  Then restart Antigravity IDE."
+    Write-Host ""
+}
 Write-Color -Text "Run an Agent:" -Color White
 Write-Host ""
 Write-Host "  Launch the interactive dashboard to browse and run agents:"
@@ -1156,7 +1274,7 @@ Write-Host "After restarting, test with:" -ForegroundColor Cyan
 Write-Color -Text "  .\hive.ps1 tui" -Color Cyan
 Write-Host ""
 
-if ($SelectedProviderId -or $credKey) {
+if ($SelectedProviderId -or $credKey -or $SelectedClientHint) {
     Write-Color -Text "Note:" -Color White
     Write-Host "- uv has been added to your User PATH"
     if ($SelectedProviderId) {
@@ -1164,6 +1282,9 @@ if ($SelectedProviderId -or $credKey) {
     }
     if ($credKey) {
         Write-Host "- HIVE_CREDENTIAL_KEY is set for credential encryption"
+    }
+    if ($SelectedClientHint) {
+        Write-Host "- HIVE_CLIENT=$SelectedClientHint is set for client-aware hints"
     }
     Write-Host "- All variables will persist across reboots"
     Write-Host ""

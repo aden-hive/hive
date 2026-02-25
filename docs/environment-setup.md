@@ -157,15 +157,15 @@ python -m agent_name COMMAND
 
 ## Building New Agents and Run Flow
 
-Build and run an agent using Claude Code CLI with the agent building skills:
+Build and run an agent using a supported coding-agent CLI with the agent-building skills:
 
-### 1. Install Claude Skills (One-time)
+### 1. Install Agent Skills (One-time)
 
 ```bash
 ./quickstart.sh
 ```
 
-This verifies agent-related Claude Code skills are available:
+This verifies the agent-building skills are available:
 
 - `/hive` - Complete workflow for building agents
 - `/hive-create` - Step-by-step build guide
@@ -205,8 +205,14 @@ This step creates the initial agent structure required for further development.
 
 ### 3. Define Agent Logic
 
+**Claude Code:**
 ```
 claude> /hive-concepts
+```
+
+**Codex CLI:**
+```
+codex> use hive-concepts
 ```
 
 Follow the prompts to:
@@ -220,8 +226,14 @@ This step establishes the core concepts and rules needed before building an agen
 
 ### 4. Apply Agent Patterns
 
+**Claude Code:**
 ```
 claude> /hive-patterns
+```
+
+**Codex CLI:**
+```
+codex> use hive-patterns
 ```
 
 Follow the prompts to:
@@ -235,8 +247,14 @@ This step helps optimize agent design before final testing.
 
 ### 5. Test Your Agent
 
+**Claude Code:**
 ```
 claude> /hive-test
+```
+
+**Codex CLI:**
+```
+codex> use hive-test
 ```
 
 Follow the prompts to:
@@ -456,10 +474,17 @@ This design allows agents in `exports/` to be:
 ./quickstart.sh
 ```
 
-### 2. Build Agent (Claude Code)
+### 2. Build Agent
 
+**Claude Code:**
 ```
 claude> /hive
+Enter goal: "Build an agent that processes customer support tickets"
+```
+
+**Codex CLI:**
+```
+codex> use hive
 Enter goal: "Build an agent that processes customer support tickets"
 ```
 
@@ -471,8 +496,14 @@ PYTHONPATH=exports uv run python -m your_agent_name validate
 
 ### 4. Test Agent
 
+**Claude Code:**
 ```
 claude> /hive-test
+```
+
+**Codex CLI:**
+```
+codex> use hive-test
 ```
 
 ### 5. Run Agent

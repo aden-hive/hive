@@ -10,6 +10,8 @@ import logging
 import os
 from dataclasses import dataclass
 
+from framework.credentials.client_hints import get_credential_fix_guidance_lines
+
 logger = logging.getLogger(__name__)
 
 
@@ -50,6 +52,16 @@ def ensure_credential_key_env() -> None:
         if found and value:
             os.environ[var_name] = value
             logger.debug("Loaded %s from shell config", var_name)
+
+
+def build_missing_credentials_error(missing_entries: list[str]) -> str:
+    """Build a client-agnostic credential error message."""
+    lines = ["Missing required credentials:\n"]
+    lines.extend(missing_entries)
+    lines.append("")
+    lines.extend(get_credential_fix_guidance_lines())
+    return "\n".join(lines)
+
 
 
 @dataclass
@@ -279,11 +291,9 @@ def validate_agent_credentials(nodes: list, quiet: bool = False, verify: bool = 
                 "(ADEN_API_KEY is set but OAuth tokens unavailable):\n"
             )
             lines.extend(aden_not_connected)
-        lines.append(
-            "\nTo fix: run /hive-credentials in Claude Code."
-            "\nIf you've already set up credentials, "
-            "restart your terminal to load them."
-        )
+        if lines:
+            lines.append("")
+        lines.extend(get_credential_fix_guidance_lines())
         exc = CredentialError("\n".join(lines))
         exc.failed_cred_names = failed_cred_names  # type: ignore[attr-defined]
         raise exc

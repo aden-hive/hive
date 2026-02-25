@@ -57,5 +57,8 @@ fi
 echo ""
 echo "Next: Restart Antigravity IDE so it loads the MCP config."
 echo "      Then open this repo; agent-builder and tools should appear."
-echo ""
-echo "For Claude Code, run: $0 --claude"
+
+if command -v claude >/dev/null 2>&1; then
+  echo ""
+  echo "Optional (Claude Code): run $0 --claude"
+fi

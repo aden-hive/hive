@@ -285,10 +285,10 @@ fi
 echo ""
 
 # ============================================================
-# Step 4: Verify Claude Code Skills
+# Step 4: Verify Agent Skills
 # ============================================================
 
-echo -e "${BLUE}Step 4: Verifying Claude Code skills...${NC}"
+echo -e "${BLUE}Step 4: Verifying agent skills...${NC}"
 echo ""
 
 # Provider configuration - use associative arrays (Bash 4+) or indexed arrays (Bash 3.2)
@@ -575,6 +575,39 @@ detect_shell_rc() {
 
 SHELL_RC_FILE=$(detect_shell_rc)
 SHELL_NAME=$(basename "$SHELL")
+
+# Persist or update an export in the detected shell profile.
+upsert_shell_export() {
+    local key="$1"
+    local value="$2"
+    local line="export ${key}=\"${value}\""
+    local tmp_file
+
+    tmp_file="$(mktemp)"
+    if [ -f "$SHELL_RC_FILE" ]; then
+        awk -v key="$key" -v line="$line" '
+            BEGIN { replaced=0 }
+            $0 ~ "^export " key "=" {
+                if (!replaced) {
+                    print line
+                    replaced=1
+                }
+                next
+            }
+            { print }
+            END {
+                if (!replaced) {
+                    print ""
+                    print "# Hive client hint"
+                    print line
+                }
+            }
+        ' "$SHELL_RC_FILE" > "$tmp_file"
+        mv "$tmp_file" "$SHELL_RC_FILE"
+    else
+        printf "%s\n" "$line" > "$SHELL_RC_FILE"
+    fi
+}
 
 # Prompt the user to choose a model for their selected provider.
 # Sets SELECTED_MODEL and SELECTED_MAX_TOKENS.
@@ -1010,6 +1043,52 @@ fi
 
 echo ""
 
+# Configure HIVE_CLIENT for client-aware guidance in runtime messages.
+echo -e "${YELLOW}⬢${NC} ${BLUE}${BOLD}Client hint setup...${NC}"
+echo ""
+
+SELECTED_CLIENT_HINT="${HIVE_CLIENT:-}"
+if [ -z "$SELECTED_CLIENT_HINT" ]; then
+    prompt_choice "Select your coding client (used for tailored Hive hints):" \
+        "Generic terminal / not sure" \
+        "Claude Code" \
+        "Codex" \
+        "Cursor" \
+        "Antigravity"
+
+    case "$PROMPT_CHOICE" in
+        0) SELECTED_CLIENT_HINT="generic" ;;
+        1) SELECTED_CLIENT_HINT="claude" ;;
+        2) SELECTED_CLIENT_HINT="codex" ;;
+        3) SELECTED_CLIENT_HINT="cursor" ;;
+        4) SELECTED_CLIENT_HINT="antigravity" ;;
+    esac
+fi
+
+NORMALIZED_CLIENT_HINT="$(printf "%s" "$SELECTED_CLIENT_HINT" | tr '[:upper:]' '[:lower:]')"
+case "$NORMALIZED_CLIENT_HINT" in
+    claude|claude_code|claude-code)
+        SELECTED_CLIENT_HINT="claude"
+        ;;
+    codex)
+        SELECTED_CLIENT_HINT="codex"
+        ;;
+    cursor)
+        SELECTED_CLIENT_HINT="cursor"
+        ;;
+    antigravity|antigravity-ide|gemini)
+        SELECTED_CLIENT_HINT="antigravity"
+        ;;
+    *)
+        SELECTED_CLIENT_HINT="generic"
+        ;;
+esac
+
+upsert_shell_export "HIVE_CLIENT" "$SELECTED_CLIENT_HINT"
+export HIVE_CLIENT="$SELECTED_CLIENT_HINT"
+echo -e "${GREEN}  ✓ Saved HIVE_CLIENT=${SELECTED_CLIENT_HINT} to ${SHELL_RC_FILE}${NC}"
+echo ""
+
 # ============================================================
 # Step 6: Verify Setup
 # ============================================================
@@ -1050,10 +1129,25 @@ else
     echo -e "${YELLOW}--${NC}"
 fi
 
-echo -n "  ⬡ skills... "
-if [ -d "$SCRIPT_DIR/.claude/skills" ]; then
-    SKILL_COUNT=$(ls -1d "$SCRIPT_DIR/.claude/skills"/*/ 2>/dev/null | wc -l)
-    echo -e "${GREEN}${SKILL_COUNT} found${NC}"
+echo -n "  - skills... "
+SKILL_SUMMARIES=()
+for candidate in "$SCRIPT_DIR/.agents/skills" "$SCRIPT_DIR/.agent/skills" "$SCRIPT_DIR/.cursor/skills" "$SCRIPT_DIR/.claude/skills"; do
+    if [ -d "$candidate" ]; then
+        SKILL_COUNT=$(ls -1d "$candidate"/*/ 2>/dev/null | wc -l)
+        SKILLS_SOURCE="$(basename "$(dirname "$candidate")")/skills"
+        SKILL_SUMMARIES+=("${GREEN}${SKILL_COUNT} found${NC} ${DIM}(${SKILLS_SOURCE})${NC}")
+    fi
+done
+
+if [ ${#SKILL_SUMMARIES[@]} -gt 0 ]; then
+    SKILLS_LINE=""
+    for entry in "${SKILL_SUMMARIES[@]}"; do
+        if [ -n "$SKILLS_LINE" ]; then
+            SKILLS_LINE+="; "
+        fi
+        SKILLS_LINE+="$entry"
+    done
+    echo -e "$SKILLS_LINE"
 else
     echo -e "${YELLOW}--${NC}"
 fi
@@ -1074,6 +1168,15 @@ if command -v codex > /dev/null 2>&1; then
 else
     echo -e "${YELLOW}--${NC}"
     CODEX_AVAILABLE=false
+fi
+
+echo -n "  - claude CLI... "
+if command -v claude > /dev/null 2>&1; then
+    echo -e "${GREEN}available${NC}"
+    CLAUDE_AVAILABLE=true
+else
+    echo -e "${YELLOW}--${NC}"
+    CLAUDE_AVAILABLE=false
 fi
 
 echo -n "  ⬡ local settings... "
@@ -1170,30 +1273,35 @@ fi
 if [ -n "$HIVE_CREDENTIAL_KEY" ]; then
     echo -e "${BOLD}Credential Store:${NC}"
     echo -e "  ${GREEN}⬢${NC} ${DIM}~/.hive/credentials/${NC}  (encrypted)"
-    echo -e "  ${DIM}Set up agent credentials with:${NC} ${CYAN}/setup-credentials${NC}"
+    echo -e "  ${DIM}Set up agent credentials with:${NC} ${CYAN}/hive-credentials${NC}"
     echo ""
 fi
 
-echo -e "${BOLD}Build a New Agent (Claude):${NC}"
+echo -e "${BOLD}Build a New Agent:${NC}"
 echo ""
-echo -e "  1. Open Claude Code in this directory:"
-echo -e "     ${CYAN}claude${NC}"
-echo ""
-echo -e "  2. Build a new agent:"
+echo -e "  If your coding client supports Hive skills, run:"
 echo -e "     ${CYAN}/hive${NC}"
-echo ""
-echo -e "  3. Test an existing agent:"
 echo -e "     ${CYAN}/hive-test${NC}"
+echo -e "     ${CYAN}/hive-credentials${NC}"
 echo ""
 
-# Show Codex instructions if available
-if [ "$CODEX_AVAILABLE" = true ]; then
-    echo -e "${BOLD}Build a New Agent (Codex):${NC}"
+if [ "$CLAUDE_AVAILABLE" = true ]; then
+    echo -e "${BOLD}Claude Code:${NC}"
+    echo -e "  1. Run: ${CYAN}claude${NC}"
+    echo -e "  2. Then run: ${CYAN}/hive${NC}"
     echo ""
-    echo -e "  Codex ${GREEN}${CODEX_VERSION}${NC} is available. To use it with Hive:"
-    echo -e "  1. Restart your terminal (or open a new one)"
-    echo -e "  2. Run: ${CYAN}codex${NC}"
-    echo -e "  3. Type: ${CYAN}use hive${NC}"
+fi
+
+if [ "$CODEX_AVAILABLE" = true ]; then
+    echo -e "${BOLD}Codex:${NC}"
+    echo -e "  1. Run: ${CYAN}codex${NC}"
+    echo -e "  2. Type: ${CYAN}use hive${NC}"
+    echo ""
+fi
+
+if [ -d "$SCRIPT_DIR/.cursor/skills" ]; then
+    echo -e "${BOLD}Cursor:${NC}"
+    echo -e "  Open this repo in Cursor and use Hive skills from ${CYAN}.cursor/skills${NC}"
     echo ""
 fi
 
@@ -1212,6 +1320,11 @@ echo -e "  ${GREEN}Option 2:${NC} Open a new terminal window"
 echo ""
 echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
 echo ""
+if [ "$SELECTED_CLIENT_HINT" = "antigravity" ] || [ -f "$HOME/.gemini/antigravity/mcp_config.json" ]; then
+    echo -e "${BOLD}Antigravity:${NC}"
+    echo -e "  Run ${CYAN}./scripts/setup-antigravity-mcp.sh${NC} to configure MCP, then restart Antigravity IDE."
+    echo ""
+fi
 
 echo -e "${BOLD}Run an Agent:${NC}"
 echo ""
@@ -1219,5 +1332,12 @@ echo -e "  Launch the interactive dashboard to browse and run agents:"
 echo -e "  You can start an example agent or an agent built by yourself:"
 echo -e "     ${CYAN}hive tui${NC}"
 echo ""
+# Show shell sourcing reminder if we added environment variables
+if [ -n "$SELECTED_PROVIDER_ID" ] || [ -n "$HIVE_CREDENTIAL_KEY" ] || [ -n "$SELECTED_CLIENT_HINT" ]; then
+    echo -e "${BOLD}Note:${NC} To use the new environment variables in this shell, run:"
+    echo -e "  ${CYAN}source $SHELL_RC_FILE${NC}"
+    echo ""
+fi
+
 echo -e "${DIM}Run ./quickstart.sh again to reconfigure.${NC}"
 echo ""
