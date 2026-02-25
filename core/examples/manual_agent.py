@@ -103,9 +103,18 @@ async def main():
     # 6. Initialize Runtime & Executor
     # Runtime handles state/memory; Executor runs the graph
     from pathlib import Path
+    from datetime import datetime
 
-    runtime = Runtime(storage_path=Path("./agent_logs"))
-    executor = GraphExecutor(runtime=runtime)
+    # Create a unique session directory for this run
+    session_dir = (
+        Path("./agent_logs") / f"session_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+    )
+    session_dir.mkdir(parents=True, exist_ok=True)
+
+    runtime = Runtime(storage_path=session_dir)
+    executor = GraphExecutor(runtime=runtime, storage_path=session_dir)
+
+    print(f"\nLogs & state will be written to: {session_dir.resolve()}")
 
     # 7. Register Node Implementations
     # Connect node IDs in the graph to actual Python implementations
@@ -115,7 +124,9 @@ async def main():
     # 8. Execute Agent
     print("Executing agent with input: name='Alice'...")
 
-    result = await executor.execute(graph=graph, goal=goal, input_data={"name": "Alice"})
+    result = await executor.execute(
+        graph=graph, goal=goal, input_data={"name": "Alice"}
+    )
 
     # 9. Verify Results
     if result.success:
