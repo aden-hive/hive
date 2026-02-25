@@ -96,15 +96,6 @@ async def handle_create_session(request: web.Request) -> web.Response:
             )
     except ValueError as e:
         msg = str(e)
-        # Provide extra info when agent is already loaded
-        if agent_path and "already loaded" in msg:
-            resolved_id = agent_id or Path(agent_path).name
-            existing = manager.get_session_by_worker_id(resolved_id)
-            if existing:
-                return web.json_response(
-                    {"error": msg, **_session_to_live_dict(existing)},
-                    status=409,
-                )
         if "currently loading" in msg:
             resolved_id = agent_id or (Path(agent_path).name if agent_path else "")
             return web.json_response(

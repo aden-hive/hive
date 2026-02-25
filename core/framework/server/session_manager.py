@@ -15,7 +15,7 @@ import json
 import logging
 import time
 import uuid
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -43,8 +43,6 @@ class Session:
     # Judge (active when worker is loaded)
     judge_task: asyncio.Task | None = None
     escalation_sub: str | None = None
-    # Internal
-    _session_id: str = ""  # storage-scoped session ID
 
 
 class SessionManager:
@@ -77,15 +75,12 @@ class SessionManager:
         from framework.llm.litellm import LiteLLMProvider
         from framework.runtime.event_bus import EventBus
 
-        resolved_id = session_id or f"session_{uuid.uuid4().hex[:8]}"
+        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+        resolved_id = session_id or f"session_{ts}_{uuid.uuid4().hex[:8]}"
 
         async with self._lock:
             if resolved_id in self._sessions:
                 raise ValueError(f"Session '{resolved_id}' already exists")
-
-        # Session-scoped storage ID
-        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-        sid = f"session_{ts}_{uuid.uuid4().hex[:8]}"
 
         # Load LLM config from ~/.hive/configuration.json
         rc = RuntimeConfig(model=model or self._model or RuntimeConfig().model)
@@ -104,7 +99,6 @@ class SessionManager:
             event_bus=event_bus,
             llm=llm,
             loaded_at=time.time(),
-            _session_id=sid,
         )
 
         async with self._lock:
@@ -149,13 +143,6 @@ class SessionManager:
 
         agent_path = Path(agent_path)
         resolved_worker_id = agent_id or agent_path.name
-
-        # Check if this agent is already loaded in any session
-        existing = self.get_session_by_worker_id(resolved_worker_id)
-        if existing:
-            raise ValueError(
-                f"Agent '{resolved_worker_id}' already loaded"
-            )
 
         # Auto-generate session ID (not the agent name)
         session = await self._create_session_core(model=model)
@@ -210,9 +197,9 @@ class SessionManager:
             )
 
         async with self._lock:
-            if resolved_worker_id in self._loading:
-                raise ValueError(f"Worker '{resolved_worker_id}' is currently loading")
-            self._loading.add(resolved_worker_id)
+            if session.id in self._loading:
+                raise ValueError(f"Session '{session.id}' is currently loading a worker")
+            self._loading.add(session.id)
 
         try:
             # Blocking I/O — load in executor
@@ -250,7 +237,7 @@ class SessionManager:
             session.worker_info = info
 
             async with self._lock:
-                self._loading.discard(resolved_worker_id)
+                self._loading.discard(session.id)
 
             logger.info(
                 "Worker '%s' loaded into session '%s'",
@@ -260,7 +247,7 @@ class SessionManager:
 
         except Exception:
             async with self._lock:
-                self._loading.discard(resolved_worker_id)
+                self._loading.discard(session.id)
             raise
 
     async def load_worker(
@@ -372,7 +359,7 @@ class SessionManager:
         from framework.runtime.core import Runtime
 
         hive_home = Path.home() / ".hive"
-        queen_dir = hive_home / "queen" / "session" / session._session_id
+        queen_dir = hive_home / "queen" / "session" / session.id
         queen_dir.mkdir(parents=True, exist_ok=True)
 
         # Register MCP coding tools
@@ -395,7 +382,7 @@ class SessionManager:
         register_queen_lifecycle_tools(
             queen_registry,
             session=session,
-            session_id=session._session_id,
+            session_id=session.id,
         )
 
         # Monitoring tools need concrete worker paths — only register when present
@@ -464,7 +451,7 @@ class SessionManager:
                     graph=queen_graph,
                     goal=queen_goal,
                     input_data={"greeting": "Session started."},
-                    session_state={"resume_session_id": session._session_id},
+                    session_state={"resume_session_id": session.id},
                 )
                 logger.warning("Queen executor returned (should be forever-alive)")
             except Exception:
@@ -504,7 +491,7 @@ class SessionManager:
             )
 
             hive_home = Path.home() / ".hive"
-            judge_dir = hive_home / "judge" / "session" / session._session_id
+            judge_dir = hive_home / "judge" / "session" / session.id
             judge_dir.mkdir(parents=True, exist_ok=True)
 
             judge_runtime = Runtime(hive_home / "judge")
@@ -535,7 +522,7 @@ class SessionManager:
                             input_data={
                                 "event": {"source": "timer", "reason": "scheduled"},
                             },
-                            session_state={"resume_session_id": session._session_id},
+                            session_state={"resume_session_id": session.id},
                         )
                     except Exception:
                         logger.error("Health judge tick failed", exc_info=True)
@@ -641,8 +628,8 @@ class SessionManager:
             return s
         return self.get_session_by_worker_id(agent_id)
 
-    def is_loading(self, worker_id: str) -> bool:
-        return worker_id in self._loading
+    def is_loading(self, session_id: str) -> bool:
+        return session_id in self._loading
 
     def list_sessions(self) -> list[Session]:
         return list(self._sessions.values())

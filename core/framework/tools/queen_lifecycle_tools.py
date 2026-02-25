@@ -13,7 +13,7 @@ Usage::
     register_queen_lifecycle_tools(
         registry=queen_tool_registry,
         session=session,
-        session_id=session._session_id,
+        session_id=session.id,
     )
 
     # TUI path — wrap bare references in an adapter

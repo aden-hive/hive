@@ -479,37 +479,21 @@ class AgentRunner:
     def _import_agent_module(agent_path: Path):
         """Import an agent package from its directory path.
 
-        Tries package import first (works when exports/ is on sys.path,
-        which cli.py:_configure_paths() ensures). Falls back to direct
-        file import of agent.py via importlib.util.
+        Ensures the agent's parent directory is on sys.path so the package
+        can be imported normally (supports relative imports within the agent).
         """
         import importlib
+        import sys
 
         package_name = agent_path.name
+        parent_dir = str(agent_path.resolve().parent)
 
-        # Try importing as a package (works when exports/ is on sys.path)
-        try:
-            return importlib.import_module(package_name)
-        except ImportError:
-            pass
+        # Ensure the parent directory is on sys.path so the agent package
+        # is importable (e.g., exports/ or examples/templates/)
+        if parent_dir not in sys.path:
+            sys.path.insert(0, parent_dir)
 
-        # Fallback: import agent.py directly via file path
-        import importlib.util
-
-        agent_py = agent_path / "agent.py"
-        if not agent_py.exists():
-            raise FileNotFoundError(
-                f"No importable agent found at {agent_path}. "
-                f"Expected a Python package with agent.py."
-            )
-        spec = importlib.util.spec_from_file_location(
-            f"{package_name}.agent",
-            agent_py,
-            submodule_search_locations=[str(agent_path)],
-        )
-        module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(module)
-        return module
+        return importlib.import_module(package_name)
 
     @classmethod
     def load(

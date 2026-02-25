@@ -25,7 +25,11 @@ async def handle_trigger(request: web.Request) -> web.Response:
     body = await request.json()
     entry_point_id = body.get("entry_point_id", "default")
     input_data = body.get("input_data", {})
-    session_state = body.get("session_state")
+    session_state = body.get("session_state") or {}
+
+    # Scope the worker execution to the live session ID
+    if "resume_session_id" not in session_state:
+        session_state["resume_session_id"] = session.id
 
     execution_id = await session.worker_runtime.trigger(
         entry_point_id,

@@ -391,11 +391,16 @@ export default function Workspace() {
   }, []);
 
   // --- Agent loading: loadAgentForType ---
+  const loadingRef = useRef(new Set<string>());
   const loadAgentForType = useCallback(async (agentType: string) => {
     if (agentType === "new-agent") {
       updateAgentState(agentType, { loading: false });
       return;
     }
+
+    // Ref-based guard: prevents double-load from React StrictMode
+    if (loadingRef.current.has(agentType)) return;
+    loadingRef.current.add(agentType);
 
     updateAgentState(agentType, { loading: true, error: null, ready: false, sessionId: null });
 
@@ -488,6 +493,8 @@ export default function Workspace() {
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
       updateAgentState(agentType, { error: msg, loading: false });
+    } finally {
+      loadingRef.current.delete(agentType);
     }
   }, [updateAgentState]);
 

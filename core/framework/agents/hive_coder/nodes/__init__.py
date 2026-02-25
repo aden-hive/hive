@@ -36,7 +36,7 @@ Analyze imports, structure, and style in reference agents.
 - **Verify assumptions.** Never assume a class, import, or pattern \
 exists. Read actual source to confirm. Search if unsure.
 - **Discover tools dynamically.** NEVER reference tools from static \
-docs. Always run discover_mcp_tools() to see what actually exists.
+docs. Always run list_agent_tools() to see what actually exists.
 - **Professional objectivity.** If a use case is a poor fit for the \
 framework, say so. Technical accuracy over validation.
 - **Concise.** No emojis. No preambles. No postambles. Substance only.
@@ -55,8 +55,12 @@ errors yourself. Don't declare success until validation passes.
 - undo_changes(path?) — restore from git snapshot
 
 ## Meta-Agent
+- list_agent_tools(server_config_path?) — list all tool names available \
+for agent building, grouped by category. Call this FIRST before designing.
 - discover_mcp_tools(server_config_path?) — connect to MCP servers \
-and list all available tools with full schemas. Default: hive-tools.
+and list all available tools with full schemas. Use for parameter details.
+- validate_agent_tools(agent_path) — validate that all tools declared \
+in an agent's nodes actually exist. Call after building.
 - list_agents() — list all agent packages in exports/ with session counts
 - list_agent_sessions(agent_name, status?, limit?) — list sessions
 - get_agent_session_state(agent_name, session_id) — full session state
@@ -71,14 +75,15 @@ You are not just a file writer. You have deep integration with the \
 Hive framework:
 
 ## Tool Discovery (MANDATORY before designing)
-Before designing any agent, run discover_mcp_tools() to see what \
-tools are actually available from the hive-tools MCP server. This \
-returns full schemas with parameter names, types, and descriptions. \
-NEVER guess tool names or parameters from memory. The tool catalog \
-is the ground truth.
+Before designing any agent, run list_agent_tools() to get all \
+available tool names. ONLY use tools from this list in your node \
+definitions. NEVER guess or fabricate tool names from memory.
 
-To check a specific agent's tools:
-  discover_mcp_tools("exports/{agent_name}/mcp_servers.json")
+For full parameter schemas when you need details:
+  discover_mcp_tools()
+
+To check a specific agent's configured tools:
+  list_agent_tools("exports/{agent_name}/mcp_servers.json")
 
 ## Agent Awareness
 Run list_agents() to see what agents already exist. Read their code \
@@ -116,7 +121,7 @@ Ask only what you CANNOT infer. Fill blanks with domain knowledge.
 
 ## 2. Qualify
 
-Assess framework fit honestly. Run discover_mcp_tools() to check \
+Assess framework fit honestly. Run list_agent_tools() to check \
 what tools exist. Read the framework guide:
   read_file("core/framework/agents/hive_coder/reference/framework_guide.md")
 
@@ -277,7 +282,7 @@ STEP 2 — After user responds, call set_output:
 
 **Tools** — NEVER fabricate tool names. Common hallucinations: \
 csv_read, csv_write, csv_append, file_upload, database_query. \
-If discover_mcp_tools() shows these don't exist, use alternatives \
+If list_agent_tools() shows these don't exist, use alternatives \
 (e.g. save_data/load_data for data persistence).
 
 **Node rules**:
@@ -322,7 +327,7 @@ triggers, use `AsyncEntryPointSpec` (from framework.graph.edge) and \
 
 ## 5. Verify
 
-Run THREE validation steps after writing. All must pass:
+Run FOUR validation steps after writing. All must pass:
 
 **Step A — Class validation** (checks graph structure):
 ```
@@ -341,7 +346,15 @@ This catches missing __init__.py exports, bad conversation_mode, \
 invalid loop_config, and unreachable nodes. If Step A passes but \
 Step B fails, the problem is in __init__.py exports.
 
-**Step C — Run tests:**
+**Step C — Tool validation** (checks that declared tools actually exist \
+in the agent's MCP servers — catches hallucinated tool names):
+```
+validate_agent_tools("exports/{name}")
+```
+If any tools are missing: fix the node definitions to use only tools \
+that exist. Run list_agent_tools() to see what's available.
+
+**Step D — Run tests:**
 ```
 run_agent_tests("{name}")
 ```
@@ -400,7 +413,9 @@ its outputs are visible to you.
         "run_command",
         "undo_changes",
         # Meta-agent tools
+        "list_agent_tools",
         "discover_mcp_tools",
+        "validate_agent_tools",
         "list_agents",
         "list_agent_sessions",
         "get_agent_session_state",
@@ -500,6 +515,7 @@ queen_node = NodeSpec(
         "undo_changes",
         # Meta-agent (from coder-tools MCP)
         "discover_mcp_tools",
+        "validate_agent_tools",
         "list_agents",
         "list_agent_sessions",
         "get_agent_session_state",
@@ -530,7 +546,7 @@ Analyze imports, structure, and style in reference agents.
 - **Verify assumptions.** Never assume a class, import, or pattern \
 exists. Read actual source to confirm. Search if unsure.
 - **Discover tools dynamically.** NEVER reference tools from static \
-docs. Always run discover_mcp_tools() to see what actually exists.
+docs. Always run list_agent_tools() to see what actually exists.
 - **Self-verify.** After writing code, run validation and tests. Fix \
 errors yourself. Don't declare success until validation passes.
 - **Concise.** No emojis. No preambles. No postambles. Substance only.
@@ -547,8 +563,12 @@ errors yourself. Don't declare success until validation passes.
 - undo_changes(path?) — restore from git snapshot
 
 ## Meta-Agent
+- list_agent_tools(server_config_path?) — list all tool names available \
+for agent building, grouped by category. Call this FIRST before designing.
 - discover_mcp_tools(server_config_path?) — connect to MCP servers \
-and list all available tools with full schemas. Default: hive-tools.
+and list all available tools with full schemas. Use for parameter details.
+- validate_agent_tools(agent_path) — validate that all tools declared \
+in an agent's nodes actually exist. Call after building.
 - list_agents() — list all agent packages in exports/ with session counts
 - list_agent_sessions(agent_name, status?, limit?) — list sessions
 - get_agent_session_state(agent_name, session_id) — full session state
@@ -611,7 +631,7 @@ You do not need to relay it. The user will come back to you after responding.
 When building Hive agent packages, follow this workflow:
 
 ## 1. Understand & Qualify
-Hear what the user wants. Run discover_mcp_tools() to check tool availability. \
+Hear what the user wants. Run list_agent_tools() to check tool availability. \
 Read the framework guide:
   read_file("core/framework/agents/hive_coder/reference/framework_guide.md")
 
@@ -630,10 +650,11 @@ Write files: config.py, nodes/__init__.py, agent.py, __init__.py, \
 __main__.py, mcp_servers.json, tests/.
 
 ## 4. Verify
-Run THREE validation steps:
+Run FOUR validation steps:
   run_command("python -c 'from {name} import default_agent; print(default_agent.validate())'")
   run_command("python -c 'from framework.runner.runner import AgentRunner; \\
     r = AgentRunner.load(\"exports/{name}\"); print(\"OK\")'")
+  validate_agent_tools("exports/{name}")
   run_agent_tests("{name}")
 
 # Style
@@ -656,7 +677,9 @@ ALL_QUEEN_TOOLS = [
     "run_command",
     "undo_changes",
     # Meta-agent (from coder-tools MCP)
+    "list_agent_tools",
     "discover_mcp_tools",
+    "validate_agent_tools",
     "list_agents",
     "list_agent_sessions",
     "get_agent_session_state",
