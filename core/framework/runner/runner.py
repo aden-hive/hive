@@ -746,6 +746,10 @@ class AgentRunner:
 
         Ensures the agent's parent directory is on sys.path so the package
         can be imported normally (supports relative imports within the agent).
+
+        Always reloads the package and its submodules so that code changes
+        made since the last import (or since a previous session load in the
+        same server process) are picked up.
         """
         import importlib
         import sys
@@ -753,10 +757,24 @@ class AgentRunner:
         package_name = agent_path.name
         parent_dir = str(agent_path.resolve().parent)
 
-        # Ensure the parent directory is on sys.path so the agent package
-        # is importable (e.g., exports/ or examples/templates/)
-        if parent_dir not in sys.path:
-            sys.path.insert(0, parent_dir)
+        # Always place the correct parent directory first on sys.path.
+        # Multiple agent dirs can contain packages with the same name
+        # (e.g. exports/deep_research_agent and examples/deep_research_agent).
+        # Without this, a previously-added parent dir could shadow the
+        # agent we actually want to load.
+        if parent_dir in sys.path:
+            sys.path.remove(parent_dir)
+        sys.path.insert(0, parent_dir)
+
+        # Evict cached submodules first (e.g. deep_research_agent.nodes,
+        # deep_research_agent.agent) so the top-level reload picks up
+        # changes in the entire package — not just __init__.py.
+        stale = [
+            name for name in sys.modules
+            if name == package_name or name.startswith(f"{package_name}.")
+        ]
+        for name in stale:
+            del sys.modules[name]
 
         return importlib.import_module(package_name)
 

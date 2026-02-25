@@ -839,7 +839,7 @@ def cmd_list(args: argparse.Namespace) -> int:
 
     agents = []
     for path in directory.iterdir():
-        if path.is_dir() and (path / "agent.json").exists():
+        if _is_valid_agent_dir(path):
             try:
                 runner = AgentRunner.load(path)
                 info = runner.info()
@@ -906,14 +906,14 @@ def cmd_dispatch(args: argparse.Namespace) -> int:
         # Use specific agents
         for agent_name in args.agents:
             agent_path = agents_dir / agent_name
-            if not (agent_path / "agent.json").exists():
+            if not _is_valid_agent_dir(agent_path):
                 print(f"Agent not found: {agent_path}", file=sys.stderr)
                 return 1
             agent_paths.append((agent_name, agent_path))
     else:
         # Discover all agents
         for path in agents_dir.iterdir():
-            if path.is_dir() and (path / "agent.json").exists():
+            if _is_valid_agent_dir(path):
                 agent_paths.append((path.name, path))
 
     if not agent_paths:
@@ -1664,16 +1664,7 @@ def _select_agent(agents_dir: Path) -> str | None:
         # Display agents for current page (with global numbering)
         for i, agent_path in enumerate(page_agents, start_idx + 1):
             try:
-                agent_json = agent_path / "agent.json"
-                if agent_json.exists():
-                    with open(agent_json) as f:
-                        data = json.load(f)
-                    agent_meta = data.get("agent", {})
-                    name = agent_meta.get("name", agent_path.name)
-                    desc = agent_meta.get("description", "")
-                else:
-                    # Python-based agent - extract from config.py
-                    name, desc = _extract_python_agent_metadata(agent_path)
+                name, desc = _extract_python_agent_metadata(agent_path)
                 desc = desc[:50] + "..." if len(desc) > 50 else desc
                 print(f"  {i}. {name}")
                 print(f"     {desc}")

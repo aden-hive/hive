@@ -70,19 +70,50 @@ def _count_sessions(agent_name: str) -> int:
     return sum(1 for d in sessions_dir.iterdir() if d.is_dir() and d.name.startswith("session_"))
 
 
-def _extract_agent_stats(agent_json_path: Path) -> tuple[int, int, list[str]]:
-    """Extract node count, tool count, and tags from agent.json."""
-    try:
-        data = json.loads(agent_json_path.read_text())
-        nodes = data.get("nodes", [])
-        node_count = len(nodes)
-        tools: set[str] = set()
-        for node in nodes:
-            tools.update(node.get("tools", []))
-        tags = data.get("agent", {}).get("tags", [])
-        return node_count, len(tools), tags
-    except Exception:
-        return 0, 0, []
+def _extract_agent_stats(agent_path: Path) -> tuple[int, int, list[str]]:
+    """Extract node count, tool count, and tags from an agent directory.
+
+    Prefers agent.py (AST-parsed) over agent.json for node/tool counts
+    since agent.json may be stale.  Tags are only available from agent.json.
+    """
+    import ast
+
+    node_count, tool_count, tags = 0, 0, []
+
+    # Try agent.py first — source of truth for nodes
+    agent_py = agent_path / "agent.py"
+    if agent_py.exists():
+        try:
+            tree = ast.parse(agent_py.read_text())
+            for node in ast.walk(tree):
+                # Find `nodes = [...]` assignment
+                if isinstance(node, ast.Assign):
+                    for target in node.targets:
+                        if isinstance(target, ast.Name) and target.id == "nodes":
+                            if isinstance(node.value, ast.List):
+                                node_count = len(node.value.elts)
+        except Exception:
+            pass
+
+    # Fall back to / supplement from agent.json
+    agent_json = agent_path / "agent.json"
+    if agent_json.exists():
+        try:
+            data = json.loads(agent_json.read_text())
+            json_nodes = data.get("nodes", [])
+            if node_count == 0:
+                node_count = len(json_nodes)
+            # Tool count: use whichever source gave us nodes, but agent.json
+            # has the structured tool lists so prefer it for tool counting
+            tools: set[str] = set()
+            for n in json_nodes:
+                tools.update(n.get("tools", []))
+            tool_count = len(tools)
+            tags = data.get("agent", {}).get("tags", [])
+        except Exception:
+            pass
+
+    return node_count, tool_count, tags
 
 
 def discover_agents() -> dict[str, list[AgentEntry]]:
@@ -113,12 +144,11 @@ def discover_agents() -> dict[str, list[AgentEntry]]:
             config_fallback_name = path.name.replace("_", " ").title()
             used_config = name != config_fallback_name
 
-            agent_json = path / "agent.json"
-            node_count, tool_count, tags = 0, 0, []
-            if agent_json.exists():
-                node_count, tool_count, tags = _extract_agent_stats(agent_json)
-                if not used_config:
-                    # config.py didn't provide values, fall back to agent.json
+            node_count, tool_count, tags = _extract_agent_stats(path)
+            if not used_config:
+                # config.py didn't provide values, fall back to agent.json
+                agent_json = path / "agent.json"
+                if agent_json.exists():
                     try:
                         data = json.loads(agent_json.read_text())
                         meta = data.get("agent", {})
