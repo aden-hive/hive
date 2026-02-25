@@ -12,13 +12,13 @@ dependencies = [
   "mcp>=1.0.0",
   "fastmcp>=2.0.0",
   "textual>=1.0.0",
-  "pytest>=8.0",
-  "pytest-asyncio>=0.23",
-  "pytest-xdist>=3.0",
-  "tools",
-]
-
-[project.optional-dependencies]
+        "pytest>=8.0",
+        "pytest-asyncio>=0.23",
+        "pytest-xdist>=3.0",
+        "croniter>=1.4.0",
+        "tools",
+      ]
+  [project.optional-dependencies]
 tui = ["textual>=0.75.0"]
 webhook = ["aiohttp>=3.9.0"]
 

@@ -166,7 +166,9 @@ class AgentRuntime:
         self._last_user_input_time: float = 0.0
 
         # Initialize storage
-        storage_path_obj = Path(storage_path) if isinstance(storage_path, str) else storage_path
+        storage_path_obj = (
+            Path(storage_path) if isinstance(storage_path, str) else storage_path
+        )
         self._storage = ConcurrentStorage(
             base_path=storage_path_obj,
             cache_ttl=self._config.cache_ttl,
@@ -247,7 +249,9 @@ class AgentRuntime:
             RuntimeError: If runtime is running
         """
         if self._running:
-            raise RuntimeError("Cannot unregister entry points while runtime is running")
+            raise RuntimeError(
+                "Cannot unregister entry points while runtime is running"
+            )
 
         if entry_point_id in self._entry_points:
             del self._entry_points[entry_point_id]
@@ -381,25 +385,28 @@ class AgentRuntime:
                     try:
                         from croniter import croniter
 
-                        # Validate the expression upfront
                         if not croniter.is_valid(cron_expr):
                             raise ValueError(f"Invalid cron expression: {cron_expr}")
-                    except (ImportError, ValueError) as e:
-                        logger.warning(
-                            "Entry point '%s' has invalid cron config: %s",
-                            ep_id,
-                            e,
-                        )
-                        continue
+                    except ImportError:
+                        raise RuntimeError(
+                            f"Entry point '{ep_id}' uses a cron schedule but the 'croniter' "
+                            "package is not installed. Add 'croniter>=1.4.0' to your dependencies."
+                        ) from None
+                    except ValueError as e:
+                        raise ValueError(f"Entry point '{ep_id}': {e}") from e
 
-                    def _make_cron_timer(entry_point_id: str, expr: str, immediate: bool):
+                    def _make_cron_timer(
+                        entry_point_id: str, expr: str, immediate: bool
+                    ):
                         async def _cron_loop():
                             from croniter import croniter
 
                             if not immediate:
-                                cron = croniter(expr, datetime.now())
+                                # Capture now once to avoid drift
+                                _now = datetime.now()
+                                cron = croniter(expr, _now)
                                 next_dt = cron.get_next(datetime)
-                                sleep_secs = (next_dt - datetime.now()).total_seconds()
+                                sleep_secs = (next_dt - _now).total_seconds()
                                 self._timer_next_fire[entry_point_id] = (
                                     time.monotonic() + sleep_secs
                                 )
@@ -432,9 +439,10 @@ class AgentRuntime:
                                         exc_info=True,
                                     )
                                 # Calculate next fire from now
-                                cron = croniter(expr, datetime.now())
+                                _now = datetime.now()
+                                cron = croniter(expr, _now)
                                 next_dt = cron.get_next(datetime)
-                                sleep_secs = (next_dt - datetime.now()).total_seconds()
+                                sleep_secs = (next_dt - _now).total_seconds()
                                 self._timer_next_fire[entry_point_id] = (
                                     time.monotonic() + sleep_secs
                                 )
@@ -497,7 +505,9 @@ class AgentRuntime:
 
                         return _timer_loop
 
-                    task = asyncio.create_task(_make_timer(ep_id, interval, run_immediately)())
+                    task = asyncio.create_task(
+                        _make_timer(ep_id, interval, run_immediately)()
+                    )
                     self._timer_tasks.append(task)
                     logger.info(
                         "Started timer for entry point '%s' every %s min%s",
@@ -620,7 +630,9 @@ class AgentRuntime:
         Returns:
             ExecutionResult or None if timeout
         """
-        exec_id = await self.trigger(entry_point_id, input_data, session_state=session_state)
+        exec_id = await self.trigger(
+            entry_point_id, input_data, session_state=session_state
+        )
         stream = self._streams.get(entry_point_id)
         if stream is None:
             raise ValueError(f"Entry point '{entry_point_id}' not found")
@@ -664,7 +676,9 @@ class AgentRuntime:
         # Validate entry nodes exist in graph
         for _ep_id, spec in entry_points.items():
             if graph.get_node(spec.entry_node) is None:
-                raise ValueError(f"Entry node '{spec.entry_node}' not found in graph '{graph_id}'")
+                raise ValueError(
+                    f"Entry node '{spec.entry_node}' not found in graph '{graph_id}'"
+                )
 
         # Create streams for each entry point
         streams: dict[str, ExecutionStream] = {}
@@ -779,7 +793,12 @@ class AgentRuntime:
                                     local_ep, source_graph_id=gid
                                 )
                                 await stream.execute(
-                                    {"event": {"source": "timer", "reason": "scheduled"}},
+                                    {
+                                        "event": {
+                                            "source": "timer",
+                                            "reason": "scheduled",
+                                        }
+                                    },
                                     session_state=session_state,
                                 )
                             except Exception:
@@ -959,7 +978,9 @@ class AgentRuntime:
             if ep_id == exclude_entry_point:
                 continue
             for exec_id in stream.active_execution_ids:
-                state_path = self._storage.base_path / "sessions" / exec_id / "state.json"
+                state_path = (
+                    self._storage.base_path / "sessions" / exec_id / "state.json"
+                )
                 try:
                     if state_path.exists():
                         data = _json.loads(state_path.read_text(encoding="utf-8"))
@@ -969,7 +990,11 @@ class AgentRuntime:
                         # Filter to only input keys so stale outputs
                         # from previous triggers don't leak through.
                         if allowed_keys is not None:
-                            memory = {k: v for k, v in full_memory.items() if k in allowed_keys}
+                            memory = {
+                                k: v
+                                for k, v in full_memory.items()
+                                if k in allowed_keys
+                            }
                         else:
                             memory = full_memory
                         if memory:
@@ -985,7 +1010,9 @@ class AgentRuntime:
                     )
         return None
 
-    async def inject_input(self, node_id: str, content: str, graph_id: str | None = None) -> bool:
+    async def inject_input(
+        self, node_id: str, content: str, graph_id: str | None = None
+    ) -> bool:
         """Inject user input into a running client-facing node.
 
         Routes input to the EventLoopNode identified by ``node_id``.
@@ -1199,7 +1226,9 @@ def create_agent_runtime(
     if enable_logging and runtime_log_store is None:
         from framework.runtime.runtime_log_store import RuntimeLogStore
 
-        storage_path_obj = Path(storage_path) if isinstance(storage_path, str) else storage_path
+        storage_path_obj = (
+            Path(storage_path) if isinstance(storage_path, str) else storage_path
+        )
         runtime_log_store = RuntimeLogStore(storage_path_obj / "runtime_logs")
 
     runtime = AgentRuntime(
