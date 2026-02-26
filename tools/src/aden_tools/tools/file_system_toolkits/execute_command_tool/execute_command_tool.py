@@ -9,25 +9,75 @@ from mcp.server.fastmcp import FastMCP
 from ..security import WORKSPACES_DIR, get_secure_path
 
 # Dangerous commands/binaries that must never be executed
-_BLOCKED_COMMANDS = frozenset({
-    # Destructive filesystem operations
-    "rm", "rmdir", "del", "rd",
-    # Network access
-    "curl", "wget", "nc", "ncat", "netcat", "ssh", "scp", "sftp", "ftp", "telnet",
-    # System modification
-    "shutdown", "reboot", "halt", "poweroff", "init",
-    "mkfs", "fdisk", "dd", "format",
-    "chmod", "chown", "chattr",
-    # Package managers (can install arbitrary software)
-    "apt", "apt-get", "yum", "dnf", "pacman", "pip", "npm", "gem",
-    # Shells and interpreters (can run arbitrary code)
-    "bash", "sh", "zsh", "csh", "fish", "powershell", "pwsh", "cmd",
-    "python", "python3", "perl", "ruby", "node", "php",
-    # Privilege escalation
-    "sudo", "su", "doas", "runas",
-    # Windows-specific dangerous commands
-    "reg", "net", "sc", "wmic", "icacls", "takeown",
-})
+_BLOCKED_COMMANDS = frozenset(
+    {
+        # Destructive filesystem operations
+        "rm",
+        "rmdir",
+        "del",
+        "rd",
+        # Network access
+        "curl",
+        "wget",
+        "nc",
+        "ncat",
+        "netcat",
+        "ssh",
+        "scp",
+        "sftp",
+        "ftp",
+        "telnet",
+        # System modification
+        "shutdown",
+        "reboot",
+        "halt",
+        "poweroff",
+        "init",
+        "mkfs",
+        "fdisk",
+        "dd",
+        "format",
+        "chmod",
+        "chown",
+        "chattr",
+        # Package managers (can install arbitrary software)
+        "apt",
+        "apt-get",
+        "yum",
+        "dnf",
+        "pacman",
+        "pip",
+        "npm",
+        "gem",
+        # Shells and interpreters (can run arbitrary code)
+        "bash",
+        "sh",
+        "zsh",
+        "csh",
+        "fish",
+        "powershell",
+        "pwsh",
+        "cmd",
+        "python",
+        "python3",
+        "perl",
+        "ruby",
+        "node",
+        "php",
+        # Privilege escalation
+        "sudo",
+        "su",
+        "doas",
+        "runas",
+        # Windows-specific dangerous commands
+        "reg",
+        "net",
+        "sc",
+        "wmic",
+        "icacls",
+        "takeown",
+    }
+)
 
 # Shell metacharacters that indicate command chaining / injection
 _SHELL_METACHAR_RE = re.compile(r"[;|&`$]|\$\(|>\s*>|<\s*<")
@@ -45,8 +95,8 @@ def _validate_command(command: str) -> list[str]:
     # Reject shell metacharacters before parsing — these indicate injection
     if _SHELL_METACHAR_RE.search(command):
         raise ValueError(
-            f"Command rejected: Shell metacharacters are not allowed. "
-            f"Avoid using ;, |, &, `, $() or redirections in commands."
+            "Command rejected: Shell metacharacters are not allowed. "
+            "Avoid using ;, |, &, `, $() or redirections in commands."
         )
 
     # Parse safely
@@ -151,4 +201,3 @@ def register_tools(mcp: FastMCP) -> None:
             return {"error": "Command timed out after 60 seconds"}
         except Exception as e:
             return {"error": f"Failed to execute command: {str(e)}"}
-

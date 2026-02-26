@@ -310,9 +310,7 @@ class TestGetSecurePath:
         from aden_tools.tools.file_system_toolkits.security import get_secure_path
 
         result = get_secure_path("/etc/passwd", **ids)
-        session_dir = str(
-            self.workspaces_dir / "test-workspace" / "test-agent" / "test-session"
-        )
+        session_dir = str(self.workspaces_dir / "test-workspace" / "test-agent" / "test-session")
         assert result.startswith(session_dir)
         assert "etc" in result
 
@@ -321,9 +319,7 @@ class TestGetSecurePath:
         from aden_tools.tools.file_system_toolkits.security import get_secure_path
 
         result = get_secure_path("///etc/passwd", **ids)
-        session_dir = str(
-            self.workspaces_dir / "test-workspace" / "test-agent" / "test-session"
-        )
+        session_dir = str(self.workspaces_dir / "test-workspace" / "test-agent" / "test-session")
         assert result.startswith(session_dir)
 
     def test_null_byte_rejected(self, ids):
@@ -338,8 +334,5 @@ class TestGetSecurePath:
         from aden_tools.tools.file_system_toolkits.security import get_secure_path
 
         result = get_secure_path("\\etc\\passwd", **ids)
-        session_dir = str(
-            self.workspaces_dir / "test-workspace" / "test-agent" / "test-session"
-        )
+        session_dir = str(self.workspaces_dir / "test-workspace" / "test-agent" / "test-session")
         assert result.startswith(session_dir)
-
