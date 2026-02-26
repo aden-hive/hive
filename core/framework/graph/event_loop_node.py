@@ -915,7 +915,8 @@ class EventLoopNode(NodeProtocol):
                 )
                 if missing and self._judge is not None:
                     hint = (
-                        f"Missing required output keys: {missing}. Use set_output to provide them."
+                        f"Task incomplete. Required outputs not yet produced: {missing}. "
+                        f"Follow your system prompt instructions to complete the work."
                     )
                     logger.info(
                         "[%s] iter=%d: ACCEPT but missing keys %s",
@@ -1790,7 +1791,8 @@ class EventLoopNode(NodeProtocol):
                 return JudgeVerdict(
                     action="RETRY",
                     feedback=(
-                        f"Missing output keys: {missing}. Use set_output tool to provide them."
+                        f"Task incomplete. Required outputs not yet produced: {missing}. "
+                        f"Follow your system prompt instructions to complete the work."
                     ),
                 )
 
