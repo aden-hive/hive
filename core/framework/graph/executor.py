@@ -238,7 +238,7 @@ class GraphExecutor:
 
             state_path.write_text(_json.dumps(state_data, indent=2), encoding="utf-8")
         except Exception:
-            pass  # Best-effort — never block execution
+            self.logger.warning("Failed to persist state.json progress", exc_info=True)
 
     def _validate_tools(self, graph: GraphSpec) -> list[str]:
         """
@@ -1360,7 +1360,7 @@ class GraphExecutor:
                                 list(wip_outputs.keys()),
                             )
                 except Exception:
-                    self.logger.debug(
+                    self.logger.warning(
                         "Could not flush accumulator outputs from cursor",
                         exc_info=True,
                     )
@@ -1456,7 +1456,7 @@ class GraphExecutor:
                             if value is not None:
                                 memory.write(key, value, validate=False)
                 except Exception:
-                    self.logger.debug(
+                    self.logger.warning(
                         "Could not flush accumulator outputs from cursor",
                         exc_info=True,
                     )
