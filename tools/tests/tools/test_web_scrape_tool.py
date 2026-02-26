@@ -26,7 +26,7 @@ def _make_playwright_mocks(html, status=200, final_url="https://example.com/page
     mock_page = AsyncMock()
     mock_page.goto.return_value = mock_response
     mock_page.content.return_value = html
-    mock_page.wait_for_timeout.return_value = None
+    mock_page.wait_for_load_state.return_value = None
 
     mock_context = AsyncMock()
     mock_context.new_page.return_value = mock_page
@@ -349,3 +349,84 @@ class TestWebScrapeToolLinkConversion:
         # Empty and whitespace-only text should be filtered
         assert "" not in texts
         assert len([t for t in texts if not t.strip()]) == 0
+
+
+class TestWebScrapeToolErrorHandling:
+    """Tests for error handling and early exit before JS wait."""
+
+    @pytest.mark.asyncio
+    @patch(_STEALTH_PATH)
+    @patch(_PW_PATH)
+    async def test_http_error_returns_without_waiting(self, mock_pw, mock_stealth, web_scrape_fn):
+        """HTTP errors return immediately without waiting for networkidle."""
+        html = "<html><body>Not Found</body></html>"
+        mock_cm, _, mock_page = _make_playwright_mocks(html, status=404)
+        mock_pw.return_value = mock_cm
+        mock_stealth.return_value.apply_stealth_async = AsyncMock()
+
+        result = await web_scrape_fn(url="https://example.com/missing")
+        assert result == {"error": "HTTP 404: Failed to fetch URL"}
+        mock_page.wait_for_load_state.assert_not_called()
+
+    @pytest.mark.asyncio
+    @patch(_STEALTH_PATH)
+    @patch(_PW_PATH)
+    async def test_null_response_returns_error(self, mock_pw, mock_stealth, web_scrape_fn):
+        """Null navigation response returns error without waiting."""
+        mock_cm, _, mock_page = _make_playwright_mocks("<html></html>")
+        mock_pw.return_value = mock_cm
+        mock_stealth.return_value.apply_stealth_async = AsyncMock()
+        mock_page.goto.return_value = None
+
+        result = await web_scrape_fn(url="https://example.com")
+        assert result == {"error": "Navigation failed: no response received"}
+        mock_page.wait_for_load_state.assert_not_called()
+
+    @pytest.mark.asyncio
+    @patch(_STEALTH_PATH)
+    @patch(_PW_PATH)
+    async def test_non_html_content_type_skipped(self, mock_pw, mock_stealth, web_scrape_fn):
+        """Non-HTML content types are skipped without waiting."""
+        mock_cm, mock_response, mock_page = _make_playwright_mocks("<html></html>")
+        mock_response.headers = {"content-type": "application/pdf"}
+        mock_pw.return_value = mock_cm
+        mock_stealth.return_value.apply_stealth_async = AsyncMock()
+
+        result = await web_scrape_fn(url="https://example.com/file.pdf")
+        assert "error" in result
+        assert result["skipped"] is True
+        mock_page.wait_for_load_state.assert_not_called()
+
+
+class TestWebScrapeToolRobotsTxt:
+    """Tests for robots.txt respect."""
+
+    @pytest.mark.asyncio
+    @patch(_STEALTH_PATH)
+    @patch(_PW_PATH)
+    @patch("aden_tools.tools.web_scrape_tool.web_scrape_tool.RobotFileParser")
+    async def test_blocked_by_robots_txt(self, mock_rp_cls, mock_pw, mock_stealth, web_scrape_fn):
+        """URLs disallowed by robots.txt are skipped."""
+        mock_rp = MagicMock()
+        mock_rp.can_fetch.return_value = False
+        mock_rp_cls.return_value = mock_rp
+
+        result = await web_scrape_fn(url="https://example.com/private")
+        assert "error" in result
+        assert "robots.txt" in result["error"]
+        assert result["skipped"] is True
+
+    @pytest.mark.asyncio
+    @patch(_STEALTH_PATH)
+    @patch(_PW_PATH)
+    @patch("aden_tools.tools.web_scrape_tool.web_scrape_tool.RobotFileParser")
+    async def test_robots_txt_disabled(self, mock_rp_cls, mock_pw, mock_stealth, web_scrape_fn):
+        """robots.txt check is skipped when respect_robots_txt=False."""
+        html = "<html><body>Content</body></html>"
+        mock_cm, _, _ = _make_playwright_mocks(html)
+        mock_pw.return_value = mock_cm
+        mock_stealth.return_value.apply_stealth_async = AsyncMock()
+
+        result = await web_scrape_fn(url="https://example.com", respect_robots_txt=False)
+        assert "error" not in result
+        mock_rp_cls.assert_not_called()

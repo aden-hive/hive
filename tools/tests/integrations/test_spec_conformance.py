@@ -29,6 +29,7 @@ from aden_tools.credentials import (
 from aden_tools.tools import register_all_tools
 
 from .conftest import (
+    CREDENTIAL_STORE_META_MODULES,
     CREDENTIAL_TOOL_MODULE_IDS,
     CREDENTIAL_TOOL_MODULES,
     KNOWN_PHANTOM_TOOLS,
@@ -292,6 +293,8 @@ class TestCredentialCoverage:
         1. Add a CredentialSpec in credentials/<category>.py for your tool
         2. Remove the 'credentials' param from register_tools() if no credentials needed
         """
+        if short_name in CREDENTIAL_STORE_META_MODULES:
+            pytest.skip(f"'{short_name}' is a credential-store meta-module")
         tools_in_module = MODULE_TO_TOOLS.get(short_name, [])
         for tool_name in tools_in_module:
             assert tool_name in all_spec_tools, (

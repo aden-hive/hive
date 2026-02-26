@@ -104,7 +104,7 @@ class EdgeSpec(BaseModel):
 
     model_config = {"extra": "allow"}
 
-    def should_traverse(
+    async def should_traverse(
         self,
         source_success: bool,
         source_output: dict[str, Any],
@@ -145,7 +145,7 @@ class EdgeSpec(BaseModel):
             if llm is None or goal is None:
                 # Fallback to ON_SUCCESS if LLM not available
                 return source_success
-            return self._llm_decide(
+            return await self._llm_decide(
                 llm=llm,
                 goal=goal,
                 source_success=source_success,
@@ -203,7 +203,7 @@ class EdgeSpec(BaseModel):
             logger.warning(f"         Available context keys: {list(context.keys())}")
             return False
 
-    def _llm_decide(
+    async def _llm_decide(
         self,
         llm: Any,
         goal: Any,
@@ -247,7 +247,7 @@ Respond with ONLY a JSON object:
 {{"proceed": true/false, "reasoning": "brief explanation"}}"""
 
         try:
-            response = llm.complete(
+            response = await llm.acomplete(
                 messages=[{"role": "user", "content": prompt}],
                 system="You are a routing agent. Respond with JSON only.",
                 max_tokens=150,
@@ -422,7 +422,7 @@ class GraphSpec(BaseModel):
 
     # Cleanup LLM for JSON extraction fallback (fast/cheap model preferred)
     # If not set, uses CEREBRAS_API_KEY -> cerebras/llama-3.3-70b or
-    # ANTHROPIC_API_KEY -> claude-3-5-haiku as fallback
+    # ANTHROPIC_API_KEY -> claude-haiku-4-5 as fallback
     cleanup_llm_model: str | None = None
 
     # Execution limits
@@ -433,6 +433,25 @@ class GraphSpec(BaseModel):
     loop_config: dict[str, Any] = Field(
         default_factory=dict,
         description="EventLoopNode configuration (max_iterations, max_tool_calls_per_turn, etc.)",
+    )
+
+    # Conversation mode
+    conversation_mode: str = Field(
+        default="continuous",
+        description=(
+            "How conversations flow between event_loop nodes. "
+            "'continuous' (default): one conversation threads through all "
+            "event_loop nodes with cumulative tools and layered prompt composition. "
+            "'isolated': each node gets a fresh conversation."
+        ),
+    )
+    identity_prompt: str | None = Field(
+        default=None,
+        description=(
+            "Agent-level identity prompt (Layer 1 of the onion model). "
+            "In continuous mode, this is the static identity that persists "
+            "unchanged across all node transitions. In isolated mode, ignored."
+        ),
     )
 
     # Metadata

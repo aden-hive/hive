@@ -22,6 +22,10 @@ from aden_tools.credentials import CREDENTIAL_SPECS
 # These specs use a phantom tool name for credential grouping.
 KNOWN_PHANTOM_TOOLS: set[str] = {"google_search"}
 
+# Modules that accept `credentials` to query the credential store itself
+# (meta-tools), not for external API auth. They don't need CredentialSpecs.
+CREDENTIAL_STORE_META_MODULES: set[str] = {"account_info_tool"}
+
 # --- Tool Module Discovery ---
 
 TOOLS_SRC = Path(__file__).resolve().parent.parent.parent / "src" / "aden_tools" / "tools"

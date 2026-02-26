@@ -119,7 +119,7 @@ Los frameworks de agentes tradicionales requieren que diseñes manualmente flujo
 ```mermaid
 flowchart LR
     subgraph BUILD["🏗️ BUILD"]
-        GOAL["Define Goal<br/>+ Success Criteria"] --> NODES["Add Nodes<br/>LLM/Router/Function"]
+        GOAL["Define Goal<br/>+ Success Criteria"] --> NODES["Add Nodes<br/>Event Loop"]
         NODES --> EDGES["Connect Edges<br/>on_success/failure/conditional"]
         EDGES --> TEST["Test & Validate"] --> APPROVE["Approve & Export"]
     end

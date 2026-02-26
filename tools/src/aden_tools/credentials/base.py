@@ -29,7 +29,7 @@ class CredentialSpec:
     """Tool names that require this credential (e.g., ['web_search'])"""
 
     node_types: list[str] = field(default_factory=list)
-    """Node types that require this credential (e.g., ['llm_generate', 'llm_tool_use'])"""
+    """Node types that require this credential (e.g., ['event_loop'])"""
 
     required: bool = True
     """Whether this credential is required (vs optional)"""
@@ -321,7 +321,7 @@ class CredentialManager:
         Get list of missing credentials for the given node types.
 
         Args:
-            node_types: List of node types to check (e.g., ['llm_generate', 'llm_tool_use'])
+            node_types: List of node types to check (e.g., ['event_loop'])
 
         Returns:
             List of (credential_name, spec) tuples for missing credentials
@@ -357,7 +357,7 @@ class CredentialManager:
 
         Example:
             creds = CredentialManager()
-            creds.validate_for_node_types(["llm_generate", "llm_tool_use"])
+            creds.validate_for_node_types(["event_loop"])
             # Raises CredentialError if ANTHROPIC_API_KEY is not set
         """
         missing = self.get_missing_for_node_types(node_types)

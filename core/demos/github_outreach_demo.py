@@ -68,7 +68,7 @@ from framework.graph.event_loop_node import (  # noqa: E402
 )
 from framework.graph.executor import GraphExecutor  # noqa: E402
 from framework.graph.goal import Goal  # noqa: E402
-from framework.graph.node import NodeSpec  # noqa: E402
+from framework.graph.node import NodeContext, NodeProtocol, NodeResult, NodeSpec  # noqa: E402
 from framework.llm.litellm import LiteLLMProvider  # noqa: E402
 from framework.runner.tool_registry import ToolRegistry  # noqa: E402
 from framework.runtime.core import Runtime  # noqa: E402
@@ -654,7 +654,7 @@ NODE_SPECS = {
         id="sender",
         name="Sender",
         description="Send approved campaign emails",
-        node_type="function",
+        node_type="event_loop",
         input_keys=["approved_emails"],
         output_keys=["send_results"],
     ),
@@ -823,11 +823,20 @@ def _send_email_via_resend(
         return {"error": f"Network error: {e}"}
 
 
+class SenderNode(NodeProtocol):
+    """Node wrapper for send_emails function."""
+
+    async def execute(self, ctx: NodeContext) -> NodeResult:
+        approved = ctx.input_data.get("approved_emails", "")
+        result_str = send_emails(approved_emails=approved)
+        ctx.memory.write("send_results", result_str)
+        return NodeResult(success=True, output={"send_results": result_str})
+
+
 def send_emails(approved_emails: str = "") -> str:
     """Send approved campaign emails via Resend, or log if unconfigured.
 
-    Called by FunctionNode which unpacks input_keys as kwargs.
-    Returns a JSON string (FunctionNode wraps it in NodeResult).
+    Returns a JSON string.
     """
     approved = approved_emails
     if not approved:
@@ -1780,7 +1789,7 @@ async def _run_pipeline(websocket, initial_message: str):
     )
     for nid, impl in nodes.items():
         executor.register_node(nid, impl)
-    executor.register_function("sender", send_emails)
+    executor.register_node("sender", SenderNode())
 
     # --- Event forwarding: bus → WebSocket ---
 

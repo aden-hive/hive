@@ -99,8 +99,7 @@ docs(readme): update installation instructions
 2. Update documentation if needed
 3. Add tests for new functionality
 4. Ensure `make check` and `make test` pass
-5. Update the CHANGELOG.md if applicable
-6. Request review from maintainers
+5. Request review from maintainers
 
 ### PR Title Format
 
@@ -126,6 +125,8 @@ feat(component): add new feature description
 - Write docstrings for classes and public functions
 - Use meaningful variable and function names
 - Keep functions focused and small
+
+For linting and formatting (Ruff, pre-commit hooks), see [Linting & Formatting Setup](docs/contributing-lint-setup.md).
 
 ## Testing
 
