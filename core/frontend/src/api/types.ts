@@ -178,6 +178,7 @@ export interface GraphTopology {
   nodes: NodeSpec[];
   edges: GraphEdge[];
   entry_node: string;
+  entry_points?: EntryPoint[];
 }
 
 export interface NodeCriteria {

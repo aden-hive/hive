@@ -290,14 +290,19 @@ class EventLoopNode(NodeProtocol):
                 _restored_recent_responses = restored.recent_responses
                 _restored_tool_fingerprints = restored.recent_tool_fingerprints
 
-                # Refresh the system prompt to the current node spec's version.
+                # Refresh the system prompt with full 3-layer composition.
                 # The stored prompt may be stale after code changes or when
                 # runtime-injected context (e.g. worker identity) has changed.
-                from framework.graph.prompt_composer import _with_datetime
+                # On resume, we rebuild identity + narrative + focus so the LLM
+                # understands the session history, not just the node directive.
+                from framework.graph.prompt_composer import compose_system_prompt
 
-                _current_prompt = _with_datetime(ctx.node_spec.system_prompt or "")
-                if ctx.accounts_prompt:
-                    _current_prompt = f"{_current_prompt}\n\n{ctx.accounts_prompt}"
+                _current_prompt = compose_system_prompt(
+                    identity_prompt=ctx.identity_prompt or None,
+                    focus_prompt=ctx.node_spec.system_prompt,
+                    narrative=ctx.narrative or None,
+                    accounts_prompt=ctx.accounts_prompt or None,
+                )
                 if conversation.system_prompt != _current_prompt:
                     conversation.update_system_prompt(_current_prompt)
                     logger.info("Refreshed system prompt for restored conversation")

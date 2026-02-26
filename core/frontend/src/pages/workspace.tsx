@@ -505,6 +505,16 @@ export default function Workspace() {
         }
 
         if (!liveSession) {
+          // Reconnect failed — clear stale cached messages from localStorage restore
+          if (storedId) {
+            setSessionsByAgent(prev => ({
+              ...prev,
+              [agentType]: (prev[agentType] || []).map((s, i) =>
+                i === 0 ? { ...s, messages: [], graphNodes: [] } : s,
+              ),
+            }));
+          }
+
           liveSession = await sessionsApi.create(undefined, undefined, undefined, prompt);
 
           // Show the initial prompt as a user message in chat (only on fresh create)
@@ -567,6 +577,16 @@ export default function Workspace() {
       }
 
       if (!liveSession) {
+        // Reconnect failed — clear stale cached messages from localStorage restore
+        if (storedSessionId) {
+          setSessionsByAgent(prev => ({
+            ...prev,
+            [agentType]: (prev[agentType] || []).map((s, i) =>
+              i === 0 ? { ...s, messages: [], graphNodes: [] } : s,
+            ),
+          }));
+        }
+
         try {
           liveSession = await sessionsApi.create(agentType);
         } catch (loadErr: unknown) {
@@ -1345,6 +1365,7 @@ export default function Workspace() {
   }, [activeWorker, agentStates]);
 
   const closeAgentTab = useCallback((agentType: string) => {
+    setSelectedNode(null);
     // Pause worker execution if running (saves checkpoint), then kill the
     // entire backend session so the queen and judge don't keep running.
     const state = agentStates[agentType];
@@ -1415,6 +1436,7 @@ export default function Workspace() {
           if (tab) {
             setActiveWorker(agentType);
             setActiveSessionByAgent(prev => ({ ...prev, [agentType]: tab.sessionId }));
+            setSelectedNode(null);
           }
         }}
         onCloseTab={closeAgentTab}
@@ -1480,7 +1502,10 @@ export default function Workspace() {
           <AgentGraph
               nodes={currentGraph.nodes}
               title={currentGraph.title}
-              onNodeClick={(node) => setSelectedNode(prev => prev?.id === node.id ? null : node)}
+              onNodeClick={(node) => {
+                if (node.nodeType === "trigger") return;
+                setSelectedNode(prev => prev?.id === node.id ? null : node);
+              }}
               onRun={handleRun}
               onPause={handlePause}
               runState={activeAgentState?.workerRunState ?? "idle"}
