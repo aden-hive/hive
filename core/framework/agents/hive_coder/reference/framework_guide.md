@@ -72,7 +72,7 @@ goal = Goal(
 | id | str | required | kebab-case identifier |
 | name | str | required | Display name |
 | description | str | required | What the node does |
-| node_type | str | required | Always `"event_loop"` |
+| node_type | str | required | `"event_loop"` or `"gcu"` (browser automation — see GCU Guide appendix) |
 | input_keys | list[str] | required | Memory keys this node reads |
 | output_keys | list[str] | required | Memory keys this node writes via set_output |
 | system_prompt | str | "" | LLM instructions |
