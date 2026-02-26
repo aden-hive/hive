@@ -428,6 +428,15 @@ class GraphSpec(BaseModel):
     # Execution limits
     max_steps: int = Field(default=100, description="Maximum node executions before timeout")
     max_retries_per_node: int = 3
+    execution_timeout_seconds: float | None = Field(
+        default=None,
+        description=(
+            "Maximum wall-clock time in seconds for the entire graph execution. "
+            "When exceeded, the executor stops at the next node boundary and "
+            "returns a timeout result with saved state for potential resumption. "
+            "None means no timeout (only max_steps applies)."
+        ),
+    )
 
     # EventLoopNode configuration (from configure_loop)
     loop_config: dict[str, Any] = Field(

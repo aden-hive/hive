@@ -11,6 +11,7 @@ The executor:
 
 import asyncio
 import logging
+import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -565,9 +566,73 @@ class GraphExecutor:
                 data_dir=str(self._storage_path / "data"),
             )
 
+        _execution_start = time.monotonic()
+
         try:
             while steps < graph.max_steps:
                 steps += 1
+
+                # Check execution timeout (wall-clock)
+                if graph.execution_timeout_seconds is not None:
+                    elapsed = time.monotonic() - _execution_start
+                    if elapsed >= graph.execution_timeout_seconds:
+                        self.logger.warning(
+                            "⏱ Execution timeout reached (%.1fs >= %.1fs limit) "
+                            "after %d steps — stopping at node boundary",
+                            elapsed,
+                            graph.execution_timeout_seconds,
+                            steps - 1,
+                        )
+
+                        # Emit timeout event
+                        if self._event_bus:
+                            await self._event_bus.emit_execution_paused(
+                                stream_id=self._stream_id,
+                                node_id=current_node_id,
+                                reason="Execution timeout reached",
+                            )
+
+                        saved_memory = memory.read_all()
+                        timeout_session_state = {
+                            "memory": saved_memory,
+                            "execution_path": list(path),
+                            "node_visit_counts": dict(node_visit_counts),
+                            "resume_from": current_node_id,
+                        }
+
+                        self.runtime.end_run(
+                            success=False,
+                            output_data=saved_memory,
+                            narrative=(
+                                f"Execution timed out after {elapsed:.1f}s "
+                                f"({steps - 1} steps executed)"
+                            ),
+                        )
+
+                        if self.runtime_logger:
+                            await self.runtime_logger.end_run(
+                                status="timeout",
+                                duration_ms=int(elapsed * 1000),
+                                node_path=path,
+                                execution_quality="failed",
+                            )
+
+                        return ExecutionResult(
+                            success=False,
+                            error=(
+                                f"Execution timed out after {elapsed:.1f}s "
+                                f"(limit: {graph.execution_timeout_seconds}s). "
+                                f"{steps - 1} steps executed."
+                            ),
+                            output=saved_memory,
+                            steps_executed=steps - 1,
+                            total_tokens=total_tokens,
+                            total_latency_ms=total_latency,
+                            path=path,
+                            node_visit_counts=dict(node_visit_counts),
+                            session_state=timeout_session_state,
+                            execution_quality="failed",
+                        )
 
                 # Check for pause request
                 if self._pause_requested.is_set():
