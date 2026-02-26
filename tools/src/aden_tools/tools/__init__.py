@@ -72,6 +72,7 @@ from .stripe_tool import register_tools as register_stripe
 from .subdomain_enumerator import register_tools as register_subdomain_enumerator
 from .tech_stack_detector import register_tools as register_tech_stack_detector
 from .telegram_tool import register_tools as register_telegram
+from .pushover_tool import register_tools as register_pushover
 from .time_tool import register_tools as register_time
 from .vision_tool import register_tools as register_vision
 from .web_scrape_tool import register_tools as register_web_scrape
@@ -153,6 +154,7 @@ def register_all_tools(
     register_risk_scorer(mcp)
     register_stripe(mcp, credentials=credentials)
     register_brevo(mcp, credentials=credentials)
+    register_pushover(mcp, credentials=credentials)
 
     # Postgres tool
     register_postgres(mcp, credentials=credentials)
