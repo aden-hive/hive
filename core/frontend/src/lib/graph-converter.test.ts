@@ -272,7 +272,7 @@ describe("trigger node synthesis", () => {
       ],
       entry_node: "A",
       entry_points: [
-        { id: "webhook", name: "Webhook Handler", entry_node: "A", trigger_type: "webhook" },
+        { id: "webhook", name: "Webhook Handler", entry_node: "A", trigger_type: "webhook", trigger_config: { url: "/hook" } },
       ],
     };
 
@@ -283,9 +283,25 @@ describe("trigger node synthesis", () => {
     expect(trigger.id).toBe("__trigger_webhook");
     expect(trigger.nodeType).toBe("trigger");
     expect(trigger.triggerType).toBe("webhook");
+    expect(trigger.triggerConfig).toEqual({ url: "/hook" });
     expect(trigger.label).toBe("Webhook Handler");
     expect(trigger.status).toBe("pending");
     expect(trigger.next).toEqual(["A"]);
+  });
+
+  it("trigger_config is threaded through for timer triggers", () => {
+    const topology: GraphTopology = {
+      nodes: [makeNode("A")],
+      edges: [],
+      entry_node: "A",
+      entry_points: [
+        { id: "timer", name: "Daily Check", entry_node: "A", trigger_type: "timer", trigger_config: { cron: "0 9 * * *" } },
+      ],
+    };
+
+    const result = topologyToGraphNodes(topology);
+    const trigger = result[0];
+    expect(trigger.triggerConfig).toEqual({ cron: "0 9 * * *" });
   });
 
   it("no entry_points: no trigger nodes added", () => {

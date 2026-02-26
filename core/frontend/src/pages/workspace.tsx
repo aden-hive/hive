@@ -1,7 +1,7 @@
 import { useState, useCallback, useRef, useEffect, useMemo } from "react";
 import ReactDOM from "react-dom";
 import { useSearchParams, useNavigate } from "react-router-dom";
-import { Plus, KeyRound, Sparkles, Layers, ChevronLeft, Bot, Loader2, WifiOff } from "lucide-react";
+import { Plus, KeyRound, Sparkles, Layers, ChevronLeft, Bot, Loader2, WifiOff, X } from "lucide-react";
 import AgentGraph, { type GraphNode, type NodeStatus } from "@/components/AgentGraph";
 import ChatPanel, { type ChatMessage } from "@/components/ChatPanel";
 import TopBar from "@/components/TopBar";
@@ -1502,10 +1502,7 @@ export default function Workspace() {
           <AgentGraph
               nodes={currentGraph.nodes}
               title={currentGraph.title}
-              onNodeClick={(node) => {
-                if (node.nodeType === "trigger") return;
-                setSelectedNode(prev => prev?.id === node.id ? null : node);
-              }}
+              onNodeClick={(node) => setSelectedNode(prev => prev?.id === node.id ? null : node)}
               onRun={handleRun}
               onPause={handlePause}
               runState={activeAgentState?.workerRunState ?? "idle"}
@@ -1569,16 +1566,66 @@ export default function Workspace() {
           </div>
           {selectedNode && (
             <div className="w-[480px] min-w-[400px] flex-shrink-0">
-              <NodeDetailPanel
-                node={selectedNode}
-                nodeSpec={activeAgentState?.nodeSpecs.find(n => n.id === selectedNode.id) ?? null}
-                sessionId={activeAgentState?.sessionId || undefined}
-                graphId={activeAgentState?.graphId || undefined}
-                workerSessionId={null}
-                nodeLogs={activeAgentState?.nodeLogs[selectedNode.id] || []}
-                actionPlan={activeAgentState?.nodeActionPlans[selectedNode.id]}
-                onClose={() => setSelectedNode(null)}
-              />
+              {selectedNode.nodeType === "trigger" ? (
+                <div className="flex flex-col h-full border-l border-border/40 bg-card/20 animate-in slide-in-from-right">
+                  <div className="px-4 pt-4 pb-3 border-b border-border/30 flex items-start justify-between gap-2">
+                    <div className="flex items-start gap-3 min-w-0">
+                      <div className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 mt-0.5 bg-[hsl(210,40%,55%)]/15 border border-[hsl(210,40%,55%)]/25">
+                        <span className="text-sm" style={{ color: "hsl(210,40%,55%)" }}>
+                          {{"webhook": "\u26A1", "timer": "\u23F1", "api": "\u2192", "event": "\u223F"}[selectedNode.triggerType || ""] || "\u26A1"}
+                        </span>
+                      </div>
+                      <div className="min-w-0">
+                        <h3 className="text-sm font-semibold text-foreground leading-tight">{selectedNode.label}</h3>
+                        <p className="text-[11px] text-muted-foreground mt-0.5 capitalize">{selectedNode.triggerType} trigger</p>
+                      </div>
+                    </div>
+                    <button onClick={() => setSelectedNode(null)} className="p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors flex-shrink-0">
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                  <div className="px-4 py-4 flex flex-col gap-3">
+                    {(() => {
+                      const tc = selectedNode.triggerConfig as Record<string, unknown> | undefined;
+                      const cron = tc?.cron as string | undefined;
+                      const interval = tc?.interval_minutes as number | undefined;
+                      const eventTypes = tc?.event_types as string[] | undefined;
+                      const scheduleLabel = cron
+                        ? `cron: ${cron}`
+                        : interval
+                          ? `Every ${interval >= 60 ? `${interval / 60}h` : `${interval}m`}`
+                          : eventTypes?.length
+                            ? eventTypes.join(", ")
+                            : null;
+                      return scheduleLabel ? (
+                        <div>
+                          <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider mb-1.5">Schedule</p>
+                          <p className="text-xs text-foreground/80 font-mono bg-muted/30 rounded-lg px-3 py-2 border border-border/20">
+                            {scheduleLabel}
+                          </p>
+                        </div>
+                      ) : null;
+                    })()}
+                    <div>
+                      <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider mb-1.5">Fires into</p>
+                      <p className="text-xs text-foreground/80 font-mono bg-muted/30 rounded-lg px-3 py-2 border border-border/20">
+                        {selectedNode.next?.[0]?.split("-").map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(" ") || "—"}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <NodeDetailPanel
+                  node={selectedNode}
+                  nodeSpec={activeAgentState?.nodeSpecs.find(n => n.id === selectedNode.id) ?? null}
+                  sessionId={activeAgentState?.sessionId || undefined}
+                  graphId={activeAgentState?.graphId || undefined}
+                  workerSessionId={null}
+                  nodeLogs={activeAgentState?.nodeLogs[selectedNode.id] || []}
+                  actionPlan={activeAgentState?.nodeActionPlans[selectedNode.id]}
+                  onClose={() => setSelectedNode(null)}
+                />
+              )}
             </div>
           )}
         </div>

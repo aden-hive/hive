@@ -11,6 +11,7 @@ export interface GraphNode {
   status: NodeStatus;
   nodeType?: NodeType;
   triggerType?: string;
+  triggerConfig?: Record<string, unknown>;
   next?: string[];
   backEdges?: string[];
   iterations?: number;
@@ -405,7 +406,7 @@ export default function AgentGraph({ nodes, title: _title, onNodeClick, onRun, o
     const clipId = `clip-trigger-${node.id}`;
 
     return (
-      <g key={node.id} style={{ cursor: "default" }}>
+      <g key={node.id} onClick={() => onNodeClick?.(node)} style={{ cursor: onNodeClick ? "pointer" : "default" }}>
         {/* Pill-shaped background with dashed border */}
         <rect
           x={pos.x} y={pos.y}

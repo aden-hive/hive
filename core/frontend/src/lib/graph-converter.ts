@@ -29,6 +29,7 @@ export function topologyToGraphNodes(topology: GraphTopology): GraphNode[] {
       status: "pending",
       nodeType: "trigger",
       triggerType: ep.trigger_type,
+      triggerConfig: ep.trigger_config,
       next: [ep.entry_node],
     });
   }

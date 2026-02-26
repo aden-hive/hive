@@ -100,7 +100,13 @@ async def handle_list_nodes(request: web.Request) -> web.Response:
         for e in graph.edges
     ]
     entry_points = [
-        {"id": ep.id, "name": ep.name, "entry_node": ep.entry_node, "trigger_type": ep.trigger_type}
+        {
+            "id": ep.id,
+            "name": ep.name,
+            "entry_node": ep.entry_node,
+            "trigger_type": ep.trigger_type,
+            "trigger_config": ep.trigger_config,
+        }
         for ep in reg.entry_points.values()
     ]
     return web.json_response(

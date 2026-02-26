@@ -188,6 +188,7 @@ async def handle_get_live_session(request: web.Request) -> web.Response:
                 "name": ep.name,
                 "entry_node": ep.entry_node,
                 "trigger_type": ep.trigger_type,
+                "trigger_config": ep.trigger_config,
             }
             for ep in session.worker_runtime.get_entry_points()
         ]
@@ -316,6 +317,7 @@ async def handle_session_entry_points(request: web.Request) -> web.Response:
                     "name": ep.name,
                     "entry_node": ep.entry_node,
                     "trigger_type": ep.trigger_type,
+                    "trigger_config": ep.trigger_config,
                 }
                 for ep in eps
             ]

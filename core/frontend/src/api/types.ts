@@ -26,6 +26,7 @@ export interface EntryPoint {
   name: string;
   entry_node: string;
   trigger_type: string;
+  trigger_config?: Record<string, unknown>;
 }
 
 export interface DiscoverEntry {
