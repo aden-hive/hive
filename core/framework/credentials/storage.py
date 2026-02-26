@@ -155,8 +155,10 @@ class EncryptedFileStorage(CredentialStorage):
                 # Generate new key
                 self._key = Fernet.generate_key()
                 logger.warning(
-                    f"Generated new encryption key. To persist credentials across restarts, "
-                    f"set {key_env_var}={self._key.decode()}"
+                    "Generated new encryption key. Credentials will not persist across "
+                    "restarts until %s is set. Run 'hive setup-credentials' or export "
+                    "the key from this session's credential store.",
+                    key_env_var,
                 )
 
         self._fernet = Fernet(self._key)
