@@ -390,6 +390,10 @@ class EventLoopNode(NodeProtocol):
         recent_responses: list[str] = _restored_recent_responses
         recent_tool_fingerprints: list[list[tuple[str, str]]] = _restored_tool_fingerprints
 
+        # 5b. Client-facing state: after user responds, expect the LLM to
+        # work (call tools) rather than auto-blocking again on text-only.
+        _cf_expecting_work = False
+
         # 6. Main loop
         for iteration in range(start_iteration, self._config.max_iterations):
             iter_start = time.time()
@@ -706,7 +710,13 @@ class EventLoopNode(NodeProtocol):
                 recent_tool_fingerprints=recent_tool_fingerprints,
             )
 
-            # 6h. Client-facing input blocking
+            # 6h. Client-facing state transition: tool calls mean the LLM
+            # acted on user input, so the next text-only turn is a new
+            # presentation (auto-block is appropriate again).
+            if real_tool_results or outputs_set:
+                _cf_expecting_work = False
+
+            # 6h'. Client-facing input blocking
             #
             # Two triggers:
             # (a) Explicit ask_user() — always blocks, then falls through
@@ -716,6 +726,9 @@ class EventLoopNode(NodeProtocol):
             #     user.  Block for their response, then *skip* judge so the
             #     next LLM turn can process the reply without confusing
             #     "missing outputs" feedback.
+            #     However, if the user already provided input and the LLM
+            #     responds with text-only instead of calling tools, fall
+            #     through to judge so weak models get RETRY feedback.
             #
             # Turns that include tool calls or set_output are *work*, not
             # conversation — they flow through without blocking.
@@ -727,8 +740,19 @@ class EventLoopNode(NodeProtocol):
                     _cf_block = True
                     _cf_prompt = ask_user_prompt
                 elif assistant_text and not real_tool_results and not outputs_set:
-                    _cf_block = True
-                    _cf_auto = True
+                    _missing = self._get_missing_output_keys(
+                        accumulator,
+                        ctx.node_spec.output_keys,
+                        ctx.node_spec.nullable_output_keys,
+                    )
+                    if _cf_expecting_work and _missing:
+                        # User already responded and required outputs are
+                        # still missing — LLM should be working, not
+                        # talking.  Fall through to judge (6i).
+                        pass
+                    else:
+                        _cf_block = True
+                        _cf_auto = True
 
             if _cf_block:
                 if self._shutdown:
@@ -783,6 +807,8 @@ class EventLoopNode(NodeProtocol):
                 )
                 got_input = await self._await_user_input(ctx, prompt=_cf_prompt)
                 logger.info("[%s] iter=%d: unblocked, got_input=%s", node_id, iteration, got_input)
+                if got_input:
+                    _cf_expecting_work = True
                 if not got_input:
                     await self._publish_loop_completed(
                         stream_id, node_id, iteration + 1, execution_id
@@ -926,6 +952,7 @@ class EventLoopNode(NodeProtocol):
                     )
                     await conversation.add_user_message(hint)
                     # Gap D: log ACCEPT-with-missing-keys as RETRY
+                    _cf_expecting_work = True
                     _retry_count += 1
                     if ctx.runtime_logger:
                         iter_latency_ms = int((time.time() - iter_start) * 1000)
@@ -1035,6 +1062,7 @@ class EventLoopNode(NodeProtocol):
                 )
 
             elif verdict.action == "RETRY":
+                _cf_expecting_work = True
                 _retry_count += 1
                 if ctx.runtime_logger:
                     iter_latency_ms = int((time.time() - iter_start) * 1000)
