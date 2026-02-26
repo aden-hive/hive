@@ -226,6 +226,13 @@ def register_tools(mcp: FastMCP) -> None:
 
 See [BUILDING_TOOLS.md](BUILDING_TOOLS.md) for the full guide.
 
+## Security Hardening
+
+The file system and command execution tools implement several security layers to prevent sandbox escapes and remote code execution:
+
+- **Path Sandboxing**: All file tools use `get_secure_path()` which enforces a 3-layer sandbox (workspace/agent/session). It normalizes path separators, strips leading separators, blocks Windows drive letters, and verifies that the final resolved path is within the session boundary.
+- **Command Validation**: `execute_command_tool` uses `shell=False` and `shlex.split()` for safe parsing. It validates every command against a blocklist of destructive (e.g., `rm`), network (e.g., `curl`), and privilege escalation tools. It also rejects shell metacharacters like `;`, `|`, and `&` to prevent command chaining.
+
 ## Documentation
 
 - [Building Tools Guide](BUILDING_TOOLS.md) - How to create new tools
