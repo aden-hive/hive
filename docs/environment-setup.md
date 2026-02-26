@@ -521,7 +521,7 @@ export ANTHROPIC_API_KEY="sk-ant-..."
 ### Optional Configuration
 
 ```bash
-# Encryption key for credential store (default: ~/.hive/credentials)
+# Fernet encryption key for credential store at ~/.hive/credentials
 export HIVE_CREDENTIAL_KEY="your-fernet-key"
 
 # Agent storage location (default: /tmp)

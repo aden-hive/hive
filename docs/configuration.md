@@ -66,7 +66,7 @@ export EXA_API_KEY="..."
 # Run agents without LLM calls (structure-only validation)
 export MOCK_MODE=1
 
-# Encryption key for credential store (default: ~/.hive/credentials)
+# Fernet encryption key for credential store at ~/.hive/credentials
 export HIVE_CREDENTIAL_KEY="your-fernet-key"
 
 # Custom agent storage path (default: /tmp)
