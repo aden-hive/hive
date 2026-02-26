@@ -260,6 +260,20 @@ class TestEnvVarStorage:
         with pytest.raises(NotImplementedError):
             storage.delete("test")
 
+    def test_empty_env_var(self):
+        """Test that empty environment variables are ignored."""
+        with patch.dict(os.environ, {"TEST_API_KEY": ""}):
+            storage = EnvVarStorage(env_mapping={"test": "TEST_API_KEY"})
+            assert not storage.exists("test")
+            assert storage.load("test") is None
+
+    def test_whitespace_env_var(self):
+        """Test that whitespace environment variables are ignored."""
+        with patch.dict(os.environ, {"TEST_API_KEY": "   "}):
+            storage = EnvVarStorage(env_mapping={"test": "TEST_API_KEY"})
+            assert not storage.exists("test")
+            assert storage.load("test") is None
+
 
 class TestEncryptedFileStorage:
     """Tests for EncryptedFileStorage."""
