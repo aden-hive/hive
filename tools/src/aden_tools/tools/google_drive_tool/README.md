@@ -14,7 +14,7 @@ This tool provides comprehensive integration with Google Drive API v3, enabling 
 
 | Variable | Description | Required |
 |----------|-------------|----------|
-| `GOOGLE_DRIVE_ACCESS_TOKEN` | OAuth2 access token for Google Drive API | Yes |
+| `GOOGLE_DRIVE_REFRESH_TOKEN` | OAuth2 access token for Google Drive API | Yes |
 
 
 ## Tool Functions
