@@ -84,12 +84,10 @@ class Checkpoint:
         │   ├── checkpoint_1.json         # Individual checkpoints
         │   ├── checkpoint_2.json
         │   └── checkpoint_N.json
-        ├── conversations/                # Per-node conversation state (existing)
-        │   ├── node_id_1/
-        │   │   ├── parts/
-        │   │   ├── meta.json
-        │   │   └── cursor.json
-        │   └── node_id_2/...
+        ├── conversations/                # Flat conversation state (parts carry phase_id)
+        │   ├── meta.json                # Current node config
+        │   ├── cursor.json              # Iteration, outputs, stall state
+        │   └── parts/                   # Sequential message files
         ├── data/                         # Spillover artifacts (existing)
         └── logs/                         # L1/L2/L3 logs (existing)
 ```

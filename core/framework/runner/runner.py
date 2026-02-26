@@ -5,6 +5,7 @@ import logging
 import os
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from datetime import UTC
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -41,6 +42,13 @@ CLAUDE_OAUTH_CLIENT_ID = "9d1c250a-e61b-44d9-88ed-5944d1962f5e"
 
 # Buffer in seconds before token expiry to trigger a proactive refresh
 _TOKEN_REFRESH_BUFFER_SECS = 300  # 5 minutes
+
+# Codex (OpenAI) subscription auth
+CODEX_AUTH_FILE = Path.home() / ".codex" / "auth.json"
+CODEX_OAUTH_TOKEN_URL = "https://auth.openai.com/oauth/token"
+CODEX_OAUTH_CLIENT_ID = "app_EMoamEEZ73f0CkXaXp7hrann"
+CODEX_KEYCHAIN_SERVICE = "Codex Auth"
+_CODEX_TOKEN_LIFETIME_SECS = 3600  # 1 hour (no explicit expiry field)
 
 
 def _refresh_claude_code_token(refresh_token: str) -> dict | None:
@@ -159,6 +167,263 @@ def get_claude_code_token() -> str | None:
     # Refresh failed — return the existing token and warn
     logger.warning("Claude Code token refresh failed. Run 'claude' to re-authenticate.")
     return access_token
+
+
+# ---------------------------------------------------------------------------
+# Codex (OpenAI) subscription token helpers
+# ---------------------------------------------------------------------------
+
+
+def _get_codex_keychain_account() -> str:
+    """Compute the macOS Keychain account name used by the Codex CLI.
+
+    The Codex CLI stores credentials under the account
+    ``cli|<sha256(~/.codex)[:16]>`` in the ``Codex Auth`` service.
+    """
+    import hashlib
+
+    codex_dir = str(Path.home() / ".codex")
+    digest = hashlib.sha256(codex_dir.encode()).hexdigest()[:16]
+    return f"cli|{digest}"
+
+
+def _read_codex_keychain() -> dict | None:
+    """Read Codex auth data from macOS Keychain (macOS only).
+
+    Returns the parsed JSON from the Keychain entry, or None if not
+    available (wrong platform, entry missing, etc.).
+    """
+    import platform
+    import subprocess
+
+    if platform.system() != "Darwin":
+        return None
+
+    try:
+        account = _get_codex_keychain_account()
+        result = subprocess.run(
+            [
+                "security",
+                "find-generic-password",
+                "-s",
+                CODEX_KEYCHAIN_SERVICE,
+                "-a",
+                account,
+                "-w",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        if result.returncode != 0:
+            return None
+        raw = result.stdout.strip()
+        if not raw:
+            return None
+        return json.loads(raw)
+    except (subprocess.TimeoutExpired, json.JSONDecodeError, OSError) as exc:
+        logger.debug("Codex keychain read failed: %s", exc)
+        return None
+
+
+def _read_codex_auth_file() -> dict | None:
+    """Read Codex auth data from ~/.codex/auth.json (fallback)."""
+    if not CODEX_AUTH_FILE.exists():
+        return None
+    try:
+        with open(CODEX_AUTH_FILE) as f:
+            return json.load(f)
+    except (json.JSONDecodeError, OSError):
+        return None
+
+
+def _is_codex_token_expired(auth_data: dict) -> bool:
+    """Check whether the Codex token is expired or close to expiry.
+
+    The Codex auth.json has no explicit ``expiresAt`` field, so we infer
+    expiry as ``last_refresh + _CODEX_TOKEN_LIFETIME_SECS``.  Falls back
+    to the file mtime when ``last_refresh`` is absent.
+    """
+    import time
+    from datetime import datetime
+
+    now = time.time()
+    last_refresh = auth_data.get("last_refresh")
+
+    if last_refresh is None:
+        # Fall back to file modification time
+        try:
+            last_refresh = CODEX_AUTH_FILE.stat().st_mtime
+        except OSError:
+            # Cannot determine age — assume expired
+            return True
+    elif isinstance(last_refresh, str):
+        # Codex stores last_refresh as an ISO 8601 timestamp string —
+        # convert to Unix epoch float for arithmetic.
+        try:
+            last_refresh = datetime.fromisoformat(last_refresh.replace("Z", "+00:00")).timestamp()
+        except (ValueError, TypeError):
+            return True
+
+    expires_at = last_refresh + _CODEX_TOKEN_LIFETIME_SECS
+    return now >= (expires_at - _TOKEN_REFRESH_BUFFER_SECS)
+
+
+def _refresh_codex_token(refresh_token: str) -> dict | None:
+    """Refresh the Codex OAuth token using the refresh token.
+
+    POSTs to the OpenAI auth endpoint with form-urlencoded data.
+
+    Returns:
+        Dict with new token data on success, None on failure.
+    """
+    import urllib.error
+    import urllib.parse
+    import urllib.request
+
+    data = urllib.parse.urlencode(
+        {
+            "grant_type": "refresh_token",
+            "refresh_token": refresh_token,
+            "client_id": CODEX_OAUTH_CLIENT_ID,
+        }
+    ).encode("utf-8")
+
+    req = urllib.request.Request(
+        CODEX_OAUTH_TOKEN_URL,
+        data=data,
+        headers={"Content-Type": "application/x-www-form-urlencoded"},
+        method="POST",
+    )
+
+    try:
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            return json.loads(resp.read())
+    except (urllib.error.URLError, json.JSONDecodeError, TimeoutError, OSError) as exc:
+        logger.debug("Codex token refresh failed: %s", exc)
+        return None
+
+
+def _save_refreshed_codex_credentials(auth_data: dict, token_data: dict) -> None:
+    """Write refreshed tokens back to ~/.codex/auth.json only (not Keychain).
+
+    The Codex CLI manages its own Keychain entries, so we only update the
+    file-based credentials.
+    """
+    from datetime import datetime
+
+    try:
+        tokens = auth_data.get("tokens", {})
+        tokens["access_token"] = token_data["access_token"]
+        if "refresh_token" in token_data:
+            tokens["refresh_token"] = token_data["refresh_token"]
+        if "id_token" in token_data:
+            tokens["id_token"] = token_data["id_token"]
+        auth_data["tokens"] = tokens
+        auth_data["last_refresh"] = datetime.now(UTC).isoformat()
+
+        CODEX_AUTH_FILE.parent.mkdir(parents=True, exist_ok=True)
+        with open(CODEX_AUTH_FILE, "w") as f:
+            json.dump(auth_data, f, indent=2)
+        logger.debug("Codex credentials refreshed successfully")
+    except (OSError, KeyError) as exc:
+        logger.debug("Failed to save refreshed Codex credentials: %s", exc)
+
+
+def get_codex_token() -> str | None:
+    """Get the OAuth token from Codex subscription with auto-refresh.
+
+    Reads from macOS Keychain first, then falls back to
+    ``~/.codex/auth.json``.  If the token is expired or close to
+    expiry, attempts an automatic refresh.
+
+    Returns:
+        The access token if available, None otherwise.
+    """
+    # Try Keychain first, then file
+    auth_data = _read_codex_keychain() or _read_codex_auth_file()
+    if not auth_data:
+        return None
+
+    tokens = auth_data.get("tokens", {})
+    access_token = tokens.get("access_token")
+    if not access_token:
+        return None
+
+    # Check if token is still valid
+    if not _is_codex_token_expired(auth_data):
+        return access_token
+
+    # Token is expired or near expiry — attempt refresh
+    refresh_token = tokens.get("refresh_token")
+    if not refresh_token:
+        logger.warning("Codex token expired and no refresh token available")
+        return access_token  # Return expired token; it may still work briefly
+
+    logger.info("Codex token expired or near expiry, refreshing...")
+    token_data = _refresh_codex_token(refresh_token)
+
+    if token_data and "access_token" in token_data:
+        _save_refreshed_codex_credentials(auth_data, token_data)
+        return token_data["access_token"]
+
+    # Refresh failed — return the existing token and warn
+    logger.warning("Codex token refresh failed. Run 'codex' to re-authenticate.")
+    return access_token
+
+
+def _get_account_id_from_jwt(access_token: str) -> str | None:
+    """Extract the ChatGPT account_id from the access token JWT.
+
+    The OpenAI access token JWT contains a claim at
+    ``https://api.openai.com/auth`` with a ``chatgpt_account_id`` field.
+    This is used as a fallback when the auth.json doesn't store the
+    account_id explicitly.
+    """
+    import base64
+
+    try:
+        parts = access_token.split(".")
+        if len(parts) != 3:
+            return None
+        payload = parts[1]
+        # Add base64 padding
+        padding = 4 - len(payload) % 4
+        if padding != 4:
+            payload += "=" * padding
+        decoded = base64.urlsafe_b64decode(payload)
+        claims = json.loads(decoded)
+        auth = claims.get("https://api.openai.com/auth")
+        if isinstance(auth, dict):
+            account_id = auth.get("chatgpt_account_id")
+            if isinstance(account_id, str) and account_id:
+                return account_id
+    except Exception:
+        pass
+    return None
+
+
+def get_codex_account_id() -> str | None:
+    """Extract the account ID from Codex auth data for the ChatGPT-Account-Id header.
+
+    Checks the ``tokens.account_id`` field first, then falls back to
+    decoding the account ID from the access token JWT.
+
+    Returns:
+        The account_id string if available, None otherwise.
+    """
+    auth_data = _read_codex_keychain() or _read_codex_auth_file()
+    if not auth_data:
+        return None
+    tokens = auth_data.get("tokens", {})
+    account_id = tokens.get("account_id")
+    if account_id:
+        return account_id
+    # Fallback: extract from JWT
+    access_token = tokens.get("access_token")
+    if access_token:
+        return _get_account_id_from_jwt(access_token)
+    return None
 
 
 @dataclass
@@ -352,7 +617,6 @@ class AgentRunner:
         runtime_config: "AgentRuntimeConfig | None" = None,
         interactive: bool = True,
         skip_credential_validation: bool = False,
-        skip_guardian: bool = False,
         requires_account_selection: bool = False,
         configure_for_account: Callable | None = None,
         list_accounts: Callable | None = None,
@@ -372,7 +636,6 @@ class AgentRunner:
             interactive: If True (default), offer interactive credential setup on failure.
                 Set to False when called from the TUI (which handles setup via its own screen).
             skip_credential_validation: If True, skip credential checks at load time.
-            skip_guardian: If True, don't attach the Hive Coder guardian.
             requires_account_selection: If True, TUI shows account picker before starting.
             configure_for_account: Callback(runner, account_dict) to scope tools after selection.
             list_accounts: Callback() -> list[dict] to fetch available accounts.
@@ -386,7 +649,6 @@ class AgentRunner:
         self.runtime_config = runtime_config
         self._interactive = interactive
         self.skip_credential_validation = skip_credential_validation
-        self.skip_guardian = skip_guardian
         self.requires_account_selection = requires_account_selection
         self._configure_for_account = configure_for_account
         self._list_accounts = list_accounts
@@ -487,37 +749,40 @@ class AgentRunner:
     def _import_agent_module(agent_path: Path):
         """Import an agent package from its directory path.
 
-        Tries package import first (works when exports/ is on sys.path,
-        which cli.py:_configure_paths() ensures). Falls back to direct
-        file import of agent.py via importlib.util.
+        Ensures the agent's parent directory is on sys.path so the package
+        can be imported normally (supports relative imports within the agent).
+
+        Always reloads the package and its submodules so that code changes
+        made since the last import (or since a previous session load in the
+        same server process) are picked up.
         """
         import importlib
+        import sys
 
         package_name = agent_path.name
+        parent_dir = str(agent_path.resolve().parent)
 
-        # Try importing as a package (works when exports/ is on sys.path)
-        try:
-            return importlib.import_module(package_name)
-        except ImportError:
-            pass
+        # Always place the correct parent directory first on sys.path.
+        # Multiple agent dirs can contain packages with the same name
+        # (e.g. exports/deep_research_agent and examples/deep_research_agent).
+        # Without this, a previously-added parent dir could shadow the
+        # agent we actually want to load.
+        if parent_dir in sys.path:
+            sys.path.remove(parent_dir)
+        sys.path.insert(0, parent_dir)
 
-        # Fallback: import agent.py directly via file path
-        import importlib.util
+        # Evict cached submodules first (e.g. deep_research_agent.nodes,
+        # deep_research_agent.agent) so the top-level reload picks up
+        # changes in the entire package — not just __init__.py.
+        stale = [
+            name
+            for name in sys.modules
+            if name == package_name or name.startswith(f"{package_name}.")
+        ]
+        for name in stale:
+            del sys.modules[name]
 
-        agent_py = agent_path / "agent.py"
-        if not agent_py.exists():
-            raise FileNotFoundError(
-                f"No importable agent found at {agent_path}. "
-                f"Expected a Python package with agent.py."
-            )
-        spec = importlib.util.spec_from_file_location(
-            f"{package_name}.agent",
-            agent_py,
-            submodule_search_locations=[str(agent_path)],
-        )
-        module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(module)
-        return module
+        return importlib.import_module(package_name)
 
     @classmethod
     def load(
@@ -527,6 +792,7 @@ class AgentRunner:
         storage_path: Path | None = None,
         model: str | None = None,
         interactive: bool = True,
+        skip_credential_validation: bool | None = None,
     ) -> "AgentRunner":
         """
         Load an agent from an export folder.
@@ -542,6 +808,8 @@ class AgentRunner:
             model: LLM model to use (reads from agent's default_config if None)
             interactive: If True (default), offer interactive credential setup.
                 Set to False from TUI callers that handle setup via their own UI.
+            skip_credential_validation: If True, skip credential checks at load time.
+                When None (default), uses the agent module's setting.
 
         Returns:
             AgentRunner instance ready to run
@@ -611,7 +879,8 @@ class AgentRunner:
 
             # Read pre-run hooks (e.g., credential_tester needs account selection)
             skip_cred = getattr(agent_module, "skip_credential_validation", False)
-            no_guardian = getattr(agent_module, "skip_guardian", False)
+            if skip_credential_validation is not None:
+                skip_cred = skip_credential_validation
             needs_acct = getattr(agent_module, "requires_account_selection", False)
             configure_fn = getattr(agent_module, "configure_for_account", None)
             list_accts_fn = getattr(agent_module, "list_connected_accounts", None)
@@ -627,7 +896,6 @@ class AgentRunner:
                 runtime_config=agent_runtime_config,
                 interactive=interactive,
                 skip_credential_validation=skip_cred,
-                skip_guardian=no_guardian,
                 requires_account_selection=needs_acct,
                 configure_for_account=configure_fn,
                 list_accounts=list_accts_fn,
@@ -649,6 +917,7 @@ class AgentRunner:
             storage_path=storage_path,
             model=model,
             interactive=interactive,
+            skip_credential_validation=skip_credential_validation or False,
         )
 
     def register_tool(
@@ -739,7 +1008,7 @@ class AgentRunner:
         """
         self._approval_callback = callback
 
-    def _setup(self) -> None:
+    def _setup(self, event_bus=None) -> None:
         """Set up runtime, LLM, and executor."""
         # Configure structured logging (auto-detects JSON vs human-readable)
         from framework.observability import configure_logging
@@ -768,10 +1037,11 @@ class AgentRunner:
         else:
             from framework.llm.litellm import LiteLLMProvider
 
-            # Check if Claude Code subscription is configured
+            # Check if a subscription mode is configured
             config = get_hive_config()
             llm_config = config.get("llm", {})
             use_claude_code = llm_config.get("use_claude_code_subscription", False)
+            use_codex = llm_config.get("use_codex_subscription", False)
             api_base = llm_config.get("api_base")
 
             api_key = None
@@ -781,6 +1051,12 @@ class AgentRunner:
                 if not api_key:
                     print("Warning: Claude Code subscription configured but no token found.")
                     print("Run 'claude' to authenticate, then try again.")
+            elif use_codex:
+                # Get OAuth token from Codex subscription
+                api_key = get_codex_token()
+                if not api_key:
+                    print("Warning: Codex subscription configured but no token found.")
+                    print("Run 'codex' to authenticate, then try again.")
 
             if api_key and use_claude_code:
                 # Use litellm's built-in Anthropic OAuth support.
@@ -792,32 +1068,58 @@ class AgentRunner:
                     api_base=api_base,
                     extra_headers={"authorization": f"Bearer {api_key}"},
                 )
-            else:
-                # Fall back to environment variable
-                # First check api_key_env_var from config (set by quickstart)
-                api_key_env = llm_config.get("api_key_env_var") or self._get_api_key_env_var(
-                    self.model
+            elif api_key and use_codex:
+                # OpenAI Codex subscription routes through the ChatGPT backend
+                # (chatgpt.com/backend-api/codex/responses), NOT the standard
+                # OpenAI API.  The consumer OAuth token lacks platform API scopes.
+                extra_headers: dict[str, str] = {
+                    "Authorization": f"Bearer {api_key}",
+                    "User-Agent": "CodexBar",
+                }
+                account_id = get_codex_account_id()
+                if account_id:
+                    extra_headers["ChatGPT-Account-Id"] = account_id
+                self._llm = LiteLLMProvider(
+                    model=self.model,
+                    api_key=api_key,
+                    api_base="https://chatgpt.com/backend-api/codex",
+                    extra_headers=extra_headers,
+                    store=False,
+                    allowed_openai_params=["store"],
                 )
-                if api_key_env and os.environ.get(api_key_env):
+            else:
+                # Local models (e.g. Ollama) don't need an API key
+                if self._is_local_model(self.model):
                     self._llm = LiteLLMProvider(
                         model=self.model,
-                        api_key=os.environ[api_key_env],
                         api_base=api_base,
                     )
                 else:
-                    # Fall back to credential store
-                    api_key = self._get_api_key_from_credential_store()
-                    if api_key:
+                    # Fall back to environment variable
+                    # First check api_key_env_var from config (set by quickstart)
+                    api_key_env = llm_config.get("api_key_env_var") or self._get_api_key_env_var(
+                        self.model
+                    )
+                    if api_key_env and os.environ.get(api_key_env):
                         self._llm = LiteLLMProvider(
-                            model=self.model, api_key=api_key, api_base=api_base
+                            model=self.model,
+                            api_key=os.environ[api_key_env],
+                            api_base=api_base,
                         )
-                        # Set env var so downstream code (e.g. cleanup LLM in
-                        # node._extract_json) can also find it
-                        if api_key_env:
-                            os.environ[api_key_env] = api_key
-                    elif api_key_env:
-                        print(f"Warning: {api_key_env} not set. LLM calls will fail.")
-                        print(f"Set it with: export {api_key_env}=your-api-key")
+                    else:
+                        # Fall back to credential store
+                        api_key = self._get_api_key_from_credential_store()
+                        if api_key:
+                            self._llm = LiteLLMProvider(
+                                model=self.model, api_key=api_key, api_base=api_base
+                            )
+                            # Set env var so downstream code (e.g. cleanup LLM in
+                            # node._extract_json) can also find it
+                            if api_key_env:
+                                os.environ[api_key_env] = api_key
+                        elif api_key_env:
+                            print(f"Warning: {api_key_env} not set. LLM calls will fail.")
+                            print(f"Set it with: export {api_key_env}=your-api-key")
 
             # Fail fast if the agent needs an LLM but none was configured
             if self._llm is None:
@@ -827,6 +1129,12 @@ class AgentRunner:
                 if has_llm_nodes:
                     from framework.credentials.models import CredentialError
 
+                    if self._is_local_model(self.model):
+                        raise CredentialError(
+                            f"Failed to initialize LLM for local model '{self.model}'. "
+                            f"Ensure your local LLM server is running "
+                            f"(e.g. 'ollama serve' for Ollama)."
+                        )
                     api_key_env = self._get_api_key_env_var(self.model)
                     hint = (
                         f"Set it with: export {api_key_env}=your-api-key"
@@ -866,19 +1174,29 @@ class AgentRunner:
 
         # Collect connected account info for system prompt injection
         accounts_prompt = ""
+        accounts_data: list[dict] | None = None
+        tool_provider_map: dict[str, str] | None = None
         try:
             from aden_tools.credentials.store_adapter import CredentialStoreAdapter
 
             adapter = CredentialStoreAdapter.default()
-            accounts = adapter.get_all_account_info()
-            if accounts:
+            accounts_data = adapter.get_all_account_info()
+            tool_provider_map = adapter.get_tool_provider_map()
+            if accounts_data:
                 from framework.graph.prompt_composer import build_accounts_prompt
 
-                accounts_prompt = build_accounts_prompt(accounts)
+                accounts_prompt = build_accounts_prompt(accounts_data, tool_provider_map)
         except Exception:
             pass  # Best-effort — agent works without account info
 
-        self._setup_agent_runtime(tools, tool_executor, accounts_prompt=accounts_prompt)
+        self._setup_agent_runtime(
+            tools,
+            tool_executor,
+            accounts_prompt=accounts_prompt,
+            accounts_data=accounts_data,
+            tool_provider_map=tool_provider_map,
+            event_bus=event_bus,
+        )
 
     def _get_api_key_env_var(self, model: str) -> str | None:
         """Get the environment variable name for the API key based on model name."""
@@ -898,8 +1216,8 @@ class AgentRunner:
             return "MISTRAL_API_KEY"
         elif model_lower.startswith("groq/"):
             return "GROQ_API_KEY"
-        elif model_lower.startswith("ollama/"):
-            return None  # Ollama doesn't need an API key (local)
+        elif self._is_local_model(model_lower):
+            return None  # Local models don't need an API key
         elif model_lower.startswith("azure/"):
             return "AZURE_API_KEY"
         elif model_lower.startswith("cohere/"):
@@ -939,8 +1257,30 @@ class AgentRunner:
         except Exception:
             return None
 
+    @staticmethod
+    def _is_local_model(model: str) -> bool:
+        """Check if a model is a local model that doesn't require an API key.
+
+        Local providers like Ollama run on the user's machine and do not
+        need any authentication credentials.
+        """
+        LOCAL_PREFIXES = (
+            "ollama/",
+            "ollama_chat/",
+            "vllm/",
+            "lm_studio/",
+            "llamacpp/",
+        )
+        return model.lower().startswith(LOCAL_PREFIXES)
+
     def _setup_agent_runtime(
-        self, tools: list, tool_executor: Callable | None, accounts_prompt: str = ""
+        self,
+        tools: list,
+        tool_executor: Callable | None,
+        accounts_prompt: str = "",
+        accounts_data: list[dict] | None = None,
+        tool_provider_map: dict[str, str] | None = None,
+        event_bus=None,
     ) -> None:
         """Set up multi-entry-point execution using AgentRuntime."""
         # Convert AsyncEntryPointSpec to EntryPointSpec for AgentRuntime
@@ -987,17 +1327,14 @@ class AgentRunner:
             async_checkpoint=True,  # Non-blocking
         )
 
-        # Handle runtime_config - ensure it's AgentRuntimeConfig, not RuntimeConfig
-        # RuntimeConfig is for LLM settings; AgentRuntimeConfig is for AgentRuntime settings
+        # Handle runtime_config - only pass through if it's actually an AgentRuntimeConfig.
+        # Agents may export a RuntimeConfig (LLM settings) or queen-generated custom classes
+        # that would crash AgentRuntime if passed through.
         runtime_config = None
         if self.runtime_config is not None:
-            from framework.config import RuntimeConfig
+            from framework.runtime.agent_runtime import AgentRuntimeConfig
 
-            # If it's a RuntimeConfig (LLM config), don't pass it
-            if isinstance(self.runtime_config, RuntimeConfig):
-                runtime_config = None
-            else:
-                # It's already an AgentRuntimeConfig or compatible type
+            if isinstance(self.runtime_config, AgentRuntimeConfig):
                 runtime_config = self.runtime_config
 
         self._agent_runtime = create_agent_runtime(
@@ -1013,6 +1350,9 @@ class AgentRunner:
             config=runtime_config,
             graph_id=self.graph.id or self.agent_path.name,
             accounts_prompt=accounts_prompt,
+            accounts_data=accounts_data,
+            tool_provider_map=tool_provider_map,
+            event_bus=event_bus,
         )
 
         # Pass intro_message through for TUI display

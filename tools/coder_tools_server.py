@@ -884,6 +884,218 @@ def discover_mcp_tools(server_config_path: str = "") -> str:
     return json.dumps(result, indent=2, default=str)
 
 
+# ── Meta-agent: Agent tool catalog ────────────────────────────────────────
+
+
+@mcp.tool()
+def list_agent_tools(server_config_path: str = "") -> str:
+    """List all tools available for agent building from the hive-tools MCP server.
+
+    Returns tool names grouped by category. Use this BEFORE designing an agent
+    to know exactly which tools exist. Only use tools from this list in node
+    definitions — never guess or fabricate tool names.
+
+    Args:
+        server_config_path: Path to mcp_servers.json. Default: tools/mcp_servers.json
+            (the standard hive-tools server). Can also point to an agent's config
+            to see what tools that specific agent has access to.
+
+    Returns:
+        JSON with tool names grouped by prefix (e.g. gmail_*, slack_*, etc.)
+    """
+    # Resolve config path
+    if not server_config_path:
+        candidates = [
+            os.path.join(PROJECT_ROOT, "tools", "mcp_servers.json"),
+            os.path.join(PROJECT_ROOT, "mcp_servers.json"),
+        ]
+        config_path = None
+        for c in candidates:
+            if os.path.isfile(c):
+                config_path = c
+                break
+        if not config_path:
+            return json.dumps({"error": "No mcp_servers.json found"})
+    else:
+        config_path = _resolve_path(server_config_path)
+        if not os.path.isfile(config_path):
+            return json.dumps({"error": f"Config not found: {server_config_path}"})
+
+    try:
+        with open(config_path, encoding="utf-8") as f:
+            servers_config = json.load(f)
+    except (json.JSONDecodeError, OSError) as e:
+        return json.dumps({"error": f"Failed to read config: {e}"})
+
+    try:
+        from framework.runner.mcp_client import MCPClient, MCPServerConfig
+    except ImportError:
+        return json.dumps({"error": "Cannot import MCPClient"})
+
+    all_tools: list[dict] = []
+    errors = []
+    config_dir = os.path.dirname(config_path)
+
+    for server_name, server_conf in servers_config.items():
+        cwd = server_conf.get("cwd", "")
+        if cwd and not os.path.isabs(cwd):
+            cwd = os.path.abspath(os.path.join(config_dir, cwd))
+        try:
+            config = MCPServerConfig(
+                name=server_name,
+                transport=server_conf.get("transport", "stdio"),
+                command=server_conf.get("command"),
+                args=server_conf.get("args", []),
+                env=server_conf.get("env", {}),
+                cwd=cwd or None,
+                url=server_conf.get("url"),
+                headers=server_conf.get("headers", {}),
+            )
+            client = MCPClient(config)
+            client.connect()
+            for tool in client.list_tools():
+                all_tools.append({"name": tool.name, "description": tool.description})
+            client.disconnect()
+        except Exception as e:
+            errors.append({"server": server_name, "error": str(e)})
+
+    # Group by prefix (e.g., gmail_, slack_, stripe_)
+    groups: dict[str, list[str]] = {}
+    for t in sorted(all_tools, key=lambda x: x["name"]):
+        parts = t["name"].split("_", 1)
+        prefix = parts[0] if len(parts) > 1 else "general"
+        groups.setdefault(prefix, []).append(t["name"])
+
+    result: dict = {
+        "total": len(all_tools),
+        "tools_by_category": groups,
+        "all_tool_names": sorted(t["name"] for t in all_tools),
+    }
+    if errors:
+        result["errors"] = errors
+
+    return json.dumps(result, indent=2)
+
+
+# ── Meta-agent: Agent tool validation ─────────────────────────────────────
+
+
+@mcp.tool()
+def validate_agent_tools(agent_path: str) -> str:
+    """Validate that all tools declared in an agent's nodes exist in its MCP servers.
+
+    Connects to the agent's configured MCP servers, discovers available tools,
+    then checks every node's declared tools against what actually exists.
+    Use this after building an agent to catch hallucinated or misspelled tool names.
+
+    Args:
+        agent_path: Path to agent directory (e.g. "exports/my_agent")
+
+    Returns:
+        JSON with validation result: pass/fail, missing tools per node, available tools
+    """
+    resolved = _resolve_path(agent_path)
+    if not os.path.isdir(resolved):
+        return json.dumps({"error": f"Agent directory not found: {agent_path}"})
+
+    # --- Discover available tools from agent's MCP servers ---
+    mcp_config_path = os.path.join(resolved, "mcp_servers.json")
+    if not os.path.isfile(mcp_config_path):
+        return json.dumps({"error": f"No mcp_servers.json found in {agent_path}"})
+
+    try:
+        from framework.runner.mcp_client import MCPClient, MCPServerConfig
+    except ImportError:
+        return json.dumps({"error": "Cannot import MCPClient"})
+
+    available_tools: set[str] = set()
+    discovery_errors = []
+    config_dir = os.path.dirname(mcp_config_path)
+
+    try:
+        with open(mcp_config_path, encoding="utf-8") as f:
+            servers_config = json.load(f)
+    except (json.JSONDecodeError, OSError) as e:
+        return json.dumps({"error": f"Failed to read mcp_servers.json: {e}"})
+
+    for server_name, server_conf in servers_config.items():
+        cwd = server_conf.get("cwd", "")
+        if cwd and not os.path.isabs(cwd):
+            cwd = os.path.abspath(os.path.join(config_dir, cwd))
+        try:
+            config = MCPServerConfig(
+                name=server_name,
+                transport=server_conf.get("transport", "stdio"),
+                command=server_conf.get("command"),
+                args=server_conf.get("args", []),
+                env=server_conf.get("env", {}),
+                cwd=cwd or None,
+                url=server_conf.get("url"),
+                headers=server_conf.get("headers", {}),
+            )
+            client = MCPClient(config)
+            client.connect()
+            for tool in client.list_tools():
+                available_tools.add(tool.name)
+            client.disconnect()
+        except Exception as e:
+            discovery_errors.append({"server": server_name, "error": str(e)})
+
+    # --- Load agent nodes and extract declared tools ---
+    agent_py = os.path.join(resolved, "agent.py")
+    if not os.path.isfile(agent_py):
+        return json.dumps({"error": f"No agent.py found in {agent_path}"})
+
+    import importlib
+    import importlib.util
+    import sys
+
+    package_name = os.path.basename(resolved)
+    parent_dir = os.path.dirname(os.path.abspath(resolved))
+    if parent_dir not in sys.path:
+        sys.path.insert(0, parent_dir)
+
+    try:
+        agent_module = importlib.import_module(package_name)
+    except Exception as e:
+        return json.dumps({"error": f"Failed to import agent: {e}"})
+
+    nodes = getattr(agent_module, "nodes", None)
+    if not nodes:
+        return json.dumps({"error": "Agent module has no 'nodes' attribute"})
+
+    # --- Validate declared vs available ---
+    missing_by_node: dict[str, list[str]] = {}
+    for node in nodes:
+        node_tools = getattr(node, "tools", None) or []
+        missing = [t for t in node_tools if t not in available_tools]
+        if missing:
+            node_name = getattr(node, "name", None) or getattr(node, "id", "unknown")
+            node_id = getattr(node, "id", "unknown")
+            missing_by_node[f"{node_name} (id={node_id})"] = sorted(missing)
+
+    result: dict = {
+        "valid": len(missing_by_node) == 0,
+        "agent": agent_path,
+        "available_tool_count": len(available_tools),
+    }
+
+    if missing_by_node:
+        result["missing_tools"] = missing_by_node
+        result["message"] = (
+            f"FAIL: {sum(len(v) for v in missing_by_node.values())} tool(s) declared "
+            f"in nodes do not exist. Run discover_mcp_tools() to see available tools "
+            f"and fix the node definitions."
+        )
+    else:
+        result["message"] = "PASS: All declared tools exist in the agent's MCP servers."
+
+    if discovery_errors:
+        result["discovery_errors"] = discovery_errors
+
+    return json.dumps(result, indent=2)
+
+
 # ── Meta-agent: Agent inventory ───────────────────────────────────────────
 
 
@@ -905,6 +1117,7 @@ def list_agents() -> str:
     scan_dirs = [
         (os.path.join(PROJECT_ROOT, "core", "framework", "agents"), "framework"),
         (os.path.join(PROJECT_ROOT, "exports"), "user"),
+        (os.path.join(PROJECT_ROOT, "examples", "templates"), "example"),
     ]
 
     for scan_dir, source in scan_dirs:

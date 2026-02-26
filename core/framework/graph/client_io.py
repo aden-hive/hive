@@ -46,9 +46,11 @@ class ActiveNodeClientIO(NodeClientIO):
         self,
         node_id: str,
         event_bus: EventBus | None = None,
+        execution_id: str = "",
     ) -> None:
         self.node_id = node_id
         self._event_bus = event_bus
+        self._execution_id = execution_id
 
         self._output_queue: asyncio.Queue[str | None] = asyncio.Queue()
         self._output_snapshot = ""
@@ -66,6 +68,7 @@ class ActiveNodeClientIO(NodeClientIO):
                 node_id=self.node_id,
                 content=content,
                 snapshot=self._output_snapshot,
+                execution_id=self._execution_id or None,
             )
 
         if is_final:
@@ -83,6 +86,7 @@ class ActiveNodeClientIO(NodeClientIO):
                 stream_id=self.node_id,
                 node_id=self.node_id,
                 prompt=prompt,
+                execution_id=self._execution_id or None,
             )
 
         try:
@@ -158,11 +162,12 @@ class ClientIOGateway:
     def __init__(self, event_bus: EventBus | None = None) -> None:
         self._event_bus = event_bus
 
-    def create_io(self, node_id: str, client_facing: bool) -> NodeClientIO:
+    def create_io(self, node_id: str, client_facing: bool, execution_id: str = "") -> NodeClientIO:
         if client_facing:
             return ActiveNodeClientIO(
                 node_id=node_id,
                 event_bus=self._event_bus,
+                execution_id=execution_id,
             )
         return InertNodeClientIO(
             node_id=node_id,

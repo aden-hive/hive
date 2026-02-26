@@ -19,6 +19,7 @@ from typing import TYPE_CHECKING, Any
 
 from framework.graph.checkpoint_config import CheckpointConfig
 from framework.graph.executor import ExecutionResult, GraphExecutor
+from framework.runtime.event_bus import EventBus
 from framework.runtime.shared_state import IsolationLevel, SharedStateManager
 from framework.runtime.stream_runtime import StreamRuntime, StreamRuntimeAdapter
 
@@ -26,7 +27,7 @@ if TYPE_CHECKING:
     from framework.graph.edge import GraphSpec
     from framework.graph.goal import Goal
     from framework.llm.provider import LLMProvider, Tool
-    from framework.runtime.event_bus import AgentEvent, EventBus
+    from framework.runtime.event_bus import AgentEvent
     from framework.runtime.outcome_aggregator import OutcomeAggregator
     from framework.storage.concurrent import ConcurrentStorage
     from framework.storage.session_store import SessionStore
@@ -34,29 +35,50 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-class _GraphScopedEventBus:
-    """Thin proxy that stamps ``graph_id`` on every published event.
+class GraphScopedEventBus(EventBus):
+    """Proxy that stamps ``graph_id`` on every published event.
 
     The ``GraphExecutor`` and ``EventLoopNode`` emit events via the
     convenience methods on ``EventBus`` (e.g. ``emit_llm_text_delta``).
     Rather than threading ``graph_id`` through every one of those 20+
-    methods, this proxy intercepts ``publish()`` and sets ``graph_id``
-    before forwarding to the real bus.  All other attribute access is
-    delegated unchanged.
+    methods, this subclass overrides ``publish()`` to stamp the id
+    before forwarding to the real bus.
+
+    Because the ``emit_*`` methods are *inherited* from ``EventBus``,
+    ``self.publish()`` inside them resolves to this class's override —
+    unlike a ``__getattr__``-based proxy where the delegated bound
+    methods would call ``EventBus.publish`` directly, bypassing the
+    stamp entirely.
     """
 
-    __slots__ = ("_bus", "_graph_id")
-
     def __init__(self, bus: "EventBus", graph_id: str) -> None:
-        object.__setattr__(self, "_bus", bus)
-        object.__setattr__(self, "_graph_id", graph_id)
+        # Intentionally skip super().__init__() — we delegate all state
+        # (subscriptions, history, semaphore, etc.) to the real bus.
+        self._real_bus = bus
+        self._scope_graph_id = graph_id
 
     async def publish(self, event: "AgentEvent") -> None:  # type: ignore[override]
-        event.graph_id = object.__getattribute__(self, "_graph_id")
-        await object.__getattribute__(self, "_bus").publish(event)
+        event.graph_id = self._scope_graph_id
+        await self._real_bus.publish(event)
 
-    def __getattr__(self, name: str) -> Any:
-        return getattr(object.__getattribute__(self, "_bus"), name)
+    # --- Delegate state-reading methods to the real bus ---
+    # These access internal state (_subscriptions, _event_history, etc.)
+    # that only exists on the real bus.
+
+    def subscribe(self, *args: Any, **kwargs: Any) -> str:
+        return self._real_bus.subscribe(*args, **kwargs)
+
+    def unsubscribe(self, subscription_id: str) -> bool:
+        return self._real_bus.unsubscribe(subscription_id)
+
+    def get_history(self, *args: Any, **kwargs: Any) -> list:
+        return self._real_bus.get_history(*args, **kwargs)
+
+    def get_stats(self) -> dict:
+        return self._real_bus.get_stats()
+
+    async def wait_for(self, *args: Any, **kwargs: Any) -> Any:
+        return await self._real_bus.wait_for(*args, **kwargs)
 
 
 @dataclass
@@ -144,6 +166,8 @@ class ExecutionStream:
         checkpoint_config: CheckpointConfig | None = None,
         graph_id: str | None = None,
         accounts_prompt: str = "",
+        accounts_data: list[dict] | None = None,
+        tool_provider_map: dict[str, str] | None = None,
     ):
         """
         Initialize execution stream.
@@ -165,6 +189,8 @@ class ExecutionStream:
             checkpoint_config: Optional checkpoint configuration for resumable sessions
             graph_id: Optional graph identifier for multi-graph sessions
             accounts_prompt: Connected accounts block for system prompt injection
+            accounts_data: Raw account data for per-node prompt generation
+            tool_provider_map: Tool name to provider name mapping for account routing
         """
         self.stream_id = stream_id
         self.entry_spec = entry_spec
@@ -184,6 +210,8 @@ class ExecutionStream:
         self._checkpoint_config = checkpoint_config
         self._session_store = session_store
         self._accounts_prompt = accounts_prompt
+        self._accounts_data = accounts_data
+        self._tool_provider_map = tool_provider_map
 
         # Create stream-scoped runtime
         self._runtime = StreamRuntime(
@@ -207,7 +235,7 @@ class ExecutionStream:
         # Graph-scoped event bus (stamps graph_id on published events)
         self._scoped_event_bus = self._event_bus
         if self._event_bus and self.graph_id:
-            self._scoped_event_bus = _GraphScopedEventBus(self._event_bus, self.graph_id)
+            self._scoped_event_bus = GraphScopedEventBus(self._event_bus, self.graph_id)
 
         # State
         self._running = False
@@ -247,6 +275,30 @@ class ExecutionStream:
                 if getattr(node, "_awaiting_input", False):
                     return True
         return False
+
+    def get_waiting_nodes(self) -> list[dict[str, str]]:
+        """Return nodes currently blocked waiting for client input.
+
+        Each entry is ``{"node_id": ..., "execution_id": ...}``.
+        """
+        waiting: list[dict[str, str]] = []
+        for exec_id, executor in self._active_executors.items():
+            for node_id, node in executor.node_registry.items():
+                if getattr(node, "_awaiting_input", False):
+                    waiting.append({"node_id": node_id, "execution_id": exec_id})
+        return waiting
+
+    def get_injectable_nodes(self) -> list[dict[str, str]]:
+        """Return nodes that support message injection (have ``inject_event``).
+
+        Each entry is ``{"node_id": ..., "execution_id": ...}``.
+        """
+        injectable: list[dict[str, str]] = []
+        for exec_id, executor in self._active_executors.items():
+            for node_id, node in executor.node_registry.items():
+                if hasattr(node, "inject_event"):
+                    injectable.append({"node_id": node_id, "execution_id": exec_id})
+        return injectable
 
     def _record_execution_result(self, execution_id: str, result: ExecutionResult) -> None:
         """Record a completed execution result with retention pruning."""
@@ -308,7 +360,13 @@ class ExecutionStream:
                 )
             )
 
-    async def inject_input(self, node_id: str, content: str) -> bool:
+    async def inject_input(
+        self,
+        node_id: str,
+        content: str,
+        *,
+        is_client_input: bool = False,
+    ) -> bool:
         """Inject user input into a running client-facing EventLoopNode.
 
         Searches active executors for a node matching ``node_id`` and calls
@@ -319,7 +377,7 @@ class ExecutionStream:
         for executor in self._active_executors.values():
             node = executor.node_registry.get(node_id)
             if node is not None and hasattr(node, "inject_event"):
-                await node.inject_event(content)
+                await node.inject_event(content, is_client_input=is_client_input)
                 return True
         return False
 
@@ -445,7 +503,14 @@ class ExecutionStream:
                 # to this execution.  The executor sets data_dir via execution
                 # context (contextvars) so data tools and spillover share the
                 # same session-scoped directory.
-                exec_storage = self._storage.base_path / "sessions" / execution_id
+                # Derive storage from session_store (graph-specific for secondary
+                # graphs) so that all files — conversations, state, checkpoints,
+                # data — land under the graph's own sessions/ directory, not the
+                # primary worker's.
+                if self._session_store:
+                    exec_storage = self._session_store.sessions_dir / execution_id
+                else:
+                    exec_storage = self._storage.base_path / "sessions" / execution_id
                 executor = GraphExecutor(
                     runtime=runtime_adapter,
                     llm=self._llm,
@@ -453,10 +518,13 @@ class ExecutionStream:
                     tool_executor=self._tool_executor,
                     event_bus=self._scoped_event_bus,
                     stream_id=self.stream_id,
+                    execution_id=execution_id,
                     storage_path=exec_storage,
                     runtime_logger=runtime_logger,
                     loop_config=self.graph.loop_config,
                     accounts_prompt=self._accounts_prompt,
+                    accounts_data=self._accounts_data,
+                    tool_provider_map=self._tool_provider_map,
                 )
                 # Track executor so inject_input() can reach EventLoopNode instances
                 self._active_executors[execution_id] = executor
@@ -502,6 +570,7 @@ class ExecutionStream:
                     await self._write_session_state(execution_id, ctx, result=result)
 
                 # Emit completion/failure event
+                # (skip for pauses — executor already emitted execution_paused)
                 if self._scoped_event_bus:
                     if result.success:
                         await self._scoped_event_bus.emit_execution_completed(
@@ -510,7 +579,7 @@ class ExecutionStream:
                             output=result.output,
                             correlation_id=ctx.correlation_id,
                         )
-                    else:
+                    elif not result.paused_at:
                         await self._scoped_event_bus.emit_execution_failed(
                             stream_id=self.stream_id,
                             execution_id=execution_id,

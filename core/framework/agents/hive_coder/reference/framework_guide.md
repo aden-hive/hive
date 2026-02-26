@@ -413,16 +413,18 @@ See `exports/gmail_inbox_guardian/agent.py` for a complete example with:
 ## Tool Discovery
 
 Do NOT rely on a static tool list — it will be outdated. Always use
-`discover_mcp_tools()` to get the current tool catalog from the
-hive-tools MCP server. This returns full schemas including parameter
-names, types, and descriptions.
+`list_agent_tools()` to get available tool names grouped by category.
+For full schemas with parameter details, use `discover_mcp_tools()`.
 
 ```
-discover_mcp_tools()                          # default: hive-tools
-discover_mcp_tools("exports/my_agent/mcp_servers.json")  # specific agent
+list_agent_tools()                            # all available tools
+list_agent_tools("exports/my_agent/mcp_servers.json")  # specific agent
+discover_mcp_tools()                          # full schemas with params
 ```
 
-Common tool categories (verify via discover_mcp_tools):
+After building, validate tools exist: `validate_agent_tools("exports/{name}")`
+
+Common tool categories (verify via list_agent_tools):
 - **Web**: search, scrape, PDF
 - **Data**: save/load/append/list data files, serve to user
 - **File**: view, write, replace, diff, list, grep

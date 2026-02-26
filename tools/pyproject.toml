@@ -33,6 +33,9 @@ dependencies = [
     "resend>=2.0.0",
     "framework",
     "stripe>=14.3.0",
+    "arxiv>=2.1.0",
+    "requests>=2.31.0",
+    "psycopg2-binary>=2.9.0",
 ]
 
 [project.optional-dependencies]
