@@ -166,7 +166,7 @@ class NodeSpec(BaseModel):
     # Node behavior type
     node_type: str = Field(
         default="event_loop",
-        description="Type: 'event_loop' (recommended), 'router', 'human_input'.",
+        description="Type: 'event_loop' (recommended), 'gcu' (browser automation).",
     )
 
     # Data flow
