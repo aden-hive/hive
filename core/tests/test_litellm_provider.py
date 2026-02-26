@@ -826,3 +826,52 @@ class TestAsyncComplete:
         assert call_thread_ids[0] != main_thread_id, (
             "Base acomplete() should offload sync complete() to a thread pool"
         )
+
+
+# ---------------------------------------------------------------------------
+# AgentRunner._is_local_model — parameterized tests
+# ---------------------------------------------------------------------------
+
+
+class TestIsLocalModel:
+    """Parameterized tests for AgentRunner._is_local_model()."""
+
+    @pytest.mark.parametrize(
+        "model",
+        [
+            "ollama/llama3",
+            "ollama/mistral",
+            "ollama_chat/llama3",
+            "vllm/mistral",
+            "lm_studio/phi3",
+            "llamacpp/llama-7b",
+            "Ollama/Llama3",  # case-insensitive
+            "VLLM/Mistral",
+        ],
+    )
+    def test_local_models_return_true(self, model):
+        """Local model prefixes should be recognized."""
+        from framework.runner.runner import AgentRunner
+
+        assert AgentRunner._is_local_model(model) is True
+
+    @pytest.mark.parametrize(
+        "model",
+        [
+            "anthropic/claude-3-haiku",
+            "openai/gpt-4o",
+            "gpt-4o-mini",
+            "claude-3-haiku-20240307",
+            "gemini/gemini-1.5-flash",
+            "groq/llama3-70b",
+            "mistral/mistral-large",
+            "azure/gpt-4",
+            "cohere/command-r",
+            "together/llama3-70b",
+        ],
+    )
+    def test_cloud_models_return_false(self, model):
+        """Cloud model prefixes should not be treated as local."""
+        from framework.runner.runner import AgentRunner
+
+        assert AgentRunner._is_local_model(model) is False

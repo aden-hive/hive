@@ -275,6 +275,9 @@ class LiteLLMProvider(LLMProvider):
         self.api_key = api_key
         self.api_base = api_base
         self.extra_kwargs = kwargs
+        # The Codex ChatGPT backend (chatgpt.com/backend-api/codex) rejects
+        # several standard OpenAI params: max_output_tokens, stream_options.
+        self._codex_backend = bool(api_base and "chatgpt.com/backend-api/codex" in api_base)
 
         if litellm is None:
             raise ImportError(
@@ -328,6 +331,20 @@ class LiteLLMProvider(LLMProvider):
                         f"Full request dumped to: {dump_path}"
                     )
 
+                    # finish_reason=length means the model exhausted max_tokens
+                    # before producing content. Retrying with the same max_tokens
+                    # will never help — return immediately instead of looping.
+                    if finish_reason == "length":
+                        max_tok = kwargs.get("max_tokens", "unset")
+                        logger.error(
+                            f"[retry] {model} returned empty content with "
+                            f"finish_reason=length (max_tokens={max_tok}). "
+                            f"The model exhausted its token budget before "
+                            f"producing visible output. Increase max_tokens "
+                            f"or use a different model. Not retrying."
+                        )
+                        return response
+
                     if attempt == retries:
                         logger.error(
                             f"[retry] GAVE UP on {model} after {retries + 1} "
@@ -379,6 +396,43 @@ class LiteLLMProvider(LLMProvider):
         # unreachable, but satisfies type checker
         raise RuntimeError("Exhausted rate limit retries")
 
+    def _codex_sync_complete(self, kwargs: dict[str, Any]) -> "LLMResponse":
+        """Collect a streaming Codex response into a single LLMResponse.
+
+        The ChatGPT Codex backend only supports ``stream=True``, so non-streaming
+        callers go through this helper which forces streaming, accumulates the
+        chunks, and returns the same LLMResponse that ``complete()`` would.
+        """
+        kwargs["stream"] = True
+        response = litellm.completion(**kwargs)  # type: ignore[union-attr]
+        content = ""
+        model_name = self.model
+        input_tokens = 0
+        output_tokens = 0
+        finish_reason = ""
+        for chunk in response:
+            choice = chunk.choices[0] if chunk.choices else None
+            if not choice:
+                continue
+            delta = choice.delta
+            if delta and delta.content:
+                content += delta.content
+            if choice.finish_reason:
+                finish_reason = choice.finish_reason
+            if hasattr(chunk, "usage") and chunk.usage:
+                input_tokens = getattr(chunk.usage, "prompt_tokens", 0) or 0
+                output_tokens = getattr(chunk.usage, "completion_tokens", 0) or 0
+            if chunk.model:
+                model_name = chunk.model
+        return LLMResponse(
+            content=content,
+            model=model_name,
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            stop_reason=finish_reason,
+            raw_response=None,
+        )
+
     def complete(
         self,
         messages: list[dict[str, Any]],
@@ -426,6 +480,11 @@ class LiteLLMProvider(LLMProvider):
         # LiteLLM passes this through to the underlying provider
         if response_format:
             kwargs["response_format"] = response_format
+
+        # Codex ChatGPT backend requires streaming and rejects max_output_tokens.
+        if self._codex_backend:
+            kwargs.pop("max_tokens", None)
+            return self._codex_sync_complete(kwargs)
 
         # Make the call
         response = self._completion_with_rate_limit_retry(max_retries=max_retries, **kwargs)
@@ -621,6 +680,20 @@ class LiteLLMProvider(LLMProvider):
                         f"Full request dumped to: {dump_path}"
                     )
 
+                    # finish_reason=length means the model exhausted max_tokens
+                    # before producing content. Retrying with the same max_tokens
+                    # will never help — return immediately instead of looping.
+                    if finish_reason == "length":
+                        max_tok = kwargs.get("max_tokens", "unset")
+                        logger.error(
+                            f"[async-retry] {model} returned empty content with "
+                            f"finish_reason=length (max_tokens={max_tok}). "
+                            f"The model exhausted its token budget before "
+                            f"producing visible output. Increase max_tokens "
+                            f"or use a different model. Not retrying."
+                        )
+                        return response
+
                     if attempt == retries:
                         logger.error(
                             f"[async-retry] GAVE UP on {model} after {retries + 1} "
@@ -709,6 +782,11 @@ class LiteLLMProvider(LLMProvider):
         if response_format:
             kwargs["response_format"] = response_format
 
+        # Codex ChatGPT backend requires streaming and rejects max_output_tokens.
+        if self._codex_backend:
+            kwargs.pop("max_tokens", None)
+            return await self._codex_async_complete(kwargs)
+
         response = await self._acompletion_with_rate_limit_retry(max_retries=max_retries, **kwargs)
 
         content = response.choices[0].message.content or ""
@@ -723,6 +801,38 @@ class LiteLLMProvider(LLMProvider):
             output_tokens=output_tokens,
             stop_reason=response.choices[0].finish_reason or "",
             raw_response=response,
+        )
+
+    async def _codex_async_complete(self, kwargs: dict[str, Any]) -> "LLMResponse":
+        """Async version of _codex_sync_complete."""
+        kwargs["stream"] = True
+        response = await litellm.acompletion(**kwargs)  # type: ignore[union-attr]
+        content = ""
+        model_name = self.model
+        input_tokens = 0
+        output_tokens = 0
+        finish_reason = ""
+        async for chunk in response:
+            choice = chunk.choices[0] if chunk.choices else None
+            if not choice:
+                continue
+            delta = choice.delta
+            if delta and delta.content:
+                content += delta.content
+            if choice.finish_reason:
+                finish_reason = choice.finish_reason
+            if hasattr(chunk, "usage") and chunk.usage:
+                input_tokens = getattr(chunk.usage, "prompt_tokens", 0) or 0
+                output_tokens = getattr(chunk.usage, "completion_tokens", 0) or 0
+            if chunk.model:
+                model_name = chunk.model
+        return LLMResponse(
+            content=content,
+            model=model_name,
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            stop_reason=finish_reason,
+            raw_response=None,
         )
 
     async def acomplete_with_tools(
@@ -893,6 +1003,10 @@ class LiteLLMProvider(LLMProvider):
             kwargs["api_base"] = self.api_base
         if tools:
             kwargs["tools"] = [self._tool_to_openai_format(t) for t in tools]
+        # The Codex ChatGPT backend rejects max_output_tokens and stream_options.
+        if self._codex_backend:
+            kwargs.pop("max_tokens", None)
+            kwargs.pop("stream_options", None)
 
         for attempt in range(RATE_LIMIT_MAX_RETRIES + 1):
             # Post-stream events (ToolCall, TextEnd, Finish) are buffered
@@ -903,6 +1017,7 @@ class LiteLLMProvider(LLMProvider):
             tool_calls_acc: dict[int, dict[str, str]] = {}
             input_tokens = 0
             output_tokens = 0
+            stream_finish_reason: str | None = None
 
             try:
                 response = await litellm.acompletion(**kwargs)  # type: ignore[union-attr]
@@ -938,6 +1053,7 @@ class LiteLLMProvider(LLMProvider):
 
                     # --- Finish ---
                     if choice.finish_reason:
+                        stream_finish_reason = choice.finish_reason
                         for _idx, tc_data in sorted(tool_calls_acc.items()):
                             try:
                                 parsed_args = json.loads(tc_data["arguments"])
@@ -992,6 +1108,24 @@ class LiteLLMProvider(LLMProvider):
                         for event in tail_events:
                             yield event
                         return
+
+                    # finish_reason=length means the model exhausted
+                    # max_tokens before producing content. Retrying with
+                    # the same max_tokens will never help.
+                    if stream_finish_reason == "length":
+                        max_tok = kwargs.get("max_tokens", "unset")
+                        logger.error(
+                            f"[stream] {self.model} returned empty content "
+                            f"with finish_reason=length "
+                            f"(max_tokens={max_tok}). The model exhausted "
+                            f"its token budget before producing visible "
+                            f"output. Increase max_tokens or use a "
+                            f"different model. Not retrying."
+                        )
+                        for event in tail_events:
+                            yield event
+                        return
+
                     wait = _compute_retry_delay(attempt)
                     token_count, token_method = _estimate_tokens(
                         self.model,

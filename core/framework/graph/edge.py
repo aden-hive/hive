@@ -341,6 +341,12 @@ class AsyncEntryPointSpec(BaseModel):
 
     model_config = {"extra": "allow"}
 
+    def get_isolation_level(self):
+        """Convert string isolation level to enum (duck-type with EntryPointSpec)."""
+        from framework.runtime.execution_stream import IsolationLevel
+
+        return IsolationLevel(self.isolation_level)
+
 
 class GraphSpec(BaseModel):
     """
@@ -422,7 +428,7 @@ class GraphSpec(BaseModel):
 
     # Cleanup LLM for JSON extraction fallback (fast/cheap model preferred)
     # If not set, uses CEREBRAS_API_KEY -> cerebras/llama-3.3-70b or
-    # ANTHROPIC_API_KEY -> claude-3-5-haiku as fallback
+    # ANTHROPIC_API_KEY -> claude-haiku-4-5 as fallback
     cleanup_llm_model: str | None = None
 
     # Execution limits

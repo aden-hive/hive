@@ -264,11 +264,13 @@ class EventLoopNode(NodeProtocol):
         self._config = config or LoopConfig()
         self._tool_executor = tool_executor
         self._conversation_store = conversation_store
-        self._injection_queue: asyncio.Queue[str] = asyncio.Queue()
+        self._injection_queue: asyncio.Queue[tuple[str, bool]] = asyncio.Queue()
         # Client-facing input blocking state
         self._input_ready = asyncio.Event()
         self._awaiting_input = False
         self._shutdown = False
+        # Track which nodes already have an action plan emitted (skip on revisit)
+        self._action_plan_emitted: set[str] = set()
         # Subagent mark_complete: when True, _evaluate returns ACCEPT immediately
         self._mark_complete_flag = False
         # Counter for subagent instances (1, 2, 3, ...)
@@ -295,8 +297,9 @@ class EventLoopNode(NodeProtocol):
         start_time = time.time()
         total_input_tokens = 0
         total_output_tokens = 0
-        stream_id = ctx.node_id
+        stream_id = ctx.stream_id or ctx.node_id
         node_id = ctx.node_id
+        execution_id = ctx.execution_id or ""
 
         # Verdict counters for runtime logging
         _accept_count = _retry_count = _escalate_count = _continue_count = 0
@@ -352,6 +355,23 @@ class EventLoopNode(NodeProtocol):
                 start_iteration = restored.start_iteration
                 _restored_recent_responses = restored.recent_responses
                 _restored_tool_fingerprints = restored.recent_tool_fingerprints
+
+                # Refresh the system prompt with full 3-layer composition.
+                # The stored prompt may be stale after code changes or when
+                # runtime-injected context (e.g. worker identity) has changed.
+                # On resume, we rebuild identity + narrative + focus so the LLM
+                # understands the session history, not just the node directive.
+                from framework.graph.prompt_composer import compose_system_prompt
+
+                _current_prompt = compose_system_prompt(
+                    identity_prompt=ctx.identity_prompt or None,
+                    focus_prompt=ctx.node_spec.system_prompt,
+                    narrative=ctx.narrative or None,
+                    accounts_prompt=ctx.accounts_prompt or None,
+                )
+                if conversation.system_prompt != _current_prompt:
+                    conversation.update_system_prompt(_current_prompt)
+                    logger.info("Refreshed system prompt for restored conversation")
             else:
                 _restored_recent_responses = []
                 _restored_tool_fingerprints = []
@@ -386,8 +406,10 @@ class EventLoopNode(NodeProtocol):
                                 f"{system_prompt}\n\n"
                                 f"--- Your Memory ---\n{_adapt_text}\n--- End Memory ---\n\n"
                                 'Maintain your memory by calling save_data("adapt.md", ...) '
-                                'or edit_data("adapt.md", ...) as you work. '
-                                "Record identity, session history, decisions, and working notes."
+                                'or edit_data("adapt.md", ...) as you work.\n'
+                                "IMMEDIATELY save: user rules about which account/identity to use, "
+                                "behavioral constraints, and preferences. "
+                                "Also record session history, decisions, and working notes."
                             )
 
                 conversation = NodeConversation(
@@ -413,7 +435,8 @@ class EventLoopNode(NodeProtocol):
         if set_output_tool:
             tools.append(set_output_tool)
         if ctx.node_spec.client_facing and not ctx.event_triggered:
-            tools.append(self._build_ask_user_tool())
+            if stream_id != "queen":
+                tools.append(self._build_ask_user_tool())
             tools.append(self._build_escalate_tool())
             
 
@@ -446,7 +469,19 @@ class EventLoopNode(NodeProtocol):
         )
 
         # 4. Publish loop started
-        await self._publish_loop_started(stream_id, node_id)
+        await self._publish_loop_started(stream_id, node_id, execution_id)
+
+        # 4b. Fire-and-forget action plan generation (once per node per lifetime)
+        # Skip for queen/judge — action plans are only meaningful for worker nodes.
+        if (
+            start_iteration == 0
+            and ctx.llm
+            and self._event_bus
+            and node_id not in self._action_plan_emitted
+            and stream_id not in ("queen", "judge")
+        ):
+            self._action_plan_emitted.add(node_id)
+            asyncio.create_task(self._generate_action_plan(ctx, stream_id, node_id, execution_id))
 
         # 5. Stall / doom loop detection state (restored from cursor if resuming)
         recent_responses: list[str] = _restored_recent_responses
@@ -488,7 +523,7 @@ class EventLoopNode(NodeProtocol):
             await self._drain_injection_queue(conversation)
 
             # 6c. Publish iteration event
-            await self._publish_iteration(stream_id, node_id, iteration)
+            await self._publish_iteration(stream_id, node_id, iteration, execution_id)
 
             # 6d. Pre-turn compaction check (tiered)
             if conversation.needs_compaction():
@@ -511,6 +546,7 @@ class EventLoopNode(NodeProtocol):
                         turn_tokens,
                         logged_tool_calls,
                         user_input_requested,
+                        ask_user_prompt,
                     ) = await self._run_single_turn(
                         ctx, conversation, tools, iteration, accumulator
                     )
@@ -561,6 +597,7 @@ class EventLoopNode(NodeProtocol):
                                 retry_count=_stream_retry_count,
                                 max_retries=self._config.max_stream_retries,
                                 error=str(e)[:500],
+                                execution_id=execution_id,
                             )
                         await asyncio.sleep(delay)
                         continue  # retry same iteration
@@ -637,7 +674,9 @@ class EventLoopNode(NodeProtocol):
                         node_id,
                         iteration,
                     )
-                    await self._publish_loop_completed(stream_id, node_id, iteration + 1)
+                    await self._publish_loop_completed(
+                        stream_id, node_id, iteration + 1, execution_id
+                    )
                     latency_ms = int((time.time() - start_time) * 1000)
                     return NodeResult(
                         success=True,
@@ -652,7 +691,7 @@ class EventLoopNode(NodeProtocol):
             if len(recent_responses) > self._config.stall_detection_threshold:
                 recent_responses.pop(0)
             if self._is_stalled(recent_responses):
-                await self._publish_stalled(stream_id, node_id)
+                await self._publish_stalled(stream_id, node_id, execution_id)
                 latency_ms = int((time.time() - start_time) * 1000)
                 _continue_count += 1
                 if ctx.runtime_logger:
@@ -725,6 +764,7 @@ class EventLoopNode(NodeProtocol):
                             stream_id=stream_id,
                             node_id=node_id,
                             description=doom_desc,
+                            execution_id=execution_id,
                         )
                     warning_msg = (
                         f"[SYSTEM] {doom_desc}. You are repeating the "
@@ -739,6 +779,7 @@ class EventLoopNode(NodeProtocol):
                                 stream_id=stream_id,
                                 node_id=node_id,
                                 prompt=doom_desc,
+                                execution_id=execution_id,
                             )
                         self._awaiting_input = True
                         try:
@@ -779,16 +820,20 @@ class EventLoopNode(NodeProtocol):
             # conversation — they flow through without blocking.
             _cf_block = False
             _cf_auto = False
+            _cf_prompt = ""
             if ctx.node_spec.client_facing and not ctx.event_triggered:
                 if user_input_requested:
                     _cf_block = True
+                    _cf_prompt = ask_user_prompt
                 elif assistant_text and not real_tool_results and not outputs_set:
                     _cf_block = True
                     _cf_auto = True
 
             if _cf_block:
                 if self._shutdown:
-                    await self._publish_loop_completed(stream_id, node_id, iteration + 1)
+                    await self._publish_loop_completed(
+                        stream_id, node_id, iteration + 1, execution_id
+                    )
                     latency_ms = int((time.time() - start_time) * 1000)
                     _continue_count += 1
                     if ctx.runtime_logger:
@@ -835,10 +880,14 @@ class EventLoopNode(NodeProtocol):
                     iteration,
                     _cf_auto,
                 )
-                got_input = await self._await_user_input(ctx)
+                got_input = await self._await_user_input(
+                    ctx, prompt=_cf_prompt, skip_emit=user_input_requested
+                )
                 logger.info("[%s] iter=%d: unblocked, got_input=%s", node_id, iteration, got_input)
                 if not got_input:
-                    await self._publish_loop_completed(stream_id, node_id, iteration + 1)
+                    await self._publish_loop_completed(
+                        stream_id, node_id, iteration + 1, execution_id
+                    )
                     latency_ms = int((time.time() - start_time) * 1000)
                     _continue_count += 1
                     if ctx.runtime_logger:
@@ -958,6 +1007,7 @@ class EventLoopNode(NodeProtocol):
                 feedback=fb_preview,
                 judge_type=judge_type,
                 iteration=iteration,
+                execution_id=execution_id,
             )
 
             if verdict.action == "ACCEPT":
@@ -999,7 +1049,7 @@ class EventLoopNode(NodeProtocol):
                 for key, value in accumulator.to_dict().items():
                     ctx.memory.write(key, value, validate=False)
 
-                await self._publish_loop_completed(stream_id, node_id, iteration + 1)
+                await self._publish_loop_completed(stream_id, node_id, iteration + 1, execution_id)
                 latency_ms = int((time.time() - start_time) * 1000)
                 _accept_count += 1
                 if ctx.runtime_logger:
@@ -1042,7 +1092,7 @@ class EventLoopNode(NodeProtocol):
 
             elif verdict.action == "ESCALATE":
                 # Exit point 6: Judge ESCALATE — log step + log_node_complete
-                await self._publish_loop_completed(stream_id, node_id, iteration + 1)
+                await self._publish_loop_completed(stream_id, node_id, iteration + 1, execution_id)
                 latency_ms = int((time.time() - start_time) * 1000)
                 _escalate_count += 1
                 if ctx.runtime_logger:
@@ -1106,7 +1156,9 @@ class EventLoopNode(NodeProtocol):
                 continue
 
         # 7. Max iterations exhausted
-        await self._publish_loop_completed(stream_id, node_id, self._config.max_iterations)
+        await self._publish_loop_completed(
+            stream_id, node_id, self._config.max_iterations, execution_id
+        )
         latency_ms = int((time.time() - start_time) * 1000)
         if ctx.runtime_logger:
             ctx.runtime_logger.log_node_complete(
@@ -1135,14 +1187,19 @@ class EventLoopNode(NodeProtocol):
             conversation=conversation if _is_continuous else None,
         )
 
-    async def inject_event(self, content: str) -> None:
-        """Inject an external event into the running loop.
+    async def inject_event(self, content: str, *, is_client_input: bool = False) -> None:
+        """Inject an external event or user input into the running loop.
 
         The content becomes a user message prepended to the next iteration.
         Thread-safe via asyncio.Queue.
         Also unblocks _await_user_input() if the node is waiting.
+
+        Args:
+            content: The message text.
+            is_client_input: True when the message originates from a real
+                human user (e.g. /chat endpoint), False for external events.
         """
-        await self._injection_queue.put(content)
+        await self._injection_queue.put((content, is_client_input))
         self._input_ready.set()
 
     def signal_shutdown(self) -> None:
@@ -1154,7 +1211,9 @@ class EventLoopNode(NodeProtocol):
         self._shutdown = True
         self._input_ready.set()
 
-    async def _await_user_input(self, ctx: NodeContext) -> bool:
+    async def _await_user_input(
+        self, ctx: NodeContext, prompt: str = "", *, skip_emit: bool = False
+    ) -> bool:
         """Block until user input arrives or shutdown is signaled.
 
         Called in two situations:
@@ -1162,6 +1221,10 @@ class EventLoopNode(NodeProtocol):
         - Auto-block: any text-only turn (no real tools, no set_output)
           from a client-facing node — ensures the user sees and responds
           before the judge runs.
+
+        Args:
+            skip_emit: If True, skip emitting client_input_requested
+                (already emitted earlier, e.g. during ask_user detection).
 
         Returns True if input arrived, False if shutdown was signaled.
         """
@@ -1171,11 +1234,12 @@ class EventLoopNode(NodeProtocol):
         # without injecting, so the wait still blocks until the user types.
         self._input_ready.clear()
 
-        if self._event_bus:
+        if self._event_bus and not skip_emit:
             await self._event_bus.emit_client_input_requested(
-                stream_id=ctx.node_id,
+                stream_id=ctx.stream_id or ctx.node_id,
                 node_id=ctx.node_id,
-                prompt="",
+                prompt=prompt,
+                execution_id=ctx.execution_id or "",
             )
 
         self._awaiting_input = True
@@ -1196,11 +1260,11 @@ class EventLoopNode(NodeProtocol):
         tools: list[Tool],
         iteration: int,
         accumulator: OutputAccumulator,
-    ) -> tuple[str, list[dict], list[str], dict[str, int], list[dict], bool]:
+    ) -> tuple[str, list[dict], list[str], dict[str, int], list[dict], bool, str]:
         """Run a single LLM turn with streaming and tool execution.
 
         Returns (assistant_text, real_tool_results, outputs_set, token_counts, logged_tool_calls,
-        user_input_requested).
+        user_input_requested, ask_user_prompt).
 
         ``real_tool_results`` contains only results from actual tools (web_search,
         etc.), NOT from the synthetic ``set_output`` or ``ask_user`` tools.
@@ -1214,14 +1278,16 @@ class EventLoopNode(NodeProtocol):
         ``real_tool_results`` which resets each inner iteration, this list grows
         across the entire turn.
         """
-        stream_id = ctx.node_id
+        stream_id = ctx.stream_id or ctx.node_id
         node_id = ctx.node_id
+        execution_id = ctx.execution_id or ""
         token_counts: dict[str, int] = {"input": 0, "output": 0}
         tool_call_count = 0
         final_text = ""
         # Track output keys set via set_output across all inner iterations
         outputs_set_this_turn: list[str] = []
         user_input_requested = False
+        ask_user_prompt = ""
         # Accumulate ALL tool calls across inner iterations for L3 logging.
         # Unlike real_tool_results (reset each inner iteration), this persists.
         logged_tool_calls: list[dict] = []
@@ -1267,7 +1333,13 @@ class EventLoopNode(NodeProtocol):
                 if isinstance(event, TextDeltaEvent):
                     accumulated_text = event.snapshot
                     await self._publish_text_delta(
-                        stream_id, node_id, event.content, event.snapshot, ctx
+                        stream_id,
+                        node_id,
+                        event.content,
+                        event.snapshot,
+                        ctx,
+                        execution_id,
+                        iteration=iteration,
                     )
 
                 elif isinstance(event, ToolCallEvent):
@@ -1327,6 +1399,7 @@ class EventLoopNode(NodeProtocol):
                     token_counts,
                     logged_tool_calls,
                     user_input_requested,
+                    ask_user_prompt,
                 )
 
             # Execute tool calls — framework tools (set_output, ask_user)
@@ -1354,7 +1427,12 @@ class EventLoopNode(NodeProtocol):
                 executed_in_batch += 1
 
                 await self._publish_tool_started(
-                    stream_id, node_id, tc.tool_use_id, tc.tool_name, tc.tool_input
+                    stream_id,
+                    node_id,
+                    tc.tool_use_id,
+                    tc.tool_name,
+                    tc.tool_input,
+                    execution_id,
                 )
                 logger.info(
                     "[%s] tool_call: %s(%s)",
@@ -1386,7 +1464,7 @@ class EventLoopNode(NodeProtocol):
                         key = tc.tool_input.get("key", "")
                         await accumulator.set(key, value)
                         outputs_set_this_turn.append(key)
-                        await self._publish_output_key_set(stream_id, node_id, key)
+                        await self._publish_output_key_set(stream_id, node_id, key, execution_id)
                     logged_tool_calls.append(
                         {
                             "tool_use_id": tc.tool_use_id,
@@ -1401,6 +1479,17 @@ class EventLoopNode(NodeProtocol):
                 elif tc.tool_name == "ask_user":
                     # --- Framework-level ask_user handling ---
                     user_input_requested = True
+                    ask_user_prompt = tc.tool_input.get("question", "")
+                    # Emit immediately so the frontend transitions to
+                    # "awaiting input" without waiting for post-turn
+                    # processing (compaction, stall check, cursor write).
+                    if self._event_bus and ctx.node_spec.client_facing:
+                        await self._event_bus.emit_client_input_requested(
+                            stream_id=stream_id,
+                            node_id=node_id,
+                            prompt=ask_user_prompt,
+                            execution_id=execution_id,
+                        )
                     result = ToolResult(
                         tool_use_id=tc.tool_use_id,
                         content="Waiting for user input...",
@@ -1590,6 +1679,7 @@ class EventLoopNode(NodeProtocol):
                     tc.tool_name,
                     result.content,
                     result.is_error,
+                    execution_id,
                 )
 
             # If the limit was hit, add error results for every remaining
@@ -1651,6 +1741,7 @@ class EventLoopNode(NodeProtocol):
                     token_counts,
                     logged_tool_calls,
                     user_input_requested,
+                    ask_user_prompt,
                 )
 
             # --- Mid-turn pruning: prevent context blowup within a single turn ---
@@ -1677,6 +1768,7 @@ class EventLoopNode(NodeProtocol):
                     token_counts,
                     logged_tool_calls,
                     user_input_requested,
+                    ask_user_prompt,
                 )
 
             # Tool calls processed -- loop back to stream with updated conversation
@@ -2424,7 +2516,7 @@ class EventLoopNode(NodeProtocol):
                     await self._event_bus.publish(
                         AgentEvent(
                             type=EventType.CONTEXT_COMPACTED,
-                            stream_id=ctx.node_id,
+                            stream_id=ctx.stream_id or ctx.node_id,
                             node_id=ctx.node_id,
                             data={
                                 "level": "prune_only",
@@ -2480,7 +2572,7 @@ class EventLoopNode(NodeProtocol):
             await self._event_bus.publish(
                 AgentEvent(
                     type=EventType.CONTEXT_COMPACTED,
-                    stream_id=ctx.node_id,
+                    stream_id=ctx.stream_id or ctx.node_id,
                     node_id=ctx.node_id,
                     data={
                         "level": level,
@@ -2503,7 +2595,11 @@ class EventLoopNode(NodeProtocol):
         )
         prompt = (
             "Summarize this conversation so far in 2-3 sentences, "
-            "preserving key decisions and results:\n\n"
+            "preserving key decisions and results.\n\n"
+            "IMPORTANT: Always preserve any user-stated rules, constraints, "
+            "or preferences — especially which account/identity to use, "
+            "formatting preferences, and behavioral instructions. "
+            "These MUST appear verbatim or near-verbatim in your summary.\n\n"
             f"{messages_text}"
         )
         if tool_history:
@@ -2520,7 +2616,9 @@ class EventLoopNode(NodeProtocol):
             response = await ctx.llm.acomplete(
                 messages=[{"role": "user", "content": prompt}],
                 system=(
-                    "Summarize conversations concisely. Always preserve the tool history section."
+                    "Summarize conversations concisely. Always preserve the tool "
+                    "history section. Always preserve user-stated rules, constraints, "
+                    "and account/identity preferences verbatim."
                 ),
                 max_tokens=summary_budget,
             )
@@ -2592,13 +2690,24 @@ class EventLoopNode(NodeProtocol):
 
         # 5. Spillover files — list actual files so the LLM can load
         # them immediately instead of having to call list_data_files first.
+        # Inline adapt.md (agent memory) directly — it contains user rules
+        # and identity preferences that must survive emergency compaction.
         if self._config.spillover_dir:
             try:
                 from pathlib import Path
 
                 data_dir = Path(self._config.spillover_dir)
                 if data_dir.is_dir():
-                    files = sorted(f.name for f in data_dir.iterdir() if f.is_file())
+                    # Inline adapt.md content directly
+                    adapt_path = data_dir / "adapt.md"
+                    if adapt_path.is_file():
+                        adapt_text = adapt_path.read_text(encoding="utf-8").strip()
+                        if adapt_text:
+                            parts.append(f"AGENT MEMORY (adapt.md):\n{adapt_text}")
+
+                    files = sorted(
+                        f.name for f in data_dir.iterdir() if f.is_file() and f.name != "adapt.md"
+                    )
                     if files:
                         file_lines = [
                             f"  - {str(data_dir / f)}" for f in files[:30]
@@ -2657,7 +2766,16 @@ class EventLoopNode(NodeProtocol):
         if self._conversation_store is None:
             return None
 
-        conversation = await NodeConversation.restore(self._conversation_store)
+        # In isolated mode, filter parts by phase_id so the node only sees
+        # its own messages in the shared flat conversation store.  In
+        # continuous mode (or when _restore is called for timer-resume)
+        # load all parts — the full conversation threads across nodes.
+        _is_continuous = getattr(ctx, "continuous_mode", False)
+        phase_filter = None if _is_continuous else ctx.node_id
+        conversation = await NodeConversation.restore(
+            self._conversation_store,
+            phase_id=phase_filter,
+        )
         if conversation is None:
             return None
 
@@ -2729,12 +2847,17 @@ class EventLoopNode(NodeProtocol):
         count = 0
         while not self._injection_queue.empty():
             try:
-                content = self._injection_queue.get_nowait()
+                content, is_client_input = self._injection_queue.get_nowait()
                 logger.info(
-                    "[drain] injected message: %s",
+                    "[drain] injected message (client_input=%s): %s",
+                    is_client_input,
                     content[:200] if content else "(empty)",
                 )
-                await conversation.add_user_message(f"[External event]: {content}")
+                # Real user input is stored as-is; external events get a prefix
+                if is_client_input:
+                    await conversation.add_user_message(content, is_client_input=True)
+                else:
+                    await conversation.add_user_message(f"[External event]: {content}")
                 count += 1
             except asyncio.QueueEmpty:
                 break
@@ -2776,36 +2899,93 @@ class EventLoopNode(NodeProtocol):
     # EventBus publishing helpers
     # -------------------------------------------------------------------
 
-    async def _publish_loop_started(self, stream_id: str, node_id: str) -> None:
+    async def _publish_loop_started(
+        self, stream_id: str, node_id: str, execution_id: str = ""
+    ) -> None:
         if self._event_bus:
             await self._event_bus.emit_node_loop_started(
                 stream_id=stream_id,
                 node_id=node_id,
                 max_iterations=self._config.max_iterations,
+                execution_id=execution_id,
             )
 
-    async def _publish_iteration(self, stream_id: str, node_id: str, iteration: int) -> None:
+    async def _generate_action_plan(
+        self,
+        ctx: NodeContext,
+        stream_id: str,
+        node_id: str,
+        execution_id: str,
+    ) -> None:
+        """Generate a brief action plan via LLM and emit it as an SSE event.
+
+        Runs as a fire-and-forget task so it never blocks the main loop.
+        """
+        try:
+            system_prompt = ctx.node_spec.system_prompt or ""
+            # Trim to keep the prompt small
+            prompt_summary = system_prompt[:500]
+            if len(system_prompt) > 500:
+                prompt_summary += "..."
+
+            tool_names = [t.name for t in ctx.available_tools]
+            output_keys = ctx.node_spec.output_keys or []
+
+            prompt = (
+                f'You are about to work on a task as node "{node_id}".\n\n'
+                f"System prompt:\n{prompt_summary}\n\n"
+                f"Tools available: {tool_names}\n"
+                f"Required outputs: {output_keys}\n\n"
+                f"Write a brief action plan (2-5 bullet points) describing "
+                f"what you will do to complete this task. Be specific and concise.\n"
+                f"Return ONLY the plan text, no preamble."
+            )
+
+            response = await ctx.llm.acomplete(
+                messages=[{"role": "user", "content": prompt}],
+                max_tokens=1024,
+            )
+
+            plan = response.content.strip()
+            if plan and self._event_bus:
+                await self._event_bus.emit_node_action_plan(
+                    stream_id=stream_id,
+                    node_id=node_id,
+                    plan=plan,
+                    execution_id=execution_id,
+                )
+        except Exception as e:
+            logger.warning("Action plan generation failed for node '%s': %s", node_id, e)
+
+    async def _publish_iteration(
+        self, stream_id: str, node_id: str, iteration: int, execution_id: str = ""
+    ) -> None:
         if self._event_bus:
             await self._event_bus.emit_node_loop_iteration(
                 stream_id=stream_id,
                 node_id=node_id,
                 iteration=iteration,
+                execution_id=execution_id,
             )
 
-    async def _publish_loop_completed(self, stream_id: str, node_id: str, iterations: int) -> None:
+    async def _publish_loop_completed(
+        self, stream_id: str, node_id: str, iterations: int, execution_id: str = ""
+    ) -> None:
         if self._event_bus:
             await self._event_bus.emit_node_loop_completed(
                 stream_id=stream_id,
                 node_id=node_id,
                 iterations=iterations,
+                execution_id=execution_id,
             )
 
-    async def _publish_stalled(self, stream_id: str, node_id: str) -> None:
+    async def _publish_stalled(self, stream_id: str, node_id: str, execution_id: str = "") -> None:
         if self._event_bus:
             await self._event_bus.emit_node_stalled(
                 stream_id=stream_id,
                 node_id=node_id,
                 reason="Consecutive identical responses detected",
+                execution_id=execution_id,
             )
 
     async def _publish_text_delta(
@@ -2815,6 +2995,8 @@ class EventLoopNode(NodeProtocol):
         content: str,
         snapshot: str,
         ctx: NodeContext,
+        execution_id: str = "",
+        iteration: int | None = None,
     ) -> None:
         if self._event_bus:
             if ctx.node_spec.client_facing:
@@ -2823,6 +3005,8 @@ class EventLoopNode(NodeProtocol):
                     node_id=node_id,
                     content=content,
                     snapshot=snapshot,
+                    execution_id=execution_id,
+                    iteration=iteration,
                 )
             else:
                 await self._event_bus.emit_llm_text_delta(
@@ -2830,6 +3014,7 @@ class EventLoopNode(NodeProtocol):
                     node_id=node_id,
                     content=content,
                     snapshot=snapshot,
+                    execution_id=execution_id,
                 )
 
     async def _publish_tool_started(
@@ -2839,6 +3024,7 @@ class EventLoopNode(NodeProtocol):
         tool_use_id: str,
         tool_name: str,
         tool_input: dict,
+        execution_id: str = "",
     ) -> None:
         if self._event_bus:
             await self._event_bus.emit_tool_call_started(
@@ -2847,6 +3033,7 @@ class EventLoopNode(NodeProtocol):
                 tool_use_id=tool_use_id,
                 tool_name=tool_name,
                 tool_input=tool_input,
+                execution_id=execution_id,
             )
 
     async def _publish_tool_completed(
@@ -2857,6 +3044,7 @@ class EventLoopNode(NodeProtocol):
         tool_name: str,
         result: str,
         is_error: bool,
+        execution_id: str = "",
     ) -> None:
         if self._event_bus:
             await self._event_bus.emit_tool_call_completed(
@@ -2866,6 +3054,7 @@ class EventLoopNode(NodeProtocol):
                 tool_name=tool_name,
                 result=result,
                 is_error=is_error,
+                execution_id=execution_id,
             )
 
     async def _publish_judge_verdict(
@@ -2876,6 +3065,7 @@ class EventLoopNode(NodeProtocol):
         feedback: str = "",
         judge_type: str = "implicit",
         iteration: int = 0,
+        execution_id: str = "",
     ) -> None:
         if self._event_bus:
             await self._event_bus.emit_judge_verdict(
@@ -2885,6 +3075,7 @@ class EventLoopNode(NodeProtocol):
                 feedback=feedback,
                 judge_type=judge_type,
                 iteration=iteration,
+                execution_id=execution_id,
             )
 
     async def _publish_output_key_set(
@@ -2892,12 +3083,319 @@ class EventLoopNode(NodeProtocol):
         stream_id: str,
         node_id: str,
         key: str,
+        execution_id: str = "",
     ) -> None:
         if self._event_bus:
             await self._event_bus.emit_output_key_set(
                 stream_id=stream_id,
                 node_id=node_id,
                 key=key,
+                execution_id=execution_id
+            )
+
+    # -------------------------------------------------------------------
+    # Subagent Execution
+    # -------------------------------------------------------------------
+
+    async def _execute_subagent(
+        self,
+        ctx: NodeContext,
+        agent_id: str,
+        task: str,
+    ) -> ToolResult:
+        """Execute a subagent and return the result as a ToolResult.
+
+        The subagent:
+        - Gets a fresh conversation with just the task
+        - Has read-only access to the parent's readable memory
+        - Cannot delegate to its own subagents (prevents recursion)
+        - Returns its output in structured JSON format
+
+        Args:
+            ctx: Parent node's context (for memory, tools, LLM access).
+            agent_id: The node ID of the subagent to invoke.
+            task: The task description to give the subagent.
+
+        Returns:
+            ToolResult with structured JSON output containing:
+            - message: Human-readable summary
+            - data: Subagent's output (free-form JSON)
+            - metadata: Execution metadata (success, tokens, latency)
+        """
+        from framework.graph.node import NodeContext, SharedMemory
+
+        # Log subagent invocation start
+        logger.info(
+            "\n" + "=" * 60 + "\n"
+            "🤖 SUBAGENT INVOCATION\n"
+            "=" * 60 + "\n"
+            "Parent Node: %s\n"
+            "Subagent ID: %s\n"
+            "Task: %s\n"
+            + "=" * 60,
+            ctx.node_id,
+            agent_id,
+            task[:500] + "..." if len(task) > 500 else task,
+        )
+
+        # 1. Validate agent exists in registry
+        if agent_id not in ctx.node_registry:
+            return ToolResult(
+                tool_use_id="",
+                content=json.dumps({
+                    "message": f"Sub-agent '{agent_id}' not found in registry",
+                    "data": None,
+                    "metadata": {"agent_id": agent_id, "success": False, "error": "not_found"},
+                }),
+                is_error=True,
+            )
+
+        subagent_spec = ctx.node_registry[agent_id]
+
+        # 2. Create read-only memory snapshot
+        # Subagent can read everything the parent can read, but write nothing
+        parent_data = ctx.memory.read_all()
+        subagent_memory = SharedMemory()
+        for key, value in parent_data.items():
+            subagent_memory.write(key, value, validate=False)
+
+        # Scope to read-only: subagent can read all, write none
+        scoped_memory = subagent_memory.with_permissions(
+            read_keys=list(parent_data.keys()),
+            write_keys=[],  # Read-only!
+        )
+
+        # 2b. Set up report callback (one-way channel to parent / event bus)
+        subagent_reports: list[dict] = []
+
+        async def _report_callback(
+            message: str,
+            data: dict | None = None,
+            *,
+            wait_for_response: bool = False,
+        ) -> str | None:
+            subagent_reports.append({"message": message, "data": data, "timestamp": time.time()})
+            if self._event_bus:
+                await self._event_bus.emit_subagent_report(
+                    stream_id=ctx.node_id,
+                    node_id=f"{ctx.node_id}:subagent:{agent_id}",
+                    subagent_id=agent_id,
+                    message=message,
+                    data=data,
+                    execution_id=ctx.execution_id,
+                )
+
+            if not wait_for_response:
+                return None
+
+            if not self._event_bus:
+                logger.warning(
+                    "Subagent '%s' requested user response but no event_bus available",
+                    agent_id,
+                )
+                return None
+
+            # Create isolated receiver and register for input routing
+            import uuid
+
+            escalation_id = f"{ctx.node_id}:escalation:{uuid.uuid4().hex[:8]}"
+            receiver = _EscalationReceiver()
+            registry = ctx.shared_node_registry
+
+            registry[escalation_id] = receiver
+            try:
+                # Stream message to user (parent's node_id so TUI shows parent talking)
+                await self._event_bus.emit_client_output_delta(
+                    stream_id=ctx.node_id,
+                    node_id=ctx.node_id,
+                    content=message,
+                    snapshot=message,
+                    execution_id=ctx.execution_id,
+                )
+                # Request input (escalation_id for routing response back)
+                await self._event_bus.emit_client_input_requested(
+                    stream_id=ctx.node_id,
+                    node_id=escalation_id,
+                    prompt=message,
+                    execution_id=ctx.execution_id,
+                )
+                # Block until user responds
+                return await receiver.wait()
+            finally:
+                registry.pop(escalation_id, None)
+
+        # 3. Filter tools for subagent
+        # Use the full tool catalog (ctx.all_tools) so subagents can access tools
+        # that aren't in the parent node's filtered set (e.g. browser tools for a
+        # GCU subagent when the parent only has web_scrape/save_data).
+        # Falls back to ctx.available_tools if all_tools is empty (e.g. in tests).
+        subagent_tool_names = set(subagent_spec.tools or [])
+        tool_source = ctx.all_tools if ctx.all_tools else ctx.available_tools
+
+        subagent_tools = [
+            t for t in tool_source
+            if t.name in subagent_tool_names and t.name != "delegate_to_sub_agent"
+        ]
+
+        missing = subagent_tool_names - {t.name for t in subagent_tools}
+        if missing:
+            logger.warning(
+                "Subagent '%s' requested tools not found in catalog: %s",
+                agent_id,
+                sorted(missing),
+            )
+
+        logger.info(
+            "📦 Subagent '%s' configuration:\n"
+            "   - System prompt: %s\n"
+            "   - Tools available (%d): %s\n"
+            "   - Memory keys inherited: %s",
+            agent_id,
+            (subagent_spec.system_prompt[:200] + "...") if subagent_spec.system_prompt and len(subagent_spec.system_prompt) > 200 else subagent_spec.system_prompt,
+            len(subagent_tools),
+            [t.name for t in subagent_tools],
+            list(parent_data.keys()),
+        )
+
+        # 4. Build subagent context
+        max_iter = min(self._config.max_iterations, 10)
+        subagent_ctx = NodeContext(
+            runtime=ctx.runtime,
+            node_id=f"{ctx.node_id}:subagent:{agent_id}",
+            node_spec=subagent_spec,
+            memory=scoped_memory,
+            input_data={"task": task, **parent_data},
+            llm=ctx.llm,
+            available_tools=subagent_tools,
+            goal_context=(
+                f"Your specific task: {task}\n\n"
+                f"COMPLETION REQUIREMENTS:\n"
+                f"When your task is done, you MUST call set_output() for each required key: {subagent_spec.output_keys}\n"
+                f"Alternatively, call report_to_parent(mark_complete=true) with your findings in message/data.\n"
+                f"You have a maximum of {max_iter} turns to complete this task."
+            ),
+            goal=ctx.goal,
+            max_tokens=ctx.max_tokens,
+            runtime_logger=ctx.runtime_logger,
+            is_subagent_mode=True,  # Prevents nested delegation
+            report_callback=_report_callback,
+            node_registry={},  # Empty - no nested subagents
+            shared_node_registry=ctx.shared_node_registry,  # For escalation routing
+        )
+
+        # 5. Create and execute subagent EventLoopNode
+        # Derive a conversation store for the subagent from the parent's store.
+        # Each invocation gets a unique path so that repeated delegate calls
+        # (e.g. one per profile) don't restore a stale completed conversation.
+        self._subagent_instance_counter.setdefault(agent_id, 0)
+        self._subagent_instance_counter[agent_id] += 1
+        subagent_instance = str(self._subagent_instance_counter[agent_id])
+
+        subagent_conv_store = None
+        if self._conversation_store is not None:
+            from framework.storage.conversation_store import FileConversationStore
+
+            parent_base = getattr(self._conversation_store, "_base", None)
+            if parent_base is not None:
+                # Store subagent conversations parallel to the parent node,
+                # not nested inside it.  e.g. conversations/{node}:subagent:{agent_id}:{instance}/
+                conversations_dir = parent_base.parent  # e.g. conversations/
+                subagent_dir_name = f"{agent_id}-{subagent_instance}"
+                subagent_store_path = conversations_dir / subagent_dir_name
+                subagent_conv_store = FileConversationStore(base_path=subagent_store_path)
+
+        # Derive a subagent-scoped spillover dir so large tool results
+        # (e.g. browser_snapshot) get written to disk instead of being
+        # silently truncated.  Each instance gets its own directory to
+        # avoid file collisions between concurrent subagents.
+        subagent_spillover = None
+        if self._config.spillover_dir:
+            subagent_spillover = str(Path(self._config.spillover_dir) / agent_id / subagent_instance)
+
+        subagent_node = EventLoopNode(
+            event_bus=None,  # Subagents don't emit events to parent's bus
+            judge=SubagentJudge(task=task, max_iterations=max_iter),
+            config=LoopConfig(
+                max_iterations=max_iter,  # Tighter budget
+                max_tool_calls_per_turn=self._config.max_tool_calls_per_turn,
+                tool_call_overflow_margin=self._config.tool_call_overflow_margin,
+                max_history_tokens=self._config.max_history_tokens,
+                stall_detection_threshold=self._config.stall_detection_threshold,
+                max_tool_result_chars=self._config.max_tool_result_chars,
+                spillover_dir=subagent_spillover,
+            ),
+            tool_executor=self._tool_executor,
+            conversation_store=subagent_conv_store,
+        )
+
+        try:
+            logger.info("🚀 Starting subagent '%s' execution...", agent_id)
+            start_time = time.time()
+            result = await subagent_node.execute(subagent_ctx)
+            latency_ms = int((time.time() - start_time) * 1000)
+
+            logger.info(
+                "\n" + "-" * 60 + "\n"
+                "✅ SUBAGENT '%s' COMPLETED\n"
+                "-" * 60 + "\n"
+                "Success: %s\n"
+                "Latency: %dms\n"
+                "Tokens used: %s\n"
+                "Output keys: %s\n"
+                + "-" * 60,
+                agent_id,
+                result.success,
+                latency_ms,
+                result.tokens_used,
+                list(result.output.keys()) if result.output else [],
+            )
+
+            result_json = {
+                "message": (
+                    f"Sub-agent '{agent_id}' completed successfully"
+                    if result.success
+                    else f"Sub-agent '{agent_id}' failed: {result.error}"
+                ),
+                "data": result.output,
+                "reports": subagent_reports if subagent_reports else None,
+                "metadata": {
+                    "agent_id": agent_id,
+                    "success": result.success,
+                    "tokens_used": result.tokens_used,
+                    "latency_ms": latency_ms,
+                    "report_count": len(subagent_reports),
+                },
+            }
+
+            return ToolResult(
+                tool_use_id="",
+                content=json.dumps(result_json, indent=2, default=str),
+                is_error=not result.success,
+            )
+
+        except Exception as e:
+            logger.exception(
+                "\n" + "!" * 60 + "\n"
+                "❌ SUBAGENT '%s' FAILED\n"
+                "!" * 60 + "\n"
+                "Error: %s\n"
+                + "!" * 60,
+                agent_id,
+                str(e),
+            )
+            result_json = {
+                "message": f"Sub-agent '{agent_id}' raised exception: {e}",
+                "data": None,
+                "metadata": {
+                    "agent_id": agent_id,
+                    "success": False,
+                    "error": str(e),
+                },
+            }
+            return ToolResult(
+                tool_use_id="",
+                content=json.dumps(result_json, indent=2),
+                is_error=True,
             )
 
     # -------------------------------------------------------------------

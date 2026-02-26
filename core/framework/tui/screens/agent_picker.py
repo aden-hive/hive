@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass, field
+from enum import Enum
 from pathlib import Path
 
 from rich.console import Group
@@ -14,6 +15,14 @@ from textual.containers import Vertical
 from textual.screen import ModalScreen
 from textual.widgets import Label, OptionList, TabbedContent, TabPane
 from textual.widgets._option_list import Option
+
+
+class GetStartedAction(Enum):
+    """Actions available in the Get Started tab."""
+
+    RUN_EXAMPLES = "run_examples"
+    RUN_EXISTING = "run_existing"
+    BUILD_EDIT = "build_edit"
 
 
 @dataclass
@@ -28,6 +37,29 @@ class AgentEntry:
     node_count: int = 0
     tool_count: int = 0
     tags: list[str] = field(default_factory=list)
+    last_active: str | None = None
+
+
+def _get_last_active(agent_name: str) -> str | None:
+    """Return the most recent updated_at timestamp across all sessions."""
+    sessions_dir = Path.home() / ".hive" / "agents" / agent_name / "sessions"
+    if not sessions_dir.exists():
+        return None
+    latest: str | None = None
+    for session_dir in sessions_dir.iterdir():
+        if not session_dir.is_dir() or not session_dir.name.startswith("session_"):
+            continue
+        state_file = session_dir / "state.json"
+        if not state_file.exists():
+            continue
+        try:
+            data = json.loads(state_file.read_text())
+            ts = data.get("timestamps", {}).get("updated_at")
+            if ts and (latest is None or ts > latest):
+                latest = ts
+        except Exception:
+            continue
+    return latest
 
 
 def _count_sessions(agent_name: str) -> int:
@@ -38,19 +70,50 @@ def _count_sessions(agent_name: str) -> int:
     return sum(1 for d in sessions_dir.iterdir() if d.is_dir() and d.name.startswith("session_"))
 
 
-def _extract_agent_stats(agent_json_path: Path) -> tuple[int, int, list[str]]:
-    """Extract node count, tool count, and tags from agent.json."""
-    try:
-        data = json.loads(agent_json_path.read_text())
-        nodes = data.get("nodes", [])
-        node_count = len(nodes)
-        tools: set[str] = set()
-        for node in nodes:
-            tools.update(node.get("tools", []))
-        tags = data.get("agent", {}).get("tags", [])
-        return node_count, len(tools), tags
-    except Exception:
-        return 0, 0, []
+def _extract_agent_stats(agent_path: Path) -> tuple[int, int, list[str]]:
+    """Extract node count, tool count, and tags from an agent directory.
+
+    Prefers agent.py (AST-parsed) over agent.json for node/tool counts
+    since agent.json may be stale.  Tags are only available from agent.json.
+    """
+    import ast
+
+    node_count, tool_count, tags = 0, 0, []
+
+    # Try agent.py first — source of truth for nodes
+    agent_py = agent_path / "agent.py"
+    if agent_py.exists():
+        try:
+            tree = ast.parse(agent_py.read_text())
+            for node in ast.walk(tree):
+                # Find `nodes = [...]` assignment
+                if isinstance(node, ast.Assign):
+                    for target in node.targets:
+                        if isinstance(target, ast.Name) and target.id == "nodes":
+                            if isinstance(node.value, ast.List):
+                                node_count = len(node.value.elts)
+        except Exception:
+            pass
+
+    # Fall back to / supplement from agent.json
+    agent_json = agent_path / "agent.json"
+    if agent_json.exists():
+        try:
+            data = json.loads(agent_json.read_text())
+            json_nodes = data.get("nodes", [])
+            if node_count == 0:
+                node_count = len(json_nodes)
+            # Tool count: use whichever source gave us nodes, but agent.json
+            # has the structured tool lists so prefer it for tool counting
+            tools: set[str] = set()
+            for n in json_nodes:
+                tools.update(n.get("tools", []))
+            tool_count = len(tools)
+            tags = data.get("agent", {}).get("tags", [])
+        except Exception:
+            pass
+
+    return node_count, tool_count, tags
 
 
 def discover_agents() -> dict[str, list[AgentEntry]]:
@@ -76,20 +139,23 @@ def discover_agents() -> dict[str, list[AgentEntry]]:
             if not _is_valid_agent_dir(path):
                 continue
 
-            agent_json = path / "agent.json"
-            node_count, tool_count, tags = 0, 0, []
-            if agent_json.exists():
-                try:
-                    data = json.loads(agent_json.read_text())
-                    meta = data.get("agent", {})
-                    name = meta.get("name", path.name)
-                    desc = meta.get("description", "")
-                except Exception:
-                    name = path.name
-                    desc = "(error reading agent.json)"
-                node_count, tool_count, tags = _extract_agent_stats(agent_json)
-            else:
-                name, desc = _extract_python_agent_metadata(path)
+            # config.py is source of truth for name/description
+            name, desc = _extract_python_agent_metadata(path)
+            config_fallback_name = path.name.replace("_", " ").title()
+            used_config = name != config_fallback_name
+
+            node_count, tool_count, tags = _extract_agent_stats(path)
+            if not used_config:
+                # config.py didn't provide values, fall back to agent.json
+                agent_json = path / "agent.json"
+                if agent_json.exists():
+                    try:
+                        data = json.loads(agent_json.read_text())
+                        meta = data.get("agent", {})
+                        name = meta.get("name", name)
+                        desc = meta.get("description", desc)
+                    except Exception:
+                        pass
 
             entries.append(
                 AgentEntry(
@@ -101,6 +167,7 @@ def discover_agents() -> dict[str, list[AgentEntry]]:
                     node_count=node_count,
                     tool_count=tool_count,
                     tags=tags,
+                    last_active=_get_last_active(path.name),
                 )
             )
         if entries:
@@ -139,10 +206,20 @@ def _render_agent_option(agent: AgentEntry) -> Group:
     return Group(*parts)
 
 
+def _render_get_started_option(title: str, description: str, icon: str = "→") -> Group:
+    """Build a Rich renderable for a Get Started option."""
+    line1 = Text()
+    line1.append(f"{icon} ", style="bold cyan")
+    line1.append(title, style="bold")
+    line2 = Text(description, style="dim")
+    return Group(line1, line2)
+
+
 class AgentPickerScreen(ModalScreen[str | None]):
     """Modal screen showing available agents organized by tabbed categories.
 
     Returns the selected agent path as a string, or None if dismissed.
+    For Get Started actions, returns a special prefix like "action:run_examples".
     """
 
     BINDINGS = [
@@ -188,9 +265,14 @@ class AgentPickerScreen(ModalScreen[str | None]):
     }
     """
 
-    def __init__(self, agent_groups: dict[str, list[AgentEntry]]) -> None:
+    def __init__(
+        self,
+        agent_groups: dict[str, list[AgentEntry]],
+        show_get_started: bool = False,
+    ) -> None:
         super().__init__()
         self._groups = agent_groups
+        self._show_get_started = show_get_started
         # Map (tab_id, option_index) -> AgentEntry
         self._option_map: dict[str, dict[int, AgentEntry]] = {}
 
@@ -203,6 +285,43 @@ class AgentPickerScreen(ModalScreen[str | None]):
                 id="picker-subtitle",
             )
             with TabbedContent():
+                # Get Started tab (only on initial launch)
+                if self._show_get_started:
+                    with TabPane("Get Started", id="get-started"):
+                        option_list = OptionList(id="list-get-started")
+                        option_list.add_option(
+                            Option(
+                                _render_get_started_option(
+                                    "Test and run example agents",
+                                    "Try pre-built example agents to learn how Hive works",
+                                    "📚",
+                                ),
+                                id="action:run_examples",
+                            )
+                        )
+                        option_list.add_option(
+                            Option(
+                                _render_get_started_option(
+                                    "Test and run existing agent",
+                                    "Load and run an agent you've already built (from exports/)",
+                                    "🚀",
+                                ),
+                                id="action:run_existing",
+                            )
+                        )
+                        option_list.add_option(
+                            Option(
+                                _render_get_started_option(
+                                    "Build or edit agent",
+                                    "Create a new agent or modify an existing one",
+                                    "🛠️ ",
+                                ),
+                                id="action:build_edit",
+                            )
+                        )
+                        yield option_list
+
+                # Agent category tabs
                 for category, agents in self._groups.items():
                     tab_id = category.lower().replace(" ", "-")
                     with TabPane(f"{category} ({len(agents)})", id=tab_id):
@@ -224,6 +343,15 @@ class AgentPickerScreen(ModalScreen[str | None]):
 
     def on_option_list_option_selected(self, event: OptionList.OptionSelected) -> None:
         list_id = event.option_list.id or ""
+
+        # Handle Get Started tab options
+        if list_id == "list-get-started":
+            option = event.option
+            if option and option.id:
+                self.dismiss(option.id)  # Returns "action:run_examples", etc.
+            return
+
+        # Handle agent selection from other tabs
         idx = event.option_index
         agent_map = self._option_map.get(list_id, {})
         agent = agent_map.get(idx)

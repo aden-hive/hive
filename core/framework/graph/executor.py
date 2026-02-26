@@ -131,10 +131,13 @@ class GraphExecutor:
         parallel_config: ParallelExecutionConfig | None = None,
         event_bus: Any | None = None,
         stream_id: str = "",
+        execution_id: str = "",
         runtime_logger: Any = None,
         storage_path: str | Path | None = None,
         loop_config: dict[str, Any] | None = None,
         accounts_prompt: str = "",
+        accounts_data: list[dict] | None = None,
+        tool_provider_map: dict[str, str] | None = None,
     ):
         """
         Initialize the executor.
@@ -155,6 +158,8 @@ class GraphExecutor:
             storage_path: Optional base path for conversation persistence
             loop_config: Optional EventLoopNode configuration (max_iterations, etc.)
             accounts_prompt: Connected accounts block for system prompt injection
+            accounts_data: Raw account data for per-node prompt generation
+            tool_provider_map: Tool name to provider name mapping for account routing
         """
         self.runtime = runtime
         self.llm = llm
@@ -166,10 +171,13 @@ class GraphExecutor:
         self.logger = logging.getLogger(__name__)
         self._event_bus = event_bus
         self._stream_id = stream_id
+        self._execution_id = execution_id or getattr(runtime, "execution_id", "")
         self.runtime_logger = runtime_logger
         self._storage_path = Path(storage_path) if storage_path else None
         self._loop_config = loop_config or {}
         self.accounts_prompt = accounts_prompt
+        self.accounts_data = accounts_data
+        self.tool_provider_map = tool_provider_map
 
         # Initialize output cleaner
         self.cleansing_config = cleansing_config or CleansingConfig()
@@ -236,7 +244,12 @@ class GraphExecutor:
 
     def _validate_tools(self, graph: GraphSpec) -> list[str]:
         """
-        Validate that all tools declared by nodes are available.
+        Validate that all tools declared by reachable nodes are available.
+
+        Only checks nodes reachable from graph.entry_node via edges.
+        Nodes belonging to other entry points (e.g. the coder node when
+        entering via ticket_triage) are skipped — they will be validated
+        when their own entry point triggers execution.
 
         Returns:
             List of error messages (empty if all tools are available)
@@ -244,7 +257,20 @@ class GraphExecutor:
         errors = []
         available_tool_names = {t.name for t in self.tools}
 
+        # Compute reachable nodes from the execution's entry node
+        reachable: set[str] = set()
+        to_visit = [graph.entry_node]
+        while to_visit:
+            nid = to_visit.pop()
+            if nid in reachable:
+                continue
+            reachable.add(nid)
+            for edge in graph.get_outgoing_edges(nid):
+                to_visit.append(edge.target)
+
         for node in graph.nodes:
+            if node.id not in reachable:
+                continue
             if node.tools:
                 missing = set(node.tools) - available_tool_names
                 if missing:
@@ -478,7 +504,7 @@ class GraphExecutor:
             try:
                 from framework.storage.conversation_store import FileConversationStore
 
-                entry_conv_path = self._storage_path / "conversations" / current_node_id
+                entry_conv_path = self._storage_path / "conversations"
                 if entry_conv_path.exists():
                     _store = FileConversationStore(base_path=entry_conv_path)
 
@@ -532,6 +558,7 @@ class GraphExecutor:
                 await self._event_bus.emit_execution_resumed(
                     stream_id=self._stream_id,
                     node_id=current_node_id,
+                    execution_id=self._execution_id,
                 )
 
         # Start run
@@ -576,6 +603,7 @@ class GraphExecutor:
                             stream_id=self._stream_id,
                             node_id=current_node_id,
                             reason="User requested pause (Ctrl+Z)",
+                            execution_id=self._execution_id,
                         )
 
                     # Create session state for pause
@@ -684,6 +712,14 @@ class GraphExecutor:
                         if k not in cumulative_output_keys:
                             cumulative_output_keys.append(k)
 
+                # Build resume narrative (Layer 2) when restoring a session
+                # so the EventLoopNode can rebuild the full 3-layer system prompt.
+                _resume_narrative = ""
+                if _is_resuming and path:
+                    from framework.graph.prompt_composer import build_narrative
+
+                    _resume_narrative = build_narrative(memory, path, graph)
+
                 # Build context for node
                 ctx = self._build_context(
                     node_spec=node_spec,
@@ -697,6 +733,8 @@ class GraphExecutor:
                     cumulative_output_keys=cumulative_output_keys if is_continuous else None,
                     event_triggered=_event_triggered,
                     node_registry=node_registry,
+                    identity_prompt=getattr(graph, "identity_prompt", ""),
+                    narrative=_resume_narrative,
                 )
 
                 # Log actual input data being read
@@ -747,7 +785,9 @@ class GraphExecutor:
                 # Emit node-started event (skip event_loop nodes — they emit their own)
                 if self._event_bus and node_spec.node_type != "event_loop":
                     await self._event_bus.emit_node_loop_started(
-                        stream_id=self._stream_id, node_id=current_node_id
+                        stream_id=self._stream_id,
+                        node_id=current_node_id,
+                        execution_id=self._execution_id,
                     )
 
                 # Execute node
@@ -757,7 +797,10 @@ class GraphExecutor:
                 # Emit node-completed event (skip event_loop nodes)
                 if self._event_bus and node_spec.node_type != "event_loop":
                     await self._event_bus.emit_node_loop_completed(
-                        stream_id=self._stream_id, node_id=current_node_id, iterations=1
+                        stream_id=self._stream_id,
+                        node_id=current_node_id,
+                        iterations=1,
+                        execution_id=self._execution_id,
                     )
 
                 # Ensure runtime logging has an L2 entry for this node
@@ -877,6 +920,7 @@ class GraphExecutor:
                                 retry_count=retry_count,
                                 max_retries=max_retries,
                                 error=result.error or "",
+                                execution_id=self._execution_id,
                             )
 
                         _is_retry = True
@@ -972,6 +1016,7 @@ class GraphExecutor:
                             stream_id=self._stream_id,
                             node_id=node_spec.id,
                             reason="HITL pause node",
+                            execution_id=self._execution_id,
                         )
 
                     saved_memory = memory.read_all()
@@ -1037,6 +1082,7 @@ class GraphExecutor:
                             source_node=current_node_id,
                             target_node=result.next_node,
                             edge_condition="router",
+                            execution_id=self._execution_id,
                         )
 
                     current_node_id = result.next_node
@@ -1072,6 +1118,7 @@ class GraphExecutor:
                                     edge_condition=edge.condition.value
                                     if hasattr(edge.condition, "value")
                                     else str(edge.condition),
+                                    execution_id=self._execution_id,
                                 )
 
                         # Execute branches in parallel
@@ -1124,6 +1171,7 @@ class GraphExecutor:
                                 stream_id=self._stream_id,
                                 source_node=current_node_id,
                                 target_node=next_node,
+                                execution_id=self._execution_id,
                             )
 
                         # CHECKPOINT: node_complete (after determining next node)
@@ -1171,6 +1219,7 @@ class GraphExecutor:
                     next_spec = graph.get_node(current_node_id)
                     if next_spec and next_spec.node_type == "event_loop":
                         from framework.graph.prompt_composer import (
+                            build_accounts_prompt,
                             build_narrative,
                             build_transition_marker,
                             compose_system_prompt,
@@ -1196,26 +1245,26 @@ class GraphExecutor:
                                 else _adapt_text
                             )
 
+                        # Build per-node accounts prompt for the next node
+                        _node_accounts = self.accounts_prompt or None
+                        if self.accounts_data and self.tool_provider_map:
+                            _node_accounts = (
+                                build_accounts_prompt(
+                                    self.accounts_data,
+                                    self.tool_provider_map,
+                                    node_tool_names=next_spec.tools,
+                                )
+                                or None
+                            )
+
                         # Compose new system prompt (Layer 1 + 2 + 3 + accounts)
                         new_system = compose_system_prompt(
                             identity_prompt=getattr(graph, "identity_prompt", None),
                             focus_prompt=next_spec.system_prompt,
                             narrative=narrative,
-                            accounts_prompt=self.accounts_prompt or None,
+                            accounts_prompt=_node_accounts,
                         )
                         continuous_conversation.update_system_prompt(new_system)
-
-                        # Switch conversation store to the next node's directory
-                        # so the transition marker and all subsequent messages are
-                        # persisted there instead of the first node's directory.
-                        if self._storage_path:
-                            from framework.storage.conversation_store import (
-                                FileConversationStore,
-                            )
-
-                            next_store_path = self._storage_path / "conversations" / next_spec.id
-                            next_store = FileConversationStore(base_path=next_store_path)
-                            await continuous_conversation.switch_store(next_store)
 
                         # Insert transition marker into conversation
                         data_dir = str(self._storage_path / "data") if self._storage_path else None
@@ -1330,9 +1379,7 @@ class GraphExecutor:
                 try:
                     import json as _json
 
-                    cursor_path = (
-                        self._storage_path / "conversations" / current_node_id / "cursor.json"
-                    )
+                    cursor_path = self._storage_path / "conversations" / "cursor.json"
                     if cursor_path.exists():
                         cursor_data = _json.loads(cursor_path.read_text(encoding="utf-8"))
                         wip_outputs = cursor_data.get("outputs", {})
@@ -1433,9 +1480,7 @@ class GraphExecutor:
                 try:
                     import json as _json
 
-                    cursor_path = (
-                        self._storage_path / "conversations" / current_node_id / "cursor.json"
-                    )
+                    cursor_path = self._storage_path / "conversations" / "cursor.json"
                     if cursor_path.exists():
                         cursor_data = _json.loads(cursor_path.read_text(encoding="utf-8"))
                         for key, value in cursor_data.get("outputs", {}).items():
@@ -1511,6 +1556,8 @@ class GraphExecutor:
         override_tools: list | None = None,
         cumulative_output_keys: list[str] | None = None,
         event_triggered: bool = False,
+        identity_prompt: str = "",
+        narrative: str = "",
         node_registry: dict[str, NodeSpec] | None = None,
     ) -> NodeContext:
         """Build execution context for a node."""
@@ -1529,6 +1576,17 @@ class GraphExecutor:
             write_keys=node_spec.output_keys,
         )
 
+        # Build per-node accounts prompt (filtered to this node's tools)
+        node_accounts_prompt = self.accounts_prompt
+        if self.accounts_data and self.tool_provider_map:
+            from framework.graph.prompt_composer import build_accounts_prompt
+
+            node_accounts_prompt = build_accounts_prompt(
+                self.accounts_data,
+                self.tool_provider_map,
+                node_tool_names=node_spec.tools,
+            )
+
         return NodeContext(
             runtime=self.runtime,
             node_id=node_spec.id,
@@ -1546,8 +1604,11 @@ class GraphExecutor:
             inherited_conversation=inherited_conversation,
             cumulative_output_keys=cumulative_output_keys or [],
             event_triggered=event_triggered,
-            accounts_prompt=self.accounts_prompt,
-            execution_id=self.runtime.execution_id,
+            accounts_prompt=node_accounts_prompt,
+            identity_prompt=identity_prompt,
+            narrative=narrative,
+            execution_id=self._execution_id,
+            stream_id=self._stream_id,
             node_registry=node_registry or {},
             all_tools=list(self.tools),  # Full catalog for subagent tool resolution
             shared_node_registry=self.node_registry,  # For subagent escalation routing
@@ -1601,7 +1662,7 @@ class GraphExecutor:
             if self._storage_path:
                 from framework.storage.conversation_store import FileConversationStore
 
-                store_path = self._storage_path / "conversations" / node_spec.id
+                store_path = self._storage_path / "conversations"
                 conv_store = FileConversationStore(base_path=store_path)
 
             # Auto-configure spillover directory for large tool results.
@@ -1915,7 +1976,9 @@ class GraphExecutor:
                     # Emit node-started event (skip event_loop nodes)
                     if self._event_bus and node_spec.node_type != "event_loop":
                         await self._event_bus.emit_node_loop_started(
-                            stream_id=self._stream_id, node_id=branch.node_id
+                            stream_id=self._stream_id,
+                            node_id=branch.node_id,
+                            execution_id=self._execution_id,
                         )
 
                     self.logger.info(
@@ -1939,7 +2002,10 @@ class GraphExecutor:
                     # Emit node-completed event (skip event_loop nodes)
                     if self._event_bus and node_spec.node_type != "event_loop":
                         await self._event_bus.emit_node_loop_completed(
-                            stream_id=self._stream_id, node_id=branch.node_id, iterations=1
+                            stream_id=self._stream_id,
+                            node_id=branch.node_id,
+                            iterations=1,
+                            execution_id=self._execution_id,
                         )
 
                     if result.success:

@@ -126,6 +126,8 @@ feat(component): add new feature description
 - Use meaningful variable and function names
 - Keep functions focused and small
 
+For linting and formatting (Ruff, pre-commit hooks), see [Linting & Formatting Setup](docs/contributing-lint-setup.md).
+
 ## Testing
 
 > **Note:** When testing agents in `exports/`, always set PYTHONPATH:
