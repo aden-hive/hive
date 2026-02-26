@@ -396,43 +396,6 @@ class LiteLLMProvider(LLMProvider):
         # unreachable, but satisfies type checker
         raise RuntimeError("Exhausted rate limit retries")
 
-    def _codex_sync_complete(self, kwargs: dict[str, Any]) -> "LLMResponse":
-        """Collect a streaming Codex response into a single LLMResponse.
-
-        The ChatGPT Codex backend only supports ``stream=True``, so non-streaming
-        callers go through this helper which forces streaming, accumulates the
-        chunks, and returns the same LLMResponse that ``complete()`` would.
-        """
-        kwargs["stream"] = True
-        response = litellm.completion(**kwargs)  # type: ignore[union-attr]
-        content = ""
-        model_name = self.model
-        input_tokens = 0
-        output_tokens = 0
-        finish_reason = ""
-        for chunk in response:
-            choice = chunk.choices[0] if chunk.choices else None
-            if not choice:
-                continue
-            delta = choice.delta
-            if delta and delta.content:
-                content += delta.content
-            if choice.finish_reason:
-                finish_reason = choice.finish_reason
-            if hasattr(chunk, "usage") and chunk.usage:
-                input_tokens = getattr(chunk.usage, "prompt_tokens", 0) or 0
-                output_tokens = getattr(chunk.usage, "completion_tokens", 0) or 0
-            if chunk.model:
-                model_name = chunk.model
-        return LLMResponse(
-            content=content,
-            model=model_name,
-            input_tokens=input_tokens,
-            output_tokens=output_tokens,
-            stop_reason=finish_reason,
-            raw_response=None,
-        )
-
     def complete(
         self,
         messages: list[dict[str, Any]],
@@ -444,6 +407,19 @@ class LiteLLMProvider(LLMProvider):
         max_retries: int | None = None,
     ) -> LLMResponse:
         """Generate a completion using LiteLLM."""
+        # Codex ChatGPT backend requires streaming — delegate to the unified
+        # async streaming path which properly handles tool calls.
+        if self._codex_backend:
+            return asyncio.run(self.acomplete(
+                messages=messages,
+                system=system,
+                tools=tools,
+                max_tokens=max_tokens,
+                response_format=response_format,
+                json_mode=json_mode,
+                max_retries=max_retries,
+            ))
+
         # Prepare messages with system prompt
         full_messages = []
         if system:
@@ -480,11 +456,6 @@ class LiteLLMProvider(LLMProvider):
         # LiteLLM passes this through to the underlying provider
         if response_format:
             kwargs["response_format"] = response_format
-
-        # Codex ChatGPT backend requires streaming and rejects max_output_tokens.
-        if self._codex_backend:
-            kwargs.pop("max_tokens", None)
-            return self._codex_sync_complete(kwargs)
 
         # Make the call
         response = self._completion_with_rate_limit_retry(max_retries=max_retries, **kwargs)
@@ -633,6 +604,19 @@ class LiteLLMProvider(LLMProvider):
         max_retries: int | None = None,
     ) -> LLMResponse:
         """Async version of complete(). Uses litellm.acompletion — non-blocking."""
+        # Codex ChatGPT backend requires streaming — route through stream() which
+        # already handles Codex quirks and has proper tool call accumulation.
+        if self._codex_backend:
+            stream_iter = self.stream(
+                messages=messages,
+                system=system,
+                tools=tools,
+                max_tokens=max_tokens,
+                response_format=response_format,
+                json_mode=json_mode,
+            )
+            return await self._collect_stream_to_response(stream_iter)
+
         full_messages: list[dict[str, Any]] = []
         if system:
             full_messages.append({"role": "system", "content": system})
@@ -661,11 +645,6 @@ class LiteLLMProvider(LLMProvider):
         if response_format:
             kwargs["response_format"] = response_format
 
-        # Codex ChatGPT backend requires streaming and rejects max_output_tokens.
-        if self._codex_backend:
-            kwargs.pop("max_tokens", None)
-            return await self._codex_async_complete(kwargs)
-
         response = await self._acompletion_with_rate_limit_retry(max_retries=max_retries, **kwargs)
 
         content = response.choices[0].message.content or ""
@@ -680,38 +659,6 @@ class LiteLLMProvider(LLMProvider):
             output_tokens=output_tokens,
             stop_reason=response.choices[0].finish_reason or "",
             raw_response=response,
-        )
-
-    async def _codex_async_complete(self, kwargs: dict[str, Any]) -> "LLMResponse":
-        """Async version of _codex_sync_complete."""
-        kwargs["stream"] = True
-        response = await litellm.acompletion(**kwargs)  # type: ignore[union-attr]
-        content = ""
-        model_name = self.model
-        input_tokens = 0
-        output_tokens = 0
-        finish_reason = ""
-        async for chunk in response:
-            choice = chunk.choices[0] if chunk.choices else None
-            if not choice:
-                continue
-            delta = choice.delta
-            if delta and delta.content:
-                content += delta.content
-            if choice.finish_reason:
-                finish_reason = choice.finish_reason
-            if hasattr(chunk, "usage") and chunk.usage:
-                input_tokens = getattr(chunk.usage, "prompt_tokens", 0) or 0
-                output_tokens = getattr(chunk.usage, "completion_tokens", 0) or 0
-            if chunk.model:
-                model_name = chunk.model
-        return LLMResponse(
-            content=content,
-            model=model_name,
-            input_tokens=input_tokens,
-            output_tokens=output_tokens,
-            stop_reason=finish_reason,
-            raw_response=None,
         )
 
     def _tool_to_openai_format(self, tool: Tool) -> dict[str, Any]:
@@ -735,6 +682,8 @@ class LiteLLMProvider(LLMProvider):
         system: str = "",
         tools: list[Tool] | None = None,
         max_tokens: int = 4096,
+        response_format: dict[str, Any] | None = None,
+        json_mode: bool = False,
     ) -> AsyncIterator[StreamEvent]:
         """Stream a completion via litellm.acompletion(stream=True).
 
@@ -759,6 +708,14 @@ class LiteLLMProvider(LLMProvider):
             full_messages.append({"role": "system", "content": system})
         full_messages.extend(messages)
 
+        # Add JSON mode via prompt engineering (works across all providers)
+        if json_mode:
+            json_instruction = "\n\nPlease respond with a valid JSON object."
+            if full_messages and full_messages[0]["role"] == "system":
+                full_messages[0]["content"] += json_instruction
+            else:
+                full_messages.insert(0, {"role": "system", "content": json_instruction.strip()})
+
         kwargs: dict[str, Any] = {
             "model": self.model,
             "messages": full_messages,
@@ -773,6 +730,8 @@ class LiteLLMProvider(LLMProvider):
             kwargs["api_base"] = self.api_base
         if tools:
             kwargs["tools"] = [self._tool_to_openai_format(t) for t in tools]
+        if response_format:
+            kwargs["response_format"] = response_format
         # The Codex ChatGPT backend rejects max_output_tokens and stream_options.
         if self._codex_backend:
             kwargs.pop("max_tokens", None)
@@ -949,3 +908,54 @@ class LiteLLMProvider(LLMProvider):
                 recoverable = _is_stream_transient_error(e)
                 yield StreamErrorEvent(error=str(e), recoverable=recoverable)
                 return
+
+    async def _collect_stream_to_response(
+        self,
+        stream: AsyncIterator[StreamEvent],
+    ) -> LLMResponse:
+        """Consume a stream() iterator and collect it into a single LLMResponse.
+
+        Used by acomplete() to route through the unified streaming path so that
+        all backends (including Codex) get proper tool call handling.
+        """
+        from framework.llm.stream_events import (
+            FinishEvent,
+            StreamErrorEvent,
+            TextDeltaEvent,
+            ToolCallEvent,
+        )
+
+        content = ""
+        tool_calls: list[dict[str, Any]] = []
+        input_tokens = 0
+        output_tokens = 0
+        stop_reason = ""
+        model = self.model
+
+        async for event in stream:
+            if isinstance(event, TextDeltaEvent):
+                content = event.snapshot  # snapshot is the accumulated text
+            elif isinstance(event, ToolCallEvent):
+                tool_calls.append({
+                    "id": event.tool_use_id,
+                    "name": event.tool_name,
+                    "input": event.tool_input,
+                })
+            elif isinstance(event, FinishEvent):
+                input_tokens = event.input_tokens
+                output_tokens = event.output_tokens
+                stop_reason = event.stop_reason
+                if event.model:
+                    model = event.model
+            elif isinstance(event, StreamErrorEvent):
+                if not event.recoverable:
+                    raise RuntimeError(f"Stream error: {event.error}")
+
+        return LLMResponse(
+            content=content,
+            model=model,
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            stop_reason=stop_reason,
+            raw_response={"tool_calls": tool_calls} if tool_calls else None,
+        )
