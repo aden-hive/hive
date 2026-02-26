@@ -872,7 +872,7 @@ case $choice in
             echo -e "  Run ${CYAN}claude${NC} first to authenticate with your Claude subscription,"
             echo -e "  then run this quickstart again."
             echo ""
-            SELECTED_PROVIDER_ID=""
+            exit 1
         else
             SUBSCRIPTION_MODE="claude_code"
             SELECTED_PROVIDER_ID="anthropic"
