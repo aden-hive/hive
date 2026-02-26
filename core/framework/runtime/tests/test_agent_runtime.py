@@ -821,5 +821,182 @@ class TestTimerEntryPoints:
             await runtime.stop()
 
 
+# === Event Handler Guard Tests ===
+
+
+class TestEventHandlerGuards:
+    """Tests for self-trigger guard and circuit breaker in event-driven handlers."""
+
+    @pytest.mark.asyncio
+    async def test_self_trigger_guard_skips_own_stream(
+        self, sample_graph, sample_goal, temp_storage
+    ):
+        """Test that an event-driven entry point ignores events from its own stream."""
+        runtime = AgentRuntime(
+            graph=sample_graph,
+            goal=sample_goal,
+            storage_path=temp_storage,
+        )
+        bus = runtime._event_bus
+
+        entry_spec = EntryPointSpec(
+            id="guardian",
+            name="Guardian",
+            entry_node="process-webhook",
+            trigger_type="event",
+            trigger_config={
+                "event_types": ["execution_failed"],
+            },
+        )
+        runtime.register_entry_point(entry_spec)
+        await runtime.start()
+
+        try:
+            # Publish an event that looks like it came from the guardian itself
+            await bus.publish(
+                AgentEvent(
+                    type=EventType.EXECUTION_FAILED,
+                    stream_id="guardian",  # same as entry_point_id
+                    execution_id="exec-self",
+                    data={"error": "some failure"},
+                )
+            )
+            await asyncio.sleep(0.2)
+
+            # Guardian stream should have NO executions (event was skipped)
+            stream = runtime._streams.get("guardian")
+            assert stream is not None
+            assert len(stream._execution_tasks) == 0
+        finally:
+            await runtime.stop()
+
+    @pytest.mark.asyncio
+    async def test_self_trigger_guard_skips_own_stream_secondary_graph(
+        self, sample_graph, sample_goal, temp_storage
+    ):
+        """Test that a secondary-graph event handler ignores events from its own stream."""
+        runtime = AgentRuntime(
+            graph=sample_graph,
+            goal=sample_goal,
+            storage_path=temp_storage,
+        )
+        await runtime.start()
+
+        entry_spec = EntryPointSpec(
+            id="guardian",
+            name="Guardian",
+            entry_node="process-webhook",
+            trigger_type="event",
+            trigger_config={
+                "event_types": ["execution_failed"],
+            },
+        )
+        await runtime.add_graph(
+            graph_id="secondary",
+            graph=sample_graph,
+            goal=sample_goal,
+            entry_points={"guardian": entry_spec},
+        )
+
+        try:
+            # Publish an event from the secondary guardian's own stream
+            await runtime._event_bus.publish(
+                AgentEvent(
+                    type=EventType.EXECUTION_FAILED,
+                    stream_id="secondary::guardian",  # matches namespaced entry_point_id
+                    execution_id="exec-self",
+                    data={"error": "secondary guardian failure"},
+                )
+            )
+            await asyncio.sleep(0.2)
+
+            # Secondary guardian stream should have NO executions (self-trigger blocked)
+            reg = runtime.get_graph_registration("secondary")
+            assert reg is not None
+            stream = reg.streams.get("guardian")
+            assert stream is not None
+            assert len(stream._execution_tasks) == 0
+        finally:
+            await runtime.stop()
+
+
+# === Cancel All Tasks Tests ===
+
+
+class TestCancelAllTasks:
+    """Tests for cancel_all_tasks and cancel_all_tasks_async."""
+
+    @pytest.mark.asyncio
+    async def test_cancel_all_tasks_async_returns_false_when_no_tasks(
+        self, sample_graph, sample_goal, temp_storage
+    ):
+        """Test that cancel_all_tasks_async returns False with no running tasks."""
+        runtime = AgentRuntime(
+            graph=sample_graph,
+            goal=sample_goal,
+            storage_path=temp_storage,
+        )
+
+        entry_spec = EntryPointSpec(
+            id="webhook",
+            name="Webhook",
+            entry_node="process-webhook",
+            trigger_type="webhook",
+        )
+        runtime.register_entry_point(entry_spec)
+        await runtime.start()
+
+        try:
+            result = await runtime.cancel_all_tasks_async()
+            assert result is False
+        finally:
+            await runtime.stop()
+
+    @pytest.mark.asyncio
+    async def test_cancel_all_tasks_async_cancels_running_task(
+        self, sample_graph, sample_goal, temp_storage
+    ):
+        """Test that cancel_all_tasks_async cancels a running task and returns True."""
+        runtime = AgentRuntime(
+            graph=sample_graph,
+            goal=sample_goal,
+            storage_path=temp_storage,
+        )
+
+        entry_spec = EntryPointSpec(
+            id="webhook",
+            name="Webhook",
+            entry_node="process-webhook",
+            trigger_type="webhook",
+        )
+        runtime.register_entry_point(entry_spec)
+        await runtime.start()
+
+        try:
+            # Inject a fake running task into the stream
+            stream = runtime._streams["webhook"]
+
+            async def hang_forever():
+                await asyncio.get_event_loop().create_future()
+
+            fake_task = asyncio.ensure_future(hang_forever())
+            stream._execution_tasks["fake-exec"] = fake_task
+
+            result = await runtime.cancel_all_tasks_async()
+            assert result is True
+
+            # Let the CancelledError propagate
+            try:
+                await fake_task
+            except asyncio.CancelledError:
+                pass
+            assert fake_task.cancelled()
+
+            # Clean up
+            del stream._execution_tasks["fake-exec"]
+        finally:
+            await runtime.stop()
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

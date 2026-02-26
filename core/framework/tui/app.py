@@ -1240,46 +1240,20 @@ class AdenTUI(App):
         self.notify(f"Logs {mode}", severity="information", timeout=2)
 
     def action_pause_execution(self) -> None:
-        """Immediately pause execution by cancelling task (bound to Ctrl+Z)."""
+        """Immediately pause execution by cancelling all running tasks (bound to Ctrl+Z)."""
         if self.chat_repl is None or self.runtime is None:
             return
         try:
-            if not self.chat_repl._current_exec_id:
+            if self.runtime.cancel_all_tasks(self.chat_repl._agent_loop):
+                self.chat_repl._current_exec_id = None
                 self.notify(
-                    "No active execution to pause",
+                    "All executions stopped",
                     severity="information",
                     timeout=3,
                 )
-                return
-
-            task_cancelled = False
-            all_streams = []
-            active_reg = self.runtime.get_graph_registration(self.runtime.active_graph_id)
-            if active_reg:
-                all_streams.extend(active_reg.streams.values())
-            for gid in self.runtime.list_graphs():
-                if gid == self.runtime.active_graph_id:
-                    continue
-                reg = self.runtime.get_graph_registration(gid)
-                if reg:
-                    all_streams.extend(reg.streams.values())
-
-            for stream in all_streams:
-                exec_id = self.chat_repl._current_exec_id
-                task = stream._execution_tasks.get(exec_id)
-                if task and not task.done():
-                    task.cancel()
-                    task_cancelled = True
-                    self.notify(
-                        "Execution paused - state saved",
-                        severity="information",
-                        timeout=3,
-                    )
-                    break
-
-            if not task_cancelled:
+            else:
                 self.notify(
-                    "Execution already completed",
+                    "No active executions",
                     severity="information",
                     timeout=2,
                 )
