@@ -384,10 +384,19 @@ class AgentRuntime:
                         # Validate the expression upfront
                         if not croniter.is_valid(cron_expr):
                             raise ValueError(f"Invalid cron expression: {cron_expr}")
-                    except (ImportError, ValueError) as e:
-                        logger.warning(
-                            "Entry point '%s' has invalid cron config: %s",
+                    except ImportError:
+                        logger.error(
+                            "Entry point '%s' requires the 'croniter' package for cron "
+                            "expressions, but it is not installed. Install it with: "
+                            "pip install 'framework[cron]' or pip install croniter",
                             ep_id,
+                        )
+                        continue
+                    except ValueError as e:
+                        logger.warning(
+                            "Entry point '%s' has invalid cron expression '%s': %s",
+                            ep_id,
+                            cron_expr,
                             e,
                         )
                         continue
