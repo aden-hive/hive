@@ -709,6 +709,14 @@ class GraphExecutor:
                         if k not in cumulative_output_keys:
                             cumulative_output_keys.append(k)
 
+                # Build resume narrative (Layer 2) when restoring a session
+                # so the EventLoopNode can rebuild the full 3-layer system prompt.
+                _resume_narrative = ""
+                if _is_resuming and path:
+                    from framework.graph.prompt_composer import build_narrative
+
+                    _resume_narrative = build_narrative(memory, path, graph)
+
                 # Build context for node
                 ctx = self._build_context(
                     node_spec=node_spec,
@@ -721,6 +729,8 @@ class GraphExecutor:
                     override_tools=cumulative_tools if is_continuous else None,
                     cumulative_output_keys=cumulative_output_keys if is_continuous else None,
                     event_triggered=_event_triggered,
+                    identity_prompt=getattr(graph, "identity_prompt", ""),
+                    narrative=_resume_narrative,
                 )
 
                 # Log actual input data being read
@@ -1541,6 +1551,8 @@ class GraphExecutor:
         override_tools: list | None = None,
         cumulative_output_keys: list[str] | None = None,
         event_triggered: bool = False,
+        identity_prompt: str = "",
+        narrative: str = "",
     ) -> NodeContext:
         """Build execution context for a node."""
         # Filter tools to those available to this node
@@ -1587,6 +1599,8 @@ class GraphExecutor:
             cumulative_output_keys=cumulative_output_keys or [],
             event_triggered=event_triggered,
             accounts_prompt=node_accounts_prompt,
+            identity_prompt=identity_prompt,
+            narrative=narrative,
             execution_id=self._execution_id,
             stream_id=self._stream_id,
         )

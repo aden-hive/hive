@@ -61,18 +61,25 @@ export function sseEventToChatMessage(
   agentDisplayName?: string,
   turnId?: number,
 ): ChatMessage | null {
-  // turnId disambiguates messages across response turns.  Within a single
-  // turn the ID stays stable so the upsert logic can replace the previous
-  // snapshot (streaming).  Across turns, different turnIds produce different
-  // IDs so each response gets its own bubble.
-  const idKey = turnId != null ? String(turnId) : (event.execution_id ?? "0");
+  // Combine execution_id (unique per execution) with turnId (increments per
+  // loop iteration) so each iteration gets its own bubble while streaming
+  // deltas within one iteration still share the same ID for upsert.
+  const eid = event.execution_id ?? "";
+  const tid = turnId != null ? String(turnId) : "";
+  const idKey = eid && tid ? `${eid}-${tid}` : eid || tid || `t-${Date.now()}`;
 
   switch (event.type) {
     case "client_output_delta": {
+      // Prefer backend-provided iteration (reliable, embedded in event data)
+      // over frontend turnCounter (can desync when SSE queue drops events).
+      const iter = event.data?.iteration;
+      const iterTid = iter != null ? String(iter) : tid;
+      const iterIdKey = eid && iterTid ? `${eid}-${iterTid}` : eid || iterTid || `t-${Date.now()}`;
+
       const snapshot = (event.data?.snapshot as string) || (event.data?.content as string) || "";
       if (!snapshot) return null;
       return {
-        id: `stream-${idKey}-${event.node_id}`,
+        id: `stream-${iterIdKey}-${event.node_id}`,
         agent: agentDisplayName || event.node_id || "Agent",
         agentColor: "",
         content: snapshot,

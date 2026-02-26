@@ -3,10 +3,15 @@ import { Play, Pause, Loader2, CheckCircle2 } from "lucide-react";
 
 export type NodeStatus = "running" | "complete" | "pending" | "error" | "looping";
 
+export type NodeType = "execution" | "trigger";
+
 export interface GraphNode {
   id: string;
   label: string;
   status: NodeStatus;
+  nodeType?: NodeType;
+  triggerType?: string;
+  triggerConfig?: Record<string, unknown>;
   next?: string[];
   backEdges?: string[];
   iterations?: number;
@@ -114,6 +119,21 @@ const statusColors: Record<NodeStatus, { dot: string; bg: string; border: string
     border: "hsl(0,65%,55%,0.3)",
     glow: "hsl(0,65%,55%,0.1)",
   },
+};
+
+// Trigger node palette — cool blue-gray, visually distinct from amber execution nodes
+const triggerColors = {
+  bg: "hsl(210,25%,14%)",
+  border: "hsl(210,30%,30%)",
+  text: "hsl(210,30%,65%)",
+  icon: "hsl(210,40%,55%)",
+};
+
+const triggerIcons: Record<string, string> = {
+  webhook: "\u26A1",  // lightning bolt
+  timer: "\u23F1",    // stopwatch
+  api: "\u2192",      // right arrow
+  event: "\u223F",    // sine wave
 };
 
 function formatLabel(id: string): string {
@@ -380,7 +400,55 @@ export default function AgentGraph({ nodes, title: _title, onNodeClick, onRun, o
     );
   };
 
+  const renderTriggerNode = (node: GraphNode, i: number) => {
+    const pos = nodePos(i);
+    const icon = triggerIcons[node.triggerType || ""] || "\u26A1";
+    const clipId = `clip-trigger-${node.id}`;
+
+    return (
+      <g key={node.id} onClick={() => onNodeClick?.(node)} style={{ cursor: onNodeClick ? "pointer" : "default" }}>
+        {/* Pill-shaped background with dashed border */}
+        <rect
+          x={pos.x} y={pos.y}
+          width={nodeW} height={NODE_H}
+          rx={NODE_H / 2}
+          fill={triggerColors.bg}
+          stroke={triggerColors.border}
+          strokeWidth={1}
+          strokeDasharray="4 2"
+        />
+
+        {/* Trigger type icon */}
+        <text
+          x={pos.x + 18} y={pos.y + NODE_H / 2}
+          fill={triggerColors.icon} fontSize={13}
+          textAnchor="middle" dominantBaseline="middle"
+        >
+          {icon}
+        </text>
+
+        {/* Label */}
+        <clipPath id={clipId}>
+          <rect x={pos.x + 30} y={pos.y} width={nodeW - 38} height={NODE_H} />
+        </clipPath>
+        <text
+          x={pos.x + 32} y={pos.y + NODE_H / 2}
+          fill={triggerColors.text}
+          fontSize={nodeW < 140 ? 10.5 : 11.5}
+          fontWeight={500}
+          dominantBaseline="middle"
+          letterSpacing="0.01em"
+          clipPath={`url(#${clipId})`}
+        >
+          {node.label}
+        </text>
+      </g>
+    );
+  };
+
   const renderNode = (node: GraphNode, i: number) => {
+    if (node.nodeType === "trigger") return renderTriggerNode(node, i);
+
     const pos = nodePos(i);
     const isActive = node.status === "running" || node.status === "looping";
     const isDone = node.status === "complete";

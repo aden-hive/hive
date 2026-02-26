@@ -98,7 +98,10 @@ async def handle_check_agent(request: web.Request) -> web.Response:
 
     try:
         from framework.credentials.setup import load_agent_nodes
-        from framework.credentials.validation import ensure_credential_key_env, validate_agent_credentials
+        from framework.credentials.validation import (
+            ensure_credential_key_env,
+            validate_agent_credentials,
+        )
 
         # Load env vars from shell config (same as runtime startup)
         ensure_credential_key_env()

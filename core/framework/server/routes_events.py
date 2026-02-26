@@ -35,6 +35,7 @@ DEFAULT_EVENT_TYPES = [
     EventType.NODE_TOOL_DOOM_LOOP,
     EventType.CONTEXT_COMPACTED,
     EventType.WORKER_LOADED,
+    EventType.CREDENTIALS_REQUIRED,
 ]
 
 # Keepalive interval in seconds
@@ -77,12 +78,28 @@ async def handle_events(request: web.Request) -> web.StreamResponse:
     # Per-client buffer queue
     queue: asyncio.Queue = asyncio.Queue(maxsize=1000)
 
+    # Lifecycle events drive frontend state transitions and must never be lost.
+    _CRITICAL_EVENTS = {
+        "execution_started",
+        "execution_completed",
+        "execution_failed",
+        "execution_paused",
+        "client_input_requested",
+        "node_loop_iteration",
+        "node_loop_started",
+        "credentials_required",
+    }
+
     async def on_event(event) -> None:
-        """Push event dict into queue; drop if full."""
-        try:
-            queue.put_nowait(event.to_dict())
-        except asyncio.QueueFull:
-            pass  # Drop oldest-undelivered; client will catch up
+        """Push event dict into queue; drop non-critical events if full."""
+        evt_dict = event.to_dict()
+        if evt_dict.get("type") in _CRITICAL_EVENTS:
+            await queue.put(evt_dict)  # block rather than drop
+        else:
+            try:
+                queue.put_nowait(evt_dict)
+            except asyncio.QueueFull:
+                pass  # high-frequency events can be dropped; client will catch up
 
     # Subscribe to EventBus
     from framework.server.sse import SSEResponse
@@ -104,14 +121,16 @@ async def handle_events(request: web.Request) -> web.StreamResponse:
                 await sse.send_keepalive()
             except (ConnectionResetError, ConnectionError):
                 break
-            except RuntimeError as exc:
-                if "closing transport" in str(exc).lower():
-                    break
-                raise
+            except Exception as exc:
+                logger.debug("SSE stream closed: %s", exc)
+                break
     except asyncio.CancelledError:
         pass
     finally:
-        event_bus.unsubscribe(sub_id)
+        try:
+            event_bus.unsubscribe(sub_id)
+        except Exception:
+            pass
         logger.debug("SSE client disconnected from session '%s'", session.id)
 
     return sse.response

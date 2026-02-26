@@ -258,3 +258,118 @@ describe("node ordering", () => {
     expect(result).toEqual([]);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Trigger node synthesis from entry_points
+// ---------------------------------------------------------------------------
+
+describe("trigger node synthesis", () => {
+  it("single non-manual entry point: trigger node prepended before entry_node", () => {
+    const topology: GraphTopology = {
+      nodes: [makeNode("A"), makeNode("B")],
+      edges: [
+        { source: "A", target: "B", condition: "on_success", priority: 0 },
+      ],
+      entry_node: "A",
+      entry_points: [
+        { id: "webhook", name: "Webhook Handler", entry_node: "A", trigger_type: "webhook", trigger_config: { url: "/hook" } },
+      ],
+    };
+
+    const result = topologyToGraphNodes(topology);
+    expect(result).toHaveLength(3);
+
+    const trigger = result[0];
+    expect(trigger.id).toBe("__trigger_webhook");
+    expect(trigger.nodeType).toBe("trigger");
+    expect(trigger.triggerType).toBe("webhook");
+    expect(trigger.triggerConfig).toEqual({ url: "/hook" });
+    expect(trigger.label).toBe("Webhook Handler");
+    expect(trigger.status).toBe("pending");
+    expect(trigger.next).toEqual(["A"]);
+  });
+
+  it("trigger_config is threaded through for timer triggers", () => {
+    const topology: GraphTopology = {
+      nodes: [makeNode("A")],
+      edges: [],
+      entry_node: "A",
+      entry_points: [
+        { id: "timer", name: "Daily Check", entry_node: "A", trigger_type: "timer", trigger_config: { cron: "0 9 * * *" } },
+      ],
+    };
+
+    const result = topologyToGraphNodes(topology);
+    const trigger = result[0];
+    expect(trigger.triggerConfig).toEqual({ cron: "0 9 * * *" });
+  });
+
+  it("no entry_points: no trigger nodes added", () => {
+    const topology: GraphTopology = {
+      nodes: [makeNode("A")],
+      edges: [],
+      entry_node: "A",
+    };
+
+    const result = topologyToGraphNodes(topology);
+    expect(result).toHaveLength(1);
+    expect(result[0].nodeType).toBeUndefined();
+  });
+
+  it("only manual entry points: no trigger nodes added", () => {
+    const topology: GraphTopology = {
+      nodes: [makeNode("A")],
+      edges: [],
+      entry_node: "A",
+      entry_points: [
+        { id: "main", name: "Main", entry_node: "A", trigger_type: "manual" },
+      ],
+    };
+
+    const result = topologyToGraphNodes(topology);
+    expect(result).toHaveLength(1);
+    expect(result[0].id).toBe("A");
+  });
+
+  it("multiple non-manual entry points: multiple trigger nodes", () => {
+    const topology: GraphTopology = {
+      nodes: [makeNode("A"), makeNode("B"), makeNode("C")],
+      edges: [
+        { source: "A", target: "C", condition: "on_success", priority: 0 },
+        { source: "B", target: "C", condition: "on_success", priority: 0 },
+      ],
+      entry_node: "A",
+      entry_points: [
+        { id: "webhook", name: "Webhook", entry_node: "A", trigger_type: "webhook" },
+        { id: "timer", name: "Daily Timer", entry_node: "B", trigger_type: "timer" },
+      ],
+    };
+
+    const result = topologyToGraphNodes(topology);
+    expect(result).toHaveLength(5); // 2 triggers + 3 nodes
+    const triggers = result.filter((n) => n.nodeType === "trigger");
+    expect(triggers).toHaveLength(2);
+    expect(triggers[0].next).toEqual(["A"]);
+    expect(triggers[1].next).toEqual(["B"]);
+  });
+
+  it("mix of manual and non-manual: only non-manual become trigger nodes", () => {
+    const topology: GraphTopology = {
+      nodes: [makeNode("A"), makeNode("B")],
+      edges: [
+        { source: "A", target: "B", condition: "on_success", priority: 0 },
+      ],
+      entry_node: "A",
+      entry_points: [
+        { id: "main", name: "Main", entry_node: "A", trigger_type: "manual" },
+        { id: "webhook", name: "Webhook", entry_node: "A", trigger_type: "webhook" },
+      ],
+    };
+
+    const result = topologyToGraphNodes(topology);
+    expect(result).toHaveLength(3); // 1 trigger + 2 nodes
+    const triggers = result.filter((n) => n.nodeType === "trigger");
+    expect(triggers).toHaveLength(1);
+    expect(triggers[0].triggerType).toBe("webhook");
+  });
+});

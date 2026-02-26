@@ -770,7 +770,8 @@ class AgentRunner:
         # deep_research_agent.agent) so the top-level reload picks up
         # changes in the entire package — not just __init__.py.
         stale = [
-            name for name in sys.modules
+            name
+            for name in sys.modules
             if name == package_name or name.startswith(f"{package_name}.")
         ]
         for name in stale:
@@ -786,6 +787,7 @@ class AgentRunner:
         storage_path: Path | None = None,
         model: str | None = None,
         interactive: bool = True,
+        skip_credential_validation: bool | None = None,
     ) -> "AgentRunner":
         """
         Load an agent from an export folder.
@@ -801,6 +803,8 @@ class AgentRunner:
             model: LLM model to use (reads from agent's default_config if None)
             interactive: If True (default), offer interactive credential setup.
                 Set to False from TUI callers that handle setup via their own UI.
+            skip_credential_validation: If True, skip credential checks at load time.
+                When None (default), uses the agent module's setting.
 
         Returns:
             AgentRunner instance ready to run
@@ -870,6 +874,8 @@ class AgentRunner:
 
             # Read pre-run hooks (e.g., credential_tester needs account selection)
             skip_cred = getattr(agent_module, "skip_credential_validation", False)
+            if skip_credential_validation is not None:
+                skip_cred = skip_credential_validation
             needs_acct = getattr(agent_module, "requires_account_selection", False)
             configure_fn = getattr(agent_module, "configure_for_account", None)
             list_accts_fn = getattr(agent_module, "list_connected_accounts", None)
@@ -906,6 +912,7 @@ class AgentRunner:
             storage_path=storage_path,
             model=model,
             interactive=interactive,
+            skip_credential_validation=skip_credential_validation or False,
         )
 
     def register_tool(

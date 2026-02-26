@@ -290,14 +290,19 @@ class EventLoopNode(NodeProtocol):
                 _restored_recent_responses = restored.recent_responses
                 _restored_tool_fingerprints = restored.recent_tool_fingerprints
 
-                # Refresh the system prompt to the current node spec's version.
+                # Refresh the system prompt with full 3-layer composition.
                 # The stored prompt may be stale after code changes or when
                 # runtime-injected context (e.g. worker identity) has changed.
-                from framework.graph.prompt_composer import _with_datetime
+                # On resume, we rebuild identity + narrative + focus so the LLM
+                # understands the session history, not just the node directive.
+                from framework.graph.prompt_composer import compose_system_prompt
 
-                _current_prompt = _with_datetime(ctx.node_spec.system_prompt or "")
-                if ctx.accounts_prompt:
-                    _current_prompt = f"{_current_prompt}\n\n{ctx.accounts_prompt}"
+                _current_prompt = compose_system_prompt(
+                    identity_prompt=ctx.identity_prompt or None,
+                    focus_prompt=ctx.node_spec.system_prompt,
+                    narrative=ctx.narrative or None,
+                    accounts_prompt=ctx.accounts_prompt or None,
+                )
                 if conversation.system_prompt != _current_prompt:
                     conversation.update_system_prompt(_current_prompt)
                     logger.info("Refreshed system prompt for restored conversation")
@@ -359,7 +364,8 @@ class EventLoopNode(NodeProtocol):
         if set_output_tool:
             tools.append(set_output_tool)
         if ctx.node_spec.client_facing and not ctx.event_triggered:
-            tools.append(self._build_ask_user_tool())
+            if stream_id != "queen":
+                tools.append(self._build_ask_user_tool())
             tools.append(self._build_escalate_tool())
 
         logger.info(
@@ -805,7 +811,9 @@ class EventLoopNode(NodeProtocol):
                     iteration,
                     _cf_auto,
                 )
-                got_input = await self._await_user_input(ctx, prompt=_cf_prompt)
+                got_input = await self._await_user_input(
+                    ctx, prompt=_cf_prompt, skip_emit=user_input_requested
+                )
                 logger.info("[%s] iter=%d: unblocked, got_input=%s", node_id, iteration, got_input)
                 if got_input:
                     _cf_expecting_work = True
@@ -1138,7 +1146,9 @@ class EventLoopNode(NodeProtocol):
         self._shutdown = True
         self._input_ready.set()
 
-    async def _await_user_input(self, ctx: NodeContext, prompt: str = "") -> bool:
+    async def _await_user_input(
+        self, ctx: NodeContext, prompt: str = "", *, skip_emit: bool = False
+    ) -> bool:
         """Block until user input arrives or shutdown is signaled.
 
         Called in two situations:
@@ -1146,6 +1156,10 @@ class EventLoopNode(NodeProtocol):
         - Auto-block: any text-only turn (no real tools, no set_output)
           from a client-facing node — ensures the user sees and responds
           before the judge runs.
+
+        Args:
+            skip_emit: If True, skip emitting client_input_requested
+                (already emitted earlier, e.g. during ask_user detection).
 
         Returns True if input arrived, False if shutdown was signaled.
         """
@@ -1155,7 +1169,7 @@ class EventLoopNode(NodeProtocol):
         # without injecting, so the wait still blocks until the user types.
         self._input_ready.clear()
 
-        if self._event_bus:
+        if self._event_bus and not skip_emit:
             await self._event_bus.emit_client_input_requested(
                 stream_id=ctx.stream_id or ctx.node_id,
                 node_id=ctx.node_id,
@@ -1260,6 +1274,7 @@ class EventLoopNode(NodeProtocol):
                         event.snapshot,
                         ctx,
                         execution_id,
+                        iteration=iteration,
                     )
 
                 elif isinstance(event, ToolCallEvent):
@@ -1397,6 +1412,16 @@ class EventLoopNode(NodeProtocol):
                     # --- Framework-level ask_user handling ---
                     user_input_requested = True
                     ask_user_prompt = tc.tool_input.get("question", "")
+                    # Emit immediately so the frontend transitions to
+                    # "awaiting input" without waiting for post-turn
+                    # processing (compaction, stall check, cursor write).
+                    if self._event_bus and ctx.node_spec.client_facing:
+                        await self._event_bus.emit_client_input_requested(
+                            stream_id=stream_id,
+                            node_id=node_id,
+                            prompt=ask_user_prompt,
+                            execution_id=execution_id,
+                        )
                     result = ToolResult(
                         tool_use_id=tc.tool_use_id,
                         content="Waiting for user input...",
@@ -2638,7 +2663,7 @@ class EventLoopNode(NodeProtocol):
 
             response = await ctx.llm.acomplete(
                 messages=[{"role": "user", "content": prompt}],
-                max_tokens=300,
+                max_tokens=1024,
             )
 
             plan = response.content.strip()
@@ -2691,6 +2716,7 @@ class EventLoopNode(NodeProtocol):
         snapshot: str,
         ctx: NodeContext,
         execution_id: str = "",
+        iteration: int | None = None,
     ) -> None:
         if self._event_bus:
             if ctx.node_spec.client_facing:
@@ -2700,6 +2726,7 @@ class EventLoopNode(NodeProtocol):
                     content=content,
                     snapshot=snapshot,
                     execution_id=execution_id,
+                    iteration=iteration,
                 )
             else:
                 await self._event_bus.emit_llm_text_delta(

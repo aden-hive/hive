@@ -10,13 +10,21 @@ from framework.server.app import resolve_session, safe_path_segment
 logger = logging.getLogger(__name__)
 
 
-def _get_graph_spec(session, graph_id: str):
-    """Get GraphSpec for a graph_id. Returns (graph_spec, None) or (None, error_response)."""
+def _get_graph_registration(session, graph_id: str):
+    """Get _GraphRegistration for a graph_id. Returns (reg, None) or (None, error_response)."""
     if not session.worker_runtime:
         return None, web.json_response({"error": "No worker loaded in this session"}, status=503)
     reg = session.worker_runtime.get_graph_registration(graph_id)
     if reg is None:
         return None, web.json_response({"error": f"Graph '{graph_id}' not found"}, status=404)
+    return reg, None
+
+
+def _get_graph_spec(session, graph_id: str):
+    """Get GraphSpec for a graph_id. Returns (graph_spec, None) or (None, error_response)."""
+    reg, err = _get_graph_registration(session, graph_id)
+    if err:
+        return None, err
     return reg.graph, None
 
 
@@ -47,10 +55,11 @@ async def handle_list_nodes(request: web.Request) -> web.Response:
         return err
 
     graph_id = request.match_info["graph_id"]
-    graph, err = _get_graph_spec(session, graph_id)
+    reg, err = _get_graph_registration(session, graph_id)
     if err:
         return err
 
+    graph = reg.graph
     nodes = [_node_to_dict(n) for n in graph.nodes]
 
     # Optionally enrich with session progress
@@ -90,11 +99,22 @@ async def handle_list_nodes(request: web.Request) -> web.Response:
         {"source": e.source, "target": e.target, "condition": e.condition, "priority": e.priority}
         for e in graph.edges
     ]
+    entry_points = [
+        {
+            "id": ep.id,
+            "name": ep.name,
+            "entry_node": ep.entry_node,
+            "trigger_type": ep.trigger_type,
+            "trigger_config": ep.trigger_config,
+        }
+        for ep in reg.entry_points.values()
+    ]
     return web.json_response(
         {
             "nodes": nodes,
             "edges": edges,
             "entry_node": graph.entry_node,
+            "entry_points": entry_points,
         }
     )
 

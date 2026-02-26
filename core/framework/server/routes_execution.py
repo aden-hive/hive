@@ -1,11 +1,14 @@
 """Execution control routes — trigger, inject, chat, resume, stop, replay."""
 
+import asyncio
 import json
 import logging
 
 from aiohttp import web
 
+from framework.credentials.validation import validate_agent_credentials
 from framework.server.app import resolve_session, safe_path_segment, sessions_dir
+from framework.server.routes_sessions import _credential_error_response
 
 logger = logging.getLogger(__name__)
 
@@ -21,6 +24,21 @@ async def handle_trigger(request: web.Request) -> web.Response:
 
     if not session.worker_runtime:
         return web.json_response({"error": "No worker loaded in this session"}, status=503)
+
+    # Validate credentials before running — deferred from load time to avoid
+    # showing the modal before the user clicks Run.  Runs in executor because
+    # validate_agent_credentials makes blocking HTTP health-check calls.
+    if session.runner:
+        loop = asyncio.get_running_loop()
+        try:
+            await loop.run_in_executor(
+                None, lambda: validate_agent_credentials(session.runner.graph.nodes)
+            )
+        except Exception as e:
+            agent_path = str(session.worker_path) if session.worker_path else ""
+            resp = _credential_error_response(e, agent_path)
+            if resp is not None:
+                return resp
 
     body = await request.json()
     entry_point_id = body.get("entry_point_id", "default")

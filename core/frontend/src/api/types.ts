@@ -26,6 +26,7 @@ export interface EntryPoint {
   name: string;
   entry_node: string;
   trigger_type: string;
+  trigger_config?: Record<string, unknown>;
 }
 
 export interface DiscoverEntry {
@@ -178,6 +179,7 @@ export interface GraphTopology {
   nodes: NodeSpec[];
   edges: GraphEdge[];
   entry_node: string;
+  entry_points?: EntryPoint[];
 }
 
 export interface NodeCriteria {
@@ -262,7 +264,8 @@ export type EventTypeName =
   | "webhook_received"
   | "custom"
   | "escalation_requested"
-  | "worker_loaded";
+  | "worker_loaded"
+  | "credentials_required";
 
 export interface AgentEvent {
   type: EventTypeName;

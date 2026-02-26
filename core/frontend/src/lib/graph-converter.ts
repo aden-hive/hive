@@ -5,31 +5,57 @@ import type { GraphNode, NodeStatus } from "@/components/AgentGraph";
  * Convert a backend GraphTopology (nodes + edges + entry_node) into
  * the GraphNode[] shape that AgentGraph renders.
  *
- * Three jobs:
- *  1. Order nodes via BFS from entry_node
- *  2. Classify edges as forward (next) or backward (backEdges)
- *  3. Map session enrichment fields to NodeStatus
+ * Four jobs:
+ *  1. Synthesize trigger nodes from non-manual entry_points
+ *  2. Order nodes via BFS from trigger/entry_node
+ *  3. Classify edges as forward (next) or backward (backEdges)
+ *  4. Map session enrichment fields to NodeStatus
  */
 export function topologyToGraphNodes(topology: GraphTopology): GraphNode[] {
-  const { nodes, edges, entry_node } = topology;
+  const { nodes, edges, entry_node, entry_points } = topology;
   if (nodes.length === 0) return [];
 
-  // Build adjacency list: source → [target, ...]
+  // --- Synthesize trigger nodes for non-manual entry points ---
+  const schedulerEntryPoints = (entry_points || []).filter(
+    (ep) => ep.trigger_type !== "manual",
+  );
+  const triggerMap = new Map<string, GraphNode>();
+
+  for (const ep of schedulerEntryPoints) {
+    const triggerId = `__trigger_${ep.id}`;
+    triggerMap.set(triggerId, {
+      id: triggerId,
+      label: ep.name,
+      status: "pending",
+      nodeType: "trigger",
+      triggerType: ep.trigger_type,
+      triggerConfig: ep.trigger_config,
+      next: [ep.entry_node],
+    });
+  }
+
+  // Build adjacency list: source → [target, ...] (includes trigger edges)
   const adj = new Map<string, string[]>();
   for (const e of edges) {
     const list = adj.get(e.source) || [];
     list.push(e.target);
     adj.set(e.source, list);
   }
+  for (const [triggerId, triggerNode] of triggerMap) {
+    adj.set(triggerId, triggerNode.next!);
+  }
 
-  // BFS from entry_node to determine walk order + position map
+  // BFS — start from trigger nodes if any, else entry_node
   const order: string[] = [];
   const position = new Map<string, number>();
   const visited = new Set<string>();
 
-  const start = entry_node || nodes[0].id;
-  const queue = [start];
-  visited.add(start);
+  const starts =
+    triggerMap.size > 0
+      ? [...triggerMap.keys()]
+      : [entry_node || nodes[0].id];
+  const queue = [...starts];
+  for (const s of starts) visited.add(s);
 
   while (queue.length > 0) {
     const id = queue.shift()!;
@@ -91,6 +117,10 @@ export function topologyToGraphNodes(topology: GraphTopology): GraphNode[] {
 
   // Build GraphNode[] in BFS order
   return order.map((id) => {
+    // Synthetic trigger nodes are returned directly
+    const trigger = triggerMap.get(id);
+    if (trigger) return trigger;
+
     const spec = nodeMap.get(id);
     const next = nextMap.get(id);
     const back = backMap.get(id);

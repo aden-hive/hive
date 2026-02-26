@@ -423,7 +423,6 @@ if [ "$USE_ASSOC_ARRAYS" = true ]; then
         ["anthropic:3"]="claude-haiku-4-5-20251001"
         ["openai:0"]="gpt-5.2"
         ["openai:1"]="gpt-5-mini"
-        ["openai:2"]="gpt-5-nano"
         ["gemini:0"]="gemini-3-flash-preview"
         ["gemini:1"]="gemini-3-pro-preview"
         ["groq:0"]="moonshotai/kimi-k2-instruct-0905"
@@ -439,7 +438,6 @@ if [ "$USE_ASSOC_ARRAYS" = true ]; then
         ["anthropic:3"]="Haiku 4.5 - Fast + cheap"
         ["openai:0"]="GPT-5.2 - Most capable (recommended)"
         ["openai:1"]="GPT-5 Mini - Fast + cheap"
-        ["openai:2"]="GPT-5 Nano - Fastest"
         ["gemini:0"]="Gemini 3 Flash - Fast (recommended)"
         ["gemini:1"]="Gemini 3 Pro - Best quality"
         ["groq:0"]="Kimi K2 - Best quality (recommended)"
@@ -455,7 +453,6 @@ if [ "$USE_ASSOC_ARRAYS" = true ]; then
         ["anthropic:3"]=8192
         ["openai:0"]=16384
         ["openai:1"]=16384
-        ["openai:2"]=16384
         ["gemini:0"]=8192
         ["gemini:1"]=8192
         ["groq:0"]=8192
@@ -466,7 +463,7 @@ if [ "$USE_ASSOC_ARRAYS" = true ]; then
 
     declare -A MODEL_CHOICES_COUNT=(
         ["anthropic"]=4
-        ["openai"]=3
+        ["openai"]=2
         ["gemini"]=2
         ["groq"]=2
         ["cerebras"]=2
@@ -550,11 +547,11 @@ else
     }
 
     # Model choices per provider - flat parallel arrays with provider offsets
-    # Provider order: anthropic(4), openai(3), gemini(2), groq(2), cerebras(2)
-    MC_PROVIDERS=(anthropic anthropic anthropic anthropic openai openai openai gemini gemini groq groq cerebras cerebras)
-    MC_IDS=("claude-opus-4-6" "claude-sonnet-4-5-20250929" "claude-sonnet-4-20250514" "claude-haiku-4-5-20251001" "gpt-5.2" "gpt-5-mini" "gpt-5-nano" "gemini-3-flash-preview" "gemini-3-pro-preview" "moonshotai/kimi-k2-instruct-0905" "openai/gpt-oss-120b" "zai-glm-4.7" "qwen3-235b-a22b-instruct-2507")
-    MC_LABELS=("Opus 4.6 - Most capable (recommended)" "Sonnet 4.5 - Best balance" "Sonnet 4 - Fast + capable" "Haiku 4.5 - Fast + cheap" "GPT-5.2 - Most capable (recommended)" "GPT-5 Mini - Fast + cheap" "GPT-5 Nano - Fastest" "Gemini 3 Flash - Fast (recommended)" "Gemini 3 Pro - Best quality" "Kimi K2 - Best quality (recommended)" "GPT-OSS 120B - Fast reasoning" "ZAI-GLM 4.7 - Best quality (recommended)" "Qwen3 235B - Frontier reasoning")
-    MC_MAXTOKENS=(32768 16384 8192 8192 16384 16384 16384 8192 8192 8192 8192 8192 8192)
+    # Provider order: anthropic(4), openai(2), gemini(2), groq(2), cerebras(2)
+    MC_PROVIDERS=(anthropic anthropic anthropic anthropic openai openai gemini gemini groq groq cerebras cerebras)
+    MC_IDS=("claude-opus-4-6" "claude-sonnet-4-5-20250929" "claude-sonnet-4-20250514" "claude-haiku-4-5-20251001" "gpt-5.2" "gpt-5-mini" "gemini-3-flash-preview" "gemini-3-pro-preview" "moonshotai/kimi-k2-instruct-0905" "openai/gpt-oss-120b" "zai-glm-4.7" "qwen3-235b-a22b-instruct-2507")
+    MC_LABELS=("Opus 4.6 - Most capable (recommended)" "Sonnet 4.5 - Best balance" "Sonnet 4 - Fast + capable" "Haiku 4.5 - Fast + cheap" "GPT-5.2 - Most capable (recommended)" "GPT-5 Mini - Fast + cheap" "Gemini 3 Flash - Fast (recommended)" "Gemini 3 Pro - Best quality" "Kimi K2 - Best quality (recommended)" "GPT-OSS 120B - Fast reasoning" "ZAI-GLM 4.7 - Best quality (recommended)" "Qwen3 235B - Frontier reasoning")
+    MC_MAXTOKENS=(32768 16384 8192 8192 16384 16384 8192 8192 8192 8192 8192 8192)
 
     # Helper: get number of model choices for a provider
     get_model_choice_count() {
@@ -875,7 +872,7 @@ case $choice in
             echo -e "  Run ${CYAN}claude${NC} first to authenticate with your Claude subscription,"
             echo -e "  then run this quickstart again."
             echo ""
-            SELECTED_PROVIDER_ID=""
+            exit 1
         else
             SUBSCRIPTION_MODE="claude_code"
             SELECTED_PROVIDER_ID="anthropic"
