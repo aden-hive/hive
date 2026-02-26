@@ -55,11 +55,17 @@ _ELEMENT_HIGHLIGHT_JS = """
     const corners = [
         { top: -pad, left: -pad, borderTop: '3px solid ' + color, borderLeft: '3px solid ' + color,
           tx: -startOffset, ty: -startOffset },
-        { top: -pad, right: -pad, borderTop: '3px solid ' + color, borderRight: '3px solid ' + color,
+        { top: -pad, right: -pad,
+          borderTop: '3px solid ' + color,
+          borderRight: '3px solid ' + color,
           tx: startOffset, ty: -startOffset },
-        { bottom: -pad, left: -pad, borderBottom: '3px solid ' + color, borderLeft: '3px solid ' + color,
+        { bottom: -pad, left: -pad,
+          borderBottom: '3px solid ' + color,
+          borderLeft: '3px solid ' + color,
           tx: -startOffset, ty: startOffset },
-        { bottom: -pad, right: -pad, borderBottom: '3px solid ' + color, borderRight: '3px solid ' + color,
+        { bottom: -pad, right: -pad,
+          borderBottom: '3px solid ' + color,
+          borderRight: '3px solid ' + color,
           tx: startOffset, ty: startOffset },
     ];
 

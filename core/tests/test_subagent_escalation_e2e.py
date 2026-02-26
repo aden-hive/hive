@@ -13,15 +13,14 @@ Tests the FULL routing chain:
 from __future__ import annotations
 
 import asyncio
-import json
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncIterator
 from typing import Any
 
 import pytest
 
 from framework.graph import Goal, NodeSpec, SuccessCriterion
 from framework.graph.edge import GraphSpec
-from framework.llm.provider import LLMProvider, LLMResponse, Tool, ToolResult, ToolUse
+from framework.llm.provider import LLMProvider, LLMResponse, Tool
 from framework.llm.stream_events import (
     FinishEvent,
     StreamEvent,
@@ -33,7 +32,6 @@ from framework.runtime.execution_stream import EntryPointSpec, ExecutionStream
 from framework.runtime.outcome_aggregator import OutcomeAggregator
 from framework.runtime.shared_state import SharedStateManager
 from framework.storage.concurrent import ConcurrentStorage
-
 
 # ---------------------------------------------------------------------------
 # Sequenced mock LLM — returns different responses per call index
@@ -59,11 +57,13 @@ class SequencedLLM(LLMProvider):
         tools: list[Tool] | None = None,
         max_tokens: int = 4096,
     ) -> AsyncIterator[StreamEvent]:
-        self.stream_calls.append({
-            "index": self._call_index,
-            "system": system[:200],
-            "tool_names": [t.name for t in (tools or [])],
-        })
+        self.stream_calls.append(
+            {
+                "index": self._call_index,
+                "system": system[:200],
+                "tool_names": [t.name for t in (tools or [])],
+            }
+        )
         if self._call_index < len(self._scenarios):
             events = self._scenarios[self._call_index]
         else:
@@ -301,11 +301,13 @@ async def test_escalation_e2e_through_execution_stream(tmp_path):
 
     # 4. CLIENT_OUTPUT_DELTA was emitted for the escalation message
     output_deltas = [
-        e for e in all_events
-        if e.type == EventType.CLIENT_OUTPUT_DELTA
-        and "Login required" in e.data.get("content", "")
+        e
+        for e in all_events
+        if e.type == EventType.CLIENT_OUTPUT_DELTA and "Login required" in e.data.get("content", "")
     ]
-    assert len(output_deltas) >= 1, "Should have emitted CLIENT_OUTPUT_DELTA with escalation message"
+    assert len(output_deltas) >= 1, (
+        "Should have emitted CLIENT_OUTPUT_DELTA with escalation message"
+    )
 
     # 5. The parent node got the subagent's result
     assert "result" in result.output
@@ -447,18 +449,17 @@ async def test_escalation_cleanup_after_completion(tmp_path):
 
             # Snapshot the active executor's node_registry BEFORE responding
             for executor in stream._active_executors.values():
-                escalation_keys = [
-                    k for k in executor.node_registry
-                    if ":escalation:" in k
-                ]
-                registries_snapshot.append({
-                    "phase": "before_inject",
-                    "escalation_keys": escalation_keys,
-                    "has_receiver": any(
-                        isinstance(v, _EscalationReceiver)
-                        for v in executor.node_registry.values()
-                    ),
-                })
+                escalation_keys = [k for k in executor.node_registry if ":escalation:" in k]
+                registries_snapshot.append(
+                    {
+                        "phase": "before_inject",
+                        "escalation_keys": escalation_keys,
+                        "has_receiver": any(
+                            isinstance(v, _EscalationReceiver)
+                            for v in executor.node_registry.values()
+                        ),
+                    }
+                )
 
             await asyncio.sleep(0.02)
             await stream.inject_input(event.node_id, "ok")
@@ -474,8 +475,11 @@ async def test_escalation_cleanup_after_completion(tmp_path):
     stream = ExecutionStream(
         stream_id="start",
         entry_spec=EntryPointSpec(
-            id="start", name="Start", entry_node="parent",
-            trigger_type="manual", isolation_level="shared",
+            id="start",
+            name="Start",
+            entry_node="parent",
+            trigger_type="manual",
+            isolation_level="shared",
         ),
         graph=graph,
         goal=goal,

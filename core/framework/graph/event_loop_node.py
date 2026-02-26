@@ -111,9 +111,15 @@ class SubagentJudge:
         remaining = self._max_iterations - iteration - 1
 
         if remaining <= 3:
-            urgency = f"URGENT: Only {remaining} iterations left. Stop all other work and call set_output NOW for: {missing}"
+            urgency = (
+                f"URGENT: Only {remaining} iterations left. "
+                f"Stop all other work and call set_output NOW for: {missing}"
+            )
         elif remaining <= self._max_iterations // 2:
-            urgency = f"WARNING: {remaining} iterations remaining. You must call set_output for: {missing}"
+            urgency = (
+                f"WARNING: {remaining} iterations remaining. "
+                f"You must call set_output for: {missing}"
+            )
         else:
             urgency = f"Missing output keys: {missing}. Use set_output to provide them."
 
@@ -438,7 +444,6 @@ class EventLoopNode(NodeProtocol):
             if stream_id != "queen":
                 tools.append(self._build_ask_user_tool())
             tools.append(self._build_escalate_tool())
-            
 
         # Add delegate_to_sub_agent tool if:
         # - Node has sub_agents defined
@@ -1523,7 +1528,9 @@ class EventLoopNode(NodeProtocol):
                     logger.info(
                         "🔄 LLM requesting subagent delegation: agent_id='%s', task='%s'",
                         tc.tool_input.get("agent_id", "?"),
-                        (tc.tool_input.get("task", "")[:100] + "...") if len(tc.tool_input.get("task", "")) > 100 else tc.tool_input.get("task", ""),
+                        (tc.tool_input.get("task", "")[:100] + "...")
+                        if len(tc.tool_input.get("task", "")) > 100
+                        else tc.tool_input.get("task", ""),
                     )
                     pending_subagent.append(tc)
 
@@ -1538,7 +1545,9 @@ class EventLoopNode(NodeProtocol):
                     if ctx.report_callback:
                         try:
                             response = await ctx.report_callback(
-                                msg, data, wait_for_response=wait,
+                                msg,
+                                data,
+                                wait_for_response=wait,
                             )
                         except Exception:
                             logger.warning(
@@ -1564,11 +1573,11 @@ class EventLoopNode(NodeProtocol):
                 elif is_file_tool(tc.tool_name):
                     # --- Built-in file tool: execute inline, log as real work ---
                     result = execute_file_tool(
-                        tc.tool_name, tc.tool_input, tool_use_id=tc.tool_use_id,
+                        tc.tool_name,
+                        tc.tool_input,
+                        tool_use_id=tc.tool_use_id,
                     )
-                    results_by_id[tc.tool_use_id] = self._truncate_tool_result(
-                        result, tc.tool_name
-                    )
+                    results_by_id[tc.tool_use_id] = self._truncate_tool_result(result, tc.tool_name)
 
                 else:
                     # --- Real tool: check for truncated args, else queue ---
@@ -1625,11 +1634,13 @@ class EventLoopNode(NodeProtocol):
                     if isinstance(raw, BaseException):
                         result = ToolResult(
                             tool_use_id=tc.tool_use_id,
-                            content=json.dumps({
-                                "message": f"Sub-agent execution raised: {raw}",
-                                "data": None,
-                                "metadata": {"success": False, "error": str(raw)},
-                            }),
+                            content=json.dumps(
+                                {
+                                    "message": f"Sub-agent execution raised: {raw}",
+                                    "data": None,
+                                    "metadata": {"success": False, "error": str(raw)},
+                                }
+                            ),
                             is_error=True,
                         )
                     else:
@@ -1640,13 +1651,15 @@ class EventLoopNode(NodeProtocol):
                             is_error=raw.is_error,
                         )
                     results_by_id[tc.tool_use_id] = result
-                    logged_tool_calls.append({
-                        "tool_use_id": tc.tool_use_id,
-                        "tool_name": "delegate_to_sub_agent",
-                        "tool_input": tc.tool_input,
-                        "content": result.content,
-                        "is_error": result.is_error,
-                    })
+                    logged_tool_calls.append(
+                        {
+                            "tool_use_id": tc.tool_use_id,
+                            "tool_name": "delegate_to_sub_agent",
+                            "tool_input": tc.tool_input,
+                            "content": result.content,
+                            "is_error": result.is_error,
+                        }
+                    )
 
             # Phase 3: record results into conversation in original order,
             # build logged/real lists, and publish completed events.
@@ -1656,7 +1669,13 @@ class EventLoopNode(NodeProtocol):
                     continue  # shouldn't happen
 
                 # Build log entries for real tools (exclude synthetic tools)
-                if tc.tool_name not in ("set_output", "ask_user", "escalate_to_coder", "delegate_to_sub_agent", "report_to_parent"):
+                if tc.tool_name not in (
+                    "set_output",
+                    "ask_user",
+                    "escalate_to_coder",
+                    "delegate_to_sub_agent",
+                    "report_to_parent",
+                ):
                     tool_entry = {
                         "tool_use_id": tc.tool_use_id,
                         "tool_name": tc.tool_name,
@@ -2709,12 +2728,9 @@ class EventLoopNode(NodeProtocol):
                         f.name for f in data_dir.iterdir() if f.is_file() and f.name != "adapt.md"
                     )
                     if files:
-                        file_lines = [
-                            f"  - {str(data_dir / f)}" for f in files[:30]
-                        ]
+                        file_lines = [f"  - {str(data_dir / f)}" for f in files[:30]]
                         parts.append(
-                            "DATA FILES (use read_file to read):\n"
-                            + "\n".join(file_lines)
+                            "DATA FILES (use read_file to read):\n" + "\n".join(file_lines)
                         )
                     else:
                         parts.append(
@@ -3087,10 +3103,7 @@ class EventLoopNode(NodeProtocol):
     ) -> None:
         if self._event_bus:
             await self._event_bus.emit_output_key_set(
-                stream_id=stream_id,
-                node_id=node_id,
-                key=key,
-                execution_id=execution_id
+                stream_id=stream_id, node_id=node_id, key=key, execution_id=execution_id
             )
 
     # -------------------------------------------------------------------
@@ -3131,8 +3144,7 @@ class EventLoopNode(NodeProtocol):
             "=" * 60 + "\n"
             "Parent Node: %s\n"
             "Subagent ID: %s\n"
-            "Task: %s\n"
-            + "=" * 60,
+            "Task: %s\n" + "=" * 60,
             ctx.node_id,
             agent_id,
             task[:500] + "..." if len(task) > 500 else task,
@@ -3142,11 +3154,13 @@ class EventLoopNode(NodeProtocol):
         if agent_id not in ctx.node_registry:
             return ToolResult(
                 tool_use_id="",
-                content=json.dumps({
-                    "message": f"Sub-agent '{agent_id}' not found in registry",
-                    "data": None,
-                    "metadata": {"agent_id": agent_id, "success": False, "error": "not_found"},
-                }),
+                content=json.dumps(
+                    {
+                        "message": f"Sub-agent '{agent_id}' not found in registry",
+                        "data": None,
+                        "metadata": {"agent_id": agent_id, "success": False, "error": "not_found"},
+                    }
+                ),
                 is_error=True,
             )
 
@@ -3233,7 +3247,8 @@ class EventLoopNode(NodeProtocol):
         tool_source = ctx.all_tools if ctx.all_tools else ctx.available_tools
 
         subagent_tools = [
-            t for t in tool_source
+            t
+            for t in tool_source
             if t.name in subagent_tool_names and t.name != "delegate_to_sub_agent"
         ]
 
@@ -3251,7 +3266,9 @@ class EventLoopNode(NodeProtocol):
             "   - Tools available (%d): %s\n"
             "   - Memory keys inherited: %s",
             agent_id,
-            (subagent_spec.system_prompt[:200] + "...") if subagent_spec.system_prompt and len(subagent_spec.system_prompt) > 200 else subagent_spec.system_prompt,
+            (subagent_spec.system_prompt[:200] + "...")
+            if subagent_spec.system_prompt and len(subagent_spec.system_prompt) > 200
+            else subagent_spec.system_prompt,
             len(subagent_tools),
             [t.name for t in subagent_tools],
             list(parent_data.keys()),
@@ -3270,8 +3287,10 @@ class EventLoopNode(NodeProtocol):
             goal_context=(
                 f"Your specific task: {task}\n\n"
                 f"COMPLETION REQUIREMENTS:\n"
-                f"When your task is done, you MUST call set_output() for each required key: {subagent_spec.output_keys}\n"
-                f"Alternatively, call report_to_parent(mark_complete=true) with your findings in message/data.\n"
+                f"When your task is done, you MUST call set_output() "
+                f"for each required key: {subagent_spec.output_keys}\n"
+                f"Alternatively, call report_to_parent(mark_complete=true) "
+                f"with your findings in message/data.\n"
                 f"You have a maximum of {max_iter} turns to complete this task."
             ),
             goal=ctx.goal,
@@ -3310,7 +3329,9 @@ class EventLoopNode(NodeProtocol):
         # avoid file collisions between concurrent subagents.
         subagent_spillover = None
         if self._config.spillover_dir:
-            subagent_spillover = str(Path(self._config.spillover_dir) / agent_id / subagent_instance)
+            subagent_spillover = str(
+                Path(self._config.spillover_dir) / agent_id / subagent_instance
+            )
 
         subagent_node = EventLoopNode(
             event_bus=None,  # Subagents don't emit events to parent's bus
@@ -3341,8 +3362,7 @@ class EventLoopNode(NodeProtocol):
                 "Success: %s\n"
                 "Latency: %dms\n"
                 "Tokens used: %s\n"
-                "Output keys: %s\n"
-                + "-" * 60,
+                "Output keys: %s\n" + "-" * 60,
                 agent_id,
                 result.success,
                 latency_ms,
@@ -3375,11 +3395,7 @@ class EventLoopNode(NodeProtocol):
 
         except Exception as e:
             logger.exception(
-                "\n" + "!" * 60 + "\n"
-                "❌ SUBAGENT '%s' FAILED\n"
-                "!" * 60 + "\n"
-                "Error: %s\n"
-                + "!" * 60,
+                "\n" + "!" * 60 + "\n❌ SUBAGENT '%s' FAILED\n!" * 60 + "\nError: %s\n" + "!" * 60,
                 agent_id,
                 str(e),
             )
@@ -3436,8 +3452,7 @@ class EventLoopNode(NodeProtocol):
             "=" * 60 + "\n"
             "Parent Node: %s\n"
             "Subagent ID: %s\n"
-            "Task: %s\n"
-            + "=" * 60,
+            "Task: %s\n" + "=" * 60,
             ctx.node_id,
             agent_id,
             task[:500] + "..." if len(task) > 500 else task,
@@ -3447,11 +3462,13 @@ class EventLoopNode(NodeProtocol):
         if agent_id not in ctx.node_registry:
             return ToolResult(
                 tool_use_id="",
-                content=json.dumps({
-                    "message": f"Sub-agent '{agent_id}' not found in registry",
-                    "data": None,
-                    "metadata": {"agent_id": agent_id, "success": False, "error": "not_found"},
-                }),
+                content=json.dumps(
+                    {
+                        "message": f"Sub-agent '{agent_id}' not found in registry",
+                        "data": None,
+                        "metadata": {"agent_id": agent_id, "success": False, "error": "not_found"},
+                    }
+                ),
                 is_error=True,
             )
 
@@ -3538,7 +3555,8 @@ class EventLoopNode(NodeProtocol):
         tool_source = ctx.all_tools if ctx.all_tools else ctx.available_tools
 
         subagent_tools = [
-            t for t in tool_source
+            t
+            for t in tool_source
             if t.name in subagent_tool_names and t.name != "delegate_to_sub_agent"
         ]
 
@@ -3556,7 +3574,9 @@ class EventLoopNode(NodeProtocol):
             "   - Tools available (%d): %s\n"
             "   - Memory keys inherited: %s",
             agent_id,
-            (subagent_spec.system_prompt[:200] + "...") if subagent_spec.system_prompt and len(subagent_spec.system_prompt) > 200 else subagent_spec.system_prompt,
+            (subagent_spec.system_prompt[:200] + "...")
+            if subagent_spec.system_prompt and len(subagent_spec.system_prompt) > 200
+            else subagent_spec.system_prompt,
             len(subagent_tools),
             [t.name for t in subagent_tools],
             list(parent_data.keys()),
@@ -3575,8 +3595,10 @@ class EventLoopNode(NodeProtocol):
             goal_context=(
                 f"Your specific task: {task}\n\n"
                 f"COMPLETION REQUIREMENTS:\n"
-                f"When your task is done, you MUST call set_output() for each required key: {subagent_spec.output_keys}\n"
-                f"Alternatively, call report_to_parent(mark_complete=true) with your findings in message/data.\n"
+                f"When your task is done, you MUST call set_output() "
+                f"for each required key: {subagent_spec.output_keys}\n"
+                f"Alternatively, call report_to_parent(mark_complete=true) "
+                f"with your findings in message/data.\n"
                 f"You have a maximum of {max_iter} turns to complete this task."
             ),
             goal=ctx.goal,
@@ -3615,7 +3637,9 @@ class EventLoopNode(NodeProtocol):
         # avoid file collisions between concurrent subagents.
         subagent_spillover = None
         if self._config.spillover_dir:
-            subagent_spillover = str(Path(self._config.spillover_dir) / agent_id / subagent_instance)
+            subagent_spillover = str(
+                Path(self._config.spillover_dir) / agent_id / subagent_instance
+            )
 
         subagent_node = EventLoopNode(
             event_bus=None,  # Subagents don't emit events to parent's bus
@@ -3646,8 +3670,7 @@ class EventLoopNode(NodeProtocol):
                 "Success: %s\n"
                 "Latency: %dms\n"
                 "Tokens used: %s\n"
-                "Output keys: %s\n"
-                + "-" * 60,
+                "Output keys: %s\n" + "-" * 60,
                 agent_id,
                 result.success,
                 latency_ms,
@@ -3680,11 +3703,7 @@ class EventLoopNode(NodeProtocol):
 
         except Exception as e:
             logger.exception(
-                "\n" + "!" * 60 + "\n"
-                "❌ SUBAGENT '%s' FAILED\n"
-                "!" * 60 + "\n"
-                "Error: %s\n"
-                + "!" * 60,
+                "\n" + "!" * 60 + "\n❌ SUBAGENT '%s' FAILED\n!" * 60 + "\nError: %s\n" + "!" * 60,
                 agent_id,
                 str(e),
             )
