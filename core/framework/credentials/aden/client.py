@@ -21,11 +21,11 @@ Usage:
 
     # List what's connected
     for info in client.list_integrations():
-        print(f"{info.provider}/{info.alias}: {info.status}")
+        logger.info(f"{info.provider}/{info.alias}: {info.status}")
 
     # Get an access token
     cred = client.get_credential(info.integration_id)
-    print(cred.access_token)
+    logger.info(cred.access_token)
 """
 
 from __future__ import annotations
@@ -157,7 +157,9 @@ class AdenIntegrationInfo:
     def from_dict(cls, data: dict[str, Any]) -> AdenIntegrationInfo:
         expires_at = None
         if data.get("expires_at"):
-            expires_at = datetime.fromisoformat(data["expires_at"].replace("Z", "+00:00"))
+            expires_at = datetime.fromisoformat(
+                data["expires_at"].replace("Z", "+00:00")
+            )
 
         return cls(
             integration_id=data.get("integration_id", ""),
@@ -213,10 +215,14 @@ class AdenCredentialResponse:
         return self.provider
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any], integration_id: str = "") -> AdenCredentialResponse:
+    def from_dict(
+        cls, data: dict[str, Any], integration_id: str = ""
+    ) -> AdenCredentialResponse:
         expires_at = None
         if data.get("expires_at"):
-            expires_at = datetime.fromisoformat(data["expires_at"].replace("Z", "+00:00"))
+            expires_at = datetime.fromisoformat(
+                data["expires_at"].replace("Z", "+00:00")
+            )
 
         # Build metadata from email if present
         metadata = data.get("metadata") or {}
@@ -247,7 +253,7 @@ class AdenCredentialClient:
 
         # List integrations
         for info in client.list_integrations():
-            print(f"{info.provider}/{info.alias}: {info.status}")
+            logger.info(f"{info.provider}/{info.alias}: {info.status}")
 
         # Get access token (uses base64 integration_id, NOT provider name)
         cred = client.get_credential(info.integration_id)
@@ -311,10 +317,15 @@ class AdenCredentialClient:
                 if response.status_code == 400:
                     data = response.json()
                     msg = data.get("message", "Bad request")
-                    if data.get("error") == "refresh_failed" or "refresh" in msg.lower():
+                    if (
+                        data.get("error") == "refresh_failed"
+                        or "refresh" in msg.lower()
+                    ):
                         raise AdenRefreshError(
                             msg,
-                            requires_reauthorization=data.get("requires_reauthorization", False),
+                            requires_reauthorization=data.get(
+                                "requires_reauthorization", False
+                            ),
                             reauthorization_url=data.get("reauthorization_url"),
                         )
                     raise AdenClientError(f"Bad request: {msg}")
@@ -331,7 +342,9 @@ class AdenCredentialClient:
                     )
                     time.sleep(delay)
                 else:
-                    raise AdenClientError(f"Failed to connect to Aden server: {e}") from e
+                    raise AdenClientError(
+                        f"Failed to connect to Aden server: {e}"
+                    ) from e
 
             except (
                 AdenAuthenticationError,
@@ -357,7 +370,9 @@ class AdenCredentialClient:
         """
         response = self._request_with_retry("GET", "/v1/credentials")
         data = response.json()
-        return [AdenIntegrationInfo.from_dict(item) for item in data.get("integrations", [])]
+        return [
+            AdenIntegrationInfo.from_dict(item) for item in data.get("integrations", [])
+        ]
 
     # Alias
     list_connections = list_integrations
@@ -375,7 +390,9 @@ class AdenCredentialClient:
             AdenCredentialResponse with access_token, or None if not found.
         """
         try:
-            response = self._request_with_retry("GET", f"/v1/credentials/{integration_id}")
+            response = self._request_with_retry(
+                "GET", f"/v1/credentials/{integration_id}"
+            )
             data = response.json()
             return AdenCredentialResponse.from_dict(data, integration_id=integration_id)
         except AdenNotFoundError:
@@ -393,7 +410,9 @@ class AdenCredentialClient:
         Returns:
             AdenCredentialResponse with new access_token.
         """
-        response = self._request_with_retry("POST", f"/v1/credentials/{integration_id}/refresh")
+        response = self._request_with_retry(
+            "POST", f"/v1/credentials/{integration_id}/refresh"
+        )
         data = response.json()
         return AdenCredentialResponse.from_dict(data, integration_id=integration_id)
 
@@ -406,7 +425,9 @@ class AdenCredentialClient:
         Returns:
             {"valid": bool, "status": str, "expires_at": str, "error": str|null}
         """
-        response = self._request_with_retry("GET", f"/v1/credentials/{integration_id}/validate")
+        response = self._request_with_retry(
+            "GET", f"/v1/credentials/{integration_id}/validate"
+        )
         return response.json()
 
     def health_check(self) -> dict[str, Any]:
