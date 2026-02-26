@@ -380,11 +380,18 @@ class AgentRuntime:
                     # Cron expression mode — takes priority over interval_minutes
                     try:
                         from croniter import croniter
+                    except ImportError as exc:
+                        raise RuntimeError(
+                            f"Entry point '{ep_id}' uses a cron trigger but the "
+                            "'croniter' package is not installed. "
+                            "Add 'croniter>=1.4.0' to your dependencies."
+                        ) from exc
 
+                    try:
                         # Validate the expression upfront
                         if not croniter.is_valid(cron_expr):
                             raise ValueError(f"Invalid cron expression: {cron_expr}")
-                    except (ImportError, ValueError) as e:
+                    except ValueError as e:
                         logger.warning(
                             "Entry point '%s' has invalid cron config: %s",
                             ep_id,
@@ -397,9 +404,10 @@ class AgentRuntime:
                             from croniter import croniter
 
                             if not immediate:
-                                cron = croniter(expr, datetime.now())
+                                now = datetime.now()
+                                cron = croniter(expr, now)
                                 next_dt = cron.get_next(datetime)
-                                sleep_secs = (next_dt - datetime.now()).total_seconds()
+                                sleep_secs = (next_dt - now).total_seconds()
                                 self._timer_next_fire[entry_point_id] = (
                                     time.monotonic() + sleep_secs
                                 )
@@ -431,10 +439,12 @@ class AgentRuntime:
                                         entry_point_id,
                                         exc_info=True,
                                     )
-                                # Calculate next fire from now
-                                cron = croniter(expr, datetime.now())
+                                # Calculate next fire time from a single captured instant
+                                # to avoid drift from calling datetime.now() twice.
+                                now = datetime.now()
+                                cron = croniter(expr, now)
                                 next_dt = cron.get_next(datetime)
-                                sleep_secs = (next_dt - datetime.now()).total_seconds()
+                                sleep_secs = (next_dt - now).total_seconds()
                                 self._timer_next_fire[entry_point_id] = (
                                     time.monotonic() + sleep_secs
                                 )

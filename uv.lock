@@ -1,5 +1,5 @@
 version = 1
-revision = 3
+revision = 2
 requires-python = ">=3.11"
 resolution-markers = [
     "python_full_version >= '3.14' and sys_platform == 'win32'",
@@ -795,6 +795,7 @@ version = "0.5.1"
 source = { editable = "core" }
 dependencies = [
     { name = "anthropic" },
+    { name = "croniter" },
     { name = "fastmcp" },
     { name = "httpx" },
     { name = "litellm" },
@@ -825,6 +826,7 @@ dev = [
 requires-dist = [
     { name = "aiohttp", marker = "extra == 'webhook'", specifier = ">=3.9.0" },
     { name = "anthropic", specifier = ">=0.40.0" },
+    { name = "croniter", specifier = ">=1.4.0" },
     { name = "fastmcp", specifier = ">=2.0.0" },
     { name = "httpx", specifier = ">=0.27.0" },
     { name = "litellm", specifier = ">=1.81.0" },
