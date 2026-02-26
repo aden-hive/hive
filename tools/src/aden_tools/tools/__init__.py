@@ -28,6 +28,7 @@ from .bigquery_tool import register_tools as register_bigquery
 from .brevo_tool import register_tools as register_brevo
 from .calcom_tool import register_tools as register_calcom
 from .calendar_tool import register_tools as register_calendar
+from .cloudflare_tool import register_tools as register_cloudflare
 from .csv_tool import register_tools as register_csv
 from .discord_tool import register_tools as register_discord
 
@@ -153,6 +154,9 @@ def register_all_tools(
     register_risk_scorer(mcp)
     register_stripe(mcp, credentials=credentials)
     register_brevo(mcp, credentials=credentials)
+
+    # Cloudflare tool
+    register_cloudflare(mcp, credentials=credentials)
 
     # Postgres tool
     register_postgres(mcp, credentials=credentials)
