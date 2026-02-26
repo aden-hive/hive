@@ -52,16 +52,41 @@ SAFE_FUNCTIONS = {
     "any": any,
 }
 
+# Maximum allowed exponent to prevent CPU-based DoS (issue #5109 vuln 1)
+MAX_EXPONENT = 1000
+
+# Maximum AST recursion depth to prevent stack overflow (issue #5109 vuln 4)
+MAX_DEPTH = 50
+
+# Type-safe method whitelist: method_name -> allowed receiver types (issue #5109 vuln 3)
+SAFE_METHOD_TYPES: dict[str, tuple[type, ...]] = {
+    "get": (dict,),
+    "keys": (dict,),
+    "values": (dict,),
+    "items": (dict,),
+    "lower": (str,),
+    "upper": (str,),
+    "strip": (str,),
+    "split": (str,),
+}
+
 
 class SafeEvalVisitor(ast.NodeVisitor):
     def __init__(self, context: dict[str, Any]):
         self.context = context
+        self._depth = 0
 
     def visit(self, node: ast.AST) -> Any:
-        # Override visit to prevent default behavior and ensure only explicitly allowed nodes work
-        method = "visit_" + node.__class__.__name__
-        visitor = getattr(self, method, self.generic_visit)
-        return visitor(node)
+        # Enforce recursion depth limit (issue #5109 vuln 4)
+        self._depth += 1
+        if self._depth > MAX_DEPTH:
+            raise ValueError(f"Expression nesting depth exceeds limit ({MAX_DEPTH})")
+        try:
+            method = "visit_" + node.__class__.__name__
+            visitor = getattr(self, method, self.generic_visit)
+            return visitor(node)
+        finally:
+            self._depth -= 1
 
     def generic_visit(self, node: ast.AST):
         raise ValueError(f"Use of {node.__class__.__name__} is not allowed")
@@ -94,6 +119,13 @@ class SafeEvalVisitor(ast.NodeVisitor):
         op_func = SAFE_OPERATORS.get(type(node.op))
         if op_func is None:
             raise ValueError(f"Operator {type(node.op).__name__} is not allowed")
+        # Cap exponent to prevent CPU-based DoS (issue #5109 vuln 1)
+        if isinstance(node.op, ast.Pow):
+            base = self.visit(node.left)
+            exp = self.visit(node.right)
+            if isinstance(exp, (int, float)) and abs(exp) > MAX_EXPONENT:
+                raise ValueError(f"Exponent {exp} exceeds safe limit ({MAX_EXPONENT})")
+            return op_func(base, exp)
         return op_func(self.visit(node.left), self.visit(node.right))
 
     def visit_UnaryOp(self, node: ast.UnaryOp) -> Any:
@@ -115,11 +147,21 @@ class SafeEvalVisitor(ast.NodeVisitor):
         return True
 
     def visit_BoolOp(self, node: ast.BoolOp) -> Any:
-        values = [self.visit(v) for v in node.values]
+        # Short-circuit evaluation matching Python semantics (issue #5109 vuln 2)
         if isinstance(node.op, ast.And):
-            return all(values)
+            result: Any = True
+            for v in node.values:
+                result = self.visit(v)
+                if not result:
+                    return result
+            return result
         elif isinstance(node.op, ast.Or):
-            return any(values)
+            result = False
+            for v in node.values:
+                result = self.visit(v)
+                if result:
+                    return result
+            return result
         raise ValueError(f"Boolean operator {type(node.op).__name__} is not allowed")
 
     def visit_IfExp(self, node: ast.IfExp) -> Any:
@@ -191,22 +233,23 @@ class SafeEvalVisitor(ast.NodeVisitor):
         # Allowing method calls on strings/lists (split, join, get) is commonly needed.
 
         if isinstance(node.func, ast.Attribute):
-            # Method call.
-            # Allow basic safe methods?
-            # For security, start strict. Only helper functions.
-            # Re-visiting: User might want 'output.get("key")'.
+            # Type-safe method whitelist (issue #5109 vuln 3)
             method_name = node.func.attr
-            if method_name in [
-                "get",
-                "keys",
-                "values",
-                "items",
-                "lower",
-                "upper",
-                "strip",
-                "split",
-            ]:
-                is_safe = True
+            allowed_types = SAFE_METHOD_TYPES.get(method_name)
+            if allowed_types is not None:
+                # Evaluate the receiver to check its type
+                receiver = self.visit(node.func.value)
+                if isinstance(receiver, allowed_types):
+                    is_safe = True
+                    # Use the already-evaluated receiver; call its method directly
+                    method = getattr(receiver, method_name)
+                    args = [self.visit(arg) for arg in node.args]
+                    keywords = {kw.arg: self.visit(kw.value) for kw in node.keywords}
+                    return method(*args, **keywords)
+                else:
+                    raise ValueError(
+                        f"Method '{method_name}' is not allowed on type {type(receiver).__name__}"
+                    )
 
         if not is_safe and func not in SAFE_FUNCTIONS.values():
             raise ValueError("Call to function/method is not allowed")
