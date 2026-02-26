@@ -230,6 +230,9 @@ class SessionManager:
             if runtime and not runtime.is_running:
                 await runtime.start()
 
+            # Clean up stale "active" sessions from previous (dead) processes
+            self._cleanup_stale_active_sessions(agent_path)
+
             info = runner.info()
 
             # Update session
@@ -252,6 +255,37 @@ class SessionManager:
             async with self._lock:
                 self._loading.discard(session.id)
             raise
+
+    def _cleanup_stale_active_sessions(self, agent_path: Path) -> None:
+        """Mark stale 'active' sessions on disk as 'cancelled'.
+
+        When a new runtime starts, any on-disk session still marked 'active'
+        is from a process that no longer exists. 'Paused' sessions are left
+        intact so they remain resumable.
+        """
+        sessions_path = Path.home() / ".hive" / "agents" / agent_path.name / "sessions"
+        if not sessions_path.exists():
+            return
+
+        for d in sessions_path.iterdir():
+            if not d.is_dir() or not d.name.startswith("session_"):
+                continue
+            state_path = d / "state.json"
+            if not state_path.exists():
+                continue
+            try:
+                state = json.loads(state_path.read_text())
+                if state.get("status") != "active":
+                    continue
+                state["status"] = "cancelled"
+                state.setdefault("result", {})["error"] = "Stale session: runtime restarted"
+                state.setdefault("timestamps", {})["updated_at"] = datetime.now().isoformat()
+                state_path.write_text(json.dumps(state, indent=2))
+                logger.info(
+                    "Marked stale session '%s' as cancelled for agent '%s'", d.name, agent_path.name
+                )
+            except (json.JSONDecodeError, OSError) as e:
+                logger.warning("Failed to clean up stale session %s: %s", d.name, e)
 
     async def load_worker(
         self,
