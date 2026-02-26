@@ -274,3 +274,72 @@ class TestGetSecurePath:
         # However, realpath reveals the escape - callers should check this
         real_path = os.path.realpath(result)
         assert os.path.commonpath([real_path, str(session_dir)]) != str(session_dir)
+
+    # ==================== Security hardening tests (fixes #2909) ====================
+
+    def test_windows_drive_letter_blocked(self, ids):
+        """Windows drive-letter paths like C:/Windows are rejected."""
+        from aden_tools.tools.file_system_toolkits.security import get_secure_path
+
+        with pytest.raises(ValueError, match="drive letters are not allowed"):
+            get_secure_path("C:/Windows/System32", **ids)
+
+    def test_windows_drive_letter_backslash_blocked(self, ids):
+        """Windows drive-letter paths with backslashes are rejected."""
+        from aden_tools.tools.file_system_toolkits.security import get_secure_path
+
+        with pytest.raises(ValueError, match="drive letters are not allowed"):
+            get_secure_path("C:\\Windows\\System32", **ids)
+
+    def test_windows_drive_letter_lowercase_blocked(self, ids):
+        """Lowercase Windows drive-letter paths are also rejected."""
+        from aden_tools.tools.file_system_toolkits.security import get_secure_path
+
+        with pytest.raises(ValueError, match="drive letters are not allowed"):
+            get_secure_path("d:/sensitive/data.txt", **ids)
+
+    def test_mixed_separator_absolute_blocked(self, ids):
+        """Mixed separator absolute paths are rejected."""
+        from aden_tools.tools.file_system_toolkits.security import get_secure_path
+
+        with pytest.raises(ValueError, match="drive letters are not allowed"):
+            get_secure_path("C:\\foo/bar", **ids)
+
+    def test_forward_slash_absolute_sanitized(self, ids):
+        """Forward-slash absolute paths are sanitized to be relative."""
+        from aden_tools.tools.file_system_toolkits.security import get_secure_path
+
+        result = get_secure_path("/etc/passwd", **ids)
+        session_dir = str(
+            self.workspaces_dir / "test-workspace" / "test-agent" / "test-session"
+        )
+        assert result.startswith(session_dir)
+        assert "etc" in result
+
+    def test_multiple_leading_separators_stripped(self, ids):
+        """Multiple leading separators are all stripped."""
+        from aden_tools.tools.file_system_toolkits.security import get_secure_path
+
+        result = get_secure_path("///etc/passwd", **ids)
+        session_dir = str(
+            self.workspaces_dir / "test-workspace" / "test-agent" / "test-session"
+        )
+        assert result.startswith(session_dir)
+
+    def test_null_byte_rejected(self, ids):
+        """Null bytes in paths are rejected."""
+        from aden_tools.tools.file_system_toolkits.security import get_secure_path
+
+        with pytest.raises(ValueError, match="null bytes"):
+            get_secure_path("file.txt\x00.jpg", **ids)
+
+    def test_backslash_absolute_sanitized(self, ids):
+        """Backslash absolute paths are sanitized to be relative."""
+        from aden_tools.tools.file_system_toolkits.security import get_secure_path
+
+        result = get_secure_path("\\etc\\passwd", **ids)
+        session_dir = str(
+            self.workspaces_dir / "test-workspace" / "test-agent" / "test-session"
+        )
+        assert result.startswith(session_dir)
+
