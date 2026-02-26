@@ -27,6 +27,7 @@ interface Session {
   messages: ChatMessage[];
   graphNodes: GraphNode[];
   credentials: Credential[];
+  backendSessionId?: string;
 }
 
 function createSession(agentType: string, label: string, existingCredentials?: Credential[]): Session {
@@ -311,6 +312,7 @@ export default function Workspace() {
   const [searchParams] = useSearchParams();
   const rawAgent = searchParams.get("agent") || "new-agent";
   const initialAgent = rawAgent;
+  const hasExplicitAgent = searchParams.has("agent");
   const initialPrompt = searchParams.get("prompt") || "";
 
   // Sessions grouped by agent type — restore from localStorage if available
@@ -323,10 +325,23 @@ export default function Workspace() {
         if (!initial[tab.agentType]) initial[tab.agentType] = [];
         const session = createSession(tab.agentType, tab.label);
         session.id = tab.id;
-        // Tab structure restored; messages stay empty.
-        // Messages are only restored in loadAgentForType when rejoining an existing backend session.
+        session.backendSessionId = tab.backendSessionId;
+        // Restore messages and graph from localStorage (up to 50 messages).
+        // If the backend session is still alive, loadAgentForType may
+        // append additional messages fetched from the server.
+        const cached = persisted.sessions?.[tab.id];
+        if (cached) {
+          session.messages = cached.messages || [];
+          session.graphNodes = cached.graphNodes || [];
+        }
         initial[tab.agentType].push(session);
       }
+    }
+
+    // If persisted tabs were restored and user didn't explicitly request
+    // a different agent via URL, return restored tabs as-is.
+    if (persisted && Object.keys(initial).length > 0 && !hasExplicitAgent) {
+      return initial;
     }
 
     if (initial[initialAgent]?.length) {
@@ -357,7 +372,13 @@ export default function Workspace() {
     return sessions ? { [initialAgent]: sessions[0].id } : {};
   });
 
-  const [activeWorker, setActiveWorker] = useState(initialAgent);
+  const [activeWorker, setActiveWorker] = useState(() => {
+    if (!hasExplicitAgent) {
+      const persisted = loadPersistedTabs();
+      if (persisted?.activeWorker) return persisted.activeWorker;
+    }
+    return initialAgent;
+  });
 
   // Clear URL params after mount — they're consumed during initialization
   // and leaving them causes confusion (stale ?agent= after tab switches, etc.)
@@ -408,7 +429,12 @@ export default function Workspace() {
     const sessions: Record<string, { messages: ChatMessage[]; graphNodes: GraphNode[] }> = {};
     for (const agentSessions of Object.values(sessionsByAgent)) {
       for (const s of agentSessions) {
-        tabs.push({ id: s.id, agentType: s.agentType, label: s.label });
+        tabs.push({
+          id: s.id,
+          agentType: s.agentType,
+          label: s.label,
+          backendSessionId: s.backendSessionId || agentStates[s.agentType]?.sessionId || undefined,
+        });
         sessions[s.id] = { messages: s.messages, graphNodes: s.graphNodes };
       }
     }
@@ -417,7 +443,7 @@ export default function Workspace() {
     } else {
       localStorage.removeItem(TAB_STORAGE_KEY);
     }
-  }, [sessionsByAgent, activeSessionByAgent, activeWorker]);
+  }, [sessionsByAgent, activeSessionByAgent, activeWorker, agentStates]);
 
   const handleRun = useCallback(async () => {
     const state = agentStates[activeWorker];
@@ -466,21 +492,43 @@ export default function Workspace() {
       updateAgentState(agentType, { loading: true, error: null, ready: false, sessionId: null });
       try {
         const prompt = initialPrompt || undefined;
-        const liveSession = await sessionsApi.create(undefined, undefined, undefined, prompt);
+        let liveSession: LiveSession | undefined;
 
-        // Show the initial prompt as a user message in chat
-        if (prompt) {
-          const userMsg: ChatMessage = {
-            id: makeId(), agent: "You", agentColor: "",
-            content: prompt, timestamp: "", type: "user", thread: agentType,
-          };
-          setSessionsByAgent(prev => ({
-            ...prev,
-            [agentType]: (prev[agentType] || []).map(s => ({
-              ...s, messages: [...s.messages, userMsg],
-            })),
-          }));
+        // Try to reconnect to stored backend session (e.g., after browser refresh)
+        const storedId = sessionsRef.current[agentType]?.[0]?.backendSessionId;
+        if (storedId) {
+          try {
+            liveSession = await sessionsApi.get(storedId);
+          } catch {
+            // Session gone — fall through to create new
+          }
         }
+
+        if (!liveSession) {
+          liveSession = await sessionsApi.create(undefined, undefined, undefined, prompt);
+
+          // Show the initial prompt as a user message in chat (only on fresh create)
+          if (prompt) {
+            const userMsg: ChatMessage = {
+              id: makeId(), agent: "You", agentColor: "",
+              content: prompt, timestamp: "", type: "user", thread: agentType,
+            };
+            setSessionsByAgent(prev => ({
+              ...prev,
+              [agentType]: (prev[agentType] || []).map(s => ({
+                ...s, messages: [...s.messages, userMsg],
+              })),
+            }));
+          }
+        }
+
+        // Store backendSessionId on the Session object for persistence
+        setSessionsByAgent(prev => ({
+          ...prev,
+          [agentType]: (prev[agentType] || []).map((s, i) =>
+            i === 0 ? { ...s, backendSessionId: liveSession!.session_id } : s,
+          ),
+        }));
 
         updateAgentState(agentType, {
           sessionId: liveSession.session_id,
@@ -503,52 +551,70 @@ export default function Workspace() {
     updateAgentState(agentType, { loading: true, error: null, ready: false, sessionId: null });
 
     try {
-      let liveSession: LiveSession;
+      let liveSession: LiveSession | undefined;
       let isResumedSession = false;
-      try {
-        liveSession = await sessionsApi.create(agentType);
-      } catch (loadErr: unknown) {
-        const { ApiError } = await import("@/api/client");
 
-        // 424 = credentials required — open the credentials modal
-        if (loadErr instanceof ApiError && loadErr.status === 424) {
-          updateAgentState(agentType, { loading: false, error: "credentials_required" });
-          setCredentialsOpen(true);
-          return;
-        }
-
-        if (!(loadErr instanceof ApiError) || loadErr.status !== 409) {
-          throw loadErr;
-        }
-
-        const body = loadErr.body as Record<string, unknown>;
-        const existingSessionId = body.session_id as string | undefined;
-        if (!existingSessionId) throw loadErr;
-
-        isResumedSession = true;
-        if (body.loading) {
-          liveSession = await (async () => {
-            const maxAttempts = 30;
-            const delay = 1000;
-            for (let i = 0; i < maxAttempts; i++) {
-              await new Promise((r) => setTimeout(r, delay));
-              try {
-                const result = await sessionsApi.get(existingSessionId);
-                if (result.loading) continue;
-                return result as LiveSession;
-              } catch {
-                if (i === maxAttempts - 1) throw loadErr;
-              }
-            }
-            throw loadErr;
-          })();
-        } else {
-          liveSession = body as unknown as LiveSession;
+      // Try to reconnect to an existing backend session (e.g., after browser refresh).
+      // The backendSessionId is persisted in localStorage per tab.
+      const storedSessionId = sessionsRef.current[agentType]?.[0]?.backendSessionId;
+      if (storedSessionId) {
+        try {
+          liveSession = await sessionsApi.get(storedSessionId);
+          isResumedSession = true;
+        } catch {
+          // Session gone (server restarted, etc.) — fall through to create new
         }
       }
 
-      const displayName = formatAgentDisplayName(liveSession.worker_name || agentType);
-      updateAgentState(agentType, { sessionId: liveSession.session_id, displayName });
+      if (!liveSession) {
+        try {
+          liveSession = await sessionsApi.create(agentType);
+        } catch (loadErr: unknown) {
+          const { ApiError } = await import("@/api/client");
+
+          // 424 = credentials required — open the credentials modal
+          if (loadErr instanceof ApiError && loadErr.status === 424) {
+            updateAgentState(agentType, { loading: false, error: "credentials_required" });
+            setCredentialsOpen(true);
+            return;
+          }
+
+          if (!(loadErr instanceof ApiError) || loadErr.status !== 409) {
+            throw loadErr;
+          }
+
+          const body = loadErr.body as Record<string, unknown>;
+          const existingSessionId = body.session_id as string | undefined;
+          if (!existingSessionId) throw loadErr;
+
+          isResumedSession = true;
+          if (body.loading) {
+            liveSession = await (async () => {
+              const maxAttempts = 30;
+              const delay = 1000;
+              for (let i = 0; i < maxAttempts; i++) {
+                await new Promise((r) => setTimeout(r, delay));
+                try {
+                  const result = await sessionsApi.get(existingSessionId);
+                  if (result.loading) continue;
+                  return result as LiveSession;
+                } catch {
+                  if (i === maxAttempts - 1) throw loadErr;
+                }
+              }
+              throw loadErr;
+            })();
+          } else {
+            liveSession = body as unknown as LiveSession;
+          }
+        }
+      }
+
+      // At this point liveSession is guaranteed set — if both reconnect and create
+      // failed, the throw inside the catch exits the outer try block.
+      const session = liveSession!;
+      const displayName = formatAgentDisplayName(session.worker_name || agentType);
+      updateAgentState(agentType, { sessionId: session.session_id, displayName });
 
       // Update the session label
       setSessionsByAgent((prev) => {
@@ -557,7 +623,7 @@ export default function Workspace() {
         return {
           ...prev,
           [agentType]: sessions.map((s, i) =>
-            i === 0 ? { ...s, label: sessions.length === 1 ? displayName : `${displayName} #${i + 1}` } : s,
+            i === 0 ? { ...s, label: sessions.length === 1 ? displayName : `${displayName} #${i + 1}`, backendSessionId: session.session_id } : s,
           ),
         };
       });
@@ -566,14 +632,14 @@ export default function Workspace() {
       // Only restore messages when rejoining an existing backend session.
       let isWorkerRunning = false;
       try {
-        const { sessions: workerSessions } = await sessionsApi.workerSessions(liveSession.session_id);
+        const { sessions: workerSessions } = await sessionsApi.workerSessions(session.session_id);
         const resumable = workerSessions.find(
           (s) => s.status === "active" || s.status === "paused",
         );
         isWorkerRunning = resumable?.status === "active";
 
         if (isResumedSession && resumable) {
-          const { messages } = await sessionsApi.messages(liveSession.session_id, resumable.session_id);
+          const { messages } = await sessionsApi.messages(session.session_id, resumable.session_id);
           if (messages.length > 0) {
             const chatMsgs = messages.map((m: Message) =>
               backendMessageToChatMessage(m, agentType, displayName),
@@ -593,7 +659,7 @@ export default function Workspace() {
       // Restore queen conversation when rejoining an existing session
       if (isResumedSession) {
         try {
-          const { messages: queenMsgs } = await sessionsApi.queenMessages(liveSession.session_id);
+          const { messages: queenMsgs } = await sessionsApi.queenMessages(session.session_id);
           if (queenMsgs.length > 0) {
             const chatMsgs = queenMsgs.map((m: Message) => {
               const msg = backendMessageToChatMessage(m, agentType, "Queen Bee");

@@ -1240,6 +1240,7 @@ class EventLoopNode(NodeProtocol):
                         event.snapshot,
                         ctx,
                         execution_id,
+                        iteration=iteration,
                     )
 
                 elif isinstance(event, ToolCallEvent):
@@ -2680,6 +2681,7 @@ class EventLoopNode(NodeProtocol):
         snapshot: str,
         ctx: NodeContext,
         execution_id: str = "",
+        iteration: int | None = None,
     ) -> None:
         if self._event_bus:
             if ctx.node_spec.client_facing:
@@ -2689,6 +2691,7 @@ class EventLoopNode(NodeProtocol):
                     content=content,
                     snapshot=snapshot,
                     execution_id=execution_id,
+                    iteration=iteration,
                 )
             else:
                 await self._event_bus.emit_llm_text_delta(

@@ -655,15 +655,19 @@ class EventBus:
         content: str,
         snapshot: str,
         execution_id: str | None = None,
+        iteration: int | None = None,
     ) -> None:
         """Emit client output delta event (client_facing=True nodes)."""
+        data: dict = {"content": content, "snapshot": snapshot}
+        if iteration is not None:
+            data["iteration"] = iteration
         await self.publish(
             AgentEvent(
                 type=EventType.CLIENT_OUTPUT_DELTA,
                 stream_id=stream_id,
                 node_id=node_id,
                 execution_id=execution_id,
-                data={"content": content, "snapshot": snapshot},
+                data=data,
             )
         )
 

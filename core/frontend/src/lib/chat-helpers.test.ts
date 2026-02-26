@@ -192,6 +192,64 @@ describe("sseEventToChatMessage", () => {
     );
   });
 
+  it("uses data.iteration over turnId when present", () => {
+    const event = makeEvent({
+      type: "client_output_delta",
+      node_id: "queen",
+      execution_id: null,
+      data: { snapshot: "hello", iteration: 5 },
+    });
+    const result = sseEventToChatMessage(event, "t", undefined, 2);
+    expect(result!.id).toBe("stream-5-queen");
+  });
+
+  it("falls back to turnId when data.iteration is absent", () => {
+    const event = makeEvent({
+      type: "client_output_delta",
+      node_id: "queen",
+      execution_id: null,
+      data: { snapshot: "hello" },
+    });
+    const result = sseEventToChatMessage(event, "t", undefined, 2);
+    expect(result!.id).toBe("stream-2-queen");
+  });
+
+  it("different iterations from same node produce different message IDs", () => {
+    const e1 = makeEvent({
+      type: "client_output_delta",
+      node_id: "queen",
+      execution_id: "",
+      data: { snapshot: "first response", iteration: 0 },
+    });
+    const e2 = makeEvent({
+      type: "client_output_delta",
+      node_id: "queen",
+      execution_id: "",
+      data: { snapshot: "second response", iteration: 3 },
+    });
+    const r1 = sseEventToChatMessage(e1, "t");
+    const r2 = sseEventToChatMessage(e2, "t");
+    expect(r1!.id).not.toBe(r2!.id);
+  });
+
+  it("same iteration produces same ID for streaming upsert", () => {
+    const e1 = makeEvent({
+      type: "client_output_delta",
+      node_id: "queen",
+      execution_id: "",
+      data: { snapshot: "partial", iteration: 2 },
+    });
+    const e2 = makeEvent({
+      type: "client_output_delta",
+      node_id: "queen",
+      execution_id: "",
+      data: { snapshot: "partial response", iteration: 2 },
+    });
+    expect(sseEventToChatMessage(e1, "t")!.id).toBe(
+      sseEventToChatMessage(e2, "t")!.id,
+    );
+  });
+
   it("uses timestamp fallback when both turnId and execution_id are null", () => {
     const event = makeEvent({
       type: "client_output_delta",

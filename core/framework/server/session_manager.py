@@ -452,6 +452,7 @@ class SessionManager:
                     stream_id="queen",
                     storage_path=queen_dir,
                     loop_config=queen_graph.loop_config,
+                    execution_id=session.id,
                 )
                 session.queen_executor = executor
                 logger.info(

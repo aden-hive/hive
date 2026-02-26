@@ -84,6 +84,8 @@ async def handle_events(request: web.Request) -> web.StreamResponse:
         "execution_failed",
         "execution_paused",
         "client_input_requested",
+        "node_loop_iteration",
+        "node_loop_started",
     }
 
     async def on_event(event) -> None:

@@ -70,10 +70,16 @@ export function sseEventToChatMessage(
 
   switch (event.type) {
     case "client_output_delta": {
+      // Prefer backend-provided iteration (reliable, embedded in event data)
+      // over frontend turnCounter (can desync when SSE queue drops events).
+      const iter = event.data?.iteration;
+      const iterTid = iter != null ? String(iter) : tid;
+      const iterIdKey = eid && iterTid ? `${eid}-${iterTid}` : eid || iterTid || `t-${Date.now()}`;
+
       const snapshot = (event.data?.snapshot as string) || (event.data?.content as string) || "";
       if (!snapshot) return null;
       return {
-        id: `stream-${idKey}-${event.node_id}`,
+        id: `stream-${iterIdKey}-${event.node_id}`,
         agent: agentDisplayName || event.node_id || "Agent",
         agentColor: "",
         content: snapshot,
