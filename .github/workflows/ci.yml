@@ -38,6 +38,11 @@ jobs:
           uv run --project core ruff format --check core/
           uv run --project core ruff format --check tools/
 
+      - name: Type check (ty)
+        continue-on-error: true
+        run: |
+          uv run --project core ty check core/framework/
+
   test:
     name: Test Python Framework
     runs-on: ${{ matrix.os }}
