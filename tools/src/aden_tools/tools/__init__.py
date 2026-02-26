@@ -29,6 +29,7 @@ from .brevo_tool import register_tools as register_brevo
 from .calcom_tool import register_tools as register_calcom
 from .calendar_tool import register_tools as register_calendar
 from .csv_tool import register_tools as register_csv
+from .databricks_tool import register_tools as register_databricks
 from .discord_tool import register_tools as register_discord
 
 # Security scanning tools
@@ -156,6 +157,9 @@ def register_all_tools(
 
     # Postgres tool
     register_postgres(mcp, credentials=credentials)
+
+    # Databricks tools
+    register_databricks(mcp, credentials=credentials)
 
     # Return the list of all registered tool names
     return list(mcp._tool_manager._tools.keys())
