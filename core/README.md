@@ -85,14 +85,14 @@ The MCP server provides tools for:
 Run an LLM-powered calculator:
 
 ```bash
-# Single calculation
-uv run python -m framework calculate "2 + 3 * 4"
+# Run an exported agent
+uv run python -m framework run exports/calculator --input '{"expression": "2 + 3 * 4"}'
 
-# Interactive mode
-uv run python -m framework interactive
+# Interactive shell session
+uv run python -m framework shell exports/calculator
 
-# Analyze runs with Builder
-uv run python -m framework analyze calculator
+# Show agent info
+uv run python -m framework info exports/calculator
 ```
 
 ### Using the Runtime
@@ -141,8 +141,8 @@ uv run python -m framework test-run <agent_path> --goal <goal_id> --parallel 4
 # Debug failed tests
 uv run python -m framework test-debug <agent_path> <test_name>
 
-# List tests for a goal
-uv run python -m framework test-list <goal_id>
+# List tests for an agent
+uv run python -m framework test-list <agent_path>
 ```
 
 For detailed testing workflows, see the [hive-test skill](../.claude/skills/hive-test/SKILL.md).

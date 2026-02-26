@@ -155,7 +155,7 @@ class MockLLMProvider(LLMProvider):
         max_iterations: int = 10,
     ) -> LLMResponse:
         """
-        Generate a mock completion without tool use.
+        Mock the multi-turn tool-use loop by skipping tool execution.
 
         In mock mode, we skip tool execution and return a final response immediately.
 
