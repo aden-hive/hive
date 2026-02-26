@@ -26,7 +26,11 @@ from framework.graph.executor import ExecutionResult
 from framework.graph.node import NodeSpec
 from framework.llm.provider import LLMProvider, Tool
 from framework.runner.tool_registry import ToolRegistry
-from framework.runtime.agent_runtime import AgentRuntime, AgentRuntimeConfig, create_agent_runtime
+from framework.runtime.agent_runtime import (
+    AgentRuntime,
+    AgentRuntimeConfig,
+    create_agent_runtime,
+)
 from framework.runtime.execution_stream import EntryPointSpec
 from framework.runtime.runtime_log_store import RuntimeLogStore
 
@@ -261,7 +265,9 @@ def _is_codex_token_expired(auth_data: dict) -> bool:
         # Codex stores last_refresh as an ISO 8601 timestamp string —
         # convert to Unix epoch float for arithmetic.
         try:
-            last_refresh = datetime.fromisoformat(last_refresh.replace("Z", "+00:00")).timestamp()
+            last_refresh = datetime.fromisoformat(
+                last_refresh.replace("Z", "+00:00")
+            ).timestamp()
         except (ValueError, TypeError):
             return True
 
@@ -471,7 +477,10 @@ def load_agent_export(data: str | dict) -> tuple[GraphSpec, Goal]:
         Tuple of (GraphSpec, Goal)
     """
     if isinstance(data, str):
-        data = json.loads(data)
+        try:
+            data = json.loads(data)
+        except json.JSONDecodeError as e:
+            raise ValueError(f"Invalid JSON in agent export: {e}") from e
 
     # Extract graph and goal
     graph_data = data.get("graph", {})
@@ -479,12 +488,18 @@ def load_agent_export(data: str | dict) -> tuple[GraphSpec, Goal]:
 
     # Build NodeSpec objects
     nodes = []
-    for node_data in graph_data.get("nodes", []):
-        nodes.append(NodeSpec(**node_data))
+    for i, node_data in enumerate(graph_data.get("nodes", [])):
+        try:
+            nodes.append(NodeSpec(**node_data))
+        except (TypeError, KeyError) as e:
+            node_id = node_data.get("id", f"index {i}")
+            raise ValueError(
+                f"Invalid node specification for node '{node_id}': {e}"
+            ) from e
 
     # Build EdgeSpec objects
     edges = []
-    for edge_data in graph_data.get("edges", []):
+    for i, edge_data in enumerate(graph_data.get("edges", [])):
         condition_str = edge_data.get("condition", "on_success")
         condition_map = {
             "always": EdgeCondition.ALWAYS,
@@ -493,32 +508,44 @@ def load_agent_export(data: str | dict) -> tuple[GraphSpec, Goal]:
             "conditional": EdgeCondition.CONDITIONAL,
             "llm_decide": EdgeCondition.LLM_DECIDE,
         }
-        edge = EdgeSpec(
-            id=edge_data["id"],
-            source=edge_data["source"],
-            target=edge_data["target"],
-            condition=condition_map.get(condition_str, EdgeCondition.ON_SUCCESS),
-            condition_expr=edge_data.get("condition_expr"),
-            priority=edge_data.get("priority", 0),
-            input_mapping=edge_data.get("input_mapping", {}),
-        )
-        edges.append(edge)
+        try:
+            edge = EdgeSpec(
+                id=edge_data["id"],
+                source=edge_data["source"],
+                target=edge_data["target"],
+                condition=condition_map.get(condition_str, EdgeCondition.ON_SUCCESS),
+                condition_expr=edge_data.get("condition_expr"),
+                priority=edge_data.get("priority", 0),
+                input_mapping=edge_data.get("input_mapping", {}),
+            )
+            edges.append(edge)
+        except KeyError as e:
+            edge_id = edge_data.get("id", f"index {i}")
+            raise ValueError(
+                f"Missing required key {e} in edge specification for edge '{edge_id}'"
+            ) from e
 
     # Build AsyncEntryPointSpec objects for multi-entry-point support
     async_entry_points = []
-    for aep_data in graph_data.get("async_entry_points", []):
-        async_entry_points.append(
-            AsyncEntryPointSpec(
-                id=aep_data["id"],
-                name=aep_data.get("name", aep_data["id"]),
-                entry_node=aep_data["entry_node"],
-                trigger_type=aep_data.get("trigger_type", "manual"),
-                trigger_config=aep_data.get("trigger_config", {}),
-                isolation_level=aep_data.get("isolation_level", "shared"),
-                priority=aep_data.get("priority", 0),
-                max_concurrent=aep_data.get("max_concurrent", 10),
+    for i, aep_data in enumerate(graph_data.get("async_entry_points", [])):
+        try:
+            async_entry_points.append(
+                AsyncEntryPointSpec(
+                    id=aep_data["id"],
+                    name=aep_data.get("name", aep_data["id"]),
+                    entry_node=aep_data["entry_node"],
+                    trigger_type=aep_data.get("trigger_type", "manual"),
+                    trigger_config=aep_data.get("trigger_config", {}),
+                    isolation_level=aep_data.get("isolation_level", "shared"),
+                    priority=aep_data.get("priority", 0),
+                    max_concurrent=aep_data.get("max_concurrent", 10),
+                )
             )
-        )
+        except KeyError as e:
+            aep_id = aep_data.get("id", f"index {i}")
+            raise ValueError(
+                f"Missing required key {e} in async entry point specification for '{aep_id}'"
+            ) from e
 
     # Build GraphSpec
     graph = GraphSpec(
@@ -526,10 +553,14 @@ def load_agent_export(data: str | dict) -> tuple[GraphSpec, Goal]:
         goal_id=graph_data.get("goal_id", ""),
         version=graph_data.get("version", "1.0.0"),
         entry_node=graph_data.get("entry_node", ""),
-        entry_points=graph_data.get("entry_points", {}),  # Support pause/resume architecture
+        entry_points=graph_data.get(
+            "entry_points", {}
+        ),  # Support pause/resume architecture
         async_entry_points=async_entry_points,  # Support multi-entry-point agents
         terminal_nodes=graph_data.get("terminal_nodes", []),
-        pause_nodes=graph_data.get("pause_nodes", []),  # Support pause/resume architecture
+        pause_nodes=graph_data.get(
+            "pause_nodes", []
+        ),  # Support pause/resume architecture
         nodes=nodes,
         edges=edges,
         max_steps=graph_data.get("max_steps", 100),
@@ -541,28 +572,40 @@ def load_agent_export(data: str | dict) -> tuple[GraphSpec, Goal]:
     from framework.graph.goal import Constraint, SuccessCriterion
 
     success_criteria = []
-    for sc_data in goal_data.get("success_criteria", []):
-        success_criteria.append(
-            SuccessCriterion(
-                id=sc_data["id"],
-                description=sc_data["description"],
-                metric=sc_data.get("metric", ""),
-                target=sc_data.get("target", ""),
-                weight=sc_data.get("weight", 1.0),
+    for i, sc_data in enumerate(goal_data.get("success_criteria", [])):
+        try:
+            success_criteria.append(
+                SuccessCriterion(
+                    id=sc_data["id"],
+                    description=sc_data["description"],
+                    metric=sc_data.get("metric", ""),
+                    target=sc_data.get("target", ""),
+                    weight=sc_data.get("weight", 1.0),
+                )
             )
-        )
+        except KeyError as e:
+            sc_id = sc_data.get("id", f"index {i}")
+            raise ValueError(
+                f"Missing required key {e} in success criterion specification for '{sc_id}'"
+            ) from e
 
     constraints = []
-    for c_data in goal_data.get("constraints", []):
-        constraints.append(
-            Constraint(
-                id=c_data["id"],
-                description=c_data["description"],
-                constraint_type=c_data.get("constraint_type", "hard"),
-                category=c_data.get("category", "safety"),
-                check=c_data.get("check", ""),
+    for i, c_data in enumerate(goal_data.get("constraints", [])):
+        try:
+            constraints.append(
+                Constraint(
+                    id=c_data["id"],
+                    description=c_data["description"],
+                    constraint_type=c_data.get("constraint_type", "hard"),
+                    category=c_data.get("category", "safety"),
+                    check=c_data.get("check", ""),
+                )
             )
-        )
+        except KeyError as e:
+            c_id = c_data.get("id", f"index {i}")
+            raise ValueError(
+                f"Missing required key {e} in constraint specification for '{c_id}'"
+            ) from e
 
     goal = Goal(
         id=goal_data.get("id", ""),
@@ -833,7 +876,9 @@ class AgentRunner:
                 max_tokens = agent_config.max_tokens
             else:
                 hive_config = get_hive_config()
-                max_tokens = hive_config.get("llm", {}).get("max_tokens", DEFAULT_MAX_TOKENS)
+                max_tokens = hive_config.get("llm", {}).get(
+                    "max_tokens", DEFAULT_MAX_TOKENS
+                )
 
             # Read intro_message from agent metadata (shown on TUI load)
             agent_metadata = getattr(agent_module, "metadata", None)
@@ -1040,7 +1085,9 @@ class AgentRunner:
                 # Get OAuth token from Claude Code subscription
                 api_key = get_claude_code_token()
                 if not api_key:
-                    print("Warning: Claude Code subscription configured but no token found.")
+                    print(
+                        "Warning: Claude Code subscription configured but no token found."
+                    )
                     print("Run 'claude' to authenticate, then try again.")
             elif use_codex:
                 # Get OAuth token from Codex subscription
@@ -1088,9 +1135,9 @@ class AgentRunner:
                 else:
                     # Fall back to environment variable
                     # First check api_key_env_var from config (set by quickstart)
-                    api_key_env = llm_config.get("api_key_env_var") or self._get_api_key_env_var(
-                        self.model
-                    )
+                    api_key_env = llm_config.get(
+                        "api_key_env_var"
+                    ) or self._get_api_key_env_var(self.model)
                     if api_key_env and os.environ.get(api_key_env):
                         self._llm = LiteLLMProvider(
                             model=self.model,
@@ -1109,12 +1156,16 @@ class AgentRunner:
                             if api_key_env:
                                 os.environ[api_key_env] = api_key
                         elif api_key_env:
-                            print(f"Warning: {api_key_env} not set. LLM calls will fail.")
+                            print(
+                                f"Warning: {api_key_env} not set. LLM calls will fail."
+                            )
                             print(f"Set it with: export {api_key_env}=your-api-key")
 
             # Fail fast if the agent needs an LLM but none was configured
             if self._llm is None:
-                has_llm_nodes = any(node.node_type == "event_loop" for node in self.graph.nodes)
+                has_llm_nodes = any(
+                    node.node_type == "event_loop" for node in self.graph.nodes
+                )
                 if has_llm_nodes:
                     from framework.credentials.models import CredentialError
 
@@ -1130,7 +1181,9 @@ class AgentRunner:
                         if api_key_env
                         else "Configure an API key for your LLM provider."
                     )
-                    raise CredentialError(f"LLM API key not found for model '{self.model}'. {hint}")
+                    raise CredentialError(
+                        f"LLM API key not found for model '{self.model}'. {hint}"
+                    )
 
         # Get tools for runtime
         tools = list(self._tool_registry.get_tools().values())
@@ -1149,7 +1202,9 @@ class AgentRunner:
             if accounts_data:
                 from framework.graph.prompt_composer import build_accounts_prompt
 
-                accounts_prompt = build_accounts_prompt(accounts_data, tool_provider_map)
+                accounts_prompt = build_accounts_prompt(
+                    accounts_data, tool_provider_map
+                )
         except Exception:
             pass  # Best-effort — agent works without account info
 
@@ -1354,7 +1409,9 @@ class AgentRunner:
             for warning in validation.warnings:
                 if "Missing " in warning:
                     error_lines.append(f"  {warning}")
-            error_lines.append("\nSet the required environment variables and re-run the agent.")
+            error_lines.append(
+                "\nSet the required environment variables and re-run the agent."
+            )
             error_msg = "\n".join(error_lines)
             return ExecutionResult(
                 success=False,
@@ -1647,7 +1704,9 @@ class AgentRunner:
             adapter = CredentialStoreAdapter.default()
 
             # Check tool credentials
-            for _cred_name, spec in adapter.get_missing_for_tools(list(info.required_tools)):
+            for _cred_name, spec in adapter.get_missing_for_tools(
+                list(info.required_tools)
+            ):
                 missing_credentials.append(spec.env_var)
                 affected_tools = [t for t in info.required_tools if t in spec.tools]
                 tools_str = ", ".join(affected_tools)
@@ -1668,7 +1727,9 @@ class AgentRunner:
                 warnings.append(warning_msg)
         except ImportError:
             # aden_tools not installed - fall back to direct check
-            has_llm_nodes = any(node.node_type == "event_loop" for node in self.graph.nodes)
+            has_llm_nodes = any(
+                node.node_type == "event_loop" for node in self.graph.nodes
+            )
             if has_llm_nodes:
                 api_key_env = self._get_api_key_env_var(self.model)
                 if api_key_env and not os.environ.get(api_key_env):
@@ -1770,7 +1831,9 @@ Respond with JSON only:
                 }
                 return CapabilityResponse(
                     agent_name=info.name,
-                    level=level_map.get(data.get("level", "uncertain"), CapabilityLevel.UNCERTAIN),
+                    level=level_map.get(
+                        data.get("level", "uncertain"), CapabilityLevel.UNCERTAIN
+                    ),
                     confidence=float(data.get("confidence", 0.5)),
                     reasoning=data.get("reasoning", ""),
                     estimated_steps=data.get("estimated_steps"),
@@ -1815,7 +1878,9 @@ Respond with JSON only:
             level=level,
             confidence=confidence,
             reasoning=f"Keyword match ratio: {match_ratio:.2f}",
-            estimated_steps=info.node_count if level != CapabilityLevel.CANNOT_HANDLE else None,
+            estimated_steps=(
+                info.node_count if level != CapabilityLevel.CANNOT_HANDLE else None
+            ),
         )
 
     async def receive_message(self, message: "AgentMessage") -> "AgentMessage":
