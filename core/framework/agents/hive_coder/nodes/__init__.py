@@ -10,16 +10,35 @@ _ref_dir = Path(__file__).parent.parent / "reference"
 _framework_guide = (_ref_dir / "framework_guide.md").read_text()
 _file_templates = (_ref_dir / "file_templates.md").read_text()
 _anti_patterns = (_ref_dir / "anti_patterns.md").read_text()
+_gcu_guide_path = _ref_dir / "gcu_guide.md"
+_gcu_guide = _gcu_guide_path.read_text() if _gcu_guide_path.exists() else ""
+
+
+def _is_gcu_enabled() -> bool:
+    try:
+        from framework.config import get_gcu_enabled
+
+        return get_gcu_enabled()
+    except Exception:
+        return False
+
+
+def _build_appendices() -> str:
+    parts = (
+        "\n\n# Appendix: Framework Reference\n\n"
+        + _framework_guide
+        + "\n\n# Appendix: File Templates\n\n"
+        + _file_templates
+        + "\n\n# Appendix: Anti-Patterns\n\n"
+        + _anti_patterns
+    )
+    if _is_gcu_enabled() and _gcu_guide:
+        parts += "\n\n# Appendix: GCU Browser Automation Guide\n\n" + _gcu_guide
+    return parts
+
 
 # Shared appendices — appended to every coding node's system prompt.
-_appendices = (
-    "\n\n# Appendix: Framework Reference\n\n"
-    + _framework_guide
-    + "\n\n# Appendix: File Templates\n\n"
-    + _file_templates
-    + "\n\n# Appendix: Anti-Patterns\n\n"
-    + _anti_patterns
-)
+_appendices = _build_appendices()
 
 # Tools available to both coder (worker) and queen.
 _SHARED_TOOLS = [
