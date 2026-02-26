@@ -131,6 +131,7 @@ class EventType(StrEnum):
 
     # Worker lifecycle (session manager → frontend)
     WORKER_LOADED = "worker_loaded"
+    CREDENTIALS_REQUIRED = "credentials_required"
 
 
 @dataclass

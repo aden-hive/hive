@@ -13,9 +13,12 @@ _anti_patterns = (_ref_dir / "anti_patterns.md").read_text()
 
 # Shared appendices — appended to every coding node's system prompt.
 _appendices = (
-    "\n\n# Appendix: Framework Reference\n\n" + _framework_guide
-    + "\n\n# Appendix: File Templates\n\n" + _file_templates
-    + "\n\n# Appendix: Anti-Patterns\n\n" + _anti_patterns
+    "\n\n# Appendix: Framework Reference\n\n"
+    + _framework_guide
+    + "\n\n# Appendix: File Templates\n\n"
+    + _file_templates
+    + "\n\n# Appendix: Anti-Patterns\n\n"
+    + _anti_patterns
 )
 
 # Tools available to both coder (worker) and queen.
@@ -622,7 +625,8 @@ coder_node = NodeSpec(
         "A complete, validated Hive agent package exists at "
         "exports/{agent_name}/ and passes structural validation."
     ),
-    tools=_SHARED_TOOLS + [
+    tools=_SHARED_TOOLS
+    + [
         # Graph lifecycle tools (multi-graph sessions)
         "load_agent",
         "unload_agent",
@@ -711,7 +715,8 @@ queen_node = NodeSpec(
         "User's intent is understood, coding tasks are completed correctly, "
         "and the worker is managed effectively when delegated to."
     ),
-    tools=_SHARED_TOOLS + [
+    tools=_SHARED_TOOLS
+    + [
         # Worker lifecycle
         "start_worker",
         "stop_worker",

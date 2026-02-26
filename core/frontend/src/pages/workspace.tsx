@@ -1180,6 +1180,11 @@ export default function Workspace() {
           }
           break;
 
+        case "credentials_required":
+          updateAgentState(agentType, { workerRunState: "idle", error: "credentials_required" });
+          setCredentialsOpen(true);
+          break;
+
         case "worker_loaded": {
           const workerName = event.data?.worker_name as string | undefined;
           const displayName = formatAgentDisplayName(workerName || agentType);

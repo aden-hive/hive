@@ -33,11 +33,16 @@ Usage::
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
+
+from framework.credentials.models import CredentialError
+from framework.credentials.validation import validate_agent_credentials
+from framework.runtime.event_bus import AgentEvent, EventType
 
 if TYPE_CHECKING:
     from framework.runner.tool_registry import ToolRegistry
@@ -162,6 +167,14 @@ def register_queen_lifecycle_tools(
             return json.dumps({"error": "No worker loaded in this session."})
 
         try:
+            # Validate credentials before running — same deferred check as
+            # handle_trigger.  Runs in executor because validate_agent_credentials
+            # makes blocking HTTP health-check calls.
+            loop = asyncio.get_running_loop()
+            await loop.run_in_executor(
+                None, lambda: validate_agent_credentials(runtime.graph.nodes)
+            )
+
             # Resume timers in case they were paused by a previous stop_worker
             runtime.resume_timers()
 
@@ -185,6 +198,22 @@ def register_queen_lifecycle_tools(
                     "task": task,
                 }
             )
+        except CredentialError as e:
+            # Emit SSE event so the frontend opens the credentials modal
+            bus = getattr(session, "event_bus", None)
+            if bus is not None:
+                await bus.publish(
+                    AgentEvent(
+                        type=EventType.CREDENTIALS_REQUIRED,
+                        stream_id="queen",
+                        data={
+                            "error": "credentials_required",
+                            "message": str(e),
+                            "agent_path": str(getattr(session, "worker_path", "") or ""),
+                        },
+                    )
+                )
+            return json.dumps({"error": "credentials_required", "message": str(e)})
         except Exception as e:
             return json.dumps({"error": f"Failed to start worker: {e}"})
 

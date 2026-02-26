@@ -264,7 +264,8 @@ export type EventTypeName =
   | "webhook_received"
   | "custom"
   | "escalation_requested"
-  | "worker_loaded";
+  | "worker_loaded"
+  | "credentials_required";
 
 export interface AgentEvent {
   type: EventTypeName;

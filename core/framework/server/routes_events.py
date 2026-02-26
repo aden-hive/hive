@@ -35,6 +35,7 @@ DEFAULT_EVENT_TYPES = [
     EventType.NODE_TOOL_DOOM_LOOP,
     EventType.CONTEXT_COMPACTED,
     EventType.WORKER_LOADED,
+    EventType.CREDENTIALS_REQUIRED,
 ]
 
 # Keepalive interval in seconds
@@ -86,6 +87,7 @@ async def handle_events(request: web.Request) -> web.StreamResponse:
         "client_input_requested",
         "node_loop_iteration",
         "node_loop_started",
+        "credentials_required",
     }
 
     async def on_event(event) -> None:
