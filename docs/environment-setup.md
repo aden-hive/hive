@@ -521,8 +521,8 @@ export ANTHROPIC_API_KEY="sk-ant-..."
 ### Optional Configuration
 
 ```bash
-# Credentials storage location (default: ~/.aden/credentials)
-export ADEN_CREDENTIALS_PATH="/custom/path"
+# Encryption key for credential store (default: ~/.hive/credentials)
+export HIVE_CREDENTIAL_KEY="your-fernet-key"
 
 # Agent storage location (default: /tmp)
 export AGENT_STORAGE_PATH="/custom/storage"
