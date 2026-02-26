@@ -248,6 +248,31 @@ class TestEnvVarStorage:
             assert cred is not None
             assert cred.get_key("api_key") == "value"
 
+    def test_exists_matches_load_for_empty_value(self):
+        """Test exists/load consistency for empty env var values."""
+        with patch.dict(os.environ, {"TEST_API_KEY": ""}):
+            storage = EnvVarStorage(env_mapping={"test": "TEST_API_KEY"})
+            assert not storage.exists("test")
+            assert storage.load("test") is None
+
+    def test_exists_matches_load_for_whitespace_value(self):
+        """Test exists/load consistency for whitespace-only values."""
+        with patch.dict(os.environ, {"TEST_API_KEY": "   "}):
+            storage = EnvVarStorage(env_mapping={"test": "TEST_API_KEY"})
+            assert storage.exists("test")
+            cred = storage.load("test")
+            assert cred is not None
+            assert cred.get_key("api_key") == "   "
+
+    def test_exists_matches_load_for_non_empty_value(self):
+        """Test exists/load consistency for non-empty env var values."""
+        with patch.dict(os.environ, {"TEST_API_KEY": "test-value"}):
+            storage = EnvVarStorage(env_mapping={"test": "TEST_API_KEY"})
+            assert storage.exists("test")
+            cred = storage.load("test")
+            assert cred is not None
+            assert cred.get_key("api_key") == "test-value"
+
     def test_save_raises(self):
         """Test that save raises NotImplementedError."""
         storage = EnvVarStorage()
