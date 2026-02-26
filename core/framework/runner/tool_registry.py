@@ -52,6 +52,7 @@ class ToolRegistry:
         self._mcp_clients: list[Any] = []  # List of MCPClient instances
         self._session_context: dict[str, Any] = {}  # Auto-injected context for tools
         self._provider_index: dict[str, set[str]] = {}  # provider -> tool names
+        self._mcp_server_tools: dict[str, set[str]] = {}  # server name -> tool names
 
     def register(
         self,
@@ -285,6 +286,10 @@ class ToolRegistry:
         """Check if a tool is registered."""
         return name in self._tools
 
+    def get_server_tool_names(self, server_name: str) -> set[str]:
+        """Return tool names registered from a specific MCP server."""
+        return set(self._mcp_server_tools.get(server_name, set()))
+
     def set_session_context(self, **context) -> None:
         """
         Set session context to auto-inject into tool calls.
@@ -395,6 +400,9 @@ class ToolRegistry:
             self._mcp_clients.append(client)
 
             # Register each tool
+            server_name = server_config["name"]
+            if server_name not in self._mcp_server_tools:
+                self._mcp_server_tools[server_name] = set()
             count = 0
             for mcp_tool in client.list_tools():
                 # Convert MCP tool to framework Tool (strips context params from LLM schema)
@@ -439,6 +447,7 @@ class ToolRegistry:
                     tool,
                     make_mcp_executor(client, mcp_tool.name, self, tool_params),
                 )
+                self._mcp_server_tools[server_name].add(mcp_tool.name)
                 count += 1
 
             logger.info(f"Registered {count} tools from MCP server '{config.name}'")

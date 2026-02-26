@@ -1,10 +1,10 @@
 """
-Browser lifecycle tools - start, stop, status, profiles.
+Browser lifecycle tools - start, stop, status.
 """
 
 from fastmcp import FastMCP
 
-from ..session import get_all_sessions, get_session
+from ..session import get_session
 
 
 def register_lifecycle_tools(mcp: FastMCP) -> None:
@@ -60,25 +60,3 @@ def register_lifecycle_tools(mcp: FastMCP) -> None:
         session = get_session(profile)
         return await session.stop()
 
-    @mcp.tool()
-    async def browser_profiles() -> dict:
-        """
-        List all available browser profiles.
-
-        Returns:
-            Dict with list of profile names and their status
-        """
-        profiles = []
-        for name, session in get_all_sessions().items():
-            status = await session.status()
-            profiles.append(
-                {
-                    "name": name,
-                    "running": status.get("running", False),
-                    "tabs": status.get("tabs", 0),
-                }
-            )
-        # Always include default if not present
-        if "default" not in get_all_sessions():
-            profiles.append({"name": "default", "running": False, "tabs": 0})
-        return {"ok": True, "profiles": profiles}

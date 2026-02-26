@@ -586,7 +586,7 @@ def add_node(
     description: Annotated[str, "What this node does"],
     node_type: Annotated[
         str,
-        "Type: event_loop (recommended), router.",
+        "Type: event_loop (recommended), gcu (browser automation), router.",
     ],
     input_keys: Annotated[str, "JSON array of keys this node reads from shared memory"],
     output_keys: Annotated[str, "JSON array of keys this node writes to shared memory"],
@@ -675,8 +675,23 @@ def add_node(
     if node_type == "event_loop" and not system_prompt:
         warnings.append(f"Event loop node '{node_id}' should have a system_prompt")
 
+    # GCU node validation
+    if node_type == "gcu":
+        if tools_list:
+            warnings.append(
+                f"GCU node '{node_id}' auto-includes all browser tools from the "
+                f"gcu-tools MCP server. Manually listed tools {tools_list} will be "
+                f"merged with the auto-included set."
+            )
+        if not system_prompt:
+            warnings.append(
+                f"GCU node '{node_id}' has a default browser best-practices prompt. "
+                f"Consider adding a task-specific system_prompt — it will be appended "
+                f"after the browser instructions."
+            )
+
     # Warn about client_facing on nodes with tools (likely autonomous work)
-    if node_type == "event_loop" and client_facing and tools_list:
+    if node_type in ("event_loop", "gcu") and client_facing and tools_list:
         warnings.append(
             f"Node '{node_id}' is client_facing=True but has tools {tools_list}. "
             "Nodes with tools typically do autonomous work and should be "
@@ -1773,6 +1788,14 @@ def export_graph() -> str:
             crit_dict = criterion.model_dump() if hasattr(criterion, "model_dump") else criterion
             enriched_criteria.append(crit_dict)
         export_data["goal"]["success_criteria"] = enriched_criteria
+
+    # Auto-add GCU MCP server if any node uses the gcu type
+    has_gcu_nodes = any(n.node_type == "gcu" for n in session.nodes)
+    if has_gcu_nodes:
+        from framework.graph.gcu import GCU_MCP_SERVER_CONFIG, GCU_SERVER_NAME
+
+        if not any(s.get("name") == GCU_SERVER_NAME for s in session.mcp_servers):
+            session.mcp_servers.append(dict(GCU_MCP_SERVER_CONFIG))
 
     # === WRITE FILES TO DISK ===
     # Create exports directory

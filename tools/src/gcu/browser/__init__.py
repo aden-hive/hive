@@ -8,7 +8,7 @@ Provides comprehensive browser automation capabilities:
 - Content extraction (screenshot, console, pdf)
 - Element interaction (click, type, fill, etc.)
 - Advanced operations (wait, evaluate, upload, dialog)
-- Agent contexts (isolated sessions spawned from shared profiles)
+- Agent contexts (profile is persistent and hardcoded per agent)
 
 Uses Playwright for browser automation.
 
@@ -33,7 +33,6 @@ from .session import (
 )
 from .tools import (
     register_advanced_tools,
-    register_agent_tools,
     register_inspection_tools,
     register_interaction_tools,
     register_lifecycle_tools,
@@ -47,15 +46,14 @@ def register_tools(mcp: FastMCP) -> None:
     Register all GCU browser tools with the MCP server.
 
     Tools are organized into categories:
-    - Lifecycle: browser_start, browser_stop, browser_status, browser_profiles
+    - Lifecycle: browser_start, browser_stop, browser_status
     - Tabs: browser_tabs, browser_open, browser_close, browser_focus
     - Navigation: browser_navigate, browser_go_back, browser_go_forward, browser_reload
-    - Inspection: browser_screenshot, browser_console, browser_pdf
-    - Interactions: browser_click, browser_type, browser_fill, browser_press,
-                    browser_hover, browser_select, browser_scroll, browser_drag
+    - Inspection: browser_screenshot, browser_snapshot, browser_console, browser_pdf
+    - Interactions: browser_click, browser_click_coordinate, browser_type, browser_fill,
+                    browser_press, browser_hover, browser_select, browser_scroll, browser_drag
     - Advanced: browser_wait, browser_evaluate, browser_get_text, browser_get_attribute,
                 browser_resize, browser_upload, browser_dialog
-    - Agents: browser_agent_create
     """
     register_lifecycle_tools(mcp)
     register_tab_tools(mcp)
@@ -63,7 +61,6 @@ def register_tools(mcp: FastMCP) -> None:
     register_inspection_tools(mcp)
     register_interaction_tools(mcp)
     register_advanced_tools(mcp)
-    register_agent_tools(mcp)
 
 
 __all__ = [

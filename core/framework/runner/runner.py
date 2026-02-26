@@ -821,7 +821,9 @@ class AgentRunner:
 
             # Fail fast if the agent needs an LLM but none was configured
             if self._llm is None:
-                has_llm_nodes = any(node.node_type == "event_loop" for node in self.graph.nodes)
+                has_llm_nodes = any(
+                    node.node_type in ("event_loop", "gcu") for node in self.graph.nodes
+                )
                 if has_llm_nodes:
                     from framework.credentials.models import CredentialError
 
@@ -832,6 +834,31 @@ class AgentRunner:
                         else "Configure an API key for your LLM provider."
                     )
                     raise CredentialError(f"LLM API key not found for model '{self.model}'. {hint}")
+
+        # For GCU nodes: auto-register GCU MCP server if needed, then expand tool lists
+        has_gcu_nodes = any(node.node_type == "gcu" for node in self.graph.nodes)
+        if has_gcu_nodes:
+            from framework.graph.gcu import GCU_MCP_SERVER_CONFIG, GCU_SERVER_NAME
+
+            # Auto-register GCU MCP server if tools aren't loaded yet
+            gcu_tool_names = self._tool_registry.get_server_tool_names(GCU_SERVER_NAME)
+            if not gcu_tool_names:
+                # Resolve relative cwd against agent path
+                gcu_config = dict(GCU_MCP_SERVER_CONFIG)
+                cwd = gcu_config.get("cwd")
+                if cwd and not Path(cwd).is_absolute():
+                    gcu_config["cwd"] = str((self.agent_path / cwd).resolve())
+                self._tool_registry.register_mcp_server(gcu_config)
+                gcu_tool_names = self._tool_registry.get_server_tool_names(GCU_SERVER_NAME)
+
+            # Expand each GCU node's tools list to include all GCU server tools
+            if gcu_tool_names:
+                for node in self.graph.nodes:
+                    if node.node_type == "gcu":
+                        existing = set(node.tools)
+                        for tool_name in sorted(gcu_tool_names):
+                            if tool_name not in existing:
+                                node.tools.append(tool_name)
 
         # Get tools for runtime
         tools = list(self._tool_registry.get_tools().values())
@@ -1337,7 +1364,9 @@ class AgentRunner:
                 warnings.append(warning_msg)
         except ImportError:
             # aden_tools not installed - fall back to direct check
-            has_llm_nodes = any(node.node_type == "event_loop" for node in self.graph.nodes)
+            has_llm_nodes = any(
+                node.node_type in ("event_loop", "gcu") for node in self.graph.nodes
+            )
             if has_llm_nodes:
                 api_key_env = self._get_api_key_env_var(self.model)
                 if api_key_env and not os.environ.get(api_key_env):

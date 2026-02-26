@@ -360,6 +360,11 @@ class EventLoopNode(NodeProtocol):
                 from framework.graph.prompt_composer import _with_datetime
 
                 system_prompt = _with_datetime(ctx.node_spec.system_prompt or "")
+                # Prepend GCU browser best-practices prompt for gcu nodes
+                if ctx.node_spec.node_type == "gcu":
+                    from framework.graph.gcu import GCU_BROWSER_SYSTEM_PROMPT
+
+                    system_prompt = f"{GCU_BROWSER_SYSTEM_PROMPT}\n\n{system_prompt}"
                 # Append connected accounts info if available
                 if ctx.accounts_prompt:
                     system_prompt = f"{system_prompt}\n\n{ctx.accounts_prompt}"
