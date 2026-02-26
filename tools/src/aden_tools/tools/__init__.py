@@ -53,6 +53,7 @@ from .file_system_toolkits.replace_file_content import (
 from .file_system_toolkits.view_file import register_tools as register_view_file
 from .file_system_toolkits.write_to_file import register_tools as register_write_to_file
 from .github_tool import register_tools as register_github
+from .gitlab_tool import register_tools as register_gitlab
 from .gmail_tool import register_tools as register_gmail
 from .google_docs_tool import register_tools as register_google_docs
 from .google_maps_tool import register_tools as register_google_maps
@@ -109,6 +110,7 @@ def register_all_tools(
     # web_search supports multiple providers (Google, Brave) with auto-detection
     register_web_search(mcp, credentials=credentials)
     register_github(mcp, credentials=credentials)
+    register_gitlab(mcp, credentials=credentials)
     # email supports multiple providers (Gmail, Resend)
     register_email(mcp, credentials=credentials)
     # Gmail inbox management (read, trash, modify labels)
