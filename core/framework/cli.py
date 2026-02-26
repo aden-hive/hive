@@ -82,7 +82,7 @@ def main():
     parser.add_argument(
         "--model",
         default=get_preferred_model(),
-        help="LLM model to use (default: from ~/.hive/configuration.json, or anthropic/claude-sonnet-4-20250514)",
+        help="LLM Model(default:~/.hive/configuration.json, or anthropic/claude-sonnet-4-20250514)",
     )
 
     subparsers = parser.add_subparsers(dest="command", required=True)
