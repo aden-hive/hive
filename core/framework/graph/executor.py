@@ -1855,6 +1855,31 @@ class GraphExecutor:
                 edge=edge,
             )
 
+        # Check for overlapping output_keys across parallel branches
+        output_key_map: dict[str, list[str]] = {}  # key -> [node names]
+        for branch in branches.values():
+            node_spec = graph.get_node(branch.node_id)
+            if node_spec and node_spec.output_keys:
+                for key in node_spec.output_keys:
+                    if key not in output_key_map:
+                        output_key_map[key] = []
+                    output_key_map[key].append(node_spec.name)
+        conflicts = {k: nodes for k, nodes in output_key_map.items() if len(nodes) > 1}
+        if conflicts:
+            conflict_details = ", ".join(
+                f"'{k}' written by {nodes}" for k, nodes in conflicts.items()
+            )
+            if self._parallel_config.memory_conflict_strategy == "error":
+                raise RuntimeError(
+                    f"Parallel execution conflict: {conflict_details}. "
+                    "Configure memory_conflict_strategy='last_wins' or 'first_wins' "
+                    "to allow (not recommended), or redesign nodes with disjoint output_keys."
+                )
+            self.logger.warning(
+                f"⚠ Parallel execution conflict detected: {conflict_details}. "
+                f"Resolution: {self._parallel_config.memory_conflict_strategy}"
+            )
+
         self.logger.info(f"   ⑂ Fan-out: executing {len(branches)} branches in parallel")
         for branch in branches.values():
             target_spec = graph.get_node(branch.node_id)
