@@ -50,7 +50,14 @@ def _patch_litellm_anthropic_oauth() -> None:
     original = AnthropicModelInfo.validate_environment
 
     def _patched_validate_environment(
-        self, headers, model, messages, optional_params, litellm_params, api_key=None, api_base=None
+        self,
+        headers,
+        model,
+        messages,
+        optional_params,
+        litellm_params,
+        api_key=None,
+        api_base=None,
     ):
         result = original(
             self,
@@ -277,7 +284,9 @@ class LiteLLMProvider(LLMProvider):
         self.extra_kwargs = kwargs
         # The Codex ChatGPT backend (chatgpt.com/backend-api/codex) rejects
         # several standard OpenAI params: max_output_tokens, stream_options.
-        self._codex_backend = bool(api_base and "chatgpt.com/backend-api/codex" in api_base)
+        self._codex_backend = bool(
+            api_base and "chatgpt.com/backend-api/codex" in api_base
+        )
 
         if litellm is None:
             raise ImportError(
@@ -297,14 +306,22 @@ class LiteLLMProvider(LLMProvider):
                 # Some providers (e.g. Gemini) return 200 with empty content on
                 # rate limit / quota exhaustion instead of a proper 429.  Treat
                 # empty responses the same as a rate-limit error and retry.
-                content = response.choices[0].message.content if response.choices else None
-                has_tool_calls = bool(response.choices and response.choices[0].message.tool_calls)
+                content = (
+                    response.choices[0].message.content if response.choices else None
+                )
+                has_tool_calls = bool(
+                    response.choices and response.choices[0].message.tool_calls
+                )
                 if not content and not has_tool_calls:
                     # If the conversation ends with an assistant message,
                     # an empty response is expected — don't retry.
                     messages = kwargs.get("messages", [])
                     last_role = next(
-                        (m["role"] for m in reversed(messages) if m.get("role") != "system"),
+                        (
+                            m["role"]
+                            for m in reversed(messages)
+                            if m.get("role") != "system"
+                        ),
                         None,
                     )
                     if last_role == "assistant":
@@ -315,7 +332,9 @@ class LiteLLMProvider(LLMProvider):
                         return response
 
                     finish_reason = (
-                        response.choices[0].finish_reason if response.choices else "unknown"
+                        response.choices[0].finish_reason
+                        if response.choices
+                        else "unknown"
                     )
                     # Dump full request to file for debugging
                     token_count, token_method = _estimate_tokens(model, messages)
@@ -443,7 +462,9 @@ class LiteLLMProvider(LLMProvider):
             if full_messages and full_messages[0]["role"] == "system":
                 full_messages[0]["content"] += json_instruction
             else:
-                full_messages.insert(0, {"role": "system", "content": json_instruction.strip()})
+                full_messages.insert(
+                    0, {"role": "system", "content": json_instruction.strip()}
+                )
 
         # Build kwargs
         kwargs: dict[str, Any] = {
@@ -473,10 +494,12 @@ class LiteLLMProvider(LLMProvider):
             return self._codex_sync_complete(kwargs)
 
         # Make the call
-        response = self._completion_with_rate_limit_retry(max_retries=max_retries, **kwargs)
+        response = self._completion_with_rate_limit_retry(
+            max_retries=max_retries, **kwargs
+        )
 
         # Extract content
-        content = response.choices[0].message.content or ""
+        content = response.choices[0].message.content if response.choices else ""
 
         # Get usage info.
         # NOTE: completion_tokens includes reasoning/thinking tokens for models
@@ -493,7 +516,7 @@ class LiteLLMProvider(LLMProvider):
             model=response.model or self.model,
             input_tokens=input_tokens,
             output_tokens=output_tokens,
-            stop_reason=response.choices[0].finish_reason or "",
+            stop_reason=response.choices[0].finish_reason if response.choices else "",
             raw_response=response,
         )
 
@@ -541,6 +564,16 @@ class LiteLLMProvider(LLMProvider):
             if usage:
                 total_input_tokens += usage.prompt_tokens
                 total_output_tokens += usage.completion_tokens
+
+            if not response.choices:
+                return LLMResponse(
+                    content="Empty response from model",
+                    model=response.model or self.model,
+                    input_tokens=total_input_tokens,
+                    output_tokens=total_output_tokens,
+                    stop_reason="empty_response",
+                    raw_response=response,
+                )
 
             choice = response.choices[0]
             message = choice.message
@@ -635,12 +668,20 @@ class LiteLLMProvider(LLMProvider):
             try:
                 response = await litellm.acompletion(**kwargs)  # type: ignore[union-attr]
 
-                content = response.choices[0].message.content if response.choices else None
-                has_tool_calls = bool(response.choices and response.choices[0].message.tool_calls)
+                content = (
+                    response.choices[0].message.content if response.choices else None
+                )
+                has_tool_calls = bool(
+                    response.choices and response.choices[0].message.tool_calls
+                )
                 if not content and not has_tool_calls:
                     messages = kwargs.get("messages", [])
                     last_role = next(
-                        (m["role"] for m in reversed(messages) if m.get("role") != "system"),
+                        (
+                            m["role"]
+                            for m in reversed(messages)
+                            if m.get("role") != "system"
+                        ),
                         None,
                     )
                     if last_role == "assistant":
@@ -651,7 +692,9 @@ class LiteLLMProvider(LLMProvider):
                         return response
 
                     finish_reason = (
-                        response.choices[0].finish_reason if response.choices else "unknown"
+                        response.choices[0].finish_reason
+                        if response.choices
+                        else "unknown"
                     )
                     token_count, token_method = _estimate_tokens(model, messages)
                     dump_path = _dump_failed_request(
@@ -736,7 +779,9 @@ class LiteLLMProvider(LLMProvider):
             if full_messages and full_messages[0]["role"] == "system":
                 full_messages[0]["content"] += json_instruction
             else:
-                full_messages.insert(0, {"role": "system", "content": json_instruction.strip()})
+                full_messages.insert(
+                    0, {"role": "system", "content": json_instruction.strip()}
+                )
 
         kwargs: dict[str, Any] = {
             "model": self.model,
@@ -759,9 +804,11 @@ class LiteLLMProvider(LLMProvider):
             kwargs.pop("max_tokens", None)
             return await self._codex_async_complete(kwargs)
 
-        response = await self._acompletion_with_rate_limit_retry(max_retries=max_retries, **kwargs)
+        response = await self._acompletion_with_rate_limit_retry(
+            max_retries=max_retries, **kwargs
+        )
 
-        content = response.choices[0].message.content or ""
+        content = response.choices[0].message.content if response.choices else ""
         usage = response.usage
         input_tokens = usage.prompt_tokens if usage else 0
         output_tokens = usage.completion_tokens if usage else 0
@@ -771,7 +818,7 @@ class LiteLLMProvider(LLMProvider):
             model=response.model or self.model,
             input_tokens=input_tokens,
             output_tokens=output_tokens,
-            stop_reason=response.choices[0].finish_reason or "",
+            stop_reason=response.choices[0].finish_reason if response.choices else "",
             raw_response=response,
         )
 
@@ -846,6 +893,16 @@ class LiteLLMProvider(LLMProvider):
             if usage:
                 total_input_tokens += usage.prompt_tokens
                 total_output_tokens += usage.completion_tokens
+
+            if not response.choices:
+                return LLMResponse(
+                    content="Empty response from model",
+                    model=response.model or self.model,
+                    input_tokens=total_input_tokens,
+                    output_tokens=total_output_tokens,
+                    stop_reason="empty_response",
+                    raw_response=response,
+                )
 
             choice = response.choices[0]
             message = choice.message
@@ -1011,16 +1068,26 @@ class LiteLLMProvider(LLMProvider):
                     # --- Tool calls (accumulate across chunks) ---
                     if delta and delta.tool_calls:
                         for tc in delta.tool_calls:
-                            idx = tc.index if hasattr(tc, "index") and tc.index is not None else 0
+                            idx = (
+                                tc.index
+                                if hasattr(tc, "index") and tc.index is not None
+                                else 0
+                            )
                             if idx not in tool_calls_acc:
-                                tool_calls_acc[idx] = {"id": "", "name": "", "arguments": ""}
+                                tool_calls_acc[idx] = {
+                                    "id": "",
+                                    "name": "",
+                                    "arguments": "",
+                                }
                             if tc.id:
                                 tool_calls_acc[idx]["id"] = tc.id
                             if tc.function:
                                 if tc.function.name:
                                     tool_calls_acc[idx]["name"] = tc.function.name
                                 if tc.function.arguments:
-                                    tool_calls_acc[idx]["arguments"] += tc.function.arguments
+                                    tool_calls_acc[idx][
+                                        "arguments"
+                                    ] += tc.function.arguments
 
                     # --- Finish ---
                     if choice.finish_reason:
@@ -1067,7 +1134,11 @@ class LiteLLMProvider(LLMProvider):
                     # all outputs via set_output tool calls, and the tool
                     # results are the last messages.
                     last_role = next(
-                        (m["role"] for m in reversed(full_messages) if m.get("role") != "system"),
+                        (
+                            m["role"]
+                            for m in reversed(full_messages)
+                            if m.get("role") != "system"
+                        ),
                         None,
                     )
                     if last_role in ("assistant", "tool"):
