@@ -11,7 +11,7 @@ import asyncio
 import json
 import logging
 import time
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncIterator
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -23,7 +23,7 @@ except ImportError:
     litellm = None  # type: ignore[assignment]
     RateLimitError = Exception  # type: ignore[assignment, misc]
 
-from framework.llm.provider import LLMProvider, LLMResponse, Tool, ToolResult, ToolUse
+from framework.llm.provider import LLMProvider, LLMResponse, Tool
 from framework.llm.stream_events import StreamEvent
 
 logger = logging.getLogger(__name__)
@@ -511,127 +511,6 @@ class LiteLLMProvider(LLMProvider):
             raw_response=response,
         )
 
-    def complete_with_tools(
-        self,
-        messages: list[dict[str, Any]],
-        system: str,
-        tools: list[Tool],
-        tool_executor: Callable[[ToolUse], ToolResult],
-        max_iterations: int = 10,
-        max_tokens: int = 4096,
-    ) -> LLMResponse:
-        """Run a tool-use loop until the LLM produces a final response."""
-        # Prepare messages with system prompt
-        current_messages = []
-        if system:
-            current_messages.append({"role": "system", "content": system})
-        current_messages.extend(messages)
-
-        total_input_tokens = 0
-        total_output_tokens = 0
-
-        # Convert tools to OpenAI format
-        openai_tools = [self._tool_to_openai_format(t) for t in tools]
-
-        for _ in range(max_iterations):
-            # Build kwargs
-            kwargs: dict[str, Any] = {
-                "model": self.model,
-                "messages": current_messages,
-                "max_tokens": max_tokens,
-                "tools": openai_tools,
-                **self.extra_kwargs,
-            }
-
-            if self.api_key:
-                kwargs["api_key"] = self.api_key
-            if self.api_base:
-                kwargs["api_base"] = self.api_base
-
-            response = self._completion_with_rate_limit_retry(**kwargs)
-
-            # Track tokens
-            usage = response.usage
-            if usage:
-                total_input_tokens += usage.prompt_tokens
-                total_output_tokens += usage.completion_tokens
-
-            choice = response.choices[0]
-            message = choice.message
-
-            # Check if we're done (no tool calls)
-            if choice.finish_reason == "stop" or not message.tool_calls:
-                return LLMResponse(
-                    content=message.content or "",
-                    model=response.model or self.model,
-                    input_tokens=total_input_tokens,
-                    output_tokens=total_output_tokens,
-                    stop_reason=choice.finish_reason or "stop",
-                    raw_response=response,
-                )
-
-            # Process tool calls.
-            # Add assistant message with tool calls.
-            current_messages.append(
-                {
-                    "role": "assistant",
-                    "content": message.content,
-                    "tool_calls": [
-                        {
-                            "id": tc.id,
-                            "type": "function",
-                            "function": {
-                                "name": tc.function.name,
-                                "arguments": tc.function.arguments,
-                            },
-                        }
-                        for tc in message.tool_calls
-                    ],
-                }
-            )
-
-            # Execute tools and add results.
-            for tool_call in message.tool_calls:
-                try:
-                    args = json.loads(tool_call.function.arguments)
-                except json.JSONDecodeError:
-                    # Surface error to LLM and skip tool execution
-                    current_messages.append(
-                        {
-                            "role": "tool",
-                            "tool_call_id": tool_call.id,
-                            "content": "Invalid JSON arguments provided to tool.",
-                        }
-                    )
-                    continue
-
-                tool_use = ToolUse(
-                    id=tool_call.id,
-                    name=tool_call.function.name,
-                    input=args,
-                )
-
-                result = tool_executor(tool_use)
-
-                # Add tool result message
-                current_messages.append(
-                    {
-                        "role": "tool",
-                        "tool_call_id": result.tool_use_id,
-                        "content": result.content,
-                    }
-                )
-
-        # Max iterations reached
-        return LLMResponse(
-            content="Max tool iterations reached",
-            model=self.model,
-            input_tokens=total_input_tokens,
-            output_tokens=total_output_tokens,
-            stop_reason="max_iterations",
-            raw_response=None,
-        )
-
     # ------------------------------------------------------------------
     # Async variants — non-blocking on the event loop
     # ------------------------------------------------------------------
@@ -832,115 +711,6 @@ class LiteLLMProvider(LLMProvider):
             input_tokens=input_tokens,
             output_tokens=output_tokens,
             stop_reason=finish_reason,
-            raw_response=None,
-        )
-
-    async def acomplete_with_tools(
-        self,
-        messages: list[dict[str, Any]],
-        system: str,
-        tools: list[Tool],
-        tool_executor: Callable[[ToolUse], ToolResult],
-        max_iterations: int = 10,
-        max_tokens: int = 4096,
-    ) -> LLMResponse:
-        """Async version of complete_with_tools(). Uses litellm.acompletion — non-blocking."""
-        current_messages: list[dict[str, Any]] = []
-        if system:
-            current_messages.append({"role": "system", "content": system})
-        current_messages.extend(messages)
-
-        total_input_tokens = 0
-        total_output_tokens = 0
-        openai_tools = [self._tool_to_openai_format(t) for t in tools]
-
-        for _ in range(max_iterations):
-            kwargs: dict[str, Any] = {
-                "model": self.model,
-                "messages": current_messages,
-                "max_tokens": max_tokens,
-                "tools": openai_tools,
-                **self.extra_kwargs,
-            }
-
-            if self.api_key:
-                kwargs["api_key"] = self.api_key
-            if self.api_base:
-                kwargs["api_base"] = self.api_base
-
-            response = await self._acompletion_with_rate_limit_retry(**kwargs)
-
-            usage = response.usage
-            if usage:
-                total_input_tokens += usage.prompt_tokens
-                total_output_tokens += usage.completion_tokens
-
-            choice = response.choices[0]
-            message = choice.message
-
-            if choice.finish_reason == "stop" or not message.tool_calls:
-                return LLMResponse(
-                    content=message.content or "",
-                    model=response.model or self.model,
-                    input_tokens=total_input_tokens,
-                    output_tokens=total_output_tokens,
-                    stop_reason=choice.finish_reason or "stop",
-                    raw_response=response,
-                )
-
-            current_messages.append(
-                {
-                    "role": "assistant",
-                    "content": message.content,
-                    "tool_calls": [
-                        {
-                            "id": tc.id,
-                            "type": "function",
-                            "function": {
-                                "name": tc.function.name,
-                                "arguments": tc.function.arguments,
-                            },
-                        }
-                        for tc in message.tool_calls
-                    ],
-                }
-            )
-
-            for tool_call in message.tool_calls:
-                try:
-                    args = json.loads(tool_call.function.arguments)
-                except json.JSONDecodeError:
-                    current_messages.append(
-                        {
-                            "role": "tool",
-                            "tool_call_id": tool_call.id,
-                            "content": "Invalid JSON arguments provided to tool.",
-                        }
-                    )
-                    continue
-
-                tool_use = ToolUse(
-                    id=tool_call.id,
-                    name=tool_call.function.name,
-                    input=args,
-                )
-
-                result = tool_executor(tool_use)
-
-                current_messages.append(
-                    {
-                        "role": "tool",
-                        "tool_call_id": result.tool_use_id,
-                        "content": result.content,
-                    }
-                )
-
-        return LLMResponse(
-            content="Max tool iterations reached",
-            model=self.model,
-            input_tokens=total_input_tokens,
-            output_tokens=total_output_tokens,
-            stop_reason="max_iterations",
             raw_response=None,
         )
 

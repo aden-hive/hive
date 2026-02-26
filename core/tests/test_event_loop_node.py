@@ -68,8 +68,6 @@ class MockStreamingLLM(LLMProvider):
     def complete(self, messages, system="", **kwargs) -> LLMResponse:
         return LLMResponse(content="Summary of conversation.", model="mock", stop_reason="stop")
 
-    def complete_with_tools(self, messages, system, tools, tool_executor, **kwargs) -> LLMResponse:
-        return LLMResponse(content="", model="mock", stop_reason="stop")
 
 
 # ---------------------------------------------------------------------------
@@ -1026,8 +1024,6 @@ class ErrorThenSuccessLLM(LLMProvider):
     def complete(self, messages, system="", **kwargs) -> LLMResponse:
         return LLMResponse(content="ok", model="mock", stop_reason="stop")
 
-    def complete_with_tools(self, messages, system, tools, tool_executor, **kwargs) -> LLMResponse:
-        return LLMResponse(content="", model="mock", stop_reason="stop")
 
 
 class TestTransientErrorRetry:
@@ -1131,20 +1127,6 @@ class TestTransientErrorRetry:
                     stop_reason="stop",
                 )
 
-            def complete_with_tools(
-                self,
-                messages,
-                system,
-                tools,
-                tool_executor,
-                **kwargs,
-            ):
-                return LLMResponse(
-                    content="",
-                    model="mock",
-                    stop_reason="stop",
-                )
-
         llm = StreamErrorThenSuccessLLM()
         ctx = build_ctx(runtime, node_spec, memory, llm)
         node = EventLoopNode(
@@ -1226,9 +1208,6 @@ class TestTransientErrorRetry:
 
             def complete(self, messages, system="", **kwargs):
                 return LLMResponse(content="ok", model="mock", stop_reason="stop")
-
-            def complete_with_tools(self, messages, system, tools, tool_executor, **kwargs):
-                return LLMResponse(content="", model="mock", stop_reason="stop")
 
         llm = RecoverableErrorThenSuccessLLM()
         ctx = build_ctx(runtime, node_spec, memory, llm)
@@ -1412,19 +1391,6 @@ class ToolRepeatLLM(LLMProvider):
             stop_reason="stop",
         )
 
-    def complete_with_tools(
-        self,
-        messages,
-        system,
-        tools,
-        tool_executor,
-        **kwargs,
-    ) -> LLMResponse:
-        return LLMResponse(
-            content="",
-            model="mock",
-            stop_reason="stop",
-        )
 
 
 class TestToolDoomLoopIntegration:
@@ -1646,20 +1612,6 @@ class TestToolDoomLoopIntegration:
             def complete(self, messages, **kwargs):
                 return LLMResponse(
                     content="ok",
-                    model="mock",
-                    stop_reason="stop",
-                )
-
-            def complete_with_tools(
-                self,
-                messages,
-                system,
-                tools,
-                tool_executor,
-                **kw,
-            ):
-                return LLMResponse(
-                    content="",
                     model="mock",
                     stop_reason="stop",
                 )

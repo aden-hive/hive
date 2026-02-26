@@ -52,8 +52,6 @@ class MockLLMProvider(LLMProvider):
             output_tokens=50,
         )
 
-    def complete_with_tools(self, messages, system, tools, tool_executor, max_iterations=10):
-        raise NotImplementedError("Tool use not needed for judge tests")
 
 
 # ============================================================================
