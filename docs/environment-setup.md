@@ -36,6 +36,24 @@ Windows users should use **WSL (Windows Subsystem for Linux)** to set up and run
    ./quickstart.sh
    ```
 
+### Windows Troubleshooting
+
+If setup fails on Windows when using Git Bash with errors involving `cygpath` or `execvpe(/bin/bash) failed: No such file or directory`, the cause is usually that Git Bash is delegating path conversion to WSL, and WSL has a broken or non-functional distribution (e.g. a leftover `docker-desktop` or `Ubuntu` entry from Docker Desktop).
+
+**Diagnose:**
+
+- Run `wsl --list` to see registered distributions.
+- Unregister non-functional ones: `wsl --unregister docker-desktop`, `wsl --unregister Ubuntu` (use the exact names from the list).
+
+**Fix path resolution:**
+
+- Ensure Git's own tools are used for path conversion by putting Git's `usr\bin` (and optionally `bin`) **earlier** in your PATH than any WSL-related entries. For example, add to your user PATH:
+  - `C:\Users\<your-username>\Git\usr\bin`
+  - `C:\Users\<your-username>\Git\bin`
+  (Adjust if Git is installed elsewhere.)
+
+After unregistering broken WSL distros and fixing PATH, run `./quickstart.sh` again.
+
 ## Alpine Linux Setup
 
 If you are using Alpine Linux (e.g., inside a Docker container), you must install system dependencies and use a virtual environment before running the setup script:
