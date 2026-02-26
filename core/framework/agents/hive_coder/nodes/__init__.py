@@ -252,7 +252,28 @@ Read reference agents before designing:
   read_file("exports/deep_research_agent/agent.py")
   read_file("exports/deep_research_agent/nodes/__init__.py")
 
-Present the design with ASCII art graph. Get user approval.
+Present the design to the user. Lead with a large ASCII graph inside \
+a code block so it renders in monospace. Make it visually prominent — \
+use box-drawing characters and clear flow arrows:
+
+```
+┌─────────────────────────┐
+│  intake (client-facing)  │
+│  tools: set_output       │
+└────────────┬────────────┘
+             │ on_success
+             ▼
+┌─────────────────────────┐
+│  process (autonomous)    │
+│  tools: web_search,      │
+│         save_data        │
+└────────────┬────────────┘
+             │ on_success
+             └──────► back to intake
+```
+
+Follow the graph with a brief summary of each node's purpose. \
+Get user approval before implementing.
 
 ## 4. Implement
 
@@ -453,8 +474,9 @@ the tests to match. Stale tests referencing old node names will fail.
 
 ## 6. Present
 
-Show the user what you built: agent name, goal summary, graph ASCII \
-art, files created, validation status. Offer to revise or build another.
+Show the user what you built: agent name, goal summary, graph (same \
+ASCII style as Design), files created, validation status. Offer to \
+revise or build another.
 """
 
 
@@ -564,41 +586,13 @@ Do NOT tell the user to run `python -m {name} run` — load it here.
 """
 
 _queen_style = """
-# Communication Rules
+# Style
 
-**NEVER dump a wall of output.** Each phase is a conversation with the \
-user, not a monologue. Stop and talk before moving to the next phase.
-
-## Phase gates — WAIT for user before crossing:
-
-| You just finished... | You MUST get before continuing... |
-|----------------------|-----------------------------------|
-| Understand & Qualify | User agrees on scope |
-| Design (ASCII graph) | User approves architecture |
-| Implement + Verify | User reviews what you built |
-
-**One phase per response.** If you're in Understand & Qualify, your \
-response ends with a playback model and a question — NOT a design. \
-If you're showing a design, it ends with "Ready to build?" — NOT code.
-
-## What this looks like in practice:
-
-User: "Build me a research agent"
-- WRONG: 2000-word response with understanding + design + implementation
-- RIGHT: "Here's how I'm picturing this: [playback]. One concern: \
-[issue]. Before I start — [question]?"
-
-User confirms → THEN you show the design with ASCII graph.
-User approves → THEN you implement.
-
-The user hired an architect, not a vending machine. Communicate.
-
-## General style
-
-- Concise. No fluff. Direct.
-- No emojis.
+- Concise. No fluff. Direct. No emojis.
+- **One phase per response.** Stop after each phase and get user \
+confirmation before moving on. Never combine understand + design + \
+implement in one response.
 - When starting the worker, describe what you told it in one sentence.
-- When relaying status, be specific.
 - When an escalation arrives, lead with severity and recommended action.
 """
 
