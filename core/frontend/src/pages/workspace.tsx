@@ -387,6 +387,7 @@ export default function Workspace() {
   }, []);
 
   const [credentialsOpen, setCredentialsOpen] = useState(false);
+  const [dismissedBanner, setDismissedBanner] = useState<string | null>(null);
   const [selectedNode, setSelectedNode] = useState<GraphNode | null>(null);
   const [newTabOpen, setNewTabOpen] = useState(false);
   const newTabBtnRef = useRef<HTMLButtonElement>(null);
@@ -423,6 +424,10 @@ export default function Workspace() {
   // Derive active agent's backend state
   const activeAgentState = agentStates[activeWorker];
 
+  // Reset dismissed banner when the error clears so it re-appears if the same error returns
+  const currentError = activeAgentState?.error;
+  useEffect(() => { if (!currentError) setDismissedBanner(null); }, [currentError]);
+
   // Persist tab metadata + session data to localStorage on every relevant change
   useEffect(() => {
     const tabs: PersistedTabState["tabs"] = [];
@@ -453,6 +458,14 @@ export default function Workspace() {
       const result = await executionApi.trigger(state.sessionId, "default", {});
       updateAgentState(activeWorker, { currentExecutionId: result.execution_id });
     } catch (err) {
+      // 424 = credentials required — open the credentials modal
+      const { ApiError } = await import("@/api/client");
+      if (err instanceof ApiError && err.status === 424) {
+        updateAgentState(activeWorker, { workerRunState: "idle", error: "credentials_required" });
+        setCredentialsOpen(true);
+        return;
+      }
+
       const errMsg = err instanceof Error ? err.message : String(err);
       setSessionsByAgent((prev) => {
         const sessions = prev[activeWorker] || [];
@@ -1523,16 +1536,16 @@ export default function Workspace() {
 
             {/* Queen connecting overlay — agent loaded but queen not yet alive */}
             {!activeAgentState?.loading && activeAgentState?.ready && !activeAgentState?.queenReady && (
-              <div className="absolute top-0 left-0 right-0 z-10 px-4 py-2 bg-primary/5 border-b border-primary/20 flex items-center gap-2">
+              <div className="absolute top-0 left-0 right-0 z-10 px-4 py-2 bg-background border-b border-primary/20 flex items-center gap-2">
                 <Loader2 className="w-3.5 h-3.5 animate-spin text-primary/60" />
                 <span className="text-xs text-primary/80">Connecting to queen...</span>
               </div>
             )}
 
             {/* Connection error banner */}
-            {activeAgentState?.error && !activeAgentState?.loading && (
+            {activeAgentState?.error && !activeAgentState?.loading && dismissedBanner !== activeAgentState.error && (
               activeAgentState.error === "credentials_required" ? (
-                <div className="absolute top-0 left-0 right-0 z-10 px-4 py-2 bg-amber-500/10 border-b border-amber-500/30 flex items-center gap-2">
+                <div className="absolute top-0 left-0 right-0 z-10 px-4 py-2 bg-background border-b border-amber-500/30 flex items-center gap-2">
                   <KeyRound className="w-4 h-4 text-amber-600" />
                   <span className="text-xs text-amber-700">Missing credentials — configure them to continue</span>
                   <button
@@ -1541,11 +1554,23 @@ export default function Workspace() {
                   >
                     Open Credentials
                   </button>
+                  <button
+                    onClick={() => setDismissedBanner(activeAgentState.error!)}
+                    className="p-0.5 rounded text-amber-600 hover:text-amber-800 hover:bg-amber-500/20 transition-colors"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
                 </div>
               ) : (
-                <div className="absolute top-0 left-0 right-0 z-10 px-4 py-2 bg-destructive/10 border-b border-destructive/30 flex items-center gap-2">
+                <div className="absolute top-0 left-0 right-0 z-10 px-4 py-2 bg-background border-b border-destructive/30 flex items-center gap-2">
                   <WifiOff className="w-4 h-4 text-destructive" />
                   <span className="text-xs text-destructive">Backend unavailable: {activeAgentState.error}</span>
+                  <button
+                    onClick={() => setDismissedBanner(activeAgentState.error!)}
+                    className="ml-auto p-0.5 rounded text-destructive hover:text-destructive hover:bg-destructive/20 transition-colors"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
                 </div>
               )
             )}
@@ -1636,7 +1661,15 @@ export default function Workspace() {
         agentLabel={activeWorkerLabel}
         agentPath={activeWorker !== "new-agent" ? activeWorker : undefined}
         open={credentialsOpen}
-        onClose={() => setCredentialsOpen(false)}
+        onClose={() => {
+          setCredentialsOpen(false);
+          // If worker is loaded and credential error was cleared, auto-trigger run
+          // (credential error came from trigger, not load — no auto-load effect to help)
+          const state = agentStates[activeWorker];
+          if (state?.ready && state?.sessionId && !state?.error) {
+            handleRun();
+          }
+        }}
         credentials={activeSession?.credentials || []}
         onCredentialChange={() => {
           if (!activeSession) return;

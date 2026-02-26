@@ -214,6 +214,7 @@ class SessionManager:
                     agent_path,
                     model=resolved_model,
                     interactive=False,
+                    skip_credential_validation=True,
                 ),
             )
 
