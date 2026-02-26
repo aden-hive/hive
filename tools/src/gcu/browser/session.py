@@ -249,7 +249,11 @@ class BrowserSession:
         """Check if browser is currently running."""
         if self.session_type == "agent":
             # Agent sessions use a shared browser; check context is alive
-            return self.context is not None and self.browser is not None and self.browser.is_connected()
+            return (
+                self.context is not None
+                and self.browser is not None
+                and self.browser.is_connected()
+            )
         if self.persistent:
             # Persistent context doesn't have a separate browser object
             return self.context is not None
@@ -526,9 +530,7 @@ class BrowserSession:
             context=context,
             session_type="agent",
         )
-        logger.info(
-            f"Created agent session '{agent_id}' from profile '{source_session.profile}'"
-        )
+        logger.info(f"Created agent session '{agent_id}' from profile '{source_session.profile}'")
         return session
 
     async def status(self) -> dict:

@@ -9,15 +9,13 @@ from __future__ import annotations
 import asyncio
 import json
 from collections.abc import AsyncIterator
-from dataclasses import field
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import MagicMock
 
 import pytest
 
 from framework.graph.event_loop_node import (
     EventLoopNode,
-    JudgeVerdict,
     LoopConfig,
     SubagentJudge,
 )
@@ -30,7 +28,6 @@ from framework.llm.stream_events import (
 )
 from framework.runtime.core import Runtime
 from framework.runtime.event_bus import EventBus, EventType
-
 
 # ---------------------------------------------------------------------------
 # Mock LLM for controlled testing
@@ -224,10 +221,12 @@ class TestSubagentExecution:
     ):
         """Subagent should have read-only access to memory."""
         # Create LLM that will set output for the subagent
-        subagent_llm = MockStreamingLLM([
-            set_output_scenario("findings", "Found important data"),
-            text_finish_scenario(),
-        ])
+        subagent_llm = MockStreamingLLM(
+            [
+                set_output_scenario("findings", "Found important data"),
+                text_finish_scenario(),
+            ]
+        )
 
         node = EventLoopNode(
             config=LoopConfig(max_iterations=5),
@@ -267,10 +266,12 @@ class TestSubagentExecution:
         self, runtime, parent_node_spec, subagent_node_spec
     ):
         """Subagent should return structured JSON output."""
-        subagent_llm = MockStreamingLLM([
-            set_output_scenario("findings", "AI research results"),
-            text_finish_scenario(),
-        ])
+        subagent_llm = MockStreamingLLM(
+            [
+                set_output_scenario("findings", "AI research results"),
+                text_finish_scenario(),
+            ]
+        )
 
         node = EventLoopNode(config=LoopConfig(max_iterations=5))
 
@@ -373,8 +374,8 @@ class TestDelegationIntegration:
             text_finish_scenario("Task complete"),
         ]
 
-        # Subagent LLM: sets findings output
-        subagent_scenarios = [
+        # Subagent LLM: sets findings output (unused; scenarios defined inline)
+        _ = [
             set_output_scenario("findings", "AI trends 2024: LLMs, agents"),
             text_finish_scenario(),
         ]
@@ -559,11 +560,13 @@ class TestReportToParentExecution:
     ):
         """Reports from report_to_parent should appear in the final ToolResult JSON."""
         # Subagent LLM: report, then set output
-        subagent_llm = MockStreamingLLM([
-            report_scenario("50% done", {"progress": 0.5}),
-            set_output_scenario("findings", "All done"),
-            text_finish_scenario(),
-        ])
+        subagent_llm = MockStreamingLLM(
+            [
+                report_scenario("50% done", {"progress": 0.5}),
+                set_output_scenario("findings", "All done"),
+                text_finish_scenario(),
+            ]
+        )
 
         node = EventLoopNode(config=LoopConfig(max_iterations=10))
 
@@ -611,11 +614,13 @@ class TestReportToParentExecution:
 
         bus.subscribe(event_types=[EventType.SUBAGENT_REPORT], handler=handler)
 
-        subagent_llm = MockStreamingLLM([
-            report_scenario("Progress update", {"step": 1}),
-            set_output_scenario("findings", "Results"),
-            text_finish_scenario(),
-        ])
+        subagent_llm = MockStreamingLLM(
+            [
+                report_scenario("Progress update", {"step": 1}),
+                set_output_scenario("findings", "Results"),
+                text_finish_scenario(),
+            ]
+        )
 
         node = EventLoopNode(
             event_bus=bus,
@@ -654,14 +659,17 @@ class TestReportToParentExecution:
         self, runtime, parent_node_spec, subagent_node_spec
     ):
         """Subagent should complete even if the report callback raises."""
+
         async def failing_callback(message: str, data: dict | None = None) -> None:
             raise RuntimeError("Callback exploded")
 
-        subagent_llm = MockStreamingLLM([
-            report_scenario("This will fail callback"),
-            set_output_scenario("findings", "Still finished"),
-            text_finish_scenario(),
-        ])
+        subagent_llm = MockStreamingLLM(
+            [
+                report_scenario("This will fail callback"),
+                set_output_scenario("findings", "Still finished"),
+                text_finish_scenario(),
+            ]
+        )
 
         node = EventLoopNode(config=LoopConfig(max_iterations=10))
 
@@ -695,14 +703,14 @@ class TestReportToParentExecution:
         assert result_data["metadata"]["report_count"] == 1
 
     @pytest.mark.asyncio
-    async def test_no_reports_gives_null(
-        self, runtime, parent_node_spec, subagent_node_spec
-    ):
+    async def test_no_reports_gives_null(self, runtime, parent_node_spec, subagent_node_spec):
         """When no reports are sent, reports field should be null."""
-        subagent_llm = MockStreamingLLM([
-            set_output_scenario("findings", "Done without reporting"),
-            text_finish_scenario(),
-        ])
+        subagent_llm = MockStreamingLLM(
+            [
+                set_output_scenario("findings", "Done without reporting"),
+                text_finish_scenario(),
+            ]
+        )
 
         node = EventLoopNode(config=LoopConfig(max_iterations=10))
 
@@ -815,9 +823,12 @@ class TestEscalationFlow:
 
     @pytest.mark.asyncio
     async def test_wait_for_response_registers_receiver_in_registry(
-        self, runtime, parent_node_spec, subagent_node_spec,
+        self,
+        runtime,
+        parent_node_spec,
+        subagent_node_spec,
     ):
-        """When wait_for_response=True, an _EscalationReceiver should appear in shared_node_registry."""
+        """When wait_for_response=True, an _EscalationReceiver appears."""
         from framework.graph.event_loop_node import _EscalationReceiver
 
         bus = EventBus()
@@ -825,12 +836,14 @@ class TestEscalationFlow:
 
         # We need the subagent to call report_to_parent(wait_for_response=True),
         # then we inject a response so it unblocks.
-        subagent_llm = MockStreamingLLM([
-            report_wait_scenario("Login required for LinkedIn"),
-            # After unblock, set output and finish
-            set_output_scenario("findings", "Logged in successfully"),
-            text_finish_scenario(),
-        ])
+        subagent_llm = MockStreamingLLM(
+            [
+                report_wait_scenario("Login required for LinkedIn"),
+                # After unblock, set output and finish
+                set_output_scenario("findings", "Logged in successfully"),
+                text_finish_scenario(),
+            ]
+        )
 
         node = EventLoopNode(
             event_bus=bus,
@@ -889,7 +902,10 @@ class TestEscalationFlow:
 
     @pytest.mark.asyncio
     async def test_wait_for_response_returns_user_reply_to_subagent(
-        self, runtime, parent_node_spec, subagent_node_spec,
+        self,
+        runtime,
+        parent_node_spec,
+        subagent_node_spec,
     ):
         """The user's response should be returned as the tool result content."""
         from framework.graph.event_loop_node import _EscalationReceiver
@@ -899,11 +915,13 @@ class TestEscalationFlow:
 
         # The subagent LLM: first calls report_to_parent(wait=True), gets "all clear",
         # then sets output incorporating the response.
-        subagent_llm = MockStreamingLLM([
-            report_wait_scenario("Need login for site.com"),
-            set_output_scenario("findings", "Got response from user"),
-            text_finish_scenario(),
-        ])
+        subagent_llm = MockStreamingLLM(
+            [
+                report_wait_scenario("Need login for site.com"),
+                set_output_scenario("findings", "Got response from user"),
+                text_finish_scenario(),
+            ]
+        )
 
         node = EventLoopNode(
             event_bus=bus,
@@ -929,7 +947,7 @@ class TestEscalationFlow:
 
         async def inject_when_ready():
             for _ in range(200):
-                for key, val in list(shared_registry.items()):
+                for _key, val in list(shared_registry.items()):
                     if isinstance(val, _EscalationReceiver):
                         await val.inject_event("all clear, I logged in")
                         return
@@ -953,7 +971,10 @@ class TestEscalationFlow:
 
     @pytest.mark.asyncio
     async def test_wait_for_response_emits_client_events(
-        self, runtime, parent_node_spec, subagent_node_spec,
+        self,
+        runtime,
+        parent_node_spec,
+        subagent_node_spec,
     ):
         """Escalation should emit CLIENT_OUTPUT_DELTA and CLIENT_INPUT_REQUESTED events."""
         from framework.graph.event_loop_node import _EscalationReceiver
@@ -971,11 +992,13 @@ class TestEscalationFlow:
 
         shared_registry: dict[str, Any] = {}
 
-        subagent_llm = MockStreamingLLM([
-            report_wait_scenario("CAPTCHA detected on page"),
-            set_output_scenario("findings", "Continued after user help"),
-            text_finish_scenario(),
-        ])
+        subagent_llm = MockStreamingLLM(
+            [
+                report_wait_scenario("CAPTCHA detected on page"),
+                set_output_scenario("findings", "Continued after user help"),
+                text_finish_scenario(),
+            ]
+        )
 
         node = EventLoopNode(
             event_bus=bus,
@@ -1001,7 +1024,7 @@ class TestEscalationFlow:
 
         async def inject_when_ready():
             for _ in range(200):
-                for key, val in list(shared_registry.items()):
+                for _key, val in list(shared_registry.items()):
                     if isinstance(val, _EscalationReceiver):
                         await val.inject_event("solved it")
                         return
@@ -1024,17 +1047,22 @@ class TestEscalationFlow:
 
     @pytest.mark.asyncio
     async def test_non_blocking_report_still_works(
-        self, runtime, parent_node_spec, subagent_node_spec,
+        self,
+        runtime,
+        parent_node_spec,
+        subagent_node_spec,
     ):
         """Standard report_to_parent (no wait) should still work as fire-and-forget."""
         bus = EventBus()
         shared_registry: dict[str, Any] = {}
 
-        subagent_llm = MockStreamingLLM([
-            report_scenario("50% done", {"progress": 0.5}),
-            set_output_scenario("findings", "All done"),
-            text_finish_scenario(),
-        ])
+        subagent_llm = MockStreamingLLM(
+            [
+                report_scenario("50% done", {"progress": 0.5}),
+                set_output_scenario("findings", "All done"),
+                text_finish_scenario(),
+            ]
+        )
 
         node = EventLoopNode(
             event_bus=bus,
@@ -1069,16 +1097,21 @@ class TestEscalationFlow:
 
     @pytest.mark.asyncio
     async def test_wait_for_response_without_event_bus_returns_none(
-        self, runtime, parent_node_spec, subagent_node_spec,
+        self,
+        runtime,
+        parent_node_spec,
+        subagent_node_spec,
     ):
         """When no event_bus is available, wait_for_response should return None (no block)."""
         shared_registry: dict[str, Any] = {}
 
-        subagent_llm = MockStreamingLLM([
-            report_wait_scenario("Need help"),
-            set_output_scenario("findings", "Continued anyway"),
-            text_finish_scenario(),
-        ])
+        subagent_llm = MockStreamingLLM(
+            [
+                report_wait_scenario("Need help"),
+                set_output_scenario("findings", "Continued anyway"),
+                text_finish_scenario(),
+            ]
+        )
 
         # No event_bus — escalation can't reach user
         node = EventLoopNode(
@@ -1152,11 +1185,13 @@ class TestSubagentJudge:
         """SubagentJudge should ACCEPT when missing_keys is empty, even with tool_calls present."""
         judge = SubagentJudge(task="Check profile at https://example.com/user123")
 
-        verdict = await judge.evaluate({
-            "missing_keys": [],
-            "tool_results": [{"tool_name": "browser_navigate", "content": "ok"}],
-            "iteration": 1,
-        })
+        verdict = await judge.evaluate(
+            {
+                "missing_keys": [],
+                "tool_results": [{"tool_name": "browser_navigate", "content": "ok"}],
+                "iteration": 1,
+            }
+        )
 
         assert verdict.action == "ACCEPT"
         assert verdict.feedback == ""
@@ -1167,11 +1202,13 @@ class TestSubagentJudge:
         task = "Scrape profile at https://example.com/user456"
         judge = SubagentJudge(task=task)
 
-        verdict = await judge.evaluate({
-            "missing_keys": ["findings", "summary"],
-            "tool_results": [],
-            "iteration": 1,
-        })
+        verdict = await judge.evaluate(
+            {
+                "missing_keys": ["findings", "summary"],
+                "tool_results": [],
+                "iteration": 1,
+            }
+        )
 
         assert verdict.action == "RETRY"
         assert task in verdict.feedback
@@ -1181,7 +1218,10 @@ class TestSubagentJudge:
 
     @pytest.mark.asyncio
     async def test_subagent_terminates_immediately_with_judge(
-        self, runtime, parent_node_spec, subagent_node_spec,
+        self,
+        runtime,
+        parent_node_spec,
+        subagent_node_spec,
     ):
         """Subagent should accept on the first outer iteration after browser + set_output.
 
@@ -1195,10 +1235,12 @@ class TestSubagentJudge:
         """
         # Inner iter 1: browser_navigate + set_output("findings", ...)
         # Inner iter 2: text-only finish → inner loop exits
-        subagent_llm = MockStreamingLLM([
-            browser_and_set_output_scenario("findings", "Profile data extracted"),
-            text_finish_scenario("Task complete"),
-        ])
+        subagent_llm = MockStreamingLLM(
+            [
+                browser_and_set_output_scenario("findings", "Profile data extracted"),
+                text_finish_scenario("Task complete"),
+            ]
+        )
 
         # Mock tool executor so browser_navigate succeeds
         async def mock_tool_executor(tool_use: ToolUse) -> ToolResult:
@@ -1241,8 +1283,7 @@ class TestSubagentJudge:
         # With the implicit judge (judge=None), a turn with real_tool_results
         # would RETRY even if keys are filled; SubagentJudge accepts immediately.
         assert subagent_llm._call_index == 2, (
-            f"Expected 2 LLM calls (tool turn + text finish) but got "
-            f"{subagent_llm._call_index}."
+            f"Expected 2 LLM calls (tool turn + text finish) but got {subagent_llm._call_index}."
         )
 
         # Verify the subagent's initial message references the specific task
@@ -1260,7 +1301,9 @@ class TestSubagentJudge:
 
 
 def report_mark_complete_scenario(
-    message: str, data: dict | None = None, mark_complete: bool = True,
+    message: str,
+    data: dict | None = None,
+    mark_complete: bool = True,
 ) -> list:
     """Build scenario where LLM calls report_to_parent with mark_complete."""
     tool_input: dict[str, Any] = {"message": message, "mark_complete": mark_complete}
@@ -1286,19 +1329,24 @@ class TestMarkCompleteViaReport:
 
     @pytest.mark.asyncio
     async def test_mark_complete_terminates_without_output_keys(
-        self, runtime, parent_node_spec, subagent_node_spec,
+        self,
+        runtime,
+        parent_node_spec,
+        subagent_node_spec,
     ):
         """Subagent should terminate immediately when mark_complete=True,
         even without filling output keys via set_output."""
-        subagent_llm = MockStreamingLLM([
-            report_mark_complete_scenario(
-                "Found 3 profiles",
-                data={"profiles": ["a", "b", "c"]},
-                mark_complete=True,
-            ),
-            # This should NOT be reached — subagent exits on the same iteration
-            text_finish_scenario("Should not get here"),
-        ])
+        subagent_llm = MockStreamingLLM(
+            [
+                report_mark_complete_scenario(
+                    "Found 3 profiles",
+                    data={"profiles": ["a", "b", "c"]},
+                    mark_complete=True,
+                ),
+                # This should NOT be reached — subagent exits on the same iteration
+                text_finish_scenario("Should not get here"),
+            ]
+        )
 
         node = EventLoopNode(config=LoopConfig(max_iterations=10))
 
@@ -1341,20 +1389,25 @@ class TestMarkCompleteViaReport:
 
     @pytest.mark.asyncio
     async def test_mark_complete_false_preserves_existing_behavior(
-        self, runtime, parent_node_spec, subagent_node_spec,
+        self,
+        runtime,
+        parent_node_spec,
+        subagent_node_spec,
     ):
         """mark_complete=False (default) should NOT change existing behavior —
         the subagent still needs to fill output keys."""
-        subagent_llm = MockStreamingLLM([
-            # Report without mark_complete — should not terminate
-            report_mark_complete_scenario(
-                "Progress update",
-                mark_complete=False,
-            ),
-            # Then fill output via set_output
-            set_output_scenario("findings", "Results here"),
-            text_finish_scenario(),
-        ])
+        subagent_llm = MockStreamingLLM(
+            [
+                # Report without mark_complete — should not terminate
+                report_mark_complete_scenario(
+                    "Progress update",
+                    mark_complete=False,
+                ),
+                # Then fill output via set_output
+                set_output_scenario("findings", "Results here"),
+                text_finish_scenario(),
+            ]
+        )
 
         node = EventLoopNode(config=LoopConfig(max_iterations=10))
 
@@ -1398,21 +1451,29 @@ class TestMarkCompleteViaReport:
 
     @pytest.mark.asyncio
     async def test_mark_complete_with_report_callback(
-        self, runtime, parent_node_spec, subagent_node_spec,
+        self,
+        runtime,
+        parent_node_spec,
+        subagent_node_spec,
     ):
         """mark_complete should still invoke the report callback before terminating."""
         callback_calls: list[dict] = []
 
         async def tracking_callback(
-            message: str, data: dict | None = None, *, wait_for_response: bool = False,
+            message: str,
+            data: dict | None = None,
+            *,
+            wait_for_response: bool = False,
         ) -> str | None:
             callback_calls.append({"message": message, "data": data})
             return None
 
-        subagent_llm = MockStreamingLLM([
-            report_mark_complete_scenario("Final findings", data={"count": 5}),
-            text_finish_scenario(),
-        ])
+        subagent_llm = MockStreamingLLM(
+            [
+                report_mark_complete_scenario("Final findings", data={"count": 5}),
+                text_finish_scenario(),
+            ]
+        )
 
         # Create a subagent node directly to test with a custom callback
         subagent_node = EventLoopNode(

@@ -1968,7 +1968,11 @@ class GraphExecutor:
 
                     # Build context for this branch
                     ctx = self._build_context(
-                        node_spec, memory, goal, mapped, graph.max_tokens,
+                        node_spec,
+                        memory,
+                        goal,
+                        mapped,
+                        graph.max_tokens,
                         node_registry=node_registry,
                     )
                     node_impl = self._get_node_implementation(node_spec, graph.cleanup_llm_model)

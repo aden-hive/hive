@@ -41,9 +41,12 @@ def register_tab_tools(mcp: FastMCP) -> None:
 
         Args:
             url: URL to navigate to
-            background: Open in background without stealing focus from the current tab (default: False)
+            background: Open in background without stealing focus
+                from the current tab (default: False)
             profile: Browser profile name (default: "default")
-            wait_until: Wait condition - "commit", "domcontentloaded", "load" (default), or "networkidle"
+            wait_until: Wait condition - "commit",
+                "domcontentloaded", "load" (default),
+                or "networkidle"
 
         Returns:
             Dict with new tab info (targetId, url, title, background)

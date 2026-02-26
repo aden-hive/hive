@@ -1,9 +1,6 @@
 """Smoke tests for built-in file tools (framework.graph.file_tools)."""
 
-import os
-import tempfile
 
-import pytest
 
 from framework.graph.file_tools import (
     FILE_TOOL_NAMES,
@@ -147,16 +144,12 @@ class TestListDirectory:
         sub = tmp_path / "sub"
         sub.mkdir()
         (sub / "deep.txt").write_text("x")
-        result = execute_file_tool(
-            "list_directory", {"path": str(tmp_path), "recursive": True}
-        )
+        result = execute_file_tool("list_directory", {"path": str(tmp_path), "recursive": True})
         assert not result.is_error
         assert "deep.txt" in result.content
 
     def test_list_missing_dir(self):
-        result = execute_file_tool(
-            "list_directory", {"path": "/tmp/nonexistent_dir_abc123"}
-        )
+        result = execute_file_tool("list_directory", {"path": "/tmp/nonexistent_dir_abc123"})
         assert not result.is_error
         assert "not found" in result.content.lower()
 
@@ -165,9 +158,7 @@ class TestSearchFiles:
     def test_search_basic(self, tmp_path):
         (tmp_path / "a.py").write_text("def hello():\n    pass\n")
         (tmp_path / "b.py").write_text("def world():\n    pass\n")
-        result = execute_file_tool(
-            "search_files", {"pattern": "def hello", "path": str(tmp_path)}
-        )
+        result = execute_file_tool("search_files", {"pattern": "def hello", "path": str(tmp_path)})
         assert not result.is_error
         assert "hello" in result.content
 
@@ -198,23 +189,17 @@ class TestRunCommand:
         assert "exit code: 0" in result.content
 
     def test_command_with_cwd(self, tmp_path):
-        result = execute_file_tool(
-            "run_command", {"command": "pwd", "cwd": str(tmp_path)}
-        )
+        result = execute_file_tool("run_command", {"command": "pwd", "cwd": str(tmp_path)})
         assert not result.is_error
         assert str(tmp_path) in result.content
 
     def test_command_failure(self):
-        result = execute_file_tool(
-            "run_command", {"command": "exit 1"}
-        )
+        result = execute_file_tool("run_command", {"command": "exit 1"})
         assert not result.is_error  # error in content, not flag
         assert "exit code: 1" in result.content
 
     def test_command_timeout(self):
-        result = execute_file_tool(
-            "run_command", {"command": "sleep 10", "timeout": 1}
-        )
+        result = execute_file_tool("run_command", {"command": "sleep 10", "timeout": 1})
         assert not result.is_error
         assert "timed out" in result.content.lower()
 

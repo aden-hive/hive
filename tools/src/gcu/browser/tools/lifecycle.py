@@ -59,4 +59,3 @@ def register_lifecycle_tools(mcp: FastMCP) -> None:
         """
         session = get_session(profile)
         return await session.stop()
-

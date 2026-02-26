@@ -36,21 +36,68 @@ SEARCH_RESULT_LIMIT = 100
 
 BINARY_EXTENSIONS = frozenset(
     {
-        ".zip", ".tar", ".gz", ".bz2", ".xz", ".7z", ".rar",
-        ".exe", ".dll", ".so", ".dylib", ".bin", ".class",
-        ".jar", ".war", ".pyc", ".pyo", ".wasm",
-        ".png", ".jpg", ".jpeg", ".gif", ".bmp", ".ico", ".webp", ".svg",
-        ".mp3", ".mp4", ".avi", ".mov", ".mkv", ".wav", ".flac",
-        ".pdf", ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx",
-        ".ttf", ".otf", ".woff", ".woff2", ".eot",
-        ".o", ".a", ".lib", ".obj",
+        ".zip",
+        ".tar",
+        ".gz",
+        ".bz2",
+        ".xz",
+        ".7z",
+        ".rar",
+        ".exe",
+        ".dll",
+        ".so",
+        ".dylib",
+        ".bin",
+        ".class",
+        ".jar",
+        ".war",
+        ".pyc",
+        ".pyo",
+        ".wasm",
+        ".png",
+        ".jpg",
+        ".jpeg",
+        ".gif",
+        ".bmp",
+        ".ico",
+        ".webp",
+        ".svg",
+        ".mp3",
+        ".mp4",
+        ".avi",
+        ".mov",
+        ".mkv",
+        ".wav",
+        ".flac",
+        ".pdf",
+        ".doc",
+        ".docx",
+        ".xls",
+        ".xlsx",
+        ".ppt",
+        ".pptx",
+        ".ttf",
+        ".otf",
+        ".woff",
+        ".woff2",
+        ".eot",
+        ".o",
+        ".a",
+        ".lib",
+        ".obj",
     }
 )
 
-FILE_TOOL_NAMES = frozenset({
-    "read_file", "write_file", "edit_file",
-    "list_directory", "search_files", "run_command",
-})
+FILE_TOOL_NAMES = frozenset(
+    {
+        "read_file",
+        "write_file",
+        "edit_file",
+        "list_directory",
+        "search_files",
+        "run_command",
+    }
+)
 
 # ── Public API ────────────────────────────────────────────────────────────
 
@@ -156,7 +203,10 @@ def build_file_tools() -> list[Tool]:
                     },
                     "recursive": {
                         "type": "boolean",
-                        "description": "List recursively (default: false). Truncates at 500 entries.",
+                        "description": (
+                            "List recursively (default: false). "
+                            "Truncates at 500 entries."
+                        ),
                         "default": False,
                     },
                 },
@@ -178,7 +228,10 @@ def build_file_tools() -> list[Tool]:
                     },
                     "path": {
                         "type": "string",
-                        "description": "Absolute directory path to search (default: current directory).",
+                        "description": (
+                            "Absolute directory path to search "
+                            "(default: current directory)."
+                        ),
                         "default": ".",
                     },
                     "include": {
@@ -205,7 +258,10 @@ def build_file_tools() -> list[Tool]:
                     },
                     "cwd": {
                         "type": "string",
-                        "description": "Working directory (absolute path). Defaults to current directory.",
+                        "description": (
+                            "Working directory (absolute path). "
+                            "Defaults to current directory."
+                        ),
                         "default": "",
                     },
                     "timeout": {
@@ -505,9 +561,7 @@ def _handle_edit_file(
                 break
 
         if matched_text is None:
-            close = difflib.get_close_matches(
-                old_text[:200], content.split("\n"), n=3, cutoff=0.4
-            )
+            close = difflib.get_close_matches(old_text[:200], content.split("\n"), n=3, cutoff=0.4)
             msg = f"Error: Could not find a unique match for old_text in {path}."
             if close:
                 suggestions = "\n".join(f"  {line}" for line in close)
@@ -542,8 +596,13 @@ def _handle_list_directory(path: str = ".", recursive: bool = False, **_kw) -> s
 
     try:
         skip = {
-            ".git", "__pycache__", "node_modules", ".venv",
-            ".tox", ".mypy_cache", ".ruff_cache",
+            ".git",
+            "__pycache__",
+            "node_modules",
+            ".venv",
+            ".tox",
+            ".mypy_cache",
+            ".ruff_cache",
         }
         entries: list[str] = []
         if recursive:
@@ -581,8 +640,12 @@ def _handle_search_files(pattern: str, path: str = ".", include: str = "", **_kw
     # Try ripgrep first
     try:
         cmd = [
-            "rg", "-nH", "--no-messages", "--hidden",
-            "--max-count=20", "--glob=!.git/*",
+            "rg",
+            "-nH",
+            "--no-messages",
+            "--hidden",
+            "--max-count=20",
+            "--glob=!.git/*",
             pattern,
         ]
         if include:
@@ -628,9 +691,7 @@ def _handle_search_files(pattern: str, path: str = ".", include: str = "", **_kw
                     with open(fpath, encoding="utf-8", errors="ignore") as f:
                         for i, line in enumerate(f, 1):
                             if compiled.search(line):
-                                matches.append(
-                                    f"{fpath}:{i}:{line.rstrip()[:MAX_LINE_LENGTH]}"
-                                )
+                                matches.append(f"{fpath}:{i}:{line.rstrip()[:MAX_LINE_LENGTH]}")
                                 if len(matches) >= SEARCH_RESULT_LIMIT:
                                     return "\n".join(matches) + "\n... (truncated)"
                 except (OSError, UnicodeDecodeError):
