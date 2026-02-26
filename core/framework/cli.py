@@ -20,6 +20,11 @@ import argparse
 import sys
 from pathlib import Path
 
+# Imported at module level so the --model default is evaluated once,
+# after sys.path has been configured by _configure_paths().
+# (The actual import is deferred into main() to avoid a circular-import
+# chicken-and-egg with _configure_paths; see below.)
+
 
 def _configure_paths():
     """Auto-configure sys.path so agents in exports/ are discoverable.
@@ -67,14 +72,17 @@ def _configure_paths():
 def main():
     _configure_paths()
 
+    # Import here (after _configure_paths) so framework is on sys.path.
+    from framework.config import get_preferred_model
+
     parser = argparse.ArgumentParser(
         prog="hive",
         description="Aden Hive - Build and run goal-driven agents",
     )
     parser.add_argument(
         "--model",
-        default="claude-haiku-4-5-20251001",
-        help="Anthropic model to use",
+        default=get_preferred_model(),
+        help="LLM model to use (default: from ~/.hive/configuration.json, or anthropic/claude-sonnet-4-20250514)",
     )
 
     subparsers = parser.add_subparsers(dest="command", required=True)

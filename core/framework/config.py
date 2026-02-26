@@ -14,6 +14,15 @@ from typing import Any
 from framework.graph.edge import DEFAULT_MAX_TOKENS
 
 # ---------------------------------------------------------------------------
+# Canonical default model
+# ---------------------------------------------------------------------------
+
+#: The default LLM model used by every Hive component when no
+#: ~/.hive/configuration.json is present or it contains no ``llm`` block.
+#: Import this constant instead of hard-coding a model string.
+DEFAULT_MODEL: str = "anthropic/claude-sonnet-4-20250514"
+
+# ---------------------------------------------------------------------------
 # Low-level config file access
 # ---------------------------------------------------------------------------
 
@@ -37,11 +46,14 @@ def get_hive_config() -> dict[str, Any]:
 
 
 def get_preferred_model() -> str:
-    """Return the user's preferred LLM model string (e.g. 'anthropic/claude-sonnet-4-20250514')."""
+    """Return the user's preferred LLM model string (e.g. 'anthropic/claude-sonnet-4-20250514').
+
+    Reads ``~/.hive/configuration.json``; falls back to :data:`DEFAULT_MODEL`.
+    """
     llm = get_hive_config().get("llm", {})
     if llm.get("provider") and llm.get("model"):
         return f"{llm['provider']}/{llm['model']}"
-    return "anthropic/claude-sonnet-4-20250514"
+    return DEFAULT_MODEL
 
 
 def get_max_tokens() -> int:
