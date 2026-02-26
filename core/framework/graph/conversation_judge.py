@@ -37,7 +37,7 @@ async def evaluate_phase_completion(
     phase_description: str,
     success_criteria: str,
     accumulator_state: dict[str, Any],
-    max_history_tokens: int = 8_196,
+    max_history_tokens: int = 8_192,
 ) -> PhaseVerdict:
     """Level 2 judge: read the conversation and evaluate quality.
 
