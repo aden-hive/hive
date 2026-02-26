@@ -2633,7 +2633,7 @@ class EventLoopNode(NodeProtocol):
 
             response = await ctx.llm.acomplete(
                 messages=[{"role": "user", "content": prompt}],
-                max_tokens=300,
+                max_tokens=1024,
             )
 
             plan = response.content.strip()
