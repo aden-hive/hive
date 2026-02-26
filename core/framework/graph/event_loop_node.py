@@ -2290,7 +2290,7 @@ class EventLoopNode(NodeProtocol):
 
         # Anti-circular truncation: tools that read/produce large content
         # should NOT be re-spilled.  Truncate with a pagination hint instead.
-        if tool_name in ("load_data", "read_file", "search_files", "list_directory", "run_command"):
+        if tool_name in ("load_data", "read_file", "search_files", "list_directory"):
             preview_chars = max(limit - 300, limit // 2)
             preview = result.content[:preview_chars]
             truncated = (
