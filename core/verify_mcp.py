@@ -32,11 +32,10 @@ class Colors:
     NC = "\033[0m"
 
 
-def check(description: str) -> bool:
-    """Print check description and return a context manager for result."""
+def check(description: str) -> None:
+    """Print check description to stdout."""
     logger.info(f"Checking {description}... ", extra={"end": ""})
     sys.stdout.flush()
-    return True
 
 
 def success(msg: str = "OK"):
