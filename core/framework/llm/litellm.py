@@ -70,8 +70,49 @@ def _patch_litellm_anthropic_oauth() -> None:
     AnthropicModelInfo.validate_environment = _patched_validate_environment
 
 
+def _patch_litellm_metadata_nonetype() -> None:
+    """Patch litellm entry points to prevent metadata=None TypeError.
+
+    litellm bug: the @client decorator in utils.py has four places that do
+        "model_group" in kwargs.get("metadata", {})
+    but kwargs["metadata"] can be explicitly None (set internally by
+    litellm_params), causing:
+        TypeError: argument of type 'NoneType' is not iterable
+    This masks the real API error with a confusing APIConnectionError.
+
+    Fix: wrap the four litellm entry points (completion, acompletion,
+    responses, aresponses) to pop metadata=None before the @client
+    decorator's error handler can crash on it.
+    """
+    import functools
+
+    for fn_name in ("completion", "acompletion", "responses", "aresponses"):
+        original = getattr(litellm, fn_name, None)
+        if original is None:
+            continue
+        if asyncio.iscoroutinefunction(original):
+
+            @functools.wraps(original)
+            async def _async_wrapper(*args, _orig=original, **kwargs):
+                if kwargs.get("metadata") is None:
+                    kwargs.pop("metadata", None)
+                return await _orig(*args, **kwargs)
+
+            setattr(litellm, fn_name, _async_wrapper)
+        else:
+
+            @functools.wraps(original)
+            def _sync_wrapper(*args, _orig=original, **kwargs):
+                if kwargs.get("metadata") is None:
+                    kwargs.pop("metadata", None)
+                return _orig(*args, **kwargs)
+
+            setattr(litellm, fn_name, _sync_wrapper)
+
+
 if litellm is not None:
     _patch_litellm_anthropic_oauth()
+    _patch_litellm_metadata_nonetype()
 
 RATE_LIMIT_MAX_RETRIES = 10
 RATE_LIMIT_BACKOFF_BASE = 2  # seconds
@@ -283,6 +324,12 @@ class LiteLLMProvider(LLMProvider):
             raise ImportError(
                 "LiteLLM is not installed. Please install it with: uv pip install litellm"
             )
+
+        # Note: The Codex ChatGPT backend is a Responses API endpoint at
+        # chatgpt.com/backend-api/codex/responses.  LiteLLM's model registry
+        # correctly marks codex models with mode="responses", so we do NOT
+        # override the mode.  The responses_api_bridge in litellm handles
+        # converting Chat Completions requests to Responses API format.
 
     def _completion_with_rate_limit_retry(
         self, max_retries: int | None = None, **kwargs: Any
@@ -708,6 +755,11 @@ class LiteLLMProvider(LLMProvider):
             full_messages.append({"role": "system", "content": system})
         full_messages.extend(messages)
 
+        # Codex Responses API requires an `instructions` field (system prompt).
+        # Inject a minimal one when callers don't provide a system message.
+        if self._codex_backend and not any(m["role"] == "system" for m in full_messages):
+            full_messages.insert(0, {"role": "system", "content": "You are a helpful assistant."})
+
         # Add JSON mode via prompt engineering (works across all providers)
         if json_mode:
             json_instruction = "\n\nPlease respond with a valid JSON object."
@@ -732,7 +784,7 @@ class LiteLLMProvider(LLMProvider):
             kwargs["tools"] = [self._tool_to_openai_format(t) for t in tools]
         if response_format:
             kwargs["response_format"] = response_format
-        # The Codex ChatGPT backend rejects max_output_tokens and stream_options.
+        # The Codex ChatGPT backend (Responses API) rejects several params.
         if self._codex_backend:
             kwargs.pop("max_tokens", None)
             kwargs.pop("stream_options", None)
@@ -744,6 +796,7 @@ class LiteLLMProvider(LLMProvider):
             tail_events: list[StreamEvent] = []
             accumulated_text = ""
             tool_calls_acc: dict[int, dict[str, str]] = {}
+            _last_tool_idx = 0  # tracks most recently opened tool call slot
             input_tokens = 0
             output_tokens = 0
             stream_finish_reason: str | None = None
@@ -767,9 +820,33 @@ class LiteLLMProvider(LLMProvider):
                         )
 
                     # --- Tool calls (accumulate across chunks) ---
+                    # The Codex/Responses API bridge (litellm bug) hardcodes
+                    # index=0 on every ChatCompletionToolCallChunk, even for
+                    # parallel tool calls.  We work around this by using tc.id
+                    # (set on output_item.added events) as a "new tool call"
+                    # signal and tracking the most recently opened slot for
+                    # argument deltas that arrive with id=None.
                     if delta and delta.tool_calls:
                         for tc in delta.tool_calls:
                             idx = tc.index if hasattr(tc, "index") and tc.index is not None else 0
+
+                            if tc.id:
+                                # New tool call announced (or done event re-sent).
+                                # Check if this id already has a slot.
+                                existing_idx = next(
+                                    (k for k, v in tool_calls_acc.items() if v["id"] == tc.id),
+                                    None,
+                                )
+                                if existing_idx is not None:
+                                    idx = existing_idx
+                                elif idx in tool_calls_acc and tool_calls_acc[idx]["id"] not in ("", tc.id):
+                                    # Slot taken by a different call — assign new index
+                                    idx = max(tool_calls_acc.keys()) + 1
+                                _last_tool_idx = idx
+                            else:
+                                # Argument delta with no id — route to last opened slot
+                                idx = _last_tool_idx
+
                             if idx not in tool_calls_acc:
                                 tool_calls_acc[idx] = {"id": "", "name": "", "arguments": ""}
                             if tc.id:
