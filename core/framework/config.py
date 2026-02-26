@@ -41,7 +41,9 @@ def get_preferred_model() -> str:
     llm = get_hive_config().get("llm", {})
     if llm.get("provider") and llm.get("model"):
         return f"{llm['provider']}/{llm['model']}"
-    return "anthropic/claude-sonnet-4-20250514"
+    # Align the framework default with the CLI default model to avoid surprises
+    # when running `hive` without a ~/.hive configuration.
+    return "claude-haiku-4-5-20251001"
 
 
 def get_max_tokens() -> int:
