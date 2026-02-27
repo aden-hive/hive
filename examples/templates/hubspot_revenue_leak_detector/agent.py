@@ -1,4 +1,4 @@
-"""Revenue Leak Detector Agent — LLM-driven event_loop nodes.
+"""HubSpot Revenue Leak Detector Agent — LLM-driven event_loop nodes.
 
 Graph topology
 --------------
@@ -10,14 +10,17 @@ The agent runs until severity hits critical or MAX_CYCLES low-severity
 cycles have elapsed without leaks.
 """
 
+import os
 from pathlib import Path
 from types import MappingProxyType
+from typing import List, Optional
 
 from framework.graph import EdgeSpec, EdgeCondition, Goal, SuccessCriterion, Constraint
 from framework.graph.edge import GraphSpec
 from framework.graph.executor import ExecutionResult
 from framework.graph.checkpoint_config import CheckpointConfig
 from framework.llm import LiteLLMProvider
+from framework.llm.mock import MockLLMProvider
 from framework.runner.tool_registry import ToolRegistry
 from framework.runtime.agent_runtime import AgentRuntime, create_agent_runtime
 from framework.runtime.execution_stream import EntryPointSpec
@@ -25,20 +28,30 @@ from framework.runtime.execution_stream import EntryPointSpec
 from .config import default_config, metadata, VERSION
 from .nodes import monitor_node, analyze_node, notify_node, followup_node
 
+# This agent requires Resend for follow-up emails.
+# The global CredentialSpec has required=False (optional for other agents),
+# so we override it here at module load time so AgentRunner / TUI enforces it.
+try:
+    from aden_tools.credentials import CREDENTIAL_SPECS as _CRED_SPECS
+    if "resend" in _CRED_SPECS:
+        _CRED_SPECS["resend"].required = True
+except ImportError:
+    pass
+
 # ---- Goal ----
 goal = Goal(
-    id="revenue-leak-detector",
-    name="Revenue Leak Detector",
+    id="hubspot-revenue-leak-detector",
+    name="HubSpot Revenue Leak Detector",
     description=(
-        "Autonomous business health monitor that continuously scans the CRM pipeline, "
+        "Autonomous HubSpot CRM monitor that continuously scans the sales pipeline, "
         "detects revenue leaks (ghosted prospects, stalled deals, overdue payments, "
         "churn risk), and sends structured alerts until a critical leak threshold "
-        "triggers escalation."
+        "triggers escalation. Requires HUBSPOT_ACCESS_TOKEN."
     ),
     success_criteria=[
         SuccessCriterion(
             id="leak-detection",
-            description="Detect all revenue leaks in the CRM pipeline each cycle",
+            description="Detect all revenue leaks in the HubSpot pipeline each cycle",
             metric="output_contains",
             target="leak_count",
             weight=0.4,
@@ -61,7 +74,7 @@ goal = Goal(
     constraints=[
         Constraint(
             id="real-data-only",
-            description="Only report leaks found in actual CRM data — never fabricate deals or contacts",
+            description="Only report leaks found in actual HubSpot CRM data — never fabricate deals or contacts",
             constraint_type="hard",
             category="accuracy",
         ),
@@ -78,10 +91,22 @@ goal = Goal(
             category="safety",
         ),
         Constraint(
-            id="graceful-offline",
-            description="Operate fully offline when Telegram/Gmail/HubSpot credentials are not set",
-            constraint_type="soft",
-            category="quality",
+            id="hubspot-required",
+            description="HUBSPOT_ACCESS_TOKEN is required for meaningful operation",
+            constraint_type="hard",
+            category="requirements",
+        ),
+        Constraint(
+            id="email-required",
+            description="GOOGLE_ACCESS_TOKEN or RESEND_API_KEY is required for sending follow-up emails",
+            constraint_type="hard",
+            category="requirements",
+        ),
+        Constraint(
+            id="telegram-required",
+            description="TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID are required for sending revenue leak alerts",
+            constraint_type="hard",
+            category="requirements",
         ),
     ],
 )
@@ -140,10 +165,11 @@ pause_nodes: tuple = ()
 
 class RevenueLeakDetectorAgent:
     """
-    Revenue Leak Detector Agent — 4-node event_loop pipeline.
+    HubSpot Revenue Leak Detector Agent — 4-node event_loop pipeline.
 
     Flow: monitor -> analyze -> notify -> followup (loops until halt)
 
+    Requires HUBSPOT_ACCESS_TOKEN to access HubSpot CRM data.
     Uses AgentRuntime for proper session management with checkpointing
     and session-isolated tool state via contextvars.
     """
@@ -158,15 +184,15 @@ class RevenueLeakDetectorAgent:
         self.entry_points = dict(entry_points)
         self.pause_nodes = list(pause_nodes)
         self.terminal_nodes = list(terminal_nodes)
-        self._graph: GraphSpec | None = None
-        self._agent_runtime: AgentRuntime | None = None
-        self._tool_registry: ToolRegistry | None = None
-        self._storage_path: Path | None = None
+        self._graph: Optional[GraphSpec] = None
+        self._agent_runtime: Optional[AgentRuntime] = None
+        self._tool_registry: Optional[ToolRegistry] = None
+        self._storage_path: Optional[Path] = None
 
     def _build_graph(self) -> GraphSpec:
         """Build the GraphSpec."""
         return GraphSpec(
-            id="revenue-leak-detector-graph",
+            id="hubspot-revenue-leak-detector-graph",
             goal_id=self.goal.id,
             version=VERSION,
             entry_node=self.entry_node,
@@ -184,7 +210,7 @@ class RevenueLeakDetectorAgent:
             },
             conversation_mode="continuous",
             identity_prompt=(
-                "You are an autonomous revenue operations monitor. You scan CRM pipelines, "
+                "You are an autonomous HubSpot revenue operations monitor. You scan the sales pipeline, "
                 "detect revenue leaks, send structured alerts, and follow up with ghosted "
                 "prospects. You are precise, data-driven, and escalate critical issues immediately."
             ),
@@ -192,7 +218,7 @@ class RevenueLeakDetectorAgent:
 
     def _setup(self, mock_mode: bool = False) -> None:
         """Set up the agent runtime with tools, LLM, and session storage."""
-        self._storage_path = Path.home() / ".hive" / "agents" / "revenue_leak_detector"
+        self._storage_path = Path.home() / ".hive" / "agents" / "hubspot_revenue_leak_detector"
         self._storage_path.mkdir(parents=True, exist_ok=True)
 
         self._tool_registry = ToolRegistry()
@@ -206,8 +232,9 @@ class RevenueLeakDetectorAgent:
         if mcp_config_path.exists():
             self._tool_registry.load_mcp_config(mcp_config_path)
 
-        llm = None
-        if not mock_mode:
+        if mock_mode:
+            llm = MockLLMProvider()
+        else:
             llm = LiteLLMProvider(
                 model=self.config.model,
                 api_key=self.config.api_key,
@@ -248,6 +275,33 @@ class RevenueLeakDetectorAgent:
 
     async def start(self, mock_mode: bool = False) -> None:
         """Set up and start the agent runtime."""
+        # Enforce Resend as required for this agent (global spec has required=False).
+        # Skipped in mock mode so maintainers can test without any credentials.
+        if not mock_mode and not os.environ.get("RESEND_API_KEY"):
+            try:
+                from framework.credentials.storage import CompositeStorage, EncryptedFileStorage, EnvVarStorage
+                from framework.credentials.store import CredentialStore
+                from aden_tools.credentials import CREDENTIAL_SPECS
+                spec = CREDENTIAL_SPECS.get("resend")
+                if spec:
+                    env_mapping = {(spec.credential_id or "resend"): spec.env_var}
+                    env_storage = EnvVarStorage(env_mapping=env_mapping)
+                    if os.environ.get("HIVE_CREDENTIAL_KEY"):
+                        storage = CompositeStorage(primary=env_storage, fallbacks=[EncryptedFileStorage()])
+                    else:
+                        storage = env_storage
+                    store = CredentialStore(storage=storage)
+                    if not store.is_available(spec.credential_id or "resend"):
+                        from framework.credentials.models import CredentialError
+                        exc = CredentialError(
+                            "Missing required credential: RESEND_API_KEY\n"
+                            "  Required for: send_email (follow-up emails to GHOSTED contacts)\n"
+                            f"  Get it at: {spec.help_url or 'https://resend.com'}"
+                        )
+                        exc.failed_cred_names = ["resend"]  # type: ignore[attr-defined]
+                        raise exc
+            except ImportError:
+                pass  # aden_tools not installed, skip check
         if self._agent_runtime is None:
             self._setup(mock_mode=mock_mode)
         if not self._agent_runtime.is_running:
@@ -310,8 +364,8 @@ class RevenueLeakDetectorAgent:
 
     def validate(self) -> dict:
         """Validate agent structure."""
-        errors: list[str] = []
-        warnings: list[str] = []
+        errors: List[str] = []
+        warnings: List[str] = []
 
         node_ids = {node.id for node in self.nodes}
         for edge in self.edges:
@@ -328,16 +382,18 @@ class RevenueLeakDetectorAgent:
                 errors.append(f"Entry point '{ep_id}': node '{ep_node}' not found")
 
         # Cross-check each node's tool list against the registered TOOLS dict.
-        # Catches typos and desync between NodeSpec and tools.py at validate-time
-        # rather than silently failing at runtime when the LLM calls the missing tool.
+        # Python tools (in TOOLS) must exist — errors.
+        # MCP tools (registered at runtime via mcp_servers.json) — warnings only,
+        # since they're not discoverable until the MCP server starts.
         try:
             from .tools import TOOLS as _TOOLS  # noqa: PLC0415
-            registered = set(_TOOLS.keys())
+            registered_python = set(_TOOLS.keys())
             for node in self.nodes:
                 for tool_name in node.tools or []:
-                    if tool_name not in registered:
-                        errors.append(
-                            f"Node '{node.id}' references unregistered tool '{tool_name}'"
+                    if tool_name not in registered_python:
+                        warnings.append(
+                            f"Node '{node.id}': tool '{tool_name}' is not in local TOOLS dict "
+                            f"— expected to be an MCP tool registered at runtime"
                         )
         except Exception as exc:  # pragma: no cover
             warnings.append(f"Could not validate tool references: {exc}")
