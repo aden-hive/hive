@@ -1276,7 +1276,7 @@ def register_tools(
         Get recent messages from a Slack channel.
 
         Args:
-            channel: Channel ID (e.g., 'C0123456789')
+            channel: Channel ID (e.g., 'C0000000000')
             limit: Maximum number of messages to return (1-1000, default 20)
 
         Returns:
