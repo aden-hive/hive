@@ -166,8 +166,8 @@ def _get_connection(database_url: str):
     finally:
         try:
             conn.rollback()  # Always rollback before returning to pool
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("Rollback failed while returning connection to pool", exc_info=exc)
         pool_instance.putconn(conn)
 
 
