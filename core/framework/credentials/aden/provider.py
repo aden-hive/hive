@@ -282,8 +282,8 @@ class AdenSyncProvider(CredentialProvider):
         """
         Sync all credentials from Aden server to local store.
 
-        Fetches the list of available integrations from Aden and
-        populates the local credential store with current tokens.
+        Calls GET /v1/credentials to list integrations, then fetches
+        access tokens for each active one.
 
         Args:
             store: The credential store to populate.
@@ -298,9 +298,7 @@ class AdenSyncProvider(CredentialProvider):
 
             for info in integrations:
                 if info.status != "active":
-                    logger.warning(
-                        f"Skipping integration '{info.integration_id}': status={info.status}"
-                    )
+                    logger.warning(f"Skipping connection '{info.alias}': status={info.status}")
                     continue
 
                 try:
@@ -308,9 +306,9 @@ class AdenSyncProvider(CredentialProvider):
                     if cred:
                         store.save_credential(cred)
                         synced += 1
-                        logger.info(f"Synced credential '{info.integration_id}' from Aden")
+                        logger.info(f"Synced credential '{info.alias}' from Aden")
                 except Exception as e:
-                    logger.warning(f"Failed to sync '{info.integration_id}': {e}")
+                    logger.warning(f"Failed to sync '{info.alias}': {e}")
 
         except AdenClientError as e:
             logger.error(f"Failed to list integrations from Aden: {e}")
@@ -373,6 +371,21 @@ class AdenSyncProvider(CredentialProvider):
             value=SecretStr(aden_response.integration_type),
         )
 
+        # Store alias (user-set name from Aden platform)
+        if aden_response.alias:
+            credential.keys["_alias"] = CredentialKey(
+                name="_alias",
+                value=SecretStr(aden_response.alias),
+            )
+
+        # Persist Aden metadata as identity keys
+        for meta_key, meta_value in (aden_response.metadata or {}).items():
+            if meta_value and isinstance(meta_value, str):
+                credential.keys[f"_identity_{meta_key}"] = CredentialKey(
+                    name=f"_identity_{meta_key}",
+                    value=SecretStr(meta_value),
+                )
+
         # Update timestamps
         credential.last_refreshed = datetime.now(UTC)
         credential.provider_id = self.provider_id
@@ -400,11 +413,26 @@ class AdenSyncProvider(CredentialProvider):
             ),
         }
 
+        # Store alias (user-set name from Aden platform)
+        if aden_response.alias:
+            keys["_alias"] = CredentialKey(
+                name="_alias",
+                value=SecretStr(aden_response.alias),
+            )
+
         if aden_response.scopes:
             keys["scope"] = CredentialKey(
                 name="scope",
                 value=SecretStr(" ".join(aden_response.scopes)),
             )
+
+        # Persist Aden metadata as identity keys
+        for meta_key, meta_value in (aden_response.metadata or {}).items():
+            if meta_value and isinstance(meta_value, str):
+                keys[f"_identity_{meta_key}"] = CredentialKey(
+                    name=f"_identity_{meta_key}",
+                    value=SecretStr(meta_value),
+                )
 
         return CredentialObject(
             id=aden_response.integration_id,

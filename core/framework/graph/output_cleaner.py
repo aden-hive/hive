@@ -144,8 +144,11 @@ class OutputCleaner:
         errors = []
         warnings = []
 
-        # Check 1: Required input keys present
+        # Check 1: Required input keys present (skip nullable keys)
+        nullable = set(getattr(target_node_spec, "nullable_output_keys", None) or [])
         for key in target_node_spec.input_keys:
+            if key in nullable:
+                continue
             if key not in output:
                 errors.append(f"Missing required key: '{key}'")
                 continue
@@ -203,7 +206,7 @@ class OutputCleaner:
             warnings=warnings,
         )
 
-    def clean_output(
+    async def clean_output(
         self,
         output: dict[str, Any],
         source_node_id: str,
@@ -285,7 +288,7 @@ Return ONLY valid JSON matching the expected schema. No explanations, no markdow
                     f"🧹 Cleaning output from '{source_node_id}' using {self.config.fast_model}"
                 )
 
-            response = self.llm.complete(
+            response = await self.llm.acomplete(
                 messages=[{"role": "user", "content": prompt}],
                 system=(
                     "You clean malformed agent outputs. Return only valid JSON matching the schema."

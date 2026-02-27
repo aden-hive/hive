@@ -415,13 +415,13 @@ class TestDealTools:
 
 class TestHubSpotOAuth2Provider:
     def test_provider_id(self):
-        from core.framework.credentials.oauth2.hubspot_provider import HubSpotOAuth2Provider
+        from framework.credentials.oauth2.hubspot_provider import HubSpotOAuth2Provider
 
         provider = HubSpotOAuth2Provider(client_id="cid", client_secret="csecret")
         assert provider.provider_id == "hubspot_oauth2"
 
     def test_default_scopes(self):
-        from core.framework.credentials.oauth2.hubspot_provider import (
+        from framework.credentials.oauth2.hubspot_provider import (
             HUBSPOT_DEFAULT_SCOPES,
             HubSpotOAuth2Provider,
         )
@@ -430,7 +430,7 @@ class TestHubSpotOAuth2Provider:
         assert provider.config.default_scopes == HUBSPOT_DEFAULT_SCOPES
 
     def test_custom_scopes(self):
-        from core.framework.credentials.oauth2.hubspot_provider import HubSpotOAuth2Provider
+        from framework.credentials.oauth2.hubspot_provider import HubSpotOAuth2Provider
 
         provider = HubSpotOAuth2Provider(
             client_id="cid",
@@ -440,7 +440,7 @@ class TestHubSpotOAuth2Provider:
         assert provider.config.default_scopes == ["crm.objects.contacts.read"]
 
     def test_endpoints(self):
-        from core.framework.credentials.oauth2.hubspot_provider import (
+        from framework.credentials.oauth2.hubspot_provider import (
             HUBSPOT_AUTHORIZATION_URL,
             HUBSPOT_TOKEN_URL,
             HubSpotOAuth2Provider,
@@ -451,15 +451,15 @@ class TestHubSpotOAuth2Provider:
         assert provider.config.authorization_url == HUBSPOT_AUTHORIZATION_URL
 
     def test_supported_types(self):
-        from core.framework.credentials.models import CredentialType
-        from core.framework.credentials.oauth2.hubspot_provider import HubSpotOAuth2Provider
+        from framework.credentials.models import CredentialType
+        from framework.credentials.oauth2.hubspot_provider import HubSpotOAuth2Provider
 
         provider = HubSpotOAuth2Provider(client_id="cid", client_secret="csecret")
         assert CredentialType.OAUTH2 in provider.supported_types
 
     def test_validate_no_access_token(self):
-        from core.framework.credentials.models import CredentialObject
-        from core.framework.credentials.oauth2.hubspot_provider import HubSpotOAuth2Provider
+        from framework.credentials.models import CredentialObject
+        from framework.credentials.oauth2.hubspot_provider import HubSpotOAuth2Provider
 
         provider = HubSpotOAuth2Provider(client_id="cid", client_secret="csecret")
         cred = CredentialObject(id="test")

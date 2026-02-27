@@ -40,7 +40,7 @@ Welcome to the Aden Engineering Challenges! These quizzes are designed for stude
 After completing challenges, submit your work by:
 
 1. Creating a GitHub Gist with your answers
-2. Emailing the link to `careers@adenhq.com` with subject: `[Engineering Challenge] Your Name - Track Name`
+2. Emailing the link to `contact@adenhq.com` with subject: `[Engineering Challenge] Your Name - Track Name`
 3. Include your GitHub username in the email
 
 ## Getting Help

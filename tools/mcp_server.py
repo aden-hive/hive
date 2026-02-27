@@ -68,18 +68,7 @@ from starlette.responses import PlainTextResponse  # noqa: E402
 from aden_tools.credentials import CredentialError, CredentialStoreAdapter  # noqa: E402
 from aden_tools.tools import register_all_tools  # noqa: E402
 
-# Create credential store with access to both env vars AND encrypted store
-# This allows using Aden-synced credentials from ~/.hive/credentials
-try:
-    from framework.credentials import CredentialStore
-
-    store = CredentialStore.with_encrypted_storage()  # ~/.hive/credentials
-    credentials = CredentialStoreAdapter(store)
-    logger.info("Using CredentialStoreAdapter with encrypted storage")
-except Exception as e:
-    # Fall back to env-only adapter if encrypted storage fails
-    credentials = CredentialStoreAdapter.with_env_storage()
-    logger.warning(f"Falling back to env-only CredentialStoreAdapter: {e}")
+credentials = CredentialStoreAdapter.default()
 
 # Tier 1: Validate startup-required credentials (if any)
 try:

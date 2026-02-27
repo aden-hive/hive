@@ -6,13 +6,13 @@ categorization for guiding iteration strategy.
 """
 
 from datetime import datetime
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 
 from pydantic import BaseModel, Field
 
 
-class ErrorCategory(str, Enum):
+class ErrorCategory(StrEnum):
     """
     Category of test failure for guiding iteration.
 

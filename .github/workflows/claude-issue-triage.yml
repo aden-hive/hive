@@ -80,7 +80,13 @@ jobs:
             - help wanted: Extra attention is needed (if issue needs community input)
             - backlog: Tracked for the future, but not currently planned or prioritized
 
-            You may apply multiple labels if appropriate (e.g., "bug" and "help wanted").
+            ### 6. Estimate size (if NOT a duplicate, spam, or invalid)
+            Apply exactly ONE size label to help contributors match their capacity to the task:
+            - "size: small": Docs, typos, single-file fixes, config changes
+            - "size: medium": Bug fixes with tests, adding a single tool, changes within one package
+            - "size: large": Cross-package changes (core + tools), new modules, complex logic, architectural refactors
+
+            You may apply multiple labels if appropriate (e.g., "bug", "size: small", and "good first issue").
 
             ## Tools Available:
             - mcp__github__get_issue: Get issue details

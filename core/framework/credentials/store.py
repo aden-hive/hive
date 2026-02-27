@@ -362,6 +362,59 @@ class CredentialStore:
         """
         return self._storage.list_all()
 
+    def list_accounts(self, provider_name: str) -> list[dict[str, Any]]:
+        """List all accounts for a provider type with their identities.
+
+        Args:
+            provider_name: Provider type name (e.g. "google", "slack").
+
+        Returns:
+            List of dicts with credential_id, provider, alias, identity, label.
+        """
+        if hasattr(self._storage, "load_all_for_provider"):
+            creds = self._storage.load_all_for_provider(provider_name)
+        else:
+            cred = self.get_credential(provider_name)
+            creds = [cred] if cred else []
+        return [
+            {
+                "credential_id": c.id,
+                "provider": provider_name,
+                "alias": c.alias,
+                "identity": c.identity.to_dict(),
+            }
+            for c in creds
+        ]
+
+    def get_credential_by_alias(self, provider_name: str, alias: str) -> CredentialObject | None:
+        """Find a credential by provider name and alias.
+
+        Args:
+            provider_name: Provider type name (e.g. "google").
+            alias: User-set alias from the Aden platform.
+
+        Returns:
+            CredentialObject if found, None otherwise.
+        """
+        # LLMs sometimes pass "provider/alias" as the alias (e.g. "google/wrok"
+        # instead of just "wrok").  Strip the provider prefix when present.
+        if alias.startswith(f"{provider_name}/"):
+            alias = alias[len(provider_name) + 1 :]
+
+        if hasattr(self._storage, "load_by_alias"):
+            return self._storage.load_by_alias(provider_name, alias)
+
+        # Scan fallback for storage backends without alias index
+        if hasattr(self._storage, "load_all_for_provider"):
+            for cred in self._storage.load_all_for_provider(provider_name):
+                if cred.alias == alias:
+                    return cred
+        return None
+
+    def get_credential_by_identity(self, provider_name: str, label: str) -> CredentialObject | None:
+        """Alias for get_credential_by_alias (backward compat)."""
+        return self.get_credential_by_alias(provider_name, label)
+
     def is_available(self, credential_id: str) -> bool:
         """
         Check if a credential is available.
@@ -373,6 +426,10 @@ class CredentialStore:
             True if credential exists and is accessible
         """
         return self.get_credential(credential_id, refresh_if_needed=False) is not None
+
+    def exists(self, credential_id: str) -> bool:
+        """Check if a credential exists in storage without triggering provider fetches."""
+        return self._storage.exists(credential_id)
 
     # --- Validation ---
 

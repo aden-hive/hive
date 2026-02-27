@@ -15,7 +15,7 @@ You cannot skip steps or bypass validation.
 
 from collections.abc import Callable
 from datetime import datetime
-from enum import Enum
+from enum import StrEnum
 from pathlib import Path
 from typing import Any
 
@@ -26,7 +26,7 @@ from framework.graph.goal import Goal
 from framework.graph.node import NodeSpec
 
 
-class BuildPhase(str, Enum):
+class BuildPhase(StrEnum):
     """Current phase of the build process."""
 
     INIT = "init"  # Just started
@@ -245,19 +245,13 @@ class GraphBuilder:
             warnings.append(f"Node '{node.id}' should have a description")
 
         # Type-specific validation
-        if node.node_type == "llm_tool_use":
-            if not node.tools:
-                errors.append(f"LLM tool node '{node.id}' must specify tools")
-            if not node.system_prompt:
-                warnings.append(f"LLM node '{node.id}' should have a system_prompt")
+        if node.node_type == "event_loop":
+            if node.tools and not node.system_prompt:
+                warnings.append(f"Event loop node '{node.id}' should have a system_prompt")
 
         if node.node_type == "router":
             if not node.routes:
                 errors.append(f"Router node '{node.id}' must specify routes")
-
-        if node.node_type == "function":
-            if not node.function:
-                errors.append(f"Function node '{node.id}' must specify function name")
 
         # Check input/output keys
         if not node.input_keys:
@@ -400,9 +394,13 @@ class GraphBuilder:
         if not terminal_candidates and self.session.nodes:
             warnings.append("No terminal nodes found (all nodes have outgoing edges)")
 
-        # Check reachability
+        # Check reachability from ALL entry candidates (not just the first one).
+        # Agents with async entry points have multiple nodes with no incoming
+        # edges (e.g., a primary entry node and an event-driven entry node).
         if entry_candidates and self.session.nodes:
-            reachable = self._compute_reachable(entry_candidates[0])
+            reachable = set()
+            for candidate in entry_candidates:
+                reachable |= self._compute_reachable(candidate)
             unreachable = [n.id for n in self.session.nodes if n.id not in reachable]
             if unreachable:
                 errors.append(f"Unreachable nodes: {unreachable}")
@@ -443,14 +441,15 @@ class GraphBuilder:
         self.session.test_cases.append(test)
         self._save_session()
 
-    def run_test(
+    async def run_test_async(
         self,
         test: TestCase,
         executor_factory: Callable,
     ) -> TestResult:
         """
-        Run a single test case.
+        Run a single test case asynchronously.
 
+        This method is safe to call from async contexts (Jupyter, FastAPI, etc.).
         executor_factory should return a configured GraphExecutor.
         """
         self._require_phase([BuildPhase.ADDING_NODES, BuildPhase.ADDING_EDGES, BuildPhase.TESTING])
@@ -462,14 +461,10 @@ class GraphBuilder:
             executor = executor_factory()
 
             # Run the test
-            import asyncio
-
-            result = asyncio.run(
-                executor.execute(
-                    graph=graph,
-                    goal=self.session.goal,
-                    input_data=test.input,
-                )
+            result = await executor.execute(
+                graph=graph,
+                goal=self.session.goal,
+                input_data=test.input,
             )
 
             # Check result
@@ -498,6 +493,36 @@ class GraphBuilder:
         self._save_session()
 
         return test_result
+
+    def run_test(
+        self,
+        test: TestCase,
+        executor_factory: Callable,
+    ) -> TestResult:
+        """
+        Run a single test case.
+
+        This is a synchronous wrapper around run_test_async().
+        If called from an async context (Jupyter, FastAPI, etc.), use run_test_async() instead.
+
+        executor_factory should return a configured GraphExecutor.
+        """
+        import asyncio
+
+        # Check if an event loop is already running
+        # get_running_loop() returns a loop if one exists, or raises RuntimeError if none exists
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            # No event loop running - safe to use asyncio.run()
+            return asyncio.run(self.run_test_async(test, executor_factory))
+
+        # Event loop is running - cannot use asyncio.run()
+        raise RuntimeError(
+            "Cannot call run_test() from an async context. "
+            "An event loop is already running. "
+            "Please use 'await builder.run_test_async(test, executor_factory)' instead."
+        )
 
     def run_all_tests(self, executor_factory: Callable) -> list[TestResult]:
         """Run all test cases."""

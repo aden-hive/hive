@@ -86,63 +86,53 @@ _TOOL_MODULES = [
 
 ## Credential Management
 
-For tools requiring API keys, use the centralized `CredentialManager`. This enables:
-- **Agent-aware validation**: Credentials are checked when an agent loads, not at server startup
-- **Better error messages**: Users see exactly which credentials are missing and how to get them
-- **Easy testing**: Use `CredentialManager.for_testing()` to mock credentials
+Tools fall into two categories based on whether they need external API credentials:
 
-### Adding a New Credential
+| Signature | Meaning | CI Enforcement |
+|-----------|---------|----------------|
+| `register_tools(mcp)` | No credentials needed | ✅ Just works |
+| `register_tools(mcp, credentials=None)` | Requires credentials | ⚠️ Must have `CredentialSpec` |
 
-1. Find the appropriate category file in `src/aden_tools/credentials/`:
-   - `llm.py` - LLM providers (anthropic, openai, etc.)
-   - `search.py` - Search tools (brave_search, google_search, etc.)
-   - Or create a new category file for integrations
+**This is enforced by CI** — if your `register_tools` accepts a `credentials` parameter, every tool it registers must appear in a `CredentialSpec.tools` list. Otherwise, CI will fail with a clear error message.
 
-2. Add the credential spec to the category's dict:
+### Tools WITHOUT Credentials (Simple Case)
+
+If your tool doesn't need external API keys (file operations, local processing, etc.), just use the simple signature:
 
 ```python
-# In credentials/search.py
-SEARCH_CREDENTIALS = {
-    # ... existing credentials
-    "my_api": CredentialSpec(
-        env_var="MY_API_KEY",
-        tools=["my_api_tool"],  # Which tools need this credential
-        required=True,          # or False for optional
-        help_url="https://example.com/api-keys",
-        description="API key for My Service",
-    ),
-}
+def register_tools(mcp: FastMCP) -> None:
+    """Register tools that don't need credentials."""
+
+    @mcp.tool()
+    def my_local_tool(path: str) -> dict:
+        """Process a local file."""
+        # No credentials needed - just do the work
+        return {"result": process_file(path)}
 ```
 
-3. If you created a new category file, import and merge it in `credentials/__init__.py`:
+That's it! No additional configuration needed.
+
+### Tools WITH Credentials (Integration Case)
+
+For tools requiring API keys, follow these steps:
+
+#### Step 1: Add the `credentials` parameter
 
 ```python
-from .my_category import MY_CATEGORY_CREDENTIALS
-
-CREDENTIAL_SPECS = {
-    **LLM_CREDENTIALS,
-    **SEARCH_CREDENTIALS,
-    **MY_CATEGORY_CREDENTIALS,  # Add new category
-}
-```
-
-4. Update your tool to accept the optional `credentials` parameter:
-
-```python
-from typing import Optional, TYPE_CHECKING
+from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from aden_tools.credentials import CredentialManager
+    from aden_tools.credentials import CredentialStoreAdapter
 
 
 def register_tools(
     mcp: FastMCP,
-    credentials: Optional["CredentialManager"] = None,
+    credentials: CredentialStoreAdapter | None = None,
 ) -> None:
     @mcp.tool()
     def my_api_tool(query: str) -> dict:
         """Tool that requires an API key."""
-        # Use CredentialManager if provided, fallback to direct env access
+        # Use credentials adapter if provided, fallback to direct env access
         if credentials is not None:
             api_key = credentials.get("my_api")
         else:
@@ -157,15 +147,108 @@ def register_tools(
         # Use the API key...
 ```
 
-5. Update `register_all_tools()` in `tools/__init__.py` to pass credentials to your tool.
+#### Step 2: Create a CredentialSpec
+
+Find the appropriate category file in `src/aden_tools/credentials/` or create a new one:
+
+| Category | File | Examples |
+|----------|------|----------|
+| LLM providers | `llm.py` | anthropic, openai |
+| Search tools | `search.py` | brave_search, google_search |
+| Email providers | `email.py` | resend, google/gmail |
+| GitHub | `github.py` | github |
+| CRM | `hubspot.py` | hubspot |
+| Messaging | `slack.py` | slack |
+
+Add your credential spec:
+
+```python
+# In credentials/<category>.py
+from .base import CredentialSpec
+
+MY_CREDENTIALS = {
+    "my_api": CredentialSpec(
+        env_var="MY_API_KEY",
+        tools=["my_api_tool"],  # IMPORTANT: List ALL tool names this credential covers
+        required=True,
+        help_url="https://example.com/api-keys",
+        description="API key for My Service",
+        # Credential store mapping
+        credential_id="my_api",
+        credential_key="api_key",
+    ),
+}
+```
+
+**Important:** The `tools` list must include every tool name that your `register_tools` function creates. CI will fail if any tool is missing.
+
+#### Step 3: Merge into CREDENTIAL_SPECS
+
+If you created a new category file, import and merge it in `credentials/__init__.py`:
+
+```python
+from .my_category import MY_CREDENTIALS
+
+CREDENTIAL_SPECS = {
+    **LLM_CREDENTIALS,
+    **SEARCH_CREDENTIALS,
+    **MY_CREDENTIALS,  # Add new category
+}
+
+__all__ = [
+    # ... existing exports
+    "MY_CREDENTIALS",
+]
+```
+
+#### Step 4: Update register_all_tools
+
+In `tools/__init__.py`, add your tool registration with credentials:
+
+```python
+from .my_tool import register_tools as register_my_tool
+
+def register_all_tools(mcp: FastMCP, credentials=None) -> list[str]:
+    # ... existing registrations
+
+    # Tools that need credentials
+    register_my_tool(mcp, credentials=credentials)
+
+    return [
+        # ... existing tool names
+        "my_api_tool",
+    ]
+```
+
+### CI Enforcement Rules
+
+The following conformance tests run in CI (`tests/integrations/test_spec_conformance.py`):
+
+| Test | What It Checks |
+|------|----------------|
+| `TestModuleStructure` | Every tool module exports `register_tools` |
+| `TestRegisterToolsSignature` | Correct function signature (`mcp` param, optional `credentials`) |
+| `TestCredentialSpecFields` | All CredentialSpec fields are complete (`env_var`, `help_url`, `description`, `credential_id`, `credential_key`) |
+| `TestSpecToolsMatchRegistered` | Tool names in `spec.tools` actually exist |
+| `TestCredentialCoverage` | **Every tool from a module with `credentials` param has a spec** |
+
+If `TestCredentialCoverage` fails, you'll see:
+
+```
+Tool 'my_new_tool' from module 'my_tool' accepts credentials but has no CredentialSpec.
+
+Fix by either:
+  1. Adding a CredentialSpec in credentials/<category>.py with tools=['my_new_tool'], or
+  2. Removing 'credentials' param from register_tools() if this tool doesn't need credentials
+```
 
 ### Testing with Mock Credentials
 
 ```python
-from aden_tools.credentials import CredentialManager
+from aden_tools.credentials import CredentialStoreAdapter
 
 def test_my_tool_with_valid_key(mcp):
-    creds = CredentialManager.for_testing({"my_api": "test-key"})
+    creds = CredentialStoreAdapter.for_testing({"my_api": "test-key"})
     register_tools(mcp, credentials=creds)
     tool_fn = mcp._tool_manager._tools["my_api_tool"].fn
 
@@ -193,29 +276,6 @@ The following tools require credentials that are not set:
 
 Set these environment variables and re-run the agent.
 ```
-
-## Environment Variables (Legacy)
-
-For simple cases or backward compatibility, you can still check environment variables directly:
-
-```python
-import os
-
-def register_tools(mcp: FastMCP) -> None:
-    @mcp.tool()
-    def my_api_tool(query: str) -> dict:
-        """Tool that requires an API key."""
-        api_key = os.getenv("MY_API_KEY")
-        if not api_key:
-            return {
-                "error": "MY_API_KEY environment variable not set",
-                "help": "Get an API key at https://example.com/api",
-            }
-
-        # Use the API key...
-```
-
-However, using `CredentialManager` is recommended for new tools as it provides better validation and testing support.
 
 ## Best Practices
 

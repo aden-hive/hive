@@ -95,6 +95,7 @@ class TestPdfReadTool:
             def __init__(self, path: Path) -> None:  # noqa: ARG002
                 self.pages = [FakePage(f"Page {i + 1}") for i in range(50)]
                 self.is_encrypted = False
+                self.metadata = None
 
         # Patch PdfReader used inside the tool so we don't need a real PDF
         from aden_tools.tools.pdf_read_tool import pdf_read_tool
