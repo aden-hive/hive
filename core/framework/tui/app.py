@@ -13,6 +13,8 @@ from textual.widgets import Footer, Label
 from framework.runtime.event_bus import AgentEvent, EventType
 from framework.tui.widgets.selectable_rich_log import SelectableRichLog
 
+logger = logging.getLogger(__name__)
+
 # AgentRuntime imported lazily where needed to support runtime=None startup.
 # ChatRepl and GraphOverview are imported lazily in _mount_agent_widgets.
 
@@ -86,8 +88,8 @@ class StatusBar(Container):
         try:
             label = self.query_one("#status-content", Label)
             label.update(" │ ".join(parts))
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("StatusBar refresh failed: %s", exc)
 
     def set_graph_id(self, graph_id: str) -> None:
         self._graph_id = graph_id
@@ -326,8 +328,8 @@ class AdenTUI(App):
         if hasattr(self, "_subscription_id"):
             try:
                 self.runtime.unsubscribe_from_events(self._subscription_id)
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("Failed to unsubscribe workspace events: %s", exc)
             del self._subscription_id
 
         workspace = self.query_one("#agent-workspace", Horizontal)
@@ -350,8 +352,8 @@ class AdenTUI(App):
             if self._runner is not None:
                 try:
                     await self._runner.cleanup_async()
-                except Exception:
-                    pass
+                except Exception as exc:
+                    logger.debug("Failed to cleanup previous runner: %s", exc)
                 self._runner = None
             self.runtime = None
 
@@ -667,8 +669,8 @@ class AdenTUI(App):
                 event_bus = self.runtime._event_bus if self.runtime else None
                 if event_bus:
                     event_bus.unsubscribe(self._queen_escalation_sub)
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("Failed to unsubscribe queen escalation feed: %s", exc)
             self._queen_escalation_sub = None
 
     def _show_account_selection(self, runner, accounts: list[dict]) -> None:
@@ -828,8 +830,8 @@ class AdenTUI(App):
                     "TabbedContent", expect_type=type(screen.query_one("TabbedContent"))
                 )
                 tabbed.active = tab_id
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("Failed to focus requested tab '%s': %s", tab_id, exc)
 
         self.push_screen(screen, callback=_on_pick)
         self.call_later(_focus_tab)
@@ -897,8 +899,8 @@ class AdenTUI(App):
         if hasattr(self, "_subscription_id"):
             try:
                 self.runtime.unsubscribe_from_events(self._subscription_id)
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("Failed to unsubscribe worker events during escalation: %s", exc)
             del self._subscription_id
 
         # Remember worker agent path for coder context
@@ -1033,8 +1035,8 @@ class AdenTUI(App):
         if self._runner is not None:
             try:
                 await self._runner.cleanup_async()
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("Failed to cleanup coder runner on return: %s", exc)
 
         # 2. Restore worker
         saved = self._escalation_stack.pop()
@@ -1119,8 +1121,8 @@ class AdenTUI(App):
 
             # Start polling
             self.set_interval(0.1, self._poll_logs)
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("Failed to initialize logging queue: %s", exc)
 
     def _poll_logs(self) -> None:
         """Poll the log queue and update UI."""
@@ -1135,8 +1137,8 @@ class AdenTUI(App):
                     continue
 
                 self.chat_repl.write_python_log(record)
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("Failed while polling Python logs: %s", exc)
 
     # -- Runtime event routing --
 
@@ -1183,8 +1185,8 @@ class AdenTUI(App):
                 event_types=self._EVENT_TYPES,
                 handler=self._handle_event,
             )
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("Failed to subscribe to runtime events: %s", exc)
 
     async def _handle_event(self, event: AgentEvent) -> None:
         """Bridge events to Textual's main thread for UI updates.
@@ -1736,25 +1738,25 @@ class AdenTUI(App):
                             await asyncio.wait_for(task, timeout=5.0)
                         except (TimeoutError, asyncio.CancelledError):
                             pass
-                        except Exception:
-                            pass
+                        except Exception as exc:
+                            logger.debug("Failed waiting for task cancellation: %s", exc)
                         break
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("Failed to cancel active execution on exit: %s", exc)
 
         # Stop health monitoring (judge + queen)
         try:
             self._stop_health_monitoring()
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("Failed to stop health monitoring on exit: %s", exc)
 
         try:
             if hasattr(self, "_subscription_id") and self.runtime:
                 self.runtime.unsubscribe_from_events(self._subscription_id)
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("Failed to unsubscribe runtime events on exit: %s", exc)
         try:
             if hasattr(self, "queue_handler"):
                 logging.getLogger().removeHandler(self.queue_handler)
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("Failed to remove queue handler on exit: %s", exc)
