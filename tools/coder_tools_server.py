@@ -1556,6 +1556,22 @@ def run_agent_tests(
     # Parse test types
     types_list = [t.strip() for t in test_types.split(",")]
 
+    # Guard: pytest must be available as a subprocess command.
+    # Install with: pip install 'framework[testing]'
+    import shutil
+
+    if shutil.which("pytest") is None:
+        return json.dumps(
+            {
+                "error": (
+                    "pytest is not installed or not on PATH. "
+                    "Hive's test runner requires pytest at runtime. "
+                    "Install it with: pip install 'framework[testing]' "
+                    "or: uv pip install 'framework[testing]'"
+                ),
+            }
+        )
+
     # Build pytest command
     cmd = ["pytest"]
 
