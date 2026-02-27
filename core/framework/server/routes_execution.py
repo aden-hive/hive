@@ -319,6 +319,21 @@ async def handle_replay(request: web.Request) -> web.Response:
     )
 
 
+async def handle_cancel_queen(request: web.Request) -> web.Response:
+    """POST /api/sessions/{session_id}/cancel-queen — cancel the queen's current LLM turn."""
+    session, err = resolve_session(request)
+    if err:
+        return err
+    queen_executor = session.queen_executor
+    if queen_executor is None:
+        return web.json_response({"cancelled": False, "error": "Queen not active"}, status=404)
+    node = queen_executor.node_registry.get("queen")
+    if node is None or not hasattr(node, "cancel_current_turn"):
+        return web.json_response({"cancelled": False, "error": "Queen node not found"}, status=404)
+    node.cancel_current_turn()
+    return web.json_response({"cancelled": True})
+
+
 def register_routes(app: web.Application) -> None:
     """Register execution control routes."""
     # Session-primary routes
@@ -328,5 +343,6 @@ def register_routes(app: web.Application) -> None:
     app.router.add_post("/api/sessions/{session_id}/pause", handle_stop)
     app.router.add_post("/api/sessions/{session_id}/resume", handle_resume)
     app.router.add_post("/api/sessions/{session_id}/stop", handle_stop)
+    app.router.add_post("/api/sessions/{session_id}/cancel-queen", handle_cancel_queen)
     app.router.add_post("/api/sessions/{session_id}/replay", handle_replay)
     app.router.add_get("/api/sessions/{session_id}/goal-progress", handle_goal_progress)

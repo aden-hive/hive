@@ -47,6 +47,9 @@ export const executionApi = {
       execution_id: executionId,
     }),
 
+  cancelQueen: (sessionId: string) =>
+    api.post<{ cancelled: boolean }>(`/sessions/${sessionId}/cancel-queen`),
+
   resume: (sessionId: string, workerSessionId: string, checkpointId?: string) =>
     api.post<ResumeResult>(`/sessions/${sessionId}/resume`, {
       session_id: workerSessionId,

@@ -864,6 +864,17 @@ export default function Workspace() {
     }
   }, [agentStates, activeWorker, markAllNodesAs, updateAgentState]);
 
+  const handleCancelQueen = useCallback(async () => {
+    const state = agentStates[activeWorker];
+    if (!state?.sessionId) return;
+    try {
+      await executionApi.cancelQueen(state.sessionId);
+    } catch {
+      // Best-effort — queen may have already finished
+    }
+    updateAgentState(activeWorker, { isTyping: false });
+  }, [agentStates, activeWorker, updateAgentState]);
+
   // --- Node log helper (writes into agentStates) ---
   const appendNodeLog = useCallback((agentType: string, nodeId: string, line: string) => {
     setAgentStates((prev) => {
@@ -1584,6 +1595,7 @@ export default function Workspace() {
               <ChatPanel
                 messages={activeSession.messages}
                 onSend={handleSend}
+                onCancel={handleCancelQueen}
                 activeThread={activeWorker}
                 isWaiting={activeAgentState?.isTyping ?? false}
                 awaitingInput={activeAgentState?.awaitingInput ?? false}

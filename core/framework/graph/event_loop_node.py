@@ -70,6 +70,12 @@ class _EscalationReceiver:
 # ---------------------------------------------------------------------------
 
 
+class TurnCancelled(Exception):
+    """Raised when a turn is cancelled mid-stream."""
+
+    pass
+
+
 @dataclass
 class JudgeVerdict:
     """Result of judge evaluation for the event loop."""
@@ -275,6 +281,7 @@ class EventLoopNode(NodeProtocol):
         self._input_ready = asyncio.Event()
         self._awaiting_input = False
         self._shutdown = False
+        self._stream_task: asyncio.Task | None = None
         # Track which nodes already have an action plan emitted (skip on revisit)
         self._action_plan_emitted: set[str] = set()
         # Subagent mark_complete: when True, _evaluate returns ACCEPT immediately
@@ -546,6 +553,7 @@ class EventLoopNode(NodeProtocol):
                 len(conversation.messages),
             )
             _stream_retry_count = 0
+            _turn_cancelled = False
             while True:
                 try:
                     (
@@ -586,6 +594,10 @@ class EventLoopNode(NodeProtocol):
                         iteration=iteration,
                     )
                     break  # success — exit retry loop
+
+                except TurnCancelled:
+                    _turn_cancelled = True
+                    break
 
                 except Exception as e:
                     # Retry transient errors with exponential backoff
@@ -662,6 +674,12 @@ class EventLoopNode(NodeProtocol):
 
                     # Re-raise to maintain existing error handling
                     raise
+
+            if _turn_cancelled:
+                logger.info("[%s] iter=%d: turn cancelled by user", node_id, iteration)
+                if ctx.node_spec.client_facing and not ctx.event_triggered:
+                    await self._await_user_input(ctx, prompt="")
+                continue  # back to top of for-iteration loop
 
             # 6e'. Feed actual API token count back for accurate estimation
             turn_input = turn_tokens.get("input", 0)
@@ -792,19 +810,7 @@ class EventLoopNode(NodeProtocol):
                     )
                     if ctx.node_spec.client_facing and not ctx.event_triggered:
                         await conversation.add_user_message(warning_msg)
-                        self._input_ready.clear()
-                        if self._event_bus:
-                            await self._event_bus.emit_client_input_requested(
-                                stream_id=stream_id,
-                                node_id=node_id,
-                                prompt=doom_desc,
-                                execution_id=execution_id,
-                            )
-                        self._awaiting_input = True
-                        try:
-                            await self._input_ready.wait()
-                        finally:
-                            self._awaiting_input = False
+                        await self._await_user_input(ctx, prompt=doom_desc)
                         recent_tool_fingerprints.clear()
                         recent_responses.clear()
                     else:
@@ -1255,6 +1261,16 @@ class EventLoopNode(NodeProtocol):
         self._shutdown = True
         self._input_ready.set()
 
+    def cancel_current_turn(self) -> None:
+        """Cancel the current LLM streaming turn instantly.
+
+        Unlike signal_shutdown() which permanently stops the event loop,
+        this only kills the in-progress HTTP stream via task.cancel().
+        The queen stays alive for the next user message.
+        """
+        if self._stream_task and not self._stream_task.done():
+            self._stream_task.cancel()
+
     async def _await_user_input(
         self, ctx: NodeContext, prompt: str = "", *, skip_emit: bool = False
     ) -> bool:
@@ -1272,6 +1288,11 @@ class EventLoopNode(NodeProtocol):
 
         Returns True if input arrived, False if shutdown was signaled.
         """
+        # If messages arrived while the LLM was processing, skip blocking
+        # entirely — the next _drain_injection_queue() will pick them up.
+        if not self._injection_queue.empty():
+            return True
+
         # Clear BEFORE emitting so that synchronous handlers (e.g. the
         # headless stdin handler) can call inject_event() during the emit
         # and the signal won't be lost.  TUI handlers return immediately
@@ -1367,39 +1388,56 @@ class EventLoopNode(NodeProtocol):
             tool_calls: list[ToolCallEvent] = []
             _stream_error: StreamErrorEvent | None = None
 
-            # Stream LLM response
-            async for event in ctx.llm.stream(
-                messages=messages,
-                system=conversation.system_prompt,
-                tools=tools if tools else None,
-                max_tokens=ctx.max_tokens,
-            ):
-                if isinstance(event, TextDeltaEvent):
-                    accumulated_text = event.snapshot
-                    await self._publish_text_delta(
-                        stream_id,
-                        node_id,
-                        event.content,
-                        event.snapshot,
-                        ctx,
-                        execution_id,
-                        iteration=iteration,
-                    )
+            # Stream LLM response in a child task so cancel_current_turn()
+            # can kill it instantly without terminating the queen's main loop.
+            # Capture loop-scoped variables as defaults to satisfy B023.
+            async def _do_stream(
+                _msgs: list = messages,  # noqa: B006
+                _tc: list[ToolCallEvent] = tool_calls,  # noqa: B006
+            ) -> None:
+                nonlocal accumulated_text, _stream_error
+                async for event in ctx.llm.stream(
+                    messages=_msgs,
+                    system=conversation.system_prompt,
+                    tools=tools if tools else None,
+                    max_tokens=ctx.max_tokens,
+                ):
+                    if isinstance(event, TextDeltaEvent):
+                        accumulated_text = event.snapshot
+                        await self._publish_text_delta(
+                            stream_id,
+                            node_id,
+                            event.content,
+                            event.snapshot,
+                            ctx,
+                            execution_id,
+                            iteration=iteration,
+                        )
 
-                elif isinstance(event, ToolCallEvent):
-                    tool_calls.append(event)
+                    elif isinstance(event, ToolCallEvent):
+                        _tc.append(event)
 
-                elif isinstance(event, FinishEvent):
-                    token_counts["input"] += event.input_tokens
-                    token_counts["output"] += event.output_tokens
-                    token_counts["stop_reason"] = event.stop_reason
-                    token_counts["model"] = event.model
+                    elif isinstance(event, FinishEvent):
+                        token_counts["input"] += event.input_tokens
+                        token_counts["output"] += event.output_tokens
+                        token_counts["stop_reason"] = event.stop_reason
+                        token_counts["model"] = event.model
 
-                elif isinstance(event, StreamErrorEvent):
-                    if not event.recoverable:
-                        raise RuntimeError(f"Stream error: {event.error}")
-                    _stream_error = event
-                    logger.warning("Recoverable stream error: %s", event.error)
+                    elif isinstance(event, StreamErrorEvent):
+                        if not event.recoverable:
+                            raise RuntimeError(f"Stream error: {event.error}")
+                        _stream_error = event
+                        logger.warning("Recoverable stream error: %s", event.error)
+
+            self._stream_task = asyncio.create_task(_do_stream())
+            try:
+                await self._stream_task
+            except asyncio.CancelledError:
+                if accumulated_text:
+                    await conversation.add_assistant_message(content=accumulated_text)
+                raise TurnCancelled() from None
+            finally:
+                self._stream_task = None
 
             # If a recoverable stream error produced an empty response,
             # raise so the outer transient-error retry can handle it

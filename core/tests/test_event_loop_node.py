@@ -69,7 +69,6 @@ class MockStreamingLLM(LLMProvider):
         return LLMResponse(content="Summary of conversation.", model="mock", stop_reason="stop")
 
 
-
 # ---------------------------------------------------------------------------
 # Helper: build a simple text-only scenario
 # ---------------------------------------------------------------------------
@@ -733,14 +732,16 @@ class TestClientFacingExpectingWork:
             scenarios=[
                 # Turn 0: ask user what to do
                 tool_call_scenario(
-                    "ask_user", {"question": "Continue or generate report?"},
+                    "ask_user",
+                    {"question": "Continue or generate report?"},
                     tool_use_id="ask_1",
                 ),
                 # Turn 1: after user responds, LLM outputs text-only (lazy)
                 text_scenario("Understood, generating the report."),
                 # Turn 2: after judge RETRY, LLM sets output
                 tool_call_scenario(
-                    "set_output", {"key": "decision", "value": "generate"},
+                    "set_output",
+                    {"key": "decision", "value": "generate"},
                 ),
                 # Turn 3: accept
                 text_scenario("Done."),
@@ -781,7 +782,8 @@ class TestClientFacingExpectingWork:
             scenarios=[
                 # Turn 0: ask user for domain
                 tool_call_scenario(
-                    "ask_user", {"question": "What domain?"},
+                    "ask_user",
+                    {"question": "What domain?"},
                     tool_use_id="ask_1",
                 ),
                 # Turn 1: after user input, outputs monitoring text
@@ -832,12 +834,14 @@ class TestClientFacingExpectingWork:
             scenarios=[
                 # Turn 0: ask user
                 tool_call_scenario(
-                    "ask_user", {"question": "Ready?"},
+                    "ask_user",
+                    {"question": "Ready?"},
                     tool_use_id="ask_1",
                 ),
                 # Turn 1: after user responds, LLM does work (tool call)
                 tool_call_scenario(
-                    "save_data", {"content": "report.html"},
+                    "save_data",
+                    {"content": "report.html"},
                     tool_use_id="tool_1",
                 ),
                 # Turn 2: LLM presents results as text (no tools)
@@ -845,7 +849,8 @@ class TestClientFacingExpectingWork:
                 text_scenario("Here is your report. Need changes?"),
                 # Turn 3: after user responds, set output
                 tool_call_scenario(
-                    "set_output", {"key": "status", "value": "complete"},
+                    "set_output",
+                    {"key": "status", "value": "complete"},
                 ),
                 # Turn 4: done
                 text_scenario("All done."),
@@ -856,7 +861,10 @@ class TestClientFacingExpectingWork:
             config=LoopConfig(max_iterations=10),
         )
         ctx = build_ctx(
-            runtime, spec, memory, llm,
+            runtime,
+            spec,
+            memory,
+            llm,
             tools=[Tool(name="save_data", description="save", parameters={})],
         )
 
@@ -898,12 +906,14 @@ class TestClientFacingExpectingWork:
             scenarios=[
                 # Turn 0: ask user
                 tool_call_scenario(
-                    "ask_user", {"question": "Generate?"},
+                    "ask_user",
+                    {"question": "Generate?"},
                     tool_use_id="ask_1",
                 ),
                 # Turn 1: LLM calls tool but doesn't set output
                 tool_call_scenario(
-                    "save_data", {"content": "report"},
+                    "save_data",
+                    {"content": "report"},
                     tool_use_id="tool_1",
                 ),
                 # Turn 2: judge RETRY (missing "status"). LLM outputs text.
@@ -911,7 +921,8 @@ class TestClientFacingExpectingWork:
                 text_scenario("Report generated successfully."),
                 # Turn 3: after second RETRY, LLM finally sets output
                 tool_call_scenario(
-                    "set_output", {"key": "status", "value": "done"},
+                    "set_output",
+                    {"key": "status", "value": "done"},
                 ),
                 # Turn 4: accept
                 text_scenario("Complete."),
@@ -922,7 +933,10 @@ class TestClientFacingExpectingWork:
             config=LoopConfig(max_iterations=10),
         )
         ctx = build_ctx(
-            runtime, spec, memory, llm,
+            runtime,
+            spec,
+            memory,
+            llm,
             tools=[Tool(name="save_data", description="save", parameters={})],
         )
 
@@ -1261,7 +1275,6 @@ class ErrorThenSuccessLLM(LLMProvider):
 
     def complete(self, messages, system="", **kwargs) -> LLMResponse:
         return LLMResponse(content="ok", model="mock", stop_reason="stop")
-
 
 
 class TestTransientErrorRetry:
@@ -1628,7 +1641,6 @@ class ToolRepeatLLM(LLMProvider):
             model="mock",
             stop_reason="stop",
         )
-
 
 
 class TestToolDoomLoopIntegration:
