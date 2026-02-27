@@ -57,7 +57,6 @@ class BaseOAuth2Provider(CredentialProvider):
         provider = BaseOAuth2Provider(OAuth2Config(
             token_url="https://oauth2.example.com/token",
             client_id="my-client-id",
-            client_secret="my-client-credential",  # pragma: allowlist secret
         ))
 
         # Get token using client credentials
