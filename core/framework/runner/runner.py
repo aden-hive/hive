@@ -3,11 +3,14 @@
 import json
 import logging
 import os
+import shutil
+import subprocess
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
+from urllib.parse import urlparse
 
 from framework.config import get_hive_config, get_preferred_model
 from framework.credentials.validation import (
@@ -51,6 +54,17 @@ CODEX_KEYCHAIN_SERVICE = "Codex Auth"
 _CODEX_TOKEN_LIFETIME_SECS = 3600  # 1 hour (no explicit expiry field)
 
 
+def _is_safe_https_url(url: str) -> bool:
+    """Return True for absolute HTTPS URLs with hostnames."""
+    parsed = urlparse(url)
+    return parsed.scheme == "https" and bool(parsed.netloc)
+
+
+def _run_subprocess(command: list[str], **kwargs):
+    """Run subprocess with explicit list command."""
+    return subprocess.run(command, **kwargs)  # noqa: S603
+
+
 def _refresh_claude_code_token(refresh_token: str) -> dict | None:
     """Refresh the Claude Code OAuth token using the refresh token.
 
@@ -73,15 +87,19 @@ def _refresh_claude_code_token(refresh_token: str) -> dict | None:
         }
     ).encode("utf-8")
 
-    req = urllib.request.Request(
-        CLAUDE_OAUTH_TOKEN_URL,
+    if not _is_safe_https_url(CLAUDE_OAUTH_TOKEN_URL):
+        logger.error("Invalid Claude OAuth token URL")
+        return None
+
+    req = urllib.request.Request(  # noqa: S310
+        CLAUDE_OAUTH_TOKEN_URL,  # noqa: S310
         data=data,
         headers={"Content-Type": "application/x-www-form-urlencoded"},
         method="POST",
     )
 
     try:
-        with urllib.request.urlopen(req, timeout=15) as resp:
+        with urllib.request.urlopen(req, timeout=15) as resp:  # noqa: S310
             return json.loads(resp.read())
     except (urllib.error.URLError, json.JSONDecodeError, TimeoutError, OSError) as exc:
         logger.debug("Claude Code token refresh failed: %s", exc)
@@ -201,9 +219,13 @@ def _read_codex_keychain() -> dict | None:
 
     try:
         account = _get_codex_keychain_account()
-        result = subprocess.run(
+        security_executable = shutil.which("security")
+        if not security_executable:
+            return None
+
+        result = _run_subprocess(
             [
-                "security",
+                security_executable,
                 "find-generic-password",
                 "-s",
                 CODEX_KEYCHAIN_SERVICE,
@@ -289,15 +311,19 @@ def _refresh_codex_token(refresh_token: str) -> dict | None:
         }
     ).encode("utf-8")
 
-    req = urllib.request.Request(
-        CODEX_OAUTH_TOKEN_URL,
+    if not _is_safe_https_url(CODEX_OAUTH_TOKEN_URL):
+        logger.error("Invalid Codex OAuth token URL")
+        return None
+
+    req = urllib.request.Request(  # noqa: S310
+        CODEX_OAUTH_TOKEN_URL,  # noqa: S310
         data=data,
         headers={"Content-Type": "application/x-www-form-urlencoded"},
         method="POST",
     )
 
     try:
-        with urllib.request.urlopen(req, timeout=15) as resp:
+        with urllib.request.urlopen(req, timeout=15) as resp:  # noqa: S310
             return json.loads(resp.read())
     except (urllib.error.URLError, json.JSONDecodeError, TimeoutError, OSError) as exc:
         logger.debug("Codex token refresh failed: %s", exc)
@@ -398,8 +424,8 @@ def _get_account_id_from_jwt(access_token: str) -> str | None:
             account_id = auth.get("chatgpt_account_id")
             if isinstance(account_id, str) and account_id:
                 return account_id
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.debug("Failed to extract account_id from JWT: %s", exc)
     return None
 
 
@@ -1154,8 +1180,8 @@ class AgentRunner:
                 from framework.graph.prompt_composer import build_accounts_prompt
 
                 accounts_prompt = build_accounts_prompt(accounts_data, tool_provider_map)
-        except Exception:
-            pass  # Best-effort — agent works without account info
+        except Exception as exc:
+            logger.debug("Failed to load accounts prompt data: %s", exc)
 
         self._setup_agent_runtime(
             tools,
@@ -1779,9 +1805,8 @@ Respond with JSON only:
                     reasoning=data.get("reasoning", ""),
                     estimated_steps=data.get("estimated_steps"),
                 )
-        except Exception:
-            # Fall back to keyword matching on error
-            pass
+        except Exception as exc:
+            logger.debug("Capability check fallback triggered due to error: %s", exc)
 
         return self._keyword_capability_check(request)
 
