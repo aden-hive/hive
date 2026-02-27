@@ -395,7 +395,10 @@ def validate_agent_credentials(
                 spec = CREDENTIAL_SPECS[cn]
                 affected = sorted(t for t in required_tools if t in spec.tools)
                 _check_credential(
-                    spec, cn, affected_tools=affected, affected_node_types=[],
+                    spec,
+                    cn,
+                    affected_tools=affected,
+                    affected_node_types=[],
                     alternative_group=group_key,
                 )
 
