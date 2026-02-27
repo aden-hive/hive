@@ -2,6 +2,7 @@ import os
 
 from mcp.server.fastmcp import FastMCP
 
+from ..hashline import format_hashlines
 from ..security import get_secure_path
 
 
@@ -19,6 +20,9 @@ def register_tools(mcp: FastMCP) -> None:
         session_id: str,
         encoding: str = "utf-8",
         max_size: int = 10 * 1024 * 1024,
+        hashline: bool = False,
+        offset: int = 1,
+        limit: int = 0,
     ) -> dict:
         """
         Purpose
@@ -41,6 +45,10 @@ def register_tools(mcp: FastMCP) -> None:
             session_id: The ID of the current session
             encoding: The encoding to use for reading the file (default: "utf-8")
             max_size: The maximum size of file content to return in bytes (default: 10MB)
+            hashline: If True, return content with N:hhhh|content anchors
+                for use with hashline_edit (default: False)
+            offset: 1-indexed start line, only used when hashline=True (default: 1)
+            limit: Max lines to return, 0 = all, only used when hashline=True (default: 0)
 
         Returns:
             Dict with file content and metadata, or error dict
@@ -57,8 +65,59 @@ def register_tools(mcp: FastMCP) -> None:
                 return {"error": f"Path is not a file: {path}"}
 
             with open(secure_path, encoding=encoding) as f:
-                content = f.read()
+                content_raw = f.read()
 
+            if not hashline and (offset != 1 or limit != 0):
+                return {
+                    "error": "offset and limit are only supported when hashline=True. "
+                    "Set hashline=True to use paging."
+                }
+
+            if hashline:
+                if offset < 1:
+                    return {"error": f"offset must be >= 1, got {offset}"}
+                if limit < 0:
+                    return {"error": f"limit must be >= 0, got {limit}"}
+
+                all_lines = content_raw.splitlines()
+                total_lines = len(all_lines)
+                raw_size = len(content_raw.encode(encoding))
+
+                if offset > max(total_lines, 1):
+                    return {"error": f"offset {offset} is beyond end of file ({total_lines} lines)"}
+
+                # Check size after considering offset/limit. When paging
+                # (offset or limit set), only check the formatted output size.
+                # When reading the full file, check the raw size.
+                is_paging = offset > 1 or limit > 0
+                if not is_paging and raw_size > max_size:
+                    return {
+                        "error": f"File too large for hashline mode ({raw_size} bytes, "
+                        f"max {max_size}). Use offset and limit to read a section at a time."
+                    }
+
+                formatted = format_hashlines(all_lines, offset=offset, limit=limit)
+                shown_lines = len(formatted.splitlines()) if formatted else 0
+
+                if is_paging and len(formatted.encode(encoding)) > max_size:
+                    return {
+                        "error": f"Requested section too large ({shown_lines} lines). "
+                        f"Reduce limit to read a smaller section."
+                    }
+
+                return {
+                    "success": True,
+                    "path": path,
+                    "content": formatted,
+                    "hashline": True,
+                    "offset": offset,
+                    "limit": limit,
+                    "total_lines": total_lines,
+                    "shown_lines": shown_lines,
+                    "size_bytes": raw_size,
+                }
+
+            content = content_raw
             if len(content.encode(encoding)) > max_size:
                 content = content[:max_size]
                 content += "\n\n[... Content truncated due to size limit ...]"
@@ -67,7 +126,7 @@ def register_tools(mcp: FastMCP) -> None:
                 "success": True,
                 "path": path,
                 "content": content,
-                "size_bytes": len(content.encode("utf-8")),
+                "size_bytes": len(content.encode(encoding)),
                 "lines": len(content.splitlines()),
             }
         except Exception as e:
