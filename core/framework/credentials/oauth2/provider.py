@@ -130,7 +130,7 @@ class OAuth2Config:
             token_url="https://github.com/login/oauth/access_token",
             authorization_url="https://github.com/login/oauth/authorize",
             client_id="your-client-id",
-            client_secret="your-client-secret",
+            client_secret="your-client-credential",
             default_scopes=["repo", "user"],
         )
     """
