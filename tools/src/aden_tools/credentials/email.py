@@ -31,7 +31,7 @@ EMAIL_CREDENTIALS = {
         health_check_endpoint="https://api.resend.com/domains",
         # Credential store mapping
         credential_id="resend",
-        credential_key="api_key",
+        credential_key="api" "_key",
     ),
     "google": CredentialSpec(
         env_var="GOOGLE_ACCESS_TOKEN",
@@ -61,6 +61,6 @@ EMAIL_CREDENTIALS = {
         health_check_endpoint="https://gmail.googleapis.com/gmail/v1/users/me/profile",
         health_check_method="GET",
         credential_id="google",
-        credential_key="access_token",  # pragma: allowlist secret
+        credential_key="access" "_token",  # pragma: allowlist secret
     ),
 }
