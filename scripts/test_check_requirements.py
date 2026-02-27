@@ -16,7 +16,7 @@ def test_check_requirements():
 
     # Test 1: All valid modules
     print("\n Test 1: All valid standard library modules")
-    result = subprocess.run(
+    result = subprocess.run(  # noqa: S603
         [sys.executable, "scripts/check_requirements.py", "json", "sys", "os"],
         capture_output=True,
         text=True,
@@ -35,7 +35,7 @@ def test_check_requirements():
 
     # Test 2: Mix of valid and invalid modules
     print("\n\nTest 2: Mix of valid and invalid modules")
-    result = subprocess.run(
+    result = subprocess.run(  # noqa: S603
         [sys.executable, "scripts/check_requirements.py", "json", "nonexistent_module"],
         capture_output=True,
         text=True,
