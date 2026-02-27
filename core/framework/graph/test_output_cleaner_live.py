@@ -1,3 +1,5 @@
+# ruff: noqa: S101
+
 """
 Test OutputCleaner with real Cerebras LLM.
 
