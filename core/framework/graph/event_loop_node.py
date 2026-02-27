@@ -1341,6 +1341,15 @@ class EventLoopNode(NodeProtocol):
             except asyncio.CancelledError:
                 if accumulated_text:
                     await conversation.add_assistant_message(content=accumulated_text)
+                # Distinguish cancel_current_turn() (cancels the child
+                # _stream_task) from stop_worker (cancels the parent
+                # execution task).  When the parent itself is cancelled,
+                # cancelling() > 0 — propagate so the executor can save
+                # state.  When only the child was cancelled, convert to
+                # TurnCancelled so the event loop continues.
+                task = asyncio.current_task()
+                if task and task.cancelling() > 0:
+                    raise
                 raise TurnCancelled() from None
             finally:
                 self._stream_task = None
@@ -1533,6 +1542,12 @@ class EventLoopNode(NodeProtocol):
                     *(self._execute_tool(tc) for tc in pending_real),
                     return_exceptions=True,
                 )
+                # gather(return_exceptions=True) captures CancelledError
+                # as a return value instead of propagating it.  Re-raise
+                # so stop_worker actually stops the execution.
+                for raw in raw_results:
+                    if isinstance(raw, asyncio.CancelledError):
+                        raise raw
                 for tc, raw in zip(pending_real, raw_results, strict=True):
                     if isinstance(raw, BaseException):
                         result = ToolResult(
