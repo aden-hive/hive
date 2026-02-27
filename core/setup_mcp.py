@@ -53,7 +53,7 @@ def log_error(message: str):
 def run_command(cmd: list, error_msg: str) -> bool:
     """Run a command and return success status."""
     try:
-        subprocess.run(cmd, check=True, capture_output=True, text=True)
+        subprocess.run(cmd, check=True, capture_output=True, text=True)  # noqa: S603
         return True
     except subprocess.CalledProcessError as e:
         log_error(error_msg)
@@ -124,7 +124,7 @@ def main():
     log_step("Step 4: Testing MCP server...")
     try:
         # Try importing the MCP server module
-        subprocess.run(
+        subprocess.run(  # noqa: S603
             [sys.executable, "-c", "from framework.mcp import agent_builder_server"],
             check=True,
             capture_output=True,
