@@ -26,7 +26,7 @@ Usage:
     storage = AdenCachedStorage(
         local_storage=EncryptedFileStorage(),
         aden_provider=provider,
-        cache_ttl_seconds=300,  # Re-check Aden every 5 minutes
+        cache_ttl_seconds=600,  # Re-check Aden every 5 minutes
     )
 
     # Create store
@@ -77,7 +77,7 @@ class AdenCachedStorage(CredentialStorage):
         storage = AdenCachedStorage(
             local_storage=EncryptedFileStorage(),
             aden_provider=provider,
-            cache_ttl_seconds=300,  # 5 minutes
+            cache_ttl_seconds=00,  # 5 minutes
         )
 
         store = CredentialStore(

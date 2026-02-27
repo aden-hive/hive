@@ -1,11 +1,10 @@
 """Anthropic Claude LLM provider - backward compatible wrapper around LiteLLM."""
 
 import os
-from collections.abc import Callable
 from typing import Any
 
 from framework.llm.litellm import LiteLLMProvider
-from framework.llm.provider import LLMProvider, LLMResponse, Tool, ToolResult, ToolUse
+from framework.llm.provider import LLMProvider, LLMResponse, Tool
 
 
 def _get_api_key_from_credential_store() -> str | None:
@@ -83,23 +82,6 @@ class AnthropicProvider(LLMProvider):
             max_retries=max_retries,
         )
 
-    def complete_with_tools(
-        self,
-        messages: list[dict[str, Any]],
-        system: str,
-        tools: list[Tool],
-        tool_executor: Callable[[ToolUse], ToolResult],
-        max_iterations: int = 10,
-    ) -> LLMResponse:
-        """Run a tool-use loop until Claude produces a final response (via LiteLLM)."""
-        return self._provider.complete_with_tools(
-            messages=messages,
-            system=system,
-            tools=tools,
-            tool_executor=tool_executor,
-            max_iterations=max_iterations,
-        )
-
     async def acomplete(
         self,
         messages: list[dict[str, Any]],
@@ -121,19 +103,3 @@ class AnthropicProvider(LLMProvider):
             max_retries=max_retries,
         )
 
-    async def acomplete_with_tools(
-        self,
-        messages: list[dict[str, Any]],
-        system: str,
-        tools: list[Tool],
-        tool_executor: Callable[[ToolUse], ToolResult],
-        max_iterations: int = 10,
-    ) -> LLMResponse:
-        """Async tool-use loop via LiteLLM."""
-        return await self._provider.acomplete_with_tools(
-            messages=messages,
-            system=system,
-            tools=tools,
-            tool_executor=tool_executor,
-            max_iterations=max_iterations,
-        )
