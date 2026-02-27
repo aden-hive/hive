@@ -5,9 +5,9 @@ Verification script for Aden Hive Framework MCP Server
 This script checks if the MCP server is properly installed and configured.
 """
 
+import importlib
 import json
 import logging
-import subprocess
 import sys
 from pathlib import Path
 
@@ -54,6 +54,15 @@ def error(msg: str):
     logger.error(f"{Colors.RED}✗ {msg}{Colors.NC}")
 
 
+def _try_import(module_name: str):
+    """Try importing a module and return (module, error_message)."""
+    try:
+        module = importlib.import_module(module_name)
+        return module, None
+    except Exception as exc:
+        return None, str(exc)
+
+
 def main():
     """Run verification checks."""
     setup_logger()
@@ -65,17 +74,13 @@ def main():
 
     # Check 1: Framework package installed
     check("framework package installation")
-    try:
-        result = subprocess.run(
-            [sys.executable, "-c", "import framework; print(framework.__file__)"],
-            capture_output=True,
-            text=True,
-            check=True,
-        )
-        framework_path = result.stdout.strip()
+    framework_module, framework_error = _try_import("framework")
+    if framework_module is not None:
+        framework_path = getattr(framework_module, "__file__", "(unknown path)")
         success(f"installed at {framework_path}")
-    except subprocess.CalledProcessError:
+    else:
         error("framework package not found")
+        logger.error(f"  Error: {framework_error}")
         logger.info(f"  Run: uv pip install -e {script_dir}")
         all_checks_passed = False
 
@@ -83,9 +88,8 @@ def main():
     check("MCP dependencies")
     missing_deps = []
     for dep in ["mcp", "fastmcp"]:
-        try:
-            subprocess.run([sys.executable, "-c", f"import {dep}"], capture_output=True, check=True)
-        except subprocess.CalledProcessError:
+        _, dep_error = _try_import(dep)
+        if dep_error is not None:
             missing_deps.append(dep)
 
     if missing_deps:
@@ -97,17 +101,12 @@ def main():
 
     # Check 3: MCP server module
     check("MCP server module")
-    try:
-        subprocess.run(
-            [sys.executable, "-c", "from framework.mcp import agent_builder_server"],
-            capture_output=True,
-            text=True,
-            check=True,
-        )
+    _, module_error = _try_import("framework.mcp.agent_builder_server")
+    if module_error is None:
         success("loads successfully")
-    except subprocess.CalledProcessError as e:
+    else:
         error("failed to import")
-        logger.error(f"  Error: {e.stderr}")
+        logger.error(f"  Error: {module_error}")
         all_checks_passed = False
 
     # Check 4: MCP configuration file
@@ -147,11 +146,8 @@ def main():
 
     failed_modules = []
     for module in modules_to_check:
-        try:
-            subprocess.run(
-                [sys.executable, "-c", f"import {module}"], capture_output=True, check=True
-            )
-        except subprocess.CalledProcessError:
+        _, import_error = _try_import(module)
+        if import_error is not None:
             failed_modules.append(module)
 
     if failed_modules:
@@ -162,28 +158,15 @@ def main():
 
     # Check 6: Test MCP server startup (quick test)
     check("MCP server startup")
-    try:
-        # Try to import and instantiate the MCP server
-        result = subprocess.run(
-            [
-                sys.executable,
-                "-c",
-                "from framework.mcp.agent_builder_server import mcp; print('OK')",
-            ],
-            capture_output=True,
-            text=True,
-            check=True,
-            timeout=5,
-        )
-        if "OK" in result.stdout:
-            success("server can start")
-        else:
-            warning("unexpected output")
-    except subprocess.TimeoutExpired:
-        warning("server startup slow (might be OK)")
-    except subprocess.CalledProcessError as e:
+    agent_builder_module, startup_error = _try_import("framework.mcp.agent_builder_server")
+    if startup_error is None and hasattr(agent_builder_module, "mcp"):
+        success("server can start")
+    elif startup_error is None:
+        warning("module loaded but MCP object not found")
+        all_checks_passed = False
+    else:
         error("server failed to start")
-        logger.error(f"  Error: {e.stderr}")
+        logger.error(f"  Error: {startup_error}")
         all_checks_passed = False
 
     logger.info("")
