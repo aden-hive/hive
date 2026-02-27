@@ -40,7 +40,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 CLAUDE_CREDENTIALS_FILE = Path.home() / ".claude" / ".credentials.json"
-CLAUDE_OAUTH_TOKEN_URL = "https://console.anthropic.com/v1/oauth/token"
+CLAUDE_OAUTH_TOKEN_URL = "https://console.anthropic.com/v1/oauth/token"  # noqa: S105
 CLAUDE_OAUTH_CLIENT_ID = "9d1c250a-e61b-44d9-88ed-5944d1962f5e"
 
 # Buffer in seconds before token expiry to trigger a proactive refresh
@@ -48,7 +48,7 @@ _TOKEN_REFRESH_BUFFER_SECS = 300  # 5 minutes
 
 # Codex (OpenAI) subscription auth
 CODEX_AUTH_FILE = Path.home() / ".codex" / "auth.json"
-CODEX_OAUTH_TOKEN_URL = "https://auth.openai.com/oauth/token"
+CODEX_OAUTH_TOKEN_URL = "https://auth.openai.com/oauth/token"  # noqa: S105
 CODEX_OAUTH_CLIENT_ID = "app_EMoamEEZ73f0CkXaXp7hrann"
 CODEX_KEYCHAIN_SERVICE = "Codex Auth"
 _CODEX_TOKEN_LIFETIME_SECS = 3600  # 1 hour (no explicit expiry field)
