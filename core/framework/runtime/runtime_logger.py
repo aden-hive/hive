@@ -69,7 +69,7 @@ class RuntimeLogger:
         else:
             ts = datetime.now(UTC).strftime("%Y%m%dT%H%M%S")
             short_uuid = uuid.uuid4().hex[:8]
-            self._run_id = f"{ts}_{short_uuid}"
+            self._run_id = f"session_{ts}_{short_uuid}"
 
         self._goal_id = goal_id
         self._started_at = datetime.now(UTC).isoformat()

@@ -30,13 +30,13 @@ class TestRuntimeLogStore:
     @pytest.mark.asyncio
     async def test_ensure_run_dir_creates_directory(self, tmp_path: Path):
         store = RuntimeLogStore(tmp_path / "logs")
-        store.ensure_run_dir("test_run_1")
-        assert (tmp_path / "logs" / "runs" / "test_run_1").is_dir()
+        store.ensure_run_dir("session_test_run_1")
+        assert (tmp_path / "logs" / "sessions" / "session_test_run_1" / "logs").is_dir()
 
     @pytest.mark.asyncio
     async def test_append_and_load_details(self, tmp_path: Path):
         store = RuntimeLogStore(tmp_path / "logs")
-        store.ensure_run_dir("test_run_2")
+        store.ensure_run_dir("session_test_run_2")
 
         detail1 = NodeDetail(
             node_id="node-1",
@@ -56,10 +56,10 @@ class TestRuntimeLogStore:
             total_steps=1,
         )
 
-        store.append_node_detail("test_run_2", detail1)
-        store.append_node_detail("test_run_2", detail2)
+        store.append_node_detail("session_test_run_2", detail1)
+        store.append_node_detail("session_test_run_2", detail2)
 
-        loaded = await store.load_details("test_run_2")
+        loaded = await store.load_details("session_test_run_2")
         assert loaded is not None
         assert len(loaded.nodes) == 2
         assert loaded.nodes[0].node_id == "node-1"
@@ -69,7 +69,7 @@ class TestRuntimeLogStore:
     @pytest.mark.asyncio
     async def test_append_and_load_tool_logs(self, tmp_path: Path):
         store = RuntimeLogStore(tmp_path / "logs")
-        store.ensure_run_dir("test_run_3")
+        store.ensure_run_dir("session_test_run_3")
 
         step = NodeStepLog(
             node_id="node-1",
@@ -91,9 +91,9 @@ class TestRuntimeLogStore:
             verdict="CONTINUE",
         )
 
-        store.append_step("test_run_3", step)
+        store.append_step("session_test_run_3", step)
 
-        loaded = await store.load_tool_logs("test_run_3")
+        loaded = await store.load_tool_logs("session_test_run_3")
         assert loaded is not None
         assert len(loaded.steps) == 1
         assert loaded.steps[0].tool_calls[0].tool_name == "web_search"
@@ -104,7 +104,7 @@ class TestRuntimeLogStore:
     async def test_save_and_load_summary(self, tmp_path: Path):
         store = RuntimeLogStore(tmp_path / "logs")
         summary = RunSummaryLog(
-            run_id="test_run_1",
+            run_id="session_test_run_1",
             agent_id="agent-a",
             goal_id="goal-1",
             status="success",
@@ -115,11 +115,11 @@ class TestRuntimeLogStore:
             execution_quality="clean",
         )
 
-        await store.save_summary("test_run_1", summary)
+        await store.save_summary("session_test_run_1", summary)
 
-        loaded = await store.load_summary("test_run_1")
+        loaded = await store.load_summary("session_test_run_1")
         assert loaded is not None
-        assert loaded.run_id == "test_run_1"
+        assert loaded.run_id == "session_test_run_1"
         assert loaded.status == "success"
         assert loaded.total_nodes_executed == 3
         assert loaded.goal_id == "goal-1"
@@ -128,9 +128,9 @@ class TestRuntimeLogStore:
     @pytest.mark.asyncio
     async def test_load_missing_run_returns_none(self, tmp_path: Path):
         store = RuntimeLogStore(tmp_path / "logs")
-        assert await store.load_summary("nonexistent") is None
-        assert await store.load_details("nonexistent") is None
-        assert await store.load_tool_logs("nonexistent") is None
+        assert await store.load_summary("session_nonexistent") is None
+        assert await store.load_details("session_nonexistent") is None
+        assert await store.load_tool_logs("session_nonexistent") is None
 
     @pytest.mark.asyncio
     async def test_list_runs_empty(self, tmp_path: Path):
@@ -143,21 +143,21 @@ class TestRuntimeLogStore:
         store = RuntimeLogStore(tmp_path / "logs")
 
         # Save a success run
-        store.ensure_run_dir("run_ok")
+        store.ensure_run_dir("session_run_ok")
         await store.save_summary(
-            "run_ok",
+            "session_run_ok",
             RunSummaryLog(
-                run_id="run_ok",
+                run_id="session_run_ok",
                 status="success",
                 started_at="2025-01-01T00:00:01",
             ),
         )
         # Save a failure run
-        store.ensure_run_dir("run_fail")
+        store.ensure_run_dir("session_run_fail")
         await store.save_summary(
-            "run_fail",
+            "session_run_fail",
             RunSummaryLog(
-                run_id="run_fail",
+                run_id="session_run_fail",
                 status="failure",
                 needs_attention=True,
                 started_at="2025-01-01T00:00:02",
@@ -171,19 +171,19 @@ class TestRuntimeLogStore:
         # Filter by status
         success_runs = await store.list_runs(status="success")
         assert len(success_runs) == 1
-        assert success_runs[0].run_id == "run_ok"
+        assert success_runs[0].run_id == "session_run_ok"
 
         # Filter by needs_attention
         attention_runs = await store.list_runs(status="needs_attention")
         assert len(attention_runs) == 1
-        assert attention_runs[0].run_id == "run_fail"
+        assert attention_runs[0].run_id == "session_run_fail"
 
     @pytest.mark.asyncio
     async def test_list_runs_sorted_by_timestamp_desc(self, tmp_path: Path):
         store = RuntimeLogStore(tmp_path / "logs")
 
         for i in range(5):
-            run_id = f"run_{i}"
+            run_id = f"session_run_{i}"
             store.ensure_run_dir(run_id)
             await store.save_summary(
                 run_id,
@@ -196,15 +196,15 @@ class TestRuntimeLogStore:
 
         runs = await store.list_runs()
         # Most recent first
-        assert runs[0].run_id == "run_4"
-        assert runs[-1].run_id == "run_0"
+        assert runs[0].run_id == "session_run_4"
+        assert runs[-1].run_id == "session_run_0"
 
     @pytest.mark.asyncio
     async def test_list_runs_limit(self, tmp_path: Path):
         store = RuntimeLogStore(tmp_path / "logs")
 
         for i in range(10):
-            run_id = f"run_{i}"
+            run_id = f"session_run_{i}"
             store.ensure_run_dir(run_id)
             await store.save_summary(
                 run_id,
@@ -224,45 +224,49 @@ class TestRuntimeLogStore:
         store = RuntimeLogStore(tmp_path / "logs")
 
         # Completed run with summary
-        store.ensure_run_dir("run_done")
+        store.ensure_run_dir("session_run_done")
         await store.save_summary(
-            "run_done",
+            "session_run_done",
             RunSummaryLog(
-                run_id="run_done",
+                run_id="session_run_done",
                 status="success",
                 started_at="2025-01-01T00:00:01",
             ),
         )
 
         # In-progress run: directory exists but no summary.json
-        store.ensure_run_dir("run_active")
+        store.ensure_run_dir("session_run_active")
 
         all_runs = await store.list_runs()
         assert len(all_runs) == 2
         run_ids = {r.run_id for r in all_runs}
-        assert "run_done" in run_ids
-        assert "run_active" in run_ids
+        assert "session_run_done" in run_ids
+        assert "session_run_active" in run_ids
 
-        active = next(r for r in all_runs if r.run_id == "run_active")
+        active = next(r for r in all_runs if r.run_id == "session_run_active")
         assert active.status == "in_progress"
 
     @pytest.mark.asyncio
     async def test_read_node_details_sync(self, tmp_path: Path):
         store = RuntimeLogStore(tmp_path / "logs")
-        store.ensure_run_dir("test_run")
+        store.ensure_run_dir("session_test_run")
 
         store.append_node_detail(
-            "test_run",
+            "session_test_run",
             NodeDetail(
-                node_id="n1", node_name="A", success=True, input_tokens=100, output_tokens=50
+                node_id="n1",
+                node_name="A",
+                success=True,
+                input_tokens=100,
+                output_tokens=50,
             ),
         )
         store.append_node_detail(
-            "test_run",
+            "session_test_run",
             NodeDetail(node_id="n2", node_name="B", success=False, error="oops"),
         )
 
-        details = store.read_node_details_sync("test_run")
+        details = store.read_node_details_sync("session_test_run")
         assert len(details) == 2
         assert details[0].node_id == "n1"
         assert details[1].error == "oops"
@@ -271,15 +275,15 @@ class TestRuntimeLogStore:
     async def test_corrupt_jsonl_line_skipped(self, tmp_path: Path):
         """A corrupt JSONL line should be skipped without breaking reads."""
         store = RuntimeLogStore(tmp_path / "logs")
-        store.ensure_run_dir("test_run")
+        store.ensure_run_dir("session_test_run")
 
         # Write a valid line, a corrupt line, then another valid line
-        jsonl_path = tmp_path / "logs" / "runs" / "test_run" / "details.jsonl"
+        jsonl_path = tmp_path / "logs" / "sessions" / "session_test_run" / "logs" / "details.jsonl"
         valid1 = json.dumps(NodeDetail(node_id="n1", node_name="A", success=True).model_dump())
         valid2 = json.dumps(NodeDetail(node_id="n2", node_name="B", success=True).model_dump())
         jsonl_path.write_text(f"{valid1}\n{{corrupt line\n{valid2}\n")
 
-        details = store.read_node_details_sync("test_run")
+        details = store.read_node_details_sync("session_test_run")
         assert len(details) == 2
         assert details[0].node_id == "n1"
         assert details[1].node_id == "n2"
@@ -304,7 +308,7 @@ class TestRuntimeLogger:
         store = RuntimeLogStore(tmp_path / "logs")
         rl = RuntimeLogger(store=store, agent_id="test-agent")
         run_id = rl.start_run("goal-1")
-        assert (tmp_path / "logs" / "runs" / run_id).is_dir()
+        assert (tmp_path / "logs" / "sessions" / run_id / "logs").is_dir()
 
     @pytest.mark.asyncio
     async def test_log_step_writes_to_disk_immediately(self, tmp_path: Path):
@@ -322,7 +326,7 @@ class TestRuntimeLogger:
         )
 
         # Verify the file exists and has one line
-        jsonl_path = tmp_path / "logs" / "runs" / run_id / "tool_logs.jsonl"
+        jsonl_path = tmp_path / "logs" / "sessions" / run_id / "logs" / "tool_logs.jsonl"
         assert jsonl_path.exists()
         lines = [line for line in jsonl_path.read_text().strip().split("\n") if line]
         assert len(lines) == 1
@@ -345,7 +349,7 @@ class TestRuntimeLogger:
             exit_status="success",
         )
 
-        jsonl_path = tmp_path / "logs" / "runs" / run_id / "details.jsonl"
+        jsonl_path = tmp_path / "logs" / "sessions" / run_id / "logs" / "details.jsonl"
         assert jsonl_path.exists()
         lines = [line for line in jsonl_path.read_text().strip().split("\n") if line]
         assert len(lines) == 1
