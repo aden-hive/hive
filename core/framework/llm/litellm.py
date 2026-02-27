@@ -129,8 +129,8 @@ def _estimate_tokens(model: str, messages: list[dict]) -> tuple[int, str]:
         try:
             count = litellm.token_counter(model=model, messages=messages)
             return count, "litellm"
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("litellm token counter failed for model '%s': %s", model, exc)
 
     # Fallback: rough estimate based on character count (~4 chars per token)
     total_chars = sum(len(str(m.get("content", ""))) for m in messages)
