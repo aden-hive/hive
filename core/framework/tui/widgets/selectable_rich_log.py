@@ -8,6 +8,7 @@ by app.py). Press Escape or single-click to clear selection.
 
 from __future__ import annotations
 
+import shutil
 import subprocess
 import sys
 
@@ -199,25 +200,37 @@ def _copy_to_clipboard(text: str) -> None:
     """Copy text to system clipboard using platform-native tools."""
     try:
         if sys.platform == "darwin":
-            subprocess.run(["pbcopy"], input=text.encode(), check=True, timeout=5)
+            pbcopy_path = shutil.which("pbcopy")
+            if not pbcopy_path:
+                return
+            subprocess.run([pbcopy_path], input=text.encode(), check=True, timeout=5)  # noqa: S603
         elif sys.platform == "win32":
-            subprocess.run(
-                ["clip.exe"],
+            clip_path = shutil.which("clip.exe")
+            if not clip_path:
+                return
+            subprocess.run(  # noqa: S603
+                [clip_path],
                 input=text.encode("utf-16le"),
                 check=True,
                 timeout=5,
             )
         elif sys.platform.startswith("linux"):
             try:
-                subprocess.run(
-                    ["xclip", "-selection", "clipboard"],
+                xclip_path = shutil.which("xclip")
+                if not xclip_path:
+                    raise FileNotFoundError("xclip not found")
+                subprocess.run(  # noqa: S603
+                    [xclip_path, "-selection", "clipboard"],
                     input=text.encode(),
                     check=True,
                     timeout=5,
                 )
             except (subprocess.SubprocessError, FileNotFoundError):
-                subprocess.run(
-                    ["xsel", "--clipboard", "--input"],
+                xsel_path = shutil.which("xsel")
+                if not xsel_path:
+                    return
+                subprocess.run(  # noqa: S603
+                    [xsel_path, "--clipboard", "--input"],
                     input=text.encode(),
                     check=True,
                     timeout=5,
