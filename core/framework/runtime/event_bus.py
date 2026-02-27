@@ -88,6 +88,7 @@ class EventType(StrEnum):
     # LLM streaming observability
     LLM_TEXT_DELTA = "llm_text_delta"
     LLM_REASONING_DELTA = "llm_reasoning_delta"
+    LLM_TURN_COMPLETE = "llm_turn_complete"
 
     # Tool lifecycle
     TOOL_CALL_STARTED = "tool_call_started"
@@ -592,6 +593,36 @@ class EventBus:
                 node_id=node_id,
                 execution_id=execution_id,
                 data={"content": content},
+            )
+        )
+
+    async def emit_llm_turn_complete(
+        self,
+        stream_id: str,
+        node_id: str,
+        stop_reason: str,
+        model: str,
+        input_tokens: int,
+        output_tokens: int,
+        execution_id: str | None = None,
+        iteration: int | None = None,
+    ) -> None:
+        """Emit LLM turn completion with stop reason and model metadata."""
+        data: dict = {
+            "stop_reason": stop_reason,
+            "model": model,
+            "input_tokens": input_tokens,
+            "output_tokens": output_tokens,
+        }
+        if iteration is not None:
+            data["iteration"] = iteration
+        await self.publish(
+            AgentEvent(
+                type=EventType.LLM_TURN_COMPLETE,
+                stream_id=stream_id,
+                node_id=node_id,
+                execution_id=execution_id,
+                data=data,
             )
         )
 

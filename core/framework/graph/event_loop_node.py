@@ -479,6 +479,16 @@ class EventLoopNode(NodeProtocol):
                     )
                     total_input_tokens += turn_tokens.get("input", 0)
                     total_output_tokens += turn_tokens.get("output", 0)
+                    await self._publish_llm_turn_complete(
+                        stream_id,
+                        node_id,
+                        stop_reason=turn_tokens.get("stop_reason", ""),
+                        model=turn_tokens.get("model", ""),
+                        input_tokens=turn_tokens.get("input", 0),
+                        output_tokens=turn_tokens.get("output", 0),
+                        execution_id=execution_id,
+                        iteration=iteration,
+                    )
                     break  # success — exit retry loop
 
                 except Exception as e:
@@ -1283,6 +1293,8 @@ class EventLoopNode(NodeProtocol):
                 elif isinstance(event, FinishEvent):
                     token_counts["input"] += event.input_tokens
                     token_counts["output"] += event.output_tokens
+                    token_counts["stop_reason"] = event.stop_reason
+                    token_counts["model"] = event.model
 
                 elif isinstance(event, StreamErrorEvent):
                     if not event.recoverable:
@@ -1300,10 +1312,12 @@ class EventLoopNode(NodeProtocol):
 
             final_text = accumulated_text
             logger.info(
-                "[%s] LLM response: text=%r tool_calls=%s",
+                "[%s] LLM response: text=%r tool_calls=%s stop=%s model=%s",
                 node_id,
                 accumulated_text[:300] if accumulated_text else "(empty)",
                 [tc.tool_name for tc in tool_calls] if tool_calls else "[]",
+                token_counts.get("stop_reason", "?"),
+                token_counts.get("model", "?"),
             )
 
             # Record assistant message (write-through via conversation store)
@@ -2686,6 +2700,29 @@ class EventLoopNode(NodeProtocol):
                 node_id=node_id,
                 iteration=iteration,
                 execution_id=execution_id,
+            )
+
+    async def _publish_llm_turn_complete(
+        self,
+        stream_id: str,
+        node_id: str,
+        stop_reason: str,
+        model: str,
+        input_tokens: int,
+        output_tokens: int,
+        execution_id: str = "",
+        iteration: int | None = None,
+    ) -> None:
+        if self._event_bus:
+            await self._event_bus.emit_llm_turn_complete(
+                stream_id=stream_id,
+                node_id=node_id,
+                stop_reason=stop_reason,
+                model=model,
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
+                execution_id=execution_id,
+                iteration=iteration,
             )
 
     async def _publish_loop_completed(
