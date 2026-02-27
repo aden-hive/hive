@@ -443,12 +443,11 @@ def register_queen_lifecycle_tools(
             """
             runtime = _get_runtime()
             if runtime is not None:
-                return json.dumps(
-                    {
-                        "error": "A worker is already loaded in this session. "
-                        "Unload it first or open a new tab."
-                    }
-                )
+                try:
+                    await session_manager.unload_worker(manager_session_id)
+                except Exception as e:
+                    logger.error("Failed to unload existing worker: %s", e, exc_info=True)
+                    return json.dumps({"error": f"Failed to unload existing worker: {e}"})
 
             resolved_path = Path(agent_path).resolve()
             if not resolved_path.exists():
