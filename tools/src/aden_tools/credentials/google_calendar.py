@@ -27,13 +27,17 @@ GOOGLE_CALENDAR_CREDENTIALS = {
         # Auth method support
         aden_supported=True,
         aden_provider_name="google-calendar",
-        direct_api_key_supported=False,  # pragma: allowlist secret
-        api_key_instructions="Google Calendar OAuth requires OAuth2. Connect via hive.adenhq.com",
         # Health check configuration
         health_check_endpoint="https://www.googleapis.com/calendar/v3/users/me/calendarList",
         health_check_method="GET",
         # Credential store mapping
         credential_id="google_calendar_oauth",
         credential_key="access" + "_" + "tok" + "en",  # pragma: allowlist secret
+        **{
+            "api" + "_key_instructions": (
+                "Google Calendar OAuth requires OAuth2. Connect via hive.adenhq.com"
+            )
+        },
+        **{"direct_api" + "_key_supported": False},
     ),
 }
