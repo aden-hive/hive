@@ -15,6 +15,7 @@ Requires: GOOGLE_ACCESS_TOKEN (via Aden OAuth2)
 from __future__ import annotations
 
 import base64
+import binascii
 import os
 from typing import TYPE_CHECKING, Literal
 
@@ -25,6 +26,14 @@ if TYPE_CHECKING:
     from aden_tools.credentials import CredentialStoreAdapter
 
 GMAIL_API_BASE = "https://gmail.googleapis.com/gmail/v1/users/me"
+
+
+def _decode_gmail_body(encoded_data: str) -> str | None:
+    """Decode Gmail base64url body content to UTF-8 text."""
+    try:
+        return base64.urlsafe_b64decode(encoded_data).decode("utf-8")
+    except (binascii.Error, UnicodeDecodeError, ValueError):
+        return None
 
 
 def _sanitize_path_param(param: str, param_name: str = "parameter") -> str:
@@ -235,10 +244,9 @@ def register_tools(
         # Direct body on payload
         body = payload.get("body", {})
         if body.get("data"):
-            try:
-                return base64.urlsafe_b64decode(body["data"]).decode("utf-8")
-            except Exception:
-                pass
+            decoded_body = _decode_gmail_body(body["data"])
+            if decoded_body is not None:
+                return decoded_body
 
         # Multipart: look for text/plain first, then text/html
         parts = payload.get("parts", [])
@@ -247,10 +255,9 @@ def register_tools(
                 if part.get("mimeType") == mime_type:
                     part_body = part.get("body", {})
                     if part_body.get("data"):
-                        try:
-                            return base64.urlsafe_b64decode(part_body["data"]).decode("utf-8")
-                        except Exception:
-                            pass
+                        decoded_part = _decode_gmail_body(part_body["data"])
+                        if decoded_part is not None:
+                            return decoded_part
         return None
 
     @mcp.tool()
