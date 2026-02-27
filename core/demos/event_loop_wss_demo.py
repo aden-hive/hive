@@ -536,8 +536,8 @@ async def handle_ws(websocket):
             if event.node_id:
                 payload["node_id"] = event.node_id
             await websocket.send(json.dumps(payload))
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("Failed to forward event to websocket", exc_info=exc)
 
     bus.subscribe(
         event_types=[
@@ -577,8 +577,8 @@ async def handle_ws(websocket):
     async def on_input_requested(event):
         try:
             await websocket.send(json.dumps({"type": "ready"}))
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("Failed to send ready signal", exc_info=exc)
 
     bus.subscribe(
         event_types=[EventType.CLIENT_INPUT_REQUESTED],
@@ -622,8 +622,8 @@ async def handle_ws(websocket):
                             }
                         )
                     )
-                except Exception:
-                    pass
+                except Exception as exc:
+                    logger.debug("Failed to send loop result", exc_info=exc)
                 logger.info(f"Loop ended: success={result.success}, tokens={result.tokens_used}")
             except websockets.exceptions.ConnectionClosed:
                 logger.info("Loop stopped: WebSocket closed")
@@ -640,8 +640,8 @@ async def handle_ws(websocket):
                             }
                         )
                     )
-                except Exception:
-                    pass
+                except Exception as exc:
+                    logger.debug("Failed to send loop error", exc_info=exc)
 
         loop_task = asyncio.create_task(_run())
 
@@ -663,7 +663,8 @@ async def handle_ws(websocket):
         async for raw in websocket:
             try:
                 msg = json.loads(raw)
-            except Exception:
+            except Exception as exc:
+                logger.debug("Ignoring malformed websocket message", exc_info=exc)
                 continue
 
             # Clear command
@@ -727,7 +728,7 @@ async def main():
     port = 8765
     async with websockets.serve(
         handle_ws,
-        "0.0.0.0",
+        "0.0.0.0",  # noqa: S104
         port,
         process_request=process_request,
     ):
