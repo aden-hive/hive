@@ -249,7 +249,7 @@ class TokenLifecycleManager:
 
         return OAuth2Token(
             access_token=access_token,
-            token_type="Bearer",
+            token_type="Bearer",  # noqa: S106
             expires_at=expires_at,
             refresh_token=credential.get_key("refresh_token"),
             scope=credential.get_key("scope"),
