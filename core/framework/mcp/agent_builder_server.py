@@ -46,6 +46,7 @@ from framework.utils.io import atomic_write  # noqa: E402
 
 # Initialize MCP server
 mcp = FastMCP("agent-builder")
+logger = logging.getLogger(__name__)
 
 
 def _run_subprocess(command: list[str], **kwargs):
