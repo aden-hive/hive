@@ -53,6 +53,12 @@ ocr = [
 excel = [
     "openpyxl>=3.1.0",
 ]
+
+office = [
+    "openpyxl>=3.1.0",
+    "python-docx>=1.1.0",
+    "python-pptx>=0.6.21",
+]
 sql = [
     "duckdb>=1.0.0",
 ]
@@ -66,6 +72,8 @@ all = [
     "duckdb>=1.0.0",
     "openpyxl>=3.1.0",
     "google-cloud-bigquery>=3.0.0",
+    "python-docx>=1.1.0",
+    "python-pptx>=0.6.21",
 ]
 
 [tool.uv.sources]
@@ -113,3 +121,4 @@ dev = [
     "ruff>=0.14.14",
     "duckdb>=1.4.4",
 ]
+

@@ -17,13 +17,26 @@ from typing import TYPE_CHECKING
 
 from fastmcp import FastMCP
 
+
+#office _tools
+from .office_tool.excel import register_tools as register_excel_generate
+
+from .office_tool.word import register_tools as register_word_generate
+
+
+
 if TYPE_CHECKING:
     from aden_tools.credentials import CredentialStoreAdapter
 
 # Import register_tools from each tool module
 from .account_info_tool import register_tools as register_account_info
 from .apollo_tool import register_tools as register_apollo
-from .arxiv_tool import register_tools as register_arxiv
+try:
+    from .arxiv_tool import register_tools as register_arxiv
+except ImportError:
+    register_arxiv=None
+
+
 from .bigquery_tool import register_tools as register_bigquery
 from .brevo_tool import register_tools as register_brevo
 from .calcom_tool import register_tools as register_calcom
@@ -79,6 +92,7 @@ from .web_search_tool import register_tools as register_web_search
 
 # Web and PDF tools
 from .wikipedia_tool import register_tools as register_wikipedia
+from .office_tool.powerpoint import register_tools as register_powerpoint
 
 
 def register_all_tools(
@@ -102,8 +116,18 @@ def register_all_tools(
     register_pdf_read(mcp)
     register_time(mcp)
     register_runtime_logs(mcp)
+<<<<<<< HEAD
     register_wikipedia(mcp)
     register_arxiv(mcp)
+=======
+
+    #office tools
+    register_excel(mcp)
+    register_excel_generate(mcp)
+    register_word_generate(mcp, credentials=credentials)
+>>>>>>> 98418ae (fix: stabilize office tools (optional deps, lazy imports, registration cleanup, tests passing))
+    register_powerpoint(mcp)
+
 
     # Tools that need credentials (pass credentials if provided)
     # web_search supports multiple providers (Google, Brave) with auto-detection
@@ -141,7 +165,10 @@ def register_all_tools(
     register_execute_command(mcp)
     register_data_tools(mcp)
     register_csv(mcp)
-    register_excel(mcp)
+
+
+
+
 
     # Security scanning tools (no credentials needed)
     register_ssl_tls_scanner(mcp)
