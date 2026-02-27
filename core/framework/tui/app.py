@@ -473,14 +473,12 @@ class AdenTUI(App):
         from pathlib import Path
 
         from framework.graph.executor import GraphExecutor
-        from framework.monitoring import judge_goal, judge_graph
         from framework.runner.tool_registry import ToolRegistry
         from framework.runtime.core import Runtime
-        from framework.runtime.event_bus import EventType as _ET
         from framework.tools.queen_lifecycle_tools import register_queen_lifecycle_tools
         from framework.tools.worker_monitoring_tools import register_worker_monitoring_tools
 
-        log = logging.getLogger("tui.judge")
+        log = logging.getLogger("tui.queen")
 
         try:
             storage_path = Path(storage_path)
@@ -502,63 +500,15 @@ class AdenTUI(App):
                 worker_graph_id=self.runtime._graph_id,
             )
 
-            # 2. Storage dirs — global, not per-agent. Queen and judge are
-            #    supervisory components that outlive any single worker.
+            # 2. Storage dirs — global, not per-agent.
             hive_home = Path.home() / ".hive"
-            judge_dir = hive_home / "judge" / "session" / session_id
-            judge_dir.mkdir(parents=True, exist_ok=True)
             queen_dir = hive_home / "queen" / "session" / session_id
             queen_dir.mkdir(parents=True, exist_ok=True)
 
-            # ---------------------------------------------------------------
-            # 3. Health judge — background task, fires every 2 minutes.
-            # ---------------------------------------------------------------
-            judge_runtime = Runtime(hive_home / "judge")
-            monitoring_tools = list(monitoring_registry.get_tools().values())
-            monitoring_executor = monitoring_registry.get_executor()
-
-            # Scoped event buses — stamp graph_id on every event so
-            # downstream routing (queen-primary mode) can distinguish
-            # queen/judge/worker events.
+            # Health judge disabled for simplicity.
             from framework.runtime.execution_stream import GraphScopedEventBus
 
-            judge_event_bus = GraphScopedEventBus(event_bus, "judge")
             queen_event_bus = GraphScopedEventBus(event_bus, "queen")
-
-            async def _judge_loop():
-                interval = 120  # seconds
-                first = True
-                while True:
-                    if not first:
-                        await asyncio.sleep(interval)
-                    first = False
-                    try:
-                        executor = GraphExecutor(
-                            runtime=judge_runtime,
-                            llm=llm,
-                            tools=monitoring_tools,
-                            tool_executor=monitoring_executor,
-                            event_bus=judge_event_bus,
-                            stream_id="judge",
-                            storage_path=judge_dir,
-                            loop_config=judge_graph.loop_config,
-                        )
-                        await executor.execute(
-                            graph=judge_graph,
-                            goal=judge_goal,
-                            input_data={
-                                "event": {"source": "timer", "reason": "scheduled"},
-                            },
-                            session_state={"resume_session_id": session_id},
-                        )
-                    except Exception:
-                        log.error("Health judge tick failed", exc_info=True)
-
-            self._judge_task = asyncio.run_coroutine_threadsafe(
-                _judge_loop(),
-                agent_loop,
-            )
-            self._judge_graph_id = "judge"
 
             # ---------------------------------------------------------------
             # 4. Queen — persistent interactive conversation.
@@ -690,31 +640,8 @@ class AdenTUI(App):
 
             self.chat_repl._queen_inject_callback = _inject_queen
 
-            # Judge escalation → inject into queen conversation as a message.
-            async def _on_escalation(event):
-                ticket = event.data.get("ticket", {})
-                executor = self._queen_executor
-                if executor is None:
-                    log.warning("Escalation received but queen executor is None")
-                    return
-                node = executor.node_registry.get("queen")
-                if node is not None and hasattr(node, "inject_event"):
-                    import json as _json
-
-                    msg = "[ESCALATION TICKET from Health Judge]\n" + _json.dumps(
-                        ticket, indent=2, ensure_ascii=False
-                    )
-                    await node.inject_event(msg)
-                else:
-                    log.warning("Escalation received but queen node not ready for injection")
-
-            self._queen_escalation_sub = event_bus.subscribe(
-                event_types=[_ET.WORKER_ESCALATION_TICKET],
-                handler=_on_escalation,
-            )
-
             self.notify(
-                "Queen + health judge active",
+                "Queen active",
                 severity="information",
                 timeout=3,
             )

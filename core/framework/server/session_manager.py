@@ -167,9 +167,9 @@ class SessionManager:
                 session, worker_identity=worker_identity, initial_prompt=initial_prompt
             )
 
-            # Start health judge
-            if agent_path.name != "hive_coder" and session.worker_runtime:
-                await self._start_judge(session, session.runner._storage_path)
+            # Health judge disabled for simplicity.
+            # if agent_path.name != "hive_coder" and session.worker_runtime:
+            #     await self._start_judge(session, session.runner._storage_path)
 
         except Exception:
             # If anything fails, tear down the session
@@ -314,9 +314,10 @@ class SessionManager:
             model=model,
         )
 
-        # Start judge + notify queen (skip for hive_coder itself)
+        # Notify queen about the loaded worker (skip for hive_coder itself).
+        # Health judge disabled for simplicity.
         if agent_path.name != "hive_coder" and session.worker_runtime:
-            await self._start_judge(session, session.runner._storage_path)
+            # await self._start_judge(session, session.runner._storage_path)
             await self._notify_queen_worker_loaded(session)
 
         # Emit SSE event so the frontend can update UI
