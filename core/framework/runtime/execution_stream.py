@@ -329,20 +329,21 @@ class ExecutionStream:
         self._running = False
 
         # Cancel all active executions
+        tasks_to_wait = []
         for _, task in self._execution_tasks.items():
             if not task.done():
                 task.cancel()
-                try:
-                    await task
-                except asyncio.CancelledError:
-                    pass
-                except RuntimeError as e:
-                    # Task may be attached to a different event loop (e.g., when TUI
-                    # uses a separate loop). Log and continue cleanup.
-                    if "attached to a different loop" in str(e):
-                        logger.warning(f"Task cleanup skipped (different event loop): {e}")
-                    else:
-                        raise
+                tasks_to_wait.append(task)
+
+        if tasks_to_wait:
+            # Wait briefly — don't block indefinitely if tasks are stuck
+            # in long-running operations (LLM calls, tool executions).
+            _, pending = await asyncio.wait(tasks_to_wait, timeout=5.0)
+            if pending:
+                logger.warning(
+                    "%d execution task(s) did not finish within 5s after cancellation",
+                    len(pending),
+                )
 
         self._execution_tasks.clear()
         self._active_executions.clear()
@@ -878,10 +879,11 @@ class ExecutionStream:
         task = self._execution_tasks.get(execution_id)
         if task and not task.done():
             task.cancel()
-            try:
-                await task
-            except asyncio.CancelledError:
-                pass
+            # Wait briefly for the task to finish. Don't block indefinitely —
+            # the task may be stuck in a long LLM API call that doesn't
+            # respond to cancellation quickly. The cancellation is already
+            # requested; the task will clean up in the background.
+            done, _ = await asyncio.wait({task}, timeout=5.0)
             return True
         return False
 

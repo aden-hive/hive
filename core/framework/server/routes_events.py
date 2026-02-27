@@ -89,6 +89,7 @@ async def handle_events(request: web.Request) -> web.StreamResponse:
         "node_loop_iteration",
         "node_loop_started",
         "credentials_required",
+        "worker_loaded",
     }
 
     async def on_event(event) -> None:
