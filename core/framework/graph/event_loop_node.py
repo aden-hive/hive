@@ -983,27 +983,27 @@ class EventLoopNode(NodeProtocol):
                 # next iteration.  If we let the judge fire now it sees
                 # "missing outputs" and injects RETRY feedback *before* the
                 # user's answer, confusing the LLM.
-                _continue_count += 1
-                if ctx.runtime_logger:
-                    iter_latency_ms = int((time.time() - iter_start) * 1000)
-                    verdict_fb = (
-                        "Auto-blocked for user input (pre-interaction)"
-                        if _cf_auto
-                        else "Blocked for ask_user input (skip judge)"
-                    )
-                    ctx.runtime_logger.log_step(
-                        node_id=node_id,
-                        node_type="event_loop",
-                        step_index=iteration,
-                        verdict="CONTINUE",
-                        verdict_feedback=verdict_fb,
-                        tool_calls=logged_tool_calls,
-                        llm_text=assistant_text,
-                        input_tokens=turn_tokens.get("input", 0),
-                        output_tokens=turn_tokens.get("output", 0),
-                        latency_ms=iter_latency_ms,
-                    )
-                continue
+                # _continue_count += 1
+                # if ctx.runtime_logger:
+                #     iter_latency_ms = int((time.time() - iter_start) * 1000)
+                #     verdict_fb = (
+                #         "Auto-blocked for user input (pre-interaction)"
+                #         if _cf_auto
+                #         else "Blocked for ask_user input (skip judge)"
+                #     )
+                #     ctx.runtime_logger.log_step(
+                #         node_id=node_id,
+                #         node_type="event_loop",
+                #         step_index=iteration,
+                #         verdict="CONTINUE",
+                #         verdict_feedback=verdict_fb,
+                #         tool_calls=logged_tool_calls,
+                #         llm_text=assistant_text,
+                #         input_tokens=turn_tokens.get("input", 0),
+                #         output_tokens=turn_tokens.get("output", 0),
+                #         latency_ms=iter_latency_ms,
+                #     )
+                # continue
 
             # 6i. Judge evaluation
             should_judge = (
@@ -1440,6 +1440,15 @@ class EventLoopNode(NodeProtocol):
             except asyncio.CancelledError:
                 if accumulated_text:
                     await conversation.add_assistant_message(content=accumulated_text)
+                # Distinguish cancel_current_turn() (cancels the child
+                # _stream_task) from stop_worker (cancels the parent
+                # execution task).  When the parent itself is cancelled,
+                # cancelling() > 0 — propagate so the executor can save
+                # state.  When only the child was cancelled, convert to
+                # TurnCancelled so the event loop continues.
+                task = asyncio.current_task()
+                if task and task.cancelling() > 0:
+                    raise
                 raise TurnCancelled() from None
             finally:
                 self._stream_task = None
@@ -1692,6 +1701,12 @@ class EventLoopNode(NodeProtocol):
                     *(self._execute_tool(tc) for tc in pending_real),
                     return_exceptions=True,
                 )
+                # gather(return_exceptions=True) captures CancelledError
+                # as a return value instead of propagating it.  Re-raise
+                # so stop_worker actually stops the execution.
+                for raw in raw_results:
+                    if isinstance(raw, asyncio.CancelledError):
+                        raise raw
                 for tc, raw in zip(pending_real, raw_results, strict=True):
                     if isinstance(raw, BaseException):
                         result = ToolResult(

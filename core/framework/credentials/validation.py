@@ -71,6 +71,7 @@ class CredentialStatus:
     direct_api_key_supported: bool
     credential_key: str
     aden_not_connected: bool  # Aden-only cred, ADEN_API_KEY set, but integration missing
+    alternative_group: str | None = None  # non-None when multiple providers can satisfy a tool
 
 
 @dataclass
@@ -82,8 +83,34 @@ class CredentialValidationResult:
 
     @property
     def failed(self) -> list[CredentialStatus]:
-        """Credentials that are missing, invalid, or Aden-not-connected."""
-        return [c for c in self.credentials if not c.available or c.valid is False]
+        """Credentials that are missing, invalid, or Aden-not-connected.
+
+        For alternative groups (multi-provider tools like send_email), the group
+        is satisfied if ANY member is available and valid — only report failures
+        when the entire group is unsatisfied.
+        """
+        # Check which alternative groups are satisfied
+        alt_satisfied: dict[str, bool] = {}
+        for c in self.credentials:
+            if not c.alternative_group:
+                continue
+            if c.alternative_group not in alt_satisfied:
+                alt_satisfied[c.alternative_group] = False
+            if c.available and c.valid is not False:
+                alt_satisfied[c.alternative_group] = True
+
+        result = []
+        for c in self.credentials:
+            if c.alternative_group:
+                # Skip if any alternative in the group is satisfied
+                if alt_satisfied.get(c.alternative_group, False):
+                    continue
+                if not c.available or c.valid is False:
+                    result.append(c)
+            else:
+                if not c.available or c.valid is False:
+                    result.append(c)
+        return result
 
     @property
     def has_errors(self) -> bool:
@@ -146,7 +173,7 @@ def _label(c: CredentialStatus) -> str:
     return c.credential_name
 
 
-def _presync_aden_tokens(credential_specs: dict) -> None:
+def _presync_aden_tokens(credential_specs: dict, *, force: bool = False) -> None:
     """Sync Aden-backed OAuth tokens into env vars for validation.
 
     When ADEN_API_KEY is available, fetches fresh OAuth tokens from the Aden
@@ -154,6 +181,11 @@ def _presync_aden_tokens(credential_specs: dict) -> None:
     tokens instead of stale or mis-stored values in the encrypted store.
     Only touches credentials that are ``aden_supported`` AND whose env var
     is not already set (so explicit user exports always win).
+
+    Args:
+        force: When True, overwrite env vars that are already set.  Used by
+            the credentials modal to pick up freshly reauthorized tokens
+            from Aden instead of reusing stale values from a prior sync.
     """
     from framework.credentials.store import CredentialStore
 
@@ -166,7 +198,7 @@ def _presync_aden_tokens(credential_specs: dict) -> None:
     for name, spec in credential_specs.items():
         if not spec.aden_supported:
             continue
-        if os.environ.get(spec.env_var):
+        if not force and os.environ.get(spec.env_var):
             continue  # Already set — don't overwrite
         cred_id = spec.credential_id or name
         # sync_all() already fetched everything available from Aden.
@@ -200,6 +232,7 @@ def validate_agent_credentials(
     quiet: bool = False,
     verify: bool = True,
     raise_on_error: bool = True,
+    force_refresh: bool = False,
 ) -> CredentialValidationResult:
     """Check that required credentials are available and valid before running an agent.
 
@@ -214,6 +247,9 @@ def validate_agent_credentials(
         verify: If True (default), run health checks on present credentials.
         raise_on_error: If True (default), raise CredentialError when validation
             fails.  Set to False to get the result without raising.
+        force_refresh: If True, force re-sync of Aden OAuth tokens even when
+            env vars are already set.  Used by the credentials modal after
+            reauthorization.
 
     Returns:
         CredentialValidationResult with status of ALL required credentials.
@@ -245,7 +281,7 @@ def validate_agent_credentials(
     # into env vars so validation sees fresh tokens instead of stale values
     # in the encrypted store (e.g., a previously mis-stored google.enc).
     if os.environ.get("ADEN_API_KEY"):
-        _presync_aden_tokens(CREDENTIAL_SPECS)
+        _presync_aden_tokens(CREDENTIAL_SPECS, force=force_refresh)
 
     env_mapping = {
         (spec.credential_id or name): spec.env_var for name, spec in CREDENTIAL_SPECS.items()
@@ -257,12 +293,12 @@ def validate_agent_credentials(
         storage = env_storage
     store = CredentialStore(storage=storage)
 
-    # Build reverse mappings
-    tool_to_cred: dict[str, str] = {}
+    # Build reverse mappings — 1:many for multi-provider tools (e.g. send_email → resend OR google)
+    tool_to_creds: dict[str, list[str]] = {}
     node_type_to_cred: dict[str, str] = {}
     for cred_name, spec in CREDENTIAL_SPECS.items():
         for tool_name in spec.tools:
-            tool_to_cred[tool_name] = cred_name
+            tool_to_creds.setdefault(tool_name, []).append(cred_name)
         for nt in spec.node_types:
             node_type_to_cred[nt] = cred_name
 
@@ -273,7 +309,11 @@ def validate_agent_credentials(
     to_verify: list[int] = []  # indices into all_credentials
 
     def _check_credential(
-        spec, cred_name: str, affected_tools: list[str], affected_node_types: list[str]
+        spec,
+        cred_name: str,
+        affected_tools: list[str],
+        affected_node_types: list[str],
+        alternative_group: str | None = None,
     ) -> None:
         cred_id = spec.credential_id or cred_name
         available = store.is_available(cred_id)
@@ -302,6 +342,7 @@ def validate_agent_credentials(
             direct_api_key_supported=spec.direct_api_key_supported,
             credential_key=spec.credential_key,
             aden_not_connected=is_aden_nc,
+            alternative_group=alternative_group,
         )
         all_credentials.append(status)
 
@@ -310,15 +351,53 @@ def validate_agent_credentials(
 
     # Check tool credentials
     for tool_name in sorted(required_tools):
-        cred_name = tool_to_cred.get(tool_name)
-        if cred_name is None or cred_name in checked:
+        cred_names = tool_to_creds.get(tool_name)
+        if cred_names is None:
             continue
-        checked.add(cred_name)
-        spec = CREDENTIAL_SPECS[cred_name]
-        if not spec.required:
+
+        # Filter to credentials we haven't already checked
+        unchecked = [cn for cn in cred_names if cn not in checked]
+        if not unchecked:
             continue
-        affected = sorted(t for t in required_tools if t in spec.tools)
-        _check_credential(spec, cred_name, affected_tools=affected, affected_node_types=[])
+
+        # Single provider — existing behavior
+        if len(unchecked) == 1:
+            cred_name = unchecked[0]
+            checked.add(cred_name)
+            spec = CREDENTIAL_SPECS[cred_name]
+            if not spec.required:
+                continue
+            affected = sorted(t for t in required_tools if t in spec.tools)
+            _check_credential(spec, cred_name, affected_tools=affected, affected_node_types=[])
+            continue
+
+        # Multi-provider (e.g. send_email → resend OR google):
+        # satisfied if ANY provider credential is available.
+        available_cn = None
+        for cn in unchecked:
+            spec = CREDENTIAL_SPECS[cn]
+            cred_id = spec.credential_id or cn
+            if store.is_available(cred_id):
+                available_cn = cn
+                break
+
+        if available_cn is not None:
+            # Found an available provider — check (and health-check) it
+            checked.add(available_cn)
+            spec = CREDENTIAL_SPECS[available_cn]
+            affected = sorted(t for t in required_tools if t in spec.tools)
+            _check_credential(spec, available_cn, affected_tools=affected, affected_node_types=[])
+        else:
+            # None available — report ALL alternatives so the modal can show them
+            group_key = tool_name  # e.g. "send_email"
+            for cn in unchecked:
+                checked.add(cn)
+                spec = CREDENTIAL_SPECS[cn]
+                affected = sorted(t for t in required_tools if t in spec.tools)
+                _check_credential(
+                    spec, cn, affected_tools=affected, affected_node_types=[],
+                    alternative_group=group_key,
+                )
 
     # Check node type credentials (e.g., ANTHROPIC_API_KEY for LLM nodes)
     for nt in sorted(node_types):
