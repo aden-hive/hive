@@ -8,6 +8,7 @@ Uses BeautifulSoup for HTML parsing and content extraction.
 
 from __future__ import annotations
 
+import logging
 from typing import Any
 from urllib.parse import urljoin, urlparse
 from urllib.robotparser import RobotFileParser
@@ -20,6 +21,8 @@ from playwright.async_api import (
     async_playwright,
 )
 from playwright_stealth import Stealth
+
+logger = logging.getLogger(__name__)
 
 # Browser-like User-Agent for actual page requests
 BROWSER_USER_AGENT = (
@@ -79,8 +82,8 @@ def register_tools(mcp: FastMCP) -> None:
                             "url": url,
                             "skipped": True,
                         }
-                except Exception:
-                    pass  # If robots.txt can't be fetched, proceed anyway
+                except Exception as exc:
+                    logger.debug("Failed to read robots.txt; proceeding with scrape", exc_info=exc)
 
             # Launch headless browser with stealth
             async with async_playwright() as p:
