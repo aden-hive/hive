@@ -10,6 +10,7 @@ Falls back to None when no GUI is available (SSH, headless).
 
 import asyncio
 import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -30,10 +31,13 @@ def _has_gui() -> bool:
 def _linux_file_dialog() -> subprocess.CompletedProcess | None:
     """Try zenity, then kdialog, on Linux. Returns CompletedProcess or None."""
     # Try zenity (GTK)
+    zenity_path = shutil.which("zenity")
     try:
-        return subprocess.run(
+        if not zenity_path:
+            raise FileNotFoundError("zenity not found")
+        return subprocess.run(  # noqa: S603
             [
-                "zenity",
+                zenity_path,
                 "--file-selection",
                 "--title=Select a PDF file",
                 "--file-filter=PDF files (*.pdf)|*.pdf",
@@ -46,10 +50,13 @@ def _linux_file_dialog() -> subprocess.CompletedProcess | None:
         pass
 
     # Try kdialog (KDE)
+    kdialog_path = shutil.which("kdialog")
     try:
-        return subprocess.run(
+        if not kdialog_path:
+            raise FileNotFoundError("kdialog not found")
+        return subprocess.run(  # noqa: S603
             [
-                "kdialog",
+                kdialog_path,
                 "--getopenfilename",
                 ".",
                 "PDF files (*.pdf)",
@@ -72,9 +79,12 @@ def _pick_pdf_subprocess() -> Path | None:
     """
     try:
         if sys.platform == "darwin":
-            result = subprocess.run(
+            osascript_path = shutil.which("osascript")
+            if not osascript_path:
+                return None
+            result = subprocess.run(  # noqa: S603
                 [
-                    "osascript",
+                    osascript_path,
                     "-e",
                     'POSIX path of (choose file of type {"com.adobe.pdf"} '
                     'with prompt "Select a PDF file")',
@@ -84,6 +94,9 @@ def _pick_pdf_subprocess() -> Path | None:
                 timeout=300,
             )
         elif sys.platform == "win32":
+            powershell_path = shutil.which("powershell")
+            if not powershell_path:
+                return None
             ps_script = (
                 "Add-Type -AssemblyName System.Windows.Forms; "
                 "$f = New-Object System.Windows.Forms.OpenFileDialog; "
@@ -91,8 +104,8 @@ def _pick_pdf_subprocess() -> Path | None:
                 "$f.Title = 'Select a PDF file'; "
                 "if ($f.ShowDialog() -eq 'OK') { $f.FileName }"
             )
-            result = subprocess.run(
-                ["powershell", "-NoProfile", "-Command", ps_script],
+            result = subprocess.run(  # noqa: S603
+                [powershell_path, "-NoProfile", "-Command", ps_script],
                 capture_output=True,
                 text=True,
                 timeout=300,
