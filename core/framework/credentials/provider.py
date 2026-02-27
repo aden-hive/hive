@@ -208,7 +208,8 @@ class StaticProvider(CredentialProvider):
                 value = key.get_secret_value()
                 if value and value.strip():
                     return True
-            except Exception:
+            except Exception as exc:
+                logger.debug("Error reading credential key for '%s': %s", credential.id, exc)
                 continue
 
         return False
