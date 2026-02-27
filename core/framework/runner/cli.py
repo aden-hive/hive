@@ -3,8 +3,13 @@
 import argparse
 import asyncio
 import json
+import logging
 import sys
+import webbrowser
 from pathlib import Path
+from urllib.parse import urlparse
+
+logger = logging.getLogger(__name__)
 
 
 def register_commands(subparsers: argparse._SubParsersAction) -> None:
@@ -1549,8 +1554,12 @@ def _extract_python_agent_metadata(agent_path: Path) -> tuple[str, str]:
                                         name = result
                                     elif result and field_name == "description":
                                         desc = result
-                                except Exception:
-                                    pass
+                                except Exception as exc:
+                                    logger.debug(
+                                        "Failed to evaluate string concat for field '%s': %s",
+                                        field_name,
+                                        exc,
+                                    )
 
                 return name, desc
 
@@ -1927,18 +1936,15 @@ def cmd_setup_credentials(args: argparse.Namespace) -> int:
 
 def _open_browser(url: str) -> None:
     """Open URL in the default browser (best-effort, non-blocking)."""
-    import subprocess
-    import sys
+    parsed = urlparse(url)
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        logger.debug("Skipping browser open for invalid URL: %s", url)
+        return
 
     try:
-        if sys.platform == "darwin":
-            subprocess.Popen(["open", url], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        elif sys.platform == "linux":
-            subprocess.Popen(
-                ["xdg-open", url], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
-            )
-    except Exception:
-        pass  # Best-effort — don't crash if browser can't open
+        webbrowser.open(url)
+    except Exception as exc:
+        logger.debug("Failed to open browser for URL '%s': %s", url, exc)
 
 
 def cmd_serve(args: argparse.Namespace) -> int:
