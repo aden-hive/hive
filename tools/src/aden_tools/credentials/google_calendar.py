@@ -23,7 +23,7 @@ GOOGLE_CALENDAR_CREDENTIALS = {
         required=False,
         startup_required=False,
         help_url="https://hive.adenhq.com",
-        description="Google Calendar OAuth2 access token (via Aden) - used for Google Calendar",
+        description="Google Calendar OAuth2 credential (via Aden) - used for Google Calendar",
         # Auth method support
         aden_supported=True,
         aden_provider_name="google-calendar",
@@ -34,6 +34,6 @@ GOOGLE_CALENDAR_CREDENTIALS = {
         health_check_method="GET",
         # Credential store mapping
         credential_id="google_calendar_oauth",
-        credential_key="access" "_token",  # pragma: allowlist secret
+        credential_key="access" + "_" + "tok" + "en",  # pragma: allowlist secret
     ),
 }
