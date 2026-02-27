@@ -52,6 +52,8 @@ lint.select = [
 ]
 
 lint.per-file-ignores."demos/*" = ["E501"]
+lint.per-file-ignores."**/tests/**/*.py" = ["S101", "S103", "S104", "S105", "S106", "S107", "S108", "S110", "S112", "S603", "S607"]
+lint.per-file-ignores."**/test_*.py" = ["S101", "S103", "S104", "S105", "S106", "S107", "S108", "S110", "S112", "S603", "S607"]
 lint.isort.combine-as-imports = true
 lint.isort.known-first-party = ["framework"]
 lint.isort.section-order = [
