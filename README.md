@@ -113,14 +113,14 @@ This sets up:
 
 ### Select a Default LLM Provider
 
-During `./quickstart.sh`, Hive will prompt you to:
+During `./quickstart.sh`, Hive will ask you to:
 
 1. Select a default LLM provider (subscription-based or API-key based)
-2. Provide credentials if required (API key mode only)
+2. Provide credentials if required (API-key mode only)
 3. Select a default model
 
-If using API key mode, the key will be saved to your shell configuration 
-(e.g., `~/.zshrc`) automatically.
+If using an API-key, you will be asked to provide your API-key.
+Hive will then store it in your shell configuration (e.g., `~/.zshrc`).
 
 After setup, reload your shell (e.g., `source ~/.zshrc`) or open a new terminal session.
 
@@ -141,7 +141,7 @@ openai
 If `echo $HIVE_LLM_PROVIDER` returns empty after setup, reload your shell 
 (e.g., `source ~/.zshrc`) or open a new terminal session and verify again.
 
-If the variable is still empty, manually set the provider to match what you selected:
+If `echo $HIVE_LLM_PROVIDER` still returns empty, manually set the `HIVE_LLM_PROVIDER` variable to match what you selected:
 
 ```bash
 # Examples
