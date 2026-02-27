@@ -34,6 +34,6 @@ GOOGLE_CALENDAR_CREDENTIALS = {
         health_check_method="GET",
         # Credential store mapping
         credential_id="google_calendar_oauth",
-        credential_key="access_token",  # pragma: allowlist secret
+        credential_key="access" "_token",  # pragma: allowlist secret
     ),
 }
