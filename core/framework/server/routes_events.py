@@ -131,8 +131,8 @@ async def handle_events(request: web.Request) -> web.StreamResponse:
     finally:
         try:
             event_bus.unsubscribe(sub_id)
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("Failed to unsubscribe SSE handler '%s': %s", sub_id, exc)
         logger.debug("SSE client disconnected from session '%s'", session.id)
 
     return sse.response
