@@ -505,11 +505,20 @@ class NodeContext:
     # Connected accounts prompt (injected from runner)
     accounts_prompt: str = ""
 
+    # Resume context — Layer 1 (identity) and Layer 2 (narrative) for
+    # rebuilding the full system prompt when restoring from conversation store.
+    identity_prompt: str = ""
+    narrative: str = ""
+
     # Event-triggered execution (no interactive user attached)
     event_triggered: bool = False
 
     # Execution ID (from StreamRuntimeAdapter)
     execution_id: str = ""
+
+    # Stream identity — the ExecutionStream this node runs within.
+    # Falls back to node_id when not set (legacy / standalone executor).
+    stream_id: str = ""
 
 
 @dataclass

@@ -617,7 +617,6 @@ class AgentRunner:
         runtime_config: "AgentRuntimeConfig | None" = None,
         interactive: bool = True,
         skip_credential_validation: bool = False,
-        skip_guardian: bool = False,
         requires_account_selection: bool = False,
         configure_for_account: Callable | None = None,
         list_accounts: Callable | None = None,
@@ -637,7 +636,6 @@ class AgentRunner:
             interactive: If True (default), offer interactive credential setup on failure.
                 Set to False when called from the TUI (which handles setup via its own screen).
             skip_credential_validation: If True, skip credential checks at load time.
-            skip_guardian: If True, don't attach the Hive Coder guardian.
             requires_account_selection: If True, TUI shows account picker before starting.
             configure_for_account: Callback(runner, account_dict) to scope tools after selection.
             list_accounts: Callback() -> list[dict] to fetch available accounts.
@@ -651,7 +649,6 @@ class AgentRunner:
         self.runtime_config = runtime_config
         self._interactive = interactive
         self.skip_credential_validation = skip_credential_validation
-        self.skip_guardian = skip_guardian
         self.requires_account_selection = requires_account_selection
         self._configure_for_account = configure_for_account
         self._list_accounts = list_accounts
@@ -747,37 +744,40 @@ class AgentRunner:
     def _import_agent_module(agent_path: Path):
         """Import an agent package from its directory path.
 
-        Tries package import first (works when exports/ is on sys.path,
-        which cli.py:_configure_paths() ensures). Falls back to direct
-        file import of agent.py via importlib.util.
+        Ensures the agent's parent directory is on sys.path so the package
+        can be imported normally (supports relative imports within the agent).
+
+        Always reloads the package and its submodules so that code changes
+        made since the last import (or since a previous session load in the
+        same server process) are picked up.
         """
         import importlib
+        import sys
 
         package_name = agent_path.name
+        parent_dir = str(agent_path.resolve().parent)
 
-        # Try importing as a package (works when exports/ is on sys.path)
-        try:
-            return importlib.import_module(package_name)
-        except ImportError:
-            pass
+        # Always place the correct parent directory first on sys.path.
+        # Multiple agent dirs can contain packages with the same name
+        # (e.g. exports/deep_research_agent and examples/deep_research_agent).
+        # Without this, a previously-added parent dir could shadow the
+        # agent we actually want to load.
+        if parent_dir in sys.path:
+            sys.path.remove(parent_dir)
+        sys.path.insert(0, parent_dir)
 
-        # Fallback: import agent.py directly via file path
-        import importlib.util
+        # Evict cached submodules first (e.g. deep_research_agent.nodes,
+        # deep_research_agent.agent) so the top-level reload picks up
+        # changes in the entire package — not just __init__.py.
+        stale = [
+            name
+            for name in sys.modules
+            if name == package_name or name.startswith(f"{package_name}.")
+        ]
+        for name in stale:
+            del sys.modules[name]
 
-        agent_py = agent_path / "agent.py"
-        if not agent_py.exists():
-            raise FileNotFoundError(
-                f"No importable agent found at {agent_path}. "
-                f"Expected a Python package with agent.py."
-            )
-        spec = importlib.util.spec_from_file_location(
-            f"{package_name}.agent",
-            agent_py,
-            submodule_search_locations=[str(agent_path)],
-        )
-        module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(module)
-        return module
+        return importlib.import_module(package_name)
 
     @classmethod
     def load(
@@ -787,6 +787,7 @@ class AgentRunner:
         storage_path: Path | None = None,
         model: str | None = None,
         interactive: bool = True,
+        skip_credential_validation: bool | None = None,
     ) -> "AgentRunner":
         """
         Load an agent from an export folder.
@@ -802,6 +803,8 @@ class AgentRunner:
             model: LLM model to use (reads from agent's default_config if None)
             interactive: If True (default), offer interactive credential setup.
                 Set to False from TUI callers that handle setup via their own UI.
+            skip_credential_validation: If True, skip credential checks at load time.
+                When None (default), uses the agent module's setting.
 
         Returns:
             AgentRunner instance ready to run
@@ -871,7 +874,8 @@ class AgentRunner:
 
             # Read pre-run hooks (e.g., credential_tester needs account selection)
             skip_cred = getattr(agent_module, "skip_credential_validation", False)
-            no_guardian = getattr(agent_module, "skip_guardian", False)
+            if skip_credential_validation is not None:
+                skip_cred = skip_credential_validation
             needs_acct = getattr(agent_module, "requires_account_selection", False)
             configure_fn = getattr(agent_module, "configure_for_account", None)
             list_accts_fn = getattr(agent_module, "list_connected_accounts", None)
@@ -887,7 +891,6 @@ class AgentRunner:
                 runtime_config=agent_runtime_config,
                 interactive=interactive,
                 skip_credential_validation=skip_cred,
-                skip_guardian=no_guardian,
                 requires_account_selection=needs_acct,
                 configure_for_account=configure_fn,
                 list_accounts=list_accts_fn,
@@ -909,6 +912,7 @@ class AgentRunner:
             storage_path=storage_path,
             model=model,
             interactive=interactive,
+            skip_credential_validation=skip_credential_validation or False,
         )
 
     def register_tool(
@@ -999,7 +1003,7 @@ class AgentRunner:
         """
         self._approval_callback = callback
 
-    def _setup(self) -> None:
+    def _setup(self, event_bus=None) -> None:
         """Set up runtime, LLM, and executor."""
         # Configure structured logging (auto-detects JSON vs human-readable)
         from framework.observability import configure_logging
@@ -1159,6 +1163,7 @@ class AgentRunner:
             accounts_prompt=accounts_prompt,
             accounts_data=accounts_data,
             tool_provider_map=tool_provider_map,
+            event_bus=event_bus,
         )
 
     def _get_api_key_env_var(self, model: str) -> str | None:
@@ -1243,6 +1248,7 @@ class AgentRunner:
         accounts_prompt: str = "",
         accounts_data: list[dict] | None = None,
         tool_provider_map: dict[str, str] | None = None,
+        event_bus=None,
     ) -> None:
         """Set up multi-entry-point execution using AgentRuntime."""
         # Convert AsyncEntryPointSpec to EntryPointSpec for AgentRuntime
@@ -1289,17 +1295,14 @@ class AgentRunner:
             async_checkpoint=True,  # Non-blocking
         )
 
-        # Handle runtime_config - ensure it's AgentRuntimeConfig, not RuntimeConfig
-        # RuntimeConfig is for LLM settings; AgentRuntimeConfig is for AgentRuntime settings
+        # Handle runtime_config - only pass through if it's actually an AgentRuntimeConfig.
+        # Agents may export a RuntimeConfig (LLM settings) or queen-generated custom classes
+        # that would crash AgentRuntime if passed through.
         runtime_config = None
         if self.runtime_config is not None:
-            from framework.config import RuntimeConfig
+            from framework.runtime.agent_runtime import AgentRuntimeConfig
 
-            # If it's a RuntimeConfig (LLM config), don't pass it
-            if isinstance(self.runtime_config, RuntimeConfig):
-                runtime_config = None
-            else:
-                # It's already an AgentRuntimeConfig or compatible type
+            if isinstance(self.runtime_config, AgentRuntimeConfig):
                 runtime_config = self.runtime_config
 
         self._agent_runtime = create_agent_runtime(
@@ -1317,6 +1320,7 @@ class AgentRunner:
             accounts_prompt=accounts_prompt,
             accounts_data=accounts_data,
             tool_provider_map=tool_provider_map,
+            event_bus=event_bus,
         )
 
         # Pass intro_message through for TUI display

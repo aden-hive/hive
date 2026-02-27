@@ -707,8 +707,7 @@ $ModelChoices = @{
     )
     openai = @(
         @{ Id = "gpt-5.2";   Label = "GPT-5.2 - Most capable (recommended)"; MaxTokens = 16384 },
-        @{ Id = "gpt-5-mini"; Label = "GPT-5 Mini - Fast + cheap";            MaxTokens = 16384 },
-        @{ Id = "gpt-5-nano"; Label = "GPT-5 Nano - Fastest";                 MaxTokens = 16384 }
+        @{ Id = "gpt-5-mini"; Label = "GPT-5 Mini - Fast + cheap";            MaxTokens = 16384 }
     )
     gemini = @(
         @{ Id = "gemini-3-flash-preview"; Label = "Gemini 3 Flash - Fast (recommended)"; MaxTokens = 8192 },
