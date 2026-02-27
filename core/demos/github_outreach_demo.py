@@ -1707,8 +1707,8 @@ async def handle_ws(websocket):
             logger.exception("Pipeline error")
             try:
                 await websocket.send(json.dumps({"type": "error", "message": str(e)}))
-            except Exception:
-                pass
+            except Exception as exc:
+              logger.debug("Failed to send pipeline error over websocket", exc_info=exc)
     except websockets.exceptions.ConnectionClosed:
         pass
 
@@ -1808,8 +1808,8 @@ async def _run_pipeline(websocket, initial_message: str):
                 payload["type"] = "awaiting_input"
 
             await websocket.send(json.dumps(payload))
-        except Exception:
-            pass
+        except Exception as exc:
+          logger.debug("Failed to forward event to websocket", exc_info=exc)
 
     bus.subscribe(
         event_types=[
@@ -1888,7 +1888,8 @@ async def _run_pipeline(websocket, initial_message: str):
             async for raw in websocket:
                 try:
                     msg = json.loads(raw)
-                except Exception:
+                except Exception as exc:
+                    logger.debug("Ignoring malformed websocket message", exc_info=exc)
                     continue
                 text = msg.get("message", "")
                 if not text:
@@ -1987,7 +1988,7 @@ async def main():
     port = 8768
     async with websockets.serve(
         handle_ws,
-        "0.0.0.0",
+        "0.0.0.0",  # noqa: S104
         port,
         process_request=process_request,
     ):
