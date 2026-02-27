@@ -129,8 +129,8 @@ def register_worker_monitoring_tools(
             try:
                 state = json.loads(state_path.read_text(encoding="utf-8"))
                 session_status = state.get("status", "unknown")
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("Failed to read session state for '%s': %s", session_id, exc)
 
         # Read tool logs
         steps: list[dict] = []
