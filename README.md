@@ -91,6 +91,8 @@ Use Hive when you need:
 > Hive uses a `uv` workspace layout and is not installed with `pip install`.
 > Running `pip install -e .` from the repository root will create a placeholder package and Hive will not function correctly.
 > Please use the quickstart script below to set up the environment.
+>
+> **Warning:** Do **not** run `uvx hive tui`. The name `hive` on PyPI belongs to an unrelated C extension package (EdgeDB's `memhive`), which will fail to compile with `fatal error: errormech.h: No such file or directory`. After running `./quickstart.sh`, use the `hive` CLI symlink installed in `~/.local/bin` directly: `hive tui`.
 
 ```bash
 # Clone the repository

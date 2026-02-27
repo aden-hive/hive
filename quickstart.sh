@@ -1323,6 +1323,9 @@ else
     echo -e "  You can start an example agent or an agent built by yourself:"
     echo -e "     ${CYAN}hive tui${NC}"
     echo ""
+    echo -e "${YELLOW}  Note:${NC} Run ${CYAN}hive tui${NC} directly — do ${BOLD}not${NC} use ${CYAN}uvx hive tui${NC}."
+    echo -e "  ${DIM}('hive' on PyPI is an unrelated EdgeDB package that fails to build)${NC}"
+    echo ""
     echo -e "${DIM}Run ./quickstart.sh again to reconfigure.${NC}"
     echo ""
 fi
