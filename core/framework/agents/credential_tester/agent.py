@@ -16,6 +16,7 @@ after the user picks an account programmatically.
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -30,6 +31,8 @@ from framework.runtime.execution_stream import EntryPointSpec
 
 from .config import default_config
 from .nodes import build_tester_node
+
+logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from framework.runner import AgentRunner
@@ -299,8 +302,8 @@ def _activate_local_account(credential_id: str, alias: str) -> None:
 
             if key:
                 os.environ[spec.env_var] = key
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.debug("Failed to load local credential env vars for alias '%s': %s", alias, exc)
 
 
 def _configure_aden_node(
