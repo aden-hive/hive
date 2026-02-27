@@ -1,8 +1,11 @@
 """Runtime configuration for Hive Coder agent."""
 
 import json
+import logging
 from dataclasses import dataclass, field
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 
 def _load_preferred_model() -> str:
@@ -15,8 +18,8 @@ def _load_preferred_model() -> str:
             llm = config.get("llm", {})
             if llm.get("provider") and llm.get("model"):
                 return f"{llm['provider']}/{llm['model']}"
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("Failed to load preferred model from %s: %s", config_path, exc)
     return "anthropic/claude-sonnet-4-20250514"
 
 
