@@ -251,7 +251,7 @@ class BaseOAuth2Provider(CredentialProvider):
     def revoke_token(
         self,
         token: str,
-        token_type_hint: str = "access_token",
+        token_type_hint: str = "access_token",  # noqa: S107
     ) -> bool:
         """
         Revoke a token (RFC 7009).
