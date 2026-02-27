@@ -169,6 +169,7 @@ class _IntercomClient:
         self,
         conversation_id: str,
         assignee_id: str,
+        assignee_type: str = "admin",
         body: str = "",
     ) -> dict[str, Any]:
         """Assign a conversation to an admin or team."""
@@ -179,6 +180,7 @@ class _IntercomClient:
             "type": "admin",
             "admin_id": admin_id,
             "assignee_id": assignee_id,
+            "assignee_type": assignee_type,
             "message_type": "assignment",
             "body": body,
         }
@@ -536,7 +538,9 @@ def register_tools(
         if assignee_type not in ("admin", "team"):
             return {"error": "assignee_type must be 'admin' or 'team'"}
         try:
-            return client.assign_conversation(conversation_id, assignee_id, body=body)
+            return client.assign_conversation(
+                conversation_id, assignee_id, assignee_type=assignee_type, body=body
+            )
         except httpx.TimeoutException:
             return {"error": "Request timed out"}
         except httpx.RequestError as e:

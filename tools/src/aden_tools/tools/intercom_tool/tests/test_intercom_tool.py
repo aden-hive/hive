@@ -355,8 +355,35 @@ class TestAssignConversation:
                 "type": "admin",
                 "admin_id": "admin-1",
                 "assignee_id": "admin-2",
+                "assignee_type": "admin",
                 "message_type": "assignment",
                 "body": "Reassigning",
+            },
+            timeout=30.0,
+        )
+        assert result["type"] == "conversation"
+
+    @patch("aden_tools.tools.intercom_tool.intercom_tool.httpx.post")
+    def test_assign_with_team_type(self, mock_post):
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {"type": "conversation", "id": "456"}
+        mock_post.return_value = mock_response
+
+        result = self.client.assign_conversation(
+            "456", assignee_id="team-1", assignee_type="team", body=""
+        )
+
+        mock_post.assert_called_once_with(
+            f"{INTERCOM_API_BASE}/conversations/456/parts",
+            headers=self.client._headers,
+            json={
+                "type": "admin",
+                "admin_id": "admin-1",
+                "assignee_id": "team-1",
+                "assignee_type": "team",
+                "message_type": "assignment",
+                "body": "",
             },
             timeout=30.0,
         )
@@ -677,6 +704,23 @@ class TestNoteTagAssignTools:
             conversation_id="1", assignee_id="admin-2"
         )
         assert result["type"] == "conversation"
+
+    @patch("aden_tools.tools.intercom_tool.intercom_tool.httpx.get")
+    @patch("aden_tools.tools.intercom_tool.intercom_tool.httpx.post")
+    def test_assign_conversation_team_type(self, mock_post, mock_get):
+        mock_get.return_value = MagicMock(
+            status_code=200, json=MagicMock(return_value={"id": "admin-1"})
+        )
+        mock_post.return_value = MagicMock(
+            status_code=200, json=MagicMock(return_value={"type": "conversation", "id": "1"})
+        )
+        result = self._fn("intercom_assign_conversation")(
+            conversation_id="1", assignee_id="team-1", assignee_type="team"
+        )
+        assert result["type"] == "conversation"
+        # Verify assignee_type reached the API payload
+        call_payload = mock_post.call_args.kwargs["json"]
+        assert call_payload["assignee_type"] == "team"
 
     def test_assign_conversation_invalid_type(self):
         result = self._fn("intercom_assign_conversation")(
