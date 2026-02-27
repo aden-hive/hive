@@ -599,22 +599,18 @@ def register_tools(mcp: FastMCP) -> None:
                             record[col] = _convert_cell_value(val)
                         records.append(record)
 
-                    # Create table (sanitize name: spaces -> underscores)
+                    # Register table (sanitize name: spaces -> underscores)
                     table_name = sheet_name.replace(" ", "_").replace("-", "_")
                     if records:
                         df = pd.DataFrame(records)
-                        con.register(f"temp_{table_name}", df)
-                        con.execute(
-                            f'CREATE TABLE "{table_name}" AS SELECT * FROM temp_{table_name}'
-                        )
                     else:
-                        # Empty table
-                        cols_sql = ", ".join(f'"{h}" VARCHAR' for h in headers)
-                        con.execute(f'CREATE TABLE "{table_name}" ({cols_sql})')
+                        df = pd.DataFrame(columns=headers)
+
+                    con.register(table_name, df)
 
                     # Create 'data' alias for target sheet
                     if sheet_name == target_sheet:
-                        con.execute(f'CREATE VIEW data AS SELECT * FROM "{table_name}"')
+                        con.register("data", df)
 
                 all_sheet_names = list(wb.sheetnames)
 
