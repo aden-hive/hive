@@ -366,8 +366,12 @@ def validate_agent_credentials(
                                 if cred_obj:
                                     cred_obj.set_identity(**identity_data)
                                     store.save_credential(cred_obj)
-                            except Exception:
-                                pass  # Identity persistence is best-effort
+                            except Exception as exc:
+                                logger.debug(
+                                    "Identity persistence failed for %s: %s",
+                                    status.credential_name,
+                                    exc,
+                                )
                 except Exception as exc:
                     logger.debug("Health check for %s failed: %s", status.credential_name, exc)
 
