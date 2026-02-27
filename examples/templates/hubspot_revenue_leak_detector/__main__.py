@@ -1,5 +1,5 @@
 """
-CLI entry point for Revenue Leak Detector Agent.
+CLI entry point for HubSpot Revenue Leak Detector Agent.
 
 Uses AgentRuntime for session management with checkpointing.
 """
@@ -29,7 +29,7 @@ def setup_logging(verbose=False, debug=False):
 @click.group()
 @click.version_option(version=VERSION)
 def cli():
-    """Revenue Leak Detector — Autonomous business health monitor."""
+    """HubSpot Revenue Leak Detector — Autonomous HubSpot CRM monitor."""
     pass
 
 
@@ -39,7 +39,7 @@ def cli():
 @click.option("--verbose", "-v", is_flag=True, help="Show execution details")
 @click.option("--debug", is_flag=True, help="Show debug logging")
 def run(mock, quiet, verbose, debug):
-    """Execute the revenue leak detection workflow."""
+    """Execute HubSpot revenue leak detection workflow."""
     if not quiet:
         setup_logging(verbose=verbose, debug=debug)
 
@@ -62,7 +62,7 @@ def run(mock, quiet, verbose, debug):
 @click.option("--verbose", "-v", is_flag=True, help="Show execution details")
 @click.option("--debug", is_flag=True, help="Show debug logging")
 def tui(mock, verbose, debug):
-    """Launch the TUI dashboard for live monitoring."""
+    """Launch the TUI dashboard for live HubSpot monitoring."""
     setup_logging(verbose=verbose, debug=debug)
 
     try:
