@@ -8,8 +8,21 @@ Supports macOS, Linux, and Windows.
 from __future__ import annotations
 
 import platform
+import shutil
 import subprocess
 import webbrowser
+from urllib.parse import urlparse
+
+
+def _is_safe_browser_url(url: str) -> bool:
+    """Return True only for http/https URLs with a hostname."""
+    parsed = urlparse(url)
+    return parsed.scheme in {"http", "https"} and bool(parsed.netloc)
+
+
+def _run_browser_command(command: list[str]) -> None:
+    """Execute browser command using a controlled subprocess call."""
+    subprocess.run(command, check=True, capture_output=True)  # noqa: S603
 
 
 def open_browser(url: str) -> tuple[bool, str]:
@@ -34,29 +47,37 @@ def open_browser(url: str) -> tuple[bool, str]:
     """
     system = platform.system()
 
+    if not _is_safe_browser_url(url):
+        return False, "Invalid URL: only absolute http/https URLs are allowed"
+
     try:
         if system == "Darwin":  # macOS
-            subprocess.run(
-                ["open", url],
-                check=True,
-                capture_output=True,
-            )
+            open_path = shutil.which("open")
+            if not open_path:
+                return False, "Could not open browser (open command not found)"
+            _run_browser_command([open_path, url])
             return True, "Opened in browser"
 
         elif system == "Linux":
             # Try xdg-open first (most Linux distros)
             try:
-                subprocess.run(
-                    ["xdg-open", url],
-                    check=True,
-                    capture_output=True,
-                )
-                return True, "Opened in browser"
-            except FileNotFoundError:
+                xdg_open_path = shutil.which("xdg-open")
+                if xdg_open_path:
+                    _run_browser_command([xdg_open_path, url])
+                    return True, "Opened in browser"
+            except subprocess.CalledProcessError:
+                pass
+
+            if not shutil.which("xdg-open"):
                 # xdg-open not available, fall back to webbrowser
                 if webbrowser.open(url):
                     return True, "Opened in browser"
                 return False, "Could not open browser (xdg-open not found)"
+
+            # xdg-open exists but failed, fall back to webbrowser
+            if webbrowser.open(url):
+                return True, "Opened in browser"
+            return False, "Could not open browser"
 
         elif system == "Windows":
             if webbrowser.open(url):
