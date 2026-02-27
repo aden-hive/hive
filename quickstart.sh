@@ -995,7 +995,7 @@ if [ "$SUBSCRIPTION_MODE" = "zai_code" ]; then
     if [ -n "$API_KEY" ]; then
         echo "" >> "$SHELL_RC_FILE"
         echo "# Hive Agent Framework - ZAI Code subscription API key" >> "$SHELL_RC_FILE"
-        echo "export ZAI_API_KEY=\"$API_KEY\"" >> "$SHELL_RC_FILE"
+        echo "export ZAI_API_KEY=\"$API_KEY\"" >> "$SHELL_RC_FILE"  # pragma: allowlist secret
         export ZAI_API_KEY="$API_KEY"
         echo ""
         echo -e "${GREEN}⬢${NC} ZAI API key saved to $SHELL_RC_FILE"
