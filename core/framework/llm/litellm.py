@@ -457,15 +457,17 @@ class LiteLLMProvider(LLMProvider):
         # Codex ChatGPT backend requires streaming — delegate to the unified
         # async streaming path which properly handles tool calls.
         if self._codex_backend:
-            return asyncio.run(self.acomplete(
-                messages=messages,
-                system=system,
-                tools=tools,
-                max_tokens=max_tokens,
-                response_format=response_format,
-                json_mode=json_mode,
-                max_retries=max_retries,
-            ))
+            return asyncio.run(
+                self.acomplete(
+                    messages=messages,
+                    system=system,
+                    tools=tools,
+                    max_tokens=max_tokens,
+                    response_format=response_format,
+                    json_mode=json_mode,
+                    max_retries=max_retries,
+                )
+            )
 
         # Prepare messages with system prompt
         full_messages = []
@@ -839,7 +841,10 @@ class LiteLLMProvider(LLMProvider):
                                 )
                                 if existing_idx is not None:
                                     idx = existing_idx
-                                elif idx in tool_calls_acc and tool_calls_acc[idx]["id"] not in ("", tc.id):
+                                elif idx in tool_calls_acc and tool_calls_acc[idx]["id"] not in (
+                                    "",
+                                    tc.id,
+                                ):
                                     # Slot taken by a different call — assign new index
                                     idx = max(tool_calls_acc.keys()) + 1
                                 _last_tool_idx = idx
@@ -1013,11 +1018,13 @@ class LiteLLMProvider(LLMProvider):
             if isinstance(event, TextDeltaEvent):
                 content = event.snapshot  # snapshot is the accumulated text
             elif isinstance(event, ToolCallEvent):
-                tool_calls.append({
-                    "id": event.tool_use_id,
-                    "name": event.tool_name,
-                    "input": event.tool_input,
-                })
+                tool_calls.append(
+                    {
+                        "id": event.tool_use_id,
+                        "name": event.tool_name,
+                        "input": event.tool_input,
+                    }
+                )
             elif isinstance(event, FinishEvent):
                 input_tokens = event.input_tokens
                 output_tokens = event.output_tokens

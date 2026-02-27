@@ -122,9 +122,7 @@ async def test_codex_stream():
             if isinstance(event, TextDeltaEvent):
                 text = event.snapshot
             elif isinstance(event, ToolCallEvent):
-                tool_calls.append(
-                    {"name": event.tool_name, "input": event.tool_input}
-                )
+                tool_calls.append({"name": event.tool_name, "input": event.tool_input})
                 print(f"  ToolCall: {event.tool_name}({json.dumps(event.tool_input)})")
             elif isinstance(event, FinishEvent):
                 print(

@@ -1,5 +1,5 @@
 import { memo, useState, useRef, useEffect } from "react";
-import { Send, Crown, Cpu } from "lucide-react";
+import { Send, Square, Crown, Cpu } from "lucide-react";
 import { formatAgentDisplayName } from "@/lib/chat-helpers";
 import MarkdownContent from "@/components/MarkdownContent";
 
@@ -24,6 +24,8 @@ interface ChatPanelProps {
   awaitingInput?: boolean;
   /** When true, the input is disabled (e.g. during loading) */
   disabled?: boolean;
+  /** Called when user clicks the stop button to cancel the queen's current turn */
+  onCancel?: () => void;
 }
 
 const queenColor = "hsl(45,95%,58%)";
@@ -99,7 +101,7 @@ const MessageBubble = memo(function MessageBubble({ msg }: { msg: ChatMessage })
   );
 }, (prev, next) => prev.msg.id === next.msg.id && prev.msg.content === next.msg.content);
 
-export default function ChatPanel({ messages, onSend, isWaiting, activeThread, awaitingInput, disabled }: ChatPanelProps) {
+export default function ChatPanel({ messages, onSend, isWaiting, activeThread, awaitingInput, disabled, onCancel }: ChatPanelProps) {
   const [input, setInput] = useState("");
   const [readMap, setReadMap] = useState<Record<string, number>>({});
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -179,13 +181,23 @@ export default function ChatPanel({ messages, onSend, isWaiting, activeThread, a
             disabled={disabled}
             className="flex-1 bg-transparent text-sm text-foreground outline-none placeholder:text-muted-foreground disabled:opacity-50 disabled:cursor-not-allowed"
           />
-          <button
-            type="submit"
-            disabled={!input.trim() || disabled}
-            className="p-2 rounded-lg bg-primary text-primary-foreground disabled:opacity-30 hover:opacity-90 transition-opacity"
-          >
-            <Send className="w-4 h-4" />
-          </button>
+          {isWaiting && onCancel ? (
+            <button
+              type="button"
+              onClick={onCancel}
+              className="p-2 rounded-lg bg-destructive text-destructive-foreground hover:opacity-90 transition-opacity"
+            >
+              <Square className="w-4 h-4" />
+            </button>
+          ) : (
+            <button
+              type="submit"
+              disabled={!input.trim() || disabled}
+              className="p-2 rounded-lg bg-primary text-primary-foreground disabled:opacity-30 hover:opacity-90 transition-opacity"
+            >
+              <Send className="w-4 h-4" />
+            </button>
+          )}
         </div>
       </form>
     </div>

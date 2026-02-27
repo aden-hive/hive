@@ -63,7 +63,6 @@ class MockStreamingLLM(LLMProvider):
         return LLMResponse(content="Summary.", model="mock", stop_reason="stop")
 
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------

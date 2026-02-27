@@ -318,7 +318,7 @@ echo ""
 IMPORT_ERRORS=0
 
 # Batch check all imports in single process (reduces subprocess spawning overhead)
-CHECK_RESULT=$(uv run python scripts/check_requirements.py framework aden_tools litellm framework.mcp.agent_builder_server 2>&1)
+CHECK_RESULT=$(uv run python scripts/check_requirements.py framework aden_tools litellm framework.mcp.agent_builder_server 2>/dev/null)
 CHECK_EXIT=$?
 
 # Parse and display results

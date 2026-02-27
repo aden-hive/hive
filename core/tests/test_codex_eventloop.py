@@ -6,8 +6,6 @@ Run: .venv/bin/python core/tests/test_codex_eventloop.py
 import asyncio
 import logging
 import sys
-from dataclasses import dataclass, field
-from typing import Any
 from unittest.mock import MagicMock
 
 sys.path.insert(0, "core")
@@ -77,7 +75,9 @@ def make_context(
     )
 
 
-async def run_test(name: str, llm: LiteLLMProvider, system: str, output_keys: list[str]) -> NodeResult:
+async def run_test(
+    name: str, llm: LiteLLMProvider, system: str, output_keys: list[str]
+) -> NodeResult:
     print(f"\n{'=' * 60}")
     print(f"TEST: {name}")
     print(f"{'=' * 60}")
@@ -95,6 +95,7 @@ async def run_test(name: str, llm: LiteLLMProvider, system: str, output_keys: li
     except Exception as e:
         print(f"  EXCEPTION: {type(e).__name__}: {e}")
         import traceback
+
         traceback.print_exc()
         return NodeResult(success=False, error=str(e))
 
@@ -137,7 +138,11 @@ async def main():
                 if isinstance(event, TextDeltaEvent):
                     text = event.snapshot
                 elif isinstance(event, FinishEvent):
-                    print(f"  Finish: stop={event.stop_reason} in={event.input_tokens} out={event.output_tokens}")
+                    print(
+                        f"  Finish: stop={event.stop_reason}"
+                        f" in={event.input_tokens}"
+                        f" out={event.output_tokens}"
+                    )
                 elif isinstance(event, StreamErrorEvent):
                     print(f"  StreamError: {event.error} (recoverable={event.recoverable})")
                 elif isinstance(event, ToolCallEvent):
@@ -148,6 +153,7 @@ async def main():
         except Exception as e:
             print(f"  EXCEPTION: {type(e).__name__}: {e}")
             import traceback
+
             traceback.print_exc()
 
     print(f"\n{'=' * 60}")

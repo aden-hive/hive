@@ -37,7 +37,6 @@ class FailingLLMProvider(LLMProvider):
         raise RuntimeError("LLM unavailable")
 
 
-
 async def _build_conversation(*pairs: tuple[str, str]) -> NodeConversation:
     """Build a NodeConversation from (user, assistant) message pairs."""
     conv = NodeConversation()
