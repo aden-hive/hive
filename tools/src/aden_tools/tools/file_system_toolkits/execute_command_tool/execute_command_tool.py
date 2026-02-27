@@ -1,4 +1,5 @@
 import os
+import shlex
 import subprocess
 
 from mcp.server.fastmcp import FastMCP
@@ -47,8 +48,17 @@ def register_tools(mcp: FastMCP) -> None:
             else:
                 secure_cwd = session_root
 
+            command_args = shlex.split(command, posix=os.name != "nt")
+            if not command_args:
+                return {"error": "Command cannot be empty"}
+
             result = subprocess.run(
-                command, shell=True, cwd=secure_cwd, capture_output=True, text=True, timeout=60
+                command_args,
+                shell=False,
+                cwd=secure_cwd,
+                capture_output=True,
+                text=True,
+                timeout=60,
             )
 
             return {
@@ -61,5 +71,7 @@ def register_tools(mcp: FastMCP) -> None:
             }
         except subprocess.TimeoutExpired:
             return {"error": "Command timed out after 60 seconds"}
+        except ValueError as e:
+            return {"error": f"Invalid command syntax: {str(e)}"}
         except Exception as e:
             return {"error": f"Failed to execute command: {str(e)}"}
