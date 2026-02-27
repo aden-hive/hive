@@ -10,6 +10,7 @@ Usage:
 import json
 import logging
 import os
+import subprocess
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -45,6 +46,11 @@ from framework.utils.io import atomic_write  # noqa: E402
 
 # Initialize MCP server
 mcp = FastMCP("agent-builder")
+
+
+def _run_subprocess(command: list[str], **kwargs):
+    """Run subprocess command with explicit argv list."""
+    return subprocess.run(command, **kwargs)  # noqa: S603
 
 
 # Session persistence directory
@@ -240,8 +246,8 @@ def list_sessions() -> str:
                             "has_goal": data.get("goal") is not None,
                         }
                     )
-            except Exception:
-                pass  # Skip corrupted files
+            except Exception as exc:
+                logger.debug("Skipping corrupted session file '%s': %s", session_file, exc)
 
     # Check which session is currently active
     active_id = None
@@ -249,8 +255,8 @@ def list_sessions() -> str:
         try:
             with open(ACTIVE_SESSION_FILE) as f:
                 active_id = f.read().strip()
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("Failed to read active session pointer: %s", exc)
 
     return json.dumps(
         {
@@ -2840,7 +2846,7 @@ def run_tests(
 
     # Run pytest
     try:
-        result = subprocess.run(
+        result = _run_subprocess(
             cmd,
             capture_output=True,
             text=True,
@@ -3015,7 +3021,7 @@ def debug_test(
     env["PYTHONPATH"] = f"{project_root}:{pythonpath}"
 
     try:
-        result = subprocess.run(
+        result = _run_subprocess(
             cmd,
             capture_output=True,
             text=True,
