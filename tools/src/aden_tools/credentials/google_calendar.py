@@ -27,7 +27,7 @@ GOOGLE_CALENDAR_CREDENTIALS = {
         # Auth method support
         aden_supported=True,
         aden_provider_name="google-calendar",
-        direct_api_key_supported=False,
+        direct_api_key_supported=False,  # pragma: allowlist secret
         api_key_instructions="Google Calendar OAuth requires OAuth2. Connect via hive.adenhq.com",
         # Health check configuration
         health_check_endpoint="https://www.googleapis.com/calendar/v3/users/me/calendarList",
