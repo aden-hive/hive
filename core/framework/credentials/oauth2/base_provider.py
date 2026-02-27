@@ -39,12 +39,12 @@ class BaseOAuth2Provider(CredentialProvider):
     OSS users can extend this class for custom providers:
 
         class GitHubOAuth2Provider(BaseOAuth2Provider):
-            def __init__(self, client_id: str, client_secret: str):
+            def __init__(self, client_id: str, client_credential: str):
                 super().__init__(OAuth2Config(
                     token_url="https://github.com/login/oauth/access_token",
                     authorization_url="https://github.com/login/oauth/authorize",
                     client_id=client_id,
-                    client_secret=client_secret,  # pragma: allowlist secret
+                    client_secret=client_credential,  # pragma: allowlist secret
                     default_scopes=["repo", "user"],
                 ))
 
@@ -57,7 +57,7 @@ class BaseOAuth2Provider(CredentialProvider):
         provider = BaseOAuth2Provider(OAuth2Config(
             token_url="https://oauth2.example.com/token",
             client_id="my-client-id",
-            client_secret="my-client-secret",  # pragma: allowlist secret
+            client_secret="my-client-credential",  # pragma: allowlist secret
         ))
 
         # Get token using client credentials
