@@ -117,7 +117,7 @@ class OAuth2Config:
         revocation_url: URL for token revocation (optional)
         introspection_url: URL for token introspection (optional)
         client_id: OAuth2 client ID
-        client_secret: OAuth2 client secret
+        client_secret: OAuth2 client credential
         default_scopes: Default scopes to request
         token_placement: How to include token in requests
         custom_header_name: Header name when using HEADER_CUSTOM placement
@@ -130,7 +130,6 @@ class OAuth2Config:
             token_url="https://github.com/login/oauth/access_token",
             authorization_url="https://github.com/login/oauth/authorize",
             client_id="your-client-id",
-            client_secret="your-client-credential",
             default_scopes=["repo", "user"],
         )
     """
