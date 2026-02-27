@@ -1034,6 +1034,64 @@ fi
 echo ""
 
 # ============================================================
+# Step 4b: Browser Automation (GCU)
+# ============================================================
+
+echo -e "${BOLD}Enable browser automation?${NC}"
+echo -e "${DIM}This lets your agents control a real browser — navigate websites, fill forms,${NC}"
+echo -e "${DIM}scrape dynamic pages, and interact with web UIs.${NC}"
+echo ""
+echo -e "  ${CYAN}${BOLD}1)${NC} ${BOLD}Yes${NC}"
+echo -e "  ${CYAN}2)${NC} No"
+echo ""
+
+while true; do
+    read -r -p "Enter choice (1-2, default 1): " gcu_choice || true
+    gcu_choice="${gcu_choice:-1}"
+    if [ "$gcu_choice" = "1" ] || [ "$gcu_choice" = "2" ]; then
+        break
+    fi
+    echo -e "${RED}Invalid choice. Please enter 1 or 2${NC}"
+done
+
+if [ "$gcu_choice" = "1" ]; then
+    GCU_ENABLED=true
+    echo -e "${GREEN}⬢${NC} Browser automation enabled"
+else
+    GCU_ENABLED=false
+    echo -e "${DIM}⬡ Browser automation skipped${NC}"
+fi
+
+# Patch gcu_enabled into configuration.json
+if [ "$GCU_ENABLED" = "true" ]; then
+    GCU_PY_VAL="True"
+else
+    GCU_PY_VAL="False"
+fi
+
+if [ -f "$HIVE_CONFIG_FILE" ]; then
+    uv run python -c "
+import json
+with open('$HIVE_CONFIG_FILE') as f:
+    config = json.load(f)
+config['gcu_enabled'] = $GCU_PY_VAL
+with open('$HIVE_CONFIG_FILE', 'w') as f:
+    json.dump(config, f, indent=2)
+"
+elif [ "$GCU_ENABLED" = "true" ]; then
+    # No config file yet (user skipped LLM provider) — create minimal one
+    mkdir -p "$HIVE_CONFIG_DIR"
+    uv run python -c "
+import json
+config = {'gcu_enabled': True, 'created_at': '$(date -u +"%Y-%m-%dT%H:%M:%S+00:00")'}
+with open('$HIVE_CONFIG_FILE', 'w') as f:
+    json.dump(config, f, indent=2)
+"
+fi
+
+echo ""
+
+# ============================================================
 # Step 5: Initialize Credential Store
 # ============================================================
 
