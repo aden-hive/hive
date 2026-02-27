@@ -16,6 +16,7 @@ import json
 import logging
 import time
 from collections.abc import Awaitable, Callable
+from datetime import datetime, timezone
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Literal, Protocol, runtime_checkable
@@ -30,6 +31,7 @@ from framework.llm.stream_events import (
     ToolCallEvent,
 )
 from framework.runtime.event_bus import EventBus
+from framework.runtime.llm_debug_logger import log_llm_turn
 
 logger = logging.getLogger(__name__)
 
@@ -592,6 +594,16 @@ class EventLoopNode(NodeProtocol):
                         output_tokens=turn_tokens.get("output", 0),
                         execution_id=execution_id,
                         iteration=iteration,
+                    )
+                    log_llm_turn(
+                        node_id=node_id,
+                        stream_id=stream_id,
+                        execution_id=execution_id,
+                        iteration=iteration,
+                        assistant_text=assistant_text,
+                        tool_calls=logged_tool_calls,
+                        tool_results=real_tool_results,
+                        token_counts=turn_tokens,
                     )
                     break  # success — exit retry loop
 
@@ -1516,6 +1528,7 @@ class EventLoopNode(NodeProtocol):
             from framework.graph.file_tools import execute_file_tool, is_file_tool
 
             results_by_id: dict[str, ToolResult] = {}
+            timing_by_id: dict[str, dict[str, Any]] = {}  # tool_use_id -> {start_timestamp, duration_s}
             pending_real: list[ToolCallEvent] = []
             pending_subagent: list[ToolCallEvent] = []
 
@@ -1543,6 +1556,8 @@ class EventLoopNode(NodeProtocol):
 
                 if tc.tool_name == "set_output":
                     # --- Framework-level set_output handling ---
+                    _tc_start = time.time()
+                    _tc_ts = datetime.now(timezone.utc).isoformat()
                     result = self._handle_set_output(tc.tool_input, ctx.node_spec.output_keys)
                     result = ToolResult(
                         tool_use_id=tc.tool_use_id,
@@ -1572,6 +1587,8 @@ class EventLoopNode(NodeProtocol):
                             "tool_input": tc.tool_input,
                             "content": result.content,
                             "is_error": result.is_error,
+                            "start_timestamp": _tc_ts,
+                            "duration_s": round(time.time() - _tc_start, 3),
                         }
                     )
                     results_by_id[tc.tool_use_id] = result
@@ -1667,11 +1684,17 @@ class EventLoopNode(NodeProtocol):
 
                 elif is_file_tool(tc.tool_name):
                     # --- Built-in file tool: execute inline, log as real work ---
+                    _tc_start = time.time()
+                    _tc_ts = datetime.now(timezone.utc).isoformat()
                     result = execute_file_tool(
                         tc.tool_name,
                         tc.tool_input,
                         tool_use_id=tc.tool_use_id,
                     )
+                    timing_by_id[tc.tool_use_id] = {
+                        "start_timestamp": _tc_ts,
+                        "duration_s": round(time.time() - _tc_start, 3),
+                    }
                     results_by_id[tc.tool_use_id] = self._truncate_tool_result(result, tc.tool_name)
 
                 else:
@@ -1697,17 +1720,41 @@ class EventLoopNode(NodeProtocol):
 
             # Phase 2a: execute real tools in parallel.
             if pending_real:
-                raw_results = await asyncio.gather(
-                    *(self._execute_tool(tc) for tc in pending_real),
+
+                async def _timed_execute(
+                    _tc: ToolCallEvent,
+                ) -> tuple[ToolResult | BaseException, str, float]:
+                    """Execute a tool and return (result, start_iso, duration_s)."""
+                    _s = time.time()
+                    _iso = datetime.now(timezone.utc).isoformat()
+                    try:
+                        _r = await self._execute_tool(_tc)
+                    except BaseException as _exc:
+                        _r = _exc
+                    _dur = round(time.time() - _s, 3)
+                    return _r, _iso, _dur
+
+                timed_results = await asyncio.gather(
+                    *(_timed_execute(tc) for tc in pending_real),
                     return_exceptions=True,
                 )
                 # gather(return_exceptions=True) captures CancelledError
                 # as a return value instead of propagating it.  Re-raise
                 # so stop_worker actually stops the execution.
-                for raw in raw_results:
-                    if isinstance(raw, asyncio.CancelledError):
-                        raise raw
-                for tc, raw in zip(pending_real, raw_results, strict=True):
+                for entry in timed_results:
+                    if isinstance(entry, asyncio.CancelledError):
+                        raise entry
+                for tc, entry in zip(pending_real, timed_results, strict=True):
+                    if isinstance(entry, BaseException):
+                        raw = entry
+                        _start_iso = datetime.now(timezone.utc).isoformat()
+                        _dur_s = 0
+                    else:
+                        raw, _start_iso, _dur_s = entry
+                    timing_by_id[tc.tool_use_id] = {
+                        "start_timestamp": _start_iso,
+                        "duration_s": _dur_s,
+                    }
                     if isinstance(raw, BaseException):
                         result = ToolResult(
                             tool_use_id=tc.tool_use_id,
@@ -1720,18 +1767,39 @@ class EventLoopNode(NodeProtocol):
 
             # Phase 2b: execute subagent delegations in parallel.
             if pending_subagent:
-                subagent_results = await asyncio.gather(
-                    *(
-                        self._execute_subagent(
-                            ctx,
-                            tc.tool_input.get("agent_id", ""),
-                            tc.tool_input.get("task", ""),
+
+                async def _timed_subagent(
+                    _ctx: NodeContext,
+                    _tc: ToolCallEvent,
+                ) -> tuple[ToolResult | BaseException, str, float]:
+                    _s = time.time()
+                    _iso = datetime.now(timezone.utc).isoformat()
+                    try:
+                        _r = await self._execute_subagent(
+                            _ctx,
+                            _tc.tool_input.get("agent_id", ""),
+                            _tc.tool_input.get("task", ""),
                         )
-                        for tc in pending_subagent
-                    ),
+                    except BaseException as _exc:
+                        _r = _exc
+                    _dur = round(time.time() - _s, 3)
+                    return _r, _iso, _dur
+
+                subagent_timed = await asyncio.gather(
+                    *(_timed_subagent(ctx, tc) for tc in pending_subagent),
                     return_exceptions=True,
                 )
-                for tc, raw in zip(pending_subagent, subagent_results, strict=True):
+                for tc, entry in zip(pending_subagent, subagent_timed, strict=True):
+                    if isinstance(entry, BaseException):
+                        raw = entry
+                        _start_iso = datetime.now(timezone.utc).isoformat()
+                        _dur_s = 0
+                    else:
+                        raw, _start_iso, _dur_s = entry
+                    _sa_timing = {
+                        "start_timestamp": _start_iso,
+                        "duration_s": _dur_s,
+                    }
                     if isinstance(raw, BaseException):
                         result = ToolResult(
                             tool_use_id=tc.tool_use_id,
@@ -1759,6 +1827,7 @@ class EventLoopNode(NodeProtocol):
                             "tool_input": tc.tool_input,
                             "content": result.content,
                             "is_error": result.is_error,
+                            **_sa_timing,
                         }
                     )
 
@@ -1783,6 +1852,7 @@ class EventLoopNode(NodeProtocol):
                         "tool_input": tc.tool_input,
                         "content": result.content,
                         "is_error": result.is_error,
+                        **timing_by_id.get(tc.tool_use_id, {}),
                     }
                     real_tool_results.append(tool_entry)
                     logged_tool_calls.append(tool_entry)
