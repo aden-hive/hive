@@ -2,6 +2,31 @@ import ast
 import operator
 from typing import Any
 
+# ── Computation Limits ────────────────────────────────────────────────────
+# Maximum allowed exponent to prevent DoS via expressions like 2**2**2**30.
+_MAX_EXPONENT = 1000
+# Maximum allowed shift bits to prevent memory exhaustion via 1 << 10**9.
+_MAX_SHIFT_BITS = 64
+
+
+def _safe_pow(base: Any, exp: Any) -> Any:
+    """Power operator with exponent limit to prevent DoS."""
+    if isinstance(exp, (int, float)) and abs(exp) > _MAX_EXPONENT:
+        raise ValueError(
+            f"Exponent {exp} exceeds maximum allowed value of {_MAX_EXPONENT}"
+        )
+    return operator.pow(base, exp)
+
+
+def _safe_lshift(a: Any, b: Any) -> Any:
+    """Left shift with bit limit to prevent memory exhaustion."""
+    if isinstance(b, int) and b > _MAX_SHIFT_BITS:
+        raise ValueError(
+            f"Shift amount {b} exceeds maximum allowed value of {_MAX_SHIFT_BITS}"
+        )
+    return operator.lshift(a, b)
+
+
 # Safe operators whitelist
 SAFE_OPERATORS = {
     ast.Add: operator.add,
@@ -10,8 +35,8 @@ SAFE_OPERATORS = {
     ast.Div: operator.truediv,
     ast.FloorDiv: operator.floordiv,
     ast.Mod: operator.mod,
-    ast.Pow: operator.pow,
-    ast.LShift: operator.lshift,
+    ast.Pow: _safe_pow,
+    ast.LShift: _safe_lshift,
     ast.RShift: operator.rshift,
     ast.BitOr: operator.or_,
     ast.BitXor: operator.xor,
