@@ -31,7 +31,7 @@ class CredentialType(StrEnum):
     BASIC_AUTH = "basic_auth"
     """Username/password pair"""
 
-    BEARER_TOKEN = "bearer_token"
+    BEARER_TOKEN = "bearer_token"  # noqa: S105
     """JWT or bearer token without refresh"""
 
     CUSTOM = "custom"
