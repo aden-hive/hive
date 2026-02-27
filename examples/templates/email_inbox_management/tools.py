@@ -13,7 +13,6 @@ import time
 from pathlib import Path
 
 import httpx
-
 from framework.llm.provider import Tool, ToolResult, ToolUse
 from framework.runner.tool_registry import _execution_context
 
@@ -93,8 +92,8 @@ def _get_access_token(account: str = "") -> str:
             token = credentials.get("google")
         if token:
             return token
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.debug("Credential store lookup failed; falling back to env token", exc_info=exc)
 
     # Fallback to environment variable
     token = os.getenv("GOOGLE_ACCESS_TOKEN")
