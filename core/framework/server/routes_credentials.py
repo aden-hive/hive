@@ -154,7 +154,9 @@ async def handle_check_agent(request: web.Request) -> web.Response:
         ensure_credential_key_env()
 
         nodes = load_agent_nodes(agent_path)
-        result = validate_agent_credentials(nodes, verify=verify, raise_on_error=False, force_refresh=True)
+        result = validate_agent_credentials(
+            nodes, verify=verify, raise_on_error=False, force_refresh=True
+        )
 
         # If any credential needs Aden, include ADEN_API_KEY as a first-class row
         if any(c.aden_supported for c in result.credentials):
