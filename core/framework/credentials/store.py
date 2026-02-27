@@ -601,8 +601,8 @@ class CredentialStore:
             store = CredentialStore.for_testing({
                 "brave_search": {"api_key": "test-brave-key"},
                 "github_oauth": {
-                    "session_token": "test-token",  # pragma: allowlist secret
-                    "renewal_token": "test-refresh"  # pragma: allowlist secret
+                    "session_value": "test-value",  # pragma: allowlist secret
+                    "renewal_value": "test-refresh"  # pragma: allowlist secret
                 }
             })
         """
