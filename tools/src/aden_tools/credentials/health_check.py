@@ -563,83 +563,6 @@ class SlackHealthChecker:
             )
 
 
-class AnthropicHealthChecker:
-    """Health checker for Anthropic API credentials."""
-
-    ENDPOINT = "https://api.anthropic.com/v1/messages"
-    TIMEOUT = 10.0
-
-    def check(self, api_key: str) -> HealthCheckResult:
-        """
-        Validate Anthropic API key without consuming tokens.
-
-        Sends a deliberately invalid request (empty messages) to the messages endpoint.
-        A 401 means invalid key; 400 (bad request) means the key authenticated
-        but the payload was rejected — confirming the key is valid without
-        generating any tokens. 429 (rate limited) also indicates a valid key.
-        """
-        try:
-            with httpx.Client(timeout=self.TIMEOUT) as client:
-                response = client.post(
-                    self.ENDPOINT,
-                    headers={
-                        "x-api-key": api_key,
-                        "anthropic-version": "2023-06-01",
-                        "Content-Type": "application/json",
-                    },
-                    # Empty messages triggers 400 (not 200), so no tokens are consumed.
-                    json={
-                        "model": "claude-sonnet-4-20250514",
-                        "max_tokens": 1,
-                        "messages": [],
-                    },
-                )
-
-                if response.status_code == 200:
-                    return HealthCheckResult(
-                        valid=True,
-                        message="Anthropic API key valid",
-                    )
-                elif response.status_code == 401:
-                    return HealthCheckResult(
-                        valid=False,
-                        message="Anthropic API key is invalid",
-                        details={"status_code": 401},
-                    )
-                elif response.status_code == 429:
-                    # Rate limited but key is valid
-                    return HealthCheckResult(
-                        valid=True,
-                        message="Anthropic API key valid (rate limited)",
-                        details={"status_code": 429, "rate_limited": True},
-                    )
-                elif response.status_code == 400:
-                    # Bad request but key authenticated - key is valid
-                    return HealthCheckResult(
-                        valid=True,
-                        message="Anthropic API key valid",
-                        details={"status_code": 400},
-                    )
-                else:
-                    return HealthCheckResult(
-                        valid=False,
-                        message=f"Anthropic API returned status {response.status_code}",
-                        details={"status_code": response.status_code},
-                    )
-        except httpx.TimeoutException:
-            return HealthCheckResult(
-                valid=False,
-                message="Anthropic API request timed out",
-                details={"error": "timeout"},
-            )
-        except httpx.RequestError as e:
-            return HealthCheckResult(
-                valid=False,
-                message=f"Failed to connect to Anthropic API: {e}",
-                details={"error": str(e)},
-            )
-
-
 class GitHubHealthChecker:
     """Health checker for GitHub Personal Access Token."""
 
@@ -1068,7 +991,6 @@ HEALTH_CHECKERS: dict[str, CredentialHealthChecker] = {
     "slack": SlackHealthChecker(),
     "google_search": GoogleSearchHealthChecker(),
     "google_maps": GoogleMapsHealthChecker(),
-    "anthropic": AnthropicHealthChecker(),
     "github": GitHubHealthChecker(),
     "resend": ResendHealthChecker(),
     "stripe": StripeHealthChecker(),

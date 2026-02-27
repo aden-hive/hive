@@ -1053,62 +1053,19 @@ def _interactive_approval(request):
 def _format_natural_language_to_json(
     user_input: str, input_keys: list[str], agent_description: str, session_context: dict = None
 ) -> dict:
-    """Use Haiku to convert natural language input to JSON based on agent's input schema."""
-    import os
+    """Convert natural language input to JSON based on agent's input schema.
 
-    import anthropic
+    Maps user input to the primary input field. For follow-up inputs,
+    appends to the existing value.
+    """
+    main_field = input_keys[0] if input_keys else "objective"
 
-    client = anthropic.Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY"))
-
-    # Build prompt for Haiku
-    session_info = ""
     if session_context:
-        # Extract the main field (usually 'objective') that we'll append to
-        main_field = input_keys[0] if input_keys else "objective"
         existing_value = session_context.get(main_field, "")
+        if existing_value:
+            return {main_field: f"{existing_value}\n\n{user_input}"}
 
-        session_info = (
-            f'\n\nExisting {main_field}: "{existing_value}"\n\n'
-            f"The user is providing ADDITIONAL information. Append this new "
-            f"information to the existing {main_field} to create an enriched, "
-            "more detailed version."
-        )
-
-    prompt = f"""You are formatting user input for an agent that requires specific input fields.
-
-Agent: {agent_description}
-
-Required input fields: {", ".join(input_keys)}{session_info}
-
-User input: {user_input}
-
-{"If this is a follow-up, APPEND new info to the existing field value." if session_context else ""}
-
-Output ONLY valid JSON, no explanation:"""
-
-    try:
-        message = client.messages.create(
-            model="claude-haiku-4-5-20251001",  # Fast and cheap
-            max_tokens=500,
-            messages=[{"role": "user", "content": prompt}],
-        )
-
-        json_str = message.content[0].text.strip()
-        # Remove markdown code blocks if present
-        if json_str.startswith("```"):
-            json_str = json_str.split("```")[1]
-            if json_str.startswith("json"):
-                json_str = json_str[4:]
-        json_str = json_str.strip()
-
-        return json.loads(json_str)
-    except Exception:
-        # Fallback: try to infer the main field
-        if len(input_keys) == 1:
-            return {input_keys[0]: user_input}
-        else:
-            # Put it in the first field as fallback
-            return {input_keys[0]: user_input}
+    return {main_field: user_input}
 
 
 def cmd_shell(args: argparse.Namespace) -> int:

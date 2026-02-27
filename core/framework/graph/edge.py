@@ -427,8 +427,7 @@ class GraphSpec(BaseModel):
     max_tokens: int = Field(default=None)  # resolved by _resolve_max_tokens validator
 
     # Cleanup LLM for JSON extraction fallback (fast/cheap model preferred)
-    # If not set, uses CEREBRAS_API_KEY -> cerebras/llama-3.3-70b or
-    # ANTHROPIC_API_KEY -> claude-haiku-4-5 as fallback
+    # If not set, uses CEREBRAS_API_KEY -> cerebras/llama-3.3-70b
     cleanup_llm_model: str | None = None
 
     # Execution limits

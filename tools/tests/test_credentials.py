@@ -308,19 +308,6 @@ class TestCredentialSpecs:
         assert spec.startup_required is False
         assert "brave.com" in spec.help_url
 
-    def test_anthropic_spec_exists(self):
-        """CREDENTIAL_SPECS includes anthropic with startup_required=True."""
-        assert "anthropic" in CREDENTIAL_SPECS
-
-        spec = CREDENTIAL_SPECS["anthropic"]
-        assert spec.env_var == "ANTHROPIC_API_KEY"
-        assert spec.tools == []
-        assert "event_loop" in spec.node_types
-        assert spec.required is False
-        assert spec.startup_required is False
-        assert "anthropic.com" in spec.help_url
-
-
 class TestNodeTypeValidation:
     """Tests for node type credential validation."""
 

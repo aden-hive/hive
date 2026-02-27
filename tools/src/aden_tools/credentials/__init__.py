@@ -33,7 +33,6 @@ Usage:
     })
 
 Credential categories:
-- llm.py: LLM provider credentials (anthropic, openai, etc.)
 - search.py: Search tool credentials (brave_search, google_search, etc.)
 - email.py: Email provider credentials (resend, google/gmail)
 - apollo.py: Apollo.io API credentials
@@ -73,7 +72,6 @@ from .health_check import (
     validate_integration_wiring,
 )
 from .hubspot import HUBSPOT_CREDENTIALS
-from .llm import LLM_CREDENTIALS
 from .news import NEWS_CREDENTIALS
 from .postgres import POSTGRES_CREDENTIALS
 from .razorpay import RAZORPAY_CREDENTIALS
@@ -92,7 +90,6 @@ from .telegram import TELEGRAM_CREDENTIALS
 
 # Merged registry of all credentials
 CREDENTIAL_SPECS = {
-    **LLM_CREDENTIALS,
     **NEWS_CREDENTIALS,
     **SEARCH_CREDENTIALS,
     **EMAIL_CREDENTIALS,
@@ -139,7 +136,6 @@ __all__ = [
     # Merged registry
     "CREDENTIAL_SPECS",
     # Category registries (for direct access if needed)
-    "LLM_CREDENTIALS",
     "NEWS_CREDENTIALS",
     "SEARCH_CREDENTIALS",
     "EMAIL_CREDENTIALS",
