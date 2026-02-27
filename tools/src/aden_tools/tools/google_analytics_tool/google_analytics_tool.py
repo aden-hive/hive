@@ -26,6 +26,7 @@ from google.analytics.data_v1beta.types import (
     RunRealtimeReportRequest,
     RunReportRequest,
 )
+from google.oauth2.service_account import Credentials
 
 if TYPE_CHECKING:
     from aden_tools.credentials import CredentialStoreAdapter
@@ -38,10 +39,8 @@ class _GAClient:
 
     def __init__(self, credentials_path: str):
         self._credentials_path = credentials_path
-        # The GA4 client reads GOOGLE_APPLICATION_CREDENTIALS from the environment
-        # We set it here so the client picks up the correct path
-        os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = credentials_path
-        self._client = BetaAnalyticsDataClient()
+        creds = Credentials.from_service_account_file(credentials_path)
+        self._client = BetaAnalyticsDataClient(credentials=creds)
 
     def run_report(
         self,
@@ -62,7 +61,7 @@ class _GAClient:
         )
 
         response = self._client.run_report(request)
-        return self._format_report_response(response, dimensions)
+        return self._format_report_response(response)
 
     def run_realtime_report(
         self,
@@ -77,12 +76,11 @@ class _GAClient:
         )
 
         response = self._client.run_realtime_report(request)
-        return self._format_realtime_response(response, metrics)
+        return self._format_realtime_response(response)
 
     def _format_report_response(
         self,
         response: Any,
-        dimensions: list[str] | None,
     ) -> dict[str, Any]:
         """Format a RunReportResponse into a plain dict."""
         rows = []
@@ -107,7 +105,6 @@ class _GAClient:
     def _format_realtime_response(
         self,
         response: Any,
-        metrics: list[str],
     ) -> dict[str, Any]:
         """Format a RunRealtimeReportResponse into a plain dict."""
         rows = []
@@ -161,6 +158,16 @@ def register_tools(
         except Exception as e:
             return {"error": f"Failed to initialize Google Analytics client: {e}"}
 
+    def _validate_inputs(property_id: str, *, limit: int | None = None) -> dict[str, str] | None:
+        """Validate common inputs. Returns an error dict or None."""
+        if not property_id or not property_id.startswith("properties/"):
+            return {
+                "error": "property_id must start with 'properties/' (e.g., 'properties/123456')"
+            }
+        if limit is not None and (limit < 1 or limit > 10000):
+            return {"error": "limit must be between 1 and 10000"}
+        return None
+
     @mcp.tool()
     def ga_run_report(
         property_id: str,
@@ -193,14 +200,10 @@ def register_tools(
         if isinstance(client, dict):
             return client
 
-        if not property_id or not property_id.startswith("properties/"):
-            return {
-                "error": "property_id must start with 'properties/' (e.g., 'properties/123456')"
-            }
+        if err := _validate_inputs(property_id, limit=limit):
+            return err
         if not metrics:
             return {"error": "metrics list must not be empty"}
-        if limit < 1 or limit > 10000:
-            return {"error": "limit must be between 1 and 10000"}
 
         try:
             return client.run_report(
@@ -236,10 +239,8 @@ def register_tools(
         if isinstance(client, dict):
             return client
 
-        if not property_id or not property_id.startswith("properties/"):
-            return {
-                "error": "property_id must start with 'properties/' (e.g., 'properties/123456')"
-            }
+        if err := _validate_inputs(property_id):
+            return err
 
         effective_metrics = metrics or ["activeUsers"]
 
@@ -278,12 +279,8 @@ def register_tools(
         if isinstance(client, dict):
             return client
 
-        if not property_id or not property_id.startswith("properties/"):
-            return {
-                "error": "property_id must start with 'properties/' (e.g., 'properties/123456')"
-            }
-        if limit < 1 or limit > 10000:
-            return {"error": "limit must be between 1 and 10000"}
+        if err := _validate_inputs(property_id, limit=limit):
+            return err
 
         try:
             return client.run_report(
@@ -323,12 +320,8 @@ def register_tools(
         if isinstance(client, dict):
             return client
 
-        if not property_id or not property_id.startswith("properties/"):
-            return {
-                "error": "property_id must start with 'properties/' (e.g., 'properties/123456')"
-            }
-        if limit < 1 or limit > 10000:
-            return {"error": "limit must be between 1 and 10000"}
+        if err := _validate_inputs(property_id, limit=limit):
+            return err
 
         try:
             return client.run_report(

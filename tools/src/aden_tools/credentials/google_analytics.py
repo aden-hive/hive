@@ -9,6 +9,7 @@ from .base import CredentialSpec
 GOOGLE_ANALYTICS_CREDENTIALS = {
     "google_analytics": CredentialSpec(
         env_var="GOOGLE_APPLICATION_CREDENTIALS",
+        credential_group="google_cloud",
         tools=[
             "ga_run_report",
             "ga_get_realtime",
