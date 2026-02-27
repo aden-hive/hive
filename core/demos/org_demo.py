@@ -527,8 +527,8 @@ class MessageRouter:
             if t.done() and not t.cancelled():
                 try:
                     total += t.result().tokens_used or 0
-                except Exception:
-                    pass
+                except Exception as exc:
+                  logger.debug("Failed to accumulate task tokens", exc_info=exc)
         return total
 
 
@@ -1180,7 +1180,8 @@ async def handle_ws(websocket):
         async for raw in websocket:
             try:
                 msg = json.loads(raw)
-            except Exception:
+            except Exception as exc:
+                logger.debug("Ignoring malformed websocket message", exc_info=exc)
                 continue
 
             topic = msg.get("topic", "")
@@ -1198,8 +1199,8 @@ async def handle_ws(websocket):
                 logger.exception("Pipeline error")
                 try:
                     await websocket.send(json.dumps({"type": "error", "message": str(e)}))
-                except Exception:
-                    pass
+                except Exception as exc:
+                  logger.debug("Failed to send pipeline error over websocket", exc_info=exc)
 
     except websockets.exceptions.ConnectionClosed:
         pass
@@ -1222,8 +1223,8 @@ async def _run_org_pipeline(websocket, topic: str):
             if event.type == EventType.CUSTOM and "custom_type" in event.data:
                 payload["type"] = event.data["custom_type"]
             await websocket.send(json.dumps(payload))
-        except Exception:
-            pass
+        except Exception as exc:
+          logger.debug("Failed to forward event to websocket", exc_info=exc)
 
     bus.subscribe(
         event_types=[
@@ -1363,7 +1364,7 @@ async def main():
     port = 8767
     async with websockets.serve(
         handle_ws,
-        "0.0.0.0",
+        "0.0.0.0",  # noqa: S104
         port,
         process_request=process_request,
     ):
