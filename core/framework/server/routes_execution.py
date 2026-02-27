@@ -40,6 +40,15 @@ async def handle_trigger(request: web.Request) -> web.Response:
             if resp is not None:
                 return resp
 
+        # Resync MCP servers if credentials were added since the worker loaded
+        # (e.g. user connected an OAuth account mid-session via Aden UI).
+        try:
+            await loop.run_in_executor(
+                None, lambda: session.runner._tool_registry.resync_mcp_servers_if_needed()
+            )
+        except Exception as e:
+            logger.warning("MCP resync failed: %s", e)
+
     body = await request.json()
     entry_point_id = body.get("entry_point_id", "default")
     input_data = body.get("input_data", {})

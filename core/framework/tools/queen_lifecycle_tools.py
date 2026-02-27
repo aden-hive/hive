@@ -65,7 +65,7 @@ class WorkerSessionAdapter:
     worker_path: Path | None = None
 
 
-def build_worker_profile(runtime: AgentRuntime) -> str:
+def build_worker_profile(runtime: AgentRuntime, agent_path: Path | str | None = None) -> str:
     """Build a worker capability profile from its graph/goal definition.
 
     Injected into the queen's system prompt so it knows what the worker
@@ -76,6 +76,8 @@ def build_worker_profile(runtime: AgentRuntime) -> str:
 
     lines = ["\n\n# Worker Profile"]
     lines.append(f"Agent: {runtime.graph_id}")
+    if agent_path:
+        lines.append(f"Path: {agent_path}")
     lines.append(f"Goal: {goal.name}")
     if goal.description:
         lines.append(f"Description: {goal.description}")
@@ -174,6 +176,18 @@ def register_queen_lifecycle_tools(
             await loop.run_in_executor(
                 None, lambda: validate_agent_credentials(runtime.graph.nodes)
             )
+
+            # Resync MCP servers if credentials were added since the worker loaded
+            # (e.g. user connected an OAuth account mid-session via Aden UI).
+            runner = getattr(session, "runner", None)
+            if runner:
+                try:
+                    await loop.run_in_executor(
+                        None,
+                        lambda: runner._tool_registry.resync_mcp_servers_if_needed(),
+                    )
+                except Exception as e:
+                    logger.warning("MCP resync failed: %s", e)
 
             # Resume timers in case they were paused by a previous stop_worker
             runtime.resume_timers()

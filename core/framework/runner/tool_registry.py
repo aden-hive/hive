@@ -6,6 +6,7 @@ import importlib.util
 import inspect
 import json
 import logging
+import os
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -47,11 +48,19 @@ class ToolRegistry:
     # and auto-injected at call time for tools that accept them.
     CONTEXT_PARAMS = frozenset({"workspace_id", "agent_id", "session_id", "data_dir"})
 
+    # Credential directory used for change detection
+    _CREDENTIAL_DIR = Path("~/.hive/credentials/credentials").expanduser()
+
     def __init__(self):
         self._tools: dict[str, RegisteredTool] = {}
         self._mcp_clients: list[Any] = []  # List of MCPClient instances
         self._session_context: dict[str, Any] = {}  # Auto-injected context for tools
         self._provider_index: dict[str, set[str]] = {}  # provider -> tool names
+        # MCP resync tracking
+        self._mcp_config_path: Path | None = None  # Path used for initial load
+        self._mcp_tool_names: set[str] = set()  # Tool names registered from MCP
+        self._mcp_cred_snapshot: set[str] = set()  # Credential filenames at MCP load time
+        self._mcp_aden_key_snapshot: str | None = None  # ADEN_API_KEY value at MCP load time
         self._mcp_server_tools: dict[str, set[str]] = {}  # server name -> tool names
 
     def register(
@@ -327,6 +336,9 @@ class ToolRegistry:
         Args:
             config_path: Path to an ``mcp_servers.json`` file.
         """
+        # Remember config path for potential resync later
+        self._mcp_config_path = Path(config_path)
+
         try:
             with open(config_path) as f:
                 config = json.load(f)
@@ -353,6 +365,10 @@ class ToolRegistry:
             except Exception as e:
                 name = server_config.get("name", "unknown")
                 logger.warning(f"Failed to register MCP server '{name}': {e}")
+
+        # Snapshot credential files and ADEN_API_KEY so we can detect mid-session changes
+        self._mcp_cred_snapshot = self._snapshot_credentials()
+        self._mcp_aden_key_snapshot = os.environ.get("ADEN_API_KEY")
 
     def register_mcp_server(
         self,
@@ -447,6 +463,7 @@ class ToolRegistry:
                     tool,
                     make_mcp_executor(client, mcp_tool.name, self, tool_params),
                 )
+                self._mcp_tool_names.add(mcp_tool.name)
                 self._mcp_server_tools[server_name].add(mcp_tool.name)
                 count += 1
 
@@ -539,6 +556,67 @@ class ToolRegistry:
         for names in self._provider_index.values():
             all_names.update(names)
         return sorted(name for name in self._tools if name in all_names)
+
+    # ------------------------------------------------------------------
+    # MCP credential resync
+    # ------------------------------------------------------------------
+
+    def _snapshot_credentials(self) -> set[str]:
+        """Return the set of credential filenames currently on disk."""
+        try:
+            return set(self._CREDENTIAL_DIR.iterdir()) if self._CREDENTIAL_DIR.is_dir() else set()
+        except OSError:
+            return set()
+
+    def resync_mcp_servers_if_needed(self) -> bool:
+        """Restart MCP servers if credential files changed since last load.
+
+        Compares the current credential directory listing against the snapshot
+        taken when MCP servers were first loaded.  If new files appeared (e.g.
+        user connected an OAuth account mid-session), disconnects all MCP
+        clients and re-loads them so the new subprocess picks up the fresh
+        credentials.
+
+        Returns True if a resync was performed, False otherwise.
+        """
+        if not self._mcp_clients or self._mcp_config_path is None:
+            return False
+
+        current = self._snapshot_credentials()
+        current_aden_key = os.environ.get("ADEN_API_KEY")
+        files_changed = current != self._mcp_cred_snapshot
+        aden_key_changed = current_aden_key != self._mcp_aden_key_snapshot
+
+        if not files_changed and not aden_key_changed:
+            return False
+
+        reason = (
+            "Credential files and ADEN_API_KEY changed"
+            if files_changed and aden_key_changed
+            else "ADEN_API_KEY changed"
+            if aden_key_changed
+            else "Credential files changed"
+        )
+        logger.info("%s — resyncing MCP servers", reason)
+
+        # 1. Disconnect existing MCP clients
+        for client in self._mcp_clients:
+            try:
+                client.disconnect()
+            except Exception as e:
+                logger.warning(f"Error disconnecting MCP client during resync: {e}")
+        self._mcp_clients.clear()
+
+        # 2. Remove MCP-registered tools
+        for name in self._mcp_tool_names:
+            self._tools.pop(name, None)
+        self._mcp_tool_names.clear()
+
+        # 3. Re-load MCP servers (spawns fresh subprocesses with new credentials)
+        self.load_mcp_config(self._mcp_config_path)
+
+        logger.info("MCP server resync complete")
+        return True
 
     def cleanup(self) -> None:
         """Clean up all MCP client connections."""

@@ -1,6 +1,7 @@
 """aiohttp Application factory for the Hive HTTP API server."""
 
 import logging
+import os
 from pathlib import Path
 
 from aiohttp import web
@@ -139,6 +140,27 @@ def create_app(model: str | None = None) -> web.Application:
         from framework.credentials.validation import ensure_credential_key_env
 
         ensure_credential_key_env()
+
+        # Ensure HIVE_CREDENTIAL_KEY exists and is persisted (same as TUI setup flow).
+        # ensure_credential_key_env() loads from shell config but won't generate a new
+        # key. Web-only users who never ran the TUI need one auto-generated + persisted
+        # so credentials survive server restarts.
+        if not os.environ.get("HIVE_CREDENTIAL_KEY"):
+            try:
+                from aden_tools.credentials.shell_config import add_env_var_to_shell_config
+                from cryptography.fernet import Fernet
+
+                generated_key = Fernet.generate_key().decode()
+                os.environ["HIVE_CREDENTIAL_KEY"] = generated_key
+                add_env_var_to_shell_config(
+                    "HIVE_CREDENTIAL_KEY",
+                    generated_key,
+                    comment="Encryption key for Hive credential store",
+                )
+                logger.info("Generated and persisted HIVE_CREDENTIAL_KEY to shell config")
+            except Exception as exc:
+                logger.warning("Could not auto-persist HIVE_CREDENTIAL_KEY: %s", exc)
+
         app["credential_store"] = CredentialStore.with_aden_sync()
     except Exception:
         logger.debug("Encrypted credential store unavailable, using in-memory fallback")
