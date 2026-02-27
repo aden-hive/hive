@@ -11,7 +11,7 @@ import asyncio
 import json
 import logging
 import time
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncIterator
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -23,7 +23,7 @@ except ImportError:
     litellm = None  # type: ignore[assignment]
     RateLimitError = Exception  # type: ignore[assignment, misc]
 
-from framework.llm.provider import LLMProvider, LLMResponse, Tool, ToolResult, ToolUse
+from framework.llm.provider import LLMProvider, LLMResponse, Tool
 from framework.llm.stream_events import StreamEvent
 
 logger = logging.getLogger(__name__)
@@ -70,8 +70,49 @@ def _patch_litellm_anthropic_oauth() -> None:
     AnthropicModelInfo.validate_environment = _patched_validate_environment
 
 
+def _patch_litellm_metadata_nonetype() -> None:
+    """Patch litellm entry points to prevent metadata=None TypeError.
+
+    litellm bug: the @client decorator in utils.py has four places that do
+        "model_group" in kwargs.get("metadata", {})
+    but kwargs["metadata"] can be explicitly None (set internally by
+    litellm_params), causing:
+        TypeError: argument of type 'NoneType' is not iterable
+    This masks the real API error with a confusing APIConnectionError.
+
+    Fix: wrap the four litellm entry points (completion, acompletion,
+    responses, aresponses) to pop metadata=None before the @client
+    decorator's error handler can crash on it.
+    """
+    import functools
+
+    for fn_name in ("completion", "acompletion", "responses", "aresponses"):
+        original = getattr(litellm, fn_name, None)
+        if original is None:
+            continue
+        if asyncio.iscoroutinefunction(original):
+
+            @functools.wraps(original)
+            async def _async_wrapper(*args, _orig=original, **kwargs):
+                if kwargs.get("metadata") is None:
+                    kwargs.pop("metadata", None)
+                return await _orig(*args, **kwargs)
+
+            setattr(litellm, fn_name, _async_wrapper)
+        else:
+
+            @functools.wraps(original)
+            def _sync_wrapper(*args, _orig=original, **kwargs):
+                if kwargs.get("metadata") is None:
+                    kwargs.pop("metadata", None)
+                return _orig(*args, **kwargs)
+
+            setattr(litellm, fn_name, _sync_wrapper)
+
+
 if litellm is not None:
     _patch_litellm_anthropic_oauth()
+    _patch_litellm_metadata_nonetype()
 
 RATE_LIMIT_MAX_RETRIES = 10
 RATE_LIMIT_BACKOFF_BASE = 2  # seconds
@@ -284,6 +325,12 @@ class LiteLLMProvider(LLMProvider):
                 "LiteLLM is not installed. Please install it with: uv pip install litellm"
             )
 
+        # Note: The Codex ChatGPT backend is a Responses API endpoint at
+        # chatgpt.com/backend-api/codex/responses.  LiteLLM's model registry
+        # correctly marks codex models with mode="responses", so we do NOT
+        # override the mode.  The responses_api_bridge in litellm handles
+        # converting Chat Completions requests to Responses API format.
+
     def _completion_with_rate_limit_retry(
         self, max_retries: int | None = None, **kwargs: Any
     ) -> Any:
@@ -396,43 +443,6 @@ class LiteLLMProvider(LLMProvider):
         # unreachable, but satisfies type checker
         raise RuntimeError("Exhausted rate limit retries")
 
-    def _codex_sync_complete(self, kwargs: dict[str, Any]) -> "LLMResponse":
-        """Collect a streaming Codex response into a single LLMResponse.
-
-        The ChatGPT Codex backend only supports ``stream=True``, so non-streaming
-        callers go through this helper which forces streaming, accumulates the
-        chunks, and returns the same LLMResponse that ``complete()`` would.
-        """
-        kwargs["stream"] = True
-        response = litellm.completion(**kwargs)  # type: ignore[union-attr]
-        content = ""
-        model_name = self.model
-        input_tokens = 0
-        output_tokens = 0
-        finish_reason = ""
-        for chunk in response:
-            choice = chunk.choices[0] if chunk.choices else None
-            if not choice:
-                continue
-            delta = choice.delta
-            if delta and delta.content:
-                content += delta.content
-            if choice.finish_reason:
-                finish_reason = choice.finish_reason
-            if hasattr(chunk, "usage") and chunk.usage:
-                input_tokens = getattr(chunk.usage, "prompt_tokens", 0) or 0
-                output_tokens = getattr(chunk.usage, "completion_tokens", 0) or 0
-            if chunk.model:
-                model_name = chunk.model
-        return LLMResponse(
-            content=content,
-            model=model_name,
-            input_tokens=input_tokens,
-            output_tokens=output_tokens,
-            stop_reason=finish_reason,
-            raw_response=None,
-        )
-
     def complete(
         self,
         messages: list[dict[str, Any]],
@@ -444,6 +454,19 @@ class LiteLLMProvider(LLMProvider):
         max_retries: int | None = None,
     ) -> LLMResponse:
         """Generate a completion using LiteLLM."""
+        # Codex ChatGPT backend requires streaming — delegate to the unified
+        # async streaming path which properly handles tool calls.
+        if self._codex_backend:
+            return asyncio.run(self.acomplete(
+                messages=messages,
+                system=system,
+                tools=tools,
+                max_tokens=max_tokens,
+                response_format=response_format,
+                json_mode=json_mode,
+                max_retries=max_retries,
+            ))
+
         # Prepare messages with system prompt
         full_messages = []
         if system:
@@ -481,11 +504,6 @@ class LiteLLMProvider(LLMProvider):
         if response_format:
             kwargs["response_format"] = response_format
 
-        # Codex ChatGPT backend requires streaming and rejects max_output_tokens.
-        if self._codex_backend:
-            kwargs.pop("max_tokens", None)
-            return self._codex_sync_complete(kwargs)
-
         # Make the call
         response = self._completion_with_rate_limit_retry(max_retries=max_retries, **kwargs)
 
@@ -509,127 +527,6 @@ class LiteLLMProvider(LLMProvider):
             output_tokens=output_tokens,
             stop_reason=response.choices[0].finish_reason or "",
             raw_response=response,
-        )
-
-    def complete_with_tools(
-        self,
-        messages: list[dict[str, Any]],
-        system: str,
-        tools: list[Tool],
-        tool_executor: Callable[[ToolUse], ToolResult],
-        max_iterations: int = 10,
-        max_tokens: int = 4096,
-    ) -> LLMResponse:
-        """Run a tool-use loop until the LLM produces a final response."""
-        # Prepare messages with system prompt
-        current_messages = []
-        if system:
-            current_messages.append({"role": "system", "content": system})
-        current_messages.extend(messages)
-
-        total_input_tokens = 0
-        total_output_tokens = 0
-
-        # Convert tools to OpenAI format
-        openai_tools = [self._tool_to_openai_format(t) for t in tools]
-
-        for _ in range(max_iterations):
-            # Build kwargs
-            kwargs: dict[str, Any] = {
-                "model": self.model,
-                "messages": current_messages,
-                "max_tokens": max_tokens,
-                "tools": openai_tools,
-                **self.extra_kwargs,
-            }
-
-            if self.api_key:
-                kwargs["api_key"] = self.api_key
-            if self.api_base:
-                kwargs["api_base"] = self.api_base
-
-            response = self._completion_with_rate_limit_retry(**kwargs)
-
-            # Track tokens
-            usage = response.usage
-            if usage:
-                total_input_tokens += usage.prompt_tokens
-                total_output_tokens += usage.completion_tokens
-
-            choice = response.choices[0]
-            message = choice.message
-
-            # Check if we're done (no tool calls)
-            if choice.finish_reason == "stop" or not message.tool_calls:
-                return LLMResponse(
-                    content=message.content or "",
-                    model=response.model or self.model,
-                    input_tokens=total_input_tokens,
-                    output_tokens=total_output_tokens,
-                    stop_reason=choice.finish_reason or "stop",
-                    raw_response=response,
-                )
-
-            # Process tool calls.
-            # Add assistant message with tool calls.
-            current_messages.append(
-                {
-                    "role": "assistant",
-                    "content": message.content,
-                    "tool_calls": [
-                        {
-                            "id": tc.id,
-                            "type": "function",
-                            "function": {
-                                "name": tc.function.name,
-                                "arguments": tc.function.arguments,
-                            },
-                        }
-                        for tc in message.tool_calls
-                    ],
-                }
-            )
-
-            # Execute tools and add results.
-            for tool_call in message.tool_calls:
-                try:
-                    args = json.loads(tool_call.function.arguments)
-                except json.JSONDecodeError:
-                    # Surface error to LLM and skip tool execution
-                    current_messages.append(
-                        {
-                            "role": "tool",
-                            "tool_call_id": tool_call.id,
-                            "content": "Invalid JSON arguments provided to tool.",
-                        }
-                    )
-                    continue
-
-                tool_use = ToolUse(
-                    id=tool_call.id,
-                    name=tool_call.function.name,
-                    input=args,
-                )
-
-                result = tool_executor(tool_use)
-
-                # Add tool result message
-                current_messages.append(
-                    {
-                        "role": "tool",
-                        "tool_call_id": result.tool_use_id,
-                        "content": result.content,
-                    }
-                )
-
-        # Max iterations reached
-        return LLMResponse(
-            content="Max tool iterations reached",
-            model=self.model,
-            input_tokens=total_input_tokens,
-            output_tokens=total_output_tokens,
-            stop_reason="max_iterations",
-            raw_response=None,
         )
 
     # ------------------------------------------------------------------
@@ -754,6 +651,19 @@ class LiteLLMProvider(LLMProvider):
         max_retries: int | None = None,
     ) -> LLMResponse:
         """Async version of complete(). Uses litellm.acompletion — non-blocking."""
+        # Codex ChatGPT backend requires streaming — route through stream() which
+        # already handles Codex quirks and has proper tool call accumulation.
+        if self._codex_backend:
+            stream_iter = self.stream(
+                messages=messages,
+                system=system,
+                tools=tools,
+                max_tokens=max_tokens,
+                response_format=response_format,
+                json_mode=json_mode,
+            )
+            return await self._collect_stream_to_response(stream_iter)
+
         full_messages: list[dict[str, Any]] = []
         if system:
             full_messages.append({"role": "system", "content": system})
@@ -782,11 +692,6 @@ class LiteLLMProvider(LLMProvider):
         if response_format:
             kwargs["response_format"] = response_format
 
-        # Codex ChatGPT backend requires streaming and rejects max_output_tokens.
-        if self._codex_backend:
-            kwargs.pop("max_tokens", None)
-            return await self._codex_async_complete(kwargs)
-
         response = await self._acompletion_with_rate_limit_retry(max_retries=max_retries, **kwargs)
 
         content = response.choices[0].message.content or ""
@@ -801,147 +706,6 @@ class LiteLLMProvider(LLMProvider):
             output_tokens=output_tokens,
             stop_reason=response.choices[0].finish_reason or "",
             raw_response=response,
-        )
-
-    async def _codex_async_complete(self, kwargs: dict[str, Any]) -> "LLMResponse":
-        """Async version of _codex_sync_complete."""
-        kwargs["stream"] = True
-        response = await litellm.acompletion(**kwargs)  # type: ignore[union-attr]
-        content = ""
-        model_name = self.model
-        input_tokens = 0
-        output_tokens = 0
-        finish_reason = ""
-        async for chunk in response:
-            choice = chunk.choices[0] if chunk.choices else None
-            if not choice:
-                continue
-            delta = choice.delta
-            if delta and delta.content:
-                content += delta.content
-            if choice.finish_reason:
-                finish_reason = choice.finish_reason
-            if hasattr(chunk, "usage") and chunk.usage:
-                input_tokens = getattr(chunk.usage, "prompt_tokens", 0) or 0
-                output_tokens = getattr(chunk.usage, "completion_tokens", 0) or 0
-            if chunk.model:
-                model_name = chunk.model
-        return LLMResponse(
-            content=content,
-            model=model_name,
-            input_tokens=input_tokens,
-            output_tokens=output_tokens,
-            stop_reason=finish_reason,
-            raw_response=None,
-        )
-
-    async def acomplete_with_tools(
-        self,
-        messages: list[dict[str, Any]],
-        system: str,
-        tools: list[Tool],
-        tool_executor: Callable[[ToolUse], ToolResult],
-        max_iterations: int = 10,
-        max_tokens: int = 4096,
-    ) -> LLMResponse:
-        """Async version of complete_with_tools(). Uses litellm.acompletion — non-blocking."""
-        current_messages: list[dict[str, Any]] = []
-        if system:
-            current_messages.append({"role": "system", "content": system})
-        current_messages.extend(messages)
-
-        total_input_tokens = 0
-        total_output_tokens = 0
-        openai_tools = [self._tool_to_openai_format(t) for t in tools]
-
-        for _ in range(max_iterations):
-            kwargs: dict[str, Any] = {
-                "model": self.model,
-                "messages": current_messages,
-                "max_tokens": max_tokens,
-                "tools": openai_tools,
-                **self.extra_kwargs,
-            }
-
-            if self.api_key:
-                kwargs["api_key"] = self.api_key
-            if self.api_base:
-                kwargs["api_base"] = self.api_base
-
-            response = await self._acompletion_with_rate_limit_retry(**kwargs)
-
-            usage = response.usage
-            if usage:
-                total_input_tokens += usage.prompt_tokens
-                total_output_tokens += usage.completion_tokens
-
-            choice = response.choices[0]
-            message = choice.message
-
-            if choice.finish_reason == "stop" or not message.tool_calls:
-                return LLMResponse(
-                    content=message.content or "",
-                    model=response.model or self.model,
-                    input_tokens=total_input_tokens,
-                    output_tokens=total_output_tokens,
-                    stop_reason=choice.finish_reason or "stop",
-                    raw_response=response,
-                )
-
-            current_messages.append(
-                {
-                    "role": "assistant",
-                    "content": message.content,
-                    "tool_calls": [
-                        {
-                            "id": tc.id,
-                            "type": "function",
-                            "function": {
-                                "name": tc.function.name,
-                                "arguments": tc.function.arguments,
-                            },
-                        }
-                        for tc in message.tool_calls
-                    ],
-                }
-            )
-
-            for tool_call in message.tool_calls:
-                try:
-                    args = json.loads(tool_call.function.arguments)
-                except json.JSONDecodeError:
-                    current_messages.append(
-                        {
-                            "role": "tool",
-                            "tool_call_id": tool_call.id,
-                            "content": "Invalid JSON arguments provided to tool.",
-                        }
-                    )
-                    continue
-
-                tool_use = ToolUse(
-                    id=tool_call.id,
-                    name=tool_call.function.name,
-                    input=args,
-                )
-
-                result = tool_executor(tool_use)
-
-                current_messages.append(
-                    {
-                        "role": "tool",
-                        "tool_call_id": result.tool_use_id,
-                        "content": result.content,
-                    }
-                )
-
-        return LLMResponse(
-            content="Max tool iterations reached",
-            model=self.model,
-            input_tokens=total_input_tokens,
-            output_tokens=total_output_tokens,
-            stop_reason="max_iterations",
-            raw_response=None,
         )
 
     def _tool_to_openai_format(self, tool: Tool) -> dict[str, Any]:
@@ -965,6 +729,8 @@ class LiteLLMProvider(LLMProvider):
         system: str = "",
         tools: list[Tool] | None = None,
         max_tokens: int = 4096,
+        response_format: dict[str, Any] | None = None,
+        json_mode: bool = False,
     ) -> AsyncIterator[StreamEvent]:
         """Stream a completion via litellm.acompletion(stream=True).
 
@@ -989,6 +755,19 @@ class LiteLLMProvider(LLMProvider):
             full_messages.append({"role": "system", "content": system})
         full_messages.extend(messages)
 
+        # Codex Responses API requires an `instructions` field (system prompt).
+        # Inject a minimal one when callers don't provide a system message.
+        if self._codex_backend and not any(m["role"] == "system" for m in full_messages):
+            full_messages.insert(0, {"role": "system", "content": "You are a helpful assistant."})
+
+        # Add JSON mode via prompt engineering (works across all providers)
+        if json_mode:
+            json_instruction = "\n\nPlease respond with a valid JSON object."
+            if full_messages and full_messages[0]["role"] == "system":
+                full_messages[0]["content"] += json_instruction
+            else:
+                full_messages.insert(0, {"role": "system", "content": json_instruction.strip()})
+
         kwargs: dict[str, Any] = {
             "model": self.model,
             "messages": full_messages,
@@ -1003,7 +782,9 @@ class LiteLLMProvider(LLMProvider):
             kwargs["api_base"] = self.api_base
         if tools:
             kwargs["tools"] = [self._tool_to_openai_format(t) for t in tools]
-        # The Codex ChatGPT backend rejects max_output_tokens and stream_options.
+        if response_format:
+            kwargs["response_format"] = response_format
+        # The Codex ChatGPT backend (Responses API) rejects several params.
         if self._codex_backend:
             kwargs.pop("max_tokens", None)
             kwargs.pop("stream_options", None)
@@ -1015,6 +796,7 @@ class LiteLLMProvider(LLMProvider):
             tail_events: list[StreamEvent] = []
             accumulated_text = ""
             tool_calls_acc: dict[int, dict[str, str]] = {}
+            _last_tool_idx = 0  # tracks most recently opened tool call slot
             input_tokens = 0
             output_tokens = 0
             stream_finish_reason: str | None = None
@@ -1038,9 +820,33 @@ class LiteLLMProvider(LLMProvider):
                         )
 
                     # --- Tool calls (accumulate across chunks) ---
+                    # The Codex/Responses API bridge (litellm bug) hardcodes
+                    # index=0 on every ChatCompletionToolCallChunk, even for
+                    # parallel tool calls.  We work around this by using tc.id
+                    # (set on output_item.added events) as a "new tool call"
+                    # signal and tracking the most recently opened slot for
+                    # argument deltas that arrive with id=None.
                     if delta and delta.tool_calls:
                         for tc in delta.tool_calls:
                             idx = tc.index if hasattr(tc, "index") and tc.index is not None else 0
+
+                            if tc.id:
+                                # New tool call announced (or done event re-sent).
+                                # Check if this id already has a slot.
+                                existing_idx = next(
+                                    (k for k, v in tool_calls_acc.items() if v["id"] == tc.id),
+                                    None,
+                                )
+                                if existing_idx is not None:
+                                    idx = existing_idx
+                                elif idx in tool_calls_acc and tool_calls_acc[idx]["id"] not in ("", tc.id):
+                                    # Slot taken by a different call — assign new index
+                                    idx = max(tool_calls_acc.keys()) + 1
+                                _last_tool_idx = idx
+                            else:
+                                # Argument delta with no id — route to last opened slot
+                                idx = _last_tool_idx
+
                             if idx not in tool_calls_acc:
                                 tool_calls_acc[idx] = {"id": "", "name": "", "arguments": ""}
                             if tc.id:
@@ -1179,3 +985,54 @@ class LiteLLMProvider(LLMProvider):
                 recoverable = _is_stream_transient_error(e)
                 yield StreamErrorEvent(error=str(e), recoverable=recoverable)
                 return
+
+    async def _collect_stream_to_response(
+        self,
+        stream: AsyncIterator[StreamEvent],
+    ) -> LLMResponse:
+        """Consume a stream() iterator and collect it into a single LLMResponse.
+
+        Used by acomplete() to route through the unified streaming path so that
+        all backends (including Codex) get proper tool call handling.
+        """
+        from framework.llm.stream_events import (
+            FinishEvent,
+            StreamErrorEvent,
+            TextDeltaEvent,
+            ToolCallEvent,
+        )
+
+        content = ""
+        tool_calls: list[dict[str, Any]] = []
+        input_tokens = 0
+        output_tokens = 0
+        stop_reason = ""
+        model = self.model
+
+        async for event in stream:
+            if isinstance(event, TextDeltaEvent):
+                content = event.snapshot  # snapshot is the accumulated text
+            elif isinstance(event, ToolCallEvent):
+                tool_calls.append({
+                    "id": event.tool_use_id,
+                    "name": event.tool_name,
+                    "input": event.tool_input,
+                })
+            elif isinstance(event, FinishEvent):
+                input_tokens = event.input_tokens
+                output_tokens = event.output_tokens
+                stop_reason = event.stop_reason
+                if event.model:
+                    model = event.model
+            elif isinstance(event, StreamErrorEvent):
+                if not event.recoverable:
+                    raise RuntimeError(f"Stream error: {event.error}")
+
+        return LLMResponse(
+            content=content,
+            model=model,
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            stop_reason=stop_reason,
+            raw_response={"tool_calls": tool_calls} if tool_calls else None,
+        )

@@ -36,15 +36,6 @@ class FailingLLMProvider(LLMProvider):
     def complete(self, messages: list[dict[str, Any]], **kwargs: Any) -> LLMResponse:
         raise RuntimeError("LLM unavailable")
 
-    def complete_with_tools(
-        self,
-        messages: list[dict[str, Any]],
-        system: str,
-        tools: list,
-        tool_executor: Any,
-        max_iterations: int = 10,
-    ) -> LLMResponse:
-        raise RuntimeError("LLM unavailable")
 
 
 async def _build_conversation(*pairs: tuple[str, str]) -> NodeConversation:

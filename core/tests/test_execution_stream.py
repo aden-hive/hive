@@ -1,7 +1,7 @@
 """Tests for ExecutionStream retention behavior."""
 
 import json
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncIterator
 from typing import Any
 
 import pytest
@@ -35,16 +35,6 @@ class DummyLLMProvider(LLMProvider):
         response_format: dict[str, object] | None = None,
         json_mode: bool = False,
         max_retries: int | None = None,
-    ) -> LLMResponse:
-        return LLMResponse(content="Summary for compaction.", model="dummy")
-
-    def complete_with_tools(
-        self,
-        messages: list[dict[str, object]],
-        system: str,
-        tools: list[Tool],
-        tool_executor: Callable,
-        max_iterations: int = 10,
     ) -> LLMResponse:
         return LLMResponse(content="Summary for compaction.", model="dummy")
 

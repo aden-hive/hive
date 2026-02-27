@@ -68,8 +68,6 @@ class MockStreamingLLM(LLMProvider):
     def complete(self, messages, system="", **kwargs) -> LLMResponse:
         return LLMResponse(content="Summary of conversation.", model="mock", stop_reason="stop")
 
-    def complete_with_tools(self, messages, system, tools, tool_executor, **kwargs) -> LLMResponse:
-        return LLMResponse(content="", model="mock", stop_reason="stop")
 
 
 # ---------------------------------------------------------------------------
@@ -705,6 +703,244 @@ class TestClientFacingBlocking:
 
 
 # ===========================================================================
+# Client-facing: _cf_expecting_work state machine
+#
+# After user responds, text-only turns with missing required outputs should
+# go through judge (RETRY) instead of auto-blocking.  This prevents weak
+# models from stalling when they output "Understood" without calling tools.
+# ===========================================================================
+
+
+class TestClientFacingExpectingWork:
+    """Tests for _cf_expecting_work state machine in client-facing nodes."""
+
+    @pytest.mark.asyncio
+    async def test_text_after_user_input_goes_to_judge(self, runtime, memory):
+        """After user responds, text-only with missing outputs gets judged (not auto-blocked).
+
+        Simulates: findings-review asks user, user says "generate report",
+        Codex replies "Understood" without tools -> judge should RETRY.
+        """
+        spec = NodeSpec(
+            id="findings",
+            name="Findings Review",
+            description="review findings",
+            node_type="event_loop",
+            output_keys=["decision"],
+            client_facing=True,
+        )
+        llm = MockStreamingLLM(
+            scenarios=[
+                # Turn 0: ask user what to do
+                tool_call_scenario(
+                    "ask_user", {"question": "Continue or generate report?"},
+                    tool_use_id="ask_1",
+                ),
+                # Turn 1: after user responds, LLM outputs text-only (lazy)
+                text_scenario("Understood, generating the report."),
+                # Turn 2: after judge RETRY, LLM sets output
+                tool_call_scenario(
+                    "set_output", {"key": "decision", "value": "generate"},
+                ),
+                # Turn 3: accept
+                text_scenario("Done."),
+            ]
+        )
+        node = EventLoopNode(config=LoopConfig(max_iterations=10))
+        ctx = build_ctx(runtime, spec, memory, llm)
+
+        async def user_responds():
+            await asyncio.sleep(0.05)
+            await node.inject_event("Generate the report")
+
+        task = asyncio.create_task(user_responds())
+        result = await node.execute(ctx)
+        await task
+
+        assert result.success is True
+        assert result.output["decision"] == "generate"
+        # LLM should have been called at least 3 times (ask_user, text-only retried, set_output)
+        assert llm._call_index >= 3
+
+    @pytest.mark.asyncio
+    async def test_auto_block_without_missing_outputs(self, runtime, memory):
+        """Text-only with no missing outputs should still auto-block (queen monitoring).
+
+        Simulates: queen node with no required outputs outputs "monitoring..."
+        -> should auto-block and wait for event, not spin in judge loop.
+        """
+        spec = NodeSpec(
+            id="queen",
+            name="Queen",
+            description="orchestrator",
+            node_type="event_loop",
+            output_keys=[],
+            client_facing=True,
+        )
+        llm = MockStreamingLLM(
+            scenarios=[
+                # Turn 0: ask user for domain
+                tool_call_scenario(
+                    "ask_user", {"question": "What domain?"},
+                    tool_use_id="ask_1",
+                ),
+                # Turn 1: after user input, outputs monitoring text
+                # No missing required outputs -> should auto-block
+                text_scenario("Monitoring workers..."),
+            ]
+        )
+        node = EventLoopNode(config=LoopConfig(max_iterations=10))
+        ctx = build_ctx(runtime, spec, memory, llm)
+
+        async def user_then_shutdown():
+            await asyncio.sleep(0.05)
+            await node.inject_event("furwise.app")
+            # Node should auto-block on "Monitoring..." text.
+            # Give it time to reach the block, then shutdown.
+            await asyncio.sleep(0.1)
+            node.signal_shutdown()
+
+        task = asyncio.create_task(user_then_shutdown())
+        result = await node.execute(ctx)
+        await task
+
+        assert result.success is True
+        # LLM called exactly 2 times: ask_user + monitoring text.
+        # If auto-block was skipped, judge would loop and call LLM more times.
+        assert llm._call_index == 2
+
+    @pytest.mark.asyncio
+    async def test_tool_calls_reset_expecting_work(self, runtime, memory):
+        """After LLM calls tools, next text-only turn should auto-block again.
+
+        Simulates: user gives input -> LLM calls tools (work) -> LLM presents
+        results as text -> should auto-block (presenting, not lazy).
+        """
+        spec = NodeSpec(
+            id="report",
+            name="Report",
+            description="generate report",
+            node_type="event_loop",
+            output_keys=["status"],
+            client_facing=True,
+        )
+
+        def my_executor(tool_use: ToolUse) -> ToolResult:
+            return ToolResult(tool_use_id=tool_use.id, content="saved", is_error=False)
+
+        llm = MockStreamingLLM(
+            scenarios=[
+                # Turn 0: ask user
+                tool_call_scenario(
+                    "ask_user", {"question": "Ready?"},
+                    tool_use_id="ask_1",
+                ),
+                # Turn 1: after user responds, LLM does work (tool call)
+                tool_call_scenario(
+                    "save_data", {"content": "report.html"},
+                    tool_use_id="tool_1",
+                ),
+                # Turn 2: LLM presents results as text (no tools)
+                # Tool calls reset _cf_expecting_work -> should auto-block
+                text_scenario("Here is your report. Need changes?"),
+                # Turn 3: after user responds, set output
+                tool_call_scenario(
+                    "set_output", {"key": "status", "value": "complete"},
+                ),
+                # Turn 4: done
+                text_scenario("All done."),
+            ]
+        )
+        node = EventLoopNode(
+            tool_executor=my_executor,
+            config=LoopConfig(max_iterations=10),
+        )
+        ctx = build_ctx(
+            runtime, spec, memory, llm,
+            tools=[Tool(name="save_data", description="save", parameters={})],
+        )
+
+        async def interactions():
+            await asyncio.sleep(0.05)
+            await node.inject_event("Yes, go ahead")
+            # After tool calls + text presentation, node should auto-block again.
+            # Inject second user response.
+            await asyncio.sleep(0.2)
+            await node.inject_event("Looks good")
+
+        task = asyncio.create_task(interactions())
+        result = await node.execute(ctx)
+        await task
+
+        assert result.success is True
+        assert result.output["status"] == "complete"
+
+    @pytest.mark.asyncio
+    async def test_judge_retry_enables_expecting_work(self, runtime, memory):
+        """After judge RETRY, text-only with missing outputs goes to judge again.
+
+        Simulates: LLM calls save_data but forgets set_output -> judge RETRY ->
+        LLM outputs text -> should go to judge (not auto-block).
+        """
+        spec = NodeSpec(
+            id="report",
+            name="Report",
+            description="generate report",
+            node_type="event_loop",
+            output_keys=["status"],
+            client_facing=True,
+        )
+
+        def my_executor(tool_use: ToolUse) -> ToolResult:
+            return ToolResult(tool_use_id=tool_use.id, content="saved", is_error=False)
+
+        llm = MockStreamingLLM(
+            scenarios=[
+                # Turn 0: ask user
+                tool_call_scenario(
+                    "ask_user", {"question": "Generate?"},
+                    tool_use_id="ask_1",
+                ),
+                # Turn 1: LLM calls tool but doesn't set output
+                tool_call_scenario(
+                    "save_data", {"content": "report"},
+                    tool_use_id="tool_1",
+                ),
+                # Turn 2: judge RETRY (missing "status"). LLM outputs text.
+                # _cf_expecting_work should be True from RETRY -> goes to judge
+                text_scenario("Report generated successfully."),
+                # Turn 3: after second RETRY, LLM finally sets output
+                tool_call_scenario(
+                    "set_output", {"key": "status", "value": "done"},
+                ),
+                # Turn 4: accept
+                text_scenario("Complete."),
+            ]
+        )
+        node = EventLoopNode(
+            tool_executor=my_executor,
+            config=LoopConfig(max_iterations=10),
+        )
+        ctx = build_ctx(
+            runtime, spec, memory, llm,
+            tools=[Tool(name="save_data", description="save", parameters={})],
+        )
+
+        async def user_responds():
+            await asyncio.sleep(0.05)
+            await node.inject_event("Yes")
+
+        task = asyncio.create_task(user_responds())
+        result = await node.execute(ctx)
+        await task
+
+        assert result.success is True
+        assert result.output["status"] == "done"
+        # LLM called at least 4 times: ask_user, save_data, text(retried), set_output
+        assert llm._call_index >= 4
+
+
+# ===========================================================================
 # Tool execution
 # ===========================================================================
 
@@ -1026,8 +1262,6 @@ class ErrorThenSuccessLLM(LLMProvider):
     def complete(self, messages, system="", **kwargs) -> LLMResponse:
         return LLMResponse(content="ok", model="mock", stop_reason="stop")
 
-    def complete_with_tools(self, messages, system, tools, tool_executor, **kwargs) -> LLMResponse:
-        return LLMResponse(content="", model="mock", stop_reason="stop")
 
 
 class TestTransientErrorRetry:
@@ -1131,20 +1365,6 @@ class TestTransientErrorRetry:
                     stop_reason="stop",
                 )
 
-            def complete_with_tools(
-                self,
-                messages,
-                system,
-                tools,
-                tool_executor,
-                **kwargs,
-            ):
-                return LLMResponse(
-                    content="",
-                    model="mock",
-                    stop_reason="stop",
-                )
-
         llm = StreamErrorThenSuccessLLM()
         ctx = build_ctx(runtime, node_spec, memory, llm)
         node = EventLoopNode(
@@ -1226,9 +1446,6 @@ class TestTransientErrorRetry:
 
             def complete(self, messages, system="", **kwargs):
                 return LLMResponse(content="ok", model="mock", stop_reason="stop")
-
-            def complete_with_tools(self, messages, system, tools, tool_executor, **kwargs):
-                return LLMResponse(content="", model="mock", stop_reason="stop")
 
         llm = RecoverableErrorThenSuccessLLM()
         ctx = build_ctx(runtime, node_spec, memory, llm)
@@ -1412,19 +1629,6 @@ class ToolRepeatLLM(LLMProvider):
             stop_reason="stop",
         )
 
-    def complete_with_tools(
-        self,
-        messages,
-        system,
-        tools,
-        tool_executor,
-        **kwargs,
-    ) -> LLMResponse:
-        return LLMResponse(
-            content="",
-            model="mock",
-            stop_reason="stop",
-        )
 
 
 class TestToolDoomLoopIntegration:
@@ -1646,20 +1850,6 @@ class TestToolDoomLoopIntegration:
             def complete(self, messages, **kwargs):
                 return LLMResponse(
                     content="ok",
-                    model="mock",
-                    stop_reason="stop",
-                )
-
-            def complete_with_tools(
-                self,
-                messages,
-                system,
-                tools,
-                tool_executor,
-                **kw,
-            ):
-                return LLMResponse(
-                    content="",
                     model="mock",
                     stop_reason="stop",
                 )

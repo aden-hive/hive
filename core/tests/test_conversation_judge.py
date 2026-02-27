@@ -64,8 +64,6 @@ class MockStreamingLLM(LLMProvider):
         self.complete_calls.append({"messages": messages, "system": system})
         return LLMResponse(content=self.complete_response, model="mock", stop_reason="stop")
 
-    def complete_with_tools(self, messages, system, tools, tool_executor, **kwargs) -> LLMResponse:
-        return LLMResponse(content="", model="mock", stop_reason="stop")
 
 
 # ---------------------------------------------------------------------------

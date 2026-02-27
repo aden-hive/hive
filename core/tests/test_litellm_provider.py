@@ -20,7 +20,7 @@ import pytest
 
 from framework.llm.anthropic import AnthropicProvider
 from framework.llm.litellm import LiteLLMProvider, _compute_retry_delay
-from framework.llm.provider import LLMProvider, LLMResponse, Tool, ToolResult, ToolUse
+from framework.llm.provider import LLMProvider, LLMResponse, Tool
 
 
 class TestLiteLLMProviderInit:
@@ -154,124 +154,6 @@ class TestLiteLLMProviderComplete:
         assert call_kwargs["tools"][0]["function"]["name"] == "get_weather"
 
 
-class TestLiteLLMProviderToolUse:
-    """Test LiteLLMProvider.complete_with_tools() method."""
-
-    @patch("litellm.completion")
-    def test_complete_with_tools_single_iteration(self, mock_completion):
-        """Test tool use with single iteration."""
-        # First response: tool call
-        tool_call_response = MagicMock()
-        tool_call_response.choices = [MagicMock()]
-        tool_call_response.choices[0].message.content = None
-        tool_call_response.choices[0].message.tool_calls = [MagicMock()]
-        tool_call_response.choices[0].message.tool_calls[0].id = "call_123"
-        tool_call_response.choices[0].message.tool_calls[0].function.name = "get_weather"
-        tool_call_response.choices[0].message.tool_calls[
-            0
-        ].function.arguments = '{"location": "London"}'
-        tool_call_response.choices[0].finish_reason = "tool_calls"
-        tool_call_response.model = "gpt-4o-mini"
-        tool_call_response.usage.prompt_tokens = 20
-        tool_call_response.usage.completion_tokens = 15
-
-        # Second response: final answer
-        final_response = MagicMock()
-        final_response.choices = [MagicMock()]
-        final_response.choices[0].message.content = "The weather in London is sunny."
-        final_response.choices[0].message.tool_calls = None
-        final_response.choices[0].finish_reason = "stop"
-        final_response.model = "gpt-4o-mini"
-        final_response.usage.prompt_tokens = 30
-        final_response.usage.completion_tokens = 10
-
-        mock_completion.side_effect = [tool_call_response, final_response]
-
-        provider = LiteLLMProvider(model="gpt-4o-mini", api_key="test-key")
-
-        tools = [
-            Tool(
-                name="get_weather",
-                description="Get the weather",
-                parameters={
-                    "properties": {"location": {"type": "string"}},
-                    "required": ["location"],
-                },
-            )
-        ]
-
-        def tool_executor(tool_use: ToolUse) -> ToolResult:
-            return ToolResult(tool_use_id=tool_use.id, content="Sunny, 22C", is_error=False)
-
-        result = provider.complete_with_tools(
-            messages=[{"role": "user", "content": "What's the weather in London?"}],
-            system="You are a weather assistant.",
-            tools=tools,
-            tool_executor=tool_executor,
-        )
-
-        assert result.content == "The weather in London is sunny."
-        assert result.input_tokens == 50  # 20 + 30
-        assert result.output_tokens == 25  # 15 + 10
-        assert mock_completion.call_count == 2
-
-    @patch("litellm.completion")
-    def test_complete_with_tools_invalid_json_arguments_are_handled(self, mock_completion):
-        """Test that invalid JSON tool arguments do not execute the tool."""
-        # Mock response with invalid JSON arguments
-        tool_call_response = MagicMock()
-        tool_call_response.choices = [MagicMock()]
-        tool_call_response.choices[0].message.content = None
-        tool_call_response.choices[0].message.tool_calls = [MagicMock()]
-        tool_call_response.choices[0].message.tool_calls[0].id = "call_123"
-        tool_call_response.choices[0].message.tool_calls[0].function.name = "test_tool"
-        tool_call_response.choices[0].message.tool_calls[0].function.arguments = "{invalid json"
-        tool_call_response.choices[0].finish_reason = "tool_calls"
-        tool_call_response.model = "gpt-4o-mini"
-        tool_call_response.usage.prompt_tokens = 10
-        tool_call_response.usage.completion_tokens = 5
-
-        # Final response (LLM continues after tool error)
-        final_response = MagicMock()
-        final_response.choices = [MagicMock()]
-        final_response.choices[0].message.content = "Handled error"
-        final_response.choices[0].message.tool_calls = None
-        final_response.choices[0].finish_reason = "stop"
-        final_response.model = "gpt-4o-mini"
-        final_response.usage.prompt_tokens = 5
-        final_response.usage.completion_tokens = 5
-
-        mock_completion.side_effect = [tool_call_response, final_response]
-
-        provider = LiteLLMProvider(model="gpt-4o-mini", api_key="test-key")
-
-        tools = [
-            Tool(
-                name="test_tool",
-                description="Test tool",
-                parameters={"properties": {}, "required": []},
-            )
-        ]
-
-        called = {"value": False}
-
-        def tool_executor(tool_use: ToolUse) -> ToolResult:
-            called["value"] = True
-            return ToolResult(
-                tool_use_id=tool_use.id, content="should not be called", is_error=False
-            )
-
-        result = provider.complete_with_tools(
-            messages=[{"role": "user", "content": "Run tool"}],
-            system="You are a test assistant.",
-            tools=tools,
-            tool_executor=tool_executor,
-        )
-
-        assert called["value"] is False
-        assert result.content == "Handled error"
-
-
 class TestToolConversion:
     """Test tool format conversion."""
 
@@ -351,43 +233,6 @@ class TestAnthropicProviderBackwardCompatibility:
         call_kwargs = mock_completion.call_args[1]
         assert call_kwargs["model"] == "claude-3-haiku-20240307"
         assert call_kwargs["api_key"] == "test-key"
-
-    @patch("litellm.completion")
-    def test_anthropic_provider_complete_with_tools(self, mock_completion):
-        """Test AnthropicProvider.complete_with_tools() delegates to LiteLLM."""
-        # Mock a simple response (no tool calls)
-        mock_response = MagicMock()
-        mock_response.choices = [MagicMock()]
-        mock_response.choices[0].message.content = "The time is 3:00 PM."
-        mock_response.choices[0].message.tool_calls = None
-        mock_response.choices[0].finish_reason = "stop"
-        mock_response.model = "claude-3-haiku-20240307"
-        mock_response.usage.prompt_tokens = 20
-        mock_response.usage.completion_tokens = 10
-        mock_completion.return_value = mock_response
-
-        provider = AnthropicProvider(api_key="test-key", model="claude-3-haiku-20240307")
-
-        tools = [
-            Tool(
-                name="get_time",
-                description="Get current time",
-                parameters={"properties": {}, "required": []},
-            )
-        ]
-
-        def tool_executor(tool_use: ToolUse) -> ToolResult:
-            return ToolResult(tool_use_id=tool_use.id, content="3:00 PM", is_error=False)
-
-        result = provider.complete_with_tools(
-            messages=[{"role": "user", "content": "What time is it?"}],
-            system="You are a time assistant.",
-            tools=tools,
-            tool_executor=tool_executor,
-        )
-
-        assert result.content == "The time is 3:00 PM."
-        mock_completion.assert_called_once()
 
     @patch("litellm.completion")
     def test_anthropic_provider_passes_response_format(self, mock_completion):
@@ -739,43 +584,6 @@ class TestAsyncComplete:
         )
 
     @pytest.mark.asyncio
-    @patch("litellm.acompletion")
-    async def test_acomplete_with_tools_uses_acompletion(self, mock_acompletion):
-        """acomplete_with_tools() should use litellm.acompletion."""
-        mock_response = MagicMock()
-        mock_response.choices = [MagicMock()]
-        mock_response.choices[0].message.content = "tool result"
-        mock_response.choices[0].message.tool_calls = None
-        mock_response.choices[0].finish_reason = "stop"
-        mock_response.model = "gpt-4o-mini"
-        mock_response.usage.prompt_tokens = 10
-        mock_response.usage.completion_tokens = 5
-
-        async def async_return(*args, **kwargs):
-            return mock_response
-
-        mock_acompletion.side_effect = async_return
-
-        provider = LiteLLMProvider(model="gpt-4o-mini", api_key="test-key")
-        tools = [
-            Tool(
-                name="search",
-                description="Search the web",
-                parameters={"properties": {"q": {"type": "string"}}, "required": ["q"]},
-            )
-        ]
-
-        result = await provider.acomplete_with_tools(
-            messages=[{"role": "user", "content": "Search for cats"}],
-            system="You are helpful.",
-            tools=tools,
-            tool_executor=lambda tu: ToolResult(tool_use_id=tu.id, content="cats"),
-        )
-
-        assert result.content == "tool result"
-        mock_acompletion.assert_called_once()
-
-    @pytest.mark.asyncio
     async def test_mock_provider_acomplete(self):
         """MockLLMProvider.acomplete() should work without blocking."""
         from framework.llm.mock import MockLLMProvider
@@ -808,11 +616,6 @@ class TestAsyncComplete:
                 call_thread_ids.append(threading.current_thread().ident)
                 time.sleep(0.1)  # Sync blocking
                 return LLMResponse(content="sync done", model="slow")
-
-            def complete_with_tools(
-                self, messages, system, tools, tool_executor, max_iterations=10
-            ):
-                return LLMResponse(content="sync tools done", model="slow")
 
         provider = SlowSyncProvider()
         main_thread_id = threading.current_thread().ident
