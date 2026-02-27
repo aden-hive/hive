@@ -655,8 +655,12 @@ class ExecutionStream:
                         narrative=f"Execution failed: {str(e)}",
                         output_data={},
                     )
-                except Exception:
-                    pass  # Don't let end_run errors mask the original error
+                except Exception as exc:
+                    logger.debug(
+                        "Failed to finalize runtime_adapter end_run for execution '%s': %s",
+                        execution_id,
+                        exc,
+                    )
 
                 # Emit failure event
                 if self._scoped_event_bus:
