@@ -91,6 +91,7 @@ export default function CredentialsModal({
   const [saving, setSaving] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const pendingAdenAuth = useRef(false);
+  const lastFocusFetch = useRef(0);
 
   const fetchStatus = useCallback(async () => {
     setError(null);
@@ -141,42 +142,50 @@ export default function CredentialsModal({
     }
   }, [open, fetchStatus]);
 
-  // Re-fetch when user returns to tab (e.g. after completing OAuth on Aden)
+  // Re-fetch when user returns to window (e.g. after completing OAuth on Aden).
+  // Uses "focus" instead of "visibilitychange" because window.open("_blank")
+  // doesn't reliably trigger visibilitychange — the original tab may never
+  // lose visibility. "focus" fires reliably when the user clicks back.
   useEffect(() => {
     if (!open) return;
-    const handleVisibility = () => {
-      if (document.visibilityState === "visible") {
-        if (agentPath) credentialCache.delete(agentPath);
-        fetchStatus();
-        if (pendingAdenAuth.current) {
-          pendingAdenAuth.current = false;
-          setEditingId("aden_api_key");
-          setInputValue("");
-        }
+    const handleFocus = () => {
+      // Debounce: skip if we fetched within the last 3 seconds
+      const now = Date.now();
+      if (now - lastFocusFetch.current < 3000) return;
+      lastFocusFetch.current = now;
+      if (agentPath) credentialCache.delete(agentPath);
+      fetchStatus();
+      if (pendingAdenAuth.current) {
+        pendingAdenAuth.current = false;
+        setEditingId("aden_api_key");
+        setInputValue("");
       }
     };
-    document.addEventListener("visibilitychange", handleVisibility);
-    return () => document.removeEventListener("visibilitychange", handleVisibility);
+    window.addEventListener("focus", handleFocus);
+    return () => window.removeEventListener("focus", handleFocus);
   }, [open, agentPath, fetchStatus]);
 
   const handleConnect = async (row: CredentialRow) => {
     if (editingId === row.id) {
-      // Already editing — save (must come before Aden redirects)
-      if (!inputValue.trim()) return;
-      setSaving(true);
-      try {
-        await credentialsApi.save(row.id, { [row.credentialKey]: inputValue.trim() });
-        setEditingId(null);
-        setInputValue("");
-        if (agentPath) credentialCache.delete(agentPath);
-        onCredentialChange?.();
-        await fetchStatus();
-      } catch {
-        setError(`Failed to save ${row.name}`);
-      } finally {
-        setSaving(false);
+      if (inputValue.trim()) {
+        // Has input — save the key
+        setSaving(true);
+        try {
+          await credentialsApi.save(row.id, { [row.credentialKey]: inputValue.trim() });
+          setEditingId(null);
+          setInputValue("");
+          if (agentPath) credentialCache.delete(agentPath);
+          onCredentialChange?.();
+          await fetchStatus();
+        } catch {
+          setError(`Failed to save ${row.name}`);
+        } finally {
+          setSaving(false);
+        }
+        return;
       }
-      return;
+      // Empty input on aden_api_key — fall through to re-open Aden
+      if (row.id !== "aden_api_key") return;
     }
 
     if (row.id === "aden_api_key" && row.adenSupported) {
