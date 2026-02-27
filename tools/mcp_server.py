@@ -110,8 +110,8 @@ def main() -> None:
     )
     parser.add_argument(
         "--host",
-        default="0.0.0.0",
-        help="HTTP server host (default: 0.0.0.0)",
+        default="127.0.0.1",
+        help="HTTP server host (default: 127.0.0.1)",
     )
     parser.add_argument(
         "--stdio",
