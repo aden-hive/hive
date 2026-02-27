@@ -7,7 +7,11 @@ and DNS infrastructure hardening. Uses dnspython for all lookups.
 
 from __future__ import annotations
 
+import logging
+
 from fastmcp import FastMCP
+
+logger = logging.getLogger(__name__)
 
 try:
     import dns.exception
@@ -257,7 +261,8 @@ def _check_zone_transfer(resolver: dns.resolver.Resolver, domain: str) -> dict:
                         "Restrict zone transfers to authorized secondary DNS servers only."
                     ),
                 }
-        except Exception:
+        except Exception as exc:
+            logger.debug("Zone transfer probe failed for nameserver", exc_info=exc)
             continue
 
     return {"vulnerable": False}
