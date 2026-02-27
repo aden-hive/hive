@@ -1,7 +1,7 @@
 """
 Local Credential Registry.
 
-Manages named local API key accounts stored in EncryptedFileStorage.
+Manages named local credential accounts stored in EncryptedFileStorage.
 Mirrors the Aden integration model so local credentials have feature parity:
 aliases, identity metadata, status tracking, CRUD, and health validation.
 

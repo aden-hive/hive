@@ -61,6 +61,6 @@ EMAIL_CREDENTIALS = {
         health_check_endpoint="https://gmail.googleapis.com/gmail/v1/users/me/profile",
         health_check_method="GET",
         credential_id="google",
-        credential_key="access_token",
+        credential_key="access_token",  # pragma: allowlist secret
     ),
 }

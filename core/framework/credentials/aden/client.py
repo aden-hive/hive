@@ -11,8 +11,8 @@ API (all endpoints authenticated with Bearer {api_key}):
     POST /v1/credentials/{integration_id}/refresh  — force refresh
     GET  /v1/credentials/{integration_id}/validate — check validity
 
-Integration IDs are base64-encoded hashes assigned by the Aden platform
-(e.g. "Z29vZ2xlOlRpbW90aHk6MTYwNjc6MTM2ODQ"), NOT provider names.
+Integration IDs are opaque identifiers assigned by the Aden platform
+(e.g. "google_timothy_16067_13684"), NOT provider names.
 
 Usage:
     client = AdenCredentialClient(AdenClientConfig(
@@ -191,7 +191,7 @@ class AdenCredentialResponse:
     access_token: str
     """Short-lived access token for API calls."""
 
-    token_type: str = "Bearer"
+    token_type: str = "Bearer"  # noqa: S105
 
     expires_at: datetime | None = None
 

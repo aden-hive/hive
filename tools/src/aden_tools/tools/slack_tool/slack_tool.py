@@ -1193,7 +1193,7 @@ def register_tools(
         Send a message to a Slack channel.
 
         Args:
-            channel: Channel ID (e.g., 'C0123456789') or channel name (e.g., '#general')
+            channel: Channel ID (e.g., 'C123CHANNEL') or channel name (e.g., '#general')
             text: Message text (supports Slack markdown/mrkdwn)
             thread_ts: Optional thread timestamp to reply in a thread
 

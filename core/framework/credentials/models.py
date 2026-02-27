@@ -22,7 +22,7 @@ def _utc_now() -> datetime:
 class CredentialType(StrEnum):
     """Types of credentials the store can manage."""
 
-    API_KEY = "api_key"
+    API_KEY = "api_key"  # pragma: allowlist secret
     """Simple API key (e.g., Brave Search, OpenAI)"""
 
     OAUTH2 = "oauth2"

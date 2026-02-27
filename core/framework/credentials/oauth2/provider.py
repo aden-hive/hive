@@ -46,7 +46,7 @@ class OAuth2Token:
     """
 
     access_token: str
-    token_type: str = "Bearer"
+    token_type: str = "Bearer"  # noqa: S105
     expires_at: datetime | None = None
     refresh_token: str | None = None
     scope: str | None = None
@@ -143,7 +143,7 @@ class OAuth2Config:
 
     # Client credentials
     client_id: str = ""
-    client_secret: str = ""
+    client_secret: str = ""  # pragma: allowlist secret
 
     # Scopes
     default_scopes: list[str] = field(default_factory=list)

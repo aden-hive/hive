@@ -65,7 +65,7 @@ class HubSpotOAuth2Provider(BaseOAuth2Provider):
     def __init__(
         self,
         client_id: str,
-        client_secret: str,
+        client_secret: str,  # pragma: allowlist secret
         scopes: list[str] | None = None,
     ):
         config = OAuth2Config(
