@@ -592,14 +592,14 @@ class CredentialStore:
 
         Args:
             credentials: Dict mapping credential_id to {key_name: value}
-                        e.g., {"brave_search": {"api_key": "test-key"}}
+                        e.g., {"brave_search": {"api_credential": "test-key"}}
 
         Returns:
             CredentialStore with in-memory credentials
 
         Example:
             store = CredentialStore.for_testing({
-                "brave_search": {"api_key": "test-brave-key"},
+                "brave_search": {"api_credential": "test-brave-key"},
                 "github_oauth": {
                     "session_value": "test-value",  # pragma: allowlist secret
                     "renewal_value": "test-refresh"  # pragma: allowlist secret
