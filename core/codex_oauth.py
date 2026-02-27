@@ -15,22 +15,21 @@ import base64
 import hashlib
 import http.server
 import json
-import platform
 import secrets
-import subprocess
 import sys
 import threading
 import time
 import urllib.error
 import urllib.parse
 import urllib.request
+import webbrowser
 from datetime import UTC, datetime
 from pathlib import Path
 
 # OAuth constants (from the Codex CLI binary)
 CLIENT_ID = "app_EMoamEEZ73f0CkXaXp7hrann"
 AUTHORIZE_URL = "https://auth.openai.com/oauth/authorize"
-TOKEN_URL = "https://auth.openai.com/oauth/token"
+TOKEN_URL = "https://auth.openai.com/oauth/token"  # noqa: S105
 REDIRECT_URI = "http://localhost:1455/auth/callback"
 SCOPE = "openid profile email offline_access"
 CALLBACK_PORT = 1455
@@ -75,6 +74,11 @@ def build_authorize_url(state: str, challenge: str) -> str:
 
 def exchange_code_for_tokens(code: str, verifier: str) -> dict | None:
     """Exchange the authorization code for tokens."""
+    token_parts = urllib.parse.urlparse(TOKEN_URL)
+    if token_parts.scheme != "https" or token_parts.netloc != "auth.openai.com":
+        print("\033[0;31mInvalid token endpoint configuration\033[0m", file=sys.stderr)
+        return None
+
     data = urllib.parse.urlencode(
         {
             "grant_type": "authorization_code",
@@ -85,7 +89,7 @@ def exchange_code_for_tokens(code: str, verifier: str) -> dict | None:
         }
     ).encode("utf-8")
 
-    req = urllib.request.Request(
+    req = urllib.request.Request(  # noqa: S310
         TOKEN_URL,
         data=data,
         headers={"Content-Type": "application/x-www-form-urlencoded"},
@@ -93,7 +97,7 @@ def exchange_code_for_tokens(code: str, verifier: str) -> dict | None:
     )
 
     try:
-        with urllib.request.urlopen(req, timeout=15) as resp:
+        with urllib.request.urlopen(req, timeout=15) as resp:  # noqa: S310
             token_data = json.loads(resp.read())
     except (urllib.error.URLError, json.JSONDecodeError, TimeoutError, OSError) as exc:
         print(f"\033[0;31mToken exchange failed: {exc}\033[0m", file=sys.stderr)
@@ -157,17 +161,12 @@ def save_credentials(token_data: dict, account_id: str) -> None:
 
 def open_browser(url: str) -> bool:
     """Open the URL in the user's default browser."""
-    system = platform.system()
     try:
-        devnull = subprocess.DEVNULL
-        if system == "Darwin":
-            subprocess.Popen(["open", url], stdout=devnull, stderr=devnull)
-        elif system == "Windows":
-            subprocess.Popen(["cmd", "/c", "start", url], stdout=devnull, stderr=devnull)
-        else:
-            subprocess.Popen(["xdg-open", url], stdout=devnull, stderr=devnull)
-        return True
-    except OSError:
+        parsed = urllib.parse.urlparse(url)
+        if parsed.scheme != "https" or parsed.netloc != "auth.openai.com":
+            return False
+        return webbrowser.open(url)
+    except webbrowser.Error:
         return False
 
 
@@ -256,8 +255,8 @@ def parse_manual_input(value: str, expected_state: str) -> str | None:
         if state and state != expected_state:
             return None
         return code
-    except Exception:
-        pass
+    except ValueError:
+        return None
     # Maybe it's just the raw code
     if len(value) > 10 and " " not in value:
         return value
@@ -289,7 +288,7 @@ def main() -> int:
         if result == 0:
             print(f"\033[1;33mPort {CALLBACK_PORT} is in use. Using manual paste mode.\033[0m")
             server_available = False
-    except Exception:
+    except OSError:
         server_available = True
 
     # Open browser
