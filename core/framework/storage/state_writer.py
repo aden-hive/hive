@@ -127,8 +127,8 @@ class StateWriter:
             if isinstance(d_dict, dict):
                 try:
                     decisions.append(Decision(**d_dict))
-                except Exception:
-                    # Skip invalid decisions
+                except Exception as exc:
+                    logger.debug("Skipping invalid decision record during state write: %s", exc)
                     continue
             else:
                 decisions.append(d_dict)
