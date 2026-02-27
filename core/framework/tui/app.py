@@ -1,5 +1,6 @@
 import logging
 import platform
+import shutil
 import subprocess
 import threading
 import time
@@ -258,7 +259,11 @@ class AdenTUI(App):
         """Override to use native `open` for file:// URLs on macOS."""
         if url.startswith("file://") and platform.system() == "Darwin":
             path = url.removeprefix("file://")
-            subprocess.Popen(["open", path])
+            open_path = shutil.which("open")
+            if open_path:
+                subprocess.Popen([open_path, path])  # noqa: S603
+            else:
+                super().open_url(url, new_tab=new_tab)
         else:
             super().open_url(url, new_tab=new_tab)
 
