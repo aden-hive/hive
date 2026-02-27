@@ -36,6 +36,8 @@ from framework.runtime.event_bus import AgentEvent
 from framework.tui.widgets.log_pane import format_event, format_python_log
 from framework.tui.widgets.selectable_rich_log import SelectableRichLog as RichLog
 
+logger = logging.getLogger(__name__)
+
 
 class ChatTextArea(TextArea):
     """TextArea that submits on Enter and inserts newlines on Shift+Enter (or Ctrl+J)."""
@@ -651,8 +653,8 @@ class ChatRepl(Vertical):
                             clean_marker = "✓" if is_clean else "⚠"
                             self._write_history(f"  {i}. {clean_marker} [cyan]{cp_id}[/cyan]")
                             self._write_history(f"     Type: {cp_type}, Node: {current_node}")
-                        except Exception:
-                            pass
+                        except Exception as exc:
+                            logger.debug("Failed to parse checkpoint file '%s': %s", cp_file, exc)
 
             # Quick actions
             if checkpoint_dir.exists() and list(checkpoint_dir.glob("cp_*.json")):
@@ -1125,7 +1127,8 @@ class ChatRepl(Vertical):
                                 "label": self._get_session_label(state),
                             }
                         )
-                except Exception:
+                except Exception as exc:
+                    logger.debug("Failed to parse session state for '%s': %s", session_dir, exc)
                     continue
 
             if resumable:
@@ -1152,9 +1155,8 @@ class ChatRepl(Vertical):
                 self._write_history("\n  Type [bold]/resume <number>[/bold] to continue a session")
                 self._write_history("  Or just type your input to start a new session\n")
 
-        except Exception:
-            # Silently fail - don't block TUI startup
-            pass
+        except Exception as exc:
+            logger.debug("Failed while checking resumable sessions: %s", exc)
 
     def _set_button_send_mode(self) -> None:
         """Switch the action button to Send mode (green arrow)."""
@@ -1164,8 +1166,8 @@ class ChatRepl(Vertical):
             btn.disabled = False
             btn.remove_class("pause-mode")
             btn.add_class("send-mode")
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("Failed to set send button mode: %s", exc)
 
     def _set_button_pause_mode(self) -> None:
         """Switch the action button to Pause mode (red pause)."""
@@ -1175,8 +1177,8 @@ class ChatRepl(Vertical):
             btn.disabled = False
             btn.remove_class("send-mode")
             btn.add_class("pause-mode")
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("Failed to set pause button mode: %s", exc)
 
     def _set_button_idle_mode(self) -> None:
         """Switch the action button to idle/disabled state."""
@@ -1186,8 +1188,8 @@ class ChatRepl(Vertical):
             btn.disabled = True
             btn.remove_class("pause-mode")
             btn.add_class("send-mode")
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("Failed to set idle button mode: %s", exc)
 
     async def on_chat_text_area_submitted(self, message: ChatTextArea.Submitted) -> None:
         """Handle chat input submission."""
