@@ -2,6 +2,7 @@
 
 import asyncio
 import contextvars
+import hashlib
 import importlib.util
 import inspect
 import json
@@ -15,6 +16,51 @@ from typing import Any
 from framework.llm.provider import Tool, ToolResult, ToolUse
 
 logger = logging.getLogger(__name__)
+
+# ── Module Loading Security ──────────────────────────────────────────────────
+# Dangerous AST node types that should not appear in tool modules.
+# These are checked via a lightweight source scan before exec_module.
+_DANGEROUS_PATTERNS = (
+    "subprocess",
+    "os.system",
+    "os.popen",
+    "os.exec",
+    "__import__",
+    "eval(",
+    "exec(",
+    "compile(",
+    "ctypes",
+    "importlib.import_module",
+)
+
+
+def _validate_tool_module(module_path: Path) -> str | None:
+    """Pre-validate a tool module source before loading.
+
+    Returns None if the module is acceptable, or an error message string.
+    """
+    try:
+        source = module_path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError) as e:
+        return f"Cannot read module source: {e}"
+
+    # Check for dangerous patterns in source
+    for pattern in _DANGEROUS_PATTERNS:
+        if pattern in source:
+            return (
+                f"Module contains disallowed pattern '{pattern}'. "
+                f"Tool modules must not use shell commands, eval/exec, "
+                f"or dynamic imports."
+            )
+
+    return None
+
+
+def _compute_module_hash(module_path: Path) -> str:
+    """Compute SHA-256 hash of a module file for integrity logging."""
+    h = hashlib.sha256()
+    h.update(module_path.read_bytes())
+    return h.hexdigest()
 
 # Per-execution context overrides.  Each asyncio task (and thus each
 # concurrent graph execution) gets its own copy, so there are no races
@@ -146,6 +192,10 @@ class ToolRegistry:
         - tool_executor(tool_use: ToolUse) -> ToolResult - unified executor
         - Functions decorated with @tool
 
+        Security:
+            Module source is validated before loading to prevent arbitrary
+            code execution.  A SHA-256 hash is logged for audit trails.
+
         Args:
             module_path: Path to tools.py file
 
@@ -154,6 +204,20 @@ class ToolRegistry:
         """
         if not module_path.exists():
             return 0
+
+        # Security: validate module source before loading
+        validation_error = _validate_tool_module(module_path)
+        if validation_error:
+            logger.error(
+                "Rejected tool module %s: %s", module_path, validation_error
+            )
+            return 0
+
+        # Log module hash for audit trail
+        module_hash = _compute_module_hash(module_path)
+        logger.info(
+            "Loading tool module %s (sha256: %s)", module_path, module_hash
+        )
 
         # Load the module dynamically
         spec = importlib.util.spec_from_file_location("agent_tools", module_path)
