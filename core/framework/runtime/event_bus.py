@@ -310,8 +310,8 @@ class EventBus:
                     line = json.dumps(event.to_dict(), default=str)
                     _event_log_file.write(line + "\n")
                     _event_log_file.flush()
-                except Exception:
-                    pass  # never break event delivery
+                except Exception as exc:
+                    logger.debug("Failed to write debug event log entry: %s", exc)
 
         # Find matching subscriptions
         matching_handlers: list[EventHandler] = []
