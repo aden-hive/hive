@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import getpass
 import json
+import logging
 import os
 import sys
 from collections.abc import Callable
@@ -36,6 +37,9 @@ from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from framework.graph import NodeSpec
+
+
+logger = logging.getLogger(__name__)
 
 
 # ANSI colors for terminal output
@@ -455,8 +459,8 @@ class CredentialSetupSession:
                     aden_key,
                     comment="Aden Platform API key",
                 )
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("Failed to persist ADEN_API_KEY to shell config: %s", exc)
 
         # Sync from Aden
         try:
@@ -476,8 +480,13 @@ class CredentialSetupSession:
                     value = store.get_key(cred_id, cred.credential_key)
                     if value:
                         os.environ[cred.env_var] = value
-                except Exception:
-                    pass
+                except Exception as exc:
+                    logger.debug(
+                        "Failed to export synced credential '%s' to env var '%s': %s",
+                        cred_id,
+                        cred.env_var,
+                        exc,
+                    )
                 return True
             else:
                 self._print(
