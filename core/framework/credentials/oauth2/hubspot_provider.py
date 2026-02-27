@@ -31,7 +31,7 @@ from .provider import OAuth2Config
 logger = logging.getLogger(__name__)
 
 # HubSpot OAuth2 endpoints
-HUBSPOT_TOKEN_URL = "https://api.hubapi.com/oauth/v1/token"
+HUBSPOT_TOKEN_URL = "https://api.hubapi.com/oauth/v1/token"  # noqa: S105
 HUBSPOT_AUTHORIZATION_URL = "https://app.hubspot.com/oauth/authorize"
 
 # Default CRM scopes for contacts, companies, and deals
