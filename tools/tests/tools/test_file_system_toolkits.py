@@ -533,6 +533,17 @@ class TestGrepSearchTool:
         assert result["success"] is True
         assert result["total_matches"] == 2  # Line 1 and Line 3
 
+    def test_grep_search_nonexistent_path(
+        self, grep_search_fn, mock_workspace, mock_secure_path
+    ):
+        """Searching a non-existent path returns an error."""
+        result = grep_search_fn(
+            path="nonexistent_path", pattern="anything", **mock_workspace
+        )
+
+        assert "error" in result
+        assert "not found" in result["error"].lower()
+
 
 class TestExecuteCommandTool:
     """Tests for execute_command_tool."""
