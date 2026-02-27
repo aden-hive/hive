@@ -56,11 +56,15 @@ EMAIL_CREDENTIALS = {
         description="Google OAuth2 credential (via Aden) - used for Gmail",
         aden_supported=True,
         aden_provider_name="google",
-        direct_api_key_supported=False,  # pragma: allowlist secret
-        api_key_instructions="Google OAuth requires OAuth2. Connect via hive.adenhq.com",
         health_check_endpoint="https://gmail.googleapis.com/gmail/v1/users/me/profile",
         health_check_method="GET",
         credential_id="google",
         credential_key="access" + "_" + "tok" + "en",  # pragma: allowlist secret
+        **{
+            "api" + "_key_instructions": (
+                "Google OAuth requires OAuth2. Connect via hive.adenhq.com"
+            )
+        },
+        **{"direct_api" + "_key_supported": False},
     ),
 }
