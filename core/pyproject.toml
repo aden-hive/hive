@@ -12,9 +12,6 @@ dependencies = [
   "mcp>=1.0.0",
   "fastmcp>=2.0.0",
   "textual>=1.0.0",
-  "pytest>=8.0",
-  "pytest-asyncio>=0.23",
-  "pytest-xdist>=3.0",
   "tools",
 ]
 
@@ -63,4 +60,10 @@ lint.isort.section-order = [
 ]
 
 [dependency-groups]
-dev = ["ty>=0.0.13", "ruff>=0.14.14"]
+dev = [
+  "ty>=0.0.13",
+  "ruff>=0.14.14",
+  "pytest>=8.0",
+  "pytest-asyncio>=0.23",
+  "pytest-xdist>=3.0",
+  ]
