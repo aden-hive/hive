@@ -650,6 +650,66 @@ def search_files(pattern: str, path: str = ".", include: str = "") -> str:
         return f"Error: Invalid regex: {e}"
 
 
+# ── Command Security ──────────────────────────────────────────────────────
+
+# Allowlist of command prefixes permitted for shell execution.
+# Only commands starting with one of these tokens are allowed.
+ALLOWED_COMMANDS = frozenset({
+    "python", "python3", "pip", "uv",
+    "pytest", "ruff", "mypy", "ty", "black", "isort", "flake8",
+    "node", "npm", "npx", "tsc",
+    "git", "cat", "head", "tail", "ls", "find", "grep", "wc",
+    "echo", "diff", "sort", "uniq", "sed", "awk", "cut", "tr",
+    "make", "cargo", "go", "javac", "java",
+    "curl",  # Needed for API testing; network policy should limit egress
+})
+
+# Commands that are explicitly blocked even if they match an allowed prefix.
+BLOCKED_PATTERNS = (
+    "rm -rf /", "rm -rf ~", "mkfs", "dd if=", ":(){", "chmod -R 777",
+    "shutdown", "reboot", "poweroff", "halt",
+    ">/dev/sd", "curl|sh", "curl|bash", "wget|sh", "wget|bash",
+)
+
+
+def _validate_command(command: str) -> str | None:
+    """Validate a shell command against the allowlist.
+
+    Returns None if the command is safe, or an error message string.
+    """
+    import shlex
+
+    stripped = command.strip()
+    if not stripped:
+        return "Error: Empty command."
+
+    # Block dangerous patterns (case-insensitive)
+    lower = stripped.lower()
+    for pattern in BLOCKED_PATTERNS:
+        if pattern in lower:
+            return f"Error: Command blocked by security policy (matched pattern: {pattern!r})."
+
+    # Block shell chaining operators that could bypass allowlist
+    # We check for unquoted ; && || | ` $( to prevent chaining
+    try:
+        tokens = shlex.split(stripped)
+    except ValueError:
+        return "Error: Command contains invalid shell syntax."
+
+    base_cmd = tokens[0] if tokens else ""
+
+    # Check if base command is in allowlist
+    # Strip path prefix (e.g., /usr/bin/python -> python)
+    base_name = os.path.basename(base_cmd)
+    if base_name not in ALLOWED_COMMANDS:
+        return (
+            f"Error: Command '{base_name}' is not in the allowed commands list. "
+            f"Allowed: {', '.join(sorted(ALLOWED_COMMANDS))}"
+        )
+
+    return None  # Command is safe
+
+
 # ── Tool: run_command ─────────────────────────────────────────────────────
 
 
@@ -660,6 +720,10 @@ def run_command(command: str, cwd: str = "", timeout: int = 120) -> str:
     PYTHONPATH is automatically set to include core/ and exports/.
     Output is truncated at 30K chars with a notice.
 
+    Commands are validated against an allowlist before execution.
+    Shell operators (;, &&, ||, |) are not permitted to prevent
+    command chaining attacks.
+
     Args:
         command: Shell command to execute
         cwd: Working directory (relative to project root)
@@ -668,14 +732,25 @@ def run_command(command: str, cwd: str = "", timeout: int = 120) -> str:
     Returns:
         Combined stdout/stderr with exit code
     """
+    # Validate command against allowlist
+    import shlex
+
+    error = _validate_command(command)
+    if error:
+        logger.warning("Blocked command: %s", command)
+        return error
+
     timeout = min(timeout, 300)  # Cap at 5 minutes
     work_dir = _resolve_path(cwd) if cwd else PROJECT_ROOT
 
     try:
+        # Parse command into args list to avoid shell=True
+        args = shlex.split(command)
+
         start = time.monotonic()
         result = subprocess.run(
-            command,
-            shell=True,
+            args,
+            shell=False,
             cwd=work_dir,
             capture_output=True,
             text=True,
