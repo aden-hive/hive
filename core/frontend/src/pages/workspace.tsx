@@ -7,7 +7,7 @@ import ChatPanel, { type ChatMessage } from "@/components/ChatPanel";
 import TopBar from "@/components/TopBar";
 import { TAB_STORAGE_KEY, loadPersistedTabs, savePersistedTabs, type PersistedTabState } from "@/lib/tab-persistence";
 import NodeDetailPanel from "@/components/NodeDetailPanel";
-import CredentialsModal, { type Credential, createFreshCredentials, cloneCredentials, allRequiredCredentialsMet } from "@/components/CredentialsModal";
+import CredentialsModal, { type Credential, createFreshCredentials, cloneCredentials, allRequiredCredentialsMet, clearCredentialCache } from "@/components/CredentialsModal";
 import { agentsApi } from "@/api/agents";
 import { executionApi } from "@/api/execution";
 import { graphsApi } from "@/api/graphs";
@@ -1246,7 +1246,14 @@ export default function Workspace() {
 
         case "worker_loaded": {
           const workerName = event.data?.worker_name as string | undefined;
+          const agentPathFromEvent = event.data?.agent_path as string | undefined;
           const displayName = formatAgentDisplayName(workerName || agentType);
+
+          // Invalidate cached credential requirements so the modal fetches
+          // fresh data the next time it opens (the new agent may have
+          // different credential needs than the previous one).
+          clearCredentialCache(agentPathFromEvent);
+          clearCredentialCache(agentType);
 
           // Update agent state: new display name, reset graph so topology refetch triggers
           updateAgentState(agentType, {
