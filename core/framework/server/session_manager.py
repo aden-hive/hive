@@ -618,8 +618,12 @@ class SessionManager:
         if session.escalation_sub is not None:
             try:
                 session.event_bus.unsubscribe(session.escalation_sub)
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug(
+                    "Failed to unsubscribe escalation handler for session '%s': %s",
+                    session.id,
+                    exc,
+                )
             session.escalation_sub = None
 
     # ------------------------------------------------------------------
