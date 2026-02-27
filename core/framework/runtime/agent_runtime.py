@@ -34,7 +34,14 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class AgentRuntimeConfig:
-    """Configuration for AgentRuntime."""
+    """Configuration for AgentRuntime.
+
+    Attributes:
+        enable_execution_trace: Opt-in execution tracing for debugging,
+            observability, and future replay workflows. When disabled (default),
+            runtime follows the fast path and avoids trace wrapper allocation,
+            preserving near-zero additional overhead.
+    """
 
     max_concurrent_executions: int = 100
     cache_ttl: float = 60.0
@@ -42,6 +49,7 @@ class AgentRuntimeConfig:
     max_history: int = 1000
     execution_result_max: int = 1000
     execution_result_ttl_seconds: float | None = None
+    enable_execution_trace: bool = False
     # Webhook server config (only starts if webhook_routes is non-empty)
     webhook_host: str = "127.0.0.1"
     webhook_port: int = 8080
@@ -109,7 +117,7 @@ class AgentRuntime:
 
         # Check goal progress
         progress = await runtime.get_goal_progress()
-        print(f"Progress: {progress['overall_progress']:.1%}")
+        logger.info("Progress: %.1f%%", progress["overall_progress"] * 100)
 
         # Stop runtime
         await runtime.stop()
@@ -292,6 +300,7 @@ class AgentRuntime:
                     accounts_prompt=self._accounts_prompt,
                     accounts_data=self._accounts_data,
                     tool_provider_map=self._tool_provider_map,
+                    enable_execution_trace=self._config.enable_execution_trace,
                 )
                 await stream.start()
                 self._streams[ep_id] = stream

@@ -138,6 +138,7 @@ class GraphExecutor:
         accounts_prompt: str = "",
         accounts_data: list[dict] | None = None,
         tool_provider_map: dict[str, str] | None = None,
+        execution_trace: Any = None,
     ):
         """
         Initialize the executor.
@@ -160,6 +161,7 @@ class GraphExecutor:
             accounts_prompt: Connected accounts block for system prompt injection
             accounts_data: Raw account data for per-node prompt generation
             tool_provider_map: Tool name to provider name mapping for account routing
+            execution_trace: Optional execution trace collector for spans
         """
         self.runtime = runtime
         self.llm = llm
@@ -178,6 +180,7 @@ class GraphExecutor:
         self.accounts_prompt = accounts_prompt
         self.accounts_data = accounts_data
         self.tool_provider_map = tool_provider_map
+        self._execution_trace = execution_trace
 
         # Initialize output cleaner
         self.cleansing_config = cleansing_config or CleansingConfig()
@@ -788,7 +791,23 @@ class GraphExecutor:
 
                 # Execute node
                 self.logger.info("   Executing...")
-                result = await node_impl.execute(ctx)
+                if self._execution_trace is None:
+                    result = await node_impl.execute(ctx)
+                else:
+                    with self._execution_trace.span(
+                        "node_execution",
+                        metadata={
+                            "node_id": current_node_id,
+                            "node_name": node_spec.name,
+                            "node_type": node_spec.node_type,
+                            "step": steps,
+                        },
+                    ) as node_span:
+                        result = await node_impl.execute(ctx)
+                        if not result.success:
+                            node_span.status = "error"
+                            if result.error:
+                                node_span.metadata["node_error"] = result.error
 
                 # Emit node-completed event (skip event_loop nodes)
                 if self._event_bus and node_spec.node_type != "event_loop":

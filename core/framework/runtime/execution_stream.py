@@ -8,6 +8,7 @@ Each stream has:
 """
 
 import asyncio
+import json
 import logging
 import time
 import uuid
@@ -20,6 +21,11 @@ from typing import TYPE_CHECKING, Any
 from framework.graph.checkpoint_config import CheckpointConfig
 from framework.graph.executor import ExecutionResult, GraphExecutor
 from framework.runtime.event_bus import EventBus
+from framework.runtime.execution_trace import (
+    ExecutionTrace,
+    wrap_llm_provider,
+    wrap_tool_executor,
+)
 from framework.runtime.shared_state import IsolationLevel, SharedStateManager
 from framework.runtime.stream_runtime import StreamRuntime, StreamRuntimeAdapter
 
@@ -168,6 +174,7 @@ class ExecutionStream:
         accounts_prompt: str = "",
         accounts_data: list[dict] | None = None,
         tool_provider_map: dict[str, str] | None = None,
+        enable_execution_trace: bool = False,
     ):
         """
         Initialize execution stream.
@@ -191,6 +198,7 @@ class ExecutionStream:
             accounts_prompt: Connected accounts block for system prompt injection
             accounts_data: Raw account data for per-node prompt generation
             tool_provider_map: Tool name to provider name mapping for account routing
+            enable_execution_trace: Enable deterministic execution trace capture
         """
         self.stream_id = stream_id
         self.entry_spec = entry_spec
@@ -212,6 +220,7 @@ class ExecutionStream:
         self._accounts_prompt = accounts_prompt
         self._accounts_data = accounts_data
         self._tool_provider_map = tool_provider_map
+        self._enable_execution_trace = enable_execution_trace
 
         # Create stream-scoped runtime
         self._runtime = StreamRuntime(
@@ -452,6 +461,16 @@ class ExecutionStream:
     async def _run_execution(self, ctx: ExecutionContext) -> None:
         """Run a single execution within the stream."""
         execution_id = ctx.id
+        execution_trace: ExecutionTrace | None = None
+        if self._enable_execution_trace:
+            execution_trace = ExecutionTrace(
+                metadata={
+                    "stream_id": self.stream_id,
+                    "entry_point": self.entry_spec.id,
+                    "execution_id": execution_id,
+                    "graph_id": self.graph_id,
+                }
+            )
 
         # When sharing a session with another entry point (resume_session_id),
         # skip writing initial/final session state — the primary execution
@@ -512,11 +531,13 @@ class ExecutionStream:
                     exec_storage = self._session_store.sessions_dir / execution_id
                 else:
                     exec_storage = self._storage.base_path / "sessions" / execution_id
+                traced_llm = wrap_llm_provider(self._llm, execution_trace)
+                traced_tool_executor = wrap_tool_executor(self._tool_executor, execution_trace)
                 executor = GraphExecutor(
                     runtime=runtime_adapter,
-                    llm=self._llm,
+                    llm=traced_llm,
                     tools=self._tools,
-                    tool_executor=self._tool_executor,
+                    tool_executor=traced_tool_executor,
                     event_bus=self._scoped_event_bus,
                     stream_id=self.stream_id,
                     execution_id=execution_id,
@@ -526,6 +547,7 @@ class ExecutionStream:
                     accounts_prompt=self._accounts_prompt,
                     accounts_data=self._accounts_data,
                     tool_provider_map=self._tool_provider_map,
+                    execution_trace=execution_trace,
                 )
                 # Track executor so inject_input() can reach EventLoopNode instances
                 self._active_executors[execution_id] = executor
@@ -539,13 +561,29 @@ class ExecutionStream:
                 modified_graph = self._create_modified_graph()
 
                 # Execute
-                result = await executor.execute(
-                    graph=modified_graph,
-                    goal=self.goal,
-                    input_data=ctx.input_data,
-                    session_state=ctx.session_state,
-                    checkpoint_config=self._checkpoint_config,
-                )
+                if execution_trace is None:
+                    result = await executor.execute(
+                        graph=modified_graph,
+                        goal=self.goal,
+                        input_data=ctx.input_data,
+                        session_state=ctx.session_state,
+                        checkpoint_config=self._checkpoint_config,
+                    )
+                else:
+                    with execution_trace.span(
+                        "graph_execution",
+                        metadata={
+                            "entry_node": self.entry_spec.entry_node,
+                            "goal_id": self.goal.id,
+                        },
+                    ):
+                        result = await executor.execute(
+                            graph=modified_graph,
+                            goal=self.goal,
+                            input_data=ctx.input_data,
+                            session_state=ctx.session_state,
+                            checkpoint_config=self._checkpoint_config,
+                        )
 
                 # Clean up executor reference
                 self._active_executors.pop(execution_id, None)
@@ -668,6 +706,9 @@ class ExecutionStream:
                     )
 
             finally:
+                if execution_trace is not None:
+                    await self._write_execution_trace(execution_id, execution_trace)
+
                 # Clean up state
                 self._state_manager.cleanup_execution(execution_id)
 
@@ -680,6 +721,22 @@ class ExecutionStream:
                     self._active_executions.pop(execution_id, None)
                     self._completion_events.pop(execution_id, None)
                     self._execution_tasks.pop(execution_id, None)
+
+    async def _write_execution_trace(self, execution_id: str, trace: ExecutionTrace) -> None:
+        """Persist execution trace JSON for replay/debug tooling."""
+        try:
+            trace_path = self._storage.base_path / "sessions" / execution_id / "execution_trace.json"
+            trace_path.parent.mkdir(parents=True, exist_ok=True)
+
+            trace_payload = trace.to_dict()
+            trace_payload["execution_id"] = execution_id
+            await asyncio.to_thread(
+                trace_path.write_text,
+                json.dumps(trace_payload, indent=2),
+                encoding="utf-8",
+            )
+        except Exception as e:
+            logger.error(f"Failed to write execution trace for {execution_id}: {e}")
 
     async def _write_session_state(
         self,
