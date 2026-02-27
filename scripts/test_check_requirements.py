@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# ruff: noqa: S101
+
 """
 Simple test script to verify check_requirements.py works correctly
 """
