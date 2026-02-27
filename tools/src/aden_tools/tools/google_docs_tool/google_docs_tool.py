@@ -30,7 +30,7 @@ if TYPE_CHECKING:
 
 GOOGLE_DOCS_API_BASE = "https://docs.googleapis.com/v1"
 GOOGLE_DRIVE_API_BASE = "https://www.googleapis.com/drive/v3"
-GOOGLE_OAUTH_TOKEN_URL = "https://oauth2.googleapis.com/token"
+GOOGLE_OAUTH_TOKEN_URL = "https://oauth2.googleapis.com/token"  # noqa: S105
 
 # Allowed URL schemes for image insertion
 ALLOWED_IMAGE_SCHEMES = {"https", "http"}
