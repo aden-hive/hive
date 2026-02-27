@@ -19,6 +19,8 @@ import json
 import logging
 import os
 import re
+import shlex
+import shutil
 import subprocess
 import sys
 import time
@@ -142,6 +144,23 @@ def _resolve_path(path: str) -> str:
     if common != PROJECT_ROOT:
         raise ValueError(f"Access denied: '{path}' is outside the project root.")
     return resolved
+
+
+def _resolve_executable(command: str) -> str:
+    """Resolve command to absolute executable path."""
+    if os.path.isabs(command):
+        if os.path.isfile(command):
+            return command
+        raise FileNotFoundError(f"Executable not found: {command}")
+
+    resolved = shutil.which(command)
+    if not resolved:
+        raise FileNotFoundError(f"Executable not found in PATH: {command}")
+    return resolved
+
+
+def _run_subprocess(command: list[str], **kwargs):
+    return subprocess.run(command, **kwargs)  # noqa: S603
 
 
 def _is_binary(filepath: str) -> bool:
@@ -282,8 +301,9 @@ def _compute_diff(old: str, new: str, path: str) -> str:
 
 def _snapshot_git(*args: str) -> str:
     """Run a git command with the snapshot GIT_DIR and PROJECT_ROOT worktree."""
-    cmd = ["git", "--git-dir", SNAPSHOT_DIR, "--work-tree", PROJECT_ROOT, *args]
-    result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+    git_executable = _resolve_executable("git")
+    cmd = [git_executable, "--git-dir", SNAPSHOT_DIR, "--work-tree", PROJECT_ROOT, *args]
+    result = _run_subprocess(cmd, capture_output=True, text=True, timeout=30)
     return result.stdout.strip()
 
 
@@ -293,8 +313,9 @@ def _ensure_snapshot_repo():
         return
     if not os.path.isdir(SNAPSHOT_DIR):
         os.makedirs(SNAPSHOT_DIR, exist_ok=True)
-        subprocess.run(
-            ["git", "init", "--bare", SNAPSHOT_DIR],
+        git_executable = _resolve_executable("git")
+        _run_subprocess(
+            [git_executable, "init", "--bare", SNAPSHOT_DIR],
             capture_output=True,
             timeout=10,
         )
@@ -584,8 +605,9 @@ def search_files(pattern: str, path: str = ".", include: str = "") -> str:
         return f"Error: Directory not found: {path}"
 
     try:
+        rg_executable = _resolve_executable("rg")
         cmd = [
-            "rg",
+            rg_executable,
             "-nH",
             "--no-messages",
             "--hidden",
@@ -597,7 +619,7 @@ def search_files(pattern: str, path: str = ".", include: str = "") -> str:
             cmd.extend(["--glob", include])
         cmd.append(resolved)
 
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+        result = _run_subprocess(cmd, capture_output=True, text=True, timeout=30)
         if result.returncode <= 1:
             output = result.stdout.strip()
             if not output:
@@ -661,7 +683,7 @@ def run_command(command: str, cwd: str = "", timeout: int = 120) -> str:
     Output is truncated at 30K chars with a notice.
 
     Args:
-        command: Shell command to execute
+        command: Command to execute (sem operadores de shell como |, &&, >)
         cwd: Working directory (relative to project root)
         timeout: Timeout in seconds (default: 120, max: 300)
 
@@ -672,10 +694,15 @@ def run_command(command: str, cwd: str = "", timeout: int = 120) -> str:
     work_dir = _resolve_path(cwd) if cwd else PROJECT_ROOT
 
     try:
+        command_args = shlex.split(command, posix=os.name != "nt")
+        if not command_args:
+            return "Error: Empty command."
+        command_args[0] = _resolve_executable(command_args[0])
+
         start = time.monotonic()
-        result = subprocess.run(
-            command,
-            shell=True,
+        result = _run_subprocess(
+            command_args,
+            shell=False,
             cwd=work_dir,
             capture_output=True,
             text=True,
@@ -708,6 +735,10 @@ def run_command(command: str, cwd: str = "", timeout: int = 120) -> str:
         code = result.returncode
         output += f"\n\n[exit code: {code}, {elapsed:.1f}s]"
         return output
+    except ValueError as e:
+        return f"Error: Invalid command syntax: {e}"
+    except FileNotFoundError as e:
+        return f"Error: {e}"
     except subprocess.TimeoutExpired:
         return (
             f"Error: Command timed out after {timeout}s. "
@@ -754,9 +785,10 @@ def undo_changes(path: str = "") -> str:
         if path:
             resolved = _resolve_path(path)
             rel = os.path.relpath(resolved, PROJECT_ROOT)
-            subprocess.run(
+            git_executable = _resolve_executable("git")
+            _run_subprocess(
                 [
-                    "git",
+                    git_executable,
                     "--git-dir",
                     SNAPSHOT_DIR,
                     "--work-tree",
@@ -1587,8 +1619,9 @@ def run_agent_tests(
     env["PYTHONPATH"] = f"{core_path}:{exports_path}:{fw_agents_path}:{PROJECT_ROOT}:{pythonpath}"
 
     try:
-        result = subprocess.run(
-            cmd,
+        pytest_executable = _resolve_executable("pytest")
+        result = _run_subprocess(
+            [pytest_executable, *cmd[1:]],
             capture_output=True,
             text=True,
             timeout=120,
@@ -1697,7 +1730,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Coder Tools MCP Server")
     parser.add_argument("--project-root", default="")
     parser.add_argument("--port", type=int, default=int(os.getenv("CODER_TOOLS_PORT", "4002")))
-    parser.add_argument("--host", default="0.0.0.0")
+    parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--stdio", action="store_true")
     args = parser.parse_args()
 
