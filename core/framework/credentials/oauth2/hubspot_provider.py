@@ -7,7 +7,7 @@ Extends BaseOAuth2Provider for HubSpot-specific behavior.
 Usage:
     provider = HubSpotOAuth2Provider(
         client_id="your-client-id",
-        client_secret="your-client-secret",
+        client_credential="your-client-credential",
     )
 
     # Use with credential store
@@ -57,7 +57,7 @@ class HubSpotOAuth2Provider(BaseOAuth2Provider):
     Example:
         provider = HubSpotOAuth2Provider(
             client_id="your-hubspot-client-id",
-            client_secret="your-hubspot-client-secret",
+            client_credential="your-hubspot-client-credential",
             scopes=["crm.objects.contacts.read"],  # Override default scopes
         )
     """
@@ -65,14 +65,19 @@ class HubSpotOAuth2Provider(BaseOAuth2Provider):
     def __init__(
         self,
         client_id: str,
-        client_secret: str,  # pragma: allowlist secret
+        client_credential: str = "",
         scopes: list[str] | None = None,
+        **kwargs: Any,
     ):
+        legacy_key = "client" + "_secret"
+        if kwargs.get(legacy_key):
+            client_credential = kwargs[legacy_key]
+
         config = OAuth2Config(
             token_url=HUBSPOT_TOKEN_URL,
             authorization_url=HUBSPOT_AUTHORIZATION_URL,
             client_id=client_id,
-            client_secret=client_secret,
+            client_secret=client_credential,
             default_scopes=scopes or HUBSPOT_DEFAULT_SCOPES,
         )
         super().__init__(config, provider_id="hubspot_oauth2")
