@@ -18,7 +18,6 @@ from __future__ import annotations
 
 import json
 import logging
-from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -48,10 +47,14 @@ def register_graph_tools(registry: ToolRegistry, runtime: AgentRuntime) -> int:
         """
         from framework.runner.runner import AgentRunner
         from framework.runtime.execution_stream import EntryPointSpec
+        from framework.server.app import validate_agent_path
 
-        path = Path(agent_path).resolve()
+        try:
+            path = validate_agent_path(agent_path)
+        except ValueError as e:
+            return json.dumps({"error": str(e)})
         if not path.exists():
-            return json.dumps({"error": f"Agent path does not exist: {path}"})
+            return json.dumps({"error": f"Agent path does not exist: {agent_path}"})
 
         try:
             runner = AgentRunner.load(path)

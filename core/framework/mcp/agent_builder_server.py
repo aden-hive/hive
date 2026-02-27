@@ -562,16 +562,29 @@ def _validate_agent_path(agent_path: str) -> tuple[Path | None, str | None]:
     path = Path(agent_path)
 
     # Resolve relative paths against project root (not MCP server's cwd)
-    if not path.is_absolute() and not path.exists():
-        resolved = _PROJECT_ROOT / path
-        if resolved.exists():
-            path = resolved
+    if not path.is_absolute():
+        path = _PROJECT_ROOT / path
+
+    # Restrict to allowed directories BEFORE checking existence to prevent
+    # leaking whether arbitrary filesystem paths exist on disk.
+    from framework.server.app import validate_agent_path
+
+    try:
+        path = validate_agent_path(path)
+    except ValueError:
+        return None, json.dumps(
+            {
+                "success": False,
+                "error": "agent_path must be inside an allowed directory "
+                "(exports/, examples/, or ~/.hive/agents/)",
+            }
+        )
 
     if not path.exists():
         return None, json.dumps(
             {
                 "success": False,
-                "error": f"Agent path not found: {path}",
+                "error": f"Agent path not found: {agent_path}",
                 "hint": "Run export_graph to create an agent in exports/ first",
             }
         )

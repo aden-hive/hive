@@ -9,6 +9,7 @@ from pydantic import SecretStr
 
 from framework.credentials.models import CredentialKey, CredentialObject
 from framework.credentials.store import CredentialStore
+from framework.server.app import validate_agent_path
 
 logger = logging.getLogger(__name__)
 
@@ -142,6 +143,11 @@ async def handle_check_agent(request: web.Request) -> web.Response:
 
     if not agent_path:
         return web.json_response({"error": "agent_path is required"}, status=400)
+
+    try:
+        agent_path = str(validate_agent_path(agent_path))
+    except ValueError as e:
+        return web.json_response({"error": str(e)}, status=400)
 
     try:
         from framework.credentials.setup import load_agent_nodes
