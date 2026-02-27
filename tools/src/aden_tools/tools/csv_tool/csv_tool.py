@@ -354,8 +354,10 @@ def register_tools(mcp: FastMCP) -> None:
             # Execute query using in-memory DuckDB
             con = duckdb.connect(":memory:")
             try:
-                # Load CSV as 'data' table
-                con.execute(f"CREATE TABLE data AS SELECT * FROM read_csv_auto('{secure_path}')")
+                import pandas as pd
+
+                df = pd.read_csv(secure_path)
+                con.register("data", df)
 
                 # Execute user query
                 result = con.execute(query)
