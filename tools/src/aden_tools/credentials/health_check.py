@@ -8,10 +8,13 @@ to verify the credential works.
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass, field
 from typing import Any, Protocol
 
 import httpx
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -197,8 +200,8 @@ class OAuthBearerHealthChecker:
                     try:
                         data = response.json()
                         identity = self._extract_identity(data)
-                    except Exception:
-                        pass  # Identity extraction is best-effort
+                    except (ValueError, TypeError) as e:
+                        logger.debug("Failed to extract %s identity: %s", self.service_name, e)
                     return HealthCheckResult(
                         valid=True,
                         message=f"{self.service_name} credentials valid",
@@ -331,8 +334,8 @@ class BaseHttpHealthChecker:
             try:
                 data = response.json()
                 identity = self._extract_identity(data)
-            except Exception:
-                pass
+            except (ValueError, TypeError) as e:
+                logger.debug("Failed to extract %s identity: %s", self.SERVICE_NAME, e)
             return HealthCheckResult(
                 valid=True,
                 message=f"{self.SERVICE_NAME} credentials valid",
