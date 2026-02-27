@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import os
 
 from textual.app import ComposeResult
@@ -11,6 +12,8 @@ from textual.screen import ModalScreen
 from textual.widgets import Button, Input, Label
 
 from framework.credentials.setup import CredentialSetupSession, MissingCredential
+
+logger = logging.getLogger(__name__)
 
 
 class CredentialSetupScreen(ModalScreen[bool | None]):
@@ -172,8 +175,8 @@ class CredentialSetupScreen(ModalScreen[bool | None]):
                         aden_key,
                         comment="Aden Platform API key",
                     )
-                except Exception:
-                    pass
+                except Exception as exc:
+                    logger.debug("Failed to persist ADEN_API_KEY to shell config: %s", exc)
                 configured += 1  # ADEN_API_KEY itself counts as configured
 
             # Run Aden sync for all Aden-backed creds (best-effort)
@@ -308,8 +311,12 @@ class CredentialSetupScreen(ModalScreen[bool | None]):
                 auto_refresh=True,
             )
             EncryptedFileStorage().save(cred_obj)
-        except Exception:
-            pass  # Best-effort; env var is the primary delivery mechanism
+        except Exception as exc:
+            logger.debug(
+                "Failed to persist synced credential '%s' to local encrypted store: %s",
+                cred_id,
+                exc,
+            )
 
     def action_dismiss_setup(self) -> None:
         self.dismiss(None)
