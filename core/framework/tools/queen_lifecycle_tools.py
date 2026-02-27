@@ -65,7 +65,7 @@ class WorkerSessionAdapter:
     worker_path: Path | None = None
 
 
-def build_worker_profile(runtime: AgentRuntime) -> str:
+def build_worker_profile(runtime: AgentRuntime, agent_path: Path | str | None = None) -> str:
     """Build a worker capability profile from its graph/goal definition.
 
     Injected into the queen's system prompt so it knows what the worker
@@ -76,6 +76,8 @@ def build_worker_profile(runtime: AgentRuntime) -> str:
 
     lines = ["\n\n# Worker Profile"]
     lines.append(f"Agent: {runtime.graph_id}")
+    if agent_path:
+        lines.append(f"Path: {agent_path}")
     lines.append(f"Goal: {goal.name}")
     if goal.description:
         lines.append(f"Description: {goal.description}")
