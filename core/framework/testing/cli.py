@@ -13,6 +13,7 @@ import ast
 import os
 import subprocess
 from pathlib import Path
+from shutil import which
 
 
 def register_testing_commands(subparsers: argparse._SubParsersAction) -> None:
@@ -117,7 +118,12 @@ def cmd_test_run(args: argparse.Namespace) -> int:
         return 1
 
     # Build pytest command
-    cmd = ["pytest"]
+    pytest_path = which("pytest")
+    if not pytest_path:
+        print("Error: pytest executable not found in PATH")
+        return 1
+
+    cmd = [pytest_path]
 
     # Add test path(s) based on type filter
     if args.type == "all":
@@ -160,7 +166,7 @@ def cmd_test_run(args: argparse.Namespace) -> int:
 
     # Run pytest
     try:
-        result = subprocess.run(
+        result = subprocess.run(  # noqa: S603
             cmd,
             env=env,
             timeout=600,  # 10 minute timeout
@@ -201,8 +207,13 @@ def cmd_test_debug(args: argparse.Namespace) -> int:
         return 1
 
     # Run specific test with verbose output
+    pytest_path = which("pytest")
+    if not pytest_path:
+        print("Error: pytest executable not found in PATH")
+        return 1
+
     cmd = [
-        "pytest",
+        pytest_path,
         f"{test_file}::{test_name}",
         "-vvs",  # Very verbose with stdout
         "--tb=long",  # Full traceback
@@ -217,7 +228,7 @@ def cmd_test_debug(args: argparse.Namespace) -> int:
     print(f"Running: {' '.join(cmd)}\n")
 
     try:
-        result = subprocess.run(
+        result = subprocess.run(  # noqa: S603
             cmd,
             env=env,
             timeout=120,  # 2 minute timeout for single test
