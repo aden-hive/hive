@@ -9,13 +9,44 @@ import hashlib
 import hmac
 import json
 import logging
-from dataclasses import dataclass
+import time
+from collections import defaultdict
+from dataclasses import dataclass, field
 
 from aiohttp import web
 
 from framework.runtime.event_bus import EventBus
 
 logger = logging.getLogger(__name__)
+
+# ── Rate Limiting ─────────────────────────────────────────────────────────
+# Maximum request body size in bytes (1 MB).
+MAX_BODY_SIZE = 1_048_576
+
+# Default rate limit: requests per window per IP.
+DEFAULT_RATE_LIMIT = 60
+# Window size in seconds.
+RATE_LIMIT_WINDOW = 60
+
+
+class _RateLimiter:
+    """Simple sliding-window rate limiter keyed by client IP."""
+
+    def __init__(self, max_requests: int = DEFAULT_RATE_LIMIT, window: int = RATE_LIMIT_WINDOW):
+        self._max = max_requests
+        self._window = window
+        self._hits: dict[str, list[float]] = defaultdict(list)
+
+    def is_allowed(self, key: str) -> bool:
+        """Return True if the request is within the rate limit."""
+        now = time.monotonic()
+        window_start = now - self._window
+        # Prune old entries
+        self._hits[key] = [t for t in self._hits[key] if t > window_start]
+        if len(self._hits[key]) >= self._max:
+            return False
+        self._hits[key].append(now)
+        return True
 
 
 @dataclass
@@ -63,6 +94,7 @@ class WebhookServer:
         self._app: web.Application | None = None
         self._runner: web.AppRunner | None = None
         self._site: web.TCPSite | None = None
+        self._rate_limiter = _RateLimiter()
 
     def add_route(self, route: WebhookRoute) -> None:
         """Register a webhook route."""
@@ -104,15 +136,37 @@ class WebhookServer:
 
     async def _handle_request(self, request: web.Request) -> web.Response:
         """Handle an incoming webhook request."""
+        # Rate limiting by client IP
+        client_ip = request.remote or "unknown"
+        if not self._rate_limiter.is_allowed(client_ip):
+            logger.warning("Rate limit exceeded for %s", client_ip)
+            return web.json_response(
+                {"error": "Rate limit exceeded"},
+                status=429,
+            )
+
         path = request.path
         route = self._routes.get(path)
 
         if route is None:
             return web.json_response({"error": "Not found"}, status=404)
 
-        # Read body
+        # Check Content-Length before reading body
+        content_length = request.content_length
+        if content_length is not None and content_length > MAX_BODY_SIZE:
+            return web.json_response(
+                {"error": f"Request body too large (max {MAX_BODY_SIZE} bytes)"},
+                status=413,
+            )
+
+        # Read body with size limit
         try:
             body = await request.read()
+            if len(body) > MAX_BODY_SIZE:
+                return web.json_response(
+                    {"error": f"Request body too large (max {MAX_BODY_SIZE} bytes)"},
+                    status=413,
+                )
         except Exception:
             return web.json_response(
                 {"error": "Failed to read request body"},
