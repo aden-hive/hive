@@ -702,6 +702,16 @@ class GoogleGmailHealthChecker(OAuthBearerHealthChecker):
         )
 
 
+class IntercomHealthChecker(OAuthBearerHealthChecker):
+    """Health checker for Intercom access tokens."""
+
+    def __init__(self):
+        super().__init__(
+            endpoint="https://api.intercom.io/me",
+            service_name="Intercom",
+        )
+
+
 # Registry of health checkers
 HEALTH_CHECKERS: dict[str, CredentialHealthChecker] = {
     "discord": DiscordHealthChecker(),
@@ -714,6 +724,7 @@ HEALTH_CHECKERS: dict[str, CredentialHealthChecker] = {
     "google_maps": GoogleMapsHealthChecker(),
     "anthropic": AnthropicHealthChecker(),
     "github": GitHubHealthChecker(),
+    "intercom": IntercomHealthChecker(),
     "resend": ResendHealthChecker(),
 }
 
