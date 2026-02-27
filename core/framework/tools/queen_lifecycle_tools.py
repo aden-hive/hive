@@ -175,6 +175,18 @@ def register_queen_lifecycle_tools(
                 None, lambda: validate_agent_credentials(runtime.graph.nodes)
             )
 
+            # Resync MCP servers if credentials were added since the worker loaded
+            # (e.g. user connected an OAuth account mid-session via Aden UI).
+            runner = getattr(session, "runner", None)
+            if runner:
+                try:
+                    await loop.run_in_executor(
+                        None,
+                        lambda: runner._tool_registry.resync_mcp_servers_if_needed(),
+                    )
+                except Exception as e:
+                    logger.warning("MCP resync failed: %s", e)
+
             # Resume timers in case they were paused by a previous stop_worker
             runtime.resume_timers()
 

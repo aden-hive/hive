@@ -1666,15 +1666,7 @@ export default function Workspace() {
         agentLabel={activeWorkerLabel}
         agentPath={activeWorker !== "new-agent" ? activeWorker : undefined}
         open={credentialsOpen}
-        onClose={() => {
-          setCredentialsOpen(false);
-          // If worker is loaded and credential error was cleared, auto-trigger run
-          // (credential error came from trigger, not load — no auto-load effect to help)
-          const state = agentStates[activeWorker];
-          if (state?.ready && state?.sessionId && !state?.error) {
-            handleRun();
-          }
-        }}
+        onClose={() => setCredentialsOpen(false)}
         credentials={activeSession?.credentials || []}
         onCredentialChange={() => {
           if (!activeSession) return;

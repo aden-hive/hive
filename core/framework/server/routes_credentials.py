@@ -1,6 +1,8 @@
 """Credential CRUD routes."""
 
+import asyncio
 import logging
+import os
 
 from aiohttp import web
 from pydantic import SecretStr
@@ -53,7 +55,6 @@ async def handle_save_credential(request: web.Request) -> web.Response:
 
     Body: {"credential_id": "...", "keys": {"key_name": "value", ...}}
     """
-    store = _get_store(request)
     body = await request.json()
 
     credential_id = body.get("credential_id")
@@ -62,6 +63,41 @@ async def handle_save_credential(request: web.Request) -> web.Response:
     if not credential_id or not keys or not isinstance(keys, dict):
         return web.json_response({"error": "credential_id and keys are required"}, status=400)
 
+    # ADEN_API_KEY lives in env + shell config, not the encrypted store
+    if credential_id == "aden_api_key":
+        key = keys.get("api_key", "").strip()
+        if not key:
+            return web.json_response({"error": "api_key is required"}, status=400)
+
+        os.environ["ADEN_API_KEY"] = key
+
+        # Persist to shell config (best-effort, same pattern as TUI setup)
+        try:
+            from aden_tools.credentials.shell_config import add_env_var_to_shell_config
+
+            add_env_var_to_shell_config(
+                "ADEN_API_KEY",
+                key,
+                comment="Aden Platform API key",
+            )
+        except Exception as exc:
+            logger.warning("Could not persist ADEN_API_KEY to shell config: %s", exc)
+
+        # Immediately sync OAuth tokens from Aden (runs in executor because
+        # _presync_aden_tokens makes blocking HTTP calls to the Aden server).
+        try:
+            from aden_tools.credentials import CREDENTIAL_SPECS
+
+            from framework.credentials.validation import _presync_aden_tokens
+
+            loop = asyncio.get_running_loop()
+            await loop.run_in_executor(None, _presync_aden_tokens, CREDENTIAL_SPECS)
+        except Exception as exc:
+            logger.warning("Aden token sync after key save failed: %s", exc)
+
+        return web.json_response({"saved": "aden_api_key"}, status=201)
+
+    store = _get_store(request)
     cred = CredentialObject(
         id=credential_id,
         keys={k: CredentialKey(name=k, value=SecretStr(v)) for k, v in keys.items()},
@@ -73,6 +109,17 @@ async def handle_save_credential(request: web.Request) -> web.Response:
 async def handle_delete_credential(request: web.Request) -> web.Response:
     """DELETE /api/credentials/{credential_id} — delete a credential."""
     credential_id = request.match_info["credential_id"]
+
+    if credential_id == "aden_api_key":
+        os.environ.pop("ADEN_API_KEY", None)
+        try:
+            from aden_tools.credentials.shell_config import remove_env_var_from_shell_config
+
+            remove_env_var_from_shell_config("ADEN_API_KEY")
+        except Exception as exc:
+            logger.warning("Could not remove ADEN_API_KEY from shell config: %s", exc)
+        return web.json_response({"deleted": True})
+
     store = _get_store(request)
     deleted = store.delete_credential(credential_id)
     if not deleted:
@@ -109,7 +156,27 @@ async def handle_check_agent(request: web.Request) -> web.Response:
         nodes = load_agent_nodes(agent_path)
         result = validate_agent_credentials(nodes, verify=verify, raise_on_error=False)
 
-        required = [_status_to_dict(c) for c in result.credentials]
+        # If any credential needs Aden, include ADEN_API_KEY as a first-class row
+        if any(c.aden_supported for c in result.credentials):
+            aden_key_status = {
+                "credential_name": "Aden Platform",
+                "credential_id": "aden_api_key",
+                "env_var": "ADEN_API_KEY",
+                "description": "API key from the Developers tab in Settings",
+                "help_url": "https://hive.adenhq.com/",
+                "tools": [],
+                "node_types": [],
+                "available": result.has_aden_key,
+                "valid": None,
+                "validation_message": None,
+                "direct_api_key_supported": True,
+                "aden_supported": True,  # renders with "Authorize" button to open Aden
+                "credential_key": "api_key",
+            }
+            required = [aden_key_status] + [_status_to_dict(c) for c in result.credentials]
+        else:
+            required = [_status_to_dict(c) for c in result.credentials]
+
         return web.json_response(
             {
                 "required": required,
@@ -140,54 +207,10 @@ def _status_to_dict(c) -> dict:
     }
 
 
-async def handle_save_aden_key(request: web.Request) -> web.Response:
-    """POST /api/credentials/aden-key — save the user's ADEN_API_KEY.
-
-    Sets the key in the current process environment and persists it to shell
-    config so future terminals pick it up.  Then triggers an Aden token sync
-    so OAuth credentials resolve immediately.
-
-    Body: {"key": "..."}
-    """
-    import os
-
-    body = await request.json()
-    key = body.get("key", "").strip()
-    if not key:
-        return web.json_response({"error": "key is required"}, status=400)
-
-    os.environ["ADEN_API_KEY"] = key
-
-    # Persist to shell config (best-effort, same pattern as TUI setup)
-    try:
-        from aden_tools.credentials.shell_config import add_env_var_to_shell_config
-
-        add_env_var_to_shell_config(
-            "ADEN_API_KEY",
-            key,
-            comment="Aden Platform API key",
-        )
-    except Exception as exc:
-        logger.warning("Could not persist ADEN_API_KEY to shell config: %s", exc)
-
-    # Immediately sync OAuth tokens from Aden
-    try:
-        from aden_tools.credentials import CREDENTIAL_SPECS
-
-        from framework.credentials.validation import _presync_aden_tokens
-
-        _presync_aden_tokens(CREDENTIAL_SPECS)
-    except Exception as exc:
-        logger.warning("Aden token sync after key save failed: %s", exc)
-
-    return web.json_response({"saved": True}, status=201)
-
-
 def register_routes(app: web.Application) -> None:
     """Register credential routes on the application."""
-    # check-agent and aden-key must be registered BEFORE the {credential_id} wildcard
+    # check-agent must be registered BEFORE the {credential_id} wildcard
     app.router.add_post("/api/credentials/check-agent", handle_check_agent)
-    app.router.add_post("/api/credentials/aden-key", handle_save_aden_key)
     app.router.add_get("/api/credentials", handle_list_credentials)
     app.router.add_post("/api/credentials", handle_save_credential)
     app.router.add_get("/api/credentials/{credential_id}", handle_get_credential)

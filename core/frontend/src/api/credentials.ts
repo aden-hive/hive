@@ -45,7 +45,4 @@ export const credentialsApi = {
       "/credentials/check-agent",
       { agent_path: agentPath },
     ),
-
-  saveAdenKey: (key: string) =>
-    api.post<{ saved: boolean }>("/credentials/aden-key", { key }),
 };

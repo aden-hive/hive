@@ -1,5 +1,5 @@
-import { useState, useEffect, useCallback } from "react";
-import { KeyRound, Check, AlertCircle, X, Shield, Loader2, Trash2, ExternalLink } from "lucide-react";
+import { useState, useEffect, useCallback, useRef } from "react";
+import { KeyRound, Check, AlertCircle, X, Shield, Loader2, Trash2, ExternalLink, Pencil } from "lucide-react";
 import { credentialsApi, type AgentCredentialRequirement } from "@/api/credentials";
 
 export interface Credential {
@@ -90,9 +90,7 @@ export default function CredentialsModal({
   const [inputValue, setInputValue] = useState("");
   const [saving, setSaving] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
-  const [hasAdenKey, setHasAdenKey] = useState(true); // assume true until backend says otherwise
-  const [adenKeyInput, setAdenKeyInput] = useState("");
-  const [savingAdenKey, setSavingAdenKey] = useState(false);
+  const pendingAdenAuth = useRef(false);
 
   const fetchStatus = useCallback(async () => {
     setError(null);
@@ -108,8 +106,7 @@ export default function CredentialsModal({
 
         // Real agent — ask backend what credentials it actually needs
         setLoading(true);
-        const { required, has_aden_key } = await credentialsApi.checkAgent(agentPath);
-        setHasAdenKey(has_aden_key);
+        const { required } = await credentialsApi.checkAgent(agentPath);
         credentialCache.set(agentPath, required);
         setRows(required.map(requirementToRow));
       } else {
@@ -140,36 +137,31 @@ export default function CredentialsModal({
       fetchStatus();
       setEditingId(null);
       setInputValue("");
-      setAdenKeyInput("");
       setDeletingId(null);
     }
   }, [open, fetchStatus]);
 
-  const handleSaveAdenKey = async () => {
-    if (!adenKeyInput.trim()) return;
-    setSavingAdenKey(true);
-    try {
-      await credentialsApi.saveAdenKey(adenKeyInput.trim());
-      setAdenKeyInput("");
-      if (agentPath) credentialCache.delete(agentPath);
-      onCredentialChange?.();
-      await fetchStatus();
-    } catch {
-      setError("Failed to save Aden API Key");
-    } finally {
-      setSavingAdenKey(false);
-    }
-  };
+  // Re-fetch when user returns to tab (e.g. after completing OAuth on Aden)
+  useEffect(() => {
+    if (!open) return;
+    const handleVisibility = () => {
+      if (document.visibilityState === "visible") {
+        if (agentPath) credentialCache.delete(agentPath);
+        fetchStatus();
+        if (pendingAdenAuth.current) {
+          pendingAdenAuth.current = false;
+          setEditingId("aden_api_key");
+          setInputValue("");
+        }
+      }
+    };
+    document.addEventListener("visibilitychange", handleVisibility);
+    return () => document.removeEventListener("visibilitychange", handleVisibility);
+  }, [open, agentPath, fetchStatus]);
 
   const handleConnect = async (row: CredentialRow) => {
-    if (row.adenSupported) {
-      // OAuth credential — redirect to Aden platform
-      window.open("https://hive.adenhq.com/", "_blank", "noopener");
-      return;
-    }
-
     if (editingId === row.id) {
-      // Already editing — save
+      // Already editing — save (must come before Aden redirects)
       if (!inputValue.trim()) return;
       setSaving(true);
       try {
@@ -184,12 +176,26 @@ export default function CredentialsModal({
       } finally {
         setSaving(false);
       }
-    } else {
-      // Start editing — show inline API key input
-      setEditingId(row.id);
-      setInputValue("");
-      setDeletingId(null);
+      return;
     }
+
+    if (row.id === "aden_api_key" && row.adenSupported) {
+      // Aden Platform key — open Aden so user can grab key from Developers tab
+      window.open("https://hive.adenhq.com/", "_blank", "noopener");
+      pendingAdenAuth.current = true;
+      return;
+    }
+
+    if (row.adenSupported) {
+      // OAuth credential — redirect to Aden platform
+      window.open("https://hive.adenhq.com/", "_blank", "noopener");
+      return;
+    }
+
+    // Start editing — show inline API key input
+    setEditingId(row.id);
+    setInputValue("");
+    setDeletingId(null);
   };
 
   const handleDisconnect = async (row: CredentialRow) => {
@@ -215,7 +221,7 @@ export default function CredentialsModal({
   const invalidCount = rows.filter(c => c.valid === false).length;
   const missingCount = requiredCount - requiredConnected;
   const allRequiredMet = requiredConnected === requiredCount && invalidCount === 0;
-  const needsAdenKeyInput = !hasAdenKey && rows.some(r => r.adenSupported);
+  const adenPlatformConnected = rows.find(r => r.id === "aden_api_key")?.connected ?? false;
 
   return (
     <>
@@ -280,50 +286,6 @@ export default function CredentialsModal({
             </div>
           )}
 
-          {/* Aden API Key section */}
-          {!loading && needsAdenKeyInput && (
-            <div className="mx-5 mt-4 px-3 py-3 rounded-lg border border-amber-500/30 bg-amber-500/5">
-              <div className="flex items-center gap-2 mb-1">
-                <KeyRound className="w-3.5 h-3.5 text-amber-600" />
-                <span className="text-sm font-medium text-foreground">Aden API Key</span>
-                <span className="text-[9px] font-semibold uppercase tracking-wider px-1.5 py-0.5 rounded text-destructive/70 bg-destructive/10">
-                  Required
-                </span>
-              </div>
-              <p className="text-[11px] text-muted-foreground mb-2">
-                Required to connect OAuth integrations below.{" "}
-                <a
-                  href="https://hive.adenhq.com/"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="text-primary hover:underline inline-flex items-center gap-0.5"
-                >
-                  Get your key at hive.adenhq.com
-                  <ExternalLink className="w-2.5 h-2.5" />
-                </a>
-              </p>
-              <div className="flex gap-2">
-                <input
-                  type="password"
-                  value={adenKeyInput}
-                  onChange={(e) => setAdenKeyInput(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") handleSaveAdenKey();
-                  }}
-                  placeholder="Paste your ADEN_API_KEY..."
-                  className="flex-1 px-3 py-1.5 rounded-md border border-border bg-background text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary/40"
-                />
-                <button
-                  onClick={handleSaveAdenKey}
-                  disabled={savingAdenKey || !adenKeyInput.trim()}
-                  className="px-3 py-1.5 rounded-md text-xs font-medium bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-                >
-                  {savingAdenKey ? <Loader2 className="w-3 h-3 animate-spin" /> : "Save"}
-                </button>
-              </div>
-            </div>
-          )}
-
           {/* Credential list */}
           {!loading && (
             <div className="p-5 space-y-2">
@@ -375,6 +337,20 @@ export default function CredentialsModal({
                             Connected
                           </span>
                         )}
+                        {(row.id === "aden_api_key" || !row.adenSupported) && (
+                          <button
+                            onClick={() => {
+                              setEditingId(editingId === row.id ? null : row.id);
+                              setInputValue("");
+                              setDeletingId(null);
+                            }}
+                            disabled={saving}
+                            className="p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted/60 transition-colors"
+                            title="Update key"
+                          >
+                            <Pencil className="w-3 h-3" />
+                          </button>
+                        )}
                         <button
                           onClick={() => {
                             setDeletingId(deletingId === row.id ? null : row.id);
@@ -387,6 +363,10 @@ export default function CredentialsModal({
                           <Trash2 className="w-3 h-3" />
                         </button>
                       </div>
+                    ) : row.adenSupported && !adenPlatformConnected && row.id !== "aden_api_key" ? (
+                      <span className="text-[11px] text-muted-foreground italic flex-shrink-0">
+                        Connect Aden Platform key first
+                      </span>
                     ) : (
                       <button
                         onClick={() => handleConnect(row)}
@@ -435,7 +415,7 @@ export default function CredentialsModal({
                   )}
 
                   {/* Inline API key input */}
-                  {editingId === row.id && (!row.connected || row.valid === false) && (
+                  {editingId === row.id && (
                     <div className="mt-1.5 flex gap-2 px-3">
                       <input
                         type="password"
