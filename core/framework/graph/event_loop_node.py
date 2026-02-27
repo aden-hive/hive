@@ -885,27 +885,27 @@ class EventLoopNode(NodeProtocol):
                 # next iteration.  If we let the judge fire now it sees
                 # "missing outputs" and injects RETRY feedback *before* the
                 # user's answer, confusing the LLM.
-                _continue_count += 1
-                if ctx.runtime_logger:
-                    iter_latency_ms = int((time.time() - iter_start) * 1000)
-                    verdict_fb = (
-                        "Auto-blocked for user input (pre-interaction)"
-                        if _cf_auto
-                        else "Blocked for ask_user input (skip judge)"
-                    )
-                    ctx.runtime_logger.log_step(
-                        node_id=node_id,
-                        node_type="event_loop",
-                        step_index=iteration,
-                        verdict="CONTINUE",
-                        verdict_feedback=verdict_fb,
-                        tool_calls=logged_tool_calls,
-                        llm_text=assistant_text,
-                        input_tokens=turn_tokens.get("input", 0),
-                        output_tokens=turn_tokens.get("output", 0),
-                        latency_ms=iter_latency_ms,
-                    )
-                continue
+                # _continue_count += 1
+                # if ctx.runtime_logger:
+                #     iter_latency_ms = int((time.time() - iter_start) * 1000)
+                #     verdict_fb = (
+                #         "Auto-blocked for user input (pre-interaction)"
+                #         if _cf_auto
+                #         else "Blocked for ask_user input (skip judge)"
+                #     )
+                #     ctx.runtime_logger.log_step(
+                #         node_id=node_id,
+                #         node_type="event_loop",
+                #         step_index=iteration,
+                #         verdict="CONTINUE",
+                #         verdict_feedback=verdict_fb,
+                #         tool_calls=logged_tool_calls,
+                #         llm_text=assistant_text,
+                #         input_tokens=turn_tokens.get("input", 0),
+                #         output_tokens=turn_tokens.get("output", 0),
+                #         latency_ms=iter_latency_ms,
+                #     )
+                # continue
 
             # 6i. Judge evaluation
             should_judge = (
