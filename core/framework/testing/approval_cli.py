@@ -276,8 +276,8 @@ def _edit_test_code(code: str) -> str:
         temp_path = f.name
 
     try:
-        # Open editor
-        subprocess.run([editor_path, temp_path], check=True)
+        # Open editor (path is resolved from allowlisted command names)
+        subprocess.run([editor_path, temp_path], check=True)  # noqa: S603
 
         # Read edited code
         with open(temp_path) as f:
