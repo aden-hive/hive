@@ -1,7 +1,8 @@
 # Aden Tools MCP Server
 # Exposes tools via Model Context Protocol
 
-FROM python:3.11-slim
+# Pin to a specific digest for reproducible builds
+FROM python:3.11-slim@sha256:8faa14e498a982a15e2abff1e12e498d53c74a33a3bab4e3e1ae27e18e7f35e4
 
 WORKDIR /app
 
@@ -11,8 +12,9 @@ COPY README.md ./
 COPY src ./src
 COPY mcp_server.py ./
 
-# Install package with all dependencies
-RUN pip install --no-cache-dir -e .
+# Install package in non-editable mode for production
+# (editable installs are for development only)
+RUN pip install --no-cache-dir .
 
 # Install Playwright Chromium browser and system dependencies
 RUN playwright install chromium --with-deps
