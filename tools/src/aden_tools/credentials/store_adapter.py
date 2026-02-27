@@ -26,12 +26,16 @@ Usage:
 
 from __future__ import annotations
 
+import logging
 from typing import TYPE_CHECKING
 
 from .base import CredentialError, CredentialSpec
 
 if TYPE_CHECKING:
     from framework.credentials import CredentialStore
+
+
+logger = logging.getLogger(__name__)
 
 
 class CredentialStoreAdapter:
@@ -115,8 +119,13 @@ class CredentialStoreAdapter:
                 key = LocalCredentialRegistry.default().get_key(name, account)
                 if key is not None:
                     return key
-            except Exception:
-                pass  # Fall through to standard store lookup
+            except Exception as e:
+                logger.debug(
+                    "Falling back to standard store lookup for %s/%s: %s",
+                    name,
+                    account,
+                    e,
+                )
 
         return self._store.get(name)
 
