@@ -34,6 +34,8 @@ from framework.runtime.core import Runtime
 from framework.schemas.checkpoint import Checkpoint
 from framework.storage.checkpoint_store import CheckpointStore
 
+logger = logging.getLogger(__name__)
+
 
 @dataclass
 class ExecutionResult:
@@ -239,8 +241,8 @@ class GraphExecutor:
             state_data["memory_keys"] = list(memory_snapshot.keys())
 
             state_path.write_text(_json.dumps(state_data, indent=2), encoding="utf-8")
-        except Exception:
-            pass  # Best-effort — never block execution
+        except Exception as exc:
+            logger.debug("Failed to persist execution state snapshot: %s", exc)
 
     def _validate_tools(self, graph: GraphSpec) -> list[str]:
         """
