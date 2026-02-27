@@ -7,7 +7,7 @@ aliases, identity metadata, status tracking, CRUD, and health validation.
 
 Storage convention:
     {credential_id}/{alias}  →  CredentialObject
-    e.g. "brave_search/work" →  { api_key: "BSA-xxx", _alias: "work",
+    e.g. "brave_search/work" →  { api credential: "BSA-xxx", _alias: "work",
                                    _integration_type: "brave_search",
                                    _status: "active",
                                    _identity_username: "acme", ... }
