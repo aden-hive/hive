@@ -52,7 +52,7 @@ def register_tools(mcp: FastMCP) -> None:
             if not command_args:
                 return {"error": "Command cannot be empty"}
 
-            result = subprocess.run(
+            result = subprocess.run(  # noqa: S603
                 command_args,
                 shell=False,
                 cwd=secure_cwd,
