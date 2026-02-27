@@ -9,9 +9,12 @@ Identifies open ports, grabs service banners, and flags risky exposures
 from __future__ import annotations
 
 import asyncio
+import logging
 import socket
 
 from fastmcp import FastMCP
+
+logger = logging.getLogger(__name__)
 
 # Well-known ports and their services
 PORT_SERVICE_MAP = {
@@ -280,8 +283,8 @@ async def _check_port(ip: str, port: int, timeout: float) -> dict:
         try:
             data = await asyncio.wait_for(reader.read(256), timeout=2.0)
             banner = data.decode("utf-8", errors="ignore").strip()
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("Banner grab failed", exc_info=exc)
 
         writer.close()
         await writer.wait_closed()
