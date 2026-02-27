@@ -123,10 +123,25 @@ class HashiCorpVaultStorage(CredentialStorage):
 
         logger.info(f"Connected to HashiCorp Vault at {url}")
 
+    @staticmethod
+    def _sanitize_id(credential_id: str) -> str:
+        """Sanitize credential_id to prevent path traversal.
+
+        Only allows alphanumeric characters, hyphens, and underscores.
+        """
+        import re
+
+        if not credential_id or not credential_id.strip():
+            raise ValueError("credential_id must not be empty")
+        safe_id = re.sub(r"[^a-zA-Z0-9_\-]", "_", credential_id.strip())
+        safe_id = re.sub(r"_+", "_", safe_id).strip("_")
+        if not safe_id:
+            raise ValueError(f"credential_id '{credential_id}' contains no valid characters")
+        return safe_id
+
     def _path(self, credential_id: str) -> str:
         """Build Vault path for credential."""
-        # Sanitize credential_id
-        safe_id = credential_id.replace("/", "_").replace("\\", "_")
+        safe_id = self._sanitize_id(credential_id)
         return f"{self._prefix}/{safe_id}"
 
     def save(self, credential: CredentialObject) -> None:

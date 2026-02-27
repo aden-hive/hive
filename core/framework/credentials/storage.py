@@ -166,11 +166,33 @@ class EncryptedFileStorage(CredentialStorage):
         (self.base_path / "credentials").mkdir(parents=True, exist_ok=True)
         (self.base_path / "metadata").mkdir(parents=True, exist_ok=True)
 
+    @staticmethod
+    def _sanitize_id(credential_id: str) -> str:
+        """Sanitize credential_id to prevent path traversal.
+
+        Only allows alphanumeric characters, hyphens, and underscores.
+        All other characters are replaced with underscores.
+        """
+        import re
+
+        if not credential_id or not credential_id.strip():
+            raise ValueError("credential_id must not be empty")
+        # Allow only safe characters — reject everything else
+        safe_id = re.sub(r"[^a-zA-Z0-9_\-]", "_", credential_id.strip())
+        # Collapse repeated underscores
+        safe_id = re.sub(r"_+", "_", safe_id).strip("_")
+        if not safe_id:
+            raise ValueError(f"credential_id '{credential_id}' contains no valid characters")
+        return safe_id
+
     def _cred_path(self, credential_id: str) -> Path:
         """Get the file path for a credential."""
-        # Sanitize credential_id to prevent path traversal
-        safe_id = credential_id.replace("/", "_").replace("\\", "_").replace("..", "_")
-        return self.base_path / "credentials" / f"{safe_id}.enc"
+        safe_id = self._sanitize_id(credential_id)
+        result = self.base_path / "credentials" / f"{safe_id}.enc"
+        # Final safety check: ensure resolved path is within base_path
+        if not str(result.resolve()).startswith(str((self.base_path / "credentials").resolve())):
+            raise ValueError("Access denied: credential path escapes sandbox")
+        return result
 
     def save(self, credential: CredentialObject) -> None:
         """Encrypt and save credential."""
