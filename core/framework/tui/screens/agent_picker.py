@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
@@ -15,6 +16,8 @@ from textual.containers import Vertical
 from textual.screen import ModalScreen
 from textual.widgets import Label, OptionList, TabbedContent, TabPane
 from textual.widgets._option_list import Option
+
+logger = logging.getLogger(__name__)
 
 
 class GetStartedAction(Enum):
@@ -57,7 +60,8 @@ def _get_last_active(agent_name: str) -> str | None:
             ts = data.get("timestamps", {}).get("updated_at")
             if ts and (latest is None or ts > latest):
                 latest = ts
-        except Exception:
+        except Exception as exc:
+            logger.debug("Skipping invalid state file '%s': %s", state_file, exc)
             continue
     return latest
 
@@ -92,8 +96,8 @@ def _extract_agent_stats(agent_path: Path) -> tuple[int, int, list[str]]:
                         if isinstance(target, ast.Name) and target.id == "nodes":
                             if isinstance(node.value, ast.List):
                                 node_count = len(node.value.elts)
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("Failed to parse agent.py for stats at '%s': %s", agent_py, exc)
 
     # Fall back to / supplement from agent.json
     agent_json = agent_path / "agent.json"
@@ -110,8 +114,8 @@ def _extract_agent_stats(agent_path: Path) -> tuple[int, int, list[str]]:
                 tools.update(n.get("tools", []))
             tool_count = len(tools)
             tags = data.get("agent", {}).get("tags", [])
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("Failed to parse agent.json for stats at '%s': %s", agent_json, exc)
 
     return node_count, tool_count, tags
 
@@ -154,8 +158,8 @@ def discover_agents() -> dict[str, list[AgentEntry]]:
                         meta = data.get("agent", {})
                         name = meta.get("name", name)
                         desc = meta.get("description", desc)
-                    except Exception:
-                        pass
+                    except Exception as exc:
+                        logger.debug("Failed to load metadata from '%s': %s", agent_json, exc)
 
             entries.append(
                 AgentEntry(
