@@ -14,7 +14,7 @@ Quick Start:
     provider = BaseOAuth2Provider(OAuth2Config(
         token_url="https://oauth2.example.com/token",
         client_id="your-client-id",
-        client_secret="your-client-secret",  # pragma: allowlist secret
+        client_secret="your-client-credential",  # pragma: allowlist secret
         default_scopes=["read", "write"],
     ))
 
