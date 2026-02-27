@@ -14,6 +14,8 @@ from textual.containers import Container
 from framework.runtime.event_bus import AgentEvent, EventType
 from framework.tui.widgets.selectable_rich_log import SelectableRichLog as RichLog
 
+logger = logging.getLogger(__name__)
+
 # --- Module-level formatting constants ---
 
 EVENT_FORMAT: dict[EventType, tuple[str, str]] = {
@@ -168,5 +170,5 @@ class LogPane(Container):
             if was_at_bottom:
                 log.scroll_end(animate=False)
 
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("Failed to write log pane message: %s", exc)
