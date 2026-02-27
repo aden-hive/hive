@@ -10,6 +10,7 @@ import os
 import subprocess
 import tempfile
 from collections.abc import Callable
+from shutil import which
 
 from framework.testing.approval_types import (
     ApprovalAction,
@@ -252,16 +253,22 @@ def _edit_test_code(code: str) -> str:
     """
     Open test code in user's editor for modification.
 
-    Uses $EDITOR environment variable, falls back to vim/nano.
+    Uses a safe allowlist of editors available in PATH.
     """
-    editor = os.environ.get("EDITOR", "vim")
+    allowed_editors = ["vim", "nvim", "nano", "vi", "notepad", "code"]
+    editor_name = "vim"
 
     # Try to find an available editor
-    if not _command_exists(editor):
-        for fallback in ["nano", "vi", "notepad"]:
+    if not _command_exists(editor_name):
+        for fallback in allowed_editors:
             if _command_exists(fallback):
-                editor = fallback
+                editor_name = fallback
                 break
+
+    editor_path = which(editor_name)
+    if not editor_path:
+        print(f"Editor '{editor_name}' not found, keeping original code")
+        return code
 
     # Create temp file with code
     with tempfile.NamedTemporaryFile(mode="w", suffix=".py", delete=False) as f:
@@ -270,16 +277,13 @@ def _edit_test_code(code: str) -> str:
 
     try:
         # Open editor
-        subprocess.run([editor, temp_path], check=True)
+        subprocess.run([editor_path, temp_path], check=True)
 
         # Read edited code
         with open(temp_path) as f:
             return f.read()
     except subprocess.CalledProcessError:
         print("Editor failed, keeping original code")
-        return code
-    except FileNotFoundError:
-        print(f"Editor '{editor}' not found, keeping original code")
         return code
     finally:
         # Clean up temp file
@@ -291,6 +295,4 @@ def _edit_test_code(code: str) -> str:
 
 def _command_exists(cmd: str) -> bool:
     """Check if a command exists in PATH."""
-    from shutil import which
-
     return which(cmd) is not None
