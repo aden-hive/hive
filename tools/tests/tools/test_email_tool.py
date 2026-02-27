@@ -75,7 +75,10 @@ class TestSendEmail:
         with patch("resend.Emails.send") as mock_send:
             mock_send.return_value = {"id": "email_env"}
             result = send_email_fn(
-                to="test@example.com", subject="Test", html="<p>Hi</p>", provider="resend"
+                to="test@example.com",
+                subject="Test",
+                html="<p>Hi</p>",
+                provider="resend",
             )
 
         assert result["success"] is True
@@ -106,7 +109,9 @@ class TestSendEmail:
         monkeypatch.setenv("RESEND_API_KEY", "re_test_key")
         monkeypatch.setenv("EMAIL_FROM", "test@example.com")
 
-        result = send_email_fn(to="", subject="Test", html="<p>Hi</p>", provider="resend")
+        result = send_email_fn(
+            to="", subject="Test", html="<p>Hi</p>", provider="resend"
+        )
 
         assert "error" in result
 
@@ -127,7 +132,10 @@ class TestSendEmail:
         monkeypatch.setenv("EMAIL_FROM", "test@example.com")
 
         result = send_email_fn(
-            to="test@example.com", subject="x" * 999, html="<p>Hi</p>", provider="resend"
+            to="test@example.com",
+            subject="x" * 999,
+            html="<p>Hi</p>",
+            provider="resend",
         )
 
         assert "error" in result
@@ -137,7 +145,9 @@ class TestSendEmail:
         monkeypatch.setenv("RESEND_API_KEY", "re_test_key")
         monkeypatch.setenv("EMAIL_FROM", "test@example.com")
 
-        result = send_email_fn(to="test@example.com", subject="Test", html="", provider="resend")
+        result = send_email_fn(
+            to="test@example.com", subject="Test", html="", provider="resend"
+        )
 
         assert "error" in result
 
@@ -149,7 +159,10 @@ class TestSendEmail:
         with patch("resend.Emails.send") as mock_send:
             mock_send.return_value = {"id": "email_123"}
             result = send_email_fn(
-                to="test@example.com", subject="Test", html="<p>Hi</p>", provider="resend"
+                to="test@example.com",
+                subject="Test",
+                html="<p>Hi</p>",
+                provider="resend",
             )
 
         assert result["success"] is True
@@ -239,7 +252,10 @@ class TestSendEmail:
         with patch("resend.Emails.send") as mock_send:
             mock_send.return_value = {"id": "email_no_cc"}
             send_email_fn(
-                to="test@example.com", subject="Test", html="<p>Hi</p>", provider="resend"
+                to="test@example.com",
+                subject="Test",
+                html="<p>Hi</p>",
+                provider="resend",
             )
 
         call_args = mock_send.call_args[0][0]
@@ -274,7 +290,11 @@ class TestSendEmail:
         with patch("resend.Emails.send") as mock_send:
             mock_send.return_value = {"id": "email_ws_cc"}
             send_email_fn(
-                to="test@example.com", subject="Test", html="<p>Hi</p>", cc="   ", provider="resend"
+                to="test@example.com",
+                subject="Test",
+                html="<p>Hi</p>",
+                cc="   ",
+                provider="resend",
             )
 
         call_args = mock_send.call_args[0][0]
@@ -350,7 +370,10 @@ class TestResendProvider:
         with patch("resend.Emails.send") as mock_send:
             mock_send.return_value = {"id": "email_789"}
             result = send_email_fn(
-                to="test@example.com", subject="Test", html="<p>Hi</p>", provider="resend"
+                to="test@example.com",
+                subject="Test",
+                html="<p>Hi</p>",
+                provider="resend",
             )
 
         assert result["success"] is True
@@ -365,10 +388,29 @@ class TestResendProvider:
         with patch("resend.Emails.send") as mock_send:
             mock_send.side_effect = Exception("API rate limit exceeded")
             result = send_email_fn(
-                to="test@example.com", subject="Test", html="<p>Hi</p>", provider="resend"
+                to="test@example.com",
+                subject="Test",
+                html="<p>Hi</p>",
+                provider="resend",
             )
 
         assert "error" in result
+
+    def test_resend_missing_package(self, send_email_fn, monkeypatch):
+        """When resend package is not installed, return helpful error."""
+        monkeypatch.setenv("RESEND_API_KEY", "re_test_key")
+        monkeypatch.setenv("EMAIL_FROM", "test@example.com")
+
+        with patch.dict("sys.modules", {"resend": None}):
+            result = send_email_fn(
+                to="test@example.com",
+                subject="Test",
+                html="<p>Hi</p>",
+                provider="resend",
+            )
+
+        assert "error" in result
+        assert "resend not installed" in result["error"]
 
 
 class TestGmailProvider:
@@ -463,7 +505,9 @@ class TestGmailProvider:
             )
 
         assert "error" in result
-        assert "expired" in result["error"].lower() or "invalid" in result["error"].lower()
+        assert (
+            "expired" in result["error"].lower() or "invalid" in result["error"].lower()
+        )
         assert "help" in result
 
     def test_gmail_no_from_email_ok(self, send_email_fn, monkeypatch):
@@ -649,7 +693,9 @@ class TestGmailReplyEmail:
                 result = reply_email_fn(message_id="orig_123", html="<p>Reply</p>")
 
         assert "error" in result
-        assert "expired" in result["error"].lower() or "invalid" in result["error"].lower()
+        assert (
+            "expired" in result["error"].lower() or "invalid" in result["error"].lower()
+        )
 
     def test_send_api_error(self, reply_email_fn, monkeypatch):
         """Non-200 on send returns API error."""
