@@ -536,9 +536,9 @@ critical issue. Use sparingly.
 
 ## Agent Loading
 - load_built_agent(agent_path) — Load a newly built agent as the worker in \
-this session. Call after building and validating an agent to make it \
-available immediately. The user sees the graph update and can interact \
-with it without leaving the session.
+this session. If a worker is already loaded, it is automatically unloaded \
+first. Call after building and validating an agent to make it available \
+immediately.
 """
 
 _queen_behavior = """

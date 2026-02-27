@@ -284,7 +284,9 @@ interface AgentBackendState {
   nodeLogs: Record<string, string[]>;
   nodeActionPlans: Record<string, string>;
   isTyping: boolean;
+  isStreaming: boolean;
   llmSnapshots: Record<string, string>;
+  toolCallCounts: Record<string, number>;
 }
 
 function defaultAgentState(): AgentBackendState {
@@ -303,7 +305,9 @@ function defaultAgentState(): AgentBackendState {
     nodeLogs: {},
     nodeActionPlans: {},
     isTyping: false,
+    isStreaming: false,
     llmSnapshots: {},
+    toolCallCounts: {},
   };
 }
 
@@ -387,6 +391,9 @@ export default function Workspace() {
   }, []);
 
   const [credentialsOpen, setCredentialsOpen] = useState(false);
+  // Explicit agent path for the credentials modal — set from 424 responses
+  // when activeWorker doesn't match the actual agent (e.g. "new-agent" tab).
+  const [credentialAgentPath, setCredentialAgentPath] = useState<string | null>(null);
   const [dismissedBanner, setDismissedBanner] = useState<string | null>(null);
   const [selectedNode, setSelectedNode] = useState<GraphNode | null>(null);
   const [newTabOpen, setNewTabOpen] = useState(false);
@@ -872,7 +879,7 @@ export default function Workspace() {
     } catch {
       // Best-effort — queen may have already finished
     }
-    updateAgentState(activeWorker, { isTyping: false });
+    updateAgentState(activeWorker, { isTyping: false, isStreaming: false });
   }, [agentStates, activeWorker, updateAgentState]);
 
   // --- Node log helper (writes into agentStates) ---
@@ -951,11 +958,13 @@ export default function Workspace() {
             turnCounterRef.current[agentType] = currentTurn + 1;
             updateAgentState(agentType, {
               isTyping: true,
+              isStreaming: false,
               awaitingInput: false,
               workerRunState: "running",
               currentExecutionId: event.execution_id || agentStates[agentType]?.currentExecutionId || null,
               nodeLogs: {},
               llmSnapshots: {},
+              toolCallCounts: {},
             });
             markAllNodesAs(agentType, ["running", "looping", "complete", "error"], "pending");
           }
@@ -974,6 +983,7 @@ export default function Workspace() {
             }
             updateAgentState(agentType, {
               isTyping: false,
+              isStreaming: false,
               awaitingInput: false,
               workerRunState: "idle",
               currentExecutionId: null,
@@ -995,6 +1005,11 @@ export default function Workspace() {
             upsertChatMessage(agentType, chatMsg);
           }
 
+          // Mark streaming when LLM text is actively arriving
+          if (event.type === "llm_text_delta" || event.type === "client_output_delta") {
+            updateAgentState(agentType, { isStreaming: true });
+          }
+
           if (event.type === "llm_text_delta" && !isQueen && event.node_id) {
             const snapshot = (event.data?.snapshot as string) || "";
             if (snapshot) {
@@ -1013,17 +1028,17 @@ export default function Workspace() {
           }
 
           if (event.type === "client_input_requested") {
-            updateAgentState(agentType, { awaitingInput: true, isTyping: false });
+            updateAgentState(agentType, { awaitingInput: true, isTyping: false, isStreaming: false });
           }
           if (event.type === "execution_paused") {
-            updateAgentState(agentType, { isTyping: false, awaitingInput: false });
+            updateAgentState(agentType, { isTyping: false, isStreaming: false, awaitingInput: false });
             if (!isQueen) {
               updateAgentState(agentType, { workerRunState: "idle", currentExecutionId: null });
               markAllNodesAs(agentType, ["running", "looping"], "pending");
             }
           }
           if (event.type === "execution_failed") {
-            updateAgentState(agentType, { isTyping: false, awaitingInput: false });
+            updateAgentState(agentType, { isTyping: false, isStreaming: false, awaitingInput: false });
             if (!isQueen) {
               updateAgentState(agentType, { workerRunState: "idle", currentExecutionId: null });
               if (event.node_id) {
@@ -1055,6 +1070,7 @@ export default function Workspace() {
 
         case "node_loop_iteration":
           turnCounterRef.current[agentType] = currentTurn + 1;
+          updateAgentState(agentType, { isStreaming: false });
           if (!isQueen && event.node_id) {
             const pendingText = agentStates[agentType]?.llmSnapshots[event.node_id];
             if (pendingText?.trim()) {
@@ -1099,7 +1115,8 @@ export default function Workspace() {
           break;
         }
 
-        case "tool_call_started":
+        case "tool_call_started": {
+          console.log('[TOOL_PILL] tool_call_started received:', { isQueen, nodeId: event.node_id, streamId: event.stream_id, agentType, executionId: event.execution_id, toolName: event.data?.tool_name });
           if (!isQueen && event.node_id) {
             const pendingText = agentStates[agentType]?.llmSnapshots[event.node_id];
             if (pendingText?.trim()) {
@@ -1115,8 +1132,39 @@ export default function Workspace() {
             const toolInput = event.data?.tool_input;
             const argsStr = toolInput ? truncate(JSON.stringify(toolInput), 200) : "";
             appendNodeLog(agentType, event.node_id, `${ts} INFO  Calling ${toolName}(${argsStr})`);
+
+            // Update tool call counts and upsert compact pill into chat
+            let pillContent = "";
+            setAgentStates(prev => {
+              const state = prev[agentType];
+              if (!state) return prev;
+              const newCounts = { ...state.toolCallCounts, [toolName]: (state.toolCallCounts[toolName] || 0) + 1 };
+              pillContent = Object.entries(newCounts).map(([n, c]) => `${c} ${n}`).join(", ");
+              return {
+                ...prev,
+                [agentType]: { ...state, isStreaming: false, toolCallCounts: newCounts },
+              };
+            });
+            console.log('[TOOL_PILL] pillContent:', pillContent, 'agentType:', agentType);
+            if (pillContent) {
+              const pillMsg: ChatMessage = {
+                id: `tool-pill-${event.execution_id || "exec"}`,
+                agent: agentDisplayName || event.node_id || "Agent",
+                agentColor: "",
+                content: pillContent,
+                timestamp: "",
+                type: "tool_status",
+                role: "worker",
+                thread: agentType,
+              };
+              console.log('[TOOL_PILL] upserting:', pillMsg);
+              upsertChatMessage(agentType, pillMsg);
+            }
+          } else {
+            console.log('[TOOL_PILL] SKIPPED: isQueen=', isQueen, 'node_id=', event.node_id);
           }
           break;
+        }
 
         case "tool_call_completed":
           if (!isQueen && event.node_id) {
@@ -1215,6 +1263,7 @@ export default function Workspace() {
               ...s,
               label: displayName,
               graphNodes: [],
+              messages: s.messages.filter(m => m.role !== "worker"),
             })),
           }));
 
@@ -1340,7 +1389,7 @@ export default function Workspace() {
             s.id === activeSession.id ? { ...s, messages: [...s.messages, errorChatMsg] } : s
           ),
         }));
-        updateAgentState(activeWorker, { isTyping: false });
+        updateAgentState(activeWorker, { isTyping: false, isStreaming: false });
       });
     } else {
       const errorMsg: ChatMessage = {
@@ -1354,7 +1403,7 @@ export default function Workspace() {
           s.id === activeSession.id ? { ...s, messages: [...s.messages, errorMsg] } : s
         ),
       }));
-      updateAgentState(activeWorker, { isTyping: false });
+      updateAgentState(activeWorker, { isTyping: false, isStreaming: false });
     }
   }, [activeWorker, activeSession, agentStates, updateAgentState]);
 
@@ -1370,6 +1419,8 @@ export default function Workspace() {
       // 424 = credentials required — open the credentials modal
       const { ApiError } = await import("@/api/client");
       if (err instanceof ApiError && err.status === 424) {
+        const body = err.body as Record<string, unknown>;
+        setCredentialAgentPath((body.agent_path as string) || null);
         setCredentialsOpen(true);
         setLoadingWorker(false);
         return;
@@ -1597,7 +1648,7 @@ export default function Workspace() {
                 onSend={handleSend}
                 onCancel={handleCancelQueen}
                 activeThread={activeWorker}
-                isWaiting={activeAgentState?.isTyping ?? false}
+                isWaiting={(activeAgentState?.isTyping && !activeAgentState?.isStreaming) ?? false}
                 awaitingInput={activeAgentState?.awaitingInput ?? false}
                 disabled={
                   (activeAgentState?.loading ?? true) ||
@@ -1676,9 +1727,9 @@ export default function Workspace() {
       <CredentialsModal
         agentType={activeWorker}
         agentLabel={activeWorkerLabel}
-        agentPath={activeWorker !== "new-agent" ? activeWorker : undefined}
+        agentPath={credentialAgentPath || (activeWorker !== "new-agent" ? activeWorker : undefined)}
         open={credentialsOpen}
-        onClose={() => setCredentialsOpen(false)}
+        onClose={() => { setCredentialsOpen(false); setCredentialAgentPath(null); }}
         credentials={activeSession?.credentials || []}
         onCredentialChange={() => {
           if (!activeSession) return;
