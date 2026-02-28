@@ -53,7 +53,7 @@ def _get_last_active(agent_name: str) -> str | None:
         if not state_file.exists():
             continue
         try:
-            data = json.loads(state_file.read_text())
+            data = json.loads(state_file.read_text(encoding="utf-8"))
             ts = data.get("timestamps", {}).get("updated_at")
             if ts and (latest is None or ts > latest):
                 latest = ts
@@ -84,7 +84,7 @@ def _extract_agent_stats(agent_path: Path) -> tuple[int, int, list[str]]:
     agent_py = agent_path / "agent.py"
     if agent_py.exists():
         try:
-            tree = ast.parse(agent_py.read_text())
+            tree = ast.parse(agent_py.read_text(encoding="utf-8"))
             for node in ast.walk(tree):
                 # Find `nodes = [...]` assignment
                 if isinstance(node, ast.Assign):
@@ -99,7 +99,7 @@ def _extract_agent_stats(agent_path: Path) -> tuple[int, int, list[str]]:
     agent_json = agent_path / "agent.json"
     if agent_json.exists():
         try:
-            data = json.loads(agent_json.read_text())
+            data = json.loads(agent_json.read_text(encoding="utf-8"))
             json_nodes = data.get("nodes", [])
             if node_count == 0:
                 node_count = len(json_nodes)
@@ -150,7 +150,7 @@ def discover_agents() -> dict[str, list[AgentEntry]]:
                 agent_json = path / "agent.json"
                 if agent_json.exists():
                     try:
-                        data = json.loads(agent_json.read_text())
+                        data = json.loads(agent_json.read_text(encoding="utf-8"))
                         meta = data.get("agent", {})
                         name = meta.get("name", name)
                         desc = meta.get("description", desc)

@@ -428,7 +428,7 @@ def _load_resume_state(
         if not cp_path.exists():
             return None
         try:
-            cp_data = json.loads(cp_path.read_text())
+            cp_data = json.loads(cp_path.read_text(encoding="utf-8"))
         except (json.JSONDecodeError, OSError):
             return None
         return {
@@ -444,7 +444,7 @@ def _load_resume_state(
         if not state_path.exists():
             return None
         try:
-            state_data = json.loads(state_path.read_text())
+            state_data = json.loads(state_path.read_text(encoding="utf-8"))
         except (json.JSONDecodeError, OSError):
             return None
         progress = state_data.get("progress", {})
