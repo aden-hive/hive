@@ -65,7 +65,9 @@ class WorkerSessionAdapter:
     worker_path: Path | None = None
 
 
-def build_worker_profile(runtime: AgentRuntime, agent_path: Path | str | None = None) -> str:
+def build_worker_profile(
+    runtime: AgentRuntime, agent_path: Path | str | None = None
+) -> str:
     """Build a worker capability profile from its graph/goal definition.
 
     Injected into the queen's system prompt so it knows what the worker
@@ -223,7 +225,9 @@ def register_queen_lifecycle_tools(
                         data={
                             "error": "credentials_required",
                             "message": str(e),
-                            "agent_path": str(getattr(session, "worker_path", "") or ""),
+                            "agent_path": str(
+                                getattr(session, "worker_path", "") or ""
+                            ),
                         },
                     )
                 )
@@ -248,7 +252,9 @@ def register_queen_lifecycle_tools(
             "required": ["task"],
         },
     )
-    registry.register("start_worker", _start_tool, lambda inputs: start_worker(**inputs))
+    registry.register(
+        "start_worker", _start_tool, lambda inputs: start_worker(**inputs)
+    )
     tools_registered += 1
 
     # --- stop_worker ----------------------------------------------------------
@@ -366,7 +372,9 @@ def register_queen_lifecycle_tools(
         ),
         parameters={"type": "object", "properties": {}},
     )
-    registry.register("get_worker_status", _status_tool, lambda inputs: get_worker_status())
+    registry.register(
+        "get_worker_status", _status_tool, lambda inputs: get_worker_status()
+    )
     tools_registered += 1
 
     # --- inject_worker_message ------------------------------------------------
@@ -426,7 +434,9 @@ def register_queen_lifecycle_tools(
         },
     )
     registry.register(
-        "inject_worker_message", _inject_tool, lambda inputs: inject_worker_message(**inputs)
+        "inject_worker_message",
+        _inject_tool,
+        lambda inputs: inject_worker_message(**inputs),
     )
     tools_registered += 1
 
@@ -446,12 +456,31 @@ def register_queen_lifecycle_tools(
                 try:
                     await session_manager.unload_worker(manager_session_id)
                 except Exception as e:
-                    logger.error("Failed to unload existing worker: %s", e, exc_info=True)
-                    return json.dumps({"error": f"Failed to unload existing worker: {e}"})
+                    logger.error(
+                        "Failed to unload existing worker: %s", e, exc_info=True
+                    )
+                    return json.dumps(
+                        {"error": f"Failed to unload existing worker: {e}"}
+                    )
 
             resolved_path = Path(agent_path).resolve()
+            cwd = Path.cwd().resolve()
+            if not str(resolved_path).startswith(str(cwd)):
+                return json.dumps(
+                    {
+                        "error": f"Security violation: path '{agent_path}' is outside project root"
+                    }
+                )
+
             if not resolved_path.exists():
-                return json.dumps({"error": f"Agent path does not exist: {resolved_path}"})
+                return json.dumps(
+                    {"error": f"Agent path does not exist: {resolved_path}"}
+                )
+
+            if not resolved_path.is_dir():
+                return json.dumps(
+                    {"error": f"Agent path must be a directory: {resolved_path}"}
+                )
 
             try:
                 updated_session = await session_manager.load_worker(
@@ -469,7 +498,9 @@ def register_queen_lifecycle_tools(
                     }
                 )
             except Exception as e:
-                logger.error("load_built_agent failed for '%s'", agent_path, exc_info=True)
+                logger.error(
+                    "load_built_agent failed for '%s'", agent_path, exc_info=True
+                )
                 return json.dumps({"error": f"Failed to load agent: {e}"})
 
         _load_built_tool = Tool(
@@ -485,7 +516,9 @@ def register_queen_lifecycle_tools(
                 "properties": {
                     "agent_path": {
                         "type": "string",
-                        "description": ("Path to the agent directory (e.g. 'exports/my_agent')"),
+                        "description": (
+                            "Path to the agent directory (e.g. 'exports/my_agent')"
+                        ),
                     },
                 },
                 "required": ["agent_path"],
