@@ -14,6 +14,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from croniter import croniter
+
 from framework.graph.checkpoint_config import CheckpointConfig
 from framework.graph.executor import ExecutionResult
 from framework.runtime.event_bus import EventBus
@@ -171,7 +173,9 @@ class AgentRuntime:
         self._last_user_input_time: float = 0.0
 
         # Initialize storage
-        storage_path_obj = Path(storage_path) if isinstance(storage_path, str) else storage_path
+        storage_path_obj = (
+            Path(storage_path) if isinstance(storage_path, str) else storage_path
+        )
         self._storage = ConcurrentStorage(
             base_path=storage_path_obj,
             cache_ttl=self._config.cache_ttl,
@@ -253,7 +257,9 @@ class AgentRuntime:
             RuntimeError: If runtime is running
         """
         if self._running:
-            raise RuntimeError("Cannot unregister entry points while runtime is running")
+            raise RuntimeError(
+                "Cannot unregister entry points while runtime is running"
+            )
 
         if entry_point_id in self._entry_points:
             del self._entry_points[entry_point_id]
@@ -356,7 +362,9 @@ class AgentRuntime:
                         is_isolated = ep_spec and ep_spec.isolation_level == "isolated"
                         if is_isolated:
                             if _persistent_session_id:
-                                session_state = {"resume_session_id": _persistent_session_id}
+                                session_state = {
+                                    "resume_session_id": _persistent_session_id
+                                }
                             else:
                                 session_state = None
                         else:
@@ -397,38 +405,30 @@ class AgentRuntime:
 
                 if cron_expr:
                     # Cron expression mode — takes priority over interval_minutes
-                    try:
-                        from croniter import croniter
+                    # Validate the expression upfront
+                    if not croniter.is_valid(cron_expr):
+                        raise ValueError(f"Invalid cron expression: {cron_expr}")
 
-                        # Validate the expression upfront
-                        if not croniter.is_valid(cron_expr):
-                            raise ValueError(f"Invalid cron expression: {cron_expr}")
-                    except (ImportError, ValueError) as e:
-                        logger.warning(
-                            "Entry point '%s' has invalid cron config: %s",
-                            ep_id,
-                            e,
-                        )
-                        continue
-
-                    def _make_cron_timer(entry_point_id: str, expr: str, immediate: bool):
+                    def _make_cron_timer(
+                        entry_point_id: str, expr: str, immediate: bool
+                    ):
                         async def _cron_loop():
-                            from croniter import croniter
-
                             _persistent_session_id: str | None = None
                             if not immediate:
-                                cron = croniter(expr, datetime.now())
+                                _now = datetime.now()
+                                cron = croniter(expr, _now)
                                 next_dt = cron.get_next(datetime)
-                                sleep_secs = (next_dt - datetime.now()).total_seconds()
+                                sleep_secs = (next_dt - _now).total_seconds()
                                 self._timer_next_fire[entry_point_id] = (
                                     time.monotonic() + sleep_secs
                                 )
                                 await asyncio.sleep(max(0, sleep_secs))
                             while self._running:
                                 # Calculate next fire time upfront (used by skip paths too)
-                                cron = croniter(expr, datetime.now())
+                                _now = datetime.now()
+                                cron = croniter(expr, _now)
                                 next_dt = cron.get_next(datetime)
-                                sleep_secs = (next_dt - datetime.now()).total_seconds()
+                                sleep_secs = (next_dt - _now).total_seconds()
 
                                 # Gate: skip tick if timers are explicitly paused
                                 if self._timers_paused:
@@ -458,7 +458,10 @@ class AgentRuntime:
                                 self._timer_next_fire.pop(entry_point_id, None)
                                 try:
                                     ep_spec = self._entry_points.get(entry_point_id)
-                                    is_isolated = ep_spec and ep_spec.isolation_level == "isolated"
+                                    is_isolated = (
+                                        ep_spec
+                                        and ep_spec.isolation_level == "isolated"
+                                    )
                                     if is_isolated:
                                         if _persistent_session_id:
                                             session_state = {
@@ -567,7 +570,10 @@ class AgentRuntime:
                                 self._timer_next_fire.pop(entry_point_id, None)
                                 try:
                                     ep_spec = self._entry_points.get(entry_point_id)
-                                    is_isolated = ep_spec and ep_spec.isolation_level == "isolated"
+                                    is_isolated = (
+                                        ep_spec
+                                        and ep_spec.isolation_level == "isolated"
+                                    )
                                     if is_isolated:
                                         if _persistent_session_id:
                                             session_state = {
@@ -621,7 +627,9 @@ class AgentRuntime:
 
                         return _timer_loop
 
-                    task = asyncio.create_task(_make_timer(ep_id, interval, run_immediately)())
+                    task = asyncio.create_task(
+                        _make_timer(ep_id, interval, run_immediately)()
+                    )
                     self._timer_tasks.append(task)
                     logger.info(
                         "Started timer for entry point '%s' every %s min%s",
@@ -789,7 +797,9 @@ class AgentRuntime:
         Returns:
             ExecutionResult or None if timeout
         """
-        exec_id = await self.trigger(entry_point_id, input_data, session_state=session_state)
+        exec_id = await self.trigger(
+            entry_point_id, input_data, session_state=session_state
+        )
         stream = self._resolve_stream(entry_point_id)
         if stream is None:
             raise ValueError(f"Entry point '{entry_point_id}' not found")
@@ -833,7 +843,9 @@ class AgentRuntime:
         # Validate entry nodes exist in graph
         for _ep_id, spec in entry_points.items():
             if graph.get_node(spec.entry_node) is None:
-                raise ValueError(f"Entry node '{spec.entry_node}' not found in graph '{graph_id}'")
+                raise ValueError(
+                    f"Entry node '{spec.entry_node}' not found in graph '{graph_id}'"
+                )
 
         # Secondary graphs get their own SessionStore AND RuntimeLogStore
         # so their sessions and logs don't pollute the worker's directories.
@@ -910,7 +922,9 @@ class AgentRuntime:
                     is_isolated = ep_spec and ep_spec.isolation_level == "isolated"
                     if is_isolated:
                         if _persistent_session_id:
-                            session_state = {"resume_session_id": _persistent_session_id}
+                            session_state = {
+                                "resume_session_id": _persistent_session_id
+                            }
                         else:
                             session_state = None
                     else:
@@ -986,7 +1000,9 @@ class AgentRuntime:
                                     gid,
                                     local_ep,
                                 )
-                                timer_next_fire[local_ep] = time.monotonic() + interval_secs
+                                timer_next_fire[local_ep] = (
+                                    time.monotonic() + interval_secs
+                                )
                                 await asyncio.sleep(interval_secs)
                                 continue
 
@@ -999,7 +1015,9 @@ class AgentRuntime:
                                     gid,
                                     local_ep,
                                 )
-                                timer_next_fire[local_ep] = time.monotonic() + interval_secs
+                                timer_next_fire[local_ep] = (
+                                    time.monotonic() + interval_secs
+                                )
                                 await asyncio.sleep(interval_secs)
                                 continue
 
@@ -1008,12 +1026,16 @@ class AgentRuntime:
                             try:
                                 reg = self._graphs.get(gid)
                                 if not reg:
-                                    logger.warning("Timer: no reg for '%s', stopping", gid)
+                                    logger.warning(
+                                        "Timer: no reg for '%s', stopping", gid
+                                    )
                                     break
                                 stream = reg.streams.get(local_ep)
                                 if not stream:
                                     logger.warning(
-                                        "Timer: no stream '%s' in '%s', stopping", local_ep, gid
+                                        "Timer: no stream '%s' in '%s', stopping",
+                                        local_ep,
+                                        gid,
                                     )
                                     break
                                 # Isolated entry points get their own session;
@@ -1037,12 +1059,19 @@ class AgentRuntime:
                                             gid,
                                             local_ep,
                                         )
-                                        timer_next_fire[local_ep] = time.monotonic() + interval_secs
+                                        timer_next_fire[local_ep] = (
+                                            time.monotonic() + interval_secs
+                                        )
                                         await asyncio.sleep(interval_secs)
                                         continue
 
                                 exec_id = await stream.execute(
-                                    {"event": {"source": "timer", "reason": "scheduled"}},
+                                    {
+                                        "event": {
+                                            "source": "timer",
+                                            "reason": "scheduled",
+                                        }
+                                    },
                                     session_state=session_state,
                                 )
                                 # Remember session ID for reuse on next tick
@@ -1069,7 +1098,9 @@ class AgentRuntime:
                     _make_timer(graph_id, ep_id, interval, run_immediately)()
                 )
                 timer_tasks.append(task)
-                logger.info("Timer task created for '%s::%s': %s", graph_id, ep_id, task)
+                logger.info(
+                    "Timer task created for '%s::%s': %s", graph_id, ep_id, task
+                )
 
         self._graphs[graph_id] = _GraphRegistration(
             graph=graph,
@@ -1238,7 +1269,10 @@ class AgentRuntime:
             for ep_id, stream in reg.streams.items():
                 # Skip isolated entry points — they run in their own namespace
                 ep_spec = reg.entry_points.get(ep_id)
-                if ep_spec and getattr(ep_spec, "isolation_level", "shared") == "isolated":
+                if (
+                    ep_spec
+                    and getattr(ep_spec, "isolation_level", "shared") == "isolated"
+                ):
                     continue
                 all_streams.append((ep_id, stream))
 
@@ -1246,7 +1280,9 @@ class AgentRuntime:
             if ep_id == exclude_entry_point:
                 continue
             for exec_id in stream.active_execution_ids:
-                state_path = self._storage.base_path / "sessions" / exec_id / "state.json"
+                state_path = (
+                    self._storage.base_path / "sessions" / exec_id / "state.json"
+                )
                 try:
                     if state_path.exists():
                         data = _json.loads(state_path.read_text(encoding="utf-8"))
@@ -1256,7 +1292,11 @@ class AgentRuntime:
                         # Filter to only input keys so stale outputs
                         # from previous triggers don't leak through.
                         if allowed_keys is not None:
-                            memory = {k: v for k, v in full_memory.items() if k in allowed_keys}
+                            memory = {
+                                k: v
+                                for k, v in full_memory.items()
+                                if k in allowed_keys
+                            }
                         else:
                             memory = full_memory
                         if memory:
@@ -1302,7 +1342,9 @@ class AgentRuntime:
         target = graph_id or self._active_graph_id
         if target in self._graphs:
             for stream in self._graphs[target].streams.values():
-                if await stream.inject_input(node_id, content, is_client_input=is_client_input):
+                if await stream.inject_input(
+                    node_id, content, is_client_input=is_client_input
+                ):
                     return True
 
         # Then search all other graphs
@@ -1310,7 +1352,9 @@ class AgentRuntime:
             if gid == target:
                 continue
             for stream in reg.streams.values():
-                if await stream.inject_input(node_id, content, is_client_input=is_client_input):
+                if await stream.inject_input(
+                    node_id, content, is_client_input=is_client_input
+                ):
                     return True
         return False
 
@@ -1581,7 +1625,9 @@ def create_agent_runtime(
     if enable_logging and runtime_log_store is None:
         from framework.runtime.runtime_log_store import RuntimeLogStore
 
-        storage_path_obj = Path(storage_path) if isinstance(storage_path, str) else storage_path
+        storage_path_obj = (
+            Path(storage_path) if isinstance(storage_path, str) else storage_path
+        )
         runtime_log_store = RuntimeLogStore(storage_path_obj / "runtime_logs")
 
     runtime = AgentRuntime(
