@@ -24,10 +24,21 @@
       "mcp__agent-builder__list_stored_credentials",
       "Bash(find:*)",
       "mcp__agent-builder__run_tests",
+      "mcp__agent-builder__list_tests",
       "Bash(PYTHONPATH=core:exports:tools/src uv run pytest:*)",
       "mcp__agent-builder__list_agent_sessions",
+      "mcp__agent-builder__get_agent_session_state",
+      "mcp__agent-builder__get_agent_session_memory",
+      "mcp__agent-builder__list_agent_checkpoints",
+      "mcp__agent-builder__get_agent_checkpoint",
+      "mcp__agent-builder__compare_agent_checkpoints",
+      "mcp__agent-builder__query_runtime_logs",
+      "mcp__agent-builder__query_runtime_log_details",
+      "mcp__agent-builder__query_runtime_log_raw",
       "mcp__agent-builder__generate_constraint_tests",
-      "mcp__agent-builder__generate_success_tests"
+      "mcp__agent-builder__generate_success_tests",
+      "mcp__agent-builder__remove_node",
+      "mcp__agent-builder__remove_edge"
     ]
   },
   "enabledMcpjsonServers": ["agent-builder", "tools"]

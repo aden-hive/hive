@@ -623,6 +623,56 @@ Or in TUI:
 - Provide file paths and line numbers when possible
 - **Always include recovery commands** (Template 6) after providing fix recommendations
 
+### Stage 6b: Apply Fix (Interactive)
+
+**Objective:** Don't just recommend — apply the fix directly with user approval.
+
+**After selecting a fix template, execute these steps:**
+
+1. **Read the failing code:**
+   ```
+   Read(file_path="exports/{agent_name}/nodes/__init__.py")
+   # or agent.py, depending on the fix target
+   ```
+
+2. **Generate the specific change** based on the template and root cause analysis. Show a clear before/after diff:
+
+   > **Proposed Fix:**
+   >
+   > **File:** `exports/{agent_name}/nodes/__init__.py`
+   >
+   > **Before:**
+   > ```python
+   > system_prompt="Search the web for: {query}. Store your findings."
+   > ```
+   >
+   > **After:**
+   > ```python
+   > system_prompt="""\
+   > Search the web for: {query}. Use web_search to find sources.
+   >
+   > IMPORTANT: After finding results, you MUST call set_output("search_results", <your findings>).
+   > Do NOT continue searching indefinitely — call set_output when you have sufficient results.
+   > """
+   > ```
+
+3. **Ask for approval:**
+
+   ```
+   AskUserQuestion(questions=[{
+       "question": "Apply this fix?",
+       "header": "Fix Application",
+       "options": [
+           {"label": "Apply", "description": "Apply the change and proceed to verification"},
+           {"label": "Modify", "description": "I want to adjust the fix before applying"},
+           {"label": "Skip", "description": "I'll apply the fix manually"}
+       ],
+       "multiSelect": false
+   }])
+   ```
+
+4. **If approved**, apply the fix using the Edit tool and proceed to Stage 7 (Verification).
+
 ---
 
 ### Stage 7: Verification Support

@@ -133,6 +133,42 @@ list_tests(
 
 ### Phase 2: Execute
 
+**Before running tests, preview what will execute:**
+
+```python
+# Preview: list tests and estimate cost/time without running them
+list_tests(
+    goal_id="your-goal-id",
+    agent_path="exports/{agent_name}"
+)
+```
+
+Present a summary to the user before executing:
+
+> **Test Preview:**
+>
+> | Type | Count | Est. Time | Est. Cost |
+> |------|-------|-----------|-----------|
+> | Constraint tests | 4 | ~12s | ~$0.04 |
+> | Success tests | 8 | ~24s | ~$0.08 |
+> | **Total** | **12** | **~36s** | **~$0.12** |
+>
+> Each test makes real LLM calls (~3s + tokens per test).
+
+```
+AskUserQuestion(questions=[{
+    "question": "Ready to run tests?",
+    "header": "Test Execution",
+    "options": [
+        {"label": "Run all tests", "description": "Execute all constraint + success tests"},
+        {"label": "Run constraints only", "description": "Faster — validates hard requirements first"},
+        {"label": "Run a single test", "description": "Pick one test to run for quick validation"},
+        {"label": "Skip to manual testing", "description": "I'll run the agent manually in TUI instead"}
+    ],
+    "multiSelect": false
+}])
+```
+
 Two execution paths, use the right one for your situation.
 
 #### Iterative debugging (for complex agents)

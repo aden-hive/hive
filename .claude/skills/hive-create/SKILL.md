@@ -87,6 +87,23 @@ mkdir -p exports/AGENT_NAME/nodes
 
 **Save the tool list for STEP 4** — you will need it for node design.
 
+6. **Pre-check credentials** for the discovered tools (silent — only warn if issues found):
+
+```
+check_missing_credentials(agent_path="exports/AGENT_NAME")
+```
+
+- If credentials are missing for tools the user might need, **surface a brief warning** before proceeding:
+
+> ⚠️ **Heads up:** Some tools require credentials not yet configured:
+>   - `web_search` → `BRAVE_SEARCH_API_KEY` missing
+>   - `hubspot_search_contacts` → `HUBSPOT_ACCESS_TOKEN` missing
+>
+> You can set these up later with `/hive-credentials` — this won't block the build.
+
+- If all credentials are available or the check fails (agent not yet created), proceed silently.
+- **Do NOT block the build** — this is informational only.
+
 **THEN immediately proceed to STEP 2** (do NOT display setup results to the user — just move on).
 
 ---
@@ -675,6 +692,23 @@ AskUserQuestion(questions=[{
 
 - If **Approve**: Proceed to STEP 6
 - If **Modify**: Ask what they want to change, update the graph, re-render, ask again
+
+### Rollback: Undoing Previous Approvals
+
+If during graph design the user realizes a node or edge needs to change, you can modify the design without starting over:
+
+**To remove a node:** Call `mcp__agent-builder__remove_node(node_id="node-to-remove")` and remove its corresponding edges.
+
+**To modify a node:** Re-call `mcp__agent-builder__add_node(...)` with the same `node_id` — it overwrites the existing definition.
+
+**To remove an edge:** Call `mcp__agent-builder__remove_edge(edge_id="edge-to-remove")`.
+
+**To go back to node design (Step 4):** Tell the user "Let's revisit the node design" and re-present the node table. Any changes are cumulative — unchanged nodes are preserved.
+
+**Always re-validate** after making changes:
+```
+mcp__agent-builder__validate_graph()
+```
 
 ---
 

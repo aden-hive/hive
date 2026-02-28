@@ -15,6 +15,29 @@ Design patterns, examples, and best practices for building robust goal-driven ag
 
 **Prerequisites:** Complete agent structure using `hive-create`.
 
+**THIS IS AN INTERACTIVE WORKFLOW.** When this skill is loaded, **use AskUserQuestion** to identify which patterns the user needs:
+
+```
+AskUserQuestion(questions=[{
+    "question": "Which patterns does your agent need?",
+    "header": "Pattern Selection",
+    "options": [
+        {"label": "Client-facing interaction", "description": "Multi-turn conversations with users, STEP 1/STEP 2 prompt pattern"},
+        {"label": "Feedback loops", "description": "Review → reject → redo edges with nullable_output_keys and priority routing"},
+        {"label": "Judge patterns", "description": "SchemaJudge, implicit judge, custom validation for node output acceptance"},
+        {"label": "Fan-out / fan-in", "description": "Parallel node execution with asyncio.gather() and disjoint output keys"},
+        {"label": "Context management", "description": "Spillover, data tools, tiered compaction for large data"},
+        {"label": "Error handling", "description": "Graceful failure with ON_FAILURE edges and fallback chains"},
+        {"label": "Show all patterns", "description": "Full reference for all available patterns"}
+    ],
+    "multiSelect": true
+}])
+```
+
+**After the user selects**, show ONLY the relevant pattern sections below. Do NOT dump the entire document.
+
+---
+
 ## Practical Example: Hybrid Workflow
 
 How to build a node using both direct file writes and optional MCP validation:
