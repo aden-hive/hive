@@ -256,56 +256,22 @@ class CredentialSetupSession:
 
     def _ensure_credential_key(self) -> bool:
         """Ensure HIVE_CREDENTIAL_KEY is available for encrypted storage."""
-        if os.environ.get("HIVE_CREDENTIAL_KEY"):
+        from .key_storage import generate_and_save_credential_key, load_credential_key
+
+        if load_credential_key():
             return True
-
-        # Try to load from shell config
-        try:
-            from aden_tools.credentials.shell_config import check_env_var_in_shell_config
-
-            found, value = check_env_var_in_shell_config("HIVE_CREDENTIAL_KEY")
-            if found and value:
-                os.environ["HIVE_CREDENTIAL_KEY"] = value
-                return True
-        except ImportError:
-            pass
 
         # Generate a new key
         self._print(f"{Colors.YELLOW}Initializing credential store...{Colors.NC}")
         try:
-            from cryptography.fernet import Fernet
-
-            generated_key = Fernet.generate_key().decode()
-            os.environ["HIVE_CREDENTIAL_KEY"] = generated_key
-
-            # Save to shell config
-            self._save_key_to_shell_config(generated_key)
+            generate_and_save_credential_key()
+            self._print(
+                f"{Colors.GREEN}✓ Encryption key saved to ~/.hive/secrets/credential_key{Colors.NC}"
+            )
             return True
         except Exception as e:
             self._print(f"{Colors.RED}Failed to initialize credential store: {e}{Colors.NC}")
             return False
-
-    def _save_key_to_shell_config(self, key: str) -> None:
-        """Save HIVE_CREDENTIAL_KEY to shell config."""
-        try:
-            from aden_tools.credentials.shell_config import (
-                add_env_var_to_shell_config,
-            )
-
-            success, config_path = add_env_var_to_shell_config(
-                "HIVE_CREDENTIAL_KEY",
-                key,
-                comment="Encryption key for Hive credential store",
-            )
-            if success:
-                self._print(f"{Colors.GREEN}✓ Encryption key saved to {config_path}{Colors.NC}")
-        except Exception:
-            # Fallback: just tell the user
-            self._print("\n")
-            self._print(
-                f"{Colors.YELLOW}Add this to your shell config (~/.zshrc or ~/.bashrc):{Colors.NC}"
-            )
-            self._print(f'  export HIVE_CREDENTIAL_KEY="{key}"')
 
     def _setup_single_credential(self, cred: MissingCredential) -> bool:
         """Set up a single credential. Returns True if configured."""
@@ -444,19 +410,10 @@ class CredentialSetupSession:
                 self._print(f"{Colors.YELLOW}No key entered. Skipping.{Colors.NC}")
                 return False
 
-            os.environ["ADEN_API_KEY"] = aden_key
+            # Persist to encrypted store and set os.environ
+            from .key_storage import save_aden_api_key
 
-            # Save to shell config
-            try:
-                from aden_tools.credentials.shell_config import add_env_var_to_shell_config
-
-                add_env_var_to_shell_config(
-                    "ADEN_API_KEY",
-                    aden_key,
-                    comment="Aden Platform API key",
-                )
-            except Exception:
-                pass
+            save_aden_api_key(aden_key)
 
         # Sync from Aden
         try:

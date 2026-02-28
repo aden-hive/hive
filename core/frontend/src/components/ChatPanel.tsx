@@ -1,5 +1,5 @@
 import { memo, useState, useRef, useEffect } from "react";
-import { Send, Square, Crown, Cpu } from "lucide-react";
+import { Send, Square, Crown, Cpu, Check, ChevronRight, Loader2 } from "lucide-react";
 import { formatAgentDisplayName } from "@/lib/chat-helpers";
 import MarkdownContent from "@/components/MarkdownContent";
 
@@ -35,6 +35,75 @@ function getColor(_agent: string, role?: "queen" | "worker"): string {
   return "hsl(220,60%,55%)";
 }
 
+function ToolActivityRow({ content }: { content: string }) {
+  const [expanded, setExpanded] = useState(false);
+
+  let tools: { name: string; done: boolean }[] = [];
+  let allDone = false;
+  try {
+    const parsed = JSON.parse(content);
+    tools = parsed.tools || [];
+    allDone = parsed.allDone ?? false;
+  } catch {
+    // Legacy plain-text fallback
+    return (
+      <div className="flex gap-3 pl-10">
+        <span className="text-[11px] text-muted-foreground bg-muted/40 px-3 py-1 rounded-full border border-border/40">
+          {content}
+        </span>
+      </div>
+    );
+  }
+
+  if (tools.length === 0) return null;
+
+  const total = tools.length;
+
+  if (allDone && !expanded) {
+    return (
+      <div className="flex gap-3 pl-10">
+        <button
+          onClick={() => setExpanded(true)}
+          className="flex items-center gap-1.5 text-[11px] text-muted-foreground hover:text-foreground transition-colors"
+        >
+          <ChevronRight className="w-3 h-3" />
+          <Check className="w-3 h-3 text-emerald-500" />
+          <span>{total} tool{total === 1 ? "" : "s"} used</span>
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex gap-3 pl-10">
+      <div className="flex flex-wrap items-center gap-1.5">
+        {allDone && (
+          <button onClick={() => setExpanded(false)} className="text-muted-foreground hover:text-foreground transition-colors">
+            <ChevronRight className="w-3 h-3 rotate-90" />
+          </button>
+        )}
+        {tools.map((t, i) => (
+          <span
+            key={i}
+            className={`inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full border ${
+              t.done
+                ? "text-emerald-600 bg-emerald-500/10 border-emerald-500/20"
+                : "text-muted-foreground bg-muted/40 border-border/40"
+            }`}
+          >
+            {t.done ? (
+              <Check className="w-2.5 h-2.5" />
+            ) : (
+              <Loader2 className="w-2.5 h-2.5 animate-spin" />
+            )}
+            {t.name}
+          </span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 const MessageBubble = memo(function MessageBubble({ msg }: { msg: ChatMessage }) {
   const isUser = msg.type === "user";
   const isQueen = msg.role === "queen";
@@ -51,13 +120,7 @@ const MessageBubble = memo(function MessageBubble({ msg }: { msg: ChatMessage })
   }
 
   if (msg.type === "tool_status") {
-    return (
-      <div className="flex gap-3 pl-10">
-        <span className="text-[11px] text-muted-foreground bg-muted/40 px-3 py-1 rounded-full border border-border/40">
-          {msg.content}
-        </span>
-      </div>
-    );
+    return <ToolActivityRow content={msg.content} />;
   }
 
   if (isUser) {
@@ -115,12 +178,12 @@ export default function ChatPanel({ messages, onSend, isWaiting, activeThread, a
   const [input, setInput] = useState("");
   const [readMap, setReadMap] = useState<Record<string, number>>({});
   const bottomRef = useRef<HTMLDivElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   const threadMessages = messages.filter((m) => {
     if (m.type === "system" && !m.thread) return false;
     return m.thread === activeThread;
   });
-  console.log('[ChatPanel] render: messages:', messages.length, 'threadMessages:', threadMessages.length, 'activeThread:', activeThread, 'threads:', [...new Set(messages.map(m => m.thread))]);
 
   // Mark current thread as read
   useEffect(() => {
@@ -141,6 +204,7 @@ export default function ChatPanel({ messages, onSend, isWaiting, activeThread, a
     if (!input.trim()) return;
     onSend(input.trim(), activeThread);
     setInput("");
+    if (textareaRef.current) textareaRef.current.style.height = "auto";
   };
 
   const activeWorkerLabel = formatAgentDisplayName(activeThread);
@@ -178,9 +242,22 @@ export default function ChatPanel({ messages, onSend, isWaiting, activeThread, a
       {/* Input */}
       <form onSubmit={handleSubmit} className="p-4 border-t border-border">
         <div className="flex items-center gap-3 bg-muted/40 rounded-xl px-4 py-2.5 border border-border focus-within:border-primary/40 transition-colors">
-          <input
+          <textarea
+            ref={textareaRef}
+            rows={1}
             value={input}
-            onChange={(e) => setInput(e.target.value)}
+            onChange={(e) => {
+              setInput(e.target.value);
+              const ta = e.target;
+              ta.style.height = "auto";
+              ta.style.height = `${Math.min(ta.scrollHeight, 160)}px`;
+            }}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && !e.shiftKey) {
+                e.preventDefault();
+                handleSubmit(e);
+              }
+            }}
             placeholder={
               disabled
                 ? "Connecting to agent..."
@@ -189,7 +266,7 @@ export default function ChatPanel({ messages, onSend, isWaiting, activeThread, a
                   : `Message ${activeWorkerLabel}...`
             }
             disabled={disabled}
-            className="flex-1 bg-transparent text-sm text-foreground outline-none placeholder:text-muted-foreground disabled:opacity-50 disabled:cursor-not-allowed"
+            className="flex-1 bg-transparent text-sm text-foreground outline-none placeholder:text-muted-foreground disabled:opacity-50 disabled:cursor-not-allowed resize-none overflow-y-auto"
           />
           {isWaiting && onCancel ? (
             <button

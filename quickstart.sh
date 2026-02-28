@@ -1044,9 +1044,15 @@ echo ""
 
 HIVE_CRED_DIR="$HOME/.hive/credentials"
 
-# Check if HIVE_CREDENTIAL_KEY already exists (from env or shell rc)
+HIVE_KEY_FILE="$HOME/.hive/secrets/credential_key"
+
+# Check if HIVE_CREDENTIAL_KEY already exists (from env, file, or shell rc)
 if [ -n "$HIVE_CREDENTIAL_KEY" ]; then
     echo -e "${GREEN}  ✓ HIVE_CREDENTIAL_KEY already set${NC}"
+elif [ -f "$HIVE_KEY_FILE" ]; then
+    HIVE_CREDENTIAL_KEY=$(cat "$HIVE_KEY_FILE")
+    export HIVE_CREDENTIAL_KEY
+    echo -e "${GREEN}  ✓ HIVE_CREDENTIAL_KEY loaded from $HIVE_KEY_FILE${NC}"
 else
     # Generate a new Fernet encryption key
     echo -n "  Generating encryption key... "
@@ -1059,13 +1065,14 @@ else
     else
         echo -e "${GREEN}ok${NC}"
 
-        # Save to shell rc file
-        echo "" >> "$SHELL_RC_FILE"
-        echo "# Encryption key for Hive credential store (~/.hive/credentials)" >> "$SHELL_RC_FILE"
-        echo "export HIVE_CREDENTIAL_KEY=\"$GENERATED_KEY\"" >> "$SHELL_RC_FILE"
+        # Save to dedicated secrets file (chmod 600)
+        mkdir -p "$(dirname "$HIVE_KEY_FILE")"
+        chmod 700 "$(dirname "$HIVE_KEY_FILE")"
+        echo -n "$GENERATED_KEY" > "$HIVE_KEY_FILE"
+        chmod 600 "$HIVE_KEY_FILE"
         export HIVE_CREDENTIAL_KEY="$GENERATED_KEY"
 
-        echo -e "${GREEN}  ✓ Encryption key saved to $SHELL_RC_FILE${NC}"
+        echo -e "${GREEN}  ✓ Encryption key saved to $HIVE_KEY_FILE${NC}"
     fi
 fi
 
@@ -1263,21 +1270,8 @@ fi
 if [ -n "$HIVE_CREDENTIAL_KEY" ]; then
     echo -e "${BOLD}Credential Store:${NC}"
     echo -e "  ${GREEN}⬢${NC} ${DIM}~/.hive/credentials/${NC}  (encrypted)"
-    echo -e "  ${DIM}Set up agent credentials with:${NC} ${CYAN}/setup-credentials${NC}"
     echo ""
 fi
-
-echo -e "${BOLD}Build a New Agent (Claude):${NC}"
-echo ""
-echo -e "  1. Open Claude Code in this directory:"
-echo -e "     ${CYAN}claude${NC}"
-echo ""
-echo -e "  2. Build a new agent:"
-echo -e "     ${CYAN}/hive${NC}"
-echo ""
-echo -e "  3. Test an existing agent:"
-echo -e "     ${CYAN}/hive-test${NC}"
-echo ""
 
 # Show Codex instructions if available
 if [ "$CODEX_AVAILABLE" = true ]; then
