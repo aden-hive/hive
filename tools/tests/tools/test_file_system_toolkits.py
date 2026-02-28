@@ -203,6 +203,65 @@ class TestViewFileTool:
         assert "error" in result
         assert "Failed to read file" in result["error"]
 
+    def test_view_file_truncation_does_not_split_multibyte_chars(
+        self, view_file_fn, mock_workspace, mock_secure_path, tmp_path
+    ):
+        """Regression: truncating at max_size must not split a multibyte character.
+
+        Bug: the old code did content[:max_size] where max_size is in bytes, but
+        content is a Python str (Unicode). For multibyte encodings a char-index
+        cut ≠ a byte-boundary cut, causing UnicodeEncodeError or silent corruption.
+
+        Example: '🌍' encodes to 4 bytes in UTF-8. If max_size=3 the old code
+        produced content[:3] == '🌍' (one emoji) and then tried to re-encode it,
+        which would yield 4 bytes — exceeding the limit — or silently let it pass.
+        The fixed code truncates the byte buffer itself and decodes with
+        errors='ignore' so no partial sequences survive.
+        """
+        # Build a file whose content is a string of emoji (4 bytes each in UTF-8)
+        # total = 5 emoji × 4 bytes = 20 bytes
+        emoji_content = "🌍🌎🌏🌐🌑"
+        test_file = tmp_path / "emoji.txt"
+        test_file.write_text(emoji_content, encoding="utf-8")
+
+        # max_size = 6 bytes → only the first emoji (4 bytes) must survive
+        result = view_file_fn(path="emoji.txt", max_size=6, **mock_workspace)
+
+        assert result["success"] is True
+        # Must contain the truncation marker
+        assert "[... Content truncated due to size limit ...]" in result["content"]
+        # The retained text before the marker must be valid Unicode (no UnicodeError)
+        retained = result["content"].split("\n\n[... Content truncated due to size limit ...]")[0]
+        retained.encode("utf-8")  # must not raise
+        # Every retained character must be a complete emoji, not a broken surrogate
+        for ch in retained:
+            assert ord(ch) > 0, "Broken/null character found after truncation"
+
+    def test_view_file_size_bytes_matches_actual_encoding(
+        self, view_file_fn, mock_workspace, mock_secure_path, tmp_path
+    ):
+        """Regression: size_bytes in the response was always computed with 'utf-8'
+        regardless of the encoding parameter, giving wrong values for encodings
+        like 'utf-16' where a character occupies a different number of bytes.
+
+        The fix computes size_bytes using the same encoding as the open() call.
+        """
+        content = "Hello"
+        test_file = tmp_path / "utf16.txt"
+        test_file.write_text(content, encoding="utf-16")
+
+        result = view_file_fn(path="utf16.txt", encoding="utf-16", **mock_workspace)
+
+        assert result["success"] is True
+        assert result["content"] == content
+        # utf-16 encodes "Hello" as BOM(2) + 5×2 = 12 bytes; utf-8 would be 5.
+        # The response must report the utf-16 byte length, not the utf-8 one.
+        expected_bytes = len(content.encode("utf-16"))
+        assert result["size_bytes"] == expected_bytes, (
+            f"size_bytes should reflect the actual encoding ({expected_bytes} bytes for utf-16) "
+            f"but got {result['size_bytes']}"
+        )
+
 
 class TestWriteToFileTool:
     """Tests for write_to_file tool."""
