@@ -2,8 +2,19 @@
 Unit tests for SAP S/4HANA connector.
 """
 
+from __future__ import annotations
+
+import os
+import sys
+
 import pytest
+import requests
 from unittest.mock import Mock, patch
+
+# Ensure repo root is on path when run as a script.
+REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+if REPO_ROOT not in sys.path:
+    sys.path.insert(0, REPO_ROOT)
 
 from integrations.sap_s4hana.connector import SAPS4HANAConnector, SAPConnectionConfig
 
@@ -110,7 +121,7 @@ class TestSAPS4HANAConnector:
     def test_connection_error_handling(self, connector):
         """Test connection errors are handled gracefully."""
         with patch.object(connector.session, 'get') as mock_get:
-            mock_get.side_effect = Exception("Network error")
+            mock_get.side_effect = requests.exceptions.RequestException("Network error")
             
             with pytest.raises(ConnectionError):
                 connector.fetch_purchase_orders()
