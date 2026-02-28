@@ -35,6 +35,8 @@
   <img src="https://img.shields.io/badge/Google_Gemini-supported-4285F4?style=flat-square&logo=google" alt="Gemini" />
 </p>
 
+### Hive helps teams build resilient AI agent systems that adapt and improve in production.
+
 ## Overview
 
 Build autonomous, reliable, self-improving AI agents without hardcoding workflows. Define your goal through conversation with a coding agent, and the framework generates a node graph with dynamically created connection code. When things break, the framework captures failure data, evolves the agent through the coding agent, and redeploys. Built-in human-in-the-loop nodes, credential management, and real-time monitoring give you control without sacrificing adaptability.
@@ -42,39 +44,6 @@ Build autonomous, reliable, self-improving AI agents without hardcoding workflow
 Visit [adenhq.com](https://adenhq.com) for complete documentation, examples, and guides.
 
 https://github.com/user-attachments/assets/846c0cc7-ffd6-47fa-b4b7-495494857a55
-
-## Who Is Hive For?
-
-Hive is designed for developers and teams who want to build **production-grade AI agents** without manually wiring complex workflows.
-
-Hive is a good fit if you:
-
-- Want AI agents that **execute real business processes**, not demos
-- Prefer **goal-driven development** over hardcoded workflows
-- Need **self-healing and adaptive agents** that improve over time
-- Require **human-in-the-loop control**, observability, and cost limits
-- Plan to run agents in **production environments**
-
-Hive may not be the best fit if you’re only experimenting with simple agent chains or one-off scripts.
-
-## When Should You Use Hive?
-
-Use Hive when you need:
-
-- Long-running, autonomous agents
-- Strong guardrails, process, and controls
-- Continuous improvement based on failures
-- Multi-agent coordination
-- A framework that evolves with your goals
-
-## Quick Links
-
-- **[Documentation](https://docs.adenhq.com/)** - Complete guides and API reference
-- **[Self-Hosting Guide](https://docs.adenhq.com/getting-started/quickstart)** - Deploy Hive on your infrastructure
-- **[Changelog](https://github.com/aden-hive/hive/releases)** - Latest updates and releases
-- **[Roadmap](docs/roadmap.md)** - Upcoming features and plans
-- **[Report Issues](https://github.com/adenhq/hive/issues)** - Bug reports and feature requests
-- **[Contributing](CONTRIBUTING.md)** - How to contribute and submit PRs
 
 ## Quick Start
 
@@ -125,6 +94,27 @@ hive tui
 # Or run directly
 hive run exports/your_agent_name --input '{"key": "value"}'
 ```
+
+## Is Hive Right for You?
+
+Hive is designed for developers and teams who want to build **production-grade AI agents** without manually wiring complex workflows.
+
+| Feature | Best fit for Hive | Not a fit for Hive |
+| :--- | :--- | :--- |
+| **Complexity** | Real business processes, complex multi-agent workflows | Simple agent chains or one-off scripts |
+| **Lifecycle** | Long-running, autonomous agents with self-healing | Temporary or non-autonomous experiments |
+| **Reliability** | Production environments requiring guardrails and cost limits | Lab-only demos with no risk constraints |
+| **Methodology** | Goal-driven development that improves over time | Hardcoded, static workflows |
+| **Human Control** | Explicit human-in-the-loop and observability needs | Fully dark/unobserved execution |
+
+## Quick Links
+
+- **[Documentation](https://docs.adenhq.com/)** - Complete guides and API reference
+- **[Self-Hosting Guide](https://docs.adenhq.com/getting-started/quickstart)** - Deploy Hive on your infrastructure
+- **[Changelog](https://github.com/aden-hive/hive/releases)** - Latest updates and releases
+- **[Roadmap](docs/roadmap.md)** - Upcoming features and plans
+- **[Report Issues](https://github.com/adenhq/hive/issues)** - Bug reports and feature requests
+- **[Contributing](CONTRIBUTING.md)** - How to contribute and submit PRs
 
 ## Coding Agent Support
 
