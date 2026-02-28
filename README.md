@@ -258,6 +258,19 @@ hive run exports/my_agent --tui
 hive shell
 ```
 
+### Agents with Function Nodes
+
+If your agent contains **function nodes** (custom Python execution nodes), you must use the `GraphExecutor` path in your `agent.py` to register them before execution. The `AgentRuntime` initialization path does not expose a way to register function implementations directly.
+
+When running via `hive run` or `hive tui`, the CLI will automatically use your agent's own setup logic if implemented correctly.
+
+**Recommended Pattern:**
+1. Build the executor using `GraphExecutor(...)`
+2. Register your functions: `executor.register_function("node_id", your_function_impl)`
+3. Run the executor: `executor.execute(...)`
+
+*See the `examples/templates/` directory (e.g., `tech_news_reporter` or `deep_research_agent`) for reference implementations of this pattern.*
+
 The TUI scans both `exports/` and `examples/templates/` for available agents.
 
 > **Using Python directly (alternative):** You can also run agents with `PYTHONPATH=exports uv run python -m agent_name run --input '{...}'`
