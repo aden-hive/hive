@@ -13,12 +13,16 @@ try:
     from plaid.api import plaid_api
     from plaid.model.transactions_get_request import TransactionsGetRequest
     from plaid.model.accounts_get_request import AccountsGetRequest
-    from plaid.model.item_public_token_exchange_request import ItemPublicTokenExchangeRequest
     from plaid.configuration import Configuration
     from plaid.api_client import ApiClient
     PLAID_AVAILABLE = True
 except ImportError:
     PLAID_AVAILABLE = False
+    plaid_api = None  # type: ignore[assignment]
+    TransactionsGetRequest = None  # type: ignore[assignment]
+    AccountsGetRequest = None  # type: ignore[assignment]
+    Configuration = None  # type: ignore[assignment]
+    ApiClient = None  # type: ignore[assignment]
 
 
 @dataclass
@@ -80,7 +84,10 @@ class PlaidConnector:
             raise ValueError("No access token. Link account first.")
         
         try:
-            request = AccountsGetRequest(access_token=self.config.access_token)
+            if AccountsGetRequest is not None:
+                request = AccountsGetRequest(access_token=self.config.access_token)
+            else:
+                request = {"access_token": self.config.access_token}
             response = self.client.accounts_get(request)
             
             accounts = []
@@ -130,12 +137,20 @@ class PlaidConnector:
             start_date = (datetime.now() - timedelta(days=30)).strftime('%Y-%m-%d')
         
         try:
-            request = TransactionsGetRequest(
-                access_token=self.config.access_token,
-                start_date=start_date,
-                end_date=end_date,
-                account_ids=account_ids or []
-            )
+            if TransactionsGetRequest is not None:
+                request = TransactionsGetRequest(
+                    access_token=self.config.access_token,
+                    start_date=start_date,
+                    end_date=end_date,
+                    account_ids=account_ids or []
+                )
+            else:
+                request = {
+                    "access_token": self.config.access_token,
+                    "start_date": start_date,
+                    "end_date": end_date,
+                    "account_ids": account_ids or [],
+                }
             
             response = self.client.transactions_get(request)
             
@@ -150,7 +165,7 @@ class PlaidConnector:
                     'name': txn['name'],
                     'merchant_name': txn.get('merchant_name'),
                     'category': txn.get('category', []),
-                    'pending': txn['pending'],
+                    'pending': txn.get('pending', False),
                     'payment_channel': txn.get('payment_channel')
                 })
             
