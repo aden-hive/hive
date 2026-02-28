@@ -33,6 +33,7 @@ from .nodes import monitor_node, analyze_node, notify_node, followup_node
 # so we override it here at module load time so AgentRunner / TUI enforces it.
 try:
     from aden_tools.credentials import CREDENTIAL_SPECS as _CRED_SPECS
+
     if "resend" in _CRED_SPECS:
         _CRED_SPECS["resend"].required = True
 except ImportError:
@@ -98,13 +99,13 @@ goal = Goal(
         ),
         Constraint(
             id="email-required",
-            description="GOOGLE_ACCESS_TOKEN or RESEND_API_KEY is required for sending follow-up emails",
+            description="RESEND_API_KEY is required for sending follow-up emails",
             constraint_type="hard",
             category="requirements",
         ),
         Constraint(
             id="telegram-required",
-            description="TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID are required for sending revenue leak alerts",
+            description="TELEGRAM_BOT_TOKEN is required for sending revenue leak alerts",
             constraint_type="hard",
             category="requirements",
         ),
@@ -163,6 +164,7 @@ pause_nodes: tuple = ()
 # Agent class
 # ---------------------------------------------------------------------------
 
+
 class RevenueLeakDetectorAgent:
     """
     HubSpot Revenue Leak Detector Agent — 4-node event_loop pipeline.
@@ -218,7 +220,9 @@ class RevenueLeakDetectorAgent:
 
     def _setup(self, mock_mode: bool = False) -> None:
         """Set up the agent runtime with tools, LLM, and session storage."""
-        self._storage_path = Path.home() / ".hive" / "agents" / "hubspot_revenue_leak_detector"
+        self._storage_path = (
+            Path.home() / ".hive" / "agents" / "hubspot_revenue_leak_detector"
+        )
         self._storage_path.mkdir(parents=True, exist_ok=True)
 
         self._tool_registry = ToolRegistry()
@@ -279,20 +283,28 @@ class RevenueLeakDetectorAgent:
         # Skipped in mock mode so maintainers can test without any credentials.
         if not mock_mode and not os.environ.get("RESEND_API_KEY"):
             try:
-                from framework.credentials.storage import CompositeStorage, EncryptedFileStorage, EnvVarStorage
+                from framework.credentials.storage import (
+                    CompositeStorage,
+                    EncryptedFileStorage,
+                    EnvVarStorage,
+                )
                 from framework.credentials.store import CredentialStore
                 from aden_tools.credentials import CREDENTIAL_SPECS
+
                 spec = CREDENTIAL_SPECS.get("resend")
                 if spec:
                     env_mapping = {(spec.credential_id or "resend"): spec.env_var}
                     env_storage = EnvVarStorage(env_mapping=env_mapping)
                     if os.environ.get("HIVE_CREDENTIAL_KEY"):
-                        storage = CompositeStorage(primary=env_storage, fallbacks=[EncryptedFileStorage()])
+                        storage = CompositeStorage(
+                            primary=env_storage, fallbacks=[EncryptedFileStorage()]
+                        )
                     else:
                         storage = env_storage
                     store = CredentialStore(storage=storage)
                     if not store.is_available(spec.credential_id or "resend"):
                         from framework.credentials.models import CredentialError
+
                         exc = CredentialError(
                             "Missing required credential: RESEND_API_KEY\n"
                             "  Required for: send_email (follow-up emails to GHOSTED contacts)\n"
@@ -387,6 +399,7 @@ class RevenueLeakDetectorAgent:
         # since they're not discoverable until the MCP server starts.
         try:
             from .tools import TOOLS as _TOOLS  # noqa: PLC0415
+
             registered_python = set(_TOOLS.keys())
             for node in self.nodes:
                 for tool_name in node.tools or []:

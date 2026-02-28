@@ -39,33 +39,36 @@ from framework.llm.provider import Tool, ToolUse, ToolResult
 # Session-isolated state (contextvars — thread + session safe)
 # ---------------------------------------------------------------------------
 _leaks_var: contextvars.ContextVar[list] = contextvars.ContextVar("_leaks")
-_deals_cache_var: contextvars.ContextVar[list] = contextvars.ContextVar("_deals_cache", default=[])
+_deals_cache_var: contextvars.ContextVar[list] = contextvars.ContextVar(
+    "_deals_cache", default=[]
+)
 
-MAX_CYCLES = 3         # halt after this many consecutive low-severity cycles
+MAX_CYCLES = 3  # halt after this many consecutive low-severity cycles
 MAX_TOTAL_CYCLES = 10  # absolute cap — prevents infinite loops
 
 _SEVERITY_EMOJI: dict[str, str] = {
-    "low":      "🟢",
-    "medium":   "🟡",
-    "high":     "🔴",
+    "low": "🟢",
+    "medium": "🟡",
+    "high": "🔴",
     "critical": "🚨",
 }
 
 # HubSpot API deal stage → human-readable name
 _STAGE_MAP: dict[str, str] = {
-    "appointmentscheduled":  "Demo Scheduled",
-    "qualifiedtobuy":        "Qualified",
+    "appointmentscheduled": "Demo Scheduled",
+    "qualifiedtobuy": "Qualified",
     "presentationscheduled": "Proposal Sent",
     "decisionmakerboughtin": "Negotiation",
-    "contractsent":          "Contract Sent",
-    "closedwon":             "Closed Won",
-    "closedlost":            "Closed Lost",
+    "contractsent": "Contract Sent",
+    "closedwon": "Closed Won",
+    "closedlost": "Closed Lost",
 }
 
 
 # ---------------------------------------------------------------------------
 # Telegram chat_id auto-fetch helper
 # ---------------------------------------------------------------------------
+
 
 def _auto_fetch_telegram_chat_id() -> str:
     """
@@ -95,11 +98,17 @@ def _auto_fetch_telegram_chat_id() -> str:
                     msg = update.get("message") or update.get("channel_post")
                     if msg and "chat" in msg:
                         found = str(msg["chat"]["id"])
-                        name = msg["chat"].get("username") or msg["chat"].get("first_name", "")
+                        name = msg["chat"].get("username") or msg["chat"].get(
+                            "first_name", ""
+                        )
                         print(f"\n📱 Auto-detected Telegram chat_id: {found}  ({name})")
-                        print(f'   Tip: export TELEGRAM_CHAT_ID="{found}" to skip auto-fetch\n')
+                        print(
+                            f'   Tip: export TELEGRAM_CHAT_ID="{found}" to skip auto-fetch\n'
+                        )
                         return found
-        print("\n⚠️  No Telegram updates found — send any message to your bot first, then retry.\n")
+        print(
+            "\n⚠️  No Telegram updates found — send any message to your bot first, then retry.\n"
+        )
     except Exception as exc:
         print(f"\n⚠️  Could not auto-fetch Telegram chat_id: {exc}\n")
 
@@ -109,6 +118,7 @@ def _auto_fetch_telegram_chat_id() -> str:
 # ---------------------------------------------------------------------------
 # Tool implementations
 # ---------------------------------------------------------------------------
+
 
 def _scan_pipeline(cycle: int, deals: list | None = None) -> dict:
     """
@@ -150,11 +160,11 @@ def _scan_pipeline(cycle: int, deals: list | None = None) -> dict:
             "  Ensure HUBSPOT_ACCESS_TOKEN is set and hubspot_search_deals returned results."
         )
         return {
-            "next_cycle":             next_cycle,
-            "deals_scanned":          0,
-            "overdue_invoices":       0,
-            "support_escalations":    0,
-            "status":                 "no_deals",
+            "next_cycle": next_cycle,
+            "deals_scanned": 0,
+            "overdue_invoices": 0,
+            "support_escalations": 0,
+            "status": "no_deals",
         }
 
     # Normalise each deal — guard against LLM sending partial objects
@@ -188,18 +198,24 @@ def _scan_pipeline(cycle: int, deals: list | None = None) -> dict:
         except (ValueError, TypeError):
             value = 0
 
-        normalised.append({
-            "id":            str(raw.get("id", "")),
-            "contact":       str(raw.get("contact") or raw.get("dealname") or "Unknown Deal"),
-            "email":         str(raw.get("email", "")),
-            "stage":         stage,
-            "days_inactive": int(days_inactive),
-            "value":         value,
-        })
+        normalised.append(
+            {
+                "id": str(raw.get("id", "")),
+                "contact": str(
+                    raw.get("contact") or raw.get("dealname") or "Unknown Deal"
+                ),
+                "email": str(raw.get("email", "")),
+                "stage": stage,
+                "days_inactive": int(days_inactive),
+                "value": value,
+            }
+        )
 
     _deals_cache_var.set(normalised)
 
-    print(f"\n[scan_pipeline] Cycle {next_cycle} — {len(normalised)} open deal(s) from HubSpot")
+    print(
+        f"\n[scan_pipeline] Cycle {next_cycle} — {len(normalised)} open deal(s) from HubSpot"
+    )
     for d in normalised:
         print(
             f"  • {d['contact']}  stage={d['stage']}  "
@@ -208,11 +224,11 @@ def _scan_pipeline(cycle: int, deals: list | None = None) -> dict:
         )
 
     return {
-        "next_cycle":             next_cycle,
-        "deals_scanned":          len(normalised),
-        "overdue_invoices":       0,
-        "support_escalations":    0,
-        "status":                 "ok",
+        "next_cycle": next_cycle,
+        "deals_scanned": len(normalised),
+        "overdue_invoices": 0,
+        "support_escalations": 0,
+        "status": "ok",
     }
 
 
@@ -249,51 +265,55 @@ def _detect_revenue_leaks(cycle: int) -> dict:
             f"halt={_no_data_halt}"
         )
         return {
-            "cycle":         cycle_num,
-            "leak_count":    0,
-            "severity":      "low",
+            "cycle": cycle_num,
+            "leak_count": 0,
+            "severity": "low",
             "total_at_risk": 0,
-            "halt":          _no_data_halt,
-            "warning":       "No deal data — call scan_pipeline first each cycle",
+            "halt": _no_data_halt,
+            "warning": "No deal data — call scan_pipeline first each cycle",
         }
 
     leaks: list[dict] = []
     for deal in deals:
-        days  = deal.get("days_inactive", 0)
-        did   = deal.get("id", "")
-        name  = deal.get("contact", "Unknown")
+        days = deal.get("days_inactive", 0)
+        did = deal.get("id", "")
+        name = deal.get("contact", "Unknown")
         value = deal.get("value", 0)
         stage = deal.get("stage", "Unknown")
         email = deal.get("email", "")
 
         if days >= 21:
-            leaks.append({
-                "type":           "GHOSTED",
-                "deal_id":        did,
-                "contact":        name,
-                "email":          email,
-                "value":          value,
-                "days_inactive":  days,
-                "stage":          stage,
-                "recommendation": (
-                    f"Send re-engagement sequence to {name} immediately — "
-                    f"silent for {days} days."
-                ),
-            })
+            leaks.append(
+                {
+                    "type": "GHOSTED",
+                    "deal_id": did,
+                    "contact": name,
+                    "email": email,
+                    "value": value,
+                    "days_inactive": days,
+                    "stage": stage,
+                    "recommendation": (
+                        f"Send re-engagement sequence to {name} immediately — "
+                        f"silent for {days} days."
+                    ),
+                }
+            )
         elif days >= 10:
-            leaks.append({
-                "type":           "STALLED",
-                "deal_id":        did,
-                "contact":        name,
-                "email":          email,
-                "value":          value,
-                "days_inactive":  days,
-                "stage":          stage,
-                "recommendation": (
-                    f"Schedule an unblocking call with {name} — "
-                    f"stuck in \'{stage}\' for {days} days."
-                ),
-            })
+            leaks.append(
+                {
+                    "type": "STALLED",
+                    "deal_id": did,
+                    "contact": name,
+                    "email": email,
+                    "value": value,
+                    "days_inactive": days,
+                    "stage": stage,
+                    "recommendation": (
+                        f"Schedule an unblocking call with {name} — "
+                        f"stuck in '{stage}' for {days} days."
+                    ),
+                }
+            )
 
     _leaks_var.set(leaks)
 
@@ -302,16 +322,16 @@ def _detect_revenue_leaks(cycle: int) -> dict:
 
     if ghosted_count >= 2 or total_at_risk >= 50_000:
         severity = "critical"
-        halt     = True
+        halt = True
     elif len(leaks) >= 3 or total_at_risk >= 20_000:
         severity = "high"
-        halt     = False
+        halt = False
     elif len(leaks) >= 1:
         severity = "medium"
-        halt     = False
+        halt = False
     else:
         severity = "low"
-        halt     = cycle_num >= MAX_CYCLES
+        halt = cycle_num >= MAX_CYCLES
 
     if not halt and cycle_num >= MAX_TOTAL_CYCLES:
         halt = True
@@ -323,11 +343,11 @@ def _detect_revenue_leaks(cycle: int) -> dict:
     )
 
     return {
-        "cycle":         cycle_num,
-        "leak_count":    len(leaks),
-        "severity":      severity,
+        "cycle": cycle_num,
+        "leak_count": len(leaks),
+        "severity": severity,
         "total_at_risk": total_at_risk,
-        "halt":          halt,
+        "halt": halt,
     }
 
 
@@ -355,20 +375,20 @@ def _build_telegram_alert(
         cycle / severity / leak_count / total_at_risk — echoed for context
     """
     try:
-        cycle_num      = int(float(cycle or 0))
+        cycle_num = int(float(cycle or 0))
         leak_count_int = int(float(leak_count or 0))
-        at_risk_int    = int(float(total_at_risk or 0))
+        at_risk_int = int(float(total_at_risk or 0))
     except (ValueError, TypeError):
         cycle_num = leak_count_int = at_risk_int = 0
 
-    sev   = str(severity).lower()
+    sev = str(severity).lower()
     emoji = _SEVERITY_EMOJI.get(sev, "⚪")
     leaks = _leaks_var.get([])
-    esc   = _html.escape
+    esc = _html.escape
 
     # ── Console report ──────────────────────────────────────────────────────
     border = "═" * 64
-    thin   = "─" * 64
+    thin = "─" * 64
     print(f"\n{border}")
     print(f"  💰  HUBSPOT REVENUE LEAK DETECTOR  ·  Cycle {cycle_num}")
     print(f"{border}")
@@ -383,7 +403,9 @@ def _build_telegram_alert(
         for i, leak in enumerate(leaks, 1):
             lt = leak.get("type", "UNKNOWN")
             print(f"\n  [{i}]  {lt}")
-            print(f"        Deal     :  {leak.get('deal_id', '')}  ({leak.get('contact', '')})")
+            print(
+                f"        Deal     :  {leak.get('deal_id', '')}  ({leak.get('contact', '')})"
+            )
             print(f"        Stage    :  {leak.get('stage', '')}")
             print(f"        Inactive :  {leak.get('days_inactive', 0)} days")
             print(f"        Value    :  ${leak.get('value', 0):,}")
@@ -392,9 +414,9 @@ def _build_telegram_alert(
     print(f"\n{thin}")
     action_console = {
         "critical": "🚨  CRITICAL — Escalating to VP Sales & Finance immediately.",
-        "high":     "🔴  HIGH PRIORITY — Assign owners, act within 24 hours.",
-        "medium":   "🟡  MEDIUM — Review findings and schedule follow-ups.",
-        "low":      "🟢  Pipeline healthy — continue monitoring.",
+        "high": "🔴  HIGH PRIORITY — Assign owners, act within 24 hours.",
+        "medium": "🟡  MEDIUM — Review findings and schedule follow-ups.",
+        "low": "🟢  Pipeline healthy — continue monitoring.",
     }.get(sev, "")
     print(f"  {action_console}")
     print(f"{border}\n")
@@ -429,15 +451,15 @@ def _build_telegram_alert(
 
     action_tg = {
         "critical": "🚨 ESCALATE to VP Sales &amp; Finance immediately.",
-        "high":     "🔴 Assign owners — act within 24 hours.",
-        "medium":   "🟡 Review and schedule follow-ups.",
-        "low":      "🟢 Continue monitoring.",
+        "high": "🔴 Assign owners — act within 24 hours.",
+        "medium": "🟡 Review and schedule follow-ups.",
+        "low": "🟢 Continue monitoring.",
     }.get(sev, "")
     if action_tg:
         lines.append(action_tg)
 
     html_message = "\n".join(lines)
-    chat_id      = _auto_fetch_telegram_chat_id()
+    chat_id = _auto_fetch_telegram_chat_id()
 
     if not chat_id:
         print(
@@ -447,12 +469,12 @@ def _build_telegram_alert(
         )
 
     return {
-        "cycle":         cycle_num,
-        "severity":      sev,
-        "leak_count":    leak_count_int,
+        "cycle": cycle_num,
+        "severity": sev,
+        "leak_count": leak_count_int,
         "total_at_risk": at_risk_int,
-        "html_message":  html_message,
-        "chat_id":       chat_id,
+        "html_message": html_message,
+        "chat_id": chat_id,
     }
 
 
@@ -489,18 +511,18 @@ def _prepare_followup_emails(cycle: int) -> dict:
         )
         return {
             "contacts": [],
-            "message":  f"No GHOSTED contacts in Cycle {cycle_num}.",
+            "message": f"No GHOSTED contacts in Cycle {cycle_num}.",
         }
 
     contacts: list[dict] = []
-    skipped: list[str]   = []
+    skipped: list[str] = []
 
     for leak in ghosted:
-        contact  = str(leak.get("contact", "there"))
+        contact = str(leak.get("contact", "there"))
         to_email = str(leak.get("email", "")).strip()
-        days     = int(leak.get("days_inactive", 0))
-        value    = int(leak.get("value", 0))
-        deal_id  = str(leak.get("deal_id", ""))
+        days = int(leak.get("days_inactive", 0))
+        value = int(leak.get("value", 0))
+        deal_id = str(leak.get("deal_id", ""))
 
         if not to_email:
             skipped.append(contact)
@@ -533,13 +555,15 @@ def _prepare_followup_emails(cycle: int) -> dict:
 </body>
 </html>"""
 
-        contacts.append({
-            "contact": contact,
-            "email":   to_email,
-            "deal_id": deal_id,
-            "subject": subject,
-            "html":    html,
-        })
+        contacts.append(
+            {
+                "contact": contact,
+                "email": to_email,
+                "deal_id": deal_id,
+                "subject": subject,
+                "html": html,
+            }
+        )
 
     parts = [f"{len(contacts)} follow-up email(s) prepared for Cycle {cycle_num}"]
     if skipped:
@@ -571,11 +595,11 @@ TOOLS: dict[str, Tool] = {
             "type": "object",
             "properties": {
                 "cycle": {
-                    "type":        "integer",
+                    "type": "integer",
                     "description": "Current cycle number from context (0 on first run).",
                 },
                 "deals": {
-                    "type":        "array",
+                    "type": "array",
                     "description": (
                         "Array of open HubSpot deal objects. Each must include: "
                         "id (string), contact (string — deal/company name), "
@@ -588,14 +612,20 @@ TOOLS: dict[str, Tool] = {
                     "items": {
                         "type": "object",
                         "properties": {
-                            "id":            {"type": "string"},
-                            "contact":       {"type": "string"},
-                            "email":         {"type": "string"},
-                            "stage":         {"type": "string"},
+                            "id": {"type": "string"},
+                            "contact": {"type": "string"},
+                            "email": {"type": "string"},
+                            "stage": {"type": "string"},
                             "days_inactive": {"type": "integer"},
-                            "value":         {"type": "integer"},
+                            "value": {"type": "integer"},
                         },
-                        "required": ["id", "contact", "stage", "days_inactive", "value"],
+                        "required": [
+                            "id",
+                            "contact",
+                            "stage",
+                            "days_inactive",
+                            "value",
+                        ],
                     },
                 },
             },
@@ -614,7 +644,7 @@ TOOLS: dict[str, Tool] = {
             "type": "object",
             "properties": {
                 "cycle": {
-                    "type":        "integer",
+                    "type": "integer",
                     "description": "Cycle number (use next_cycle returned by scan_pipeline).",
                 },
             },
@@ -632,10 +662,19 @@ TOOLS: dict[str, Tool] = {
         parameters={
             "type": "object",
             "properties": {
-                "cycle":         {"type": "integer", "description": "Current cycle number."},
-                "leak_count":    {"type": "integer", "description": "Total leaks detected."},
-                "severity":      {"type": "string",  "description": "low / medium / high / critical"},
-                "total_at_risk": {"type": "integer", "description": "Total USD value at risk."},
+                "cycle": {"type": "integer", "description": "Current cycle number."},
+                "leak_count": {
+                    "type": "integer",
+                    "description": "Total leaks detected.",
+                },
+                "severity": {
+                    "type": "string",
+                    "description": "low / medium / high / critical",
+                },
+                "total_at_risk": {
+                    "type": "integer",
+                    "description": "Total USD value at risk.",
+                },
             },
             "required": ["cycle", "leak_count", "severity", "total_at_risk"],
         },
@@ -645,14 +684,14 @@ TOOLS: dict[str, Tool] = {
         description=(
             "Build ready-to-send email payloads for all GHOSTED contacts this cycle. "
             "Returns a contacts array — call send_email MCP tool for each entry "
-            "using provider=\"resend\" (or \"gmail\"). "
+            'using provider="resend" (or "gmail"). '
             "Must be called AFTER detect_revenue_leaks."
         ),
         parameters={
             "type": "object",
             "properties": {
                 "cycle": {
-                    "type":        "integer",
+                    "type": "integer",
                     "description": "Current monitoring cycle.",
                 },
             },
@@ -667,9 +706,9 @@ TOOLS: dict[str, Tool] = {
 # ---------------------------------------------------------------------------
 
 _TOOL_HANDLERS: dict[str, Any] = {
-    "scan_pipeline":           _scan_pipeline,
-    "detect_revenue_leaks":    _detect_revenue_leaks,
-    "build_telegram_alert":    _build_telegram_alert,
+    "scan_pipeline": _scan_pipeline,
+    "detect_revenue_leaks": _detect_revenue_leaks,
+    "build_telegram_alert": _build_telegram_alert,
     "prepare_followup_emails": _prepare_followup_emails,
 }
 
