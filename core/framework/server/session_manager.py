@@ -498,13 +498,19 @@ class SessionManager:
                     len(queen_tools),
                     [t.name for t in queen_tools],
                 )
-                await executor.execute(
+                result = await executor.execute(
                     graph=queen_graph,
                     goal=queen_goal,
                     input_data={"greeting": initial_prompt or "Session started."},
                     session_state={"resume_session_id": session.id},
                 )
-                logger.warning("Queen executor returned (should be forever-alive)")
+                if result.success:
+                    logger.warning("Queen executor returned (should be forever-alive)")
+                else:
+                    logger.error(
+                        "Queen executor failed: %s",
+                        result.error or "(no error message)",
+                    )
             except Exception:
                 logger.error("Queen conversation crashed", exc_info=True)
             finally:

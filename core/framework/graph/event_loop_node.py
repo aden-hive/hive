@@ -467,12 +467,6 @@ class EventLoopNode(NodeProtocol):
         if ctx.is_subagent_mode and ctx.report_callback is not None:
             tools.append(self._build_report_to_parent_tool())
 
-        # Add built-in file tools when spillover is configured
-        if self._config.spillover_dir:
-            from framework.graph.file_tools import build_file_tools
-
-            tools.extend(build_file_tools())
-
         logger.info(
             "[%s] Tools available (%d): %s | client_facing=%s | judge=%s",
             node_id,
@@ -1525,8 +1519,6 @@ class EventLoopNode(NodeProtocol):
 
             # Phase 1: triage — handle framework tools immediately,
             # queue real tools and subagents for parallel execution.
-            from framework.graph.file_tools import execute_file_tool, is_file_tool
-
             results_by_id: dict[str, ToolResult] = {}
             timing_by_id: dict[str, dict[str, Any]] = {}  # tool_use_id -> {start_timestamp, duration_s}
             pending_real: list[ToolCallEvent] = []
@@ -1681,21 +1673,6 @@ class EventLoopNode(NodeProtocol):
                         is_error=False,
                     )
                     results_by_id[tc.tool_use_id] = result
-
-                elif is_file_tool(tc.tool_name):
-                    # --- Built-in file tool: execute inline, log as real work ---
-                    _tc_start = time.time()
-                    _tc_ts = datetime.now(timezone.utc).isoformat()
-                    result = execute_file_tool(
-                        tc.tool_name,
-                        tc.tool_input,
-                        tool_use_id=tc.tool_use_id,
-                    )
-                    timing_by_id[tc.tool_use_id] = {
-                        "start_timestamp": _tc_ts,
-                        "duration_s": round(time.time() - _tc_start, 3),
-                    }
-                    results_by_id[tc.tool_use_id] = self._truncate_tool_result(result, tc.tool_name)
 
                 else:
                     # --- Real tool: check for truncated args, else queue ---

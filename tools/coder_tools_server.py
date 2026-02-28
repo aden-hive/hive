@@ -13,8 +13,6 @@ Usage:
 """
 
 import argparse
-import difflib
-import fnmatch
 import json
 import logging
 import os
@@ -25,64 +23,6 @@ import time
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
-
-# ── Constants (inspired by opencode) ──────────────────────────────────────
-
-MAX_READ_LINES = 2000
-MAX_LINE_LENGTH = 2000
-MAX_OUTPUT_BYTES = 50 * 1024  # 50KB byte budget for read output
-MAX_COMMAND_OUTPUT = 30_000  # chars before truncation
-SEARCH_RESULT_LIMIT = 100
-
-BINARY_EXTENSIONS = frozenset(
-    {
-        ".zip",
-        ".tar",
-        ".gz",
-        ".bz2",
-        ".xz",
-        ".7z",
-        ".rar",
-        ".exe",
-        ".dll",
-        ".so",
-        ".dylib",
-        ".bin",
-        ".class",
-        ".jar",
-        ".war",
-        ".pyc",
-        ".pyo",
-        ".wasm",
-        ".png",
-        ".jpg",
-        ".jpeg",
-        ".gif",
-        ".bmp",
-        ".ico",
-        ".webp",
-        ".svg",
-        ".mp3",
-        ".mp4",
-        ".avi",
-        ".mov",
-        ".mkv",
-        ".wav",
-        ".flac",
-        ".pdf",
-        ".doc",
-        ".docx",
-        ".xls",
-        ".xlsx",
-        ".ppt",
-        ".pptx",
-        ".sqlite",
-        ".db",
-        ".o",
-        ".a",
-        ".lib",
-    }
-)
 
 
 def setup_logger():
@@ -144,139 +84,6 @@ def _resolve_path(path: str) -> str:
     return resolved
 
 
-def _is_binary(filepath: str) -> bool:
-    """Detect binary files by extension and content sampling."""
-    _, ext = os.path.splitext(filepath)
-    if ext.lower() in BINARY_EXTENSIONS:
-        return True
-    try:
-        with open(filepath, "rb") as f:
-            chunk = f.read(4096)
-        if b"\x00" in chunk:
-            return True
-        non_printable = sum(1 for b in chunk if b < 9 or (13 < b < 32) or b > 126)
-        return non_printable / max(len(chunk), 1) > 0.3
-    except OSError:
-        return False
-
-
-# ── Fuzzy edit strategies (ported from opencode's 9-strategy cascade) ─────
-
-
-def _levenshtein(a: str, b: str) -> int:
-    """Standard Levenshtein distance."""
-    if not a:
-        return len(b)
-    if not b:
-        return len(a)
-    m, n = len(a), len(b)
-    dp = list(range(n + 1))
-    for i in range(1, m + 1):
-        prev = dp[0]
-        dp[0] = i
-        for j in range(1, n + 1):
-            temp = dp[j]
-            if a[i - 1] == b[j - 1]:
-                dp[j] = prev
-            else:
-                dp[j] = 1 + min(prev, dp[j], dp[j - 1])
-            prev = temp
-    return dp[n]
-
-
-def _similarity(a: str, b: str) -> float:
-    maxlen = max(len(a), len(b))
-    if maxlen == 0:
-        return 1.0
-    return 1.0 - _levenshtein(a, b) / maxlen
-
-
-def _fuzzy_find_candidates(content: str, old_text: str):
-    """
-    Yield candidate substrings from content that match old_text,
-    using a cascade of increasingly fuzzy strategies.
-    Ported from opencode's edit.ts replace() cascade.
-    """
-    # Strategy 1: Exact match
-    if old_text in content:
-        yield old_text
-
-    content_lines = content.split("\n")
-    search_lines = old_text.split("\n")
-    # Strip trailing empty line from search (common copy-paste artifact)
-    while search_lines and not search_lines[-1].strip():
-        search_lines = search_lines[:-1]
-    if not search_lines:
-        return
-
-    n_search = len(search_lines)
-
-    # Strategy 2: Line-trimmed match
-    # Each line trimmed; yields original content substring preserving indentation
-    for i in range(len(content_lines) - n_search + 1):
-        window = content_lines[i : i + n_search]
-        if all(cl.strip() == sl.strip() for cl, sl in zip(window, search_lines, strict=True)):
-            yield "\n".join(window)
-
-    # Strategy 3: Block-anchor match (first/last line as anchors, fuzzy middle)
-    if n_search >= 3:
-        first_trimmed = search_lines[0].strip()
-        last_trimmed = search_lines[-1].strip()
-        candidates = []
-        for i, line in enumerate(content_lines):
-            if line.strip() == first_trimmed:
-                end = i + n_search
-                if end <= len(content_lines) and content_lines[end - 1].strip() == last_trimmed:
-                    block = content_lines[i:end]
-                    # Score middle lines
-                    middle_content = "\n".join(block[1:-1])
-                    middle_search = "\n".join(search_lines[1:-1])
-                    sim = _similarity(middle_content, middle_search)
-                    candidates.append((sim, "\n".join(block)))
-        if candidates:
-            candidates.sort(key=lambda x: x[0], reverse=True)
-            if candidates[0][0] > 0.3:
-                yield candidates[0][1]
-
-    # Strategy 4: Whitespace-normalized match
-    normalized_search = re.sub(r"\s+", " ", old_text).strip()
-    for i in range(len(content_lines) - n_search + 1):
-        window = content_lines[i : i + n_search]
-        normalized_block = re.sub(r"\s+", " ", "\n".join(window)).strip()
-        if normalized_block == normalized_search:
-            yield "\n".join(window)
-
-    # Strategy 5: Indentation-flexible match
-    def _strip_indent(lines):
-        non_empty = [ln for ln in lines if ln.strip()]
-        if not non_empty:
-            return "\n".join(lines)
-        min_indent = min(len(ln) - len(ln.lstrip()) for ln in non_empty)
-        return "\n".join(ln[min_indent:] for ln in lines)
-
-    stripped_search = _strip_indent(search_lines)
-    for i in range(len(content_lines) - n_search + 1):
-        block = content_lines[i : i + n_search]
-        if _strip_indent(block) == stripped_search:
-            yield "\n".join(block)
-
-    # Strategy 6: Trimmed-boundary match
-    trimmed = old_text.strip()
-    if trimmed != old_text and trimmed in content:
-        yield trimmed
-
-
-def _compute_diff(old: str, new: str, path: str) -> str:
-    """Compute a unified diff for display."""
-    old_lines = old.splitlines(keepends=True)
-    new_lines = new.splitlines(keepends=True)
-    diff = difflib.unified_diff(old_lines, new_lines, fromfile=path, tofile=path, n=3)
-    result = "".join(diff)
-    if len(result) > 2000:
-        result = result[:2000] + "\n... (diff truncated)"
-    return result
-
-
 # ── Git snapshot system (ported from opencode's shadow git) ───────────────
 
 
@@ -301,356 +108,21 @@ def _ensure_snapshot_repo():
         _snapshot_git("config", "core.autocrlf", "false")
 
 
-# ── Tool: read_file ──────────────────────────────────────────────────────
-
-
-@mcp.tool()
-def read_file(path: str, offset: int = 1, limit: int = 0) -> str:
-    """Read file contents with line numbers and byte-budget truncation.
-
-    Returns numbered lines. Binary files are detected and rejected.
-    Large files are automatically truncated at 2000 lines or 50KB.
-
-    Args:
-        path: File path (relative to project root or absolute within project)
-        offset: Starting line number, 1-indexed (default: 1)
-        limit: Max lines to return, 0 = up to 2000 (default: 0)
-
-    Returns:
-        File contents with line numbers, or error message
-    """
-    resolved = _resolve_path(path)
-
-    if os.path.isdir(resolved):
-        # List directory contents instead
-        entries = []
-        for entry in sorted(os.listdir(resolved)):
-            full = os.path.join(resolved, entry)
-            suffix = "/" if os.path.isdir(full) else ""
-            entries.append(f"  {entry}{suffix}")
-        total = len(entries)
-        return f"Directory: {path} ({total} entries)\n" + "\n".join(entries[:200])
-
-    if not os.path.isfile(resolved):
-        return f"Error: File not found: {path}"
-
-    if _is_binary(resolved):
-        size = os.path.getsize(resolved)
-        return f"Binary file: {path} ({size:,} bytes). Cannot display binary content."
-
+def _take_snapshot() -> str:
+    """Take a git snapshot and return the tree hash. Silent on failure."""
+    if not SNAPSHOT_DIR:
+        return ""
     try:
-        with open(resolved, encoding="utf-8", errors="replace") as f:
-            all_lines = f.readlines()
-
-        total_lines = len(all_lines)
-        start_idx = max(0, offset - 1)  # Convert 1-indexed to 0-indexed
-        effective_limit = limit if limit > 0 else MAX_READ_LINES
-        end_idx = min(start_idx + effective_limit, total_lines)
-
-        # Apply byte budget (like opencode)
-        output_lines = []
-        byte_count = 0
-        truncated_by_bytes = False
-        for i in range(start_idx, end_idx):
-            line = all_lines[i].rstrip("\n\r")
-            if len(line) > MAX_LINE_LENGTH:
-                line = line[:MAX_LINE_LENGTH] + "..."
-            formatted = f"{i + 1:>6}\t{line}"
-            line_bytes = len(formatted.encode("utf-8")) + 1  # +1 for newline
-            if byte_count + line_bytes > MAX_OUTPUT_BYTES:
-                truncated_by_bytes = True
-                break
-            output_lines.append(formatted)
-            byte_count += line_bytes
-
-        result = "\n".join(output_lines)
-
-        # Truncation notices
-        lines_shown = len(output_lines)
-        actual_end = start_idx + lines_shown
-        if actual_end < total_lines or truncated_by_bytes:
-            result += f"\n\n(Showing lines {start_idx + 1}-{actual_end} of {total_lines}."
-            if truncated_by_bytes:
-                result += " Truncated by byte budget."
-            result += f" Use offset={actual_end + 1} to continue reading.)"
-
-        return result
-    except Exception as e:
-        return f"Error reading file: {e}"
-
-
-# ── Tool: write_file ─────────────────────────────────────────────────────
-
-
-@mcp.tool()
-def write_file(path: str, content: str) -> str:
-    """Create or overwrite a file. Automatically creates parent directories.
-
-    Takes a snapshot before writing for undo capability.
-
-    Args:
-        path: File path relative to project root
-        content: Complete file content
-
-    Returns:
-        Success message with file stats, or error
-    """
-    resolved = _resolve_path(path)
-
-    try:
-        # Snapshot before write
-        _take_snapshot()
-
-        existed = os.path.isfile(resolved)
-        os.makedirs(os.path.dirname(resolved), exist_ok=True)
-        with open(resolved, "w", encoding="utf-8") as f:
-            f.write(content)
-
-        line_count = content.count("\n") + (1 if content and not content.endswith("\n") else 0)
-        action = "Updated" if existed else "Created"
-        return f"{action} {path} ({len(content):,} bytes, {line_count} lines)"
-    except Exception as e:
-        return f"Error writing file: {e}"
-
-
-# ── Tool: edit_file (fuzzy-match cascade) ─────────────────────────────────
-
-
-@mcp.tool()
-def edit_file(path: str, old_text: str, new_text: str, replace_all: bool = False) -> str:
-    """Replace text in a file using a fuzzy-match cascade.
-
-    Tries exact match first, then falls back through increasingly fuzzy
-    strategies: line-trimmed, block-anchor, whitespace-normalized,
-    indentation-flexible, and trimmed-boundary matching.
-
-    Inspired by opencode's 9-strategy edit tool.
-
-    Args:
-        path: File path relative to project root
-        old_text: Text to find (fuzzy matching applied if exact fails)
-        new_text: Replacement text
-        replace_all: Replace all occurrences (default: first only)
-
-    Returns:
-        Success message with diff preview, or error with suggestions
-    """
-    resolved = _resolve_path(path)
-    if not os.path.isfile(resolved):
-        return f"Error: File not found: {path}"
-
-    try:
-        with open(resolved, encoding="utf-8") as f:
-            content = f.read()
-
-        # Snapshot before edit
-        _take_snapshot()
-
-        # Try fuzzy cascade
-        matched_text = None
-        strategy_used = None
-        strategies = [
-            "exact",
-            "line-trimmed",
-            "block-anchor",
-            "whitespace-normalized",
-            "indentation-flexible",
-            "trimmed-boundary",
-        ]
-
-        for i, candidate in enumerate(_fuzzy_find_candidates(content, old_text)):
-            idx = content.find(candidate)
-            if idx == -1:
-                continue
-
-            if replace_all:
-                matched_text = candidate
-                strategy_used = strategies[min(i, len(strategies) - 1)]
-                break
-
-            # Check uniqueness
-            last_idx = content.rfind(candidate)
-            if idx == last_idx:
-                matched_text = candidate
-                strategy_used = strategies[min(i, len(strategies) - 1)]
-                break
-            # Multiple matches — continue to next strategy
-
-        if matched_text is None:
-            # Generate helpful error
-            close = difflib.get_close_matches(old_text[:200], content.split("\n"), n=3, cutoff=0.4)
-            msg = f"Error: Could not find a unique match for old_text in {path}."
-            if close:
-                suggestions = "\n".join(f"  {line}" for line in close)
-                msg += f"\n\nDid you mean one of these lines?\n{suggestions}"
-            return msg
-
-        if replace_all:
-            count = content.count(matched_text)
-            new_content = content.replace(matched_text, new_text)
-        else:
-            count = 1
-            new_content = content.replace(matched_text, new_text, 1)
-
-        # Write
-        with open(resolved, "w", encoding="utf-8") as f:
-            f.write(new_content)
-
-        # Build response with diff preview
-        diff = _compute_diff(content, new_content, path)
-        match_info = f" (matched via {strategy_used})" if strategy_used != "exact" else ""
-        result = f"Replaced {count} occurrence(s) in {path}{match_info}"
-        if diff:
-            result += f"\n\n{diff}"
-        return result
-    except Exception as e:
-        return f"Error editing file: {e}"
-
-
-# ── Tool: list_directory ──────────────────────────────────────────────────
-
-
-@mcp.tool()
-def list_directory(path: str = ".", recursive: bool = False) -> str:
-    """List directory contents with type indicators.
-
-    Args:
-        path: Directory path (relative to project root, default: root)
-        recursive: List recursively (default: False)
-
-    Returns:
-        Sorted directory listing with / suffix for directories
-    """
-    resolved = _resolve_path(path)
-    if not os.path.isdir(resolved):
-        return f"Error: Directory not found: {path}"
-
-    try:
-        skip = {
-            ".git",
-            "__pycache__",
-            "node_modules",
-            ".venv",
-            ".tox",
-            ".mypy_cache",
-            ".ruff_cache",
-        }
-        entries = []
-        if recursive:
-            for root, dirs, files in os.walk(resolved):
-                dirs[:] = sorted(d for d in dirs if d not in skip and not d.startswith("."))
-                rel_root = os.path.relpath(root, resolved)
-                if rel_root == ".":
-                    rel_root = ""
-                for f in sorted(files):
-                    if f.startswith("."):
-                        continue
-                    entries.append(os.path.join(rel_root, f) if rel_root else f)
-                    if len(entries) >= 500:
-                        entries.append("... (truncated at 500 entries)")
-                        return "\n".join(entries)
-        else:
-            for entry in sorted(os.listdir(resolved)):
-                if entry.startswith(".") or entry in skip:
-                    continue
-                full = os.path.join(resolved, entry)
-                suffix = "/" if os.path.isdir(full) else ""
-                entries.append(f"{entry}{suffix}")
-
-        return "\n".join(entries) if entries else "(empty directory)"
-    except Exception as e:
-        return f"Error listing directory: {e}"
-
-
-# ── Tool: search_files ───────────────────────────────────────────────────
-
-
-@mcp.tool()
-def search_files(pattern: str, path: str = ".", include: str = "") -> str:
-    """Search file contents using regex. Results sorted by modification time.
-
-    Uses ripgrep when available, falls back to Python regex.
-
-    Args:
-        pattern: Regex pattern to search for
-        path: Directory to search (relative to project root)
-        include: File glob filter (e.g. '*.py')
-
-    Returns:
-        Matching lines grouped by file with line numbers
-    """
-    resolved = _resolve_path(path)
-    if not os.path.isdir(resolved):
-        return f"Error: Directory not found: {path}"
-
-    try:
-        cmd = [
-            "rg",
-            "-nH",
-            "--no-messages",
-            "--hidden",
-            "--max-count=20",
-            "--glob=!.git/*",
-            pattern,
-        ]
-        if include:
-            cmd.extend(["--glob", include])
-        cmd.append(resolved)
-
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
-        if result.returncode <= 1:
-            output = result.stdout.strip()
-            if not output:
-                return "No matches found."
-
-            # Group by file, make paths relative
-            lines = []
-            for line in output.split("\n")[:SEARCH_RESULT_LIMIT]:
-                line = line.replace(PROJECT_ROOT + "/", "")
-                if len(line) > MAX_LINE_LENGTH:
-                    line = line[:MAX_LINE_LENGTH] + "..."
-                lines.append(line)
-            total = output.count("\n") + 1
-            result_str = "\n".join(lines)
-            if total > SEARCH_RESULT_LIMIT:
-                result_str += (
-                    f"\n\n... ({total} total matches, showing first {SEARCH_RESULT_LIMIT})"
-                )
-            return result_str
-    except FileNotFoundError:
-        pass
-    except subprocess.TimeoutExpired:
-        return "Error: Search timed out after 30 seconds"
-
-    # Fallback: Python regex
-    try:
-        compiled = re.compile(pattern)
-        matches = []
-        skip_dirs = {".git", "__pycache__", "node_modules", ".venv", ".tox"}
-
-        for root, dirs, files in os.walk(resolved):
-            dirs[:] = [d for d in dirs if d not in skip_dirs]
-            for fname in files:
-                if include and not fnmatch.fnmatch(fname, include):
-                    continue
-                fpath = os.path.join(root, fname)
-                rel = os.path.relpath(fpath, PROJECT_ROOT)
-                try:
-                    with open(fpath, encoding="utf-8", errors="ignore") as f:
-                        for i, line in enumerate(f, 1):
-                            if compiled.search(line):
-                                matches.append(f"{rel}:{i}:{line.rstrip()[:MAX_LINE_LENGTH]}")
-                                if len(matches) >= SEARCH_RESULT_LIMIT:
-                                    return "\n".join(matches) + "\n... (truncated)"
-                except (OSError, UnicodeDecodeError):
-                    continue
-
-        return "\n".join(matches) if matches else "No matches found."
-    except re.error as e:
-        return f"Error: Invalid regex: {e}"
+        _ensure_snapshot_repo()
+        _snapshot_git("add", ".")
+        return _snapshot_git("write-tree")
+    except Exception:
+        return ""
 
 
 # ── Tool: run_command ─────────────────────────────────────────────────────
+
+MAX_COMMAND_OUTPUT = 30_000  # chars before truncation
 
 
 @mcp.tool()
@@ -668,7 +140,7 @@ def run_command(command: str, cwd: str = "", timeout: int = 120) -> str:
     Returns:
         Combined stdout/stderr with exit code
     """
-    timeout = min(timeout, 300)  # Cap at 5 minutes
+    timeout = min(timeout, 300)
     work_dir = _resolve_path(cwd) if cwd else PROJECT_ROOT
 
     try:
@@ -698,7 +170,6 @@ def run_command(command: str, cwd: str = "", timeout: int = 120) -> str:
 
         output = "\n".join(parts)
 
-        # Truncate large output (like opencode's MAX_METADATA_LENGTH)
         if len(output) > MAX_COMMAND_OUTPUT:
             output = (
                 output[:MAX_COMMAND_OUTPUT]
@@ -717,19 +188,7 @@ def run_command(command: str, cwd: str = "", timeout: int = 120) -> str:
         return f"Error executing command: {e}"
 
 
-# ── Tool: snapshot (git-based undo) ───────────────────────────────────────
-
-
-def _take_snapshot() -> str:
-    """Take a git snapshot and return the tree hash. Silent on failure."""
-    if not SNAPSHOT_DIR:
-        return ""
-    try:
-        _ensure_snapshot_repo()
-        _snapshot_git("add", ".")
-        return _snapshot_git("write-tree")
-    except Exception:
-        return ""
+# ── Tool: undo_changes (git-based undo) ──────────────────────────────────
 
 
 @mcp.tool()
@@ -1694,6 +1153,8 @@ def run_agent_tests(
 def main() -> None:
     global PROJECT_ROOT, SNAPSHOT_DIR
 
+    from aden_tools.file_ops import register_file_tools
+
     parser = argparse.ArgumentParser(description="Coder Tools MCP Server")
     parser.add_argument("--project-root", default="")
     parser.add_argument("--port", type=int, default=int(os.getenv("CODER_TOOLS_PORT", "4002")))
@@ -1710,6 +1171,13 @@ def main() -> None:
     )
     logger.info(f"Project root: {PROJECT_ROOT}")
     logger.info(f"Snapshot dir: {SNAPSHOT_DIR}")
+
+    register_file_tools(
+        mcp,
+        resolve_path=_resolve_path,
+        before_write=_take_snapshot,
+        project_root=PROJECT_ROOT,
+    )
 
     if args.stdio:
         mcp.run(transport="stdio")
