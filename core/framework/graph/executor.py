@@ -11,7 +11,6 @@ The executor:
 
 import asyncio
 import logging
-import warnings
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -21,13 +20,10 @@ from framework.graph.checkpoint_config import CheckpointConfig
 from framework.graph.edge import EdgeCondition, EdgeSpec, GraphSpec
 from framework.graph.goal import Goal
 from framework.graph.node import (
-    FunctionNode,
-    LLMNode,
     NodeContext,
     NodeProtocol,
     NodeResult,
     NodeSpec,
-    RouterNode,
     SharedMemory,
 )
 from framework.graph.output_cleaner import CleansingConfig, OutputCleaner
@@ -135,9 +131,13 @@ class GraphExecutor:
         parallel_config: ParallelExecutionConfig | None = None,
         event_bus: Any | None = None,
         stream_id: str = "",
+        execution_id: str = "",
         runtime_logger: Any = None,
         storage_path: str | Path | None = None,
         loop_config: dict[str, Any] | None = None,
+        accounts_prompt: str = "",
+        accounts_data: list[dict] | None = None,
+        tool_provider_map: dict[str, str] | None = None,
     ):
         """
         Initialize the executor.
@@ -157,6 +157,9 @@ class GraphExecutor:
             runtime_logger: Optional RuntimeLogger for per-graph-run logging
             storage_path: Optional base path for conversation persistence
             loop_config: Optional EventLoopNode configuration (max_iterations, etc.)
+            accounts_prompt: Connected accounts block for system prompt injection
+            accounts_data: Raw account data for per-node prompt generation
+            tool_provider_map: Tool name to provider name mapping for account routing
         """
         self.runtime = runtime
         self.llm = llm
@@ -168,9 +171,13 @@ class GraphExecutor:
         self.logger = logging.getLogger(__name__)
         self._event_bus = event_bus
         self._stream_id = stream_id
+        self._execution_id = execution_id or getattr(runtime, "execution_id", "")
         self.runtime_logger = runtime_logger
         self._storage_path = Path(storage_path) if storage_path else None
         self._loop_config = loop_config or {}
+        self.accounts_prompt = accounts_prompt
+        self.accounts_data = accounts_data
+        self.tool_provider_map = tool_provider_map
 
         # Initialize output cleaner
         self.cleansing_config = cleansing_config or CleansingConfig()
@@ -237,7 +244,12 @@ class GraphExecutor:
 
     def _validate_tools(self, graph: GraphSpec) -> list[str]:
         """
-        Validate that all tools declared by nodes are available.
+        Validate that all tools declared by reachable nodes are available.
+
+        Only checks nodes reachable from graph.entry_node via edges.
+        Nodes belonging to other entry points (e.g. the coder node when
+        entering via ticket_triage) are skipped — they will be validated
+        when their own entry point triggers execution.
 
         Returns:
             List of error messages (empty if all tools are available)
@@ -245,7 +257,20 @@ class GraphExecutor:
         errors = []
         available_tool_names = {t.name for t in self.tools}
 
+        # Compute reachable nodes from the execution's entry node
+        reachable: set[str] = set()
+        to_visit = [graph.entry_node]
+        while to_visit:
+            nid = to_visit.pop()
+            if nid in reachable:
+                continue
+            reachable.add(nid)
+            for edge in graph.get_outgoing_edges(nid):
+                to_visit.append(edge.target)
+
         for node in graph.nodes:
+            if node.id not in reachable:
+                continue
             if node.tools:
                 missing = set(node.tools) - available_tool_names
                 if missing:
@@ -345,6 +370,9 @@ class GraphExecutor:
         if input_data and not _is_resuming:
             for key, value in input_data.items():
                 memory.write(key, value)
+
+        # Detect event-triggered execution (timer/webhook) — no interactive user.
+        _event_triggered = bool(input_data and isinstance(input_data.get("event"), dict))
 
         path: list[str] = []
         total_tokens = 0
@@ -473,7 +501,7 @@ class GraphExecutor:
             try:
                 from framework.storage.conversation_store import FileConversationStore
 
-                entry_conv_path = self._storage_path / "conversations" / current_node_id
+                entry_conv_path = self._storage_path / "conversations"
                 if entry_conv_path.exists():
                     _store = FileConversationStore(base_path=entry_conv_path)
 
@@ -527,6 +555,7 @@ class GraphExecutor:
                 await self._event_bus.emit_execution_resumed(
                     stream_id=self._stream_id,
                     node_id=current_node_id,
+                    execution_id=self._execution_id,
                 )
 
         # Start run
@@ -571,6 +600,7 @@ class GraphExecutor:
                             stream_id=self._stream_id,
                             node_id=current_node_id,
                             reason="User requested pause (Ctrl+Z)",
+                            execution_id=self._execution_id,
                         )
 
                     # Create session state for pause
@@ -619,7 +649,7 @@ class GraphExecutor:
                     cnt = node_visit_counts.get(current_node_id, 0) + 1
                     node_visit_counts[current_node_id] = cnt
                 _is_retry = False
-                max_visits = getattr(node_spec, "max_node_visits", 1)
+                max_visits = getattr(node_spec, "max_node_visits", 0)
                 if max_visits > 0 and node_visit_counts[current_node_id] > max_visits:
                     self.logger.warning(
                         f"   ⊘ Node '{node_spec.name}' visit limit reached "
@@ -679,6 +709,14 @@ class GraphExecutor:
                         if k not in cumulative_output_keys:
                             cumulative_output_keys.append(k)
 
+                # Build resume narrative (Layer 2) when restoring a session
+                # so the EventLoopNode can rebuild the full 3-layer system prompt.
+                _resume_narrative = ""
+                if _is_resuming and path:
+                    from framework.graph.prompt_composer import build_narrative
+
+                    _resume_narrative = build_narrative(memory, path, graph)
+
                 # Build context for node
                 ctx = self._build_context(
                     node_spec=node_spec,
@@ -690,6 +728,10 @@ class GraphExecutor:
                     inherited_conversation=continuous_conversation if is_continuous else None,
                     override_tools=cumulative_tools if is_continuous else None,
                     cumulative_output_keys=cumulative_output_keys if is_continuous else None,
+                    event_triggered=_event_triggered,
+                    identity_prompt=getattr(graph, "identity_prompt", ""),
+                    narrative=_resume_narrative,
+                    graph=graph,
                 )
 
                 # Log actual input data being read
@@ -740,7 +782,9 @@ class GraphExecutor:
                 # Emit node-started event (skip event_loop nodes — they emit their own)
                 if self._event_bus and node_spec.node_type != "event_loop":
                     await self._event_bus.emit_node_loop_started(
-                        stream_id=self._stream_id, node_id=current_node_id
+                        stream_id=self._stream_id,
+                        node_id=current_node_id,
+                        execution_id=self._execution_id,
                     )
 
                 # Execute node
@@ -750,7 +794,10 @@ class GraphExecutor:
                 # Emit node-completed event (skip event_loop nodes)
                 if self._event_bus and node_spec.node_type != "event_loop":
                     await self._event_bus.emit_node_loop_completed(
-                        stream_id=self._stream_id, node_id=current_node_id, iterations=1
+                        stream_id=self._stream_id,
+                        node_id=current_node_id,
+                        iterations=1,
+                        execution_id=self._execution_id,
                     )
 
                 # Ensure runtime logging has an L2 entry for this node
@@ -833,9 +880,13 @@ class GraphExecutor:
                     # [CORRECTED] Use node_spec.max_retries instead of hardcoded 3
                     max_retries = getattr(node_spec, "max_retries", 3)
 
-                    # Event loop nodes handle retry internally via judge —
-                    # executor retry is catastrophic (retry multiplication)
-                    if node_spec.node_type == "event_loop" and max_retries > 0:
+                    # EventLoopNode instances handle retry internally via judge —
+                    # executor retry would cause catastrophic retry multiplication.
+                    # Only override for actual EventLoopNode instances, not custom
+                    # NodeProtocol implementations that happen to use node_type="event_loop"
+                    from framework.graph.event_loop_node import EventLoopNode
+
+                    if isinstance(node_impl, EventLoopNode) and max_retries > 0:
                         self.logger.warning(
                             f"EventLoopNode '{node_spec.id}' has max_retries={max_retries}. "
                             "Overriding to 0 — event loop nodes handle retry internally via judge."
@@ -866,6 +917,7 @@ class GraphExecutor:
                                 retry_count=retry_count,
                                 max_retries=max_retries,
                                 error=result.error or "",
+                                execution_id=self._execution_id,
                             )
 
                         _is_retry = True
@@ -961,6 +1013,7 @@ class GraphExecutor:
                             stream_id=self._stream_id,
                             node_id=node_spec.id,
                             reason="HITL pause node",
+                            execution_id=self._execution_id,
                         )
 
                     saved_memory = memory.read_all()
@@ -1026,6 +1079,7 @@ class GraphExecutor:
                             source_node=current_node_id,
                             target_node=result.next_node,
                             edge_condition="router",
+                            execution_id=self._execution_id,
                         )
 
                     current_node_id = result.next_node
@@ -1061,6 +1115,7 @@ class GraphExecutor:
                                     edge_condition=edge.condition.value
                                     if hasattr(edge.condition, "value")
                                     else str(edge.condition),
+                                    execution_id=self._execution_id,
                                 )
 
                         # Execute branches in parallel
@@ -1112,6 +1167,7 @@ class GraphExecutor:
                                 stream_id=self._stream_id,
                                 source_node=current_node_id,
                                 target_node=next_node,
+                                execution_id=self._execution_id,
                             )
 
                         # CHECKPOINT: node_complete (after determining next node)
@@ -1159,6 +1215,7 @@ class GraphExecutor:
                     next_spec = graph.get_node(current_node_id)
                     if next_spec and next_spec.node_type == "event_loop":
                         from framework.graph.prompt_composer import (
+                            build_accounts_prompt,
                             build_narrative,
                             build_transition_marker,
                             compose_system_prompt,
@@ -1167,25 +1224,43 @@ class GraphExecutor:
                         # Build Layer 2 (narrative) from current state
                         narrative = build_narrative(memory, path, graph)
 
-                        # Compose new system prompt (Layer 1 + 2 + 3)
+                        # Read agent working memory (adapt.md) once for both
+                        # system prompt and transition marker.
+                        _adapt_text: str | None = None
+                        if self._storage_path:
+                            _adapt_path = self._storage_path / "data" / "adapt.md"
+                            if _adapt_path.exists():
+                                _raw = _adapt_path.read_text(encoding="utf-8").strip()
+                                _adapt_text = _raw or None
+
+                        # Merge adapt.md into narrative for system prompt
+                        if _adapt_text:
+                            narrative = (
+                                f"{narrative}\n\n--- Agent Memory ---\n{_adapt_text}"
+                                if narrative
+                                else _adapt_text
+                            )
+
+                        # Build per-node accounts prompt for the next node
+                        _node_accounts = self.accounts_prompt or None
+                        if self.accounts_data and self.tool_provider_map:
+                            _node_accounts = (
+                                build_accounts_prompt(
+                                    self.accounts_data,
+                                    self.tool_provider_map,
+                                    node_tool_names=next_spec.tools,
+                                )
+                                or None
+                            )
+
+                        # Compose new system prompt (Layer 1 + 2 + 3 + accounts)
                         new_system = compose_system_prompt(
                             identity_prompt=getattr(graph, "identity_prompt", None),
                             focus_prompt=next_spec.system_prompt,
                             narrative=narrative,
+                            accounts_prompt=_node_accounts,
                         )
                         continuous_conversation.update_system_prompt(new_system)
-
-                        # Switch conversation store to the next node's directory
-                        # so the transition marker and all subsequent messages are
-                        # persisted there instead of the first node's directory.
-                        if self._storage_path:
-                            from framework.storage.conversation_store import (
-                                FileConversationStore,
-                            )
-
-                            next_store_path = self._storage_path / "conversations" / next_spec.id
-                            next_store = FileConversationStore(base_path=next_store_path)
-                            await continuous_conversation.switch_store(next_store)
 
                         # Insert transition marker into conversation
                         data_dir = str(self._storage_path / "data") if self._storage_path else None
@@ -1195,6 +1270,7 @@ class GraphExecutor:
                             memory=memory,
                             cumulative_tool_names=sorted(cumulative_tool_names),
                             data_dir=data_dir,
+                            adapt_content=_adapt_text,
                         )
                         await continuous_conversation.add_user_message(
                             marker,
@@ -1212,19 +1288,48 @@ class GraphExecutor:
                                 protect_tokens=2000,
                             )
                         if continuous_conversation.needs_compaction():
+                            _phase_ratio = continuous_conversation.usage_ratio()
                             self.logger.info(
                                 "   Phase-boundary compaction (%.0f%% usage)",
-                                continuous_conversation.usage_ratio() * 100,
+                                _phase_ratio * 100,
                             )
-                            summary = (
-                                f"Summary of earlier phases (before {next_spec.name}). "
-                                "See transition markers for phase details."
+                            _data_dir = (
+                                str(self._storage_path / "data") if self._storage_path else None
                             )
-                            await continuous_conversation.compact(
-                                summary,
-                                keep_recent=4,
-                                phase_graduated=True,
-                            )
+                            if _data_dir:
+                                await continuous_conversation.compact_preserving_structure(
+                                    spillover_dir=_data_dir,
+                                    keep_recent=4,
+                                    phase_graduated=True,
+                                )
+                                # Circuit breaker: if still over budget, fall back
+                                _post_ratio = continuous_conversation.usage_ratio()
+                                if _post_ratio >= 0.9 * _phase_ratio:
+                                    self.logger.warning(
+                                        "   Structure-preserving compaction ineffective "
+                                        "(%.0f%% -> %.0f%%), falling back to summary",
+                                        _phase_ratio * 100,
+                                        _post_ratio * 100,
+                                    )
+                                    summary = (
+                                        f"Summary of earlier phases (before {next_spec.name}). "
+                                        "See transition markers for phase details."
+                                    )
+                                    await continuous_conversation.compact(
+                                        summary,
+                                        keep_recent=4,
+                                        phase_graduated=True,
+                                    )
+                            else:
+                                summary = (
+                                    f"Summary of earlier phases (before {next_spec.name}). "
+                                    "See transition markers for phase details."
+                                )
+                                await continuous_conversation.compact(
+                                    summary,
+                                    keep_recent=4,
+                                    phase_graduated=True,
+                                )
 
                 # Update input_data for next node
                 input_data = result.output
@@ -1289,6 +1394,34 @@ class GraphExecutor:
         except asyncio.CancelledError:
             # Handle cancellation (e.g., TUI quit) - save as paused instead of failed
             self.logger.info("⏸ Execution cancelled - saving state for resume")
+
+            # Flush WIP accumulator outputs from the interrupted node's
+            # cursor.json into SharedMemory so they survive resume.  The
+            # accumulator writes to cursor.json on every set() call, but
+            # only writes to SharedMemory when the judge ACCEPTs.  Without
+            # this, edge conditions checking these keys see None on resume.
+            if current_node_id and self._storage_path:
+                try:
+                    import json as _json
+
+                    cursor_path = self._storage_path / "conversations" / "cursor.json"
+                    if cursor_path.exists():
+                        cursor_data = _json.loads(cursor_path.read_text(encoding="utf-8"))
+                        wip_outputs = cursor_data.get("outputs", {})
+                        for key, value in wip_outputs.items():
+                            if value is not None:
+                                memory.write(key, value, validate=False)
+                        if wip_outputs:
+                            self.logger.info(
+                                "Flushed %d WIP accumulator outputs to memory: %s",
+                                len(wip_outputs),
+                                list(wip_outputs.keys()),
+                            )
+                except Exception:
+                    self.logger.debug(
+                        "Could not flush accumulator outputs from cursor",
+                        exc_info=True,
+                    )
 
             # Save memory and state for resume
             saved_memory = memory.read_all()
@@ -1367,6 +1500,23 @@ class GraphExecutor:
                     execution_quality="failed",
                 )
 
+            # Flush WIP accumulator outputs (same as CancelledError path)
+            if current_node_id and self._storage_path:
+                try:
+                    import json as _json
+
+                    cursor_path = self._storage_path / "conversations" / "cursor.json"
+                    if cursor_path.exists():
+                        cursor_data = _json.loads(cursor_path.read_text(encoding="utf-8"))
+                        for key, value in cursor_data.get("outputs", {}).items():
+                            if value is not None:
+                                memory.write(key, value, validate=False)
+                except Exception:
+                    self.logger.debug(
+                        "Could not flush accumulator outputs from cursor",
+                        exc_info=True,
+                    )
+
             # Save memory and state for potential resume
             saved_memory = memory.read_all()
             session_state_out: dict[str, Any] = {
@@ -1430,6 +1580,10 @@ class GraphExecutor:
         inherited_conversation: Any = None,
         override_tools: list | None = None,
         cumulative_output_keys: list[str] | None = None,
+        event_triggered: bool = False,
+        identity_prompt: str = "",
+        narrative: str = "",
+        graph: "GraphSpec | None" = None,
     ) -> NodeContext:
         """Build execution context for a node."""
         # Filter tools to those available to this node
@@ -1447,6 +1601,29 @@ class GraphExecutor:
             write_keys=node_spec.output_keys,
         )
 
+        # Build per-node accounts prompt (filtered to this node's tools)
+        node_accounts_prompt = self.accounts_prompt
+        if self.accounts_data and self.tool_provider_map:
+            from framework.graph.prompt_composer import build_accounts_prompt
+
+            node_accounts_prompt = build_accounts_prompt(
+                self.accounts_data,
+                self.tool_provider_map,
+                node_tool_names=node_spec.tools,
+            )
+
+        # Build goal context, enriched with capability summary for
+        # client-facing nodes so the LLM knows what the full agent can do.
+        goal_context = goal.to_prompt_context()
+        if graph and node_spec.client_facing:
+            capability_summary = graph.build_capability_summary(graph.entry_node)
+            if capability_summary:
+                goal_context = (
+                    f"{goal_context}\n\n{capability_summary}"
+                    if goal_context
+                    else capability_summary
+                )
+
         return NodeContext(
             runtime=self.runtime,
             node_id=node_spec.id,
@@ -1455,7 +1632,7 @@ class GraphExecutor:
             input_data=input_data,
             llm=self.llm,
             available_tools=available_tools,
-            goal_context=goal.to_prompt_context(),
+            goal_context=goal_context,
             goal=goal,  # Pass Goal object for LLM-powered routers
             max_tokens=max_tokens,
             runtime_logger=self.runtime_logger,
@@ -1463,18 +1640,25 @@ class GraphExecutor:
             continuous_mode=continuous_mode,
             inherited_conversation=inherited_conversation,
             cumulative_output_keys=cumulative_output_keys or [],
+            event_triggered=event_triggered,
+            accounts_prompt=node_accounts_prompt,
+            identity_prompt=identity_prompt,
+            narrative=narrative,
+            execution_id=self._execution_id,
+            stream_id=self._stream_id,
         )
 
-    # Valid node types - no ambiguous "llm" type allowed
     VALID_NODE_TYPES = {
-        "llm_tool_use",
-        "llm_generate",
-        "router",
-        "function",
-        "human_input",
         "event_loop",
     }
-    DEPRECATED_NODE_TYPES = {"llm_tool_use": "event_loop", "llm_generate": "event_loop"}
+    # Node types removed in v0.5 — provide migration guidance
+    REMOVED_NODE_TYPES = {
+        "function": "event_loop",
+        "llm_tool_use": "event_loop",
+        "llm_generate": "event_loop",
+        "router": "event_loop",  # Unused theoretical infrastructure
+        "human_input": "event_loop",  # Use client_facing=True instead
+    }
 
     def _get_node_implementation(
         self, node_spec: NodeSpec, cleanup_llm_model: str | None = None
@@ -1484,62 +1668,23 @@ class GraphExecutor:
         if node_spec.id in self.node_registry:
             return self.node_registry[node_spec.id]
 
+        # Reject removed node types with migration guidance
+        if node_spec.node_type in self.REMOVED_NODE_TYPES:
+            replacement = self.REMOVED_NODE_TYPES[node_spec.node_type]
+            raise RuntimeError(
+                f"Node type '{node_spec.node_type}' was removed in v0.5. "
+                f"Migrate node '{node_spec.id}' to '{replacement}'. "
+                f"See https://github.com/adenhq/hive/issues/4753 for migration guide."
+            )
+
         # Validate node type
         if node_spec.node_type not in self.VALID_NODE_TYPES:
             raise RuntimeError(
                 f"Invalid node type '{node_spec.node_type}' for node '{node_spec.id}'. "
-                f"Must be one of: {sorted(self.VALID_NODE_TYPES)}. "
-                f"Use 'llm_tool_use' for nodes that call tools, 'llm_generate' for text generation."
+                f"Must be one of: {sorted(self.VALID_NODE_TYPES)}."
             )
 
-        # Warn on deprecated node types
-        if node_spec.node_type in self.DEPRECATED_NODE_TYPES:
-            replacement = self.DEPRECATED_NODE_TYPES[node_spec.node_type]
-            warnings.warn(
-                f"Node type '{node_spec.node_type}' is deprecated. "
-                f"Use '{replacement}' instead. "
-                f"Node: '{node_spec.id}'",
-                DeprecationWarning,
-                stacklevel=2,
-            )
-
-        # Create based on type
-        if node_spec.node_type == "llm_tool_use":
-            if not node_spec.tools:
-                raise RuntimeError(
-                    f"Node '{node_spec.id}' is type 'llm_tool_use' but declares no tools. "
-                    "Either add tools to the node or change type to 'llm_generate'."
-                )
-            return LLMNode(
-                tool_executor=self.tool_executor,
-                require_tools=True,
-                cleanup_llm_model=cleanup_llm_model,
-            )
-
-        if node_spec.node_type == "llm_generate":
-            return LLMNode(
-                tool_executor=None,
-                require_tools=False,
-                cleanup_llm_model=cleanup_llm_model,
-            )
-
-        if node_spec.node_type == "router":
-            return RouterNode()
-
-        if node_spec.node_type == "function":
-            # Function nodes need explicit registration
-            raise RuntimeError(
-                f"Function node '{node_spec.id}' not registered. Register with node_registry."
-            )
-
-        if node_spec.node_type == "human_input":
-            # Human input nodes are handled specially by HITL mechanism
-            return LLMNode(
-                tool_executor=None,
-                require_tools=False,
-                cleanup_llm_model=cleanup_llm_model,
-            )
-
+        # Create based on type (only event_loop is valid)
         if node_spec.node_type == "event_loop":
             # Auto-create EventLoopNode with sensible defaults.
             # Custom configs can still be pre-registered via node_registry.
@@ -1550,7 +1695,7 @@ class GraphExecutor:
             if self._storage_path:
                 from framework.storage.conversation_store import FileConversationStore
 
-                store_path = self._storage_path / "conversations" / node_spec.id
+                store_path = self._storage_path / "conversations"
                 conv_store = FileConversationStore(base_path=store_path)
 
             # Auto-configure spillover directory for large tool results.
@@ -1570,11 +1715,11 @@ class GraphExecutor:
                 judge=None,  # implicit judge: accept when output_keys are filled
                 config=LoopConfig(
                     max_iterations=lc.get("max_iterations", default_max_iter),
-                    max_tool_calls_per_turn=lc.get("max_tool_calls_per_turn", 10),
+                    max_tool_calls_per_turn=lc.get("max_tool_calls_per_turn", 30),
                     tool_call_overflow_margin=lc.get("tool_call_overflow_margin", 0.5),
                     stall_detection_threshold=lc.get("stall_detection_threshold", 3),
                     max_history_tokens=lc.get("max_history_tokens", 32000),
-                    max_tool_result_chars=lc.get("max_tool_result_chars", 3_000),
+                    max_tool_result_chars=lc.get("max_tool_result_chars", 30_000),
                     spillover_dir=spillover,
                 ),
                 tool_executor=self.tool_executor,
@@ -1799,14 +1944,19 @@ class GraphExecutor:
                 branch.error = f"Node {branch.node_id} not found in graph"
                 return branch, RuntimeError(branch.error)
 
+            # Get node implementation to check its type
+            branch_impl = self._get_node_implementation(node_spec, graph.cleanup_llm_model)
+
             effective_max_retries = node_spec.max_retries
-            if node_spec.node_type == "event_loop":
-                if effective_max_retries > 1:
-                    self.logger.warning(
-                        f"EventLoopNode '{node_spec.id}' has "
-                        f"max_retries={effective_max_retries}. Overriding "
-                        "to 1 — event loop nodes handle retry internally."
-                    )
+            # Only override for actual EventLoopNode instances, not custom NodeProtocol impls
+            from framework.graph.event_loop_node import EventLoopNode
+
+            if isinstance(branch_impl, EventLoopNode) and effective_max_retries > 1:
+                self.logger.warning(
+                    f"EventLoopNode '{node_spec.id}' has "
+                    f"max_retries={effective_max_retries}. Overriding "
+                    "to 1 — event loop nodes handle retry internally."
+                )
                 effective_max_retries = 1
 
             branch.status = "running"
@@ -1849,13 +1999,17 @@ class GraphExecutor:
                     branch.retry_count = attempt
 
                     # Build context for this branch
-                    ctx = self._build_context(node_spec, memory, goal, mapped, graph.max_tokens)
+                    ctx = self._build_context(
+                        node_spec, memory, goal, mapped, graph.max_tokens, graph=graph
+                    )
                     node_impl = self._get_node_implementation(node_spec, graph.cleanup_llm_model)
 
                     # Emit node-started event (skip event_loop nodes)
                     if self._event_bus and node_spec.node_type != "event_loop":
                         await self._event_bus.emit_node_loop_started(
-                            stream_id=self._stream_id, node_id=branch.node_id
+                            stream_id=self._stream_id,
+                            node_id=branch.node_id,
+                            execution_id=self._execution_id,
                         )
 
                     self.logger.info(
@@ -1879,7 +2033,10 @@ class GraphExecutor:
                     # Emit node-completed event (skip event_loop nodes)
                     if self._event_bus and node_spec.node_type != "event_loop":
                         await self._event_bus.emit_node_loop_completed(
-                            stream_id=self._stream_id, node_id=branch.node_id, iterations=1
+                            stream_id=self._stream_id,
+                            node_id=branch.node_id,
+                            iterations=1,
+                            execution_id=self._execution_id,
                         )
 
                     if result.success:
@@ -1971,10 +2128,6 @@ class GraphExecutor:
     def register_node(self, node_id: str, implementation: NodeProtocol) -> None:
         """Register a custom node implementation."""
         self.node_registry[node_id] = implementation
-
-    def register_function(self, node_id: str, func: Callable) -> None:
-        """Register a function as a node."""
-        self.node_registry[node_id] = FunctionNode(func)
 
     def request_pause(self) -> None:
         """

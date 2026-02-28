@@ -9,6 +9,7 @@ from .base import CredentialSpec
 BIGQUERY_CREDENTIALS = {
     "bigquery": CredentialSpec(
         env_var="GOOGLE_APPLICATION_CREDENTIALS",
+        credential_group="google_cloud",
         tools=["run_bigquery_query", "describe_dataset"],
         required=False,  # Falls back to ADC if not set
         startup_required=False,

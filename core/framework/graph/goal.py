@@ -44,6 +44,11 @@ class SuccessCriterion(BaseModel):
     metric: str = Field(
         description="How to measure: 'output_contains', 'output_equals', 'llm_judge', 'custom'"
     )
+    # NEW: runtime evaluation type (separate from metric)
+    type: str = Field(
+        default="success_rate", description="Runtime evaluation type, e.g. 'success_rate'"
+    )
+
     target: Any = Field(description="The target value or condition")
     weight: float = Field(default=1.0, ge=0.0, le=1.0, description="Relative importance (0-1)")
     met: bool = False
@@ -171,7 +176,17 @@ class Goal(BaseModel):
         return True
 
     def to_prompt_context(self) -> str:
-        """Generate context string for LLM prompts."""
+        """Generate context string for LLM prompts.
+
+        Returns empty string when the goal is a stub (no success criteria,
+        no constraints, no context). Stub goals are metadata-only — used for
+        graph identification but not communicated to the LLM as actionable
+        intent. This prevents runtime agents (e.g. the queen) from
+        misinterpreting their own goal as a user request.
+        """
+        if not self.success_criteria and not self.constraints and not self.context:
+            return ""
+
         lines = [
             f"# Goal: {self.name}",
             f"{self.description}",

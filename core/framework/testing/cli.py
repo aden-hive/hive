@@ -190,7 +190,7 @@ def cmd_test_debug(args: argparse.Namespace) -> int:
     # Find which file contains the test
     test_file = None
     for py_file in tests_dir.glob("test_*.py"):
-        content = py_file.read_text()
+        content = py_file.read_text(encoding="utf-8")
         if f"def {test_name}" in content or f"async def {test_name}" in content:
             test_file = py_file
             break
@@ -238,7 +238,7 @@ def _scan_test_files(tests_dir: Path) -> list[dict]:
 
     for test_file in sorted(tests_dir.glob("test_*.py")):
         try:
-            content = test_file.read_text()
+            content = test_file.read_text(encoding="utf-8")
             tree = ast.parse(content)
 
             for node in ast.walk(tree):

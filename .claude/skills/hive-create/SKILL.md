@@ -492,7 +492,7 @@ AskUserQuestion(questions=[{
 - node_id (kebab-case)
 - name
 - description
-- node_type: `"event_loop"` (recommended for all LLM work) or `"function"` (deterministic, no LLM)
+- node_type: `"event_loop"` (the only valid type; use `client_facing: True` for HITL)
 - input_keys (what data this node receives)
 - output_keys (what data this node produces)
 - tools (ONLY tools that exist from Step 1 — empty list if no tools needed)
@@ -852,8 +852,7 @@ cd /home/timothy/oss/hive && PYTHONPATH=exports uv run python -m AGENT_NAME vali
 
 | Type         | tools param             | Use when                                |
 | ------------ | ----------------------- | --------------------------------------- |
-| `event_loop` | `'["tool1"]'` or `'[]'` | LLM-powered work with or without tools  |
-| `function`   | N/A                     | Deterministic Python operations, no LLM |
+| `event_loop` | `'["tool1"]'` or `'[]'` | All agent work (with or without tools, HITL via client_facing) |
 
 ---
 
@@ -1008,7 +1007,7 @@ Use this reference during STEP 2 to give accurate, honest assessments.
 | Sub-second responses | LLM latency is inherent | Traditional code, no LLM |
 | Processing millions of items | Context windows and rate limits | Batch processing + sampling |
 | Real-time streaming data | No built-in pub/sub or streaming input | Custom MCP server + agent |
-| Guaranteed determinism | LLM outputs vary | Function nodes for deterministic parts |
+| Guaranteed determinism | LLM outputs vary | Traditional code for deterministic parts |
 | Offline/air-gapped | Requires LLM API access | Local models (not currently supported) |
 | Multi-user concurrency | Single-user session model | Separate agent instances per user |
 

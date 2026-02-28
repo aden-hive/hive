@@ -62,9 +62,6 @@ class MockStreamingLLM(LLMProvider):
     def complete(self, messages, system="", **kwargs) -> LLMResponse:
         return LLMResponse(content="Summary.", model="mock", stop_reason="stop")
 
-    def complete_with_tools(self, messages, system, tools, tool_executor, **kwargs) -> LLMResponse:
-        return LLMResponse(content="", model="mock", stop_reason="stop")
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -147,16 +144,18 @@ class TestComposeSystemPrompt:
 
     def test_identity_only(self):
         result = compose_system_prompt(identity_prompt="I am an agent.", focus_prompt=None)
-        assert result == "I am an agent."
+        assert result.startswith("I am an agent.")
+        assert "Current date and time:" in result
 
     def test_focus_only(self):
         result = compose_system_prompt(identity_prompt=None, focus_prompt="Do the thing.")
         assert "Current Focus" in result
         assert "Do the thing." in result
+        assert "Current date and time:" in result
 
     def test_empty(self):
         result = compose_system_prompt(identity_prompt=None, focus_prompt=None)
-        assert result == ""
+        assert "Current date and time:" in result
 
 
 class TestBuildNarrative:

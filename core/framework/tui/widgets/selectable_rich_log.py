@@ -178,7 +178,12 @@ class SelectableRichLog(RichLog):
 
         # Build full text from all lines
         all_text = "\n".join(strip.text for strip in self.lines)
-        extracted = sel.extract(all_text)
+        try:
+            extracted = sel.extract(all_text)
+        except (IndexError, ValueError):
+            # Selection coordinates can exceed line count when the virtual
+            # canvas is larger than the actual content (e.g. after scroll).
+            return None
         return extracted if extracted else None
 
     def copy_selection(self) -> str | None:

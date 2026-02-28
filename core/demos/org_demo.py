@@ -1257,7 +1257,7 @@ async def _run_org_pipeline(websocket, topic: str):
             judge=judge,
             config=LoopConfig(
                 max_iterations=30,
-                max_tool_calls_per_turn=25,
+                max_tool_calls_per_turn=30,
                 max_history_tokens=32_000,
             ),
             conversation_store=store,

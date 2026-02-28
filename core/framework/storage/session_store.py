@@ -24,7 +24,7 @@ class SessionStore:
     Manages sessions in the new structure:
       {base_path}/sessions/session_YYYYMMDD_HHMMSS_{uuid}/
         ├── state.json            # Single source of truth
-        ├── conversations/        # Per-node EventLoop state
+        ├── conversations/        # Flat EventLoop state (parts carry phase_id)
         ├── artifacts/            # Spillover data
         └── logs/                 # L1/L2/L3 observability
             ├── summary.json
@@ -114,7 +114,7 @@ class SessionStore:
             if not state_path.exists():
                 return None
 
-            return SessionState.model_validate_json(state_path.read_text())
+            return SessionState.model_validate_json(state_path.read_text(encoding="utf-8"))
 
         return await asyncio.to_thread(_read)
 
@@ -151,7 +151,7 @@ class SessionStore:
                     continue
 
                 try:
-                    state = SessionState.model_validate_json(state_path.read_text())
+                    state = SessionState.model_validate_json(state_path.read_text(encoding="utf-8"))
 
                     # Apply filters
                     if status and state.status != status:

@@ -44,6 +44,16 @@ def batch_fn(gmail_tools):
     return gmail_tools["gmail_batch_modify_messages"]
 
 
+@pytest.fixture
+def list_labels_fn(gmail_tools):
+    return gmail_tools["gmail_list_labels"]
+
+
+@pytest.fixture
+def create_label_fn(gmail_tools):
+    return gmail_tools["gmail_create_label"]
+
+
 def _mock_response(
     status_code: int = 200, json_data: dict | None = None, text: str = ""
 ) -> MagicMock:
@@ -90,6 +100,18 @@ class TestCredentials:
         monkeypatch.delenv("GOOGLE_ACCESS_TOKEN", raising=False)
         result = batch_fn(message_ids=["abc"], add_labels=["STARRED"])
         assert "error" in result
+
+    def test_list_labels_no_credentials(self, list_labels_fn, monkeypatch):
+        monkeypatch.delenv("GOOGLE_ACCESS_TOKEN", raising=False)
+        result = list_labels_fn()
+        assert "error" in result
+        assert "Gmail credentials not configured" in result["error"]
+
+    def test_create_label_no_credentials(self, create_label_fn, monkeypatch):
+        monkeypatch.delenv("GOOGLE_ACCESS_TOKEN", raising=False)
+        result = create_label_fn(name="Test")
+        assert "error" in result
+        assert "Gmail credentials not configured" in result["error"]
 
 
 # ---------------------------------------------------------------------------
@@ -391,3 +413,132 @@ class TestBatchModifyMessages:
             result = batch_fn(message_ids=["msg1"], add_labels=["FAKE_LABEL"])
 
         assert "error" in result
+
+
+# ---------------------------------------------------------------------------
+# gmail_list_labels
+# ---------------------------------------------------------------------------
+
+
+class TestListLabels:
+    def test_list_labels_success(self, list_labels_fn, monkeypatch):
+        monkeypatch.setenv("GOOGLE_ACCESS_TOKEN", "test_token")
+        mock_resp = _mock_response(
+            200,
+            {
+                "labels": [
+                    {"id": "INBOX", "name": "INBOX", "type": "system"},
+                    {"id": "Label_1", "name": "MyLabel", "type": "user"},
+                ],
+            },
+        )
+        with patch(HTTPX_MODULE, return_value=mock_resp) as mock_req:
+            result = list_labels_fn()
+
+        assert len(result["labels"]) == 2
+        assert result["labels"][0]["id"] == "INBOX"
+        assert result["labels"][1]["name"] == "MyLabel"
+        call_args = mock_req.call_args
+        assert call_args[0][0] == "GET"
+        assert "labels" in call_args[0][1]
+
+    def test_list_labels_empty(self, list_labels_fn, monkeypatch):
+        monkeypatch.setenv("GOOGLE_ACCESS_TOKEN", "test_token")
+        mock_resp = _mock_response(200, {})
+        with patch(HTTPX_MODULE, return_value=mock_resp):
+            result = list_labels_fn()
+
+        assert result["labels"] == []
+
+    def test_list_labels_token_expired(self, list_labels_fn, monkeypatch):
+        monkeypatch.setenv("GOOGLE_ACCESS_TOKEN", "expired")
+        mock_resp = _mock_response(401)
+        with patch(HTTPX_MODULE, return_value=mock_resp):
+            result = list_labels_fn()
+
+        assert "error" in result
+        assert "expired" in result["error"].lower() or "invalid" in result["error"].lower()
+
+    def test_list_labels_network_error(self, list_labels_fn, monkeypatch):
+        monkeypatch.setenv("GOOGLE_ACCESS_TOKEN", "test_token")
+        with patch(HTTPX_MODULE, side_effect=httpx.HTTPError("connection refused")):
+            result = list_labels_fn()
+
+        assert "error" in result
+        assert "Request failed" in result["error"]
+
+
+# ---------------------------------------------------------------------------
+# gmail_create_label
+# ---------------------------------------------------------------------------
+
+
+class TestCreateLabel:
+    def test_create_label_success(self, create_label_fn, monkeypatch):
+        monkeypatch.setenv("GOOGLE_ACCESS_TOKEN", "test_token")
+        mock_resp = _mock_response(
+            200,
+            {
+                "id": "Label_42",
+                "name": "Agent/Important",
+                "type": "user",
+            },
+        )
+        with patch(HTTPX_MODULE, return_value=mock_resp) as mock_req:
+            result = create_label_fn(name="Agent/Important")
+
+        assert result["success"] is True
+        assert result["id"] == "Label_42"
+        assert result["name"] == "Agent/Important"
+        assert result["type"] == "user"
+        body = mock_req.call_args[1]["json"]
+        assert body["name"] == "Agent/Important"
+        assert body["labelListVisibility"] == "labelShow"
+        assert body["messageListVisibility"] == "show"
+
+    def test_create_label_custom_visibility(self, create_label_fn, monkeypatch):
+        monkeypatch.setenv("GOOGLE_ACCESS_TOKEN", "test_token")
+        mock_resp = _mock_response(
+            200,
+            {"id": "Label_43", "name": "Hidden", "type": "user"},
+        )
+        with patch(HTTPX_MODULE, return_value=mock_resp) as mock_req:
+            result = create_label_fn(
+                name="Hidden",
+                label_list_visibility="labelHide",
+                message_list_visibility="hide",
+            )
+
+        assert result["success"] is True
+        body = mock_req.call_args[1]["json"]
+        assert body["labelListVisibility"] == "labelHide"
+        assert body["messageListVisibility"] == "hide"
+
+    def test_create_label_empty_name(self, create_label_fn, monkeypatch):
+        monkeypatch.setenv("GOOGLE_ACCESS_TOKEN", "test_token")
+        result = create_label_fn(name="")
+        assert "error" in result
+        assert "Label name is required" in result["error"]
+
+    def test_create_label_whitespace_name(self, create_label_fn, monkeypatch):
+        monkeypatch.setenv("GOOGLE_ACCESS_TOKEN", "test_token")
+        result = create_label_fn(name="   ")
+        assert "error" in result
+        assert "Label name is required" in result["error"]
+
+    def test_create_label_api_error(self, create_label_fn, monkeypatch):
+        monkeypatch.setenv("GOOGLE_ACCESS_TOKEN", "test_token")
+        mock_resp = _mock_response(409, text="Label name exists")
+        with patch(HTTPX_MODULE, return_value=mock_resp):
+            result = create_label_fn(name="Duplicate")
+
+        assert "error" in result
+        assert "409" in result["error"]
+
+    def test_create_label_network_error(self, create_label_fn, monkeypatch):
+        monkeypatch.setenv("GOOGLE_ACCESS_TOKEN", "test_token")
+        with patch(HTTPX_MODULE, side_effect=httpx.HTTPError("timeout")):
+            result = create_label_fn(name="Test")
+
+        assert "error" in result
+        assert "Request failed" in result["error"]

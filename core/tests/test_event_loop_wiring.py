@@ -65,7 +65,7 @@ def test_client_facing_defaults_false():
         id="n1",
         name="Node 1",
         description="test",
-        node_type="llm_generate",
+        node_type="event_loop",
     )
     assert spec.client_facing is False
 
@@ -143,7 +143,7 @@ def test_registered_event_loop_returns_impl(runtime):
 
 @pytest.mark.asyncio
 async def test_event_loop_max_retries_forced_zero(runtime):
-    """An event_loop node with max_retries=3 should only execute once (no retry)."""
+    """Custom NodeProtocol impls with node_type=event_loop keep their max_retries."""
     node_spec = NodeSpec(
         id="el_fail",
         name="Failing Event Loop",
@@ -171,9 +171,9 @@ async def test_event_loop_max_retries_forced_zero(runtime):
 
     result = await executor.execute(graph, goal, {})
 
-    # Event loop nodes get max_retries overridden to 0, meaning execute once then fail
+    # Custom nodes (not EventLoopNode instances) keep their max_retries
     assert not result.success
-    assert failing_node.attempt_count == 1
+    assert failing_node.attempt_count == 3
 
 
 @pytest.mark.asyncio
@@ -246,21 +246,21 @@ async def test_event_loop_max_retries_positive_logs_warning(runtime, caplog):
     with caplog.at_level(logging.WARNING):
         await executor.execute(graph, goal, {})
 
-    assert "Overriding to 0" in caplog.text
-    assert "el_warn" in caplog.text
+    # Custom nodes (not EventLoopNode instances) don't get override warning
+    assert "Overriding to 0" not in caplog.text
 
 
 # --- Existing node types unaffected ---
 
 
 def test_existing_node_types_unchanged():
-    """All pre-existing node types must still be in VALID_NODE_TYPES with defaults preserved."""
-    expected = {"llm_tool_use", "llm_generate", "router", "function", "human_input"}
-    assert expected.issubset(GraphExecutor.VALID_NODE_TYPES)
+    """Only event_loop is a valid node type."""
+    expected = {"event_loop"}
+    assert expected == GraphExecutor.VALID_NODE_TYPES
 
-    # Default node_type is still llm_tool_use
+    # Default node_type is event_loop
     spec = NodeSpec(id="x", name="X", description="x")
-    assert spec.node_type == "llm_tool_use"
+    assert spec.node_type == "event_loop"
 
     # Default max_retries is still 3
     assert spec.max_retries == 3

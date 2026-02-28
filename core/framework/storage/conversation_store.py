@@ -4,14 +4,20 @@ Each conversation part is stored as a separate JSON file under a
 ``parts/`` subdirectory.  Meta and cursor are stored as ``meta.json``
 and ``cursor.json`` in the base directory.
 
+The store is flat — all nodes in a continuous conversation share one
+directory.  Each part carries a ``phase_id`` to identify which node
+produced it.
+
 Directory layout::
 
-    {base_path}/
-        meta.json
-        cursor.json
+    {base_path}/          (typically ``{session}/conversations/``)
+        meta.json         current node config (overwritten on transition)
+        cursor.json       iteration counter, accumulator outputs, stall state
         parts/
-            0000000000.json
-            0000000001.json
+            0000000000.json   (phase_id=node_a)
+            0000000001.json   (phase_id=node_a)
+            0000000002.json   (transition marker)
+            0000000003.json   (phase_id=node_b)
             ...
 """
 

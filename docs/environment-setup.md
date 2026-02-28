@@ -213,7 +213,7 @@ Follow the prompts to:
 
 1. Understand the agent architecture and file structure
 2. Define the agent's goal, success criteria, and constraints
-3. Learn node types (LLM, tool-use, router, function)
+3. Learn node types (event_loop only)
 4. Discover and validate available tools before use
 
 This step establishes the core concepts and rules needed before building an agent.
@@ -521,8 +521,8 @@ export ANTHROPIC_API_KEY="sk-ant-..."
 ### Optional Configuration
 
 ```bash
-# Credentials storage location (default: ~/.aden/credentials)
-export ADEN_CREDENTIALS_PATH="/custom/path"
+# Fernet encryption key for credential store at ~/.hive/credentials
+export HIVE_CREDENTIAL_KEY="your-fernet-key"
 
 # Agent storage location (default: /tmp)
 export AGENT_STORAGE_PATH="/custom/storage"
