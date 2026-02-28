@@ -1,0 +1,317 @@
+{
+    "agent": {
+        "id": "curriculum_research_agent",
+        "name": "Curriculum Research Agent",
+        "version": "1.0.0",
+        "description": "Generate ID-ready content briefs for course and program development using domain-targeted research and ADDIE framework alignment. Accepts a topic, audience level, and accreditation context, then produces a structured content brief with learning objectives, module outlines, assessment types, and curated resources."
+    },
+    "graph": {
+        "id": "curriculum-research-agent-graph",
+        "goal_id": "curriculum-research-agent",
+        "version": "1.0.0",
+        "entry_node": "intake",
+        "entry_points": {
+            "start": "intake"
+        },
+        "pause_nodes": [],
+        "terminal_nodes": [],
+        "conversation_mode": "continuous",
+        "identity_prompt": "You are a Curriculum Research assistant specializing in instructional design. You help educators and L&D professionals develop structured content briefs by researching current industry standards, aligning findings to learning outcomes, and applying the ADDIE framework.",
+        "nodes": [
+            {
+                "id": "intake",
+                "name": "Intake",
+                "description": "Receive the research topic, target audience, education level, and accreditation context from the user. Confirm the scope before proceeding.",
+                "node_type": "event_loop",
+                "input_keys": [
+                    "topic",
+                    "level",
+                    "audience",
+                    "accreditation_context"
+                ],
+                "output_keys": [
+                    "topic",
+                    "level",
+                    "audience",
+                    "accreditation_context"
+                ],
+                "nullable_output_keys": [],
+                "input_schema": {},
+                "output_schema": {},
+                "success_criteria": "The user has confirmed the topic, audience, level, and accreditation context. All four keys have been written via set_output.",
+                "system_prompt": "You are a Curriculum Research assistant helping develop educational content.\n\n**STEP 1 \u2014 Understand the input (text only, NO tool calls):**\n\nRead the user's input from context. Determine what they provided:\n- If the input is a **file path** (ends in .json), note that you'll load it in step 2.\n- If the input is a **JSON string** or natural language, extract the four fields:\n  1. **topic** \u2014 the subject area (e.g. \"Medication Safety for Registered Nurses\")\n  2. **level** \u2014 education level (e.g. \"Continuing Education\", \"Certificate\", \"Diploma\")\n  3. **audience** \u2014 target learners (e.g. \"RNs with 2-5 years experience\")\n  4. **accreditation_context** \u2014 relevant standards body or requirements (e.g. \"CNA continuing education requirements\")\n\n**STEP 2 \u2014 Load from file if needed:**\nIf the user provided a file path, call:\n- load_curriculum_brief(file_path=<the path>)\nThis returns the four fields from the JSON file.\n\n**STEP 3 \u2014 Confirm with the user (text only, NO tool calls):**\n\nPresent a summary:\n\"Here's what I'll research for you:\n\ud83d\udcda **Topic:** [topic]\n\ud83c\udf93 **Level:** [level]\n\ud83d\udc65 **Audience:** [audience]\n\ud83d\udccb **Accreditation:** [accreditation_context]\n\nI'll now:\n1. Search for current industry standards and best practices\n2. Align findings to learning outcomes\n3. Apply the ADDIE framework to structure the content\n4. Produce an ID-ready content brief with objectives, module outline, assessments, and resources\n\nReady to proceed?\"\n\n**STEP 4 \u2014 After the user confirms, call set_output:**\n- set_output(\"topic\", <the confirmed topic>)\n- set_output(\"level\", <the confirmed level>)\n- set_output(\"audience\", <the confirmed audience>)\n- set_output(\"accreditation_context\", <the confirmed accreditation context>)",
+                "tools": [
+                    "load_curriculum_brief"
+                ],
+                "model": null,
+                "function": null,
+                "routes": {},
+                "max_retries": 3,
+                "retry_on": [],
+                "max_node_visits": 0,
+                "output_model": null,
+                "max_validation_retries": 2,
+                "client_facing": true
+            },
+            {
+                "id": "domain-research",
+                "name": "Domain Research",
+                "description": "Search for current industry standards, regulatory requirements, and best practices using Tavily with domain-scoped queries.",
+                "node_type": "event_loop",
+                "input_keys": [
+                    "topic",
+                    "accreditation_context"
+                ],
+                "output_keys": [
+                    "research_results"
+                ],
+                "nullable_output_keys": [],
+                "input_schema": {},
+                "output_schema": {},
+                "success_criteria": "At least 5 relevant sources have been found and saved to research_results.jsonl via append_data. research_results is set via set_output.",
+                "system_prompt": "You are a curriculum research specialist. Your job is to find current, authoritative sources for course content development.\n\n**STEP 1 \u2014 Design search queries:**\n\nBased on the topic and accreditation context, create 3-5 targeted search queries.\nEach query should focus on a different angle:\n- Query 1: Core competencies and standards (e.g. \"[topic] professional standards [accreditation body]\")\n- Query 2: Current best practices (e.g. \"[topic] evidence-based best practices 2024 2025\")\n- Query 3: Learning outcomes and competency frameworks (e.g. \"[topic] competency framework learning outcomes\")\n- Query 4: Assessment methods (e.g. \"[topic] assessment methods continuing education\")\n- Query 5 (optional): Recent regulatory changes (e.g. \"[topic] regulatory updates [year]\")\n\n**STEP 2 \u2014 Execute searches:**\n\nFor each query, call tavily_search with:\n- query: the search query\n- max_results: 5\n- include_domains: relevant domains for the field (e.g. for nursing:\n  [\"cna-aiic.ca\", \"who.int\", \"ismp.org\", \"nursingworld.org\", \"ncbi.nlm.nih.gov\"])\n  Choose domains appropriate to the topic and accreditation context.\n\n**STEP 3 \u2014 Process and store results with provenance:**\n\nFor each search result, extract a provenance-enriched record:\n- title: the page title\n- url: the full source URL\n- domain: the root domain (e.g. \"ncbi.nlm.nih.gov\", \"who.int\")\n- retrieved_at: today's date in ISO format (YYYY-MM-DD)\n- content: key excerpt or summary\n- relevance: \"high\", \"medium\", or \"low\" based on how directly it addresses the topic\n- category: \"standard\", \"best_practice\", \"competency\", \"assessment\", or \"regulatory\"\n\nCall append_data(filename=\"research_results.jsonl\", data=<JSON result object>) for each result.\n\n**STEP 4 \u2014 Set output:**\n- Call set_output(\"research_results\", \"research_results.jsonl\")\n\n**IMPORTANT:** Prioritize sources from recognized professional bodies, government agencies, and peer-reviewed publications. Exclude commercial marketing content.\n**IMPORTANT:** Every result MUST include domain and retrieved_at for audit traceability.",
+                "tools": [
+                    "tavily_search",
+                    "append_data"
+                ],
+                "model": null,
+                "function": null,
+                "routes": {},
+                "max_retries": 3,
+                "retry_on": [],
+                "max_node_visits": 0,
+                "output_model": null,
+                "max_validation_retries": 2,
+                "client_facing": false
+            },
+            {
+                "id": "standards-alignment",
+                "name": "Standards Alignment",
+                "description": "Map research findings to specific learning outcomes and competency standards based on the audience level and accreditation requirements.",
+                "node_type": "event_loop",
+                "input_keys": [
+                    "research_results",
+                    "level",
+                    "audience"
+                ],
+                "output_keys": [
+                    "aligned_standards"
+                ],
+                "nullable_output_keys": [],
+                "input_schema": {},
+                "output_schema": {},
+                "success_criteria": "Research findings have been mapped to learning outcomes and competency standards. aligned_standards.jsonl is written and set via set_output.",
+                "system_prompt": "You are a curriculum alignment specialist. Map research findings to structured learning outcomes using Bloom's Taxonomy and competency-based frameworks.\n\n**STEP 1 \u2014 Load research results:**\nCall load_data(filename=<the \"research_results\" value from context>).\nProcess all chunks if has_more=true.\n\n**STEP 2 \u2014 Identify key themes:**\n\nGroup the research findings into 3-6 thematic clusters. For each cluster:\n- theme_name: a descriptive label (e.g. \"Medication Administration Safety Protocols\")\n- sources: list of provenance objects [{url, domain, retrieved_at}] supporting this theme\n- key_findings: 2-4 bullet points summarizing the evidence\n\n**STEP 3 \u2014 Map to learning outcomes:**\n\nFor each theme, write 2-3 learning outcomes using Bloom's Taxonomy verbs appropriate to the education level:\n\n- Continuing Education: focus on \"Apply\", \"Analyze\", \"Evaluate\" levels\n- Certificate: focus on \"Understand\", \"Apply\", \"Analyze\" levels\n- Diploma: full range from \"Remember\" to \"Create\"\n\nFormat each outcome as:\n\"Upon completion, learners will be able to [Bloom's verb] [specific skill/knowledge] in [context].\"\n\n**STEP 4 \u2014 Identify competency standards:**\n\nCross-reference themes with the accreditation context to identify:\n- required_competencies: mandated by the accrediting body\n- recommended_competencies: best practice but not mandated\n- gap_areas: topics in the research not yet covered by existing standards\n\n**STEP 5 \u2014 Write aligned standards and set output:**\nFor each theme, call append_data(filename=\"aligned_standards.jsonl\", data=<JSON object with:\n  theme_name, sources (carrying forward provenance: [{url, domain, retrieved_at}]),\n  key_findings, learning_outcomes, competency_level,\n  required_competencies, recommended_competencies, gap_areas\n>)\n- Call set_output(\"aligned_standards\", \"aligned_standards.jsonl\")",
+                "tools": [
+                    "load_data",
+                    "append_data"
+                ],
+                "model": null,
+                "function": null,
+                "routes": {},
+                "max_retries": 3,
+                "retry_on": [],
+                "max_node_visits": 0,
+                "output_model": null,
+                "max_validation_retries": 2,
+                "client_facing": false
+            },
+            {
+                "id": "addie-synthesis",
+                "name": "ADDIE Synthesis",
+                "description": "Apply the ADDIE instructional design framework to transform aligned standards into a structured module outline with objectives, content structure, and assessment types.",
+                "node_type": "event_loop",
+                "input_keys": [
+                    "aligned_standards",
+                    "topic"
+                ],
+                "output_keys": [
+                    "addie_output"
+                ],
+                "nullable_output_keys": [],
+                "input_schema": {},
+                "output_schema": {},
+                "success_criteria": "A complete ADDIE-structured curriculum outline has been created with modules, objectives, and assessments. addie_output.jsonl is written and set via set_output.",
+                "system_prompt": "You are an instructional design expert specializing in the ADDIE model (Analysis, Design, Development, Implementation, Evaluation).\n\n**STEP 1 \u2014 Load aligned standards:**\nCall load_data(filename=<the \"aligned_standards\" value from context>).\n\n**STEP 2 \u2014 Analysis phase:**\n\nSynthesize the aligned standards into a needs analysis:\n- target_audience_profile: capabilities, prerequisites, constraints\n- performance_gaps: what learners currently lack vs. what they need\n- delivery_constraints: format, duration, technology requirements\n\n**STEP 3 \u2014 Design phase \u2014 Create module structure:**\n\nOrganize the learning outcomes into 3-6 modules. For each module:\n- module_number: sequential order\n- module_title: descriptive name\n- duration_hours: estimated instruction time\n- learning_objectives: 2-4 specific, measurable objectives (from aligned standards)\n- content_topics: key topics to cover\n- teaching_strategies: recommended instructional methods\n  (e.g. \"case study\", \"simulation\", \"lecture\", \"group discussion\", \"lab practice\")\n- assessment_type: how learning is measured\n  (e.g. \"quiz\", \"case analysis\", \"skills demonstration\", \"reflection paper\", \"portfolio\")\n- assessment_description: specific assessment activity description\n- resources_needed: materials, technology, or equipment required\n- source_provenance: list of [{url, domain, retrieved_at}] from the aligned standards\n  that inform this module's content \u2014 carry forward from the themes used\n\n**STEP 4 \u2014 Sequencing:**\n\nOrder modules by:\n1. Prerequisite dependencies (foundational concepts first)\n2. Bloom's Taxonomy progression (lower-order \u2192 higher-order)\n3. Practical application flow (theory \u2192 practice \u2192 integration)\n\n**STEP 5 \u2014 Write ADDIE output and set:**\nWrite the complete structure:\n- Call append_data(filename=\"addie_output.jsonl\", data=<JSON with:\n    needs_analysis: {target_audience_profile, performance_gaps, delivery_constraints},\n    modules: [list of module objects],\n    total_duration_hours: sum of all module durations,\n    assessment_strategy: overall approach to assessment\n  >)\n- Call set_output(\"addie_output\", \"addie_output.jsonl\")",
+                "tools": [
+                    "load_data",
+                    "append_data"
+                ],
+                "model": null,
+                "function": null,
+                "routes": {},
+                "max_retries": 3,
+                "retry_on": [],
+                "max_node_visits": 0,
+                "output_model": null,
+                "max_validation_retries": 2,
+                "client_facing": false
+            },
+            {
+                "id": "content-brief",
+                "name": "Content Brief",
+                "description": "Generate and present the final ID-ready content brief to the user, including learning objectives, module outline, assessment plan, and curated resources.",
+                "node_type": "event_loop",
+                "input_keys": [
+                    "addie_output",
+                    "topic"
+                ],
+                "output_keys": [
+                    "content_brief"
+                ],
+                "nullable_output_keys": [],
+                "input_schema": {},
+                "output_schema": {},
+                "success_criteria": "A complete content brief has been presented to the user and saved as a file. content_brief is set via set_output.",
+                "system_prompt": "You are a curriculum development assistant. Generate a polished, ID-ready content brief from the ADDIE synthesis output and present it to the user.\n\n**STEP 1 \u2014 Load ADDIE output:**\nCall load_data(filename=<the \"addie_output\" value from context>).\n\n**STEP 2 \u2014 Generate the content brief (text only, NO tool calls):**\n\nPresent a structured content brief in this format:\n\n---\n\n\ud83d\udccb **Content Brief: [Topic]**\n\n**Program Overview**\n- Level: [level]\n- Target Audience: [audience]\n- Total Duration: [X] hours\n- Number of Modules: [N]\n\n**Needs Analysis Summary**\n[2-3 sentences from the ADDIE needs analysis]\n\n**Learning Outcomes**\nList all learning outcomes across modules, numbered sequentially.\n\n**Module Outline**\n\nFor each module:\n### Module [N]: [Title] ([X] hours)\n**Objectives:**\n- [objective 1]\n- [objective 2]\n\n**Topics:**\n- [topic 1]\n- [topic 2]\n\n**Teaching Strategy:** [method]\n**Assessment:** [type] \u2014 [description]\n**Resources:** [list]\n\n> \ud83d\udccc **Sources:** [domain1] (retrieved [date]) \u2014 [URL1] | [domain2] (retrieved [date]) \u2014 [URL2]\n\n---\n\n**Assessment Strategy**\n[Overview of how learning is assessed across the program]\n\n**Recommended Resources**\n[Curated list of sources with URLs from the research phase]\n\n---\n\n**IMPORTANT:** Each module section MUST include an inline provenance block (\ud83d\udccc Sources) listing the domain, retrieval date, and citation URL for every source that informed that module. This ensures audit traceability for compliance-heavy programs.\n\n**STEP 3 \u2014 Save the brief:**\nCall save_curriculum_brief(content=<the full brief text>, filename=\"content_brief.md\")\n\n**STEP 4 \u2014 After the user responds, call set_output:**\n- set_output(\"content_brief\", \"content_brief.md\")\n\n**STEP 5 \u2014 Offer next steps:**\n\"Your content brief is ready! You can:\n1. Export it as-is for your instructional design team\n2. Adjust the module structure or objectives\n3. Research a different topic\n\nWhat would you like to do?\"",
+                "tools": [
+                    "load_data",
+                    "save_curriculum_brief"
+                ],
+                "model": null,
+                "function": null,
+                "routes": {},
+                "max_retries": 3,
+                "retry_on": [],
+                "max_node_visits": 0,
+                "output_model": null,
+                "max_validation_retries": 2,
+                "client_facing": true
+            }
+        ],
+        "edges": [
+            {
+                "id": "intake-to-research",
+                "source": "intake",
+                "target": "domain-research",
+                "condition": "on_success",
+                "condition_expr": null,
+                "priority": 1,
+                "input_mapping": {}
+            },
+            {
+                "id": "research-to-alignment",
+                "source": "domain-research",
+                "target": "standards-alignment",
+                "condition": "on_success",
+                "condition_expr": null,
+                "priority": 1,
+                "input_mapping": {}
+            },
+            {
+                "id": "alignment-to-addie",
+                "source": "standards-alignment",
+                "target": "addie-synthesis",
+                "condition": "on_success",
+                "condition_expr": null,
+                "priority": 1,
+                "input_mapping": {}
+            },
+            {
+                "id": "addie-to-brief",
+                "source": "addie-synthesis",
+                "target": "content-brief",
+                "condition": "on_success",
+                "condition_expr": null,
+                "priority": 1,
+                "input_mapping": {}
+            },
+            {
+                "id": "brief-to-intake",
+                "source": "content-brief",
+                "target": "intake",
+                "condition": "on_success",
+                "condition_expr": null,
+                "priority": 1,
+                "input_mapping": {}
+            }
+        ],
+        "max_steps": 100,
+        "max_retries_per_node": 3,
+        "description": "Generate ID-ready content briefs for course and program development using domain-targeted research and ADDIE framework alignment."
+    },
+    "goal": {
+        "id": "curriculum-research-agent",
+        "name": "Curriculum Research Agent",
+        "description": "Research current industry standards and best practices for a given topic, align findings to learning outcomes, and produce an ID-ready content brief structured around the ADDIE framework.",
+        "status": "draft",
+        "success_criteria": [
+            {
+                "id": "source-quality",
+                "description": "Research sources are from recognized professional bodies, government agencies, or peer-reviewed publications",
+                "metric": "source_authority_rate",
+                "target": ">=80%",
+                "weight": 0.25,
+                "met": false
+            },
+            {
+                "id": "standards-alignment",
+                "description": "Learning outcomes are mapped to accreditation competencies using appropriate Bloom's Taxonomy levels",
+                "metric": "alignment_completeness",
+                "target": ">=90%",
+                "weight": 0.25,
+                "met": false
+            },
+            {
+                "id": "addie-completeness",
+                "description": "Content brief includes all ADDIE components: needs analysis, module structure, objectives, assessments, and resources",
+                "metric": "addie_coverage",
+                "target": "100%",
+                "weight": 0.30,
+                "met": false
+            },
+            {
+                "id": "brief-actionability",
+                "description": "Content brief is directly usable by an instructional designer without requiring additional research",
+                "metric": "actionability_score",
+                "target": ">=85%",
+                "weight": 0.20,
+                "met": false
+            }
+        ],
+        "constraints": [
+            {
+                "id": "authoritative-sources-only",
+                "description": "Only use sources from recognized professional bodies, government agencies, accreditation authorities, or peer-reviewed publications. Exclude marketing content.",
+                "constraint_type": "hard",
+                "category": "quality",
+                "check": ""
+            },
+            {
+                "id": "blooms-taxonomy-alignment",
+                "description": "All learning objectives must use Bloom's Taxonomy verbs appropriate to the specified education level",
+                "constraint_type": "hard",
+                "category": "pedagogical",
+                "check": ""
+            },
+            {
+                "id": "accreditation-compliance",
+                "description": "Content brief must address all competencies required by the specified accreditation context",
+                "constraint_type": "hard",
+                "category": "compliance",
+                "check": ""
+            }
+        ],
+        "context": {},
+        "required_capabilities": [],
+        "input_schema": {},
+        "output_schema": {},
+        "version": "1.0.0",
+        "parent_version": null,
+        "evolution_reason": null,
+        "created_at": "2026-02-24 00:00:00.000000",
+        "updated_at": "2026-02-25 00:00:00.000000"
+    },
+    "required_tools": [
+        "load_curriculum_brief",
+        "save_curriculum_brief",
+        "tavily_search",
+        "load_data",
+        "append_data"
+    ],
+    "metadata": {
+        "created_at": "2026-02-24T00:00:00.000000",
+        "node_count": 5,
+        "edge_count": 5
+    }
+}
