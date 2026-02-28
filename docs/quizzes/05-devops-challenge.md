@@ -268,7 +268,7 @@ For SOC 2 compliance, what changes are needed?
 2. Name it `aden-devops-YOURNAME.md`
 3. Include all YAML/configuration files
 4. Include any diagrams (use Mermaid, ASCII, or image links)
-5. Email to `careers@adenhq.com`
+5. Email to `contact@adenhq.com`
    - Subject: `[DevOps Challenge] Your Name`
 
 ---

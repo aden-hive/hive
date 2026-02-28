@@ -131,7 +131,7 @@ Before submitting, make sure you have:
 1. Create a GitHub Gist at [gist.github.com](https://gist.github.com)
 2. Name it `aden-getting-started-YOURNAME.md`
 3. Include all your answers and screenshots (use image hosting like imgur for screenshots)
-4. Email the Gist link to `careers@adenhq.com`
+4. Email the Gist link to `contact@adenhq.com`
    - Subject: `[Getting Started Challenge] Your Name`
    - Include your GitHub username
 
