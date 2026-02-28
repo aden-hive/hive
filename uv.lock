@@ -964,6 +964,22 @@ wheels = [
 ]
 
 [[package]]
+name = "google-analytics-data"
+version = "0.20.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "google-api-core", extra = ["grpc"] },
+    { name = "google-auth" },
+    { name = "grpcio" },
+    { name = "proto-plus" },
+    { name = "protobuf" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/29/ec/a3ace1e5c6308f79810d24bfa29971bc1d57e3dd114409a5b58619dcaebb/google_analytics_data-0.20.0.tar.gz", hash = "sha256:00b26c813d3153b2f0e0229f3080f10079313cf922dc286c3114a3b33ad51190", size = 225381, upload-time = "2026-01-15T13:14:56.834Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/52/9d/84f043f125dc3b8285ed5e68b983bc6fa90abb22129847f98e51fff720a4/google_analytics_data-0.20.0-py3-none-any.whl", hash = "sha256:2b2e7fd1e801897073b8501127c7fb5f12df69fc2c0fb46c264813a51292ea78", size = 192755, upload-time = "2026-01-09T14:52:34.837Z" },
+]
+
+[[package]]
 name = "google-api-core"
 version = "2.29.0"
 source = { registry = "https://pypi.org/simple" }
@@ -3477,6 +3493,7 @@ dependencies = [
     { name = "dnspython" },
     { name = "fastmcp" },
     { name = "framework" },
+    { name = "google-analytics-data" },
     { name = "httpx" },
     { name = "jsonpath-ng" },
     { name = "litellm" },
@@ -3539,6 +3556,7 @@ requires-dist = [
     { name = "duckdb", marker = "extra == 'sql'", specifier = ">=1.0.0" },
     { name = "fastmcp", specifier = ">=2.0.0" },
     { name = "framework", editable = "core" },
+    { name = "google-analytics-data", specifier = ">=0.18.0" },
     { name = "google-cloud-bigquery", marker = "extra == 'all'", specifier = ">=3.0.0" },
     { name = "google-cloud-bigquery", marker = "extra == 'bigquery'", specifier = ">=3.0.0" },
     { name = "httpx", specifier = ">=0.27.0" },

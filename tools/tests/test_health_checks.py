@@ -74,6 +74,7 @@ class TestHealthCheckerRegistry:
             "google_maps",
             "anthropic",
             "github",
+            "intercom",
             "resend",
             "google_calendar_oauth",
             "google",
