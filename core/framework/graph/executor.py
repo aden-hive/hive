@@ -1294,9 +1294,7 @@ class GraphExecutor:
                                 _phase_ratio * 100,
                             )
                             _data_dir = (
-                                str(self._storage_path / "data")
-                                if self._storage_path
-                                else None
+                                str(self._storage_path / "data") if self._storage_path else None
                             )
                             if _data_dir:
                                 await continuous_conversation.compact_preserving_structure(

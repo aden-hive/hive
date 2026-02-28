@@ -256,7 +256,13 @@ report covers. Ask if they have questions.
 to access the detailed source material from the research phase. The research node's \
 tool results and research_notes.md contain the full data.
 """,
-    tools=["save_data", "append_data", "serve_file_to_user", "load_data", "list_data_files"],
+    tools=[
+        "save_data",
+        "append_data",
+        "serve_file_to_user",
+        "load_data",
+        "list_data_files",
+    ],
 )
 
 __all__ = [
