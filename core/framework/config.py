@@ -7,6 +7,7 @@ helper functions.
 
 import json
 import os
+import logging
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -18,6 +19,7 @@ from framework.graph.edge import DEFAULT_MAX_TOKENS
 # ---------------------------------------------------------------------------
 
 HIVE_CONFIG_FILE = Path.home() / ".hive" / "configuration.json"
+logger = logging.getLogger(__name__)
 
 
 def get_hive_config() -> dict[str, Any]:
@@ -27,7 +29,13 @@ def get_hive_config() -> dict[str, Any]:
     try:
         with open(HIVE_CONFIG_FILE, encoding="utf-8-sig") as f:
             return json.load(f)
-    except (json.JSONDecodeError, OSError):
+    except json.JSONDecodeError as e:
+        logger.warning(
+            "Failed to parse config file at %s: %s - using defaults", HIVE_CONFIG_FILE, e
+        )
+        return {}
+    except OSError as e:
+        logger.warning("Could not read %s: %s - using defaukts", HIVE_CONFIG_FILE, e)
         return {}
 
 
