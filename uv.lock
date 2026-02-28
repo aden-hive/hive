@@ -801,9 +801,6 @@ dependencies = [
     { name = "litellm" },
     { name = "mcp" },
     { name = "pydantic" },
-    { name = "pytest" },
-    { name = "pytest-asyncio" },
-    { name = "pytest-xdist" },
     { name = "textual" },
     { name = "tools" },
 ]
@@ -821,6 +818,9 @@ webhook = [
 
 [package.dev-dependencies]
 dev = [
+    { name = "pytest" },
+    { name = "pytest-asyncio" },
+    { name = "pytest-xdist" },
     { name = "ruff" },
     { name = "ty" },
 ]
@@ -836,9 +836,6 @@ requires-dist = [
     { name = "litellm", specifier = ">=1.81.0" },
     { name = "mcp", specifier = ">=1.0.0" },
     { name = "pydantic", specifier = ">=2.0" },
-    { name = "pytest", specifier = ">=8.0" },
-    { name = "pytest-asyncio", specifier = ">=0.23" },
-    { name = "pytest-xdist", specifier = ">=3.0" },
     { name = "textual", specifier = ">=1.0.0" },
     { name = "textual", marker = "extra == 'tui'", specifier = ">=0.75.0" },
     { name = "tools", editable = "tools" },
@@ -847,6 +844,9 @@ provides-extras = ["tui", "webhook", "server"]
 
 [package.metadata.requires-dev]
 dev = [
+    { name = "pytest", specifier = ">=8.0" },
+    { name = "pytest-asyncio", specifier = ">=0.23" },
+    { name = "pytest-xdist", specifier = ">=3.0" },
     { name = "ruff", specifier = ">=0.14.14" },
     { name = "ty", specifier = ">=0.0.13" },
 ]
