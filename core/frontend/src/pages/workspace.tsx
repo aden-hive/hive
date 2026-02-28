@@ -470,6 +470,9 @@ export default function Workspace() {
     } catch (err) {
       // 424 = credentials required — open the credentials modal
       if (err instanceof ApiError && err.status === 424) {
+        const errBody = (err as ApiError).body as Record<string, unknown>;
+        const credPath = (errBody?.agent_path as string) || null;
+        if (credPath) setCredentialAgentPath(credPath);
         updateAgentState(activeWorker, { workerRunState: "idle", error: "credentials_required" });
         setCredentialsOpen(true);
         return;
@@ -614,6 +617,9 @@ export default function Workspace() {
         } catch (loadErr: unknown) {
           // 424 = credentials required — open the credentials modal
           if (loadErr instanceof ApiError && loadErr.status === 424) {
+            const errBody = loadErr.body as Record<string, unknown>;
+            const credPath = (errBody.agent_path as string) || null;
+            if (credPath) setCredentialAgentPath(credPath);
             updateAgentState(agentType, { loading: false, error: "credentials_required" });
             setCredentialsOpen(true);
             return;
@@ -1274,10 +1280,13 @@ export default function Workspace() {
           }
           break;
 
-        case "credentials_required":
+        case "credentials_required": {
           updateAgentState(agentType, { workerRunState: "idle", error: "credentials_required" });
+          const credAgentPath = event.data?.agent_path as string | undefined;
+          if (credAgentPath) setCredentialAgentPath(credAgentPath);
           setCredentialsOpen(true);
           break;
+        }
 
         case "worker_loaded": {
           const workerName = event.data?.worker_name as string | undefined;
