@@ -253,3 +253,53 @@ class TestPgExplain:
 
         assert result["success"] is False
         assert "error" in result
+
+    def test_explain_passes_plain_string_not_sql_composable(self, mcp, monkeypatch):
+        """Ensure pg_explain passes a plain SQL string to cursor.execute(),
+        not a pg_sql.SQL() composable object. This is the fix for the SQL
+        injection vector where user input was wrapped in pg_sql.SQL()."""
+        executed_queries = []
+
+        class CaptureCursor:
+            description = [type("D", (), {"name": "plan"})]
+
+            def execute(self, query, params=None):
+                executed_queries.append(query)
+
+            def fetchall(self):
+                return [("Seq Scan on t",)]
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                pass
+
+        class CaptureConn:
+            def set_session(self, **kwargs):
+                pass
+
+            def cursor(self):
+                return CaptureCursor()
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                pass
+
+        monkeypatch.setattr(
+            "aden_tools.tools.postgres_tool.postgres_tool._get_connection",
+            lambda database_url: CaptureConn(),
+        )
+
+        register_tools(mcp)
+        pg_explain_fn = mcp._tool_manager._tools["pg_explain"].fn
+
+        result = pg_explain_fn(sql="SELECT * FROM users")
+
+        assert result["success"] is True
+        # The EXPLAIN query should be a plain string, not a psycopg2 SQL composable
+        assert len(executed_queries) == 1
+        assert isinstance(executed_queries[0], str)
+        assert executed_queries[0] == "EXPLAIN SELECT * FROM users"

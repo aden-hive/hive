@@ -24,7 +24,7 @@ from typing import Any
 
 import psycopg2 as psycopg
 from fastmcp import FastMCP
-from psycopg2 import pool, sql as pg_sql
+from psycopg2 import pool
 
 from aden_tools.credentials import CREDENTIAL_SPECS
 from aden_tools.credentials.store_adapter import CredentialStoreAdapter
@@ -497,7 +497,7 @@ def register_tools(
 
             with _get_connection(database_url) as conn:
                 with conn.cursor() as cur:
-                    cur.execute(pg_sql.SQL("EXPLAIN {}").format(pg_sql.SQL(sql)))
+                    cur.execute(f"EXPLAIN {sql}")
                     plan = [r[0] for r in cur.fetchall()]
 
             duration_ms = int((time.monotonic() - start) * 1000)
