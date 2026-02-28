@@ -1377,6 +1377,7 @@ class YouTubeHealthChecker(BaseHttpHealthChecker):
 # Telegram Bot API health checker (not OAuth - token goes in URL path)
 class TelegramHealthChecker:
     """Health checker for Telegram Bot tokens."""
+
     TIMEOUT = 10.0
 
     def check(self, bot_token: str) -> HealthCheckResult:
