@@ -71,6 +71,12 @@ Important:
 - Track which URL each finding comes from (you'll need citations later)
 - Call set_output for each key in a SEPARATE turn (not in the same turn as other tool calls)
 
+Context management:
+- Your tool results are automatically saved to files. After compaction, the file \
+references remain in the conversation — use load_data() to recover any content you need.
+- Use append_data('research_notes.md', ...) to maintain a running log of key findings \
+as you go. This survives compaction and helps the report node produce a detailed report.
+
 When done, use set_output (one key at a time, separate turns):
 - set_output("findings", "Structured summary: key findings with source URLs for each claim. \
 Include themes, contradictions, and confidence levels.")
@@ -161,6 +167,9 @@ Requirements:
 - Every factual claim must cite its source with [n] notation
 - Be objective — present multiple viewpoints where sources disagree
 - Answer the original research questions from the brief
+- If findings appear incomplete or summarized, call list_data_files() and load_data() \
+to access the detailed source material from the research phase. The research node's \
+tool results and research_notes.md contain the full data.
 
 Save the HTML:
   save_data(filename="report.html", data="<html>...</html>")

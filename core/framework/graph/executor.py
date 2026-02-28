@@ -1288,19 +1288,50 @@ class GraphExecutor:
                                 protect_tokens=2000,
                             )
                         if continuous_conversation.needs_compaction():
+                            _phase_ratio = continuous_conversation.usage_ratio()
                             self.logger.info(
                                 "   Phase-boundary compaction (%.0f%% usage)",
-                                continuous_conversation.usage_ratio() * 100,
+                                _phase_ratio * 100,
                             )
-                            summary = (
-                                f"Summary of earlier phases (before {next_spec.name}). "
-                                "See transition markers for phase details."
+                            _data_dir = (
+                                str(self._storage_path / "data")
+                                if self._storage_path
+                                else None
                             )
-                            await continuous_conversation.compact(
-                                summary,
-                                keep_recent=4,
-                                phase_graduated=True,
-                            )
+                            if _data_dir:
+                                await continuous_conversation.compact_preserving_structure(
+                                    spillover_dir=_data_dir,
+                                    keep_recent=4,
+                                    phase_graduated=True,
+                                )
+                                # Circuit breaker: if still over budget, fall back
+                                _post_ratio = continuous_conversation.usage_ratio()
+                                if _post_ratio >= 0.9 * _phase_ratio:
+                                    self.logger.warning(
+                                        "   Structure-preserving compaction ineffective "
+                                        "(%.0f%% -> %.0f%%), falling back to summary",
+                                        _phase_ratio * 100,
+                                        _post_ratio * 100,
+                                    )
+                                    summary = (
+                                        f"Summary of earlier phases (before {next_spec.name}). "
+                                        "See transition markers for phase details."
+                                    )
+                                    await continuous_conversation.compact(
+                                        summary,
+                                        keep_recent=4,
+                                        phase_graduated=True,
+                                    )
+                            else:
+                                summary = (
+                                    f"Summary of earlier phases (before {next_spec.name}). "
+                                    "See transition markers for phase details."
+                                )
+                                await continuous_conversation.compact(
+                                    summary,
+                                    keep_recent=4,
+                                    phase_graduated=True,
+                                )
 
                 # Update input_data for next node
                 input_data = result.output
@@ -1686,11 +1717,11 @@ class GraphExecutor:
                 judge=None,  # implicit judge: accept when output_keys are filled
                 config=LoopConfig(
                     max_iterations=lc.get("max_iterations", default_max_iter),
-                    max_tool_calls_per_turn=lc.get("max_tool_calls_per_turn", 10),
+                    max_tool_calls_per_turn=lc.get("max_tool_calls_per_turn", 30),
                     tool_call_overflow_margin=lc.get("tool_call_overflow_margin", 0.5),
                     stall_detection_threshold=lc.get("stall_detection_threshold", 3),
                     max_history_tokens=lc.get("max_history_tokens", 32000),
-                    max_tool_result_chars=lc.get("max_tool_result_chars", 3_000),
+                    max_tool_result_chars=lc.get("max_tool_result_chars", 30_000),
                     spillover_dir=spillover,
                 ),
                 tool_executor=self.tool_executor,

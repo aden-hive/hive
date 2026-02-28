@@ -127,7 +127,7 @@ identity_prompt = (
 )
 loop_config = {
     "max_iterations": 100,
-    "max_tool_calls_per_turn": 20,
+    "max_tool_calls_per_turn": 30,
     "max_history_tokens": 32000,
 }
 
@@ -160,8 +160,8 @@ queen_graph = GraphSpec(
     edges=[],
     conversation_mode="continuous",
     loop_config={
-        "max_iterations": 200,
-        "max_tool_calls_per_turn": 10,
+        "max_iterations": 999_999,
+        "max_tool_calls_per_turn": 30,
         "max_history_tokens": 32000,
     },
 )
