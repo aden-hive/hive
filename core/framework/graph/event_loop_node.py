@@ -551,7 +551,36 @@ class EventLoopNode(NodeProtocol):
                         await asyncio.sleep(delay)
                         continue  # retry same iteration
 
-                    # Non-transient or retries exhausted — existing crash handler
+                    # Non-transient or retries exhausted.
+                    # For client-facing nodes, surface the error and wait
+                    # for user input instead of killing the loop.  The user
+                    # can retry or adjust the request.
+                    if ctx.node_spec.client_facing:
+                        error_msg = f"LLM call failed: {e}"
+                        logger.error(
+                            "[%s] iter=%d: %s — waiting for user input",
+                            node_id,
+                            iteration,
+                            error_msg,
+                        )
+                        if self._event_bus:
+                            await self._event_bus.emit_node_retry(
+                                stream_id=stream_id,
+                                node_id=node_id,
+                                retry_count=_stream_retry_count,
+                                max_retries=self._config.max_stream_retries,
+                                error=str(e)[:500],
+                                execution_id=execution_id,
+                            )
+                        # Inject the error as an assistant message so the
+                        # user sees it, then block for their next message.
+                        await conversation.add_assistant_message(
+                            f"[Error: {error_msg}. Please try again.]"
+                        )
+                        await self._await_user_input(ctx, prompt="")
+                        break  # exit retry loop, continue outer iteration
+
+                    # Non-client-facing: crash as before
                     import traceback
 
                     iter_latency_ms = int((time.time() - iter_start) * 1000)

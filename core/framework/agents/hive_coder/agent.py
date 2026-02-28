@@ -160,7 +160,7 @@ queen_graph = GraphSpec(
     edges=[],
     conversation_mode="continuous",
     loop_config={
-        "max_iterations": 200,
+        "max_iterations": 999_999,
         "max_tool_calls_per_turn": 30,
         "max_history_tokens": 32000,
     },
