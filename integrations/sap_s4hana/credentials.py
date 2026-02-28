@@ -4,11 +4,11 @@ SAP S/4HANA Credential Management
 Follows Hive's credentialSpec pattern for secure authentication.
 """
 
-from dataclasses import dataclass
-from typing import Optional
+from __future__ import annotations
 
-from framework.credentials.credential_spec import CredentialSpec
-from framework.credentials.credential_store import CredentialStore
+from dataclasses import dataclass
+
+from framework.credentials import CredentialStore
 
 
 @dataclass
@@ -21,29 +21,35 @@ class SAPCredentials:
     verify_ssl: bool = True
     
     @classmethod
-    def from_credential_store(cls, store: CredentialStore, credential_id: str) -> "SAPCredentials":
-        """Load credentials from Hive's credential store."""
-        spec = store.get(credential_id)
-        
+    def from_credential_store(
+        cls,
+        store: CredentialStore,
+        credential_ref: str = "sap_s4hana/default",
+    ) -> "SAPCredentials":
+        """Load credentials from Hive v0.6+ credential store."""
+        cred = store.get_credential(credential_ref)
+        if cred is None:
+            raise ValueError(f"SAP credential not found: {credential_ref}")
+
+        base_url = cred.get_key("base_url")
+        username = cred.get_key("username")
+        password = cred.get_key("password")
+        client = cred.get_key("client") or "100"
+        verify_ssl_raw = cred.get_key("verify_ssl")
+        verify_ssl = True if verify_ssl_raw is None else str(verify_ssl_raw).lower() == "true"
+
+        if not base_url or not username or not password:
+            raise ValueError(
+                f"SAP credential '{credential_ref}' is missing one of required keys: "
+                "base_url, username, password"
+            )
+
         return cls(
-            base_url=spec.get("base_url"),
-            username=spec.get("username"),
-            password=spec.get("password"),
-            client=spec.get("client", "100"),
-            verify_ssl=spec.get("verify_ssl", True)
-        )
-    
-    def to_credential_spec(self) -> CredentialSpec:
-        """Convert to Hive credential spec format."""
-        return CredentialSpec(
-            credential_type="sap_s4hana",
-            config={
-                "base_url": self.base_url,
-                "username": self.username,
-                "password": self.password,
-                "client": self.client,
-                "verify_ssl": self.verify_ssl
-            }
+            base_url=base_url,
+            username=username,
+            password=password,
+            client=client,
+            verify_ssl=verify_ssl,
         )
 
 
