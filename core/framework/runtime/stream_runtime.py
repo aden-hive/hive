@@ -273,6 +273,7 @@ class StreamRuntime:
             self._outcome_aggregator.record_decision(
                 stream_id=self.stream_id,
                 execution_id=execution_id,
+                run_id=run.id,
                 decision=decision,
             )
 
@@ -326,6 +327,7 @@ class StreamRuntime:
             self._outcome_aggregator.record_outcome(
                 stream_id=self.stream_id,
                 execution_id=execution_id,
+                run_id=run.id,
                 decision_id=decision_id,
                 outcome=outcome,
             )

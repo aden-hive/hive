@@ -51,6 +51,7 @@ class DecisionRecord:
 
     stream_id: str
     execution_id: str
+    run_id: str | None
     decision: Decision
     outcome: Outcome | None = None
     timestamp: datetime = field(default_factory=datetime.now)
@@ -96,6 +97,7 @@ class OutcomeAggregator:
         # Decision tracking
         self._decisions: list[DecisionRecord] = []
         self._decisions_by_id: dict[str, DecisionRecord] = {}
+        self._decisions_by_run: dict[str, list[DecisionRecord]] = {}
         self._lock = asyncio.Lock()
 
         # Criterion tracking
@@ -127,6 +129,7 @@ class OutcomeAggregator:
         stream_id: str,
         execution_id: str,
         decision: Decision,
+        run_id: str | None = None,
     ) -> None:
         """
         Record a decision from any stream.
@@ -139,8 +142,12 @@ class OutcomeAggregator:
         record = DecisionRecord(
             stream_id=stream_id,
             execution_id=execution_id,
+            run_id=run_id,
             decision=decision,
         )
+
+        if run_id:
+            self._decisions_by_run.setdefault(run_id, []).append(record)
 
         # Create unique key for lookup
         key = f"{stream_id}:{execution_id}:{decision.id}"
@@ -156,6 +163,7 @@ class OutcomeAggregator:
         execution_id: str,
         decision_id: str,
         outcome: Outcome,
+        run_id: str | None = None,
     ) -> None:
         """
         Record the outcome of a decision.
@@ -292,6 +300,7 @@ class OutcomeAggregator:
                 ),
                 "streams_active": len({d.stream_id for d in self._decisions}),
                 "executions_total": len({(d.stream_id, d.execution_id) for d in self._decisions}),
+                "runs_total": len({d.run_id for d in self._decisions if d.run_id}),
             }
 
             # Determine recommendation
@@ -425,6 +434,10 @@ class OutcomeAggregator:
             for d in self._decisions
             if d.stream_id == stream_id and d.execution_id == execution_id
         ]
+    
+    def get_decisions_by_run(self, run_id: str) -> list[DecisionRecord]:
+        """Get all decisions associated with a specific run."""
+        return self._decisions_by_run.get(run_id, [])
 
     def get_recent_decisions(self, limit: int = 10) -> list[DecisionRecord]:
         """Get most recent decisions."""
