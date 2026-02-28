@@ -149,6 +149,74 @@ class TestCredentialStoreAdapterToolMapping:
         # Should only appear once even though two tools need it
         assert len(missing) == 1
 
+    def test_multi_provider_satisfied_by_any(self, monkeypatch):
+        """For multi-provider tools, having ANY provider credential is sufficient."""
+        custom_specs = {
+            "provider_a": CredentialSpec(
+                env_var="PROVIDER_A_KEY",
+                tools=["multi_tool"],
+                required=True,
+            ),
+            "provider_b": CredentialSpec(
+                env_var="PROVIDER_B_KEY",
+                tools=["multi_tool"],
+                required=True,
+            ),
+        }
+        monkeypatch.delenv("PROVIDER_A_KEY", raising=False)
+        monkeypatch.setenv("PROVIDER_B_KEY", "some-key")
+
+        creds = CredentialStoreAdapter.with_env_storage(specs=custom_specs)
+        missing = creds.get_missing_for_tools(["multi_tool"])
+
+        assert missing == []
+
+    def test_multi_provider_reports_all_when_none_available(self, monkeypatch):
+        """For multi-provider tools, reports ALL alternatives when none available."""
+        custom_specs = {
+            "provider_a": CredentialSpec(
+                env_var="PROVIDER_A_KEY",
+                tools=["multi_tool"],
+                required=True,
+            ),
+            "provider_b": CredentialSpec(
+                env_var="PROVIDER_B_KEY",
+                tools=["multi_tool"],
+                required=True,
+            ),
+        }
+        monkeypatch.delenv("PROVIDER_A_KEY", raising=False)
+        monkeypatch.delenv("PROVIDER_B_KEY", raising=False)
+
+        creds = CredentialStoreAdapter.with_env_storage(specs=custom_specs)
+        missing = creds.get_missing_for_tools(["multi_tool"])
+
+        assert len(missing) == 2
+        cred_names = {name for name, _ in missing}
+        assert cred_names == {"provider_a", "provider_b"}
+
+    def test_get_credential_for_tool_prefers_available(self, monkeypatch):
+        """get_credential_for_tool returns available provider for multi-provider tools."""
+        custom_specs = {
+            "provider_a": CredentialSpec(
+                env_var="PROVIDER_A_KEY",
+                tools=["multi_tool"],
+                required=True,
+            ),
+            "provider_b": CredentialSpec(
+                env_var="PROVIDER_B_KEY",
+                tools=["multi_tool"],
+                required=True,
+            ),
+        }
+        monkeypatch.delenv("PROVIDER_A_KEY", raising=False)
+        monkeypatch.setenv("PROVIDER_B_KEY", "some-key")
+
+        creds = CredentialStoreAdapter.with_env_storage(specs=custom_specs)
+        result = creds.get_credential_for_tool("multi_tool")
+
+        assert result == "provider_b"
+
 
 class TestCredentialStoreAdapterValidation:
     """Tests for validate_for_tools() behavior."""

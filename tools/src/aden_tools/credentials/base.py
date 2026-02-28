@@ -122,11 +122,11 @@ class CredentialManager:
         self._specs = specs
         self._overrides = _overrides or {}
         self._dotenv_path = dotenv_path
-        # Build reverse mapping: tool_name -> credential_name
-        self._tool_to_cred: dict[str, str] = {}
+        # Build reverse mapping: tool_name -> credential_names (1:many for multi-provider)
+        self._tool_to_creds: dict[str, list[str]] = {}
         for cred_name, spec in self._specs.items():
             for tool_name in spec.tools:
-                self._tool_to_cred[tool_name] = cred_name
+                self._tool_to_creds.setdefault(tool_name, []).append(cred_name)
         # Build reverse mapping: node_type -> credential_name
         self._node_type_to_cred: dict[str, str] = {}
         for cred_name, spec in self._specs.items():
@@ -234,17 +234,29 @@ class CredentialManager:
         """
         Get the credential name required by a tool.
 
+        For multi-provider tools (e.g. send_email), returns the first
+        available provider's credential name, or the first one if none available.
+
         Args:
             tool_name: Name of the tool (e.g., "web_search")
 
         Returns:
             Credential name if tool requires one, None otherwise
         """
-        return self._tool_to_cred.get(tool_name)
+        cred_names = self._tool_to_creds.get(tool_name)
+        if not cred_names:
+            return None
+        for cn in cred_names:
+            if self.is_available(cn):
+                return cn
+        return cred_names[0]
 
     def get_missing_for_tools(self, tool_names: list[str]) -> list[tuple[str, CredentialSpec]]:
         """
         Get list of missing credentials for the given tools.
+
+        For multi-provider tools (e.g. send_email → resend OR google),
+        satisfied if ANY provider credential is available.
 
         Args:
             tool_names: List of tool names to check
@@ -256,15 +268,31 @@ class CredentialManager:
         checked: set[str] = set()
 
         for tool_name in tool_names:
-            cred_name = self._tool_to_cred.get(tool_name)
-            if cred_name is None:
-                # Tool doesn't require credentials
+            cred_names = self._tool_to_creds.get(tool_name)
+            if cred_names is None:
                 continue
-            if cred_name in checked:
-                # Already checked this credential
+            unchecked = [cn for cn in cred_names if cn not in checked]
+            if not unchecked:
                 continue
-            checked.add(cred_name)
 
+            # Multi-provider: satisfied if ANY is available
+            if len(unchecked) > 1:
+                any_available = False
+                for cn in unchecked:
+                    checked.add(cn)
+                    if self.is_available(cn):
+                        any_available = True
+                        break
+                if not any_available:
+                    for cn in unchecked:
+                        spec = self._specs[cn]
+                        if spec.required:
+                            missing.append((cn, spec))
+                continue
+
+            # Single provider
+            cred_name = unchecked[0]
+            checked.add(cred_name)
             spec = self._specs[cred_name]
             if spec.required and not self.is_available(cred_name):
                 missing.append((cred_name, spec))

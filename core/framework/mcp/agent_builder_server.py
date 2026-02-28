@@ -486,19 +486,56 @@ def _validate_tool_credentials(tools_list: list[str]) -> dict | None:
 
         store = _get_credential_store()
 
-        # Build tool -> credential mapping
-        tool_to_cred: dict[str, str] = {}
+        # Build tool -> credential mapping (1:many for multi-provider tools)
+        tool_to_creds: dict[str, list[str]] = {}
         for cred_name, spec in CREDENTIAL_SPECS.items():
             for tool_name in spec.tools:
-                tool_to_cred[tool_name] = cred_name
+                tool_to_creds.setdefault(tool_name, []).append(cred_name)
 
         # Find missing credentials
         cred_errors = []
         checked: set[str] = set()
         for tool_name in tools_list:
-            cred_name = tool_to_cred.get(tool_name)
-            if cred_name is None or cred_name in checked:
+            cred_names = tool_to_creds.get(tool_name)
+            if cred_names is None:
                 continue
+
+            # Filter to credentials we haven't already checked
+            unchecked = [cn for cn in cred_names if cn not in checked]
+            if not unchecked:
+                continue
+
+            # Multi-provider tool (e.g. send_email → resend OR google):
+            # satisfied if ANY provider credential is available.
+            if len(unchecked) > 1:
+                any_available = False
+                for cn in unchecked:
+                    checked.add(cn)
+                    spec = CREDENTIAL_SPECS[cn]
+                    cred_id = spec.credential_id or cn
+                    if store.is_available(cred_id):
+                        any_available = True
+                        break
+                if any_available:
+                    continue
+                # None available — report all alternatives
+                for cn in unchecked:
+                    spec = CREDENTIAL_SPECS[cn]
+                    affected_tools = [t for t in tools_list if t in spec.tools]
+                    cred_errors.append(
+                        {
+                            "credential": cn,
+                            "env_var": spec.env_var,
+                            "tools_affected": affected_tools,
+                            "help_url": spec.help_url,
+                            "description": spec.description,
+                            "alternative_group": tool_name,
+                        }
+                    )
+                continue
+
+            # Single provider
+            cred_name = unchecked[0]
             checked.add(cred_name)
             spec = CREDENTIAL_SPECS[cred_name]
             cred_id = spec.credential_id or cred_name
@@ -3264,12 +3301,12 @@ def check_missing_credentials(
         info = runner.info()
         node_types = list({node.node_type for node in runner.graph.nodes})
 
-        # Build reverse mappings: tool/node_type -> credential name
-        tool_to_cred: dict[str, str] = {}
+        # Build reverse mappings (1:many for multi-provider tools like send_email)
+        tool_to_creds: dict[str, list[str]] = {}
         node_type_to_cred: dict[str, str] = {}
         for cred_name, spec in CREDENTIAL_SPECS.items():
             for tool_name in spec.tools:
-                tool_to_cred[tool_name] = cred_name
+                tool_to_creds.setdefault(tool_name, []).append(cred_name)
             for nt in spec.node_types:
                 node_type_to_cred[nt] = cred_name
 
@@ -3277,27 +3314,76 @@ def check_missing_credentials(
         seen: set[str] = set()
         all_missing = []
 
-        for name_list, mapping in [
-            (info.required_tools, tool_to_cred),
-            (node_types, node_type_to_cred),
-        ]:
-            for item_name in name_list:
-                cred_name = mapping.get(item_name)
-                if cred_name is None or cred_name in seen:
+        # Check tool credentials
+        for tool_name in info.required_tools:
+            cred_names = tool_to_creds.get(tool_name)
+            if cred_names is None:
+                continue
+            unchecked = [cn for cn in cred_names if cn not in seen]
+            if not unchecked:
+                continue
+
+            # Multi-provider: satisfied if ANY provider credential is available
+            if len(unchecked) > 1:
+                any_available = False
+                for cn in unchecked:
+                    seen.add(cn)
+                    spec = CREDENTIAL_SPECS[cn]
+                    cred_id = spec.credential_id or cn
+                    if store.is_available(cred_id):
+                        any_available = True
+                        break
+                if any_available:
                     continue
-                seen.add(cred_name)
-                spec = CREDENTIAL_SPECS[cred_name]
-                cred_id = spec.credential_id or cred_name
-                if spec.required and not store.is_available(cred_id):
+                # None available — report all alternatives
+                for cn in unchecked:
+                    spec = CREDENTIAL_SPECS[cn]
                     all_missing.append(
                         {
-                            "credential_name": cred_name,
+                            "credential_name": cn,
                             "env_var": spec.env_var,
                             "description": spec.description,
                             "help_url": spec.help_url,
                             "tools": spec.tools,
+                            "alternative_group": tool_name,
                         }
                     )
+                continue
+
+            # Single provider
+            cred_name = unchecked[0]
+            seen.add(cred_name)
+            spec = CREDENTIAL_SPECS[cred_name]
+            cred_id = spec.credential_id or cred_name
+            if spec.required and not store.is_available(cred_id):
+                all_missing.append(
+                    {
+                        "credential_name": cred_name,
+                        "env_var": spec.env_var,
+                        "description": spec.description,
+                        "help_url": spec.help_url,
+                        "tools": spec.tools,
+                    }
+                )
+
+        # Check node type credentials
+        for nt in node_types:
+            cred_name = node_type_to_cred.get(nt)
+            if cred_name is None or cred_name in seen:
+                continue
+            seen.add(cred_name)
+            spec = CREDENTIAL_SPECS[cred_name]
+            cred_id = spec.credential_id or cred_name
+            if spec.required and not store.is_available(cred_id):
+                all_missing.append(
+                    {
+                        "credential_name": cred_name,
+                        "env_var": spec.env_var,
+                        "description": spec.description,
+                        "help_url": spec.help_url,
+                        "tools": spec.tools,
+                    }
+                )
 
         # Also check what's already set
         available = []

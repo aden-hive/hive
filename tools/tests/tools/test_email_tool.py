@@ -488,13 +488,85 @@ class TestGmailProvider:
         assert result["provider"] == "gmail"
 
 
-class TestProviderRequired:
-    """Tests that provider is a required parameter."""
+class TestProviderAutoDetect:
+    """Tests that provider auto-detects from available credentials."""
 
-    def test_missing_provider_raises_type_error(self, send_email_fn):
-        """Calling send_email without provider raises TypeError."""
-        with pytest.raises(TypeError):
-            send_email_fn(to="test@example.com", subject="Test", html="<p>Hi</p>")
+    def test_no_credentials_returns_error(self, send_email_fn, monkeypatch):
+        """Omitting provider with no credentials returns helpful error."""
+        monkeypatch.delenv("RESEND_API_KEY", raising=False)
+        monkeypatch.delenv("GOOGLE_ACCESS_TOKEN", raising=False)
+
+        result = send_email_fn(to="test@example.com", subject="Test", html="<p>Hi</p>")
+
+        assert "error" in result
+        assert "No email credentials configured" in result["error"]
+
+    def test_auto_detects_gmail(self, send_email_fn, monkeypatch):
+        """Omitting provider with Gmail credentials uses Gmail."""
+        monkeypatch.setenv("GOOGLE_ACCESS_TOKEN", "test_gmail_token")
+        monkeypatch.delenv("RESEND_API_KEY", raising=False)
+
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {"id": "gmail_auto"}
+
+        with patch(_HTTPX_POST, return_value=mock_response):
+            result = send_email_fn(
+                to="test@example.com", subject="Test", html="<p>Hi</p>"
+            )
+
+        assert result["success"] is True
+        assert result["provider"] == "gmail"
+
+    def test_auto_detects_resend(self, send_email_fn, monkeypatch):
+        """Omitting provider with only Resend credentials uses Resend."""
+        monkeypatch.setenv("RESEND_API_KEY", "re_test_key")
+        monkeypatch.setenv("EMAIL_FROM", "test@example.com")
+        monkeypatch.delenv("GOOGLE_ACCESS_TOKEN", raising=False)
+
+        with patch("resend.Emails.send") as mock_send:
+            mock_send.return_value = {"id": "resend_auto"}
+            result = send_email_fn(
+                to="test@example.com", subject="Test", html="<p>Hi</p>"
+            )
+
+        assert result["success"] is True
+        assert result["provider"] == "resend"
+
+    def test_prefers_gmail_over_resend(self, send_email_fn, monkeypatch):
+        """When both providers are available, prefers Gmail."""
+        monkeypatch.setenv("GOOGLE_ACCESS_TOKEN", "test_gmail_token")
+        monkeypatch.setenv("RESEND_API_KEY", "re_test_key")
+
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {"id": "gmail_preferred"}
+
+        with patch(_HTTPX_POST, return_value=mock_response):
+            result = send_email_fn(
+                to="test@example.com", subject="Test", html="<p>Hi</p>"
+            )
+
+        assert result["success"] is True
+        assert result["provider"] == "gmail"
+
+    def test_explicit_provider_still_works(self, send_email_fn, monkeypatch):
+        """Explicit provider overrides auto-detection."""
+        monkeypatch.setenv("GOOGLE_ACCESS_TOKEN", "test_gmail_token")
+        monkeypatch.setenv("RESEND_API_KEY", "re_test_key")
+        monkeypatch.setenv("EMAIL_FROM", "test@example.com")
+
+        with patch("resend.Emails.send") as mock_send:
+            mock_send.return_value = {"id": "resend_explicit"}
+            result = send_email_fn(
+                to="test@example.com",
+                subject="Test",
+                html="<p>Hi</p>",
+                provider="resend",
+            )
+
+        assert result["success"] is True
+        assert result["provider"] == "resend"
 
 
 _HTTPX_GET = "aden_tools.tools.email_tool.email_tool.httpx.get"

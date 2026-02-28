@@ -130,6 +130,18 @@ def register_tools(
             return credentials.get("resend")
         return os.getenv("RESEND_API_KEY")
 
+    def _detect_provider(account: str = "") -> Literal["resend", "gmail"] | None:
+        """Auto-detect email provider from available credentials.
+
+        Checks gmail first (more common), then resend.
+        Returns None if no provider credentials are found.
+        """
+        if _get_credential("gmail", account):
+            return "gmail"
+        if _get_credential("resend"):
+            return "resend"
+        return None
+
     def _resolve_from_email(from_email: str | None) -> str | None:
         """Resolve sender address: explicit param > EMAIL_FROM env var."""
         if from_email:
@@ -151,13 +163,22 @@ def register_tools(
         to: str | list[str],
         subject: str,
         html: str,
-        provider: Literal["resend", "gmail"],
+        provider: Literal["resend", "gmail"] | None = None,
         from_email: str | None = None,
         cc: str | list[str] | None = None,
         bcc: str | list[str] | None = None,
         account: str = "",
     ) -> dict:
         """Core email sending logic, callable by other tools."""
+        # Auto-detect provider if not specified
+        if provider is None:
+            provider = _detect_provider(account)
+            if provider is None:
+                return {
+                    "error": "No email credentials configured",
+                    "help": "Connect Gmail via hive.adenhq.com or set RESEND_API_KEY",
+                }
+
         from_email = _resolve_from_email(from_email)
 
         to_list = _normalize_recipients(to)
@@ -217,7 +238,7 @@ def register_tools(
         to: str | list[str],
         subject: str,
         html: str,
-        provider: Literal["resend", "gmail"],
+        provider: Literal["resend", "gmail"] | None = None,
         from_email: str | None = None,
         cc: str | list[str] | None = None,
         bcc: str | list[str] | None = None,
@@ -230,11 +251,15 @@ def register_tools(
         - "gmail": Use Gmail API (requires Gmail OAuth2 via Aden)
         - "resend": Use Resend API (requires RESEND_API_KEY)
 
+        If provider is not specified, auto-detects from available credentials
+        (prefers Gmail over Resend).
+
         Args:
             to: Recipient email address(es). Single string or list of strings.
             subject: Email subject line (1-998 chars per RFC 2822).
             html: Email body as HTML string.
-            provider: Email provider to use ("gmail" or "resend"). Required.
+            provider: Email provider to use ("gmail" or "resend"). Optional.
+                      If omitted, auto-detects from configured credentials.
             from_email: Sender email address. Falls back to EMAIL_FROM env var if not provided.
                         Optional for Gmail (defaults to authenticated user's address).
             cc: CC recipient(s). Single string or list of strings. Optional.

@@ -73,13 +73,13 @@ class CredentialStoreAdapter:
         self._store = store
         self._specs = specs
 
-        # Build reverse mappings for validation
-        self._tool_to_cred: dict[str, str] = {}
+        # Build reverse mappings for validation (1:many for multi-provider tools)
+        self._tool_to_creds: dict[str, list[str]] = {}
         self._node_type_to_cred: dict[str, str] = {}
 
         for cred_name, spec in self._specs.items():
             for tool_name in spec.tools:
-                self._tool_to_cred[tool_name] = cred_name
+                self._tool_to_creds.setdefault(tool_name, []).append(cred_name)
             for node_type in spec.node_types:
                 self._node_type_to_cred[node_type] = cred_name
 
@@ -135,17 +135,30 @@ class CredentialStoreAdapter:
         """
         Get the credential name required by a tool.
 
+        For multi-provider tools (e.g. send_email), returns the first
+        available provider's credential name, or the first one if none available.
+
         Args:
             tool_name: Name of the tool (e.g., "web_search")
 
         Returns:
             Credential name if tool requires one, None otherwise
         """
-        return self._tool_to_cred.get(tool_name)
+        cred_names = self._tool_to_creds.get(tool_name)
+        if not cred_names:
+            return None
+        # Return first available, or first if none available
+        for cn in cred_names:
+            if self.is_available(cn):
+                return cn
+        return cred_names[0]
 
     def get_missing_for_tools(self, tool_names: list[str]) -> list[tuple[str, CredentialSpec]]:
         """
         Get list of missing credentials for the given tools.
+
+        For multi-provider tools (e.g. send_email → resend OR google),
+        satisfied if ANY provider credential is available.
 
         Args:
             tool_names: List of tool names to check
@@ -157,13 +170,31 @@ class CredentialStoreAdapter:
         checked: set[str] = set()
 
         for tool_name in tool_names:
-            cred_name = self._tool_to_cred.get(tool_name)
-            if cred_name is None:
+            cred_names = self._tool_to_creds.get(tool_name)
+            if cred_names is None:
                 continue
-            if cred_name in checked:
+            unchecked = [cn for cn in cred_names if cn not in checked]
+            if not unchecked:
                 continue
-            checked.add(cred_name)
 
+            # Multi-provider: satisfied if ANY is available
+            if len(unchecked) > 1:
+                any_available = False
+                for cn in unchecked:
+                    checked.add(cn)
+                    if self.is_available(cn):
+                        any_available = True
+                        break
+                if not any_available:
+                    for cn in unchecked:
+                        spec = self._specs[cn]
+                        if spec.required:
+                            missing.append((cn, spec))
+                continue
+
+            # Single provider
+            cred_name = unchecked[0]
+            checked.add(cred_name)
             spec = self._specs[cred_name]
             if spec.required and not self.is_available(cred_name):
                 missing.append((cred_name, spec))
@@ -324,11 +355,20 @@ class CredentialStoreAdapter:
     def get_tool_provider_map(self) -> dict[str, str]:
         """Map tool names to provider names for account routing.
 
+        For multi-provider tools, maps to the available provider's aden_provider_name.
+
         Returns:
             Dict mapping tool_name -> provider_name
             (e.g. {"gmail_list_messages": "google", "slack_send_message": "slack"})
         """
-        return dict(self._tool_to_cred)
+        result: dict[str, str] = {}
+        for tool_name, cred_names in self._tool_to_creds.items():
+            for cn in cred_names:
+                spec = self._specs[cn]
+                if spec.aden_provider_name:
+                    result[tool_name] = spec.aden_provider_name
+                    break
+        return result
 
     def get_by_alias(self, provider_name: str, alias: str) -> str | None:
         """Resolve a specific account's token by alias."""
