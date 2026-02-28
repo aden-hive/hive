@@ -10,6 +10,7 @@ Usage:
 import json
 import logging
 import os
+import shutil
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -2772,6 +2773,21 @@ def run_tests(
     import re
     import subprocess
 
+    # Guard: pytest must be available as a subprocess command.
+    # Install with: pip install 'framework[testing]'
+    if shutil.which("pytest") is None:
+        return json.dumps(
+            {
+                "goal_id": goal_id,
+                "error": (
+                    "pytest is not installed or not on PATH. "
+                    "Hive's test runner requires pytest at runtime. "
+                    "Install it with: pip install 'framework[testing]' "
+                    "or: uv pip install 'framework[testing]'"
+                ),
+            }
+        )
+
     path, err = _validate_agent_path(agent_path)
     if err:
         return err
@@ -2964,6 +2980,22 @@ def debug_test(
     """
     import re
     import subprocess
+
+    # Guard: pytest must be available as a subprocess command.
+    # Install with: pip install 'framework[testing]'
+    if shutil.which("pytest") is None:
+        return json.dumps(
+            {
+                "goal_id": goal_id,
+                "test_name": test_name,
+                "error": (
+                    "pytest is not installed or not on PATH. "
+                    "Hive's test runner requires pytest at runtime. "
+                    "Install it with: pip install 'framework[testing]' "
+                    "or: uv pip install 'framework[testing]'"
+                ),
+            }
+        )
 
     # Derive agent_path from session if not provided
     if not agent_path and _session:
