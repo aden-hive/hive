@@ -118,6 +118,11 @@ RATE_LIMIT_MAX_RETRIES = 10
 RATE_LIMIT_BACKOFF_BASE = 2  # seconds
 RATE_LIMIT_MAX_DELAY = 120  # seconds - cap to prevent absurd waits
 
+# Empty-stream retries use a short fixed delay, not the rate-limit backoff.
+# Conversation-structure issues are deterministic — long waits don't help.
+EMPTY_STREAM_MAX_RETRIES = 3
+EMPTY_STREAM_RETRY_DELAY = 1.0  # seconds
+
 # Directory for dumping failed requests
 FAILED_REQUESTS_DIR = Path.home() / ".hive" / "failed_requests"
 
@@ -770,6 +775,18 @@ class LiteLLMProvider(LLMProvider):
             else:
                 full_messages.insert(0, {"role": "system", "content": json_instruction.strip()})
 
+        # Remove ghost empty assistant messages (content="" and no tool_calls).
+        # These arise when a model returns an empty stream after a tool result
+        # (an "expected" no-op turn). Keeping them in history confuses some
+        # models (notably Codex/gpt-5.3) and causes cascading empty streams.
+        full_messages = [
+            m
+            for m in full_messages
+            if not (
+                m.get("role") == "assistant" and not m.get("content") and not m.get("tool_calls")
+            )
+        ]
+
         kwargs: dict[str, Any] = {
             "model": self.model,
             "messages": full_messages,
@@ -899,7 +916,7 @@ class LiteLLMProvider(LLMProvider):
                 # (If text deltas were yielded above, has_content is True
                 # and we skip the retry path — nothing was yielded in vain.)
                 has_content = accumulated_text or tool_calls_acc
-                if not has_content and attempt < RATE_LIMIT_MAX_RETRIES:
+                if not has_content:
                     # If the conversation ends with an assistant or tool
                     # message, an empty stream is expected — the LLM has
                     # nothing new to say.  Don't burn retries on this;
@@ -912,8 +929,12 @@ class LiteLLMProvider(LLMProvider):
                         None,
                     )
                     if last_role in ("assistant", "tool"):
-                        logger.debug(
-                            "[stream] Empty response after %s message — expected, not retrying.",
+                        logger.warning(
+                            "[stream] %s returned empty stream after %s message "
+                            "(no text, no tool calls). Treating as a no-op turn. "
+                            "If this repeats, the agent may be stuck — check for "
+                            "ghost empty assistant messages in conversation history.",
+                            self.model,
                             last_role,
                         )
                         for event in tail_events:
@@ -937,26 +958,30 @@ class LiteLLMProvider(LLMProvider):
                             yield event
                         return
 
-                    wait = _compute_retry_delay(attempt)
-                    token_count, token_method = _estimate_tokens(
-                        self.model,
-                        full_messages,
-                    )
-                    dump_path = _dump_failed_request(
-                        model=self.model,
-                        kwargs=kwargs,
-                        error_type="empty_stream",
-                        attempt=attempt,
-                    )
-                    logger.warning(
-                        f"[stream-retry] {self.model} returned empty stream — "
-                        f"~{token_count} tokens ({token_method}). "
-                        f"Request dumped to: {dump_path}. "
-                        f"Retrying in {wait}s "
-                        f"(attempt {attempt + 1}/{RATE_LIMIT_MAX_RETRIES})"
-                    )
-                    await asyncio.sleep(wait)
-                    continue
+                    # Empty stream after a user message — use short fixed
+                    # retries, not the rate-limit backoff.  This is likely
+                    # a deterministic conversation-structure issue, so long
+                    # exponential waits don't help.
+                    if attempt < EMPTY_STREAM_MAX_RETRIES:
+                        token_count, token_method = _estimate_tokens(
+                            self.model,
+                            full_messages,
+                        )
+                        dump_path = _dump_failed_request(
+                            model=self.model,
+                            kwargs=kwargs,
+                            error_type="empty_stream",
+                            attempt=attempt,
+                        )
+                        logger.warning(
+                            f"[stream-retry] {self.model} returned empty stream — "
+                            f"~{token_count} tokens ({token_method}). "
+                            f"Request dumped to: {dump_path}. "
+                            f"Retrying in {EMPTY_STREAM_RETRY_DELAY}s "
+                            f"(attempt {attempt + 1}/{EMPTY_STREAM_MAX_RETRIES})"
+                        )
+                        await asyncio.sleep(EMPTY_STREAM_RETRY_DELAY)
+                        continue
 
                 # Success (or final attempt) — flush remaining events.
                 for event in tail_events:
