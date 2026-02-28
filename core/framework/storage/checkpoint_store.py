@@ -95,7 +95,7 @@ class CheckpointStore:
                 return None
 
             try:
-                return Checkpoint.model_validate_json(checkpoint_path.read_text())
+                return Checkpoint.model_validate_json(checkpoint_path.read_text(encoding="utf-8"))
             except Exception as e:
                 logger.error(f"Failed to load checkpoint {checkpoint_id}: {e}")
                 return None
@@ -123,7 +123,7 @@ class CheckpointStore:
                 return None
 
             try:
-                return CheckpointIndex.model_validate_json(self.index_path.read_text())
+                return CheckpointIndex.model_validate_json(self.index_path.read_text(encoding="utf-8"))
             except Exception as e:
                 logger.error(f"Failed to load checkpoint index: {e}")
                 return None

@@ -2,9 +2,12 @@
 Chat / REPL Widget - Uses RichLog for append-only, selection-safe display.
 
 Streaming display approach:
-- The processing-indicator Label is used as a live status bar during streaming
-  (Label.update() replaces text in-place, unlike RichLog which is append-only).
-- On EXECUTION_COMPLETED, the final output is written to RichLog as permanent history.
+- The #streaming-output RichLog shows live LLM output as it streams in.
+  Each text delta appends new tokens so the user sees the full response forming.
+- On flush (tool call, node switch, execution complete, input requested) the
+  accumulated text is written to #chat-history as permanent history and the
+  streaming area is cleared.
+- The #processing-indicator Label shows brief status messages (tool names, etc.).
 - Tool events are written directly to RichLog as discrete status lines.
 
 Client-facing input:
@@ -17,14 +20,16 @@ Client-facing input:
 import asyncio
 import logging
 import re
+import shutil
 import threading
 from pathlib import Path
 from typing import Any
 
+from rich.text import Text
 from textual.app import ComposeResult
-from textual.containers import Vertical
+from textual.containers import Horizontal, Vertical
 from textual.message import Message
-from textual.widgets import Label, TextArea
+from textual.widgets import Button, Label, TextArea
 
 from framework.runtime.agent_runtime import AgentRuntime
 from framework.runtime.event_bus import AgentEvent
@@ -33,7 +38,7 @@ from framework.tui.widgets.selectable_rich_log import SelectableRichLog as RichL
 
 
 class ChatTextArea(TextArea):
-    """TextArea that submits on Enter and inserts newlines on Shift+Enter."""
+    """TextArea that submits on Enter and inserts newlines on Shift+Enter (or Ctrl+J)."""
 
     class Submitted(Message):
         """Posted when the user presses Enter."""
@@ -50,7 +55,7 @@ class ChatTextArea(TextArea):
                 self.post_message(self.Submitted(text))
             event.stop()
             event.prevent_default()
-        elif event.key == "shift+enter":
+        elif event.key in ("shift+enter", "ctrl+j"):
             event.key = "enter"
             await super()._on_key(event)
         else:
@@ -67,6 +72,54 @@ class ChatRepl(Vertical):
         layout: vertical;
     }
 
+    ChatRepl > #input-row {
+        width: 100%;
+        height: auto;
+        dock: bottom;
+    }
+
+    ChatRepl > #input-row > ChatTextArea {
+        width: 1fr;
+        height: auto;
+        max-height: 7;
+        dock: none;
+        margin-top: 1;
+    }
+
+    ChatRepl > #input-row > #action-button {
+        width: auto;
+        height: auto;
+        min-width: 10;
+        margin-top: 1;
+        margin-left: 1;
+        border: none;
+        dock: none;
+    }
+
+    ChatRepl > #input-row > #action-button.send-mode {
+        background: $success;
+        color: $text;
+    }
+
+    ChatRepl > #input-row > #action-button.send-mode:hover {
+        background: $success-darken-1;
+    }
+
+    ChatRepl > #input-row > #action-button.pause-mode {
+        background: red;
+        color: white;
+    }
+
+    ChatRepl > #input-row > #action-button.pause-mode:hover {
+        background: darkred;
+    }
+
+    ChatRepl > #input-row > #action-button:disabled {
+        background: $panel;
+        color: $text-muted;
+        opacity: 0.4;
+    }
+
     ChatRepl > RichLog {
         width: 100%;
         height: 1fr;
@@ -76,26 +129,35 @@ class ChatRepl(Vertical):
         scrollbar-color: $primary;
     }
 
+    ChatRepl > #streaming-output {
+        width: 100%;
+        height: auto;
+        min-height: 0;
+        max-height: 20%;
+        background: $panel;
+        border-top: solid $primary 40%;
+        display: none;
+        scrollbar-background: $panel;
+        scrollbar-color: $primary;
+        padding: 0 1;
+    }
+
     ChatRepl > #processing-indicator {
         width: 100%;
-        height: 1;
+        height: auto;
+        max-height: 4;
         background: $primary 20%;
         color: $text;
         text-style: bold;
         display: none;
     }
 
-    ChatRepl > ChatTextArea {
-        width: 100%;
-        height: auto;
-        max-height: 7;
-        dock: bottom;
+    ChatRepl > #input-row > ChatTextArea {
         background: $surface;
         border: tall $primary;
-        margin-top: 1;
     }
 
-    ChatRepl > ChatTextArea:focus {
+    ChatRepl > #input-row > ChatTextArea:focus {
         border: tall $accent;
     }
     """
@@ -110,8 +172,10 @@ class ChatRepl(Vertical):
         self.runtime = runtime
         self._current_exec_id: str | None = None
         self._streaming_snapshot: str = ""
+        self._streaming_written: int = 0  # chars already written to streaming-output
         self._waiting_for_input: bool = False
         self._input_node_id: str | None = None
+        self._input_graph_id: str | None = None
         self._pending_ask_question: str = ""
         self._active_node_id: str | None = None  # Currently executing node
         self._resume_session = resume_session
@@ -119,6 +183,15 @@ class ChatRepl(Vertical):
         self._session_index: list[str] = []  # IDs from last listing
         self._show_logs: bool = False  # Clean mode by default
         self._log_buffer: list[str] = []  # Buffered log lines for backfill on toggle ON
+        self._attached_pdf: dict | None = None  # Pending PDF attachment for next message
+
+        # Queen-primary mode: when set, user input defaults to the queen.
+        # The worker only gets input when it explicitly asks (CLIENT_INPUT_REQUESTED).
+        self._queen_inject_callback: Any = None  # async (str) -> bool, set by app.py
+        self._worker_waiting: bool = False  # True when worker asked for input
+        self._worker_input_node_id: str | None = None
+        self._worker_input_graph_id: str | None = None
+        self._streaming_source: str | None = None  # "queen" | None; set by app.py per event
 
         # Dedicated event loop for agent execution.
         # Keeps blocking runtime code (LLM calls, MCP tools) off
@@ -140,8 +213,18 @@ class ChatRepl(Vertical):
             wrap=True,
             min_width=0,
         )
+        yield RichLog(
+            id="streaming-output",
+            highlight=True,
+            markup=True,
+            auto_scroll=True,
+            wrap=True,
+            min_width=0,
+        )
         yield Label("Agent is processing...", id="processing-indicator")
-        yield ChatTextArea(id="chat-input", placeholder="Enter input for agent...")
+        with Horizontal(id="input-row"):
+            yield ChatTextArea(id="chat-input", placeholder="Enter input for agent...")
+            yield Button("↵ Send", id="action-button", disabled=True)
 
     # Regex for file:// URIs that are NOT already inside Rich [link=...] markup
     _FILE_URI_RE = re.compile(r"(?<!\[link=)(file://[^\s)\]>*]+)")
@@ -157,12 +240,10 @@ class ChatRepl(Vertical):
         return self._FILE_URI_RE.sub(_shorten, text)
 
     def _write_history(self, content: str) -> None:
-        """Write to chat history, only auto-scrolling if user is at the bottom."""
+        """Write to chat history and scroll to bottom."""
         history = self.query_one("#chat-history", RichLog)
-        was_at_bottom = history.is_vertical_scroll_end
         history.write(self._linkify(content))
-        if was_at_bottom:
-            history.scroll_end(animate=False)
+        history.scroll_end(animate=False)
 
     def toggle_logs(self) -> None:
         """Toggle inline log display on/off. Backfills buffered logs on toggle ON."""
@@ -196,6 +277,9 @@ class ChatRepl(Vertical):
 
         if cmd == "/help":
             self._write_history("""[bold cyan]Available Commands:[/bold cyan]
+  [bold]/attach[/bold]                      - Open file dialog to attach a PDF
+  [bold]/attach[/bold] <file_path>          - Attach a PDF from a specific path
+  [bold]/detach[/bold]                      - Remove the currently attached PDF
   [bold]/sessions[/bold]                    - List all sessions for this agent
   [bold]/sessions[/bold] <session_id>       - Show session details and checkpoints
   [bold]/resume[/bold]                      - List sessions and pick one to resume
@@ -203,15 +287,25 @@ class ChatRepl(Vertical):
   [bold]/resume[/bold] <session_id>         - Resume session by ID
   [bold]/recover[/bold] <session_id> <cp_id> - Recover from specific checkpoint
   [bold]/pause[/bold]                      - Pause current execution (Ctrl+Z)
+  [bold]/agents[/bold]                     - Browse and switch agents (Ctrl+A)
+  [bold]/coder[/bold] [reason]             - Escalate to Hive Coder for code changes
+  [bold]/back[/bold] [summary]             - Return from Hive Coder to worker agent
+  [bold]/graphs[/bold]                     - List loaded graphs and their status
+  [bold]/graph[/bold] <id>                 - Switch active graph focus
+  [bold]/load[/bold] <path>                - Load an agent graph into the session
+  [bold]/unload[/bold] <id>                - Remove a graph from the session
   [bold]/help[/bold]                       - Show this help message
 
 [dim]Examples:[/dim]
+  /attach                                [dim]# Open file picker dialog[/dim]
+  /attach ~/Documents/report.pdf         [dim]# Attach a specific PDF[/dim]
+  /detach                                [dim]# Remove attached PDF[/dim]
   /sessions                              [dim]# List all sessions[/dim]
-  /sessions session_20260208_143022      [dim]# Show session details[/dim]
-  /resume                                [dim]# Show numbered session list[/dim]
   /resume 1                              [dim]# Resume first listed session[/dim]
-  /resume session_20260208_143022        [dim]# Resume by full session ID[/dim]
-  /recover session_20260208_143022 cp_xxx [dim]# Recover from specific checkpoint[/dim]
+  /graphs                                [dim]# Show loaded agent graphs[/dim]
+  /graph email_agent                     [dim]# Switch focus to email_agent[/dim]
+  /load exports/email_agent              [dim]# Load agent into session[/dim]
+  /unload email_agent                    [dim]# Remove agent from session[/dim]
   /pause                                 [dim]# Pause (or Ctrl+Z)[/dim]
 """)
         elif cmd == "/sessions":
@@ -252,13 +346,107 @@ class ChatRepl(Vertical):
             session_id = parts[1].strip()
             checkpoint_id = parts[2].strip()
             await self._cmd_recover(session_id, checkpoint_id)
+        elif cmd == "/attach":
+            file_path = parts[1].strip() if len(parts) > 1 else None
+            await self._cmd_attach(file_path)
+        elif cmd == "/detach":
+            if self._attached_pdf:
+                name = self._attached_pdf["filename"]
+                self._attached_pdf = None
+                self._write_history(f"[dim]Detached: {name}[/dim]")
+            else:
+                self._write_history("[dim]No PDF attached.[/dim]")
         elif cmd == "/pause":
             await self._cmd_pause()
+        elif cmd == "/agents":
+            app = self.app
+            if hasattr(app, "action_show_agent_picker"):
+                await app.action_show_agent_picker()
+        elif cmd == "/graphs":
+            self._cmd_graphs()
+        elif cmd == "/graph":
+            if len(parts) < 2:
+                self._write_history("[bold red]Usage:[/bold red] /graph <graph_id>")
+            else:
+                self._cmd_switch_graph(parts[1].strip())
+        elif cmd == "/load":
+            if len(parts) < 2:
+                self._write_history("[bold red]Usage:[/bold red] /load <agent_path>")
+            else:
+                await self._cmd_load_graph(parts[1].strip())
+        elif cmd == "/unload":
+            if len(parts) < 2:
+                self._write_history("[bold red]Usage:[/bold red] /unload <graph_id>")
+            else:
+                await self._cmd_unload_graph(parts[1].strip())
+        elif cmd == "/coder":
+            reason = " ".join(parts[1:]) if len(parts) > 1 else ""
+            await self._cmd_coder(reason)
+        elif cmd == "/back":
+            summary = " ".join(parts[1:]) if len(parts) > 1 else ""
+            await self._cmd_back(summary)
         else:
             self._write_history(
                 f"[bold red]Unknown command:[/bold red] {cmd}\n"
                 "Type [bold]/help[/bold] for available commands"
             )
+
+    def attach_pdf(self, path: Path) -> None:
+        """Validate and stage a PDF file for the next message.
+
+        Copies the PDF to ~/.hive/assets/ and stores the path. The agent's
+        pdf_read tool handles text extraction at runtime.
+
+        Called by /attach <path> or by the native file dialog.
+        """
+        path = Path(path).expanduser().resolve()
+
+        if not path.exists():
+            self._write_history(f"[bold red]Error:[/bold red] File not found: {path}")
+            return
+        if path.suffix.lower() != ".pdf":
+            self._write_history("[bold red]Error:[/bold red] Only PDF files are supported")
+            return
+
+        # Copy to ~/.hive/assets/, deduplicating like a normal filesystem:
+        # resume.pdf → resume(1).pdf → resume(2).pdf
+        assets_dir = Path.home() / ".hive" / "assets"
+        assets_dir.mkdir(parents=True, exist_ok=True)
+        dest = assets_dir / path.name
+        counter = 1
+        while dest.exists():
+            dest = assets_dir / f"{path.stem}({counter}){path.suffix}"
+            counter += 1
+        shutil.copy2(path, dest)
+
+        self._attached_pdf = {
+            "filename": path.name,
+            "path": str(dest),
+        }
+
+        self._write_history(f"[green]Attached:[/green] {path.name}")
+        self._write_history("[dim]PDF will be read by the agent on your next message.[/dim]")
+
+    async def _cmd_attach(self, file_path: str | None = None) -> None:
+        """Attach a PDF file for context injection into the next message."""
+        if file_path is None:
+            from framework.tui.widgets.file_browser import _has_gui, pick_pdf_file
+
+            if not _has_gui():
+                self._write_history(
+                    "[bold yellow]No GUI available.[/bold yellow] "
+                    "Provide a path: [bold]/attach /path/to/file.pdf[/bold]"
+                )
+                return
+
+            self._write_history("[dim]Opening file dialog...[/dim]")
+            path = await pick_pdf_file()
+
+            if path is not None:
+                self.attach_pdf(path)
+            return
+
+        self.attach_pdf(Path(file_path))
 
     async def _cmd_sessions(self, session_id: str | None) -> None:
         """List sessions or show details of a specific session."""
@@ -575,6 +763,8 @@ class ChatRepl(Vertical):
                     f"[green]✓[/green] Resume started (execution: {exec_id[:12]}...)"
                 )
                 self._write_history("  Agent is continuing from where it stopped...")
+                # Enable Pause button now that execution is running
+                self._set_button_pause_mode()
 
             except Exception as e:
                 self._write_history(f"[bold red]Error starting resume:[/bold red] {e}")
@@ -663,6 +853,8 @@ class ChatRepl(Vertical):
                     f"[green]✓[/green] Recovery started (execution: {exec_id[:12]}...)"
                 )
                 self._write_history("  Agent is continuing from checkpoint...")
+                # Enable Pause button now that execution is running
+                self._set_button_pause_mode()
 
             except Exception as e:
                 self._write_history(f"[bold red]Error starting recovery:[/bold red] {e}")
@@ -697,6 +889,166 @@ class ChatRepl(Vertical):
 
         if not task_cancelled:
             self._write_history("[bold yellow]Execution already completed[/bold yellow]")
+
+    async def _cmd_coder(self, reason: str = "") -> None:
+        """User-initiated escalation to Hive Coder."""
+        app = self.app
+        if not hasattr(app, "_do_escalate_to_coder"):
+            self._write_history("[bold red]Escalation not available[/bold red]")
+            return
+
+        context_parts = []
+        if self._active_node_id:
+            context_parts.append(f"Active node: {self._active_node_id}")
+        if self._streaming_snapshot:
+            snippet = self._streaming_snapshot[:500]
+            context_parts.append(f"Last agent output: {snippet}")
+        context = "\n".join(context_parts)
+
+        if not reason:
+            reason = "User-initiated escalation via /coder"
+
+        self._write_history("[bold cyan]Escalating to Hive Coder...[/bold cyan]")
+
+        node_id = self._input_node_id or self._active_node_id or ""
+        app._do_escalate_to_coder(
+            reason=reason,
+            context=context,
+            node_id=node_id,
+        )
+
+    async def _cmd_back(self, summary: str = "") -> None:
+        """Return from Hive Coder to the worker agent."""
+        app = self.app
+        if not hasattr(app, "_escalation_stack"):
+            self._write_history("[bold yellow]Not in an escalation.[/bold yellow]")
+            return
+        if not app._escalation_stack:
+            self._write_history(
+                "[bold yellow]Not in an escalation.[/bold yellow] "
+                "/back is only available after /coder or agent escalation."
+            )
+            return
+
+        self._write_history("[bold cyan]Returning to worker agent...[/bold cyan]")
+        await app._return_from_escalation(summary)
+
+    def _cmd_graphs(self) -> None:
+        """List all loaded graphs and their status."""
+        graphs = self.runtime.list_graphs()
+        if not graphs:
+            self._write_history("[dim]No graphs loaded[/dim]")
+            return
+
+        lines = ["[bold cyan]Loaded Graphs:[/bold cyan]"]
+        for gid in graphs:
+            reg = self.runtime.get_graph_registration(gid)
+            if reg is None:
+                continue
+            is_primary = gid == self.runtime.graph_id
+            is_active = gid == self.runtime.active_graph_id
+            markers = []
+            if is_primary:
+                markers.append("primary")
+            if is_active:
+                markers.append("active")
+            marker_str = f" [dim]({', '.join(markers)})[/dim]" if markers else ""
+            ep_list = ", ".join(reg.entry_points.keys())
+            active_execs = sum(len(s.active_execution_ids) for s in reg.streams.values())
+            exec_str = f" [green]{active_execs} running[/green]" if active_execs else ""
+            lines.append(f"  [bold]{gid}[/bold]{marker_str} — eps: {ep_list}{exec_str}")
+        self._write_history("\n".join(lines))
+
+    def _cmd_switch_graph(self, graph_id: str) -> None:
+        """Switch the active graph focus."""
+        try:
+            self.runtime.active_graph_id = graph_id
+        except ValueError:
+            self._write_history(
+                f"[bold red]Graph '{graph_id}' not found.[/bold red] "
+                "Use /graphs to see loaded graphs."
+            )
+            return
+
+        # Tell the app to update the UI
+        app = self.app
+        if hasattr(app, "action_switch_graph"):
+            app.action_switch_graph(graph_id)
+        else:
+            self._write_history(f"[bold green]Switched to graph: {graph_id}[/bold green]")
+
+    async def _cmd_load_graph(self, agent_path: str) -> None:
+        """Load an agent graph into the session."""
+        from pathlib import Path
+
+        path = Path(agent_path).resolve()
+        if not path.exists():
+            self._write_history(f"[bold red]Path does not exist:[/bold red] {path}")
+            return
+
+        self._write_history(f"[dim]Loading agent from {path}...[/dim]")
+
+        try:
+            from framework.runner.runner import AgentRunner
+
+            graph_id = await AgentRunner.setup_as_secondary(path, self.runtime)
+            self._write_history(
+                f"[bold green]Loaded graph '{graph_id}'[/bold green] — "
+                "use /graphs to see all, /graph to switch"
+            )
+        except Exception as e:
+            self._write_history(f"[bold red]Failed to load agent:[/bold red] {e}")
+
+    async def _cmd_unload_graph(self, graph_id: str) -> None:
+        """Unload a secondary graph from the session."""
+        try:
+            await self.runtime.remove_graph(graph_id)
+            self._write_history(f"[bold green]Unloaded graph '{graph_id}'[/bold green]")
+        except ValueError as e:
+            self._write_history(f"[bold red]Error:[/bold red] {e}")
+
+    # Known node IDs from external executors (queen, judge) that aren't
+    # in the worker's graph.  Maps node_id → display name.
+    _EXTERNAL_NODE_NAMES: dict[str, str] = {"queen": "Queen"}
+
+    def _node_label(self, node_id: str | None = None) -> str:
+        """Resolve a node_id to a Rich-formatted speaker label."""
+        nid = node_id or self._active_node_id
+        if nid:
+            node = self.runtime.graph.get_node(nid)
+            if node:
+                name = node.name
+            elif nid in self._EXTERNAL_NODE_NAMES:
+                name = self._EXTERNAL_NODE_NAMES[nid]
+            else:
+                name = nid
+            return f"[bold blue]{name}:[/bold blue]"
+        # No node_id at all — use streaming source if available.
+        if self._streaming_source == "queen":
+            return "[bold blue]Queen:[/bold blue]"
+        return "[bold blue]Agent:[/bold blue]"
+
+    def _clear_streaming(self) -> None:
+        """Reset streaming state and hide the live output area."""
+        self._streaming_snapshot = ""
+        self._streaming_written = 0
+        stream_log = self.query_one("#streaming-output", RichLog)
+        stream_log.clear()
+        stream_log.display = False
+        # Hiding the streaming pane makes chat-history taller (1fr reclaims
+        # the space).  Re-scroll so subsequent _write_history calls see
+        # is_vertical_scroll_end == True.
+        self.query_one("#chat-history", RichLog).scroll_end(animate=False)
+
+    def flush_streaming(self) -> None:
+        """Flush any accumulated streaming text to history.
+
+        Called by the app when switching graphs to ensure in-progress
+        streaming content is preserved before the UI context changes.
+        """
+        if self._streaming_snapshot:
+            self._write_history(f"{self._node_label()} {self._streaming_snapshot}")
+            self._clear_streaming()
 
     def on_mount(self) -> None:
         """Add welcome message and check for resumable sessions."""
@@ -804,9 +1156,70 @@ class ChatRepl(Vertical):
             # Silently fail - don't block TUI startup
             pass
 
+    def _set_button_send_mode(self) -> None:
+        """Switch the action button to Send mode (green arrow)."""
+        try:
+            btn = self.query_one("#action-button", Button)
+            btn.label = "↵ Send"
+            btn.disabled = False
+            btn.remove_class("pause-mode")
+            btn.add_class("send-mode")
+        except Exception:
+            pass
+
+    def _set_button_pause_mode(self) -> None:
+        """Switch the action button to Pause mode (red pause)."""
+        try:
+            btn = self.query_one("#action-button", Button)
+            btn.label = "⏸ Pause"
+            btn.disabled = False
+            btn.remove_class("send-mode")
+            btn.add_class("pause-mode")
+        except Exception:
+            pass
+
+    def _set_button_idle_mode(self) -> None:
+        """Switch the action button to idle/disabled state."""
+        try:
+            btn = self.query_one("#action-button", Button)
+            btn.label = "↵ Send"
+            btn.disabled = True
+            btn.remove_class("pause-mode")
+            btn.add_class("send-mode")
+        except Exception:
+            pass
+
     async def on_chat_text_area_submitted(self, message: ChatTextArea.Submitted) -> None:
         """Handle chat input submission."""
         await self._submit_input(message.text)
+
+    def on_text_area_changed(self, event: TextArea.Changed) -> None:
+        """Toggle the Send button based on whether there is text in the input."""
+        if event.text_area.id != "chat-input":
+            return
+        # Only update button if we're not currently executing (Pause takes priority)
+        if self._current_exec_id is not None:
+            return
+        has_text = bool(event.text_area.text.strip())
+        if has_text:
+            self._set_button_send_mode()
+        else:
+            self._set_button_idle_mode()
+
+    async def on_button_pressed(self, event: Button.Pressed) -> None:
+        """Handle action button click — Send when idle, Pause when executing."""
+        if event.button.id != "action-button":
+            return
+        if self._current_exec_id is not None:
+            # Execution running → act as Pause
+            await self._cmd_pause()
+        else:
+            # No execution → act as Send (submit whatever is in the input)
+            chat_input = self.query_one("#chat-input", ChatTextArea)
+            text = chat_input.text.strip()
+            if text:
+                chat_input.clear()
+                await self._submit_input(text)
 
     async def _submit_input(self, user_input: str) -> None:
         """Handle submitted text — either start new execution or inject input."""
@@ -819,6 +1232,13 @@ class ChatRepl(Vertical):
             await self._handle_command(user_input)
             return
 
+        # ── Queen-primary routing ──────────────────────────────────────
+        # When a queen callback is set, all user input defaults to the
+        # queen UNLESS the worker has explicitly asked for input.
+        if self._queen_inject_callback is not None:
+            return await self._submit_input_queen_primary(user_input)
+
+        # ── Legacy routing (no queen) ──────────────────────────────────
         # Client-facing input: route to the waiting node
         if self._waiting_for_input and self._input_node_id:
             self._write_history(f"[bold green]You:[/bold green] {user_input}")
@@ -832,11 +1252,13 @@ class ChatRepl(Vertical):
             indicator.update("Thinking...")
 
             node_id = self._input_node_id
+            graph_id = self._input_graph_id
             self._input_node_id = None
+            self._input_graph_id = None
 
             try:
                 future = asyncio.run_coroutine_threadsafe(
-                    self.runtime.inject_input(node_id, user_input),
+                    self.runtime.inject_input(node_id, user_input, graph_id=graph_id),
                     self._agent_loop,
                 )
                 await asyncio.wrap_future(future)
@@ -869,15 +1291,20 @@ class ChatRepl(Vertical):
         self._write_history(f"[bold green]You:[/bold green] {user_input}")
 
         try:
-            # Get entry point
+            # Get entry points for the active graph, preferring manual
+            # (interactive) ones over event/timer-driven ones.
             entry_points = self.runtime.get_entry_points()
-            if not entry_points:
+            manual_eps = [ep for ep in entry_points if ep.trigger_type in ("manual", "api")]
+            if not manual_eps:
+                manual_eps = entry_points  # fallback: use whatever is available
+            if not manual_eps:
                 self._write_history("[bold red]Error:[/bold red] No entry points")
                 return
 
             # Determine the input key from the entry node
-            entry_point = entry_points[0]
-            entry_node = self.runtime.graph.get_node(entry_point.entry_node)
+            entry_point = manual_eps[0]
+            active_graph = self.runtime.get_active_graph()
+            entry_node = active_graph.get_node(entry_point.entry_node)
 
             if entry_node and entry_node.input_keys:
                 input_key = entry_node.input_keys[0]
@@ -885,15 +1312,25 @@ class ChatRepl(Vertical):
                 input_key = "input"
 
             # Reset streaming state
-            self._streaming_snapshot = ""
+            self._clear_streaming()
 
             # Show processing indicator
             indicator.update("Thinking...")
             indicator.display = True
 
+            # Switch button to Pause mode
+            self._set_button_pause_mode()
+
             # Keep input enabled for commands during execution
             chat_input = self.query_one("#chat-input", ChatTextArea)
             chat_input.placeholder = "Commands available: /pause, /sessions, /help"
+
+            # Build input data, injecting attached PDF file path if present
+            input_data = {input_key: user_input}
+            if self._attached_pdf:
+                input_data["pdf_file_path"] = self._attached_pdf["path"]
+                self._write_history(f"[dim]Including PDF: {self._attached_pdf['filename']}[/dim]")
+                self._attached_pdf = None
 
             # Submit execution to the dedicated agent loop so blocking
             # runtime code (LLM, MCP tools) never touches Textual's loop.
@@ -902,7 +1339,7 @@ class ChatRepl(Vertical):
             future = asyncio.run_coroutine_threadsafe(
                 self.runtime.trigger(
                     entry_point_id=entry_point.id,
-                    input_data={input_key: user_input},
+                    input_data=input_data,
                 ),
                 self._agent_loop,
             )
@@ -917,6 +1354,52 @@ class ChatRepl(Vertical):
             chat_input.disabled = False
             self._write_history(f"[bold red]Error:[/bold red] {e}")
 
+    async def _submit_input_queen_primary(self, user_input: str) -> None:
+        """Route input in queen-primary mode.
+
+        Priority:
+        1. Worker override — worker asked for input via CLIENT_INPUT_REQUESTED
+        2. Default — inject into the queen conversation
+        """
+        self._write_history(f"[bold green]You:[/bold green] {user_input}")
+
+        # 1. Worker override: worker explicitly asked for user input
+        if self._worker_waiting and self._worker_input_node_id:
+            chat_input = self.query_one("#chat-input", ChatTextArea)
+            chat_input.placeholder = "Worker processing..."
+
+            indicator = self.query_one("#processing-indicator", Label)
+            indicator.update("Worker thinking...")
+
+            node_id = self._worker_input_node_id
+            graph_id = self._worker_input_graph_id
+            self._worker_waiting = False
+            self._worker_input_node_id = None
+            self._worker_input_graph_id = None
+
+            try:
+                future = asyncio.run_coroutine_threadsafe(
+                    self.runtime.inject_input(node_id, user_input, graph_id=graph_id),
+                    self._agent_loop,
+                )
+                await asyncio.wrap_future(future)
+            except Exception as e:
+                self._write_history(f"[bold red]Error delivering to worker:[/bold red] {e}")
+            return
+
+        # 2. Default: inject into the queen
+        indicator = self.query_one("#processing-indicator", Label)
+        indicator.update("Queen thinking...")
+
+        try:
+            future = asyncio.run_coroutine_threadsafe(
+                self._queen_inject_callback(user_input),
+                self._agent_loop,
+            )
+            await asyncio.wrap_future(future)
+        except Exception as e:
+            self._write_history(f"[bold red]Error delivering to queen:[/bold red] {e}")
+
     # -- Event handlers called by app.py _handle_event --
 
     def handle_node_started(self, node_id: str) -> None:
@@ -926,34 +1409,48 @@ class ChatRepl(Vertical):
         previous node and resets the processing indicator so the user
         sees a clean transition between graph nodes.
         """
-        self._active_node_id = node_id
+        # Flush stale snapshot with the PREVIOUS node's label before switching
         if self._streaming_snapshot:
-            self._write_history(f"[bold blue]Agent:[/bold blue] {self._streaming_snapshot}")
-            self._streaming_snapshot = ""
+            self._write_history(f"{self._node_label()} {self._streaming_snapshot}")
+        self._clear_streaming()
+        self._active_node_id = node_id
         indicator = self.query_one("#processing-indicator", Label)
         indicator.update("Thinking...")
 
     def handle_loop_iteration(self, iteration: int) -> None:
         """Flush accumulated streaming text when a new loop iteration starts."""
         if self._streaming_snapshot:
-            self._write_history(f"[bold blue]Agent:[/bold blue] {self._streaming_snapshot}")
-            self._streaming_snapshot = ""
+            self._write_history(f"{self._node_label()} {self._streaming_snapshot}")
+        self._clear_streaming()
 
     def handle_text_delta(self, content: str, snapshot: str) -> None:
         """Handle a streaming text token from the LLM."""
         self._streaming_snapshot = snapshot
 
-        # Show a truncated live preview in the indicator label
-        indicator = self.query_one("#processing-indicator", Label)
-        preview = snapshot[-80:] if len(snapshot) > 80 else snapshot
-        # Replace newlines for single-line display
-        preview = preview.replace("\n", " ")
-        indicator.update(
-            f"Thinking: ...{preview}" if len(snapshot) > 80 else f"Thinking: {preview}"
-        )
+        # Stream into the live output area
+        stream_log = self.query_one("#streaming-output", RichLog)
+        if not stream_log.display:
+            stream_log.display = True
+            # Showing the streaming pane shrinks chat-history (height: 1fr).
+            # Re-scroll so _write_history still sees is_vertical_scroll_end.
+            self.query_one("#chat-history", RichLog).scroll_end(animate=False)
+
+        # Rewrite the full snapshot as a single block so text wraps
+        # naturally instead of one token per line.
+        stream_log.clear()
+        stream_log.write(Text.from_markup(f"{self._node_label()} {snapshot}"))
+        self._streaming_written = len(snapshot)
 
     def handle_tool_started(self, tool_name: str, tool_input: dict[str, Any]) -> None:
         """Handle a tool call starting."""
+        # Flush any accumulated LLM text before the tool call starts.
+        # Without this, text from a turn that also issues tool calls
+        # would sit in _streaming_snapshot and get overwritten by the
+        # next LLM turn, never appearing in the chat log.
+        if self._streaming_snapshot:
+            self._write_history(f"{self._node_label()} {self._streaming_snapshot}")
+            self._clear_streaming()
+
         indicator = self.query_one("#processing-indicator", Label)
 
         if tool_name == "ask_user":
@@ -961,6 +1458,10 @@ class ChatRepl(Vertical):
             # Suppress the generic "Tool: ask_user" line.
             self._pending_ask_question = tool_input.get("question", "")
             indicator.update("Preparing question...")
+            return
+
+        if tool_name == "escalate_to_coder":
+            indicator.update("Escalating to coder...")
             return
 
         # Update indicator to show tool activity
@@ -974,9 +1475,7 @@ class ChatRepl(Vertical):
 
     def handle_tool_completed(self, tool_name: str, result: str, is_error: bool) -> None:
         """Handle a tool call completing."""
-        if tool_name == "ask_user":
-            # Suppress the synthetic "Waiting for user input..." result.
-            # The actual question is displayed by handle_input_requested().
+        if tool_name in ("ask_user", "escalate_to_coder"):
             return
 
         result_str = str(result)
@@ -998,23 +1497,27 @@ class ChatRepl(Vertical):
     def handle_execution_completed(self, output: dict[str, Any]) -> None:
         """Handle execution finishing successfully."""
         indicator = self.query_one("#processing-indicator", Label)
+        indicator.update("")
         indicator.display = False
 
         # Write the final streaming snapshot to permanent history (if any)
         if self._streaming_snapshot:
-            self._write_history(f"[bold blue]Agent:[/bold blue] {self._streaming_snapshot}")
+            self._write_history(f"{self._node_label()} {self._streaming_snapshot}")
         else:
             output_str = str(output.get("output_string", output))
-            self._write_history(f"[bold blue]Agent:[/bold blue] {output_str}")
+            self._write_history(f"{self._node_label()} {output_str}")
         self._write_history("")  # separator
 
         self._current_exec_id = None
-        self._streaming_snapshot = ""
+        self._clear_streaming()
         self._waiting_for_input = False
         self._input_node_id = None
         self._active_node_id = None
         self._pending_ask_question = ""
         self._log_buffer.clear()
+
+        # Reset button to idle/send mode
+        self._set_button_idle_mode()
 
         # Re-enable input
         chat_input = self.query_one("#chat-input", ChatTextArea)
@@ -1025,18 +1528,22 @@ class ChatRepl(Vertical):
     def handle_execution_failed(self, error: str) -> None:
         """Handle execution failing."""
         indicator = self.query_one("#processing-indicator", Label)
+        indicator.update("")
         indicator.display = False
 
         self._write_history(f"[bold red]Error:[/bold red] {error}")
         self._write_history("")  # separator
 
         self._current_exec_id = None
-        self._streaming_snapshot = ""
+        self._clear_streaming()
         self._waiting_for_input = False
         self._pending_ask_question = ""
         self._input_node_id = None
         self._active_node_id = None
         self._log_buffer.clear()
+
+        # Reset button to idle/send mode
+        self._set_button_idle_mode()
 
         # Re-enable input
         chat_input = self.query_one("#chat-input", ChatTextArea)
@@ -1044,7 +1551,18 @@ class ChatRepl(Vertical):
         chat_input.placeholder = "Enter input for agent..."
         chat_input.focus()
 
-    def handle_input_requested(self, node_id: str) -> None:
+    def handle_escalation_requested(self, data: dict) -> None:
+        """Display escalation request from the worker agent."""
+        if self._streaming_snapshot:
+            self._write_history(f"{self._node_label()} {self._streaming_snapshot}")
+            self._clear_streaming()
+
+        reason = data.get("reason", "")
+        self._write_history("[bold yellow]Agent is escalating to Hive Coder[/bold yellow]")
+        if reason:
+            self._write_history(f"[dim]Reason: {reason}[/dim]")
+
+    def handle_input_requested(self, node_id: str, graph_id: str | None = None) -> None:
         """Handle a client-facing node requesting user input.
 
         Transitions to 'waiting for input' state: flushes the current
@@ -1052,27 +1570,64 @@ class ChatRepl(Vertical):
         and sets a flag so the next submission routes to inject_input().
         """
         # Flush accumulated streaming text as agent output
+        label = self._node_label(node_id)
         flushed_snapshot = self._streaming_snapshot
         if flushed_snapshot:
-            self._write_history(f"[bold blue]Agent:[/bold blue] {flushed_snapshot}")
-            self._streaming_snapshot = ""
+            self._write_history(f"{label} {flushed_snapshot}")
+        self._clear_streaming()
 
         # Display the ask_user question if stashed and not already
         # present in the streaming snapshot (avoids double-display).
         question = self._pending_ask_question
         self._pending_ask_question = ""
         if question and question not in flushed_snapshot:
-            self._write_history(f"[bold blue]Agent:[/bold blue] {question}")
+            self._write_history(f"{label} {question}")
 
         self._waiting_for_input = True
         self._input_node_id = node_id or None
+        self._input_graph_id = graph_id
 
         indicator = self.query_one("#processing-indicator", Label)
         indicator.update("Waiting for your input...")
 
         chat_input = self.query_one("#chat-input", ChatTextArea)
         chat_input.disabled = False
-        chat_input.placeholder = "Type your response..."
+        node = self.runtime.graph.get_node(node_id) if node_id else None
+        name = node.name if node else self._EXTERNAL_NODE_NAMES.get(node_id or "", None)
+        chat_input.placeholder = (
+            f"Type your response to {name}..." if name else "Type your response..."
+        )
+        chat_input.focus()
+
+    def handle_worker_input_requested(self, node_id: str, graph_id: str | None = None) -> None:
+        """Handle the worker asking for user input in queen-primary mode.
+
+        Sets the worker override flag so the next user input goes to the
+        worker instead of the queen.  After the user responds, the flag
+        clears and input reverts to the queen.
+        """
+        # Flush queen streaming if any
+        if self._streaming_snapshot:
+            self._write_history(f"[bold blue]Queen:[/bold blue] {self._streaming_snapshot}")
+            self._clear_streaming()
+
+        self._worker_waiting = True
+        self._worker_input_node_id = node_id or None
+        self._worker_input_graph_id = graph_id
+
+        # Display the ask_user question if stashed
+        question = self._pending_ask_question
+        self._pending_ask_question = ""
+        if question:
+            label = self._node_label(node_id)
+            self._write_history(f"{label} {question}")
+
+        indicator = self.query_one("#processing-indicator", Label)
+        indicator.update("Worker is waiting for your input...")
+
+        chat_input = self.query_one("#chat-input", ChatTextArea)
+        chat_input.disabled = False
+        chat_input.placeholder = "Type your response to the worker..."
         chat_input.focus()
 
     def handle_node_completed(self, node_id: str) -> None:
@@ -1081,8 +1636,11 @@ class ChatRepl(Vertical):
             self._active_node_id = None
 
     def handle_internal_output(self, node_id: str, content: str) -> None:
-        """Show output from non-client-facing nodes."""
-        self._write_history(f"[dim cyan]⟨{node_id}⟩[/dim cyan] {content}")
+        """Buffer output from non-client-facing nodes. Only display if logs are ON."""
+        line = f"[dim cyan]⟨{node_id}⟩[/dim cyan] {content}"
+        self._log_buffer.append(line)
+        if self._show_logs:
+            self._write_history(line)
 
     def handle_execution_paused(self, node_id: str, reason: str) -> None:
         """Show that execution has been paused."""

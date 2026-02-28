@@ -25,6 +25,7 @@ EVENT_FORMAT: dict[EventType, tuple[str, str]] = {
     EventType.NODE_LOOP_STARTED: ("@@", "cyan"),
     EventType.NODE_LOOP_ITERATION: ("..", "dim"),
     EventType.NODE_LOOP_COMPLETED: ("@@", "dim"),
+    EventType.LLM_TURN_COMPLETE: ("◆", "green"),
     EventType.NODE_STALLED: ("!!", "bold yellow"),
     EventType.NODE_INPUT_BLOCKED: ("!!", "yellow"),
     EventType.GOAL_PROGRESS: ("%%", "blue"),
@@ -87,6 +88,12 @@ def extract_event_text(event: AgentEvent) -> str:
         return f"State changed: {data.get('key', 'unknown')}"
     elif et == EventType.CLIENT_INPUT_REQUESTED:
         return "Waiting for user input"
+    elif et == EventType.LLM_TURN_COMPLETE:
+        stop = data.get("stop_reason", "?")
+        model = data.get("model", "?")
+        inp = data.get("input_tokens", 0)
+        out = data.get("output_tokens", 0)
+        return f"{model} → {stop} ({inp}+{out} tokens)"
     else:
         return f"{et.value}: {data}"
 

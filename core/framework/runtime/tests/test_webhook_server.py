@@ -472,7 +472,7 @@ class TestEventDrivenEntryPoints:
                 id="process-event",
                 name="Process Event",
                 description="Process incoming event",
-                node_type="llm_generate",
+                node_type="event_loop",
                 input_keys=["event"],
                 output_keys=["result"],
             ),

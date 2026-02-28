@@ -11,9 +11,9 @@ Usage:
 
 Testing commands:
     hive test-run <agent_path> --goal <goal_id>
-    hive test-debug <goal_id> <test_id>
-    hive test-list <goal_id>
-    hive test-stats <goal_id>
+    hive test-debug <agent_path> <test_name>
+    hive test-list <agent_path>
+    hive test-stats <agent_path>
 """
 
 import argparse
@@ -55,6 +55,13 @@ def _configure_paths():
     core_str = str(project_root / "core")
     if (project_root / "core").is_dir() and core_str not in sys.path:
         sys.path.insert(0, core_str)
+
+    # Add core/framework/agents/ so framework agents are importable as top-level packages
+    framework_agents_dir = project_root / "core" / "framework" / "agents"
+    if framework_agents_dir.is_dir():
+        fa_str = str(framework_agents_dir)
+        if fa_str not in sys.path:
+            sys.path.insert(0, fa_str)
 
 
 def main():

@@ -1,10 +1,12 @@
 """Tool discovery and registration for agent runner."""
 
+import asyncio
 import contextvars
 import importlib.util
 import inspect
 import json
 import logging
+import os
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -46,10 +48,19 @@ class ToolRegistry:
     # and auto-injected at call time for tools that accept them.
     CONTEXT_PARAMS = frozenset({"workspace_id", "agent_id", "session_id", "data_dir"})
 
+    # Credential directory used for change detection
+    _CREDENTIAL_DIR = Path("~/.hive/credentials/credentials").expanduser()
+
     def __init__(self):
         self._tools: dict[str, RegisteredTool] = {}
         self._mcp_clients: list[Any] = []  # List of MCPClient instances
         self._session_context: dict[str, Any] = {}  # Auto-injected context for tools
+        self._provider_index: dict[str, set[str]] = {}  # provider -> tool names
+        # MCP resync tracking
+        self._mcp_config_path: Path | None = None  # Path used for initial load
+        self._mcp_tool_names: set[str] = set()  # Tool names registered from MCP
+        self._mcp_cred_snapshot: set[str] = set()  # Credential filenames at MCP load time
+        self._mcp_aden_key_snapshot: str | None = None  # ADEN_API_KEY value at MCP load time
 
     def register(
         self,
@@ -224,7 +235,18 @@ class ToolRegistry:
         Get unified tool executor function.
 
         Returns a function that dispatches to the appropriate tool executor.
+        Handles both sync and async tool implementations — async results are
+        wrapped so that ``EventLoopNode._execute_tool`` can await them.
         """
+
+        def _wrap_result(tool_use_id: str, result: Any) -> ToolResult:
+            if isinstance(result, ToolResult):
+                return result
+            return ToolResult(
+                tool_use_id=tool_use_id,
+                content=json.dumps(result) if not isinstance(result, str) else result,
+                is_error=False,
+            )
 
         def executor(tool_use: ToolUse) -> ToolResult:
             if tool_use.name not in self._tools:
@@ -237,13 +259,24 @@ class ToolRegistry:
             registered = self._tools[tool_use.name]
             try:
                 result = registered.executor(tool_use.input)
-                if isinstance(result, ToolResult):
-                    return result
-                return ToolResult(
-                    tool_use_id=tool_use.id,
-                    content=json.dumps(result) if not isinstance(result, str) else result,
-                    is_error=False,
-                )
+
+                # Async tool: wrap the awaitable so the caller can await it
+                if asyncio.iscoroutine(result) or asyncio.isfuture(result):
+
+                    async def _await_and_wrap():
+                        try:
+                            r = await result
+                            return _wrap_result(tool_use.id, r)
+                        except Exception as exc:
+                            return ToolResult(
+                                tool_use_id=tool_use.id,
+                                content=json.dumps({"error": str(exc)}),
+                                is_error=True,
+                            )
+
+                    return _await_and_wrap()
+
+                return _wrap_result(tool_use.id, result)
             except Exception as e:
                 return ToolResult(
                     tool_use_id=tool_use.id,
@@ -298,6 +331,9 @@ class ToolRegistry:
         Args:
             config_path: Path to an ``mcp_servers.json`` file.
         """
+        # Remember config path for potential resync later
+        self._mcp_config_path = Path(config_path)
+
         try:
             with open(config_path) as f:
                 config = json.load(f)
@@ -324,6 +360,10 @@ class ToolRegistry:
             except Exception as e:
                 name = server_config.get("name", "unknown")
                 logger.warning(f"Failed to register MCP server '{name}': {e}")
+
+        # Snapshot credential files and ADEN_API_KEY so we can detect mid-session changes
+        self._mcp_cred_snapshot = self._snapshot_credentials()
+        self._mcp_aden_key_snapshot = os.environ.get("ADEN_API_KEY")
 
     def register_mcp_server(
         self,
@@ -395,7 +435,15 @@ class ToolRegistry:
                             filtered_context = {
                                 k: v for k, v in base_context.items() if k in tool_params
                             }
-                            merged_inputs = {**filtered_context, **inputs}
+                            # Strip context params from LLM inputs — the framework
+                            # values are authoritative (prevents the LLM from passing
+                            # e.g. data_dir="/data" and overriding the real path).
+                            clean_inputs = {
+                                k: v
+                                for k, v in inputs.items()
+                                if k not in registry_ref.CONTEXT_PARAMS
+                            }
+                            merged_inputs = {**clean_inputs, **filtered_context}
                             result = client_ref.call_tool(tool_name, merged_inputs)
                             # MCP tools return content array, extract the result
                             if isinstance(result, list) and len(result) > 0:
@@ -415,6 +463,7 @@ class ToolRegistry:
                     tool,
                     make_mcp_executor(client, mcp_tool.name, self, tool_params),
                 )
+                self._mcp_tool_names.add(mcp_tool.name)
                 count += 1
 
             logger.info(f"Registered {count} tools from MCP server '{config.name}'")
@@ -456,6 +505,117 @@ class ToolRegistry:
         )
 
         return tool
+
+    # ------------------------------------------------------------------
+    # Provider-based tool filtering
+    # ------------------------------------------------------------------
+
+    def build_provider_index(self) -> None:
+        """Build provider -> tool-name mapping from CREDENTIAL_SPECS.
+
+        Populates ``_provider_index`` so :meth:`get_by_provider` works.
+        Safe to call even if ``aden_tools`` is not installed (silently no-ops).
+        """
+        try:
+            from aden_tools.credentials import CREDENTIAL_SPECS
+        except ImportError:
+            logger.debug("aden_tools not available, skipping provider index")
+            return
+
+        self._provider_index.clear()
+        for spec in CREDENTIAL_SPECS.values():
+            provider = spec.aden_provider_name
+            if provider:
+                if provider not in self._provider_index:
+                    self._provider_index[provider] = set()
+                self._provider_index[provider].update(spec.tools)
+
+    def get_by_provider(self, provider: str) -> dict[str, Tool]:
+        """Return registered tools that belong to *provider*.
+
+        Lazily builds the provider index on first call.
+        """
+        if not self._provider_index:
+            self.build_provider_index()
+        tool_names = self._provider_index.get(provider, set())
+        return {name: rt.tool for name, rt in self._tools.items() if name in tool_names}
+
+    def get_tool_names_by_provider(self, provider: str) -> list[str]:
+        """Return sorted registered tool names for *provider*."""
+        if not self._provider_index:
+            self.build_provider_index()
+        tool_names = self._provider_index.get(provider, set())
+        return sorted(name for name in self._tools if name in tool_names)
+
+    def get_all_provider_tool_names(self) -> list[str]:
+        """Return sorted names of all registered tools that belong to any provider."""
+        if not self._provider_index:
+            self.build_provider_index()
+        all_names: set[str] = set()
+        for names in self._provider_index.values():
+            all_names.update(names)
+        return sorted(name for name in self._tools if name in all_names)
+
+    # ------------------------------------------------------------------
+    # MCP credential resync
+    # ------------------------------------------------------------------
+
+    def _snapshot_credentials(self) -> set[str]:
+        """Return the set of credential filenames currently on disk."""
+        try:
+            return set(self._CREDENTIAL_DIR.iterdir()) if self._CREDENTIAL_DIR.is_dir() else set()
+        except OSError:
+            return set()
+
+    def resync_mcp_servers_if_needed(self) -> bool:
+        """Restart MCP servers if credential files changed since last load.
+
+        Compares the current credential directory listing against the snapshot
+        taken when MCP servers were first loaded.  If new files appeared (e.g.
+        user connected an OAuth account mid-session), disconnects all MCP
+        clients and re-loads them so the new subprocess picks up the fresh
+        credentials.
+
+        Returns True if a resync was performed, False otherwise.
+        """
+        if not self._mcp_clients or self._mcp_config_path is None:
+            return False
+
+        current = self._snapshot_credentials()
+        current_aden_key = os.environ.get("ADEN_API_KEY")
+        files_changed = current != self._mcp_cred_snapshot
+        aden_key_changed = current_aden_key != self._mcp_aden_key_snapshot
+
+        if not files_changed and not aden_key_changed:
+            return False
+
+        reason = (
+            "Credential files and ADEN_API_KEY changed"
+            if files_changed and aden_key_changed
+            else "ADEN_API_KEY changed"
+            if aden_key_changed
+            else "Credential files changed"
+        )
+        logger.info("%s — resyncing MCP servers", reason)
+
+        # 1. Disconnect existing MCP clients
+        for client in self._mcp_clients:
+            try:
+                client.disconnect()
+            except Exception as e:
+                logger.warning(f"Error disconnecting MCP client during resync: {e}")
+        self._mcp_clients.clear()
+
+        # 2. Remove MCP-registered tools
+        for name in self._mcp_tool_names:
+            self._tools.pop(name, None)
+        self._mcp_tool_names.clear()
+
+        # 3. Re-load MCP servers (spawns fresh subprocesses with new credentials)
+        self.load_mcp_config(self._mcp_config_path)
+
+        logger.info("MCP server resync complete")
+        return True
 
     def cleanup(self) -> None:
         """Clean up all MCP client connections."""

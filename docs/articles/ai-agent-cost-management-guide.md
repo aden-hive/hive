@@ -333,7 +333,7 @@ system_prompt += "\nKeep responses under 200 words."
 # Or use max_tokens parameter
 response = llm.complete(
     prompt,
-    max_tokens=300  # Hard limit
+    max_tokens=1024  # Hard limit
 )
 ```
 
