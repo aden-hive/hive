@@ -453,7 +453,7 @@ identity_prompt = (
 )
 loop_config = {
     "max_iterations": 50,
-    "max_tool_calls_per_turn": 10,
+    "max_tool_calls_per_turn": 30,
     "max_history_tokens": 32000,
 }
 
@@ -539,7 +539,7 @@ class CredentialTesterAgent:
             max_tokens=self.config.max_tokens,
             loop_config={
                 "max_iterations": 50,
-                "max_tool_calls_per_turn": 10,
+                "max_tool_calls_per_turn": 30,
                 "max_history_tokens": 32000,
             },
             conversation_mode="continuous",

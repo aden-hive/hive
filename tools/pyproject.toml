@@ -31,6 +31,7 @@ dependencies = [
     "litellm>=1.81.0",
     "dnspython>=2.4.0",
     "resend>=2.0.0",
+    "google-analytics-data>=0.18.0",
     "framework",
     "stripe>=14.3.0",
     "arxiv>=2.1.0",

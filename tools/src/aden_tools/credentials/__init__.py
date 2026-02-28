@@ -40,7 +40,9 @@ Credential categories:
 - discord.py: Discord bot credentials
 - github.py: GitHub API credentials
 - hubspot.py: HubSpot CRM credentials
+- intercom.py: Intercom customer messaging credentials
 - slack.py: Slack workspace credentials
+- google_analytics.py: Google Analytics credentials
 - google_maps.py: Google Maps Platform credentials
 - calcom.py: Cal.com scheduling API credentials
 
@@ -63,6 +65,7 @@ from .discord import DISCORD_CREDENTIALS
 from .email import EMAIL_CREDENTIALS
 from .gcp_vision import GCP_VISION_CREDENTIALS
 from .github import GITHUB_CREDENTIALS
+from .google_analytics import GOOGLE_ANALYTICS_CREDENTIALS
 from .google_calendar import GOOGLE_CALENDAR_CREDENTIALS
 from .google_docs import GOOGLE_DOCS_CREDENTIALS
 from .google_maps import GOOGLE_MAPS_CREDENTIALS
@@ -73,6 +76,7 @@ from .health_check import (
     validate_integration_wiring,
 )
 from .hubspot import HUBSPOT_CREDENTIALS
+from .intercom import INTERCOM_CREDENTIALS
 from .llm import LLM_CREDENTIALS
 from .news import NEWS_CREDENTIALS
 from .postgres import POSTGRES_CREDENTIALS
@@ -100,9 +104,11 @@ CREDENTIAL_SPECS = {
     **APOLLO_CREDENTIALS,
     **DISCORD_CREDENTIALS,
     **GITHUB_CREDENTIALS,
+    **GOOGLE_ANALYTICS_CREDENTIALS,
     **GOOGLE_DOCS_CREDENTIALS,
     **GOOGLE_MAPS_CREDENTIALS,
     **HUBSPOT_CREDENTIALS,
+    **INTERCOM_CREDENTIALS,
     **GOOGLE_CALENDAR_CREDENTIALS,
     **SLACK_CREDENTIALS,
     **SERPAPI_CREDENTIALS,
@@ -145,9 +151,11 @@ __all__ = [
     "EMAIL_CREDENTIALS",
     "GCP_VISION_CREDENTIALS",
     "GITHUB_CREDENTIALS",
+    "GOOGLE_ANALYTICS_CREDENTIALS",
     "GOOGLE_DOCS_CREDENTIALS",
     "GOOGLE_MAPS_CREDENTIALS",
     "HUBSPOT_CREDENTIALS",
+    "INTERCOM_CREDENTIALS",
     "GOOGLE_CALENDAR_CREDENTIALS",
     "SLACK_CREDENTIALS",
     "APOLLO_CREDENTIALS",

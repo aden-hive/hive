@@ -461,6 +461,8 @@ export default function Workspace() {
   const handleRun = useCallback(async () => {
     const state = agentStates[activeWorker];
     if (!state?.sessionId || !state?.ready) return;
+    // Reset dismissed banner so a repeated 424 re-shows it
+    setDismissedBanner(null);
     try {
       updateAgentState(activeWorker, { workerRunState: "deploying" });
       const result = await executionApi.trigger(state.sessionId, "default", {});
@@ -468,6 +470,9 @@ export default function Workspace() {
     } catch (err) {
       // 424 = credentials required — open the credentials modal
       if (err instanceof ApiError && err.status === 424) {
+        const errBody = (err as ApiError).body as Record<string, unknown>;
+        const credPath = (errBody?.agent_path as string) || null;
+        if (credPath) setCredentialAgentPath(credPath);
         updateAgentState(activeWorker, { workerRunState: "idle", error: "credentials_required" });
         setCredentialsOpen(true);
         return;
@@ -612,6 +617,9 @@ export default function Workspace() {
         } catch (loadErr: unknown) {
           // 424 = credentials required — open the credentials modal
           if (loadErr instanceof ApiError && loadErr.status === 424) {
+            const errBody = loadErr.body as Record<string, unknown>;
+            const credPath = (errBody.agent_path as string) || null;
+            if (credPath) setCredentialAgentPath(credPath);
             updateAgentState(agentType, { loading: false, error: "credentials_required" });
             setCredentialsOpen(true);
             return;
@@ -769,9 +777,16 @@ export default function Workspace() {
     }
   }, [updateAgentState]);
 
+  // Track which sessions already have an in-flight or completed graph fetch
+  // to prevent the flood of duplicate API calls.  agentStates changes on every
+  // SSE event (text delta, tool_call, etc.) which re-triggers this effect
+  // before the first response has returned.
+  const fetchedGraphSessionsRef = useRef<Set<string>>(new Set());
   useEffect(() => {
     for (const [agentType, state] of Object.entries(agentStates)) {
       if (!state.sessionId || !state.ready || state.nodeSpecs.length > 0 || state.graphId) continue;
+      if (fetchedGraphSessionsRef.current.has(state.sessionId)) continue;
+      fetchedGraphSessionsRef.current.add(state.sessionId);
       fetchGraphForAgent(agentType, state.sessionId);
     }
   }, [agentStates, fetchGraphForAgent]);
@@ -1265,10 +1280,13 @@ export default function Workspace() {
           }
           break;
 
-        case "credentials_required":
+        case "credentials_required": {
           updateAgentState(agentType, { workerRunState: "idle", error: "credentials_required" });
+          const credAgentPath = event.data?.agent_path as string | undefined;
+          if (credAgentPath) setCredentialAgentPath(credAgentPath);
           setCredentialsOpen(true);
           break;
+        }
 
         case "worker_loaded": {
           const workerName = event.data?.worker_name as string | undefined;
@@ -1761,14 +1779,14 @@ export default function Workspace() {
         agentLabel={activeWorkerLabel}
         agentPath={credentialAgentPath || (activeWorker !== "new-agent" ? activeWorker : undefined)}
         open={credentialsOpen}
-        onClose={() => { setCredentialsOpen(false); setCredentialAgentPath(null); }}
+        onClose={() => { setCredentialsOpen(false); setCredentialAgentPath(null); setDismissedBanner(null); }}
         credentials={activeSession?.credentials || []}
         onCredentialChange={() => {
-          if (!activeSession) return;
           // Clear credential error so the auto-load effect retries session creation
           if (agentStates[activeWorker]?.error === "credentials_required") {
             updateAgentState(activeWorker, { error: null });
           }
+          if (!activeSession) return;
           setSessionsByAgent(prev => ({
             ...prev,
             [activeWorker]: prev[activeWorker].map(s =>

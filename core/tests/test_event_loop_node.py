@@ -111,7 +111,7 @@ def tool_call_scenario(
 @pytest.fixture
 def runtime():
     rt = MagicMock(spec=Runtime)
-    rt.start_run = MagicMock(return_value="run_1")
+    rt.start_run = MagicMock(return_value="session_20250101_000000_eventlp01")
     rt.decide = MagicMock(return_value="dec_1")
     rt.record_outcome = MagicMock()
     rt.end_run = MagicMock()
