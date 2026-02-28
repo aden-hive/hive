@@ -2,7 +2,7 @@
 
 An autonomous HubSpot CRM monitor built on the Aden Hive framework.
 Continuously scans the sales pipeline, detects revenue leak patterns,
-sends structured alerts, and emails ghosted contacts — cycling until a
+sends structured alerts, and emails ghosted contacts via Resend — cycling until a
 critical threshold triggers escalation and halt.
 
 ---
@@ -64,7 +64,7 @@ export RESEND_API_KEY="re_xxx..."
 
 > **Note:** You must also verify a sending domain in Resend → **Domains** before emails will deliver.
 
-### 3. Telegram Alerts (Required)
+### 3. Telegram Alerts
 
 The LLM uses `telegram_send_message` MCP tool to send alerts.
 
