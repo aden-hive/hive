@@ -1,0 +1,132 @@
+{
+  "agent": {
+    "id": "discord_digest",
+    "name": "Discord Community Digest",
+    "version": "1.0.0",
+    "description": "Monitor Discord servers, categorize messages by priority, and deliver an actionable summary as a Discord DM."
+  },
+  "graph": {
+    "id": "discord-digest-graph",
+    "goal_id": "discord-digest",
+    "version": "1.0.0",
+    "entry_node": "configure",
+    "entry_points": {
+      "start": "configure"
+    },
+    "pause_nodes": [],
+    "terminal_nodes": [
+      "generate-digest"
+    ],
+    "nodes": [
+      {
+        "id": "configure",
+        "name": "Configure Digest",
+        "description": "Capture user preferences: servers, channels, lookback window, keywords, and Discord user ID for DM delivery.",
+        "node_type": "event_loop",
+        "input_keys": [],
+        "output_keys": ["digest_config"],
+        "tools": [],
+        "client_facing": true
+      },
+      {
+        "id": "scan-channels",
+        "name": "Scan Channels",
+        "description": "Pull messages from target Discord channels, filter by time range, and flag important messages.",
+        "node_type": "event_loop",
+        "input_keys": ["digest_config"],
+        "output_keys": ["channel_data"],
+        "tools": ["discord_list_guilds", "discord_list_channels", "discord_get_messages"],
+        "client_facing": false
+      },
+      {
+        "id": "generate-digest",
+        "name": "Generate Digest",
+        "description": "Summarize scanned messages into an actionable digest and deliver as a Discord DM.",
+        "node_type": "event_loop",
+        "input_keys": ["digest_config", "channel_data"],
+        "output_keys": ["digest_report"],
+        "tools": ["discord_send_message"],
+        "client_facing": false
+      }
+    ],
+    "edges": [
+      {
+        "id": "configure-to-scan",
+        "source": "configure",
+        "target": "scan-channels",
+        "condition": "on_success",
+        "priority": 1
+      },
+      {
+        "id": "scan-to-digest",
+        "source": "scan-channels",
+        "target": "generate-digest",
+        "condition": "on_success",
+        "priority": 1
+      }
+    ],
+    "max_steps": 100,
+    "description": "Monitor Discord servers, categorize messages by priority, and deliver an actionable summary as a Discord DM."
+  },
+  "goal": {
+    "id": "discord-digest",
+    "name": "Discord Community Digest",
+    "description": "Monitor Discord servers, categorize messages by priority, and deliver an actionable summary as a Discord DM.",
+    "success_criteria": [
+      {
+        "id": "sc-channels-scanned",
+        "description": "At least 5 channels are scanned for messages",
+        "metric": "channels_scanned",
+        "target": ">=5",
+        "weight": 0.20
+      },
+      {
+        "id": "sc-messages-categorized",
+        "description": "Messages are categorized into action/threads/announcements/fyi",
+        "metric": "messages_categorized",
+        "target": "true",
+        "weight": 0.25
+      },
+      {
+        "id": "sc-digest-delivered",
+        "description": "Digest is delivered as a Discord DM to the user",
+        "metric": "digest_delivered",
+        "target": "true",
+        "weight": 0.30
+      },
+      {
+        "id": "sc-dedup",
+        "description": "Digest does not repeat messages from previous runs",
+        "metric": "dedup_applied",
+        "target": "true",
+        "weight": 0.25
+      }
+    ],
+    "constraints": [
+      {
+        "id": "c-no-spam",
+        "description": "Never send unsolicited messages to other users",
+        "constraint_type": "hard",
+        "category": "safety"
+      },
+      {
+        "id": "c-time-range",
+        "description": "Only scan messages within the configured lookback window",
+        "constraint_type": "hard",
+        "category": "correctness"
+      },
+      {
+        "id": "c-rate-limit",
+        "description": "Respect Discord API rate limits",
+        "constraint_type": "hard",
+        "category": "reliability"
+      }
+    ]
+  },
+  "required_tools": [
+    "discord_list_guilds",
+    "discord_list_channels",
+    "discord_get_messages",
+    "discord_send_message"
+  ]
+}
