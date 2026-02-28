@@ -1,0 +1,112 @@
+{
+  "strict": true,
+  "dry_run": false,
+  "charts": [
+    {
+      "path": "out/ops_kpi_trend.png",
+      "chart": {
+        "title": "Incident Volume vs SLA Compliance",
+        "x_label": "Week",
+        "y_label": "Value",
+        "series": [
+          {
+            "name": "Incidents",
+            "x": [1, 2, 3, 4, 5, 6],
+            "y": [42, 38, 47, 35, 31, 29]
+          },
+          {
+            "name": "SLA Compliance %",
+            "x": [1, 2, 3, 4, 5, 6],
+            "y": [91, 92, 89, 94, 95, 96]
+          }
+        ]
+      }
+    }
+  ],
+  "xlsx_path": "out/operations_report.xlsx",
+  "pptx_path": "out/operations_report.pptx",
+  "docx_path": "out/operations_report.docx",
+  "workbook": {
+    "sheets": [
+      {
+        "name": "KPI Summary",
+        "columns": ["Team", "Incidents", "SLA_Compliance", "Backlog"],
+        "rows": [
+          ["Platform", 84, 0.94, 12],
+          ["API", 63, 0.92, 9],
+          ["Data", 51, 0.95, 7]
+        ],
+        "freeze_panes": "A2",
+        "number_formats": {
+          "SLA_Compliance": "0.00%"
+        },
+        "auto_filter": true,
+        "header_fill": true
+      },
+      {
+        "name": "Charts",
+        "columns": ["Chart"],
+        "rows": [["Ops trend"]],
+        "images": [
+          {
+            "path": "out/ops_kpi_trend.png",
+            "cell": "A3",
+            "width": 620
+          }
+        ],
+        "auto_filter": false,
+        "header_fill": false
+      }
+    ]
+  },
+  "deck": {
+    "title": "Operations Weekly Brief",
+    "slides": [
+      {
+        "title": "Highlights",
+        "bullets": [
+          "Incident trend improved week over week",
+          "SLA compliance stayed above 92%"
+        ],
+        "image_paths": [],
+        "charts": []
+      },
+      {
+        "title": "KPI Trend",
+        "bullets": [
+          "Lower incidents with higher SLA compliance"
+        ],
+        "image_paths": ["out/ops_kpi_trend.png"],
+        "charts": []
+      }
+    ]
+  },
+  "doc": {
+    "title": "Operations Report",
+    "sections": [
+      {
+        "heading": "Executive Summary",
+        "paragraphs": [
+          "This report summarizes weekly incident and SLA performance."
+        ],
+        "bullets": [
+          "Incident volume decreased",
+          "Backlog remained controlled"
+        ]
+      },
+      {
+        "heading": "Team Metrics",
+        "paragraphs": [],
+        "bullets": [],
+        "table": {
+          "columns": ["Team", "Incidents", "SLA_Compliance", "Backlog"],
+          "rows": [
+            ["Platform", 84, 0.94, 12],
+            ["API", 63, 0.92, 9],
+            ["Data", 51, 0.95, 7]
+          ]
+        }
+      }
+    ]
+  }
+}

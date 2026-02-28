@@ -1,0 +1,109 @@
+{
+  "strict": true,
+  "dry_run": false,
+  "charts": [
+    {
+      "path": "out/your_chart_1.png",
+      "chart": {
+        "title": "YOUR_CHART_TITLE",
+        "x_label": "YOUR_X_AXIS_LABEL",
+        "y_label": "YOUR_Y_AXIS_LABEL",
+        "series": [
+          {
+            "name": "YOUR_SERIES_1_NAME",
+            "x": [1, 2, 3, 4],
+            "y": [10, 20, 15, 30]
+          },
+          {
+            "name": "YOUR_SERIES_2_NAME",
+            "x": [1, 2, 3, 4],
+            "y": [8, 16, 14, 22]
+          }
+        ]
+      }
+    }
+  ],
+  "xlsx_path": "out/your_report.xlsx",
+  "pptx_path": "out/your_report.pptx",
+  "docx_path": "out/your_report.docx",
+  "workbook": {
+    "sheets": [
+      {
+        "name": "Summary",
+        "columns": ["Label", "Metric_1", "Metric_2"],
+        "rows": [
+          ["Row_1", 0.10, -0.02],
+          ["Row_2", 0.05, -0.01]
+        ],
+        "freeze_panes": "A2",
+        "number_formats": {
+          "Metric_1": "0.00%",
+          "Metric_2": "0.00%"
+        },
+        "auto_filter": true,
+        "header_fill": true
+      },
+      {
+        "name": "Charts",
+        "columns": ["Chart"],
+        "rows": [["Primary chart"]],
+        "images": [
+          {
+            "path": "out/your_chart_1.png",
+            "cell": "A3",
+            "width": 600
+          }
+        ],
+        "auto_filter": false,
+        "header_fill": false
+      }
+    ]
+  },
+  "deck": {
+    "title": "YOUR_PRESENTATION_TITLE",
+    "slides": [
+      {
+        "title": "Summary",
+        "bullets": [
+          "YOUR_KEY_POINT_1",
+          "YOUR_KEY_POINT_2"
+        ],
+        "image_paths": [],
+        "charts": []
+      },
+      {
+        "title": "Chart",
+        "bullets": ["YOUR_CHART_INSIGHT"],
+        "image_paths": ["out/your_chart_1.png"],
+        "charts": []
+      }
+    ]
+  },
+  "doc": {
+    "title": "YOUR_DOCUMENT_TITLE",
+    "sections": [
+      {
+        "heading": "Executive Summary",
+        "paragraphs": [
+          "WRITE_YOUR_SUMMARY_PARAGRAPH_HERE"
+        ],
+        "bullets": [
+          "YOUR_BULLET_1",
+          "YOUR_BULLET_2"
+        ]
+      },
+      {
+        "heading": "Data Table",
+        "paragraphs": [],
+        "bullets": [],
+        "table": {
+          "columns": ["Label", "Metric_1", "Metric_2"],
+          "rows": [
+            ["Row_1", 0.10, -0.02],
+            ["Row_2", 0.05, -0.01]
+          ]
+        }
+      }
+    ]
+  }
+}

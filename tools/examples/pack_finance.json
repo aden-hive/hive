@@ -1,0 +1,85 @@
+{
+  "strict": true,
+  "charts": [
+    {
+      "path": "out/aapl_msft.png",
+      "chart": {
+        "title": "AAPL vs MSFT (synthetic)",
+        "x_label": "Day",
+        "y_label": "Price",
+        "series": [
+          {
+            "name": "AAPL",
+            "x": [1, 2, 3, 4, 5],
+            "y": [190, 191, 192, 191, 193]
+          },
+          {
+            "name": "MSFT",
+            "x": [1, 2, 3, 4, 5],
+            "y": [410, 412, 411, 413, 414]
+          }
+        ]
+      }
+    }
+  ],
+  "xlsx_path": "out/pack_finance.xlsx",
+  "pptx_path": "out/pack_finance.pptx",
+  "docx_path": "out/pack_finance.docx",
+  "workbook": {
+    "sheets": [
+      {
+        "name": "Summary",
+        "columns": ["Ticker", "Return", "Drawdown"],
+        "rows": [["AAPL", 0.0123, -0.034], ["MSFT", 0.004, -0.021]],
+        "freeze_panes": "A2",
+        "number_formats": {
+          "Return": "0.00%",
+          "Drawdown": "0.00%"
+        },
+        "auto_filter": true,
+        "header_fill": true
+      },
+      {
+        "name": "Charts",
+        "columns": ["Chart"],
+        "rows": [["AAPL vs MSFT"]],
+        "images": [
+          {
+            "path": "out/aapl_msft.png",
+            "cell": "A3",
+            "width": 600
+          }
+        ],
+        "auto_filter": false,
+        "header_fill": false
+      }
+    ]
+  },
+  "deck": {
+    "title": "Finance Brief",
+    "slides": [
+      {
+        "title": "Summary",
+        "bullets": ["AAPL outperformed", "MSFT stable"],
+        "image_paths": [],
+        "charts": []
+      },
+      {
+        "title": "Chart",
+        "bullets": ["Synthetic price chart"],
+        "image_paths": ["out/aapl_msft.png"],
+        "charts": []
+      }
+    ]
+  },
+  "doc": {
+    "title": "Finance Report",
+    "sections": [
+      {
+        "heading": "Executive Summary",
+        "paragraphs": ["Auto-generated pack output."],
+        "bullets": []
+      }
+    ]
+  }
+}

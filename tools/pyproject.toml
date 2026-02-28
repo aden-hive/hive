@@ -39,10 +39,15 @@ dependencies = [
     "psycopg2-binary>=2.9.0",
 ]
 
+[project.scripts]
+aden-office-pack = "aden_tools.cli.office_pack:main"
+
 [project.optional-dependencies]
 dev = [
     "pytest>=7.0.0",
     "pytest-asyncio>=0.21.0",
+    "pyright>=1.1.380",
+    "pre-commit>=3.7.0",
 ]
 sandbox = [
     "RestrictedPython>=7.0",
@@ -53,6 +58,15 @@ ocr = [
 ]
 excel = [
     "openpyxl>=3.1.0",
+]
+powerpoint = [
+    "python-pptx>=1.0.0",
+]
+word = [
+    "python-docx>=1.1.0",
+]
+charts = [
+    "matplotlib>=3.8.0",
 ]
 sql = [
     "duckdb>=1.0.0",
@@ -67,6 +81,12 @@ all = [
     "duckdb>=1.0.0",
     "openpyxl>=3.1.0",
     "google-cloud-bigquery>=3.0.0",
+    "python-pptx>=1.0.0",
+    "matplotlib>=3.8.0",
+    "pyright>=1.1.380",
+    "pre-commit>=3.7.0",
+
+
 ]
 
 [tool.uv.sources]
@@ -83,25 +103,18 @@ packages = ["src/aden_tools"]
 target-version = "py311"
 line-length = 100
 
-lint.select = [
-  "B",   # bugbear errors
-  "C4",  # flake8-comprehensions errors
-  "E",   # pycodestyle errors
-  "F",   # pyflakes errors
-  "I",   # import sorting
-  "Q",   # flake8-quotes errors
-  "UP",  # py-upgrade
-  "W",   # pycodestyle warnings
-]
+[tool.ruff.lint]
+select = ["E", "F", "I"]
 
-lint.isort.combine-as-imports = true
-lint.isort.known-first-party = ["aden_tools"]
-lint.isort.section-order = [
-  "future",
-  "standard-library",
-  "third-party",
-  "first-party",
-  "local-folder",
+[tool.ruff.lint.isort]
+combine-as-imports = true
+known-first-party = ["aden_tools"]
+section-order = [
+    "future",
+    "standard-library",
+    "third-party",
+    "first-party",
+    "local-folder",
 ]
 
 [tool.pytest.ini_options]
@@ -114,3 +127,13 @@ dev = [
     "ruff>=0.14.14",
     "duckdb>=1.4.4",
 ]
+powerpoint = [
+    "python-pptx>=1.0.0",
+]
+word = [
+    "python-docx>=1.1.0",
+]
+charts = [
+    "matplotlib>=3.8.0",
+]
+

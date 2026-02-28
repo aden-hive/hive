@@ -1,9 +1,16 @@
 """Tests for security.py - get_secure_path() function."""
 
 import os
+import sys
 from unittest.mock import patch
 
 import pytest
+
+IS_WINDOWS = sys.platform.startswith("win")
+HAS_SYMLINK_PRIV = True
+if IS_WINDOWS:
+    # Windows requires Developer Mode or elevated permissions for reliable symlink creation.
+    HAS_SYMLINK_PRIV = bool(os.environ.get("ENABLE_SYMLINK_TESTS", ""))
 
 
 class TestGetSecurePath:
@@ -228,6 +235,10 @@ class TestGetSecurePath:
         expected = self.workspaces_dir / "test-workspace" / "test-agent" / "test-session"
         assert result == str(expected)
 
+    @pytest.mark.skipif(
+        IS_WINDOWS and not HAS_SYMLINK_PRIV,
+        reason="Windows symlink privilege required (set ENABLE_SYMLINK_TESTS=1)",
+    )
     def test_symlink_within_sandbox_works(self, ids):
         """Symlinks that stay within the sandbox are allowed."""
         from aden_tools.tools.file_system_toolkits.security import get_secure_path
@@ -247,6 +258,10 @@ class TestGetSecurePath:
 
         assert result == str(symlink_path)
 
+    @pytest.mark.skipif(
+        IS_WINDOWS and not HAS_SYMLINK_PRIV,
+        reason="Windows symlink privilege required (set ENABLE_SYMLINK_TESTS=1)",
+    )
     def test_symlink_escape_detected_with_realpath(self, ids):
         """Symlinks pointing outside sandbox can be detected using realpath.
 

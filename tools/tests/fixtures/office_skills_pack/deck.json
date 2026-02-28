@@ -1,0 +1,24 @@
+{
+  "title": "Weekly Brief",
+  "slides": [
+    {
+      "title": "Summary",
+      "bullets": [
+        "One",
+        "Two"
+      ],
+      "image_paths": [],
+      "charts": []
+    },
+    {
+      "title": "Chart",
+      "bullets": [
+        "See chart"
+      ],
+      "image_paths": [
+        "out/chart.png"
+      ],
+      "charts": []
+    }
+  ]
+}

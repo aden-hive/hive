@@ -81,10 +81,54 @@ jobs:
           uv sync --extra dev
           uv run pytest tests/ -v
 
+  test-tools-office:
+    name: Test Tools (Office Pack Extras)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+
+      - name: Install office extras and run office tests
+        run: |
+          cd tools
+          uv sync --extra dev --extra excel --extra word --extra powerpoint --extra charts
+          uv run pytest tests/tools/test_chart_tool.py tests/tools/test_excel_write_tool.py tests/tools/test_powerpoint_tool.py tests/tools/test_word_tool.py -v
+
+      - name: Office pack CLI smoke (dry-run markdown)
+        run: |
+          cd tools
+          uv run python -m aden_tools.cli.office_pack --spec examples/pack_custom_template.json --dry-run --print-markdown
+
+  typecheck-office:
+    name: Typecheck Office Pack
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+
+      - name: Install office extras and run pyright
+        run: |
+          pip install -e ".[dev,excel,word,powerpoint,charts]"
+          python tools/scripts/typecheck_office.py
+
   validate:
     name: Validate Agent Exports
     runs-on: ubuntu-latest
-    needs: [lint, test, test-tools]
+    needs: [lint, test, test-tools, test-tools-office, typecheck-office]
     steps:
       - uses: actions/checkout@v4
 

@@ -30,6 +30,7 @@ from .calcom_tool import register_tools as register_calcom
 from .calendar_tool import register_tools as register_calendar
 from .csv_tool import register_tools as register_csv
 from .discord_tool import register_tools as register_discord
+from .chart_tool import register_tools as register_chart
 
 # Security scanning tools
 from .dns_security_scanner import register_tools as register_dns_security_scanner
@@ -61,7 +62,15 @@ from .http_headers_scanner import register_tools as register_http_headers_scanne
 from .hubspot_tool import register_tools as register_hubspot
 from .intercom_tool import register_tools as register_intercom
 from .news_tool import register_tools as register_news
+from .office_skills_pack.manifest_tool import register_tools as register_office_manifest
+from .office_skills_pack.list_tool import register_tools as register_office_list_outputs
+from .office_skills_pack.pack_tool import register_tools as register_office_pack_tool
+from .office_skills_pack.schema_tool import register_tools as register_office_schema
+from .office_skills_pack.examples_tool import register_tools as register_office_examples
+from .office_skills_pack.spec_builder_tool import register_tools as register_office_spec_builder
+from .office_skills_pack.viewer_tool import register_tools as register_office_viewer
 from .pdf_read_tool import register_tools as register_pdf_read
+from .powerpoint_tool import register_tools as register_powerpoint
 from .port_scanner import register_tools as register_port_scanner
 from .postgres_tool import register_tools as register_postgres
 from .razorpay_tool import register_tools as register_razorpay
@@ -78,6 +87,7 @@ from .time_tool import register_tools as register_time
 from .vision_tool import register_tools as register_vision
 from .web_scrape_tool import register_tools as register_web_scrape
 from .web_search_tool import register_tools as register_web_search
+from .word_tool import register_tools as register_word
 
 # Web and PDF tools
 from .wikipedia_tool import register_tools as register_wikipedia
@@ -146,6 +156,17 @@ def register_all_tools(
     register_data_tools(mcp)
     register_csv(mcp)
     register_excel(mcp)
+    register_excel_write(mcp)
+    register_powerpoint(mcp)
+    register_word(mcp)
+    register_chart(mcp)
+    register_office_schema(mcp)
+    register_office_manifest(mcp)
+    register_office_pack_tool(mcp)
+    register_office_viewer(mcp)
+    register_office_list_outputs(mcp)
+    register_office_examples(mcp)
+    register_office_spec_builder(mcp)
 
     # Security scanning tools (no credentials needed)
     register_ssl_tls_scanner(mcp)

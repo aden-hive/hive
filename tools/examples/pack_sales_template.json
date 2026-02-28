@@ -1,0 +1,117 @@
+{
+  "strict": true,
+  "dry_run": false,
+  "charts": [
+    {
+      "path": "out/sales_trend.png",
+      "chart": {
+        "title": "Monthly Revenue vs Target",
+        "x_label": "Month",
+        "y_label": "Amount (USD)",
+        "series": [
+          {
+            "name": "Revenue",
+            "x": [1, 2, 3, 4, 5, 6],
+            "y": [120000, 135000, 142000, 155000, 149000, 168000]
+          },
+          {
+            "name": "Target",
+            "x": [1, 2, 3, 4, 5, 6],
+            "y": [110000, 125000, 135000, 145000, 150000, 160000]
+          }
+        ]
+      }
+    }
+  ],
+  "xlsx_path": "out/sales_report.xlsx",
+  "pptx_path": "out/sales_report.pptx",
+  "docx_path": "out/sales_report.docx",
+  "workbook": {
+    "sheets": [
+      {
+        "name": "KPI Summary",
+        "columns": ["Region", "Revenue", "Target", "Margin"],
+        "rows": [
+          ["North", 520000, 500000, 0.29],
+          ["South", 430000, 450000, 0.24],
+          ["East", 390000, 380000, 0.27],
+          ["West", 470000, 460000, 0.26]
+        ],
+        "freeze_panes": "A2",
+        "number_formats": {
+          "Revenue": "$#,##0",
+          "Target": "$#,##0",
+          "Margin": "0.00%"
+        },
+        "auto_filter": true,
+        "header_fill": true
+      },
+      {
+        "name": "Charts",
+        "columns": ["Description"],
+        "rows": [["Revenue vs Target trend"]],
+        "images": [
+          {
+            "path": "out/sales_trend.png",
+            "cell": "A3",
+            "width": 620
+          }
+        ],
+        "auto_filter": false,
+        "header_fill": false
+      }
+    ]
+  },
+  "deck": {
+    "title": "Quarterly Sales Review",
+    "slides": [
+      {
+        "title": "Executive Summary",
+        "bullets": [
+          "Total revenue beat plan by 3.5%",
+          "North region led growth"
+        ],
+        "image_paths": [],
+        "charts": []
+      },
+      {
+        "title": "Revenue Trend",
+        "bullets": [
+          "Revenue remained above target for most months"
+        ],
+        "image_paths": ["out/sales_trend.png"],
+        "charts": []
+      }
+    ]
+  },
+  "doc": {
+    "title": "Sales Performance Report",
+    "sections": [
+      {
+        "heading": "Executive Summary",
+        "paragraphs": [
+          "This report summarizes regional sales performance and target attainment."
+        ],
+        "bullets": [
+          "Strong performance in North and West",
+          "Margin remained above 24% across regions"
+        ]
+      },
+      {
+        "heading": "Regional KPI Table",
+        "paragraphs": [],
+        "bullets": [],
+        "table": {
+          "columns": ["Region", "Revenue", "Target", "Margin"],
+          "rows": [
+            ["North", 520000, 500000, 0.29],
+            ["South", 430000, 450000, 0.24],
+            ["East", 390000, 380000, 0.27],
+            ["West", 470000, 460000, 0.26]
+          ]
+        }
+      }
+    ]
+  }
+}
+

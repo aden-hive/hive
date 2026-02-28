@@ -1,0 +1,47 @@
+{
+  "sheets": [
+    {
+      "name": "Summary",
+      "columns": [
+        "Ticker",
+        "Return"
+      ],
+      "rows": [
+        [
+          "AAPL",
+          0.01
+        ],
+        [
+          "MSFT",
+          0.02
+        ]
+      ],
+      "freeze_panes": "A2",
+      "number_formats": {
+        "Return": "0.00%"
+      },
+      "auto_filter": true,
+      "header_fill": true
+    },
+    {
+      "name": "Charts",
+      "columns": [
+        "Chart"
+      ],
+      "rows": [
+        [
+          "AAPL vs MSFT"
+        ]
+      ],
+      "images": [
+        {
+          "path": "out/chart.png",
+          "cell": "A3",
+          "width": 400
+        }
+      ],
+      "auto_filter": false,
+      "header_fill": false
+    }
+  ]
+}
