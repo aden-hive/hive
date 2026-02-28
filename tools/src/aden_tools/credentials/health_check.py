@@ -1058,9 +1058,64 @@ class BrevoHealthChecker(BaseHttpHealthChecker):
         return identity
 
 
+# Telegram Bot API health checker (not OAuth - token goes in URL path)
+class TelegramHealthChecker:
+    """Health checker for Telegram Bot tokens."""
+
+    TIMEOUT = 10.0
+
+    def check(self, bot_token: str) -> HealthCheckResult:
+        """
+        Validate Telegram bot token by making a lightweight API call.
+        Telegram bot tokens go in the URL path: /bot<TOKEN>/getMe
+        """
+        try:
+            with httpx.Client(timeout=self.TIMEOUT) as client:
+                response = client.get(
+                    f"https://api.telegram.org/bot{bot_token}/getMe",
+                )
+
+                if response.status_code == 200:
+                    return HealthCheckResult(
+                        valid=True,
+                        message="Telegram bot token valid",
+                    )
+                elif response.status_code == 401:
+                    return HealthCheckResult(
+                        valid=False,
+                        message="Telegram bot token is invalid or expired",
+                        details={"status_code": 401},
+                    )
+                elif response.status_code == 404:
+                    return HealthCheckResult(
+                        valid=False,
+                        message="Telegram bot token not found (404)",
+                        details={"status_code": 404},
+                    )
+                else:
+                    return HealthCheckResult(
+                        valid=False,
+                        message=f"Telegram API returned status {response.status_code}",
+                        details={"status_code": response.status_code},
+                    )
+        except httpx.TimeoutException:
+            return HealthCheckResult(
+                valid=False,
+                message="Telegram API request timed out",
+                details={"error": "timeout"},
+            )
+        except httpx.RequestError as e:
+            return HealthCheckResult(
+                valid=False,
+                message=f"Failed to connect to Telegram: {e}",
+                details={"error": str(e)},
+            )
+
+
 # Registry of health checkers
 HEALTH_CHECKERS: dict[str, CredentialHealthChecker] = {
     "discord": DiscordHealthChecker(),
+    "telegram": TelegramHealthChecker(),
     "hubspot": HubSpotHealthChecker(),
     "brave_search": BraveSearchHealthChecker(),
     "google_calendar_oauth": GoogleCalendarHealthChecker(),

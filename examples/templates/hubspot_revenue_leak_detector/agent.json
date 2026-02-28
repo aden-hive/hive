@@ -1,0 +1,174 @@
+{
+  "agent": {
+    "id": "hubspot_revenue_leak_detector",
+    "name": "HubSpot Revenue Leak Detector",
+    "version": "1.0.0",
+    "description": "Autonomous HubSpot CRM monitor that continuously scans the sales pipeline, detects revenue leaks (ghosted prospects, stalled deals, overdue payments, churn risk), and sends structured alerts until a critical leak threshold triggers escalation. Uses HubSpot, Email (Resend), and Telegram MCP tools from hive-tools server. Requires HUBSPOT_ACCESS_TOKEN, RESEND_API_KEY, and TELEGRAM_BOT_TOKEN + TELEGRAM_CHAT_ID."
+  },
+  "graph": {
+    "id": "hubspot-revenue-leak-detector-graph",
+    "goal_id": "hubspot-revenue-leak-detector",
+    "version": "1.0.0",
+    "entry_node": "monitor",
+    "entry_points": {
+      "start": "monitor"
+    },
+    "pause_nodes": [],
+    "terminal_nodes": [],
+    "conversation_mode": "continuous",
+    "nodes": [
+      {
+        "id": "monitor",
+        "name": "Monitor",
+        "description": "Scan HubSpot CRM pipeline for current cycle using HubSpot MCP tools.",
+        "node_type": "event_loop",
+        "max_node_visits": 0,
+        "input_keys": ["cycle"],
+        "output_keys": ["cycle", "deals_scanned", "overdue_invoices", "support_escalations"],
+        "tools": ["hubspot_search_deals", "hubspot_search_contacts", "scan_pipeline"]
+      },
+      {
+        "id": "analyze",
+        "name": "Analyze",
+        "description": "Detect revenue leak patterns in current HubSpot pipeline snapshot.",
+        "node_type": "event_loop",
+        "max_node_visits": 0,
+        "input_keys": ["cycle", "deals_scanned", "overdue_invoices", "support_escalations"],
+        "output_keys": ["cycle", "leak_count", "severity", "total_at_risk", "halt"],
+        "tools": ["detect_revenue_leaks"]
+      },
+      {
+        "id": "notify",
+        "name": "Notify",
+        "description": "Send a formatted revenue leak alert and pass halt state through.",
+        "node_type": "event_loop",
+        "max_node_visits": 0,
+        "input_keys": ["cycle", "leak_count", "severity", "total_at_risk", "halt"],
+        "output_keys": ["cycle", "halt"],
+        "tools": ["build_telegram_alert", "telegram_send_message"]
+      },
+      {
+        "id": "followup",
+        "name": "Followup",
+        "description": "Send re-engagement emails to GHOSTED contacts using Resend MCP tool.",
+        "node_type": "event_loop",
+        "max_node_visits": 0,
+        "input_keys": ["cycle", "halt"],
+        "output_keys": ["cycle", "halt"],
+        "tools": ["prepare_followup_emails", "send_email"]
+      }
+    ],
+    "edges": [
+      {
+        "id": "monitor-to-analyze",
+        "source": "monitor",
+        "target": "analyze",
+        "condition": "on_success"
+      },
+      {
+        "id": "analyze-to-notify",
+        "source": "analyze",
+        "target": "notify",
+        "condition": "on_success"
+      },
+      {
+        "id": "notify-to-followup",
+        "source": "notify",
+        "target": "followup",
+        "condition": "on_success"
+      },
+      {
+        "id": "followup-to-monitor",
+        "source": "followup",
+        "target": "monitor",
+        "condition": "conditional",
+        "condition_expr": "str(halt).lower() != \"true\""
+      }
+    ]
+  },
+  "goal": {
+    "id": "hubspot-revenue-leak-detector",
+    "name": "HubSpot Revenue Leak Detector",
+    "description": "Autonomous HubSpot CRM monitor that continuously scans the sales pipeline, detects revenue leaks (ghosted prospects, stalled deals, overdue payments, churn risk), and sends structured alerts until a critical leak threshold triggers escalation. Requires HUBSPOT_ACCESS_TOKEN, RESEND_API_KEY, and TELEGRAM_BOT_TOKEN + TELEGRAM_CHAT_ID.",
+    "success_criteria": [
+      {
+        "id": "leak-detection",
+        "description": "Detect all revenue leaks in HubSpot pipeline each cycle",
+        "metric": "output_contains",
+        "target": "leak_count",
+        "weight": 0.4
+      },
+      {
+        "id": "alert-delivery",
+        "description": "Successfully send alerts for every detected leak via console and Telegram",
+        "metric": "output_contains",
+        "target": "sent",
+        "weight": 0.3
+      },
+      {
+        "id": "followup-coverage",
+        "description": "Send follow-up emails to all GHOSTED contacts",
+        "metric": "output_contains",
+        "target": "emails_sent",
+        "weight": 0.3
+      }
+    ],
+    "constraints": [
+      {
+        "id": "real-data-only",
+        "description": "Only report leaks found in actual HubSpot CRM data — never fabricate deals or contacts",
+        "constraint_type": "hard",
+        "category": "accuracy"
+      },
+      {
+        "id": "single-tool-call",
+        "description": "Each node calls its designated tool exactly once per cycle",
+        "constraint_type": "hard",
+        "category": "scope"
+      },
+      {
+        "id": "halt-on-critical",
+        "description": "Halt monitoring loop when severity reaches critical or MAX_CYCLES of low severity elapse",
+        "constraint_type": "hard",
+        "category": "safety"
+      },
+      {
+        "id": "hubspot-required",
+        "description": "HUBSPOT_ACCESS_TOKEN is required for meaningful operation",
+        "constraint_type": "hard",
+        "category": "requirements"
+      },
+      {
+        "id": "email-required",
+        "description": "RESEND_API_KEY is required for sending follow-up emails",
+        "constraint_type": "hard",
+        "category": "requirements"
+      },
+      {
+        "id": "telegram-required",
+        "description": "TELEGRAM_BOT_TOKEN is required for sending revenue leak alerts",
+        "constraint_type": "hard",
+        "category": "requirements"
+      }
+    ]
+  },
+  "required_tools": [
+    "scan_pipeline",
+    "detect_revenue_leaks",
+    "build_telegram_alert",
+    "prepare_followup_emails"
+  ],
+  "mcp_servers": {
+    "hive-tools": {
+      "transport": "stdio",
+      "command": "uv",
+      "args": ["run", "python", "mcp_server.py", "--stdio"],
+      "cwd": "../../../tools",
+      "description": "Hive tools MCP server providing HubSpot CRM, Email (Resend), Telegram, web_search, web_scrape, and write_to_file tools"
+    }
+  },
+  "metadata": {
+    "tags": ["revenue", "hubspot", "crm", "monitoring", "telegram", "resend", "email"],
+    "category": "business"
+  }
+}
