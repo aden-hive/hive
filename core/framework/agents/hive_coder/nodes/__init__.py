@@ -351,7 +351,7 @@ value. These DO NOT EXIST.
 ```python
 loop_config = {
     "max_iterations": 100,
-    "max_tool_calls_per_turn": 20,
+    "max_tool_calls_per_turn": 30,
     "max_history_tokens": 32000,
 }
 ```
