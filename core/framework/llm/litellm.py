@@ -783,9 +783,7 @@ class LiteLLMProvider(LLMProvider):
             m
             for m in full_messages
             if not (
-                m.get("role") == "assistant"
-                and not m.get("content")
-                and not m.get("tool_calls")
+                m.get("role") == "assistant" and not m.get("content") and not m.get("tool_calls")
             )
         ]
 

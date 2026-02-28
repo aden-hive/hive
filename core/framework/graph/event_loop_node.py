@@ -2400,10 +2400,7 @@ class EventLoopNode(NodeProtocol):
                 )
             else:
                 # Small result: keep full content + annotation
-                content = (
-                    f"{result.content}\n\n"
-                    f"[Saved to '{filename}']"
-                )
+                content = f"{result.content}\n\n[Saved to '{filename}']"
                 logger.info(
                     "Tool result saved to file: %s (%d chars → %s)",
                     tool_name,
@@ -2537,9 +2534,7 @@ class EventLoopNode(NodeProtocol):
                     mid_ratio * 100,
                 )
                 summary = self._build_emergency_summary(ctx, accumulator, conversation)
-                await conversation.compact(
-                    summary, keep_recent=keep, phase_graduated=_phase_grad
-                )
+                await conversation.compact(summary, keep_recent=keep, phase_graduated=_phase_grad)
         else:
             # Fallback: LLM-based summary (no spillover dir available)
             if level == "emergency":
