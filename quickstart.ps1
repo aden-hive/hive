@@ -307,8 +307,9 @@ Write-Host ""
 
 Write-Step -Number "1" -Text "Step 1: Checking Python..."
 
+# On Windows "python3.x" aliases don't exist; prefer "python" then "python3"
 $PythonCmd = $null
-foreach ($candidate in @("python3.13", "python3.12", "python3.11", "python3", "python")) {
+foreach ($candidate in @("python", "python3", "python3.13", "python3.12", "python3.11")) {
     try {
         $ver = & $candidate -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')" 2>$null
         if ($LASTEXITCODE -eq 0 -and $ver) {
@@ -326,17 +327,7 @@ foreach ($candidate in @("python3.13", "python3.12", "python3.11", "python3", "p
 }
 
 if (-not $PythonCmd) {
-    # Try plain "python" as final fallback (common on Windows)
-    try {
-        $ver = & python -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')" 2>$null
-        if ($LASTEXITCODE -eq 0) {
-            Write-Color -Text "Python $ver found but 3.11+ is required." -Color Red
-        } else {
-            Write-Color -Text "Python is not installed." -Color Red
-        }
-    } catch {
-        Write-Color -Text "Python is not installed." -Color Red
-    }
+    Write-Color -Text "Python 3.11+ is not installed or not on PATH." -Color Red
     Write-Host ""
     Write-Host "Please install Python 3.11+ from https://python.org"
     Write-Host "  - Make sure to check 'Add Python to PATH' during installation"
@@ -673,7 +664,7 @@ $imports = @(
 $modulesToCheck = @("framework", "aden_tools", "litellm", "framework.mcp.agent_builder_server")
 
 try {
-    $checkOutput = & uv run $PythonCmd scripts/check_requirements.py @modulesToCheck 2>&1 | Out-String
+    $checkOutput = & uv run python scripts/check_requirements.py @modulesToCheck 2>&1 | Out-String
     $resultJson = $null
     
     # Try to parse JSON result
@@ -1197,7 +1188,7 @@ $verifyErrors = 0
 $verifyModules = @("framework", "aden_tools")
 
 try {
-    $verifyOutput = & uv run $PythonCmd scripts/check_requirements.py @verifyModules 2>&1 | Out-String
+    $verifyOutput = & uv run python scripts/check_requirements.py @verifyModules 2>&1 | Out-String
     $verifyJson = $null
     
     try {
@@ -1207,7 +1198,7 @@ try {
         # Fall back to basic checks if JSON parsing fails
         foreach ($mod in $verifyModules) {
             Write-Host "  $([char]0x2B21) $mod... " -NoNewline
-            $null = & uv run $PythonCmd -c "import $mod" 2>&1
+            $null = & uv run python -c "import $mod" 2>&1
             if ($LASTEXITCODE -eq 0) { Write-Ok "ok" }
             else { Write-Fail "failed"; $verifyErrors++ }
         }

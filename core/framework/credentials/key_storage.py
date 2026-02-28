@@ -164,7 +164,7 @@ def _read_credential_key_file() -> str | None:
     """Read the credential key from ``~/.hive/secrets/credential_key``."""
     try:
         if CREDENTIAL_KEY_PATH.is_file():
-            value = CREDENTIAL_KEY_PATH.read_text().strip()
+            value = CREDENTIAL_KEY_PATH.read_text(encoding="utf-8").strip()
             if value:
                 return value
     except Exception:
