@@ -537,6 +537,32 @@ wheels = [
 ]
 
 [[package]]
+name = "databricks-mcp"
+version = "0.1.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "databricks-sdk" },
+    { name = "mcp" },
+]
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/49/10/9f12e8d3322327a8edac8b906a0f1cece3dfbc58efdd2198538b4ba56957/databricks_mcp-0.1.0-py3-none-any.whl", hash = "sha256:d02ed6cdd24a862a365b4fae2892223d8209d14e5be500ebc14d086f646408cc", size = 2307, upload-time = "2025-06-05T20:39:11.724Z" },
+]
+
+[[package]]
+name = "databricks-sdk"
+version = "0.94.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "google-auth" },
+    { name = "protobuf" },
+    { name = "requests" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/3e/39/18b3a4a69851f583d7970ae71f19975e06ef892ea17393bcafb773088f96/databricks_sdk-0.94.0.tar.gz", hash = "sha256:1b29a9d63e2dc9808ed79253ba3668cd6d130dabb880a576d647fa3b1b1a7b30", size = 861465, upload-time = "2026-02-26T08:17:12.063Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/aa/da/072fe4df10aec583eb72327856b4743c7f5fb50a16772d5f86fcc20e2457/databricks_sdk-0.94.0-py3-none-any.whl", hash = "sha256:ae980186ee2d99f3639d14a94457776dca22980a04f65f89497a79889b2b9149", size = 811079, upload-time = "2026-02-26T08:17:10.242Z" },
+]
+
+[[package]]
 name = "diff-match-patch"
 version = "20241021"
 source = { registry = "https://pypi.org/simple" }
@@ -3511,6 +3537,8 @@ dependencies = [
 
 [package.optional-dependencies]
 all = [
+    { name = "databricks-mcp" },
+    { name = "databricks-sdk" },
     { name = "duckdb" },
     { name = "google-cloud-bigquery" },
     { name = "openpyxl" },
@@ -3520,6 +3548,10 @@ all = [
 ]
 bigquery = [
     { name = "google-cloud-bigquery" },
+]
+databricks = [
+    { name = "databricks-mcp" },
+    { name = "databricks-sdk" },
 ]
 dev = [
     { name = "pytest" },
@@ -3550,6 +3582,10 @@ dev = [
 requires-dist = [
     { name = "arxiv", specifier = ">=2.1.0" },
     { name = "beautifulsoup4", specifier = ">=4.12.0" },
+    { name = "databricks-mcp", marker = "extra == 'all'", specifier = ">=0.1.0" },
+    { name = "databricks-mcp", marker = "extra == 'databricks'", specifier = ">=0.1.0" },
+    { name = "databricks-sdk", marker = "extra == 'all'", specifier = ">=0.30.0" },
+    { name = "databricks-sdk", marker = "extra == 'databricks'", specifier = ">=0.30.0" },
     { name = "diff-match-patch", specifier = ">=20230430" },
     { name = "dnspython", specifier = ">=2.4.0" },
     { name = "duckdb", marker = "extra == 'all'", specifier = ">=1.0.0" },
@@ -3583,7 +3619,7 @@ requires-dist = [
     { name = "restrictedpython", marker = "extra == 'sandbox'", specifier = ">=7.0" },
     { name = "stripe", specifier = ">=14.3.0" },
 ]
-provides-extras = ["dev", "sandbox", "ocr", "excel", "sql", "bigquery", "all"]
+provides-extras = ["dev", "sandbox", "ocr", "excel", "sql", "bigquery", "databricks", "all"]
 
 [package.metadata.requires-dev]
 dev = [

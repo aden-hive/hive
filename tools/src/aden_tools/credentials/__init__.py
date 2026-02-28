@@ -58,6 +58,7 @@ To add a new credential:
 from .apollo import APOLLO_CREDENTIALS
 from .base import CredentialError, CredentialSpec
 from .bigquery import BIGQUERY_CREDENTIALS
+from .databricks import DATABRICKS_CREDENTIALS
 from .brevo import BREVO_CREDENTIALS
 from .browser import get_aden_auth_url, get_aden_setup_url, open_browser
 from .calcom import CALCOM_CREDENTIALS
@@ -119,6 +120,7 @@ CREDENTIAL_SPECS = {
     **STRIPE_CREDENTIALS,
     **BREVO_CREDENTIALS,
     **POSTGRES_CREDENTIALS,
+    **DATABRICKS_CREDENTIALS,
 }
 
 __all__ = [
@@ -168,4 +170,5 @@ __all__ = [
     "STRIPE_CREDENTIALS",
     "BREVO_CREDENTIALS",
     "POSTGRES_CREDENTIALS",
+    "DATABRICKS_CREDENTIALS",
 ]
