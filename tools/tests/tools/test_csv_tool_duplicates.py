@@ -27,9 +27,7 @@ class TestCsvDuplicates:
             "aden_tools.tools.csv_tool.csv_tool.get_secure_path",
             return_value=str(csv_file),
         ):
-            result = csv_read(
-                path="dupes.csv", workspace_id="w", agent_id="a", session_id="s"
-            )
+            result = csv_read(path="dupes.csv", workspace_id="w", agent_id="a", session_id="s")
 
         assert "error" in result
         assert "duplicate column names" in result["error"]

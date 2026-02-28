@@ -250,9 +250,7 @@ def register_tools(
             Dict with send result including provider used and message ID,
             or error dict with "error" and optional "help" keys.
         """
-        return _send_email_impl(
-            to, subject, html, provider, from_email, cc, bcc, account
-        )
+        return _send_email_impl(to, subject, html, provider, from_email, cc, bcc, account)
 
     def _fetch_original_message(access_token: str, message_id: str) -> dict:
         """Fetch the original message to extract threading info."""
@@ -282,14 +280,10 @@ def register_tools(
             }
 
         data = response.json()
-        headers = {
-            h["name"]: h["value"] for h in data.get("payload", {}).get("headers", [])
-        }
+        headers = {h["name"]: h["value"] for h in data.get("payload", {}).get("headers", [])}
         return {
             "thread_id": data.get("threadId"),
-            "message_id_header": headers.get(
-                "Message-ID", headers.get("Message-Id", "")
-            ),
+            "message_id_header": headers.get("Message-ID", headers.get("Message-Id", "")),
             "subject": headers.get("Subject", ""),
             "from": headers.get("From", ""),
         }

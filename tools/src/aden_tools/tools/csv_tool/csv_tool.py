@@ -185,9 +185,7 @@ def register_tools(mcp: FastMCP) -> None:
             secure_path = get_secure_path(path, workspace_id, agent_id, session_id)
 
             if not os.path.exists(secure_path):
-                return {
-                    "error": f"File not found: {path}. Use csv_write to create a new file."
-                }
+                return {"error": f"File not found: {path}. Use csv_write to create a new file."}
 
             if not path.lower().endswith(".csv"):
                 return {"error": "File must have .csv extension"}
@@ -382,9 +380,7 @@ def register_tools(mcp: FastMCP) -> None:
             con = duckdb.connect(":memory:")
             try:
                 # Load CSV as 'data' table
-                con.execute(
-                    f"CREATE TABLE data AS SELECT * FROM read_csv_auto('{secure_path}')"
-                )
+                con.execute(f"CREATE TABLE data AS SELECT * FROM read_csv_auto('{secure_path}')")
 
                 # Execute user query
                 result = con.execute(query)
@@ -410,7 +406,5 @@ def register_tools(mcp: FastMCP) -> None:
             error_msg = str(e)
             # Make DuckDB errors more readable
             if "Catalog Error" in error_msg:
-                return {
-                    "error": f"SQL error: {error_msg}. Remember the table is named 'data'."
-                }
+                return {"error": f"SQL error: {error_msg}. Remember the table is named 'data'."}
             return {"error": f"Query failed: {error_msg}"}
