@@ -14,42 +14,45 @@ logger = logging.getLogger(__name__)
 
 
 def ensure_credential_key_env() -> None:
-    """Load credentials from shell config if not in environment.
+    """Load bootstrap credentials into ``os.environ``.
 
-    The quickstart.sh and setup-credentials skill write API keys to ~/.zshrc
-    or ~/.bashrc. If the user hasn't sourced their config in the current shell,
-    this reads them directly so the runner (and any MCP subprocesses) can use them.
+    Priority chain for each credential:
+      1. ``os.environ`` (already set — nothing to do)
+      2. Dedicated file storage (``~/.hive/secrets/`` or encrypted store)
+      3. Shell config fallback (``~/.zshrc`` / ``~/.bashrc``) for backward compat
 
-    Loads:
-    - HIVE_CREDENTIAL_KEY (encrypted credential store)
-    - ADEN_API_KEY (Aden OAuth sync)
-    - All LLM API keys (ANTHROPIC_API_KEY, OPENAI_API_KEY, ZAI_API_KEY, etc.)
+    Boot order matters: HIVE_CREDENTIAL_KEY must load BEFORE ADEN_API_KEY
+    because the encrypted store depends on it.
+
+    Remaining LLM/tool API keys still load from shell config.
     """
+    from .key_storage import load_aden_api_key, load_credential_key
+
+    # Step 1: HIVE_CREDENTIAL_KEY (must come first — encrypted store depends on it)
+    load_credential_key()
+
+    # Step 2: ADEN_API_KEY (uses encrypted store, then shell config fallback)
+    load_aden_api_key()
+
+    # Step 3: Load remaining LLM/tool API keys from shell config
     try:
         from aden_tools.credentials.shell_config import check_env_var_in_shell_config
     except ImportError:
         return
 
-    # Core credentials that are always checked
-    env_vars_to_load = ["HIVE_CREDENTIAL_KEY", "ADEN_API_KEY"]
-
-    # Add all LLM/tool API keys from CREDENTIAL_SPECS
     try:
         from aden_tools.credentials import CREDENTIAL_SPECS
 
         for spec in CREDENTIAL_SPECS.values():
-            if spec.env_var and spec.env_var not in env_vars_to_load:
-                env_vars_to_load.append(spec.env_var)
+            var_name = spec.env_var
+            if var_name and var_name not in ("HIVE_CREDENTIAL_KEY", "ADEN_API_KEY"):
+                if not os.environ.get(var_name):
+                    found, value = check_env_var_in_shell_config(var_name)
+                    if found and value:
+                        os.environ[var_name] = value
+                        logger.debug("Loaded %s from shell config", var_name)
     except ImportError:
         pass
-
-    for var_name in env_vars_to_load:
-        if os.environ.get(var_name):
-            continue
-        found, value = check_env_var_in_shell_config(var_name)
-        if found and value:
-            os.environ[var_name] = value
-            logger.debug("Loaded %s from shell config", var_name)
 
 
 @dataclass

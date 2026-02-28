@@ -178,6 +178,7 @@ export default function ChatPanel({ messages, onSend, isWaiting, activeThread, a
   const [input, setInput] = useState("");
   const [readMap, setReadMap] = useState<Record<string, number>>({});
   const bottomRef = useRef<HTMLDivElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   const threadMessages = messages.filter((m) => {
     if (m.type === "system" && !m.thread) return false;
@@ -203,6 +204,7 @@ export default function ChatPanel({ messages, onSend, isWaiting, activeThread, a
     if (!input.trim()) return;
     onSend(input.trim(), activeThread);
     setInput("");
+    if (textareaRef.current) textareaRef.current.style.height = "auto";
   };
 
   const activeWorkerLabel = formatAgentDisplayName(activeThread);
@@ -240,9 +242,22 @@ export default function ChatPanel({ messages, onSend, isWaiting, activeThread, a
       {/* Input */}
       <form onSubmit={handleSubmit} className="p-4 border-t border-border">
         <div className="flex items-center gap-3 bg-muted/40 rounded-xl px-4 py-2.5 border border-border focus-within:border-primary/40 transition-colors">
-          <input
+          <textarea
+            ref={textareaRef}
+            rows={1}
             value={input}
-            onChange={(e) => setInput(e.target.value)}
+            onChange={(e) => {
+              setInput(e.target.value);
+              const ta = e.target;
+              ta.style.height = "auto";
+              ta.style.height = `${Math.min(ta.scrollHeight, 160)}px`;
+            }}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && !e.shiftKey) {
+                e.preventDefault();
+                handleSubmit(e);
+              }
+            }}
             placeholder={
               disabled
                 ? "Connecting to agent..."
@@ -251,7 +266,7 @@ export default function ChatPanel({ messages, onSend, isWaiting, activeThread, a
                   : `Message ${activeWorkerLabel}...`
             }
             disabled={disabled}
-            className="flex-1 bg-transparent text-sm text-foreground outline-none placeholder:text-muted-foreground disabled:opacity-50 disabled:cursor-not-allowed"
+            className="flex-1 bg-transparent text-sm text-foreground outline-none placeholder:text-muted-foreground disabled:opacity-50 disabled:cursor-not-allowed resize-none overflow-y-auto"
           />
           {isWaiting && onCancel ? (
             <button
