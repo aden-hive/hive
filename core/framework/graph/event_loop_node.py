@@ -16,13 +16,16 @@ import json
 import logging
 import re
 import time
+import traceback
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Literal, Protocol, runtime_checkable
 
 from framework.graph.conversation import ConversationStore, NodeConversation
+from framework.graph.conversation_judge import evaluate_phase_completion
 from framework.graph.node import NodeContext, NodeProtocol, NodeResult
+from framework.graph.prompt_composer import _with_datetime, compose_system_prompt
 from framework.llm.provider import Tool, ToolResult, ToolUse
 from framework.llm.stream_events import (
     FinishEvent,
@@ -30,7 +33,7 @@ from framework.llm.stream_events import (
     TextDeltaEvent,
     ToolCallEvent,
 )
-from framework.runtime.event_bus import EventBus
+from framework.runtime.event_bus import AgentEvent, EventBus, EventType
 
 logger = logging.getLogger(__name__)
 
@@ -63,6 +66,44 @@ class JudgeProtocol(Protocol):
     """
 
     async def evaluate(self, context: dict[str, Any]) -> JudgeVerdict: ...
+
+
+# ---------------------------------------------------------------------------
+# Transient Error Handling (LiteLLM support)
+# ---------------------------------------------------------------------------
+
+_LITELLM_TRANSIENT_ERRORS: tuple[type[BaseException], ...] | None = None
+
+
+def _get_litellm_transient_errors() -> tuple[type[BaseException], ...]:
+    """Get tuple of LiteLLM transient exception types (cached)."""
+    global _LITELLM_TRANSIENT_ERRORS
+    if _LITELLM_TRANSIENT_ERRORS is not None:
+        return _LITELLM_TRANSIENT_ERRORS
+
+    try:
+        from litellm.exceptions import (
+            APIConnectionError,
+            BadGatewayError,
+            InternalServerError,
+            RateLimitError,
+            ServiceUnavailableError,
+        )
+
+        _LITELLM_TRANSIENT_ERRORS = (
+            RateLimitError,
+            APIConnectionError,
+            InternalServerError,
+            BadGatewayError,
+            ServiceUnavailableError,
+            TimeoutError,
+            ConnectionError,
+            OSError,
+        )
+    except ImportError:
+        _LITELLM_TRANSIENT_ERRORS = (TimeoutError, ConnectionError, OSError)
+
+    return _LITELLM_TRANSIENT_ERRORS
 
 
 # ---------------------------------------------------------------------------
@@ -137,6 +178,8 @@ class OutputAccumulator:
 
     async def set(self, key: str, value: Any) -> None:
         """Set a key-value pair, persisting immediately if store is available."""
+        if self.values.get(key) == value:
+            return  # No change
         self.values[key] = value
         if self.store:
             cursor = await self.store.read_cursor() or {}
@@ -317,8 +360,6 @@ class EventLoopNode(NodeProtocol):
                 # runtime-injected context (e.g. worker identity) has changed.
                 # On resume, we rebuild identity + narrative + focus so the LLM
                 # understands the session history, not just the node directive.
-                from framework.graph.prompt_composer import compose_system_prompt
-
                 _current_prompt = compose_system_prompt(
                     identity_prompt=ctx.identity_prompt or None,
                     focus_prompt=ctx.node_spec.system_prompt,
@@ -333,8 +374,6 @@ class EventLoopNode(NodeProtocol):
                 _restored_tool_fingerprints = []
 
                 # Fresh conversation: either isolated mode or first node in continuous mode.
-                from framework.graph.prompt_composer import _with_datetime
-
                 system_prompt = _with_datetime(ctx.node_spec.system_prompt or "")
                 # Append connected accounts info if available
                 if ctx.accounts_prompt:
@@ -581,8 +620,6 @@ class EventLoopNode(NodeProtocol):
                         break  # exit retry loop, continue outer iteration
 
                     # Non-client-facing: crash as before
-                    import traceback
-
                     iter_latency_ms = int((time.time() - iter_start) * 1000)
                     latency_ms = int((time.time() - start_time) * 1000)
                     error_msg = f"LLM call failed: {e}"
@@ -789,7 +826,7 @@ class EventLoopNode(NodeProtocol):
             # (b) Auto-block — a text-only turn (no real tools, no
             #     set_output) from a client-facing node.  Blocks for the
             #     user's response, then falls through to judge so models
-            #     stuck in a clarification loop get RETRY feedback.
+            #     stuck in a clarification loop get RETRY pressure.
             #
             # Turns that include tool calls or set_output are *work*, not
             # conversation — they flow through without blocking.
@@ -909,7 +946,7 @@ class EventLoopNode(NodeProtocol):
 
                 # -- Judge-skip decision after client-facing blocking --
                 #
-                # Explicit ask_user: skip judge while the agent is still
+                # Explicit ask_user: skip judge only if the agent is still
                 # gathering information from the user.  BUT if all required
                 # outputs have already been set, don't skip — fall through to
                 # the judge so it can accept the completed node.
@@ -1867,10 +1904,8 @@ class EventLoopNode(NodeProtocol):
         # Recover from truncated JSON (max_tokens hit mid-argument).
         # The _raw key is set by litellm when json.loads fails.
         if not key and "_raw" in tool_input:
-            import re
-
             raw = tool_input["_raw"]
-            key_match = re.search(r'"key"\s*:\s*"(\w+)"', raw)
+            key_match = re.search(r'"key"\s*:\s*"([^"]+)"', raw)
             if key_match:
                 key = key_match.group(1)
             val_match = re.search(r'"value"\s*:\s*"', raw)
@@ -1977,8 +2012,6 @@ class EventLoopNode(NodeProtocol):
 
                 # Level 2: conversation-aware quality check (if success_criteria set)
                 if ctx.node_spec.success_criteria and ctx.llm:
-                    from framework.graph.conversation_judge import evaluate_phase_completion
-
                     verdict = await evaluate_phase_completion(
                         llm=ctx.llm,
                         conversation=conversation,
@@ -2142,27 +2175,7 @@ class EventLoopNode(NodeProtocol):
         Transient: network errors, rate limits, server errors, timeouts.
         Permanent: auth errors, bad requests, context window exceeded.
         """
-        try:
-            from litellm.exceptions import (
-                APIConnectionError,
-                BadGatewayError,
-                InternalServerError,
-                RateLimitError,
-                ServiceUnavailableError,
-            )
-
-            transient_types: tuple[type[BaseException], ...] = (
-                RateLimitError,
-                APIConnectionError,
-                InternalServerError,
-                BadGatewayError,
-                ServiceUnavailableError,
-                TimeoutError,
-                ConnectionError,
-                OSError,
-            )
-        except ImportError:
-            transient_types = (TimeoutError, ConnectionError, OSError)
+        transient_types = _get_litellm_transient_errors()
 
         if isinstance(exc, transient_types):
             return True
@@ -2280,11 +2293,12 @@ class EventLoopNode(NodeProtocol):
                     replaced = True
                     break
             if replaced:
-                content = "".join(lines)
+                new_content = "".join(lines)
             else:
-                content += entry
+                new_content = content + entry
 
-            adapt_path.write_text(content, encoding="utf-8")
+            if new_content != content:
+                adapt_path.write_text(new_content, encoding="utf-8")
         except Exception as e:
             logger.warning("Failed to record learning for key=%s: %s", key, e)
 
@@ -2483,8 +2497,6 @@ class EventLoopNode(NodeProtocol):
                         f"before={prune_before}% after={prune_after}%",
                     )
                 if self._event_bus:
-                    from framework.runtime.event_bus import AgentEvent, EventType
-
                     await self._event_bus.publish(
                         AgentEvent(
                             type=EventType.CONTEXT_COMPACTED,
@@ -2565,8 +2577,6 @@ class EventLoopNode(NodeProtocol):
             )
 
         if self._event_bus:
-            from framework.runtime.event_bus import AgentEvent, EventType
-
             await self._event_bus.publish(
                 AgentEvent(
                     type=EventType.CONTEXT_COMPACTED,
@@ -2692,8 +2702,6 @@ class EventLoopNode(NodeProtocol):
         # and identity preferences that must survive emergency compaction.
         if self._config.spillover_dir:
             try:
-                from pathlib import Path
-
                 data_dir = Path(self._config.spillover_dir)
                 if data_dir.is_dir():
                     # Inline adapt.md content directly
