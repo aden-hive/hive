@@ -63,7 +63,7 @@ from .setup import (
     CredentialSetupSession,
     MissingCredential,
     SetupResult,
-    detect_missing_credentials_from_nodes,
+    load_agent_nodes,
     run_credential_setup_cli,
 )
 from .storage import (
@@ -75,7 +75,12 @@ from .storage import (
 )
 from .store import CredentialStore
 from .template import TemplateResolver
-from .validation import ensure_credential_key_env, validate_agent_credentials
+from .validation import (
+    CredentialStatus,
+    CredentialValidationResult,
+    ensure_credential_key_env,
+    validate_agent_credentials,
+)
 
 # Aden sync components (lazy import to avoid httpx dependency when not needed)
 # Usage: from core.framework.credentials.aden import AdenSyncProvider
@@ -130,11 +135,13 @@ __all__ = [
     # Validation
     "ensure_credential_key_env",
     "validate_agent_credentials",
+    "CredentialStatus",
+    "CredentialValidationResult",
     # Interactive setup
     "CredentialSetupSession",
     "MissingCredential",
     "SetupResult",
-    "detect_missing_credentials_from_nodes",
+    "load_agent_nodes",
     "run_credential_setup_cli",
     # Aden sync (optional - requires httpx)
     "AdenSyncProvider",

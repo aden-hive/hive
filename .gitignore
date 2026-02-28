@@ -46,6 +46,7 @@ coverage/
 
 # TypeScript
 *.tsbuildinfo
+vite.config.d.ts
 
 # Python
 __pycache__/

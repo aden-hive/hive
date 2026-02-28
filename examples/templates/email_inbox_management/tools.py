@@ -86,7 +86,9 @@ def _get_access_token(account: str = "") -> str:
 
         credentials = CredentialStoreAdapter.default()
         if account:
-            token = credentials.get_by_alias("google", account)
+            # Strip provider prefix if LLM passes "google/alias" format
+            clean_account = account.removeprefix("google/")
+            token = credentials.get_by_alias("google", clean_account)
         else:
             token = credentials.get("google")
         if token:

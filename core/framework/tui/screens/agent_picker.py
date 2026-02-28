@@ -37,6 +37,29 @@ class AgentEntry:
     node_count: int = 0
     tool_count: int = 0
     tags: list[str] = field(default_factory=list)
+    last_active: str | None = None
+
+
+def _get_last_active(agent_name: str) -> str | None:
+    """Return the most recent updated_at timestamp across all sessions."""
+    sessions_dir = Path.home() / ".hive" / "agents" / agent_name / "sessions"
+    if not sessions_dir.exists():
+        return None
+    latest: str | None = None
+    for session_dir in sessions_dir.iterdir():
+        if not session_dir.is_dir() or not session_dir.name.startswith("session_"):
+            continue
+        state_file = session_dir / "state.json"
+        if not state_file.exists():
+            continue
+        try:
+            data = json.loads(state_file.read_text())
+            ts = data.get("timestamps", {}).get("updated_at")
+            if ts and (latest is None or ts > latest):
+                latest = ts
+        except Exception:
+            continue
+    return latest
 
 
 def _count_sessions(agent_name: str) -> int:
@@ -47,19 +70,50 @@ def _count_sessions(agent_name: str) -> int:
     return sum(1 for d in sessions_dir.iterdir() if d.is_dir() and d.name.startswith("session_"))
 
 
-def _extract_agent_stats(agent_json_path: Path) -> tuple[int, int, list[str]]:
-    """Extract node count, tool count, and tags from agent.json."""
-    try:
-        data = json.loads(agent_json_path.read_text())
-        nodes = data.get("nodes", [])
-        node_count = len(nodes)
-        tools: set[str] = set()
-        for node in nodes:
-            tools.update(node.get("tools", []))
-        tags = data.get("agent", {}).get("tags", [])
-        return node_count, len(tools), tags
-    except Exception:
-        return 0, 0, []
+def _extract_agent_stats(agent_path: Path) -> tuple[int, int, list[str]]:
+    """Extract node count, tool count, and tags from an agent directory.
+
+    Prefers agent.py (AST-parsed) over agent.json for node/tool counts
+    since agent.json may be stale.  Tags are only available from agent.json.
+    """
+    import ast
+
+    node_count, tool_count, tags = 0, 0, []
+
+    # Try agent.py first — source of truth for nodes
+    agent_py = agent_path / "agent.py"
+    if agent_py.exists():
+        try:
+            tree = ast.parse(agent_py.read_text())
+            for node in ast.walk(tree):
+                # Find `nodes = [...]` assignment
+                if isinstance(node, ast.Assign):
+                    for target in node.targets:
+                        if isinstance(target, ast.Name) and target.id == "nodes":
+                            if isinstance(node.value, ast.List):
+                                node_count = len(node.value.elts)
+        except Exception:
+            pass
+
+    # Fall back to / supplement from agent.json
+    agent_json = agent_path / "agent.json"
+    if agent_json.exists():
+        try:
+            data = json.loads(agent_json.read_text())
+            json_nodes = data.get("nodes", [])
+            if node_count == 0:
+                node_count = len(json_nodes)
+            # Tool count: use whichever source gave us nodes, but agent.json
+            # has the structured tool lists so prefer it for tool counting
+            tools: set[str] = set()
+            for n in json_nodes:
+                tools.update(n.get("tools", []))
+            tool_count = len(tools)
+            tags = data.get("agent", {}).get("tags", [])
+        except Exception:
+            pass
+
+    return node_count, tool_count, tags
 
 
 def discover_agents() -> dict[str, list[AgentEntry]]:
@@ -85,20 +139,23 @@ def discover_agents() -> dict[str, list[AgentEntry]]:
             if not _is_valid_agent_dir(path):
                 continue
 
-            agent_json = path / "agent.json"
-            node_count, tool_count, tags = 0, 0, []
-            if agent_json.exists():
-                try:
-                    data = json.loads(agent_json.read_text())
-                    meta = data.get("agent", {})
-                    name = meta.get("name", path.name)
-                    desc = meta.get("description", "")
-                except Exception:
-                    name = path.name
-                    desc = "(error reading agent.json)"
-                node_count, tool_count, tags = _extract_agent_stats(agent_json)
-            else:
-                name, desc = _extract_python_agent_metadata(path)
+            # config.py is source of truth for name/description
+            name, desc = _extract_python_agent_metadata(path)
+            config_fallback_name = path.name.replace("_", " ").title()
+            used_config = name != config_fallback_name
+
+            node_count, tool_count, tags = _extract_agent_stats(path)
+            if not used_config:
+                # config.py didn't provide values, fall back to agent.json
+                agent_json = path / "agent.json"
+                if agent_json.exists():
+                    try:
+                        data = json.loads(agent_json.read_text())
+                        meta = data.get("agent", {})
+                        name = meta.get("name", name)
+                        desc = meta.get("description", desc)
+                    except Exception:
+                        pass
 
             entries.append(
                 AgentEntry(
@@ -110,6 +167,7 @@ def discover_agents() -> dict[str, list[AgentEntry]]:
                     node_count=node_count,
                     tool_count=tool_count,
                     tags=tags,
+                    last_active=_get_last_active(path.name),
                 )
             )
         if entries:

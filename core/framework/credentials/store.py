@@ -396,6 +396,11 @@ class CredentialStore:
         Returns:
             CredentialObject if found, None otherwise.
         """
+        # LLMs sometimes pass "provider/alias" as the alias (e.g. "google/wrok"
+        # instead of just "wrok").  Strip the provider prefix when present.
+        if alias.startswith(f"{provider_name}/"):
+            alias = alias[len(provider_name) + 1 :]
+
         if hasattr(self._storage, "load_by_alias"):
             return self._storage.load_by_alias(provider_name, alias)
 
@@ -421,6 +426,10 @@ class CredentialStore:
             True if credential exists and is accessible
         """
         return self.get_credential(credential_id, refresh_if_needed=False) is not None
+
+    def exists(self, credential_id: str) -> bool:
+        """Check if a credential exists in storage without triggering provider fetches."""
+        return self._storage.exists(credential_id)
 
     # --- Validation ---
 

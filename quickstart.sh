@@ -173,6 +173,60 @@ UV_VERSION=$(uv --version)
 echo -e "${GREEN}  ✓ uv detected: $UV_VERSION${NC}"
 echo ""
 
+# Check for Node.js (needed for frontend dashboard)
+NODE_AVAILABLE=false
+if command -v node &> /dev/null; then
+    NODE_VERSION=$(node --version)
+    NODE_MAJOR=$(echo "$NODE_VERSION" | sed 's/v//' | cut -d. -f1)
+    if [ "$NODE_MAJOR" -ge 20 ]; then
+        echo -e "${GREEN}  ✓ Node.js $NODE_VERSION${NC}"
+        NODE_AVAILABLE=true
+    else
+        echo -e "${YELLOW}  ⚠ Node.js $NODE_VERSION found (20+ required for frontend)${NC}"
+        echo -e "${YELLOW}  Installing Node.js 20 via nvm...${NC}"
+        # Install nvm if not present
+        if [ -z "${NVM_DIR:-}" ] || [ ! -s "$NVM_DIR/nvm.sh" ]; then
+            export NVM_DIR="$HOME/.nvm"
+            curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.3/install.sh | bash 2>/dev/null
+        fi
+        # Source nvm and install Node 20
+        [ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"
+        if nvm install 20 > /dev/null 2>&1 && nvm use 20 > /dev/null 2>&1; then
+            NODE_VERSION=$(node --version)
+            echo -e "${GREEN}  ✓ Node.js $NODE_VERSION installed via nvm${NC}"
+            NODE_AVAILABLE=true
+        else
+            echo -e "${RED}  ✗ Node.js installation failed${NC}"
+            echo -e "${DIM}    Install manually from https://nodejs.org${NC}"
+        fi
+    fi
+else
+    echo -e "${YELLOW}  Node.js not found. Installing via nvm...${NC}"
+    # Install nvm if not present
+    if [ -z "${NVM_DIR:-}" ] || [ ! -s "$NVM_DIR/nvm.sh" ]; then
+        export NVM_DIR="$HOME/.nvm"
+        if ! curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.3/install.sh 2>/dev/null | bash 2>/dev/null; then
+            echo -e "${RED}  ✗ nvm installation failed${NC}"
+            echo -e "${DIM}    Install Node.js 20+ manually from https://nodejs.org${NC}"
+        fi
+    fi
+    # Source nvm and install Node 20
+    if [ -s "${NVM_DIR:-$HOME/.nvm}/nvm.sh" ]; then
+        export NVM_DIR="${NVM_DIR:-$HOME/.nvm}"
+        . "$NVM_DIR/nvm.sh"
+        if nvm install 20 > /dev/null 2>&1 && nvm use 20 > /dev/null 2>&1; then
+            NODE_VERSION=$(node --version)
+            echo -e "${GREEN}  ✓ Node.js $NODE_VERSION installed via nvm${NC}"
+            NODE_AVAILABLE=true
+        else
+            echo -e "${RED}  ✗ Node.js installation failed${NC}"
+            echo -e "${DIM}    Install manually from https://nodejs.org${NC}"
+        fi
+    fi
+fi
+
+echo ""
+
 # ============================================================
 # Step 2: Install Python Packages
 # ============================================================
@@ -216,6 +270,37 @@ echo ""
 echo -e "${GREEN}⬢${NC} All packages installed"
 echo ""
 
+# Build frontend (if Node.js is available)
+FRONTEND_BUILT=false
+if [ "$NODE_AVAILABLE" = true ]; then
+    echo -e "${YELLOW}⬢${NC} ${BLUE}${BOLD}Building frontend dashboard...${NC}"
+    echo ""
+    FRONTEND_DIR="$SCRIPT_DIR/core/frontend"
+    if [ -f "$FRONTEND_DIR/package.json" ]; then
+        echo -n "  Installing npm packages... "
+        if (cd "$FRONTEND_DIR" && npm install --no-fund --no-audit) > /dev/null 2>&1; then
+            echo -e "${GREEN}ok${NC}"
+        else
+            echo -e "${RED}failed${NC}"
+            NODE_AVAILABLE=false
+        fi
+
+        if [ "$NODE_AVAILABLE" = true ]; then
+            echo -n "  Building frontend... "
+            if (cd "$FRONTEND_DIR" && npm run build) > /dev/null 2>&1; then
+                echo -e "${GREEN}ok${NC}"
+                echo -e "${GREEN}  ✓ Frontend built → core/frontend/dist/${NC}"
+                FRONTEND_BUILT=true
+            else
+                echo -e "${RED}failed${NC}"
+                echo -e "${YELLOW}  ⚠ Frontend build failed. The web dashboard won't be available.${NC}"
+                echo -e "${DIM}    Run 'cd core/frontend && npm run build' manually to debug.${NC}"
+            fi
+        fi
+    fi
+    echo ""
+fi
+
 # ============================================================
 # Step 3: Configure LLM API Key
 # ============================================================
@@ -233,7 +318,7 @@ echo ""
 IMPORT_ERRORS=0
 
 # Batch check all imports in single process (reduces subprocess spawning overhead)
-CHECK_RESULT=$(uv run python scripts/check_requirements.py framework aden_tools litellm framework.mcp.agent_builder_server 2>&1)
+CHECK_RESULT=$(uv run python scripts/check_requirements.py framework aden_tools litellm framework.mcp.agent_builder_server 2>/dev/null)
 CHECK_EXIT=$?
 
 # Parse and display results
@@ -338,7 +423,6 @@ if [ "$USE_ASSOC_ARRAYS" = true ]; then
         ["anthropic:3"]="claude-haiku-4-5-20251001"
         ["openai:0"]="gpt-5.2"
         ["openai:1"]="gpt-5-mini"
-        ["openai:2"]="gpt-5-nano"
         ["gemini:0"]="gemini-3-flash-preview"
         ["gemini:1"]="gemini-3-pro-preview"
         ["groq:0"]="moonshotai/kimi-k2-instruct-0905"
@@ -354,7 +438,6 @@ if [ "$USE_ASSOC_ARRAYS" = true ]; then
         ["anthropic:3"]="Haiku 4.5 - Fast + cheap"
         ["openai:0"]="GPT-5.2 - Most capable (recommended)"
         ["openai:1"]="GPT-5 Mini - Fast + cheap"
-        ["openai:2"]="GPT-5 Nano - Fastest"
         ["gemini:0"]="Gemini 3 Flash - Fast (recommended)"
         ["gemini:1"]="Gemini 3 Pro - Best quality"
         ["groq:0"]="Kimi K2 - Best quality (recommended)"
@@ -370,7 +453,6 @@ if [ "$USE_ASSOC_ARRAYS" = true ]; then
         ["anthropic:3"]=8192
         ["openai:0"]=16384
         ["openai:1"]=16384
-        ["openai:2"]=16384
         ["gemini:0"]=8192
         ["gemini:1"]=8192
         ["groq:0"]=8192
@@ -381,7 +463,7 @@ if [ "$USE_ASSOC_ARRAYS" = true ]; then
 
     declare -A MODEL_CHOICES_COUNT=(
         ["anthropic"]=4
-        ["openai"]=3
+        ["openai"]=2
         ["gemini"]=2
         ["groq"]=2
         ["cerebras"]=2
@@ -465,11 +547,11 @@ else
     }
 
     # Model choices per provider - flat parallel arrays with provider offsets
-    # Provider order: anthropic(4), openai(3), gemini(2), groq(2), cerebras(2)
-    MC_PROVIDERS=(anthropic anthropic anthropic anthropic openai openai openai gemini gemini groq groq cerebras cerebras)
-    MC_IDS=("claude-opus-4-6" "claude-sonnet-4-5-20250929" "claude-sonnet-4-20250514" "claude-haiku-4-5-20251001" "gpt-5.2" "gpt-5-mini" "gpt-5-nano" "gemini-3-flash-preview" "gemini-3-pro-preview" "moonshotai/kimi-k2-instruct-0905" "openai/gpt-oss-120b" "zai-glm-4.7" "qwen3-235b-a22b-instruct-2507")
-    MC_LABELS=("Opus 4.6 - Most capable (recommended)" "Sonnet 4.5 - Best balance" "Sonnet 4 - Fast + capable" "Haiku 4.5 - Fast + cheap" "GPT-5.2 - Most capable (recommended)" "GPT-5 Mini - Fast + cheap" "GPT-5 Nano - Fastest" "Gemini 3 Flash - Fast (recommended)" "Gemini 3 Pro - Best quality" "Kimi K2 - Best quality (recommended)" "GPT-OSS 120B - Fast reasoning" "ZAI-GLM 4.7 - Best quality (recommended)" "Qwen3 235B - Frontier reasoning")
-    MC_MAXTOKENS=(32768 16384 8192 8192 16384 16384 16384 8192 8192 8192 8192 8192 8192)
+    # Provider order: anthropic(4), openai(2), gemini(2), groq(2), cerebras(2)
+    MC_PROVIDERS=(anthropic anthropic anthropic anthropic openai openai gemini gemini groq groq cerebras cerebras)
+    MC_IDS=("claude-opus-4-6" "claude-sonnet-4-5-20250929" "claude-sonnet-4-20250514" "claude-haiku-4-5-20251001" "gpt-5.2" "gpt-5-mini" "gemini-3-flash-preview" "gemini-3-pro-preview" "moonshotai/kimi-k2-instruct-0905" "openai/gpt-oss-120b" "zai-glm-4.7" "qwen3-235b-a22b-instruct-2507")
+    MC_LABELS=("Opus 4.6 - Most capable (recommended)" "Sonnet 4.5 - Best balance" "Sonnet 4 - Fast + capable" "Haiku 4.5 - Fast + cheap" "GPT-5.2 - Most capable (recommended)" "GPT-5 Mini - Fast + cheap" "Gemini 3 Flash - Fast (recommended)" "Gemini 3 Pro - Best quality" "Kimi K2 - Best quality (recommended)" "GPT-OSS 120B - Fast reasoning" "ZAI-GLM 4.7 - Best quality (recommended)" "Qwen3 235B - Frontier reasoning")
+    MC_MAXTOKENS=(32768 16384 8192 8192 16384 16384 8192 8192 8192 8192 8192 8192)
 
     # Helper: get number of model choices for a provider
     get_model_choice_count() {
@@ -790,7 +872,7 @@ case $choice in
             echo -e "  Run ${CYAN}claude${NC} first to authenticate with your Claude subscription,"
             echo -e "  then run this quickstart again."
             echo ""
-            SELECTED_PROVIDER_ID=""
+            exit 1
         else
             SUBSCRIPTION_MODE="claude_code"
             SELECTED_PROVIDER_ID="anthropic"
@@ -818,12 +900,16 @@ case $choice in
             echo ""
             echo -e "${YELLOW}  Codex credentials not found. Starting OAuth login...${NC}"
             echo ""
-            if uv run python "$SCRIPT_DIR/codex_oauth.py"; then
+            if uv run python "$SCRIPT_DIR/core/codex_oauth.py"; then
                 CODEX_CRED_DETECTED=true
             else
                 echo ""
-                echo -e "${RED}  OAuth login failed.${NC}"
-                echo -e "  You can also run ${CYAN}codex${NC} to authenticate, then run this quickstart again."
+                echo -e "${RED}  OAuth login failed or was cancelled.${NC}"
+                echo ""
+                echo -e "  To authenticate manually, visit:"
+                echo -e "  ${CYAN}https://auth.openai.com/authorize?client_id=app_EMoamEEZ73f0CkXaXp7hrann&response_type=code&redirect_uri=http://localhost:1455/auth/callback&scope=openid%20profile%20email%20offline_access${NC}"
+                echo ""
+                echo -e "  Or run ${CYAN}codex${NC} to authenticate, then run this quickstart again."
                 echo ""
                 SELECTED_PROVIDER_ID=""
             fi
@@ -1093,6 +1179,13 @@ else
     echo -e "${YELLOW}--${NC}"
 fi
 
+echo -n "  ⬡ frontend... "
+if [ -f "$SCRIPT_DIR/core/frontend/dist/index.html" ]; then
+    echo -e "${GREEN}ok${NC}"
+else
+    echo -e "${YELLOW}--${NC}"
+fi
+
 echo ""
 
 if [ $ERRORS -gt 0 ]; then
@@ -1197,27 +1290,39 @@ if [ "$CODEX_AVAILABLE" = true ]; then
     echo ""
 fi
 
-# Prompt user to source shell config or start new terminal
-echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-echo -e "${BOLD}⚠️  IMPORTANT: Load your new configuration${NC}"
-echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-echo ""
-echo -e "  Your API keys have been saved to ${CYAN}$SHELL_RC_FILE${NC}"
-echo -e "  To use them, either:"
-echo ""
-echo -e "  ${GREEN}Option 1:${NC} Source your shell config now:"
-echo -e "     ${CYAN}source $SHELL_RC_FILE${NC}"
-echo ""
-echo -e "  ${GREEN}Option 2:${NC} Open a new terminal window"
-echo ""
-echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-echo ""
+# Auto-launch dashboard if frontend was built
+if [ "$FRONTEND_BUILT" = true ]; then
+    echo -e "${BOLD}Launching dashboard...${NC}"
+    echo ""
+    echo -e "  ${DIM}Starting server on http://localhost:8787${NC}"
+    echo -e "  ${DIM}Press Ctrl+C to stop${NC}"
+    echo ""
+    # exec replaces the quickstart process with hive serve
+    # --open tells it to auto-open the browser once the server is ready
+    exec "$SCRIPT_DIR/hive" serve --open
+else
+    # No frontend — show manual instructions
+    echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    echo -e "${BOLD}⚠️  IMPORTANT: Load your new configuration${NC}"
+    echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    echo ""
+    echo -e "  Your API keys have been saved to ${CYAN}$SHELL_RC_FILE${NC}"
+    echo -e "  To use them, either:"
+    echo ""
+    echo -e "  ${GREEN}Option 1:${NC} Source your shell config now:"
+    echo -e "     ${CYAN}source $SHELL_RC_FILE${NC}"
+    echo ""
+    echo -e "  ${GREEN}Option 2:${NC} Open a new terminal window"
+    echo ""
+    echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    echo ""
 
-echo -e "${BOLD}Run an Agent:${NC}"
-echo ""
-echo -e "  Launch the interactive dashboard to browse and run agents:"
-echo -e "  You can start an example agent or an agent built by yourself:"
-echo -e "     ${CYAN}hive tui${NC}"
-echo ""
-echo -e "${DIM}Run ./quickstart.sh again to reconfigure.${NC}"
-echo ""
+    echo -e "${BOLD}Run an Agent:${NC}"
+    echo ""
+    echo -e "  Launch the interactive dashboard to browse and run agents:"
+    echo -e "  You can start an example agent or an agent built by yourself:"
+    echo -e "     ${CYAN}hive tui${NC}"
+    echo ""
+    echo -e "${DIM}Run ./quickstart.sh again to reconfigure.${NC}"
+    echo ""
+fi

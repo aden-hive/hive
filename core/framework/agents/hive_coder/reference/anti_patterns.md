@@ -24,7 +24,7 @@
 
 9. **Invalid `loop_config` keys** — Only three valid keys: `max_iterations` (int), `max_tool_calls_per_turn` (int), `max_history_tokens` (int). Keys like `"strategy"`, `"mode"`, `"timeout"` are NOT valid and are silently ignored or cause errors.
 
-10. **Fabricating tools that don't exist** — Never guess tool names. Always verify via `discover_mcp_tools()`. Common hallucinations: `csv_read`, `csv_write`, `csv_append`, `file_upload`, `database_query`. If a required tool doesn't exist, redesign the agent to use tools that DO exist (e.g., `save_data`/`load_data` for data persistence).
+10. **Fabricating tools that don't exist** — Never guess tool names. Always verify via `list_agent_tools()` before designing and `validate_agent_tools()` after building. Common hallucinations: `csv_read`, `csv_write`, `csv_append`, `file_upload`, `database_query`, `bulk_fetch_emails`. If a required tool doesn't exist, redesign the agent to use tools that DO exist (e.g., `save_data`/`load_data` for data persistence).
 
 ## Design Errors
 

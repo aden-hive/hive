@@ -95,17 +95,6 @@ class ScriptableMockLLMProvider(LLMProvider):
             output_tokens=10,
         )
 
-    def complete_with_tools(
-        self,
-        messages: list[dict[str, Any]],
-        system: str = "",
-        tools: list[Tool] | None = None,
-        tool_executor: Callable[[ToolUse], ToolResult] | None = None,
-        max_iterations: int = 10,
-        max_tokens: int = 1024,
-    ) -> LLMResponse:
-        return self.complete(messages, system, tools, max_tokens)
-
     async def stream(
         self,
         messages: list[dict[str, Any]],

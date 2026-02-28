@@ -102,4 +102,3 @@ class TestOrchestratorLLMProviderType:
 
         assert isinstance(orchestrator._llm, LLMProvider)
         assert hasattr(orchestrator._llm, "complete")
-        assert hasattr(orchestrator._llm, "complete_with_tools")

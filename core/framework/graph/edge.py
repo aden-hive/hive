@@ -341,6 +341,12 @@ class AsyncEntryPointSpec(BaseModel):
 
     model_config = {"extra": "allow"}
 
+    def get_isolation_level(self):
+        """Convert string isolation level to enum (duck-type with EntryPointSpec)."""
+        from framework.runtime.execution_stream import IsolationLevel
+
+        return IsolationLevel(self.isolation_level)
+
 
 class GraphSpec(BaseModel):
     """
