@@ -53,14 +53,25 @@ class S3Storage:
             'config': boto_config
         }
         
-        # Try credentials adapter first (only if available)
+        # Try credential store adapter first (Hive v0.6+ namespaced creds)
         if CREDENTIALS_AVAILABLE and credentials:
             try:
-                creds = credentials.get_credentials("aws")
-                client_kwargs['aws_access_key_id'] = creds['access_key_id']
-                client_kwargs['aws_secret_access_key'] = creds['secret_access_key']
-                if creds.get('session_token'):
-                    client_kwargs['aws_session_token'] = creds['session_token']
+                credential_ref = os.getenv("AWS_CREDENTIAL_REF", "aws/default")
+                store = getattr(credentials, "store", None)
+                if store:
+                    payload = store.get(credential_ref)
+                    if isinstance(payload, dict):
+                        access = payload.get("access_key_id") or payload.get("aws_access_key_id")
+                        secret = payload.get("secret_access_key") or payload.get("aws_secret_access_key")
+                        token = payload.get("session_token") or payload.get("aws_session_token")
+                        region_from_store = payload.get("region") or payload.get("aws_default_region")
+                        if access and secret:
+                            client_kwargs["aws_access_key_id"] = access
+                            client_kwargs["aws_secret_access_key"] = secret
+                        if token:
+                            client_kwargs["aws_session_token"] = token
+                        if region_from_store:
+                            client_kwargs["region_name"] = region_from_store
             except Exception:
                 pass
         
