@@ -71,11 +71,6 @@ def main():
         prog="hive",
         description="Aden Hive - Build and run goal-driven agents",
     )
-    parser.add_argument(
-        "--model",
-        default="claude-haiku-4-5-20251001",
-        help="Anthropic model to use",
-    )
 
     subparsers = parser.add_subparsers(dest="command", required=True)
 

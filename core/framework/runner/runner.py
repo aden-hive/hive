@@ -521,21 +521,30 @@ def load_agent_export(data: str | dict) -> tuple[GraphSpec, Goal]:
         )
 
     # Build GraphSpec
-    graph = GraphSpec(
-        id=graph_data.get("id", "agent-graph"),
-        goal_id=graph_data.get("goal_id", ""),
-        version=graph_data.get("version", "1.0.0"),
-        entry_node=graph_data.get("entry_node", ""),
-        entry_points=graph_data.get("entry_points", {}),  # Support pause/resume architecture
-        async_entry_points=async_entry_points,  # Support multi-entry-point agents
-        terminal_nodes=graph_data.get("terminal_nodes", []),
-        pause_nodes=graph_data.get("pause_nodes", []),  # Support pause/resume architecture
-        nodes=nodes,
-        edges=edges,
-        max_steps=graph_data.get("max_steps", 100),
-        max_retries_per_node=graph_data.get("max_retries_per_node", 3),
-        description=graph_data.get("description", ""),
-    )
+    graph_kwargs = {
+        "id": graph_data.get("id", "agent-graph"),
+        "goal_id": graph_data.get("goal_id", ""),
+        "version": graph_data.get("version", "1.0.0"),
+        "entry_node": graph_data.get("entry_node", ""),
+        "entry_points": graph_data.get("entry_points", {}),  # Support pause/resume architecture
+        "async_entry_points": async_entry_points,  # Support multi-entry-point agents
+        "terminal_nodes": graph_data.get("terminal_nodes", []),
+        "pause_nodes": graph_data.get("pause_nodes", []),  # Support pause/resume architecture
+        "nodes": nodes,
+        "edges": edges,
+        "max_steps": graph_data.get("max_steps", 100),
+        "max_retries_per_node": graph_data.get("max_retries_per_node", 3),
+        "description": graph_data.get("description", ""),
+    }
+
+    # Backward/forward compatibility for exports
+    if "default_model" in graph_data:
+        graph_kwargs["default_model"] = graph_data["default_model"]
+    elif "defaultModel" in graph_data:
+        graph_kwargs["default_model"] = graph_data["defaultModel"]
+    
+    graph = GraphSpec(**graph_kwargs)
+
 
     # Build Goal
     from framework.graph.goal import Constraint, SuccessCriterion
@@ -1063,6 +1072,16 @@ class AgentRunner:
                     api_base=api_base,
                     extra_headers={"authorization": f"Bearer {api_key}"},
                 )
+<<<<<<< fix/first-pr
+                if (
+                    api_key_env == "GEMINI_API_KEY"
+                    and not os.environ.get("GEMINI_API_KEY")
+                    and os.environ.get("GOOGLE_API_KEY")
+                ):
+                    os.environ["GEMINI_API_KEY"] = os.environ["GOOGLE_API_KEY"]
+                if api_key_env and os.environ.get(api_key_env):
+                    self._llm = LiteLLMProvider(model=self.model)
+=======
             elif api_key and use_codex:
                 # OpenAI Codex subscription routes through the ChatGPT backend
                 # (chatgpt.com/backend-api/codex/responses), NOT the standard
@@ -1089,6 +1108,7 @@ class AgentRunner:
                         model=self.model,
                         api_base=api_base,
                     )
+>>>>>>> main
                 else:
                     # Fall back to environment variable
                     # First check api_key_env_var from config (set by quickstart)
