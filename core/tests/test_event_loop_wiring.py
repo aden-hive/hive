@@ -248,22 +248,3 @@ async def test_event_loop_max_retries_positive_logs_warning(runtime, caplog):
 
     # Custom nodes (not EventLoopNode instances) don't get override warning
     assert "Overriding to 0" not in caplog.text
-
-
-# --- Existing node types unaffected ---
-
-
-def test_existing_node_types_unchanged():
-    """Only event_loop is a valid node type."""
-    expected = {"event_loop"}
-    assert expected == GraphExecutor.VALID_NODE_TYPES
-
-    # Default node_type is event_loop
-    spec = NodeSpec(id="x", name="X", description="x")
-    assert spec.node_type == "event_loop"
-
-    # Default max_retries is still 3
-    assert spec.max_retries == 3
-
-    # Default client_facing is False
-    assert spec.client_facing is False

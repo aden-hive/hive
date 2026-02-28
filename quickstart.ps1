@@ -1087,7 +1087,51 @@ if ($SelectedProviderId) {
 Write-Host ""
 
 # ============================================================
-# Step 5: Initialize Credential Store
+# Step 5b: Browser Automation (GCU)
+# ============================================================
+
+Write-Host ""
+Write-Color -Text "Enable browser automation?" -Color White
+Write-Color -Text "This lets your agents control a real browser - navigate websites, fill forms," -Color DarkGray
+Write-Color -Text "scrape dynamic pages, and interact with web UIs." -Color DarkGray
+Write-Host ""
+Write-Host "  " -NoNewline; Write-Color -Text "1)" -Color Cyan -NoNewline; Write-Host " Yes"
+Write-Host "  " -NoNewline; Write-Color -Text "2)" -Color Cyan -NoNewline; Write-Host " No"
+Write-Host ""
+
+do {
+    $gcuChoice = Read-Host "Enter choice (1-2)"
+} while ($gcuChoice -ne "1" -and $gcuChoice -ne "2")
+
+$GcuEnabled = $false
+if ($gcuChoice -eq "1") {
+    $GcuEnabled = $true
+    Write-Ok "Browser automation enabled"
+} else {
+    Write-Color -Text "  Browser automation skipped" -Color DarkGray
+}
+
+# Patch gcu_enabled into configuration.json
+if (Test-Path $HiveConfigFile) {
+    $existingConfig = Get-Content -Path $HiveConfigFile -Raw | ConvertFrom-Json
+    $existingConfig | Add-Member -NotePropertyName "gcu_enabled" -NotePropertyValue $GcuEnabled -Force
+    $existingConfig | ConvertTo-Json -Depth 4 | Set-Content -Path $HiveConfigFile -Encoding UTF8
+} elseif ($GcuEnabled) {
+    # No config file yet (user skipped LLM provider) - create minimal one
+    if (-not (Test-Path $HiveConfigDir)) {
+        New-Item -ItemType Directory -Path $HiveConfigDir -Force | Out-Null
+    }
+    $minConfig = @{
+        gcu_enabled = $true
+        created_at  = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ss+00:00")
+    }
+    $minConfig | ConvertTo-Json -Depth 4 | Set-Content -Path $HiveConfigFile -Encoding UTF8
+}
+
+Write-Host ""
+
+# ============================================================
+# Step 6: Initialize Credential Store
 # ============================================================
 
 Write-Step -Number "5" -Text "Step 5: Initializing credential store..."

@@ -134,6 +134,9 @@ class EventType(StrEnum):
     WORKER_LOADED = "worker_loaded"
     CREDENTIALS_REQUIRED = "credentials_required"
 
+    # Subagent reports (one-way progress updates from sub-agents)
+    SUBAGENT_REPORT = "subagent_report"
+
 
 @dataclass
 class AgentEvent:
@@ -1008,6 +1011,30 @@ class EventBus:
                     "severity": severity,
                     "queen_graph_id": queen_graph_id,
                     "queen_stream_id": queen_stream_id,
+                },
+            )
+        )
+
+    async def emit_subagent_report(
+        self,
+        stream_id: str,
+        node_id: str,
+        subagent_id: str,
+        message: str,
+        data: dict[str, Any] | None = None,
+        execution_id: str | None = None,
+    ) -> None:
+        """Emit a one-way progress report from a sub-agent."""
+        await self.publish(
+            AgentEvent(
+                type=EventType.SUBAGENT_REPORT,
+                stream_id=stream_id,
+                node_id=node_id,
+                execution_id=execution_id,
+                data={
+                    "subagent_id": subagent_id,
+                    "message": message,
+                    "data": data,
                 },
             )
         )
