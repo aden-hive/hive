@@ -731,6 +731,7 @@ class GraphExecutor:
                     event_triggered=_event_triggered,
                     identity_prompt=getattr(graph, "identity_prompt", ""),
                     narrative=_resume_narrative,
+                    graph=graph,
                 )
 
                 # Log actual input data being read
@@ -1553,6 +1554,7 @@ class GraphExecutor:
         event_triggered: bool = False,
         identity_prompt: str = "",
         narrative: str = "",
+        graph: "GraphSpec | None" = None,
     ) -> NodeContext:
         """Build execution context for a node."""
         # Filter tools to those available to this node
@@ -1581,6 +1583,18 @@ class GraphExecutor:
                 node_tool_names=node_spec.tools,
             )
 
+        # Build goal context, enriched with capability summary for
+        # client-facing nodes so the LLM knows what the full agent can do.
+        goal_context = goal.to_prompt_context()
+        if graph and node_spec.client_facing:
+            capability_summary = graph.build_capability_summary(graph.entry_node)
+            if capability_summary:
+                goal_context = (
+                    f"{goal_context}\n\n{capability_summary}"
+                    if goal_context
+                    else capability_summary
+                )
+
         return NodeContext(
             runtime=self.runtime,
             node_id=node_spec.id,
@@ -1589,7 +1603,7 @@ class GraphExecutor:
             input_data=input_data,
             llm=self.llm,
             available_tools=available_tools,
-            goal_context=goal.to_prompt_context(),
+            goal_context=goal_context,
             goal=goal,  # Pass Goal object for LLM-powered routers
             max_tokens=max_tokens,
             runtime_logger=self.runtime_logger,
@@ -1956,7 +1970,9 @@ class GraphExecutor:
                     branch.retry_count = attempt
 
                     # Build context for this branch
-                    ctx = self._build_context(node_spec, memory, goal, mapped, graph.max_tokens)
+                    ctx = self._build_context(
+                        node_spec, memory, goal, mapped, graph.max_tokens, graph=graph
+                    )
                     node_impl = self._get_node_implementation(node_spec, graph.cleanup_llm_model)
 
                     # Emit node-started event (skip event_loop nodes)
