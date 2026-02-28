@@ -80,7 +80,7 @@ One client-facing node handles ALL user interaction (setup, logging, reports). O
 - Validate graph structure (nodes, edges, entry points)
 - Verify node specs (tools, prompts, client-facing flag)
 - Check goal/constraints/success criteria definitions
-- Test that `AgentRunner.load()` + `_setup()` succeeds (skip if no API key)
+- Test that `AgentRunner.load()` succeeds (structural, no API key needed)
 
 **What NOT to do:**
 ```python

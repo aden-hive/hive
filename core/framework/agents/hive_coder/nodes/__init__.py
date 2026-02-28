@@ -488,7 +488,7 @@ Most agents use `terminal_nodes=[]` (forever-alive). This means \
 terminal node that doesn't exist. Agent tests MUST be structural:
 - Validate graph, node specs, edges, tools, prompts
 - Check goal/constraints/success criteria definitions
-- Test `AgentRunner.load()` + `_setup()` (skip if no API key)
+- Test `AgentRunner.load()` succeeds (structural, no API key needed)
 - NEVER call `runner.run()` or `trigger_and_wait()` in tests for \
 forever-alive agents — they will hang and time out.
 When you restructure an agent (change nodes/edges), always update \

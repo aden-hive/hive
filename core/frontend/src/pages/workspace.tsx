@@ -16,6 +16,7 @@ import { useMultiSSE } from "@/hooks/use-sse";
 import type { LiveSession, AgentEvent, DiscoverEntry, Message, NodeSpec } from "@/api/types";
 import { backendMessageToChatMessage, sseEventToChatMessage, formatAgentDisplayName } from "@/lib/chat-helpers";
 import { topologyToGraphNodes } from "@/lib/graph-converter";
+import { ApiError } from "@/api/client";
 
 const makeId = () => Math.random().toString(36).slice(2, 9);
 
@@ -466,7 +467,6 @@ export default function Workspace() {
       updateAgentState(activeWorker, { currentExecutionId: result.execution_id });
     } catch (err) {
       // 424 = credentials required — open the credentials modal
-      const { ApiError } = await import("@/api/client");
       if (err instanceof ApiError && err.status === 424) {
         updateAgentState(activeWorker, { workerRunState: "idle", error: "credentials_required" });
         setCredentialsOpen(true);
@@ -610,8 +610,6 @@ export default function Workspace() {
         try {
           liveSession = await sessionsApi.create(agentType);
         } catch (loadErr: unknown) {
-          const { ApiError } = await import("@/api/client");
-
           // 424 = credentials required — open the credentials modal
           if (loadErr instanceof ApiError && loadErr.status === 424) {
             updateAgentState(agentType, { loading: false, error: "credentials_required" });
@@ -1452,7 +1450,6 @@ export default function Workspace() {
       // Success: worker_loaded SSE event will handle UI updates automatically
     } catch (err) {
       // 424 = credentials required — open the credentials modal
-      const { ApiError } = await import("@/api/client");
       if (err instanceof ApiError && err.status === 424) {
         const body = err.body as Record<string, unknown>;
         setCredentialAgentPath((body.agent_path as string) || null);

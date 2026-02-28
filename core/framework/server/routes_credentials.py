@@ -2,7 +2,6 @@
 
 import asyncio
 import logging
-import os
 
 from aiohttp import web
 from pydantic import SecretStr
@@ -63,25 +62,15 @@ async def handle_save_credential(request: web.Request) -> web.Response:
     if not credential_id or not keys or not isinstance(keys, dict):
         return web.json_response({"error": "credential_id and keys are required"}, status=400)
 
-    # ADEN_API_KEY lives in env + shell config, not the encrypted store
+    # ADEN_API_KEY is stored in the encrypted store via key_storage module
     if credential_id == "aden_api_key":
         key = keys.get("api_key", "").strip()
         if not key:
             return web.json_response({"error": "api_key is required"}, status=400)
 
-        os.environ["ADEN_API_KEY"] = key
+        from framework.credentials.key_storage import save_aden_api_key
 
-        # Persist to shell config (best-effort, same pattern as TUI setup)
-        try:
-            from aden_tools.credentials.shell_config import add_env_var_to_shell_config
-
-            add_env_var_to_shell_config(
-                "ADEN_API_KEY",
-                key,
-                comment="Aden Platform API key",
-            )
-        except Exception as exc:
-            logger.warning("Could not persist ADEN_API_KEY to shell config: %s", exc)
+        save_aden_api_key(key)
 
         # Immediately sync OAuth tokens from Aden (runs in executor because
         # _presync_aden_tokens makes blocking HTTP calls to the Aden server).
@@ -111,13 +100,9 @@ async def handle_delete_credential(request: web.Request) -> web.Response:
     credential_id = request.match_info["credential_id"]
 
     if credential_id == "aden_api_key":
-        os.environ.pop("ADEN_API_KEY", None)
-        try:
-            from aden_tools.credentials.shell_config import remove_env_var_from_shell_config
+        from framework.credentials.key_storage import delete_aden_api_key
 
-            remove_env_var_from_shell_config("ADEN_API_KEY")
-        except Exception as exc:
-            logger.warning("Could not remove ADEN_API_KEY from shell config: %s", exc)
+        delete_aden_api_key()
         return web.json_response({"deleted": True})
 
     store = _get_store(request)

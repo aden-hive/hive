@@ -160,20 +160,9 @@ class CredentialSetupScreen(ModalScreen[bool | None]):
             aden_input = self.query_one("#key-aden", Input)
             aden_key = aden_input.value.strip()
             if aden_key:
-                os.environ["ADEN_API_KEY"] = aden_key
-                # Persist to shell config
-                try:
-                    from aden_tools.credentials.shell_config import (
-                        add_env_var_to_shell_config,
-                    )
+                from framework.credentials.key_storage import save_aden_api_key
 
-                    add_env_var_to_shell_config(
-                        "ADEN_API_KEY",
-                        aden_key,
-                        comment="Aden Platform API key",
-                    )
-                except Exception:
-                    pass
+                save_aden_api_key(aden_key)
                 configured += 1  # ADEN_API_KEY itself counts as configured
 
             # Run Aden sync for all Aden-backed creds (best-effort)

@@ -139,25 +139,18 @@ def create_app(model: str | None = None) -> web.Application:
     try:
         from framework.credentials.validation import ensure_credential_key_env
 
+        # Load ALL credentials: HIVE_CREDENTIAL_KEY, ADEN_API_KEY, and LLM keys
         ensure_credential_key_env()
 
-        # Ensure HIVE_CREDENTIAL_KEY exists and is persisted (same as TUI setup flow).
-        # ensure_credential_key_env() loads from shell config but won't generate a new
-        # key. Web-only users who never ran the TUI need one auto-generated + persisted
-        # so credentials survive server restarts.
+        # Auto-generate credential key for web-only users who never ran the TUI
         if not os.environ.get("HIVE_CREDENTIAL_KEY"):
             try:
-                from aden_tools.credentials.shell_config import add_env_var_to_shell_config
-                from cryptography.fernet import Fernet
+                from framework.credentials.key_storage import generate_and_save_credential_key
 
-                generated_key = Fernet.generate_key().decode()
-                os.environ["HIVE_CREDENTIAL_KEY"] = generated_key
-                add_env_var_to_shell_config(
-                    "HIVE_CREDENTIAL_KEY",
-                    generated_key,
-                    comment="Encryption key for Hive credential store",
+                generate_and_save_credential_key()
+                logger.info(
+                    "Generated and persisted HIVE_CREDENTIAL_KEY to ~/.hive/secrets/credential_key"
                 )
-                logger.info("Generated and persisted HIVE_CREDENTIAL_KEY to shell config")
             except Exception as exc:
                 logger.warning("Could not auto-persist HIVE_CREDENTIAL_KEY: %s", exc)
 
