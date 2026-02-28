@@ -20,7 +20,7 @@ from fastmcp import FastMCP
 if TYPE_CHECKING:
     from aden_tools.credentials import CredentialStoreAdapter
 
-# Import register_tools from each tool module
+# Tool modules (credentials-based)
 from .account_info_tool import register_tools as register_account_info
 from .apollo_tool import register_tools as register_apollo
 from .arxiv_tool import register_tools as register_arxiv
@@ -37,6 +37,8 @@ from .email_tool import register_tools as register_email
 from .exa_search_tool import register_tools as register_exa_search
 from .example_tool import register_tools as register_example
 from .excel_tool import register_tools as register_excel
+
+# File system toolkits
 from .file_system_toolkits.apply_diff import register_tools as register_apply_diff
 from .file_system_toolkits.apply_patch import register_tools as register_apply_patch
 from .file_system_toolkits.data_tools import register_tools as register_data_tools
@@ -44,12 +46,11 @@ from .file_system_toolkits.execute_command_tool import (
     register_tools as register_execute_command,
 )
 from .file_system_toolkits.grep_search import register_tools as register_grep_search
+from .file_system_toolkits.hashline_edit import register_tools as register_hashline_edit
 from .file_system_toolkits.list_dir import register_tools as register_list_dir
 from .file_system_toolkits.replace_file_content import (
     register_tools as register_replace_file_content,
 )
-
-# Import file system toolkits
 from .file_system_toolkits.view_file import register_tools as register_view_file
 from .file_system_toolkits.write_to_file import register_tools as register_write_to_file
 from .github_tool import register_tools as register_github
@@ -142,6 +143,8 @@ def register_all_tools(
     register_apply_diff(mcp)
     register_apply_patch(mcp)
     register_grep_search(mcp)
+    # hashline_edit: anchor-based editing, pairs with view_file/grep_search hashline mode
+    register_hashline_edit(mcp)
     register_execute_command(mcp)
     register_data_tools(mcp)
     register_csv(mcp)

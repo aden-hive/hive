@@ -32,12 +32,17 @@ view_file(
 | `workspace_id` | str | Yes | - | The ID of the workspace |
 | `agent_id` | str | Yes | - | The ID of the agent |
 | `session_id` | str | Yes | - | The ID of the current session |
+| `encoding` | str | No | `"utf-8"` | The encoding to use for reading the file |
+| `max_size` | int | No | `10485760` | Maximum size of file content to return in bytes (10 MB) |
+| `hashline` | bool | No | `False` | If True, return content with `N:hhhh\|content` anchors for use with `hashline_edit` |
+| `offset` | int | No | `1` | 1-indexed start line (only used when `hashline=True`) |
+| `limit` | int | No | `0` | Max lines to return, 0 = all (only used when `hashline=True`) |
 
 ## Returns
 
 Returns a dictionary with the following structure:
 
-**Success:**
+**Success (default mode):**
 ```python
 {
     "success": True,
@@ -45,6 +50,21 @@ Returns a dictionary with the following structure:
     "content": "{\"debug\": true}",
     "size_bytes": 16,
     "lines": 1
+}
+```
+
+**Success (hashline mode):**
+```python
+{
+    "success": True,
+    "path": "app.py",
+    "content": "1:a3f2|def main():\n2:f1c4|    print(\"hello\")",
+    "hashline": True,
+    "offset": 1,
+    "limit": 0,
+    "total_lines": 2,
+    "shown_lines": 2,
+    "size_bytes": 35
 }
 ```
 

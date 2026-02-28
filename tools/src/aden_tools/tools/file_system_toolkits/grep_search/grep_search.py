@@ -3,6 +3,7 @@ import re
 
 from mcp.server.fastmcp import FastMCP
 
+from ..hashline import compute_line_hash
 from ..security import WORKSPACES_DIR, get_secure_path
 
 
@@ -17,12 +18,14 @@ def register_tools(mcp: FastMCP) -> None:
         agent_id: str,
         session_id: str,
         recursive: bool = False,
+        hashline: bool = False,
     ) -> dict:
         """
         Search for a pattern in a file or directory within the session sandbox.
 
         Use this when you need to find specific content or patterns in files using regex.
         Set recursive=True to search through all subdirectories.
+        Set hashline=True to include anchor hashes in results for use with hashline_edit.
 
         Args:
             path: The path to search in (file or directory, relative to session root)
@@ -31,6 +34,7 @@ def register_tools(mcp: FastMCP) -> None:
             agent_id: The ID of the agent
             session_id: The ID of the current session
             recursive: Whether to search recursively in directories (default: False)
+            hashline: If True, include anchor field (N:hhhh) in each match (default: False)
 
         Returns:
             Dict with search results and match details, or error dict
@@ -67,14 +71,34 @@ def register_tools(mcp: FastMCP) -> None:
                 # Calculate relative path for display
                 display_path = os.path.relpath(file_path, session_root)
                 try:
-                    with open(file_path, encoding="utf-8") as f:
-                        for i, line in enumerate(f, 1):
-                            if regex.search(line):
+                    if hashline:
+                        # Use splitlines() for anchor consistency with
+                        # view_file/hashline_edit (handles Unicode line
+                        # separators like \u2028, \x85).
+                        with open(file_path, encoding="utf-8") as f:
+                            content = f.read()
+                        for i, line in enumerate(content.splitlines(), 1):
+                            if not regex.search(line):
+                                continue
+                            matches.append(
+                                {
+                                    "file": display_path,
+                                    "line_number": i,
+                                    "line_content": line,
+                                    "anchor": f"{i}:{compute_line_hash(line)}",
+                                }
+                            )
+                    else:
+                        with open(file_path, encoding="utf-8") as f:
+                            for i, line in enumerate(f, 1):
+                                bare = line.rstrip("\n\r")
+                                if not regex.search(bare):
+                                    continue
                                 matches.append(
                                     {
                                         "file": display_path,
                                         "line_number": i,
-                                        "line_content": line.strip(),
+                                        "line_content": bare.strip(),
                                     }
                                 )
                 except (UnicodeDecodeError, PermissionError):
