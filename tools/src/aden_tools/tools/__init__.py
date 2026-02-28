@@ -67,6 +67,7 @@ from .postgres_tool import register_tools as register_postgres
 from .razorpay_tool import register_tools as register_razorpay
 from .risk_scorer import register_tools as register_risk_scorer
 from .runtime_logs_tool import register_tools as register_runtime_logs
+from .s3_tool import register_tools as register_s3
 from .serpapi_tool import register_tools as register_serpapi
 from .slack_tool import register_tools as register_slack
 from .ssl_tls_scanner import register_tools as register_ssl_tls_scanner
@@ -125,6 +126,7 @@ def register_all_tools(
     register_exa_search(mcp, credentials=credentials)
     register_news(mcp, credentials=credentials)
     register_razorpay(mcp, credentials=credentials)
+    register_s3(mcp, credentials=credentials)
     register_serpapi(mcp, credentials=credentials)
     register_slack(mcp, credentials=credentials)
     register_telegram(mcp, credentials=credentials)

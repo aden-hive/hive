@@ -27,6 +27,7 @@ export AWS_SECRET_ACCESS_KEY=your_secret_key
 export AWS_DEFAULT_REGION=us-east-1
 # Optional:
 # export AWS_SESSION_TOKEN=your_session_token
+# export AWS_CREDENTIAL_REF=aws/default
 
 2. IAM Role (Production Recommended)
 
@@ -35,6 +36,7 @@ When running on AWS infrastructure (EC2, ECS, Lambda, etc.), attach an IAM role 
 3. Hive Credential Store
 
 The tool also supports Hive’s CredentialStoreAdapter for secure credential management within agent workflows.
+For v0.6+ namespaced credentials, store under `aws/default` (or set `AWS_CREDENTIAL_REF`).
 
 ## Required IAM Permissions
 
@@ -123,5 +125,4 @@ Common errors:
 - NoSuchKey — Object not found
 
 - AccessDenied — Insufficient IAM permissions
-
 
