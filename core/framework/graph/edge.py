@@ -503,6 +503,45 @@ class GraphSpec(BaseModel):
         """Get all edges entering a node."""
         return [e for e in self.edges if e.target == node_id]
 
+    def build_capability_summary(self, from_node_id: str) -> str:
+        """Build a summary of the agent's downstream workflow phases and tools.
+
+        Walks the graph from *from_node_id* and collects all reachable nodes
+        (excluding the starting node itself) so that client-facing entry nodes
+        can inform the user about what the overall agent is capable of.
+
+        Returns:
+            A formatted string listing each downstream node's name,
+            description, and tools — or an empty string when there are
+            no downstream nodes.
+        """
+        reachable: list[Any] = []
+        visited: set[str] = set()
+        queue = [from_node_id]
+        while queue:
+            nid = queue.pop()
+            if nid in visited:
+                continue
+            visited.add(nid)
+            node = self.get_node(nid)
+            if node and nid != from_node_id:
+                reachable.append(node)
+            for edge in self.get_outgoing_edges(nid):
+                queue.append(edge.target)
+
+        if not reachable:
+            return ""
+
+        lines = [
+            "## Agent Capabilities",
+            "This agent has the following workflow phases and tools:",
+        ]
+        for node in reachable:
+            tool_str = f" (tools: {', '.join(node.tools)})" if node.tools else ""
+            lines.append(f"- {node.name}: {node.description}{tool_str}")
+
+        return "\n".join(lines)
+
     def detect_fan_out_nodes(self) -> dict[str, list[str]]:
         """
         Detect nodes that fan-out to multiple targets.

@@ -7,7 +7,7 @@ import ChatPanel, { type ChatMessage } from "@/components/ChatPanel";
 import TopBar from "@/components/TopBar";
 import { TAB_STORAGE_KEY, loadPersistedTabs, savePersistedTabs, type PersistedTabState } from "@/lib/tab-persistence";
 import NodeDetailPanel from "@/components/NodeDetailPanel";
-import CredentialsModal, { type Credential, createFreshCredentials, cloneCredentials, allRequiredCredentialsMet } from "@/components/CredentialsModal";
+import CredentialsModal, { type Credential, createFreshCredentials, cloneCredentials, allRequiredCredentialsMet, clearCredentialCache } from "@/components/CredentialsModal";
 import { agentsApi } from "@/api/agents";
 import { executionApi } from "@/api/execution";
 import { graphsApi } from "@/api/graphs";
@@ -16,6 +16,7 @@ import { useMultiSSE } from "@/hooks/use-sse";
 import type { LiveSession, AgentEvent, DiscoverEntry, Message, NodeSpec } from "@/api/types";
 import { backendMessageToChatMessage, sseEventToChatMessage, formatAgentDisplayName } from "@/lib/chat-helpers";
 import { topologyToGraphNodes } from "@/lib/graph-converter";
+import { ApiError } from "@/api/client";
 
 const makeId = () => Math.random().toString(36).slice(2, 9);
 
@@ -181,80 +182,6 @@ function NewTabPopover({ open, onClose, anchorRef, discoverAgents, onFromScratch
   );
 }
 
-// --- LoadAgentPopover ---
-interface LoadAgentPopoverProps {
-  open: boolean;
-  onClose: () => void;
-  anchorRef: React.RefObject<HTMLButtonElement | null>;
-  discoverAgents: DiscoverEntry[];
-  onSelect: (agentPath: string) => void;
-}
-
-function LoadAgentPopover({ open, onClose, anchorRef, discoverAgents, onSelect }: LoadAgentPopoverProps) {
-  const [pos, setPos] = useState<{ top: number; right: number } | null>(null);
-  const ref = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (open && anchorRef.current) {
-      const rect = anchorRef.current.getBoundingClientRect();
-      setPos({ top: rect.bottom + 4, right: window.innerWidth - rect.right });
-    }
-  }, [open, anchorRef]);
-
-  useEffect(() => {
-    if (!open) return;
-    const handler = (e: MouseEvent) => {
-      if (
-        ref.current && !ref.current.contains(e.target as Node) &&
-        anchorRef.current && !anchorRef.current.contains(e.target as Node)
-      ) onClose();
-    };
-    document.addEventListener("mousedown", handler);
-    return () => document.removeEventListener("mousedown", handler);
-  }, [open, onClose, anchorRef]);
-
-  useEffect(() => {
-    if (!open) return;
-    const handler = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
-    document.addEventListener("keydown", handler);
-    return () => document.removeEventListener("keydown", handler);
-  }, [open, onClose]);
-
-  if (!open || !pos) return null;
-
-  return ReactDOM.createPortal(
-    <div
-      ref={ref}
-      style={{ position: "fixed", top: pos.top, right: pos.right, zIndex: 9999 }}
-      className="w-60 rounded-xl border border-border/60 bg-card shadow-xl shadow-black/30 overflow-hidden"
-    >
-      <div className="flex items-center gap-2 px-3 py-2.5 border-b border-border/40">
-        <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
-          Load Agent
-        </span>
-      </div>
-      <div className="p-1.5 flex flex-col max-h-64 overflow-y-auto">
-        {discoverAgents.map(agent => (
-          <button
-            key={agent.path}
-            onClick={() => { onSelect(agent.path); onClose(); }}
-            className="flex items-center gap-2.5 w-full px-3 py-2 rounded-lg text-left transition-colors hover:bg-muted/60 text-foreground"
-          >
-            <div className="w-6 h-6 rounded-md bg-muted/80 flex items-center justify-center flex-shrink-0">
-              <Bot className="w-3.5 h-3.5 text-muted-foreground" />
-            </div>
-            <span className="text-sm font-medium">{agent.name}</span>
-          </button>
-        ))}
-        {discoverAgents.length === 0 && (
-          <p className="text-xs text-muted-foreground px-3 py-2">No agents found</p>
-        )}
-      </div>
-    </div>,
-    document.body
-  );
-}
-
 function fmtLogTs(ts: string): string {
   try {
     const d = new Date(ts);
@@ -286,7 +213,7 @@ interface AgentBackendState {
   isTyping: boolean;
   isStreaming: boolean;
   llmSnapshots: Record<string, string>;
-  toolCallCounts: Record<string, number>;
+  activeToolCalls: Record<string, { name: string; done: boolean; streamId: string }>;
 }
 
 function defaultAgentState(): AgentBackendState {
@@ -307,7 +234,7 @@ function defaultAgentState(): AgentBackendState {
     isTyping: false,
     isStreaming: false,
     llmSnapshots: {},
-    toolCallCounts: {},
+    activeToolCalls: {},
   };
 }
 
@@ -398,9 +325,6 @@ export default function Workspace() {
   const [selectedNode, setSelectedNode] = useState<GraphNode | null>(null);
   const [newTabOpen, setNewTabOpen] = useState(false);
   const newTabBtnRef = useRef<HTMLButtonElement>(null);
-  const [loadAgentOpen, setLoadAgentOpen] = useState(false);
-  const [loadingWorker, setLoadingWorker] = useState(false);
-  const loadAgentBtnRef = useRef<HTMLButtonElement>(null);
 
   // Ref mirror of sessionsByAgent so SSE callback can read current graph
   // state without adding sessionsByAgent to its dependency array.
@@ -460,14 +384,18 @@ export default function Workspace() {
   const handleRun = useCallback(async () => {
     const state = agentStates[activeWorker];
     if (!state?.sessionId || !state?.ready) return;
+    // Reset dismissed banner so a repeated 424 re-shows it
+    setDismissedBanner(null);
     try {
       updateAgentState(activeWorker, { workerRunState: "deploying" });
       const result = await executionApi.trigger(state.sessionId, "default", {});
       updateAgentState(activeWorker, { currentExecutionId: result.execution_id });
     } catch (err) {
       // 424 = credentials required — open the credentials modal
-      const { ApiError } = await import("@/api/client");
       if (err instanceof ApiError && err.status === 424) {
+        const errBody = (err as ApiError).body as Record<string, unknown>;
+        const credPath = (errBody?.agent_path as string) || null;
+        if (credPath) setCredentialAgentPath(credPath);
         updateAgentState(activeWorker, { workerRunState: "idle", error: "credentials_required" });
         setCredentialsOpen(true);
         return;
@@ -610,10 +538,11 @@ export default function Workspace() {
         try {
           liveSession = await sessionsApi.create(agentType);
         } catch (loadErr: unknown) {
-          const { ApiError } = await import("@/api/client");
-
           // 424 = credentials required — open the credentials modal
           if (loadErr instanceof ApiError && loadErr.status === 424) {
+            const errBody = loadErr.body as Record<string, unknown>;
+            const credPath = (errBody.agent_path as string) || null;
+            if (credPath) setCredentialAgentPath(credPath);
             updateAgentState(agentType, { loading: false, error: "credentials_required" });
             setCredentialsOpen(true);
             return;
@@ -771,9 +700,16 @@ export default function Workspace() {
     }
   }, [updateAgentState]);
 
+  // Track which sessions already have an in-flight or completed graph fetch
+  // to prevent the flood of duplicate API calls.  agentStates changes on every
+  // SSE event (text delta, tool_call, etc.) which re-triggers this effect
+  // before the first response has returned.
+  const fetchedGraphSessionsRef = useRef<Set<string>>(new Set());
   useEffect(() => {
     for (const [agentType, state] of Object.entries(agentStates)) {
       if (!state.sessionId || !state.ready || state.nodeSpecs.length > 0 || state.graphId) continue;
+      if (fetchedGraphSessionsRef.current.has(state.sessionId)) continue;
+      fetchedGraphSessionsRef.current.add(state.sessionId);
       fetchGraphForAgent(agentType, state.sessionId);
     }
   }, [agentStates, fetchGraphForAgent]);
@@ -964,7 +900,7 @@ export default function Workspace() {
               currentExecutionId: event.execution_id || agentStates[agentType]?.currentExecutionId || null,
               nodeLogs: {},
               llmSnapshots: {},
-              toolCallCounts: {},
+              activeToolCalls: {},
             });
             markAllNodesAs(agentType, ["running", "looping", "complete", "error"], "pending");
           }
@@ -1054,7 +990,7 @@ export default function Workspace() {
 
         case "node_loop_started":
           turnCounterRef.current[agentType] = currentTurn + 1;
-          updateAgentState(agentType, { isTyping: true });
+          updateAgentState(agentType, { isTyping: true, activeToolCalls: {} });
           if (!isQueen && event.node_id) {
             const sessions = sessionsRef.current[agentType] || [];
             const activeId = activeSessionRef.current[agentType] || sessions[0]?.id;
@@ -1070,7 +1006,7 @@ export default function Workspace() {
 
         case "node_loop_iteration":
           turnCounterRef.current[agentType] = currentTurn + 1;
-          updateAgentState(agentType, { isStreaming: false });
+          updateAgentState(agentType, { isStreaming: false, activeToolCalls: {} });
           if (!isQueen && event.node_id) {
             const pendingText = agentStates[agentType]?.llmSnapshots[event.node_id];
             if (pendingText?.trim()) {
@@ -1117,58 +1053,58 @@ export default function Workspace() {
 
         case "tool_call_started": {
           console.log('[TOOL_PILL] tool_call_started received:', { isQueen, nodeId: event.node_id, streamId: event.stream_id, agentType, executionId: event.execution_id, toolName: event.data?.tool_name });
-          if (!isQueen && event.node_id) {
-            const pendingText = agentStates[agentType]?.llmSnapshots[event.node_id];
-            if (pendingText?.trim()) {
-              appendNodeLog(agentType, event.node_id, `${ts} INFO  LLM: ${truncate(pendingText.trim(), 300)}`);
-              setAgentStates(prev => {
-                const state = prev[agentType];
-                if (!state) return prev;
-                const { [event.node_id!]: _, ...rest } = state.llmSnapshots;
-                return { ...prev, [agentType]: { ...state, llmSnapshots: rest } };
-              });
+          if (event.node_id) {
+            if (!isQueen) {
+              const pendingText = agentStates[agentType]?.llmSnapshots[event.node_id];
+              if (pendingText?.trim()) {
+                appendNodeLog(agentType, event.node_id, `${ts} INFO  LLM: ${truncate(pendingText.trim(), 300)}`);
+                setAgentStates(prev => {
+                  const state = prev[agentType];
+                  if (!state) return prev;
+                  const { [event.node_id!]: _, ...rest } = state.llmSnapshots;
+                  return { ...prev, [agentType]: { ...state, llmSnapshots: rest } };
+                });
+              }
+              appendNodeLog(agentType, event.node_id, `${ts} INFO  Calling ${(event.data?.tool_name as string) || "unknown"}(${event.data?.tool_input ? truncate(JSON.stringify(event.data.tool_input), 200) : ""})`);
             }
-            const toolName = (event.data?.tool_name as string) || "unknown";
-            const toolInput = event.data?.tool_input;
-            const argsStr = toolInput ? truncate(JSON.stringify(toolInput), 200) : "";
-            appendNodeLog(agentType, event.node_id, `${ts} INFO  Calling ${toolName}(${argsStr})`);
 
-            // Update tool call counts and upsert compact pill into chat
-            let pillContent = "";
+            const toolName = (event.data?.tool_name as string) || "unknown";
+            const toolUseId = (event.data?.tool_use_id as string) || "";
+
+            // Track active (in-flight) tools and upsert activity row into chat
+            const sid = event.stream_id;
             setAgentStates(prev => {
               const state = prev[agentType];
               if (!state) return prev;
-              const newCounts = { ...state.toolCallCounts, [toolName]: (state.toolCallCounts[toolName] || 0) + 1 };
-              pillContent = Object.entries(newCounts).map(([n, c]) => `${c} ${n}`).join(", ");
-              return {
-                ...prev,
-                [agentType]: { ...state, isStreaming: false, toolCallCounts: newCounts },
-              };
-            });
-            console.log('[TOOL_PILL] pillContent:', pillContent, 'agentType:', agentType);
-            if (pillContent) {
-              const pillMsg: ChatMessage = {
-                id: `tool-pill-${event.execution_id || "exec"}`,
+              const newActive = { ...state.activeToolCalls, [toolUseId]: { name: toolName, done: false, streamId: sid } };
+              // Only include tools from this stream in the pill
+              const tools = Object.values(newActive).filter(t => t.streamId === sid).map(t => ({ name: t.name, done: t.done }));
+              const allDone = tools.length > 0 && tools.every(t => t.done);
+              upsertChatMessage(agentType, {
+                id: `tool-pill-${sid}-${event.execution_id || "exec"}-${currentTurn}`,
                 agent: agentDisplayName || event.node_id || "Agent",
                 agentColor: "",
-                content: pillContent,
+                content: JSON.stringify({ tools, allDone }),
                 timestamp: "",
                 type: "tool_status",
-                role: "worker",
+                role,
                 thread: agentType,
+              });
+              return {
+                ...prev,
+                [agentType]: { ...state, isStreaming: false, activeToolCalls: newActive },
               };
-              console.log('[TOOL_PILL] upserting:', pillMsg);
-              upsertChatMessage(agentType, pillMsg);
-            }
+            });
           } else {
-            console.log('[TOOL_PILL] SKIPPED: isQueen=', isQueen, 'node_id=', event.node_id);
+            console.log('[TOOL_PILL] SKIPPED: no node_id', event.node_id);
           }
           break;
         }
 
-        case "tool_call_completed":
-          if (!isQueen && event.node_id) {
+        case "tool_call_completed": {
+          if (event.node_id) {
             const toolName = (event.data?.tool_name as string) || "unknown";
+            const toolUseId = (event.data?.tool_use_id as string) || "";
             const isError = event.data?.is_error as boolean | undefined;
             const result = event.data?.result as string | undefined;
             if (isError) {
@@ -1177,8 +1113,36 @@ export default function Workspace() {
               const resultStr = result ? ` (${truncate(result, 200)})` : "";
               appendNodeLog(agentType, event.node_id, `${ts} INFO  ${toolName} done${resultStr}`);
             }
+
+            // Mark tool as done and update activity row
+            const sid = event.stream_id;
+            setAgentStates(prev => {
+              const state = prev[agentType];
+              if (!state) return prev;
+              const updated = { ...state.activeToolCalls };
+              if (updated[toolUseId]) {
+                updated[toolUseId] = { ...updated[toolUseId], done: true };
+              }
+              const tools = Object.values(updated).filter(t => t.streamId === sid).map(t => ({ name: t.name, done: t.done }));
+              const allDone = tools.length > 0 && tools.every(t => t.done);
+              upsertChatMessage(agentType, {
+                id: `tool-pill-${sid}-${event.execution_id || "exec"}-${currentTurn}`,
+                agent: agentDisplayName || event.node_id || "Agent",
+                agentColor: "",
+                content: JSON.stringify({ tools, allDone }),
+                timestamp: "",
+                type: "tool_status",
+                role,
+                thread: agentType,
+              });
+              return {
+                ...prev,
+                [agentType]: { ...state, activeToolCalls: updated },
+              };
+            });
           }
           break;
+        }
 
         case "node_internal_output":
           if (!isQueen && event.node_id) {
@@ -1239,14 +1203,24 @@ export default function Workspace() {
           }
           break;
 
-        case "credentials_required":
+        case "credentials_required": {
           updateAgentState(agentType, { workerRunState: "idle", error: "credentials_required" });
+          const credAgentPath = event.data?.agent_path as string | undefined;
+          if (credAgentPath) setCredentialAgentPath(credAgentPath);
           setCredentialsOpen(true);
           break;
+        }
 
         case "worker_loaded": {
           const workerName = event.data?.worker_name as string | undefined;
+          const agentPathFromEvent = event.data?.agent_path as string | undefined;
           const displayName = formatAgentDisplayName(workerName || agentType);
+
+          // Invalidate cached credential requirements so the modal fetches
+          // fresh data the next time it opens (the new agent may have
+          // different credential needs than the previous one).
+          clearCredentialCache(agentPathFromEvent);
+          clearCredentialCache(agentType);
 
           // Update agent state: new display name, reset graph so topology refetch triggers
           updateAgentState(agentType, {
@@ -1407,43 +1381,6 @@ export default function Workspace() {
     }
   }, [activeWorker, activeSession, agentStates, updateAgentState]);
 
-  const handleLoadAgent = useCallback(async (agentPath: string) => {
-    const state = agentStates[activeWorker];
-    if (!state?.sessionId) return;
-
-    setLoadingWorker(true);
-    try {
-      await sessionsApi.loadWorker(state.sessionId, agentPath);
-      // Success: worker_loaded SSE event will handle UI updates automatically
-    } catch (err) {
-      // 424 = credentials required — open the credentials modal
-      const { ApiError } = await import("@/api/client");
-      if (err instanceof ApiError && err.status === 424) {
-        const body = err.body as Record<string, unknown>;
-        setCredentialAgentPath((body.agent_path as string) || null);
-        setCredentialsOpen(true);
-        setLoadingWorker(false);
-        return;
-      }
-
-      const errMsg = err instanceof Error ? err.message : String(err);
-      const activeId = activeSessionRef.current[activeWorker];
-      const errorMsg: ChatMessage = {
-        id: makeId(), agent: "System", agentColor: "",
-        content: `Failed to load agent: ${errMsg}`,
-        timestamp: "", type: "system", thread: activeWorker,
-      };
-      setSessionsByAgent(prev => ({
-        ...prev,
-        [activeWorker]: (prev[activeWorker] || []).map(s =>
-          s.id === activeId ? { ...s, messages: [...s.messages, errorMsg] } : s
-        ),
-      }));
-    } finally {
-      setLoadingWorker(false);
-    }
-  }, [activeWorker, agentStates]);
-
   const closeAgentTab = useCallback((agentType: string) => {
     setSelectedNode(null);
     // Pause worker execution if running (saves checkpoint), then kill the
@@ -1542,30 +1479,6 @@ export default function Workspace() {
           </>
         }
       >
-        {activeWorker === "new-agent" && activeAgentState?.ready && !activeAgentState?.graphId && (
-          <>
-            <button
-              ref={loadAgentBtnRef}
-              onClick={() => setLoadAgentOpen(o => !o)}
-              disabled={loadingWorker}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors flex-shrink-0"
-            >
-              {loadingWorker ? (
-                <Loader2 className="w-3.5 h-3.5 animate-spin" />
-              ) : (
-                <Bot className="w-3.5 h-3.5" />
-              )}
-              Load Agent
-            </button>
-            <LoadAgentPopover
-              open={loadAgentOpen}
-              onClose={() => setLoadAgentOpen(false)}
-              anchorRef={loadAgentBtnRef}
-              discoverAgents={discoverAgents}
-              onSelect={handleLoadAgent}
-            />
-          </>
-        )}
         <button
           onClick={() => setCredentialsOpen(true)}
           className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors flex-shrink-0"
@@ -1729,14 +1642,14 @@ export default function Workspace() {
         agentLabel={activeWorkerLabel}
         agentPath={credentialAgentPath || (activeWorker !== "new-agent" ? activeWorker : undefined)}
         open={credentialsOpen}
-        onClose={() => { setCredentialsOpen(false); setCredentialAgentPath(null); }}
+        onClose={() => { setCredentialsOpen(false); setCredentialAgentPath(null); setDismissedBanner(null); }}
         credentials={activeSession?.credentials || []}
         onCredentialChange={() => {
-          if (!activeSession) return;
           // Clear credential error so the auto-load effect retries session creation
           if (agentStates[activeWorker]?.error === "credentials_required") {
             updateAgentState(activeWorker, { error: null });
           }
+          if (!activeSession) return;
           setSessionsByAgent(prev => ({
             ...prev,
             [activeWorker]: prev[activeWorker].map(s =>

@@ -1946,7 +1946,7 @@ def get_session_status() -> str:
 @mcp.tool()
 def configure_loop(
     max_iterations: Annotated[int, "Maximum loop iterations per node execution (default 50)"] = 50,
-    max_tool_calls_per_turn: Annotated[int, "Maximum tool calls per LLM turn (default 10)"] = 10,
+    max_tool_calls_per_turn: Annotated[int, "Maximum tool calls per LLM turn (default 30)"] = 30,
     stall_detection_threshold: Annotated[
         int, "Consecutive identical responses before stall detection triggers (default 3)"
     ] = 3,
