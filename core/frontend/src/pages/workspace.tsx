@@ -771,9 +771,16 @@ export default function Workspace() {
     }
   }, [updateAgentState]);
 
+  // Track which sessions already have an in-flight or completed graph fetch
+  // to prevent the flood of duplicate API calls.  agentStates changes on every
+  // SSE event (text delta, tool_call, etc.) which re-triggers this effect
+  // before the first response has returned.
+  const fetchedGraphSessionsRef = useRef<Set<string>>(new Set());
   useEffect(() => {
     for (const [agentType, state] of Object.entries(agentStates)) {
       if (!state.sessionId || !state.ready || state.nodeSpecs.length > 0 || state.graphId) continue;
+      if (fetchedGraphSessionsRef.current.has(state.sessionId)) continue;
+      fetchedGraphSessionsRef.current.add(state.sessionId);
       fetchGraphForAgent(agentType, state.sessionId);
     }
   }, [agentStates, fetchGraphForAgent]);

@@ -115,7 +115,7 @@ class LoopConfig:
     # turns.  After the grace period, the judge runs to apply RETRY pressure
     # on models stuck in a clarification loop.  Explicit ask_user() calls
     # always skip the judge regardless of this setting.
-    cf_grace_turns: int = 2
+    cf_grace_turns: int = 1
     tool_doom_loop_enabled: bool = True
 
 
@@ -1932,8 +1932,19 @@ class EventLoopNode(NodeProtocol):
                 # Client-facing nodes with no output keys are meant for
                 # continuous interaction — they should not auto-accept.
                 # Only exit via shutdown, max_iterations, or max_node_visits.
+                # Inject tool-use pressure so models stuck in a
+                # "narrate-instead-of-act" loop get corrective feedback.
                 if not output_keys and ctx.node_spec.client_facing:
-                    return JudgeVerdict(action="RETRY", feedback="")
+                    return JudgeVerdict(
+                        action="RETRY",
+                        feedback=(
+                            "STOP describing what you will do. "
+                            "You have FULL access to all tools — file creation, "
+                            "shell commands, MCP tools — and you CAN call them "
+                            "directly in your response. Respond ONLY with tool "
+                            "calls, no prose. Execute the task now."
+                        ),
+                    )
 
                 # Level 2: conversation-aware quality check (if success_criteria set)
                 if ctx.node_spec.success_criteria and ctx.llm:
