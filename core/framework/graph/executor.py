@@ -731,6 +731,7 @@ class GraphExecutor:
                     event_triggered=_event_triggered,
                     identity_prompt=getattr(graph, "identity_prompt", ""),
                     narrative=_resume_narrative,
+                    graph=graph,
                 )
 
                 # Log actual input data being read
@@ -1287,19 +1288,48 @@ class GraphExecutor:
                                 protect_tokens=2000,
                             )
                         if continuous_conversation.needs_compaction():
+                            _phase_ratio = continuous_conversation.usage_ratio()
                             self.logger.info(
                                 "   Phase-boundary compaction (%.0f%% usage)",
-                                continuous_conversation.usage_ratio() * 100,
+                                _phase_ratio * 100,
                             )
-                            summary = (
-                                f"Summary of earlier phases (before {next_spec.name}). "
-                                "See transition markers for phase details."
+                            _data_dir = (
+                                str(self._storage_path / "data") if self._storage_path else None
                             )
-                            await continuous_conversation.compact(
-                                summary,
-                                keep_recent=4,
-                                phase_graduated=True,
-                            )
+                            if _data_dir:
+                                await continuous_conversation.compact_preserving_structure(
+                                    spillover_dir=_data_dir,
+                                    keep_recent=4,
+                                    phase_graduated=True,
+                                )
+                                # Circuit breaker: if still over budget, fall back
+                                _post_ratio = continuous_conversation.usage_ratio()
+                                if _post_ratio >= 0.9 * _phase_ratio:
+                                    self.logger.warning(
+                                        "   Structure-preserving compaction ineffective "
+                                        "(%.0f%% -> %.0f%%), falling back to summary",
+                                        _phase_ratio * 100,
+                                        _post_ratio * 100,
+                                    )
+                                    summary = (
+                                        f"Summary of earlier phases (before {next_spec.name}). "
+                                        "See transition markers for phase details."
+                                    )
+                                    await continuous_conversation.compact(
+                                        summary,
+                                        keep_recent=4,
+                                        phase_graduated=True,
+                                    )
+                            else:
+                                summary = (
+                                    f"Summary of earlier phases (before {next_spec.name}). "
+                                    "See transition markers for phase details."
+                                )
+                                await continuous_conversation.compact(
+                                    summary,
+                                    keep_recent=4,
+                                    phase_graduated=True,
+                                )
 
                 # Update input_data for next node
                 input_data = result.output
@@ -1553,6 +1583,7 @@ class GraphExecutor:
         event_triggered: bool = False,
         identity_prompt: str = "",
         narrative: str = "",
+        graph: "GraphSpec | None" = None,
     ) -> NodeContext:
         """Build execution context for a node."""
         # Filter tools to those available to this node
@@ -1581,6 +1612,18 @@ class GraphExecutor:
                 node_tool_names=node_spec.tools,
             )
 
+        # Build goal context, enriched with capability summary for
+        # client-facing nodes so the LLM knows what the full agent can do.
+        goal_context = goal.to_prompt_context()
+        if graph and node_spec.client_facing:
+            capability_summary = graph.build_capability_summary(graph.entry_node)
+            if capability_summary:
+                goal_context = (
+                    f"{goal_context}\n\n{capability_summary}"
+                    if goal_context
+                    else capability_summary
+                )
+
         return NodeContext(
             runtime=self.runtime,
             node_id=node_spec.id,
@@ -1589,7 +1632,7 @@ class GraphExecutor:
             input_data=input_data,
             llm=self.llm,
             available_tools=available_tools,
-            goal_context=goal.to_prompt_context(),
+            goal_context=goal_context,
             goal=goal,  # Pass Goal object for LLM-powered routers
             max_tokens=max_tokens,
             runtime_logger=self.runtime_logger,
@@ -1672,11 +1715,11 @@ class GraphExecutor:
                 judge=None,  # implicit judge: accept when output_keys are filled
                 config=LoopConfig(
                     max_iterations=lc.get("max_iterations", default_max_iter),
-                    max_tool_calls_per_turn=lc.get("max_tool_calls_per_turn", 10),
+                    max_tool_calls_per_turn=lc.get("max_tool_calls_per_turn", 30),
                     tool_call_overflow_margin=lc.get("tool_call_overflow_margin", 0.5),
                     stall_detection_threshold=lc.get("stall_detection_threshold", 3),
                     max_history_tokens=lc.get("max_history_tokens", 32000),
-                    max_tool_result_chars=lc.get("max_tool_result_chars", 3_000),
+                    max_tool_result_chars=lc.get("max_tool_result_chars", 30_000),
                     spillover_dir=spillover,
                 ),
                 tool_executor=self.tool_executor,
@@ -1956,7 +1999,9 @@ class GraphExecutor:
                     branch.retry_count = attempt
 
                     # Build context for this branch
-                    ctx = self._build_context(node_spec, memory, goal, mapped, graph.max_tokens)
+                    ctx = self._build_context(
+                        node_spec, memory, goal, mapped, graph.max_tokens, graph=graph
+                    )
                     node_impl = self._get_node_implementation(node_spec, graph.cleanup_llm_model)
 
                     # Emit node-started event (skip event_loop nodes)

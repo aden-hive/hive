@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import re
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Literal, Protocol, runtime_checkable
 
 
@@ -90,13 +91,44 @@ class Message:
 
 
 def _extract_spillover_filename(content: str) -> str | None:
-    """Extract spillover filename from a truncated tool result.
+    """Extract spillover filename from a tool result annotation.
 
-    Matches the pattern produced by EventLoopNode._truncate_tool_result():
-        "saved to 'tool_github_list_stargazers_abc123.txt'"
+    Matches patterns produced by EventLoopNode._truncate_tool_result():
+        - Large result:  "saved to 'web_search_1.txt'"
+        - Small result:  "[Saved to 'web_search_1.txt']"
     """
-    match = re.search(r"saved to '([^']+)'", content)
+    match = re.search(r"[Ss]aved to '([^']+)'", content)
     return match.group(1) if match else None
+
+
+_TC_ARG_LIMIT = 200  # max chars per tool_call argument after compaction
+
+
+def _compact_tool_calls(tool_calls: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Truncate tool_call arguments to save context tokens during compaction.
+
+    Preserves ``id``, ``type``, and ``function.name`` exactly.  Truncates
+    ``function.arguments`` (a JSON string) to at most ``_TC_ARG_LIMIT`` chars
+    so that large payloads (e.g. set_output with full findings) don't survive
+    compaction and defeat the purpose of context reduction.
+    """
+    compact = []
+    for tc in tool_calls:
+        func = tc.get("function", {})
+        args = func.get("arguments", "")
+        if len(args) > _TC_ARG_LIMIT:
+            args = args[:_TC_ARG_LIMIT] + "…[truncated]"
+        compact.append(
+            {
+                "id": tc.get("id", ""),
+                "type": tc.get("type", "function"),
+                "function": {
+                    "name": func.get("name", ""),
+                    "arguments": args,
+                },
+            }
+        )
+    return compact
 
 
 # ---------------------------------------------------------------------------
@@ -353,12 +385,20 @@ class NodeConversation:
         """Best available token estimate.
 
         Uses actual API input token count when available (set via
-        :meth:`update_token_count`), otherwise falls back to the rough
-        ``total_chars / 4`` heuristic.
+        :meth:`update_token_count`), otherwise falls back to a
+        ``total_chars / 4`` heuristic that includes both message content
+        AND tool_call argument sizes.
         """
         if self._last_api_input_tokens is not None:
             return self._last_api_input_tokens
-        total_chars = sum(len(m.content) for m in self._messages)
+        total_chars = 0
+        for m in self._messages:
+            total_chars += len(m.content)
+            if m.tool_calls:
+                for tc in m.tool_calls:
+                    func = tc.get("function", {})
+                    total_chars += len(func.get("arguments", ""))
+                    total_chars += len(func.get("name", ""))
         return total_chars // 4
 
     def update_token_count(self, actual_input_tokens: int) -> None:
@@ -586,6 +626,138 @@ class NodeConversation:
 
         self._messages = [summary_msg] + recent_messages
         self._last_api_input_tokens = None  # reset; next LLM call will recalibrate
+
+    async def compact_preserving_structure(
+        self,
+        spillover_dir: str,
+        keep_recent: int = 4,
+        phase_graduated: bool = False,
+    ) -> None:
+        """Structure-preserving compaction: save freeform text to file, keep tool messages.
+
+        Unlike ``compact()`` which replaces ALL old messages with a single LLM
+        summary, this method preserves the tool call structure (assistant
+        messages with tool_calls + tool result messages) that are already tiny
+        after pruning.  Only freeform text exchanges (user messages,
+        text-only assistant messages) are saved to a file and removed.
+
+        The result: the agent retains exact knowledge of what tools it called,
+        where each result is stored, and can load the conversation text if
+        needed.  No LLM summary call.  No heuristics.  Nothing lost.
+        """
+        if not self._messages:
+            return
+
+        total = len(self._messages)
+
+        # Determine split point (same logic as compact)
+        if phase_graduated and self._current_phase:
+            split = self._find_phase_graduated_split()
+        else:
+            split = None
+
+        if split is None:
+            keep_recent = max(0, min(keep_recent, total - 1))
+            split = total - keep_recent if keep_recent > 0 else total
+
+        # Advance split past orphaned tool results at the boundary
+        while split < total and self._messages[split].role == "tool":
+            split += 1
+
+        if split == 0:
+            return
+
+        old_messages = self._messages[:split]
+
+        # Classify old messages: structural (keep) vs freeform (save to file)
+        kept_structural: list[Message] = []
+        freeform_lines: list[str] = []
+
+        for msg in old_messages:
+            if msg.role == "tool":
+                # Tool results — already pruned to ~30 tokens (file reference).
+                # Keep in conversation.
+                kept_structural.append(msg)
+            elif msg.role == "assistant" and msg.tool_calls:
+                # Assistant message with tool_calls — keep the tool_calls
+                # with truncated arguments, clear the freeform text content.
+                compact_tcs = _compact_tool_calls(msg.tool_calls)
+                kept_structural.append(
+                    Message(
+                        seq=msg.seq,
+                        role=msg.role,
+                        content="",
+                        tool_calls=compact_tcs,
+                        is_error=msg.is_error,
+                        phase_id=msg.phase_id,
+                        is_transition_marker=msg.is_transition_marker,
+                    )
+                )
+            else:
+                # Freeform text (user messages, text-only assistant messages)
+                # — save to file and remove from conversation.
+                role_label = msg.role
+                text = msg.content
+                if len(text) > 2000:
+                    text = text[:2000] + "…"
+                freeform_lines.append(f"[{role_label}] (seq={msg.seq}): {text}")
+
+        # Write freeform text to a numbered conversation file
+        spill_path = Path(spillover_dir)
+        spill_path.mkdir(parents=True, exist_ok=True)
+
+        # Find next conversation file number
+        existing = sorted(spill_path.glob("conversation_*.md"))
+        next_n = len(existing) + 1
+        conv_filename = f"conversation_{next_n}.md"
+
+        if freeform_lines:
+            header = f"## Compacted conversation (messages 1-{split})\n\n"
+            conv_text = header + "\n\n".join(freeform_lines)
+            (spill_path / conv_filename).write_text(conv_text, encoding="utf-8")
+        else:
+            # Nothing to save — skip file creation
+            conv_filename = ""
+
+        # Build reference message
+        if conv_filename:
+            ref_content = (
+                f"[Previous conversation saved to '{conv_filename}'. "
+                f"Use load_data('{conv_filename}') to review if needed.]"
+            )
+        else:
+            ref_content = "[Previous freeform messages compacted.]"
+        # Use a seq just before the first kept message
+        recent_messages = list(self._messages[split:])
+        if kept_structural:
+            ref_seq = kept_structural[0].seq - 1
+        elif recent_messages:
+            ref_seq = recent_messages[0].seq - 1
+        else:
+            ref_seq = self._next_seq
+            self._next_seq += 1
+
+        ref_msg = Message(seq=ref_seq, role="user", content=ref_content)
+
+        # Persist: delete old messages from store, write reference + kept structural
+        if self._store:
+            first_kept_seq = (
+                kept_structural[0].seq
+                if kept_structural
+                else (recent_messages[0].seq if recent_messages else self._next_seq)
+            )
+            # Delete everything before the first structural message we're keeping
+            await self._store.delete_parts_before(first_kept_seq)
+            # Write the reference message
+            await self._store.write_part(ref_msg.seq, ref_msg.to_storage_dict())
+            # Write kept structural messages (they may have been modified)
+            for msg in kept_structural:
+                await self._store.write_part(msg.seq, msg.to_storage_dict())
+            await self._store.write_cursor({"next_seq": self._next_seq})
+
+        # Reassemble: reference + kept structural (in original order) + recent
+        self._messages = [ref_msg] + kept_structural + recent_messages
+        self._last_api_input_tokens = None
 
     def _find_phase_graduated_split(self) -> int | None:
         """Find split point that preserves current + previous phase.

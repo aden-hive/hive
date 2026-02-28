@@ -235,16 +235,14 @@ class MyAgent:
             identity_prompt=identity_prompt,
         )
 
-    def _setup(self, mock_mode=False):
+    def _setup(self):
         self._storage_path = Path.home() / ".hive" / "agents" / "my_agent"
         self._storage_path.mkdir(parents=True, exist_ok=True)
         self._tool_registry = ToolRegistry()
         mcp_config = Path(__file__).parent / "mcp_servers.json"
         if mcp_config.exists():
             self._tool_registry.load_mcp_config(mcp_config)
-        llm = None
-        if not mock_mode:
-            llm = LiteLLMProvider(model=self.config.model, api_key=self.config.api_key, api_base=self.config.api_base)
+        llm = LiteLLMProvider(model=self.config.model, api_key=self.config.api_key, api_base=self.config.api_base)
         tools = list(self._tool_registry.get_tools().values())
         tool_executor = self._tool_registry.get_executor()
         self._graph = self._build_graph()
@@ -257,9 +255,9 @@ class MyAgent:
                                                 checkpoint_max_age_days=7, async_checkpoint=True),
         )
 
-    async def start(self, mock_mode=False):
+    async def start(self):
         if self._agent_runtime is None:
-            self._setup(mock_mode=mock_mode)
+            self._setup()
         if not self._agent_runtime.is_running:
             await self._agent_runtime.start()
 
@@ -274,8 +272,8 @@ class MyAgent:
         return await self._agent_runtime.trigger_and_wait(
             entry_point_id=entry_point, input_data=input_data or {}, session_state=session_state)
 
-    async def run(self, context, mock_mode=False, session_state=None):
-        await self.start(mock_mode=mock_mode)
+    async def run(self, context, session_state=None):
+        await self.start()
         try:
             result = await self.trigger_and_wait("default", context, session_state=session_state)
             return result or ExecutionResult(success=False, error="Execution timeout")
@@ -471,19 +469,17 @@ def cli():
 
 @cli.command()
 @click.option("--topic", "-t", required=True)
-@click.option("--mock", is_flag=True)
 @click.option("--verbose", "-v", is_flag=True)
-def run(topic, mock, verbose):
+def run(topic, verbose):
     """Execute the agent."""
     setup_logging(verbose=verbose)
-    result = asyncio.run(default_agent.run({"topic": topic}, mock_mode=mock))
+    result = asyncio.run(default_agent.run({"topic": topic}))
     click.echo(json.dumps({"success": result.success, "output": result.output}, indent=2, default=str))
     sys.exit(0 if result.success else 1)
 
 
 @cli.command()
-@click.option("--mock", is_flag=True)
-def tui(mock):
+def tui():
     """Launch TUI dashboard."""
     from pathlib import Path
     from framework.tui.app import AdenTUI
@@ -499,7 +495,7 @@ def tui(mock):
         storage.mkdir(parents=True, exist_ok=True)
         mcp_cfg = Path(__file__).parent / "mcp_servers.json"
         if mcp_cfg.exists(): agent._tool_registry.load_mcp_config(mcp_cfg)
-        llm = None if mock else LiteLLMProvider(model=agent.config.model, api_key=agent.config.api_key, api_base=agent.config.api_base)
+        llm = LiteLLMProvider(model=agent.config.model, api_key=agent.config.api_key, api_base=agent.config.api_base)
         runtime = create_agent_runtime(
             graph=agent._build_graph(), goal=agent.goal, storage_path=storage,
             entry_points=[EntryPointSpec(id="start", name="Start", entry_node="intake", trigger_type="manual", isolation_level="isolated")],
@@ -564,7 +560,6 @@ import sys
 from pathlib import Path
 
 import pytest
-import pytest_asyncio
 
 _repo_root = Path(__file__).resolve().parents[3]
 for _p in ["exports", "core"]:
@@ -576,18 +571,17 @@ AGENT_PATH = str(Path(__file__).resolve().parents[1])
 
 
 @pytest.fixture(scope="session")
-def mock_mode():
-    return True
+def agent_module():
+    """Import the agent package for structural validation."""
+    import importlib
+    return importlib.import_module(Path(AGENT_PATH).name)
 
 
-@pytest_asyncio.fixture(scope="session")
-async def runner(tmp_path_factory, mock_mode):
+@pytest.fixture(scope="session")
+def runner_loaded():
+    """Load the agent through AgentRunner (structural only, no LLM needed)."""
     from framework.runner.runner import AgentRunner
-    storage = tmp_path_factory.mktemp("agent_storage")
-    r = AgentRunner.load(AGENT_PATH, mock_mode=mock_mode, storage_path=storage)
-    r._setup()
-    yield r
-    await r.cleanup_async()
+    return AgentRunner.load(AGENT_PATH)
 ```
 
 ## entry_points Format

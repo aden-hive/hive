@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { Crown, Mail, Briefcase, Shield, Search, Newspaper, ArrowRight, Hexagon, Send, Bot } from "lucide-react";
 import TopBar from "@/components/TopBar";
@@ -40,6 +40,7 @@ const promptHints = [
 export default function Home() {
   const navigate = useNavigate();
   const [inputValue, setInputValue] = useState("");
+  const textareaRef = useRef<HTMLInputElement>(null);
   const [showAgents, setShowAgents] = useState(false);
   const [agents, setAgents] = useState<DiscoverEntry[]>([]);
   const [loading, setLoading] = useState(false);
@@ -106,18 +107,14 @@ export default function Home() {
           <form onSubmit={handleSubmit} className="mb-6">
             <div className="relative border border-border/60 rounded-xl bg-card/50 hover:border-primary/30 focus-within:border-primary/40 transition-colors shadow-sm">
               <input
+                ref={textareaRef}
+                type="text"
                 value={inputValue}
                 onChange={(e) => setInputValue(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") {
-                    e.preventDefault();
-                    handleSubmit(e);
-                  }
-                }}
                 placeholder="Describe a task for the hive..."
-                className="w-full bg-transparent px-5 py-3 pr-12 text-sm text-foreground placeholder:text-muted-foreground/60 focus:outline-none rounded-xl"
+                className="w-full bg-transparent px-5 py-4 pr-12 text-sm text-foreground placeholder:text-muted-foreground/60 focus:outline-none rounded-xl"
               />
-              <div className="absolute right-3 top-1/2 -translate-y-1/2">
+              <div className="absolute right-3 bottom-2.5">
                 <button
                   type="submit"
                   disabled={!inputValue.trim()}

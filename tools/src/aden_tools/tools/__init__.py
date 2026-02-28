@@ -54,10 +54,12 @@ from .file_system_toolkits.view_file import register_tools as register_view_file
 from .file_system_toolkits.write_to_file import register_tools as register_write_to_file
 from .github_tool import register_tools as register_github
 from .gmail_tool import register_tools as register_gmail
+from .google_analytics_tool import register_tools as register_google_analytics
 from .google_docs_tool import register_tools as register_google_docs
 from .google_maps_tool import register_tools as register_google_maps
 from .http_headers_scanner import register_tools as register_http_headers_scanner
 from .hubspot_tool import register_tools as register_hubspot
+from .intercom_tool import register_tools as register_intercom
 from .news_tool import register_tools as register_news
 from .pdf_read_tool import register_tools as register_pdf_read
 from .port_scanner import register_tools as register_port_scanner
@@ -114,6 +116,7 @@ def register_all_tools(
     # Gmail inbox management (read, trash, modify labels)
     register_gmail(mcp, credentials=credentials)
     register_hubspot(mcp, credentials=credentials)
+    register_intercom(mcp, credentials=credentials)
     register_apollo(mcp, credentials=credentials)
     register_bigquery(mcp, credentials=credentials)
     register_calcom(mcp, credentials=credentials)
@@ -126,6 +129,7 @@ def register_all_tools(
     register_slack(mcp, credentials=credentials)
     register_telegram(mcp, credentials=credentials)
     register_vision(mcp, credentials=credentials)
+    register_google_analytics(mcp, credentials=credentials)
     register_google_docs(mcp, credentials=credentials)
     register_google_maps(mcp, credentials=credentials)
     register_account_info(mcp, credentials=credentials)

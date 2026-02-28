@@ -114,7 +114,7 @@ class SessionStore:
             if not state_path.exists():
                 return None
 
-            return SessionState.model_validate_json(state_path.read_text())
+            return SessionState.model_validate_json(state_path.read_text(encoding="utf-8"))
 
         return await asyncio.to_thread(_read)
 
@@ -151,7 +151,7 @@ class SessionStore:
                     continue
 
                 try:
-                    state = SessionState.model_validate_json(state_path.read_text())
+                    state = SessionState.model_validate_json(state_path.read_text(encoding="utf-8"))
 
                     # Apply filters
                     if status and state.status != status:

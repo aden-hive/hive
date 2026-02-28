@@ -435,7 +435,15 @@ class ToolRegistry:
                             filtered_context = {
                                 k: v for k, v in base_context.items() if k in tool_params
                             }
-                            merged_inputs = {**filtered_context, **inputs}
+                            # Strip context params from LLM inputs — the framework
+                            # values are authoritative (prevents the LLM from passing
+                            # e.g. data_dir="/data" and overriding the real path).
+                            clean_inputs = {
+                                k: v
+                                for k, v in inputs.items()
+                                if k not in registry_ref.CONTEXT_PARAMS
+                            }
+                            merged_inputs = {**clean_inputs, **filtered_context}
                             result = client_ref.call_tool(tool_name, merged_inputs)
                             # MCP tools return content array, extract the result
                             if isinstance(result, list) and len(result) > 0:

@@ -63,9 +63,18 @@ if (Test-Path $configPath) {
 }
 
 # Load HIVE_CREDENTIAL_KEY for encrypted credential store
-$credKey = [System.Environment]::GetEnvironmentVariable("HIVE_CREDENTIAL_KEY", "User")
-if ($credKey -and -not $env:HIVE_CREDENTIAL_KEY) {
-    $env:HIVE_CREDENTIAL_KEY = $credKey
+if (-not $env:HIVE_CREDENTIAL_KEY) {
+    # 1. Windows User env var (legacy quickstart installs)
+    $credKey = [System.Environment]::GetEnvironmentVariable("HIVE_CREDENTIAL_KEY", "User")
+    if ($credKey) {
+        $env:HIVE_CREDENTIAL_KEY = $credKey
+    } else {
+        # 2. File-based storage (new quickstart + matches quickstart.sh)
+        $credKeyFile = Join-Path $env:USERPROFILE ".hive\secrets\credential_key"
+        if (Test-Path $credKeyFile) {
+            $env:HIVE_CREDENTIAL_KEY = (Get-Content $credKeyFile -Raw).Trim()
+        }
+    }
 }
 
 # ── Run the Hive CLI ────────────────────────────────────────────────

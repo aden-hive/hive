@@ -91,7 +91,7 @@ export default function TopBar({ tabs: tabsProp, onTabClick, onCloseTab, canClos
       <div className="flex items-center gap-3 min-w-0">
         <button onClick={() => navigate("/")} className="flex items-center gap-2 hover:opacity-80 transition-opacity flex-shrink-0">
           <Crown className="w-4 h-4 text-primary" />
-          <span className="text-sm font-semibold text-primary">Hive</span>
+          <span className="text-sm font-semibold text-primary">Open Hive</span>
         </button>
 
         {tabs.length > 0 && (

@@ -277,13 +277,13 @@ class SessionManager:
             if not state_path.exists():
                 continue
             try:
-                state = json.loads(state_path.read_text())
+                state = json.loads(state_path.read_text(encoding="utf-8"))
                 if state.get("status") != "active":
                     continue
                 state["status"] = "cancelled"
                 state.setdefault("result", {})["error"] = "Stale session: runtime restarted"
                 state.setdefault("timestamps", {})["updated_at"] = datetime.now().isoformat()
-                state_path.write_text(json.dumps(state, indent=2))
+                state_path.write_text(json.dumps(state, indent=2), encoding="utf-8")
                 logger.info(
                     "Marked stale session '%s' as cancelled for agent '%s'", d.name, agent_path.name
                 )

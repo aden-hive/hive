@@ -369,7 +369,7 @@ async def handle_list_worker_sessions(request: web.Request) -> web.Response:
         state_path = d / "state.json"
         if state_path.exists():
             try:
-                state = json.loads(state_path.read_text())
+                state = json.loads(state_path.read_text(encoding="utf-8"))
                 entry["status"] = state.get("status", "unknown")
                 entry["started_at"] = state.get("started_at")
                 entry["completed_at"] = state.get("completed_at")
@@ -408,7 +408,7 @@ async def handle_get_worker_session(request: web.Request) -> web.Response:
         return web.json_response({"error": "Session not found"}, status=404)
 
     try:
-        state = json.loads(state_path.read_text())
+        state = json.loads(state_path.read_text(encoding="utf-8"))
     except (json.JSONDecodeError, OSError) as e:
         return web.json_response({"error": f"Failed to read session: {e}"}, status=500)
 
@@ -436,7 +436,7 @@ async def handle_list_checkpoints(request: web.Request) -> web.Response:
         if f.suffix != ".json":
             continue
         try:
-            data = json.loads(f.read_text())
+            data = json.loads(f.read_text(encoding="utf-8"))
             checkpoints.append(
                 {
                     "checkpoint_id": f.stem,
@@ -546,7 +546,7 @@ async def handle_messages(request: web.Request) -> web.Response:
             if part_file.suffix != ".json":
                 continue
             try:
-                part = json.loads(part_file.read_text())
+                part = json.loads(part_file.read_text(encoding="utf-8"))
                 part["_node_id"] = node_dir.name
                 all_messages.append(part)
             except (json.JSONDecodeError, OSError):
@@ -600,7 +600,7 @@ async def handle_queen_messages(request: web.Request) -> web.Response:
             if part_file.suffix != ".json":
                 continue
             try:
-                part = json.loads(part_file.read_text())
+                part = json.loads(part_file.read_text(encoding="utf-8"))
                 part["_node_id"] = node_dir.name
                 all_messages.append(part)
             except (json.JSONDecodeError, OSError):

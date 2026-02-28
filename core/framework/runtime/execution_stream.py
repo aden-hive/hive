@@ -570,8 +570,7 @@ class ExecutionStream:
                 if not _is_shared_session:
                     await self._write_session_state(execution_id, ctx, result=result)
 
-                # Emit completion/failure event
-                # (skip for pauses — executor already emitted execution_paused)
+                # Emit completion/failure/pause event
                 if self._scoped_event_bus:
                     if result.success:
                         await self._scoped_event_bus.emit_execution_completed(
@@ -580,7 +579,17 @@ class ExecutionStream:
                             output=result.output,
                             correlation_id=ctx.correlation_id,
                         )
-                    elif not result.paused_at:
+                    elif result.paused_at:
+                        # The executor returns paused_at on CancelledError but
+                        # does NOT emit execution_paused itself — we must emit
+                        # it here so the frontend can transition out of "running".
+                        await self._scoped_event_bus.emit_execution_paused(
+                            stream_id=self.stream_id,
+                            node_id=result.paused_at,
+                            reason=result.error or "Execution paused",
+                            execution_id=execution_id,
+                        )
+                    else:
                         await self._scoped_event_bus.emit_execution_failed(
                             stream_id=self.stream_id,
                             execution_id=execution_id,
@@ -627,6 +636,25 @@ class ExecutionStream:
                     else:
                         await self._write_session_state(
                             execution_id, ctx, error="Execution cancelled"
+                        )
+
+                # Emit SSE event so the frontend knows the execution stopped.
+                # The executor does NOT emit on CancelledError, so there is no
+                # risk of double-emitting.
+                if self._scoped_event_bus:
+                    if has_result and result.paused_at:
+                        await self._scoped_event_bus.emit_execution_paused(
+                            stream_id=self.stream_id,
+                            node_id=result.paused_at,
+                            reason="Execution cancelled",
+                            execution_id=execution_id,
+                        )
+                    else:
+                        await self._scoped_event_bus.emit_execution_failed(
+                            stream_id=self.stream_id,
+                            execution_id=execution_id,
+                            error="Execution cancelled",
+                            correlation_id=ctx.correlation_id,
                         )
 
                 # Don't re-raise - we've handled it and saved state

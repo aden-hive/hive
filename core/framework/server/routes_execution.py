@@ -190,7 +190,7 @@ async def handle_resume(request: web.Request) -> web.Response:
         return web.json_response({"error": "Session not found"}, status=404)
 
     try:
-        state = json.loads(state_path.read_text())
+        state = json.loads(state_path.read_text(encoding="utf-8"))
     except (json.JSONDecodeError, OSError) as e:
         return web.json_response({"error": f"Failed to read session: {e}"}, status=500)
 

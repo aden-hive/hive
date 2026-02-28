@@ -113,27 +113,43 @@ async def handle_events(request: web.Request) -> web.StreamResponse:
 
     sse = SSEResponse()
     await sse.prepare(request)
+    logger.info(
+        "SSE connected: session='%s', sub_id='%s', types=%d", session.id, sub_id, len(event_types)
+    )
 
+    event_count = 0
+    close_reason = "unknown"
     try:
         while True:
             try:
                 data = await asyncio.wait_for(queue.get(), timeout=KEEPALIVE_INTERVAL)
                 await sse.send_event(data)
+                event_count += 1
+                if event_count == 1:
+                    logger.info(
+                        "SSE first event: session='%s', type='%s'", session.id, data.get("type")
+                    )
             except TimeoutError:
                 await sse.send_keepalive()
             except (ConnectionResetError, ConnectionError):
+                close_reason = "client_disconnected"
                 break
             except Exception as exc:
-                logger.debug("SSE stream closed: %s", exc)
+                close_reason = f"error: {exc}"
                 break
     except asyncio.CancelledError:
-        pass
+        close_reason = "cancelled"
     finally:
         try:
             event_bus.unsubscribe(sub_id)
         except Exception:
             pass
-        logger.debug("SSE client disconnected from session '%s'", session.id)
+        logger.info(
+            "SSE disconnected: session='%s', events_sent=%d, reason='%s'",
+            session.id,
+            event_count,
+            close_reason,
+        )
 
     return sse.response
 

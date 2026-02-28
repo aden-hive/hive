@@ -1864,7 +1864,7 @@ def import_from_export(
         return json.dumps({"success": False, "error": f"File not found: {agent_json_path}"})
 
     try:
-        data = json.loads(path.read_text())
+        data = json.loads(path.read_text(encoding="utf-8"))
     except json.JSONDecodeError as e:
         return json.dumps({"success": False, "error": f"Invalid JSON: {e}"})
 
@@ -1946,7 +1946,7 @@ def get_session_status() -> str:
 @mcp.tool()
 def configure_loop(
     max_iterations: Annotated[int, "Maximum loop iterations per node execution (default 50)"] = 50,
-    max_tool_calls_per_turn: Annotated[int, "Maximum tool calls per LLM turn (default 10)"] = 10,
+    max_tool_calls_per_turn: Annotated[int, "Maximum tool calls per LLM turn (default 30)"] = 30,
     stall_detection_threshold: Annotated[
         int, "Consecutive identical responses before stall detection triggers (default 3)"
     ] = 3,
@@ -2986,7 +2986,7 @@ def debug_test(
     # Find which file contains the test
     test_file = None
     for py_file in tests_dir.glob("test_*.py"):
-        content = py_file.read_text()
+        content = py_file.read_text(encoding="utf-8")
         if f"def {test_name}" in content or f"async def {test_name}" in content:
             test_file = py_file
             break
@@ -3138,7 +3138,7 @@ def list_tests(
     tests = []
     for test_file in sorted(tests_dir.glob("test_*.py")):
         try:
-            content = test_file.read_text()
+            content = test_file.read_text(encoding="utf-8")
             tree = ast.parse(content)
 
             # Find all async function definitions that start with "test_"

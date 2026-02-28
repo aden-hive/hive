@@ -761,7 +761,7 @@ class GraphBuilder:
         path = self.storage_path / f"{session_id}.json"
         if not path.exists():
             raise FileNotFoundError(f"Session not found: {session_id}")
-        return BuildSession.model_validate_json(path.read_text())
+        return BuildSession.model_validate_json(path.read_text(encoding="utf-8"))
 
     @classmethod
     def list_sessions(cls, storage_path: Path | str | None = None) -> list[str]:

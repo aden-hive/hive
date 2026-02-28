@@ -80,27 +80,38 @@ export function useMultiSSE({ sessions, onEvent }: UseMultiSSEOptions) {
   const onEventRef = useRef(onEvent);
   onEventRef.current = onEvent;
 
-  const sourcesRef = useRef(new Map<string, EventSource>());
+  // Track both the EventSource and its session ID so we can detect session changes
+  const sourcesRef = useRef(new Map<string, { es: EventSource; sessionId: string }>());
 
   // Diff-based open/close — runs on every `sessions` change
   useEffect(() => {
     const current = sourcesRef.current;
     const desired = new Set(Object.keys(sessions));
 
-    // Close connections for sessions no longer in the map
-    for (const [agentType, es] of current) {
-      if (!desired.has(agentType)) {
-        es.close();
+    // Close connections for removed agents OR changed session IDs
+    for (const [agentType, entry] of current) {
+      if (!desired.has(agentType) || sessions[agentType] !== entry.sessionId) {
+        console.log('[SSE] closing:', agentType, entry.sessionId, desired.has(agentType) ? '(session changed)' : '(removed)');
+        entry.es.close();
         current.delete(agentType);
       }
     }
 
-    // Open connections for newly added sessions
+    // Open connections for new/changed sessions
     for (const [agentType, sessionId] of Object.entries(sessions)) {
       if (!sessionId || current.has(agentType)) continue;
 
       const url = `/api/sessions/${sessionId}/events`;
+      console.log('[SSE] opening:', agentType, sessionId);
       const es = new EventSource(url);
+
+      es.onopen = () => {
+        console.log('[SSE] connected:', agentType, sessionId);
+      };
+
+      es.onerror = () => {
+        console.error('[SSE] error:', agentType, sessionId, 'readyState:', es.readyState);
+      };
 
       es.onmessage = (e: MessageEvent) => {
         try {
@@ -112,14 +123,14 @@ export function useMultiSSE({ sessions, onEvent }: UseMultiSSEOptions) {
         }
       };
 
-      current.set(agentType, es);
+      current.set(agentType, { es, sessionId });
     }
   }, [sessions]);
 
   // Close all on unmount only
   useEffect(() => {
     return () => {
-      for (const es of sourcesRef.current.values()) es.close();
+      for (const entry of sourcesRef.current.values()) entry.es.close();
       sourcesRef.current.clear();
     };
   }, []);
