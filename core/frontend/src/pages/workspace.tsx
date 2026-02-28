@@ -461,6 +461,8 @@ export default function Workspace() {
   const handleRun = useCallback(async () => {
     const state = agentStates[activeWorker];
     if (!state?.sessionId || !state?.ready) return;
+    // Reset dismissed banner so a repeated 424 re-shows it
+    setDismissedBanner(null);
     try {
       updateAgentState(activeWorker, { workerRunState: "deploying" });
       const result = await executionApi.trigger(state.sessionId, "default", {});
@@ -1761,14 +1763,14 @@ export default function Workspace() {
         agentLabel={activeWorkerLabel}
         agentPath={credentialAgentPath || (activeWorker !== "new-agent" ? activeWorker : undefined)}
         open={credentialsOpen}
-        onClose={() => { setCredentialsOpen(false); setCredentialAgentPath(null); }}
+        onClose={() => { setCredentialsOpen(false); setCredentialAgentPath(null); setDismissedBanner(null); }}
         credentials={activeSession?.credentials || []}
         onCredentialChange={() => {
-          if (!activeSession) return;
           // Clear credential error so the auto-load effect retries session creation
           if (agentStates[activeWorker]?.error === "credentials_required") {
             updateAgentState(activeWorker, { error: null });
           }
+          if (!activeSession) return;
           setSessionsByAgent(prev => ({
             ...prev,
             [activeWorker]: prev[activeWorker].map(s =>
