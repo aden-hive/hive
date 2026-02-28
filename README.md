@@ -91,6 +91,12 @@ Use Hive when you need:
 > Hive uses a `uv` workspace layout and is not installed with `pip install`.
 > Running `pip install -e .` from the repository root will create a placeholder package and Hive will not function correctly.
 > Please use the quickstart script below to set up the environment.
+> **Note for Windows users**
+>
+> Hive relies on Unix-style tooling. For Windows, it is strongly recommended to use **WSL (Windows Subsystem for Linux)** or **Git Bash**.
+> Running setup scripts directly in PowerShell may cause unexpected issues.
+
+
 
 ```bash
 # Clone the repository
