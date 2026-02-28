@@ -54,6 +54,17 @@ def register_tools(mcp: FastMCP) -> None:
 
                 columns = list(reader.fieldnames)
 
+                # Check for duplicate column names to prevent silent data loss
+                if len(columns) != len(set(columns)):
+                    duplicates = list(
+                        set([col for col in columns if columns.count(col) > 1])
+                    )
+                    return {
+                        "error": f"CSV has duplicate column names: {duplicates}",
+                        "columns": columns,
+                        "duplicate_columns": duplicates,
+                    }
+
                 # Apply offset and limit
                 rows = []
                 for i, row in enumerate(reader):
@@ -119,6 +130,15 @@ def register_tools(mcp: FastMCP) -> None:
             if not columns:
                 return {"error": "columns cannot be empty"}
 
+            # Check for duplicate column names
+            if len(columns) != len(set(columns)):
+                duplicates = list(
+                    set([col for col in columns if columns.count(col) > 1])
+                )
+                return {
+                    "error": f"Cannot write CSV with duplicate column names: {duplicates}"
+                }
+
             # Create parent directories if needed
             parent_dir = os.path.dirname(secure_path)
             if parent_dir:
@@ -169,7 +189,9 @@ def register_tools(mcp: FastMCP) -> None:
             secure_path = get_secure_path(path, workspace_id, agent_id, session_id)
 
             if not os.path.exists(secure_path):
-                return {"error": f"File not found: {path}. Use csv_write to create a new file."}
+                return {
+                    "error": f"File not found: {path}. Use csv_write to create a new file."
+                }
 
             if not path.lower().endswith(".csv"):
                 return {"error": "File must have .csv extension"}
@@ -250,6 +272,17 @@ def register_tools(mcp: FastMCP) -> None:
                     return {"error": "CSV file is empty or has no headers"}
 
                 columns = list(reader.fieldnames)
+
+                # Check for duplicate column names
+                if len(columns) != len(set(columns)):
+                    duplicates = list(
+                        set([col for col in columns if columns.count(col) > 1])
+                    )
+                    return {
+                        "error": f"CSV has duplicate column names: {duplicates}",
+                        "columns": columns,
+                        "duplicate_columns": duplicates,
+                    }
 
                 # Count rows
                 total_rows = sum(1 for _ in reader)
@@ -355,7 +388,9 @@ def register_tools(mcp: FastMCP) -> None:
             con = duckdb.connect(":memory:")
             try:
                 # Load CSV as 'data' table
-                con.execute(f"CREATE TABLE data AS SELECT * FROM read_csv_auto('{secure_path}')")
+                con.execute(
+                    f"CREATE TABLE data AS SELECT * FROM read_csv_auto('{secure_path}')"
+                )
 
                 # Execute user query
                 result = con.execute(query)
@@ -381,5 +416,7 @@ def register_tools(mcp: FastMCP) -> None:
             error_msg = str(e)
             # Make DuckDB errors more readable
             if "Catalog Error" in error_msg:
-                return {"error": f"SQL error: {error_msg}. Remember the table is named 'data'."}
+                return {
+                    "error": f"SQL error: {error_msg}. Remember the table is named 'data'."
+                }
             return {"error": f"Query failed: {error_msg}"}
