@@ -1,10 +1,53 @@
 """CLI commands for agent runner."""
 
+from __future__ import annotations
+
 import argparse
 import asyncio
 import json
 import sys
 from pathlib import Path
+
+
+def _parse_input_json(json_str: str, source: str = "--input") -> dict:
+    """Parse JSON input with user-friendly error messages. Exits on failure."""
+    try:
+        data = json.loads(json_str)
+    except json.JSONDecodeError as e:
+        _print_json_parse_error(e, json_str, source)
+        sys.exit(1)
+    if not isinstance(data, dict):
+        print(f"Error: {source} must be a JSON object, got {type(data).__name__}", file=sys.stderr)
+        print(f"Example: {source} '{{\"key\": \"value\"}}'", file=sys.stderr)
+        sys.exit(1)
+    return data
+
+
+def _print_json_parse_error(e: json.JSONDecodeError, raw: str, source: str) -> None:
+    """Print a clear, actionable JSON parse error message."""
+    pos = getattr(e, "pos", None)
+    lineno = getattr(e, "lineno", None)
+    colno = getattr(e, "colno", None)
+    msg = e.msg
+
+    # Build location string
+    loc_parts = []
+    if lineno is not None:
+        loc_parts.append(f"line {lineno}")
+    if colno is not None:
+        loc_parts.append(f"column {colno}")
+    if pos is not None and not loc_parts:
+        loc_parts.append(f"position {pos}")
+    location = f" ({', '.join(loc_parts)})" if loc_parts else ""
+
+    # Truncate long input for display
+    display_raw = raw if len(raw) <= 80 else raw[:77] + "..."
+
+    print(f"Error: Invalid JSON in {source}{location}", file=sys.stderr)
+    print(f"  {msg}", file=sys.stderr)
+    print(f"  Your input: {display_raw!r}", file=sys.stderr)
+    print(f"  Expected format: {source} '{{\"key\": \"value\"}}'", file=sys.stderr)
+    print("  Tips: Use double quotes for keys and strings; ensure brackets are balanced.", file=sys.stderr)
 
 
 def register_commands(subparsers: argparse._SubParsersAction) -> None:
@@ -510,18 +553,17 @@ def cmd_run(args: argparse.Namespace) -> int:
     # Load input context
     context = {}
     if args.input:
-        try:
-            context = json.loads(args.input)
-        except json.JSONDecodeError as e:
-            print(f"Error parsing --input JSON: {e}", file=sys.stderr)
-            return 1
+        context = _parse_input_json(args.input, "--input")
     elif args.input_file:
         try:
-            with open(args.input_file) as f:
-                context = json.load(f)
-        except (FileNotFoundError, json.JSONDecodeError) as e:
-            print(f"Error reading input file: {e}", file=sys.stderr)
+            content = Path(args.input_file).read_text(encoding="utf-8")
+        except FileNotFoundError:
+            print(f"Error: Input file not found: {args.input_file}", file=sys.stderr)
             return 1
+        except (PermissionError, IsADirectoryError, UnicodeDecodeError, OSError) as e:
+            print(f"Error: Cannot read input file: {e}", file=sys.stderr)
+            return 1
+        context = _parse_input_json(content, f"--input-file {args.input_file}")
 
     # Run the agent (with TUI or standard)
     if getattr(args, "tui", False):
@@ -886,11 +928,7 @@ def cmd_dispatch(args: argparse.Namespace) -> int:
     from framework.runner import AgentOrchestrator
 
     # Parse input
-    try:
-        context = json.loads(args.input)
-    except json.JSONDecodeError as e:
-        print(f"Error parsing --input JSON: {e}", file=sys.stderr)
-        return 1
+    context = _parse_input_json(args.input, "--input")
 
     # Find agents
     agents_dir = Path(args.agents_dir)
