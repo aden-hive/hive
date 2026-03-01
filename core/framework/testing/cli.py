@@ -11,8 +11,33 @@ Provides commands:
 import argparse
 import ast
 import os
+import shutil
 import subprocess
+import sys
 from pathlib import Path
+
+
+def _check_pytest_available() -> bool:
+    """Check if pytest is available as a runnable command.
+
+    Returns True if pytest is found, otherwise prints an error message
+    with install instructions and returns False.
+    """
+    if shutil.which("pytest") is None:
+        print(
+            "Error: pytest is not installed or not on PATH.\n"
+            "Hive's testing commands require pytest at runtime.\n"
+            "Install it with:\n"
+            "\n"
+            "  pip install 'framework[testing]'\n"
+            "\n"
+            "or if using uv:\n"
+            "\n"
+            "  uv pip install 'framework[testing]'",
+            file=sys.stderr,
+        )
+        return False
+    return True
 
 
 def register_testing_commands(subparsers: argparse._SubParsersAction) -> None:
@@ -105,6 +130,9 @@ def register_testing_commands(subparsers: argparse._SubParsersAction) -> None:
 
 def cmd_test_run(args: argparse.Namespace) -> int:
     """Run tests for an agent using pytest subprocess."""
+    if not _check_pytest_available():
+        return 1
+
     agent_path = Path(args.agent_path)
     tests_dir = agent_path / "tests"
 
@@ -177,7 +205,8 @@ def cmd_test_run(args: argparse.Namespace) -> int:
 
 def cmd_test_debug(args: argparse.Namespace) -> int:
     """Debug a failed test by re-running with verbose output."""
-    import subprocess
+    if not _check_pytest_available():
+        return 1
 
     agent_path = Path(args.agent_path)
     test_name = args.test_name
