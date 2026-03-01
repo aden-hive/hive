@@ -280,6 +280,8 @@ interface AgentBackendState {
   graphId: string | null;
   nodeSpecs: NodeSpec[];
   awaitingInput: boolean;
+  /** The message ID of the current worker input request (for inline reply box) */
+  workerInputMessageId: string | null;
   workerRunState: "idle" | "deploying" | "running";
   currentExecutionId: string | null;
   nodeLogs: Record<string, string[]>;
@@ -301,6 +303,7 @@ function defaultAgentState(): AgentBackendState {
     graphId: null,
     nodeSpecs: [],
     awaitingInput: false,
+    workerInputMessageId: null,
     workerRunState: "idle",
     currentExecutionId: null,
     nodeLogs: {},
@@ -998,6 +1001,7 @@ export default function Workspace() {
               isTyping: false,
               isStreaming: false,
               awaitingInput: false,
+              workerInputMessageId: null,
               workerRunState: "idle",
               currentExecutionId: null,
               llmSnapshots: {},
@@ -1041,17 +1045,47 @@ export default function Workspace() {
           }
 
           if (event.type === "client_input_requested") {
-            updateAgentState(agentType, { awaitingInput: true, isTyping: false, isStreaming: false });
+            console.log('[CLIENT_INPUT_REQ] stream_id:', streamId, 'isQueen:', isQueen, 'node_id:', event.node_id, 'prompt:', (event.data?.prompt as string)?.slice(0, 80), 'agentType:', agentType);
+            if (isQueen) {
+              updateAgentState(agentType, { awaitingInput: true, isTyping: false, isStreaming: false });
+            } else {
+              // Worker input request.
+              // If the prompt is non-empty (explicit ask_user), create a visible
+              // message bubble.  For auto-block (empty prompt), the worker's text
+              // was already streamed via client_output_delta — just activate the
+              // reply box below the last worker message.
+              const eid = event.execution_id ?? "";
+              const prompt = (event.data?.prompt as string) || "";
+              if (prompt) {
+                const workerInputMsg: ChatMessage = {
+                  id: `worker-input-${eid}-${event.node_id || Date.now()}`,
+                  agent: displayName || event.node_id || "Worker",
+                  agentColor: "",
+                  content: prompt,
+                  timestamp: "",
+                  type: "worker_input_request",
+                  role: "worker",
+                  thread: agentType,
+                };
+                console.log('[CLIENT_INPUT_REQ] creating worker_input_request msg:', workerInputMsg.id, 'content:', prompt.slice(0, 80));
+                upsertChatMessage(agentType, workerInputMsg);
+              }
+              updateAgentState(agentType, {
+                awaitingInput: true,
+                isTyping: false,
+                isStreaming: false,
+              });
+            }
           }
           if (event.type === "execution_paused") {
-            updateAgentState(agentType, { isTyping: false, isStreaming: false, awaitingInput: false });
+            updateAgentState(agentType, { isTyping: false, isStreaming: false, awaitingInput: false, workerInputMessageId: null });
             if (!isQueen) {
               updateAgentState(agentType, { workerRunState: "idle", currentExecutionId: null });
               markAllNodesAs(agentType, ["running", "looping"], "pending");
             }
           }
           if (event.type === "execution_failed") {
-            updateAgentState(agentType, { isTyping: false, isStreaming: false, awaitingInput: false });
+            updateAgentState(agentType, { isTyping: false, isStreaming: false, awaitingInput: false, workerInputMessageId: null });
             if (!isQueen) {
               updateAgentState(agentType, { workerRunState: "idle", currentExecutionId: null });
               if (event.node_id) {
@@ -1408,26 +1442,7 @@ export default function Workspace() {
     updateAgentState(activeWorker, { isTyping: true });
 
     if (state?.sessionId && state?.ready) {
-      executionApi.chat(state.sessionId, text).then((result) => {
-        if (result.status === "started") {
-          // Queen wasn't ready — backend triggered worker directly
-          updateAgentState(activeWorker, {
-            currentExecutionId: result.execution_id || null,
-            workerRunState: "running",
-          });
-          const notice: ChatMessage = {
-            id: makeId(), agent: "System", agentColor: "",
-            content: "The queen wasn't ready yet — your message triggered an agent run directly.",
-            timestamp: "", type: "system", thread,
-          };
-          setSessionsByAgent(prev => ({
-            ...prev,
-            [activeWorker]: prev[activeWorker].map(s =>
-              s.id === activeSession.id ? { ...s, messages: [...s.messages, notice] } : s
-            ),
-          }));
-        }
-      }).catch((err: unknown) => {
+      executionApi.chat(state.sessionId, text).catch((err: unknown) => {
         const errMsg = err instanceof Error ? err.message : String(err);
         const errorChatMsg: ChatMessage = {
           id: makeId(), agent: "System", agentColor: "",
@@ -1456,6 +1471,44 @@ export default function Workspace() {
       }));
       updateAgentState(activeWorker, { isTyping: false, isStreaming: false });
     }
+  }, [activeWorker, activeSession, agentStates, updateAgentState]);
+
+  // --- handleWorkerReply: send user input to the worker via dedicated endpoint ---
+  const handleWorkerReply = useCallback((text: string) => {
+    if (!activeSession) return;
+    const state = agentStates[activeWorker];
+    if (!state?.sessionId || !state?.ready) return;
+
+    // Add user reply to chat thread
+    const userMsg: ChatMessage = {
+      id: makeId(), agent: "You", agentColor: "",
+      content: text, timestamp: "", type: "user", thread: activeWorker,
+    };
+    setSessionsByAgent(prev => ({
+      ...prev,
+      [activeWorker]: prev[activeWorker].map(s =>
+        s.id === activeSession.id ? { ...s, messages: [...s.messages, userMsg] } : s
+      ),
+    }));
+
+    // Clear awaiting state optimistically
+    updateAgentState(activeWorker, { awaitingInput: false, workerInputMessageId: null, isTyping: true });
+
+    executionApi.workerInput(state.sessionId, text).catch((err: unknown) => {
+      const errMsg = err instanceof Error ? err.message : String(err);
+      const errorChatMsg: ChatMessage = {
+        id: makeId(), agent: "System", agentColor: "",
+        content: `Failed to send to worker: ${errMsg}`,
+        timestamp: "", type: "system", thread: activeWorker,
+      };
+      setSessionsByAgent(prev => ({
+        ...prev,
+        [activeWorker]: prev[activeWorker].map(s =>
+          s.id === activeSession.id ? { ...s, messages: [...s.messages, errorChatMsg] } : s
+        ),
+      }));
+      updateAgentState(activeWorker, { isTyping: false, isStreaming: false });
+    });
   }, [activeWorker, activeSession, agentStates, updateAgentState]);
 
   const handleLoadAgent = useCallback(async (agentPath: string) => {
@@ -1697,9 +1750,12 @@ export default function Workspace() {
                 messages={activeSession.messages}
                 onSend={handleSend}
                 onCancel={handleCancelQueen}
+                onWorkerReply={handleWorkerReply}
                 activeThread={activeWorker}
                 isWaiting={(activeAgentState?.isTyping && !activeAgentState?.isStreaming) ?? false}
-                awaitingInput={activeAgentState?.awaitingInput ?? false}
+                workerAwaitingInput={
+                  (activeAgentState?.awaitingInput && activeAgentState?.workerRunState === "running") ?? false
+                }
                 disabled={
                   (activeAgentState?.loading ?? true) ||
                   !(activeAgentState?.queenReady)

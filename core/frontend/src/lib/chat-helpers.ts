@@ -89,19 +89,10 @@ export function sseEventToChatMessage(
       };
     }
 
-    case "client_input_requested": {
-      const prompt = (event.data?.prompt as string) || "";
-      if (!prompt) return null;
-      return {
-        id: `input-req-${idKey}-${event.node_id}`,
-        agent: agentDisplayName || event.node_id || "Agent",
-        agentColor: "",
-        content: prompt,
-        timestamp: "",
-        role: "worker",
-        thread,
-      };
-    }
+    case "client_input_requested":
+      // Handled explicitly in handleSSEEvent (workspace.tsx) so it can
+      // create a worker_input_request message and set awaitingInput state.
+      return null;
 
     case "llm_text_delta": {
       const snapshot = (event.data?.snapshot as string) || (event.data?.content as string) || "";

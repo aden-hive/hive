@@ -1,6 +1,5 @@
 import { memo, useState, useRef, useEffect } from "react";
-import { Send, Square, Crown, Cpu, Check, ChevronRight, Loader2 } from "lucide-react";
-import { formatAgentDisplayName } from "@/lib/chat-helpers";
+import { Send, Square, Crown, Cpu, Check, ChevronRight, Loader2, Reply } from "lucide-react";
 import MarkdownContent from "@/components/MarkdownContent";
 
 export interface ChatMessage {
@@ -9,7 +8,7 @@ export interface ChatMessage {
   agentColor: string;
   content: string;
   timestamp: string;
-  type?: "system" | "agent" | "user" | "tool_status";
+  type?: "system" | "agent" | "user" | "tool_status" | "worker_input_request";
   role?: "queen" | "worker";
   /** Which worker thread this message belongs to (worker agent name) */
   thread?: string;
@@ -20,19 +19,22 @@ interface ChatPanelProps {
   onSend: (message: string, thread: string) => void;
   isWaiting?: boolean;
   activeThread: string;
-  /** When true, the agent is waiting for user input — changes placeholder text */
-  awaitingInput?: boolean;
+  /** When true, the worker is waiting for user input — shows inline reply box */
+  workerAwaitingInput?: boolean;
   /** When true, the input is disabled (e.g. during loading) */
   disabled?: boolean;
   /** Called when user clicks the stop button to cancel the queen's current turn */
   onCancel?: () => void;
+  /** Called when user submits a reply to the worker's input request */
+  onWorkerReply?: (message: string) => void;
 }
 
 const queenColor = "hsl(45,95%,58%)";
+const workerColor = "hsl(220,60%,55%)";
 
 function getColor(_agent: string, role?: "queen" | "worker"): string {
   if (role === "queen") return queenColor;
-  return "hsl(220,60%,55%)";
+  return workerColor;
 }
 
 function ToolActivityRow({ content }: { content: string }) {
@@ -101,6 +103,75 @@ function ToolActivityRow({ content }: { content: string }) {
         ))}
       </div>
     </div>
+  );
+}
+
+/** Inline reply box that appears below a worker's input request in the chat thread. */
+function WorkerInputReply({ onSubmit, disabled }: { onSubmit: (text: string) => void; disabled?: boolean }) {
+  const [value, setValue] = useState("");
+  const [sent, setSent] = useState(false);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
+
+  useEffect(() => {
+    if (!disabled && !sent) inputRef.current?.focus();
+  }, [disabled, sent]);
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!value.trim() || sent) return;
+    onSubmit(value.trim());
+    setSent(true);
+  };
+
+  if (sent) {
+    return (
+      <div className="ml-10 flex items-center gap-1.5 text-[11px] text-muted-foreground py-1">
+        <Check className="w-3 h-3 text-emerald-500" />
+        <span>Response sent</span>
+      </div>
+    );
+  }
+
+  return (
+    <form onSubmit={handleSubmit} className="ml-10 mt-1">
+      <div
+        className="flex items-center gap-2 rounded-xl px-3 py-2 border transition-colors"
+        style={{
+          backgroundColor: `${workerColor}08`,
+          borderColor: `${workerColor}30`,
+        }}
+      >
+        <Reply className="w-3.5 h-3.5 flex-shrink-0" style={{ color: workerColor }} />
+        <textarea
+          ref={inputRef}
+          rows={1}
+          value={value}
+          onChange={(e) => {
+            setValue(e.target.value);
+            const ta = e.target;
+            ta.style.height = "auto";
+            ta.style.height = `${Math.min(ta.scrollHeight, 120)}px`;
+          }}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && !e.shiftKey) {
+              e.preventDefault();
+              handleSubmit(e);
+            }
+          }}
+          placeholder="Reply to worker..."
+          disabled={disabled}
+          className="flex-1 bg-transparent text-sm text-foreground outline-none placeholder:text-muted-foreground disabled:opacity-50 resize-none overflow-y-auto"
+        />
+        <button
+          type="submit"
+          disabled={!value.trim() || disabled}
+          className="p-1.5 rounded-lg transition-opacity disabled:opacity-30 hover:opacity-90"
+          style={{ backgroundColor: workerColor, color: "white" }}
+        >
+          <Send className="w-3.5 h-3.5" />
+        </button>
+      </div>
+    </form>
   );
 }
 
@@ -174,7 +245,7 @@ const MessageBubble = memo(function MessageBubble({ msg }: { msg: ChatMessage })
   );
 }, (prev, next) => prev.msg.id === next.msg.id && prev.msg.content === next.msg.content);
 
-export default function ChatPanel({ messages, onSend, isWaiting, activeThread, awaitingInput, disabled, onCancel }: ChatPanelProps) {
+export default function ChatPanel({ messages, onSend, isWaiting, activeThread, workerAwaitingInput, disabled, onCancel, onWorkerReply }: ChatPanelProps) {
   const [input, setInput] = useState("");
   const [readMap, setReadMap] = useState<Record<string, number>>({});
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -197,7 +268,7 @@ export default function ChatPanel({ messages, onSend, isWaiting, activeThread, a
   const lastMsg = threadMessages[threadMessages.length - 1];
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [threadMessages.length, lastMsg?.content]);
+  }, [threadMessages.length, lastMsg?.content, workerAwaitingInput]);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -207,7 +278,16 @@ export default function ChatPanel({ messages, onSend, isWaiting, activeThread, a
     if (textareaRef.current) textareaRef.current.style.height = "auto";
   };
 
-  const activeWorkerLabel = formatAgentDisplayName(activeThread);
+  // Find the last worker message to attach the inline reply box below.
+  // For explicit ask_user, this will be the worker_input_request message.
+  // For auto-block, this will be the last client_output_delta streamed message.
+  const lastWorkerMsgIdx = workerAwaitingInput
+    ? threadMessages.reduce(
+        (last, m, i) =>
+          m.role === "worker" && m.type !== "tool_status" && m.type !== "system" ? i : last,
+        -1,
+      )
+    : -1;
 
   return (
     <div className="flex flex-col h-full min-w-0">
@@ -218,8 +298,13 @@ export default function ChatPanel({ messages, onSend, isWaiting, activeThread, a
 
       {/* Messages */}
       <div className="flex-1 overflow-auto px-5 py-4 space-y-3">
-        {threadMessages.map((msg) => (
-          <MessageBubble key={msg.id} msg={msg} />
+        {threadMessages.map((msg, idx) => (
+          <div key={msg.id}>
+            <MessageBubble msg={msg} />
+            {idx === lastWorkerMsgIdx && onWorkerReply && (
+              <WorkerInputReply onSubmit={onWorkerReply} />
+            )}
+          </div>
         ))}
 
         {isWaiting && (
@@ -239,7 +324,7 @@ export default function ChatPanel({ messages, onSend, isWaiting, activeThread, a
         <div ref={bottomRef} />
       </div>
 
-      {/* Input */}
+      {/* Input — always connected to Queen */}
       <form onSubmit={handleSubmit} className="p-4 border-t border-border">
         <div className="flex items-center gap-3 bg-muted/40 rounded-xl px-4 py-2.5 border border-border focus-within:border-primary/40 transition-colors">
           <textarea
@@ -258,13 +343,7 @@ export default function ChatPanel({ messages, onSend, isWaiting, activeThread, a
                 handleSubmit(e);
               }
             }}
-            placeholder={
-              disabled
-                ? "Connecting to agent..."
-                : awaitingInput
-                  ? "Agent is waiting for your response..."
-                  : `Message ${activeWorkerLabel}...`
-            }
+            placeholder={disabled ? "Connecting to agent..." : "Message Queen Bee..."}
             disabled={disabled}
             className="flex-1 bg-transparent text-sm text-foreground outline-none placeholder:text-muted-foreground disabled:opacity-50 disabled:cursor-not-allowed resize-none overflow-y-auto"
           />
