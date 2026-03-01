@@ -510,7 +510,9 @@ async def test_parallel_memory_conflict_strategy_error(runtime, goal):
     graph = _make_fanout_graph([b1, b2])
 
     config = ParallelExecutionConfig(memory_conflict_strategy="error")
-    executor = GraphExecutor(runtime=runtime, enable_parallel_execution=True, parallel_config=config)
+    executor = GraphExecutor(
+        runtime=runtime, enable_parallel_execution=True, parallel_config=config
+    )
     executor.register_node("source", SuccessNode({"data": "x"}))
     executor.register_node("b1", SuccessNode({"overlap_key": "1"}))
     executor.register_node("b2", SuccessNode({"overlap_key": "2"}))
@@ -535,9 +537,11 @@ async def test_parallel_memory_conflict_strategy_warning(runtime, goal):
     graph = _make_fanout_graph([b1, b2])
 
     config = ParallelExecutionConfig(memory_conflict_strategy="last_wins")
-    executor = GraphExecutor(runtime=runtime, enable_parallel_execution=True, parallel_config=config)
+    executor = GraphExecutor(
+        runtime=runtime, enable_parallel_execution=True, parallel_config=config
+    )
     executor.register_node("source", SuccessNode({"data": "x"}))
-    
+
     b1_impl = SuccessNode({"overlap_key": "1"})
     b2_impl = SuccessNode({"overlap_key": "2"})
     executor.register_node("b1", b1_impl)
@@ -548,5 +552,6 @@ async def test_parallel_memory_conflict_strategy_warning(runtime, goal):
     assert result.success
     assert b1_impl.executed
     assert b2_impl.executed
-    # Final memory should have one of the values (last writes wins, so either 1 or 2 depending on event loop scheduling)
+    # Final memory should have one of the values (last writes wins,
+    # so either 1 or 2 depending on event loop scheduling)
     assert result.output.get("overlap_key") in ["1", "2"]

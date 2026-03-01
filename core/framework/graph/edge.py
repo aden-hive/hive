@@ -712,26 +712,4 @@ class GraphSpec(BaseModel):
                     f"{client_facing_targets}. Only one branch may be client-facing."
                 )
 
-        # Output key overlap on parallel event_loop nodes
-        for source_id, targets in fan_outs.items():
-            event_loop_targets = [
-                t
-                for t in targets
-                if self.get_node(t) and getattr(self.get_node(t), "node_type", "") == "event_loop"
-            ]
-            if len(event_loop_targets) > 1:
-                seen_keys: dict[str, str] = {}
-                for node_id in event_loop_targets:
-                    node = self.get_node(node_id)
-                    for key in getattr(node, "output_keys", []):
-                        if key in seen_keys:
-                            errors.append(
-                                f"Fan-out from '{source_id}': event_loop nodes "
-                                f"'{seen_keys[key]}' and '{node_id}' both write to "
-                                f"output_key '{key}'. Parallel event_loop nodes must "
-                                f"have disjoint output_keys to prevent last-wins data loss."
-                            )
-                        else:
-                            seen_keys[key] = node_id
-
         return errors

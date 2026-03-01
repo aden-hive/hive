@@ -1953,7 +1953,9 @@ class GraphExecutor:
             strategy = self._parallel_config.memory_conflict_strategy
             if strategy == "error":
                 self.logger.error(f"   ✗ {conflict_msg} (strategy='error')")
-                raise RuntimeError(conflict_msg)
+                err = RuntimeError(conflict_msg)
+                err.metadata = conflicting_keys
+                raise err
             else:
                 self.logger.warning(
                     f"   ⚠ {conflict_msg} Resolution strategy: '{strategy}'"
