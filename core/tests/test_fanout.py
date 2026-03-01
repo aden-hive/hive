@@ -492,3 +492,61 @@ async def test_parallel_disabled_uses_sequential(runtime, goal):
     # Only one branch should have executed (sequential follows first edge)
     executed_count = sum([b1_impl.executed, b2_impl.executed])
     assert executed_count == 1
+
+
+# === 12. Memory conflict strategies ===
+
+
+@pytest.mark.asyncio
+async def test_parallel_memory_conflict_strategy_error(runtime, goal):
+    """When parallel nodes have overlapping output_keys and strategy is 'error', it should fail."""
+    b1 = NodeSpec(
+        id="b1", name="B1", description="node1", node_type="event_loop", output_keys=["overlap_key"]
+    )
+    b2 = NodeSpec(
+        id="b2", name="B2", description="node2", node_type="event_loop", output_keys=["overlap_key"]
+    )
+
+    graph = _make_fanout_graph([b1, b2])
+
+    config = ParallelExecutionConfig(memory_conflict_strategy="error")
+    executor = GraphExecutor(runtime=runtime, enable_parallel_execution=True, parallel_config=config)
+    executor.register_node("source", SuccessNode({"data": "x"}))
+    executor.register_node("b1", SuccessNode({"overlap_key": "1"}))
+    executor.register_node("b2", SuccessNode({"overlap_key": "2"}))
+
+    result = await executor.execute(graph, goal, {})
+
+    assert not result.success
+    assert "Parallel Safety Audit failed" in result.error
+    assert "overlap_key" in result.error
+
+
+@pytest.mark.asyncio
+async def test_parallel_memory_conflict_strategy_warning(runtime, goal):
+    """When strategy is 'last_wins', overlapping output_keys log a warning but execute."""
+    b1 = NodeSpec(
+        id="b1", name="B1", description="node1", node_type="event_loop", output_keys=["overlap_key"]
+    )
+    b2 = NodeSpec(
+        id="b2", name="B2", description="node2", node_type="event_loop", output_keys=["overlap_key"]
+    )
+
+    graph = _make_fanout_graph([b1, b2])
+
+    config = ParallelExecutionConfig(memory_conflict_strategy="last_wins")
+    executor = GraphExecutor(runtime=runtime, enable_parallel_execution=True, parallel_config=config)
+    executor.register_node("source", SuccessNode({"data": "x"}))
+    
+    b1_impl = SuccessNode({"overlap_key": "1"})
+    b2_impl = SuccessNode({"overlap_key": "2"})
+    executor.register_node("b1", b1_impl)
+    executor.register_node("b2", b2_impl)
+
+    result = await executor.execute(graph, goal, {})
+
+    assert result.success
+    assert b1_impl.executed
+    assert b2_impl.executed
+    # Final memory should have one of the values (last writes wins, so either 1 or 2 depending on event loop scheduling)
+    assert result.output.get("overlap_key") in ["1", "2"]

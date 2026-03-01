@@ -1929,6 +1929,36 @@ class GraphExecutor:
                 edge=edge,
             )
 
+        # Parallel Safety Audit: Check for disjoint output keys
+        output_key_owners: dict[str, list[str]] = {}
+        for branch in branches.values():
+            node_spec = graph.get_node(branch.node_id)
+            if node_spec:
+                for key in node_spec.output_keys:
+                    if key not in output_key_owners:
+                        output_key_owners[key] = []
+                    output_key_owners[key].append(node_spec.name or branch.node_id)
+
+        conflicting_keys = {
+            key: owners
+            for key, owners in output_key_owners.items()
+            if len(owners) > 1
+        }
+
+        if conflicting_keys:
+            conflict_msg = (
+                f"Parallel Safety Audit failed: Overlapping output_keys detected. "
+                f"Keys {conflicting_keys} are written by multiple parallel branches."
+            )
+            strategy = self._parallel_config.memory_conflict_strategy
+            if strategy == "error":
+                self.logger.error(f"   ✗ {conflict_msg} (strategy='error')")
+                raise RuntimeError(conflict_msg)
+            else:
+                self.logger.warning(
+                    f"   ⚠ {conflict_msg} Resolution strategy: '{strategy}'"
+                )
+
         self.logger.info(f"   ⑂ Fan-out: executing {len(branches)} branches in parallel")
         for branch in branches.values():
             target_spec = graph.get_node(branch.node_id)
