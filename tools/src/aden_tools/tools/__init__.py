@@ -60,6 +60,7 @@ from .google_maps_tool import register_tools as register_google_maps
 from .http_headers_scanner import register_tools as register_http_headers_scanner
 from .hubspot_tool import register_tools as register_hubspot
 from .intercom_tool import register_tools as register_intercom
+from .json_yaml_tool import register_tools as register_json_yaml
 from .news_tool import register_tools as register_news
 from .pdf_read_tool import register_tools as register_pdf_read
 from .port_scanner import register_tools as register_port_scanner
@@ -106,6 +107,7 @@ def register_all_tools(
     register_runtime_logs(mcp)
     register_wikipedia(mcp)
     register_arxiv(mcp)
+    register_json_yaml(mcp)
 
     # Tools that need credentials (pass credentials if provided)
     # web_search supports multiple providers (Google, Brave) with auto-detection
