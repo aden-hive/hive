@@ -1392,9 +1392,23 @@ class TelegramHealthChecker:
                 )
 
                 if response.status_code == 200:
+                    data = response.json()
+                    if not data.get("ok"):
+                        description = data.get("description", "Unknown error")
+                        return HealthCheckResult(
+                            valid=False,
+                            message=f"Telegram bot token invalid: {description}",
+                            details={"description": description},
+                        )
+                    username = data.get("result", {}).get("username", "")
+                    msg = (
+                        f"Telegram bot token valid (@{username})"
+                        if username
+                        else "Telegram bot token valid"
+                    )
                     return HealthCheckResult(
                         valid=True,
-                        message="Telegram bot token valid",
+                        message=msg,
                     )
                 elif response.status_code == 401:
                     return HealthCheckResult(

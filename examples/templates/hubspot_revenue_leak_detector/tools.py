@@ -20,8 +20,7 @@ Required credentials (via env vars / MCP credential store):
   HUBSPOT_ACCESS_TOKEN  — HubSpot Private App token
   TELEGRAM_BOT_TOKEN    — Telegram bot token (chat_id auto-fetched if unset)
   TELEGRAM_CHAT_ID      — Optional; auto-fetched from getUpdates if not set
-  RESEND_API_KEY        — Resend API key for email
-                          (or Google OAuth configured via Aden for gmail provider)
+  RESEND_API_KEY        — Resend API key for email (required for follow-up emails)
 """
 
 import contextvars
@@ -317,8 +316,8 @@ def _detect_revenue_leaks(cycle: int) -> dict:
 
     _leaks_var.set(leaks)
 
-    total_at_risk = int(sum(l.get("value", 0) for l in leaks))
-    ghosted_count = sum(1 for l in leaks if l["type"] == "GHOSTED")
+    total_at_risk = int(sum(leak.get("value", 0) for leak in leaks))
+    ghosted_count = sum(1 for leak in leaks if leak["type"] == "GHOSTED")
 
     if ghosted_count >= 2 or total_at_risk >= 50_000:
         severity = "critical"
@@ -502,7 +501,7 @@ def _prepare_followup_emails(cycle: int) -> dict:
     except (ValueError, TypeError):
         cycle_num = 0
 
-    ghosted = [l for l in _leaks_var.get([]) if l.get("type") == "GHOSTED"]
+    ghosted = [leak for leak in _leaks_var.get([]) if leak.get("type") == "GHOSTED"]
 
     if not ghosted:
         print(
@@ -684,7 +683,7 @@ TOOLS: dict[str, Tool] = {
         description=(
             "Build ready-to-send email payloads for all GHOSTED contacts this cycle. "
             "Returns a contacts array — call send_email MCP tool for each entry "
-            'using provider="resend" (or "gmail"). '
+            'using provider="resend". '
             "Must be called AFTER detect_revenue_leaks."
         ),
         parameters={

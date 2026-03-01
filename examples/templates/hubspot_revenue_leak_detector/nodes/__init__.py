@@ -199,10 +199,10 @@ STEP 2 — Send emails:
       subject:  contact.subject
       html:     contact.html
       provider: "resend"
-    If send_email fails or returns an error for this contact, continue to the next contact.
+    If send_email fails or returns an error for this contact (including missing
+    RESEND_API_KEY), log the error and continue to the next contact.
     Do NOT retry a failed send.
 
-  If no RESEND_API_KEY is configured, try provider: "gmail" instead.
   If the contacts array is empty, skip this step.
 
 STEP 3 — Set outputs (values as strings):
