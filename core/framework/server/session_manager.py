@@ -356,6 +356,28 @@ class SessionManager:
         logger.info("Worker '%s' unloaded from session '%s'", worker_id, session_id)
         return True
 
+    async def pause_session(self, session_id: str) -> bool:
+        """Pause all active executions in a session's worker."""
+        session = self._sessions.get(session_id)
+        if session is None or session.worker_runtime is None:
+            return False
+        
+        return await session.worker_runtime.pause()
+
+    async def resume_session(self, session_id: str, execution_id: str | None = None) -> str | None:
+        """Resume a paused execution in a session's worker."""
+        session = self._sessions.get(session_id)
+        if session is None or session.worker_runtime is None:
+            return None
+            
+        # If no execution_id provided, we try to find the most recent paused one
+        # but for now we require it or expect the caller to provide it.
+        if not execution_id:
+            # Fallback to a default or list
+            return None
+            
+        return await session.worker_runtime.resume(execution_id)
+
     # ------------------------------------------------------------------
     # Session teardown
     # ------------------------------------------------------------------

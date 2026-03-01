@@ -23,6 +23,7 @@ from framework.runtime.runtime_log_store import RuntimeLogStore
 from framework.runtime.shared_state import SharedStateManager
 from framework.storage.concurrent import ConcurrentStorage
 from framework.storage.session_store import SessionStore
+from framework.observability.telemetry import capture_event
 
 if TYPE_CHECKING:
     from framework.graph.edge import GraphSpec
@@ -651,6 +652,18 @@ class AgentRuntime:
 
             self._running = True
             self._timers_paused = False
+            
+            # Capture telemetry
+            capture_event(
+                "agent_runtime_start",
+                {
+                    "graph_id": self._graph_id,
+                    "num_streams": len(self._streams),
+                    "has_llm": self._llm is not None,
+                    "num_tools": len(self._tools),
+                }
+            )
+            
             logger.info(f"AgentRuntime started with {len(self._streams)} streams")
 
     async def stop(self) -> None:
@@ -691,6 +704,72 @@ class AgentRuntime:
 
             self._running = False
             logger.info("AgentRuntime stopped")
+
+    async def pause(self, execution_id: str | None = None) -> bool:
+        """
+        Pause one or all active executions.
+
+        Args:
+            execution_id: Specific execution to pause. If None, pauses all.
+
+        Returns:
+            True if at least one execution was paused.
+        """
+        paused_any = False
+        for stream in self._streams.values():
+            if execution_id:
+                if execution_id in stream.active_execution_ids:
+                    if await stream.cancel_execution(execution_id):
+                        paused_any = True
+            else:
+                # Pause all active executions in this stream
+                active_ids = list(stream.active_execution_ids)
+                for eid in active_ids:
+                    if await stream.cancel_execution(eid):
+                        paused_any = True
+        
+        if paused_any:
+            logger.info(f"AgentRuntime paused {'execution ' + execution_id if execution_id else 'all executions'}")
+        return paused_any
+
+    async def resume(self, execution_id: str, input_data: dict[str, Any] | None = None) -> str | None:
+        """
+        Resume a paused execution.
+
+        Args:
+            execution_id: The session ID to resume.
+            input_data: Optional new input data.
+
+        Returns:
+            New execution ID (usually the same as session_id) or None if failed.
+        """
+        # To resume, we need to know which entry point it was running.
+        # We can find this by looking at the session state on disk.
+        if not self._session_store:
+            logger.error("Cannot resume: no session store configured")
+            return None
+            
+        state = await self._session_store.read_state(execution_id)
+        if not state:
+            logger.error(f"Cannot resume: session {execution_id} not found")
+            return None
+            
+        if state.status != "paused":
+            logger.warning(f"Session {execution_id} is in status {state.status}, not paused")
+            # We can still try to resume if it's failed or cancelled
+            
+        entry_point_id = state.entry_point
+        if not entry_point_id:
+            logger.error(f"Cannot resume: entry_point not found in session state for {execution_id}")
+            return None
+            
+        # Trigger with resume_session_id
+        return await self.trigger(
+            entry_point_id=entry_point_id,
+            input_data=input_data or state.input_data or {},
+            session_state={"resume_session_id": execution_id},
+            graph_id=state.agent_id if state.agent_id != self._graph_id else None
+        )
 
     def pause_timers(self) -> None:
         """Pause all timer-driven entry points.
@@ -793,7 +872,34 @@ class AgentRuntime:
         stream = self._resolve_stream(entry_point_id)
         if stream is None:
             raise ValueError(f"Entry point '{entry_point_id}' not found")
-        return await stream.wait_for_completion(exec_id, timeout)
+        result = await stream.wait_for_completion(exec_id, timeout)
+        
+        # Capture telemetry
+        if result:
+            capture_event(
+                "agent_execution_complete",
+                {
+                    "graph_id": graph_id or self._graph_id,
+                    "entry_point_id": entry_point_id,
+                    "success": result.success,
+                    "steps_executed": result.steps_executed,
+                    "total_tokens": result.total_tokens,
+                    "duration_ms": result.total_latency_ms,
+                    "execution_quality": result.execution_quality,
+                    "had_partial_failures": result.had_partial_failures,
+                }
+            )
+        else:
+            capture_event(
+                "agent_execution_timeout",
+                {
+                    "graph_id": graph_id or self._graph_id,
+                    "entry_point_id": entry_point_id,
+                    "timeout": timeout,
+                }
+            )
+            
+        return result
 
     # === MULTI-GRAPH MANAGEMENT ===
 

@@ -212,6 +212,90 @@ async def handle_stop_session(request: web.Request) -> web.Response:
     return web.json_response({"session_id": session_id, "stopped": True})
 
 
+async def handle_pause_session(request: web.Request) -> web.Response:
+    """POST /api/sessions/{session_id}/pause — pause active executions in a session."""
+    manager = _get_manager(request)
+    session_id = request.match_info["session_id"]
+
+    paused = await manager.pause_session(session_id)
+    if not paused:
+        # Check if session exists at all
+        session = manager.get_session(session_id)
+        if session is None:
+            return web.json_response(
+                {"error": f"Session '{session_id}' not found"},
+                status=404,
+            )
+        return web.json_response(
+            {"session_id": session_id, "status": "no_active_executions", "message": "No active executions to pause"},
+            status=200,
+        )
+
+    return web.json_response(
+        {"session_id": session_id, "status": "paused", "message": "Session executions paused"}
+    )
+
+
+async def handle_resume_session(request: web.Request) -> web.Response:
+    """POST /api/sessions/{session_id}/resume — resume a paused session.
+
+    Body: {"execution_id": "..." (optional)}
+    """
+    manager = _get_manager(request)
+    session_id = request.match_info["session_id"]
+    body = await request.json() if request.can_read_body else {}
+    execution_id = body.get("execution_id")
+
+    # If no execution_id, we need to find one to resume.
+    # For now, if it's missing, we'll return an error or try a default.
+    if not execution_id:
+        # Try to find a paused worker session on disk
+        session = manager.get_session(session_id)
+        if session and session.worker_path:
+            sess_dir = sessions_dir(session)
+            if sess_dir.exists():
+                # Find most recent paused session
+                paused_sessions = []
+                for d in sess_dir.iterdir():
+                    if not d.is_dir() or not d.name.startswith("session_"):
+                        continue
+                    state_path = d / "state.json"
+                    if state_path.exists():
+                        try:
+                            state = json.loads(state_path.read_text(encoding="utf-8"))
+                            if state.get("status") == "paused":
+                                paused_sessions.append((d.name, state.get("timestamps", {}).get("updated_at", "")))
+                        except Exception:
+                            continue
+                
+                if paused_sessions:
+                    # Sort by updated_at desc
+                    paused_sessions.sort(key=lambda x: x[1], reverse=True)
+                    execution_id = paused_sessions[0][0]
+
+    if not execution_id:
+        return web.json_response(
+            {"error": "execution_id is required to resume, and no paused sessions were found auto-magically"},
+            status=400,
+        )
+
+    new_exec_id = await manager.resume_session(session_id, execution_id)
+    if not new_exec_id:
+        return web.json_response(
+            {"error": f"Failed to resume session {session_id} / execution {execution_id}"},
+            status=500,
+        )
+
+    return web.json_response(
+        {
+            "session_id": session_id,
+            "execution_id": new_exec_id,
+            "status": "resumed",
+            "message": f"Execution {execution_id} resumed",
+        }
+    )
+
+
 # ------------------------------------------------------------------
 # Worker lifecycle
 # ------------------------------------------------------------------
@@ -668,6 +752,8 @@ def register_routes(app: web.Application) -> None:
     app.router.add_get("/api/sessions", handle_list_live_sessions)
     app.router.add_get("/api/sessions/{session_id}", handle_get_live_session)
     app.router.add_delete("/api/sessions/{session_id}", handle_stop_session)
+    app.router.add_post("/api/sessions/{session_id}/pause", handle_pause_session)
+    app.router.add_post("/api/sessions/{session_id}/resume", handle_resume_session)
 
     # Worker lifecycle
     app.router.add_post("/api/sessions/{session_id}/worker", handle_load_worker)

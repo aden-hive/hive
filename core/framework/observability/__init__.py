@@ -14,10 +14,13 @@ from framework.observability.logging import (
     get_trace_context,
     set_trace_context,
 )
+from framework.observability.telemetry import capture_event, get_telemetry_client
 
 __all__ = [
     "configure_logging",
     "get_trace_context",
     "set_trace_context",
     "clear_trace_context",
+    "capture_event",
+    "get_telemetry_client",
 ]

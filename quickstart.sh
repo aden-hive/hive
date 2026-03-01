@@ -379,39 +379,16 @@ echo ""
 # Provider configuration - use associative arrays (Bash 4+) or indexed arrays (Bash 3.2)
 if [ "$USE_ASSOC_ARRAYS" = true ]; then
     # Bash 4+ - use associative arrays (cleaner and more efficient)
-    declare -A PROVIDER_NAMES=(
-        ["ANTHROPIC_API_KEY"]="Anthropic (Claude)"
-        ["OPENAI_API_KEY"]="OpenAI (GPT)"
-        ["GEMINI_API_KEY"]="Google Gemini"
-        ["GOOGLE_API_KEY"]="Google AI"
-        ["GROQ_API_KEY"]="Groq"
-        ["CEREBRAS_API_KEY"]="Cerebras"
-        ["MISTRAL_API_KEY"]="Mistral"
-        ["TOGETHER_API_KEY"]="Together AI"
-        ["DEEPSEEK_API_KEY"]="DeepSeek"
-    )
-
-    declare -A PROVIDER_IDS=(
-        ["ANTHROPIC_API_KEY"]="anthropic"
-        ["OPENAI_API_KEY"]="openai"
-        ["GEMINI_API_KEY"]="gemini"
-        ["GOOGLE_API_KEY"]="google"
-        ["GROQ_API_KEY"]="groq"
-        ["CEREBRAS_API_KEY"]="cerebras"
-        ["MISTRAL_API_KEY"]="mistral"
-        ["TOGETHER_API_KEY"]="together"
-        ["DEEPSEEK_API_KEY"]="deepseek"
-    )
-
-    declare -A DEFAULT_MODELS=(
-        ["anthropic"]="claude-haiku-4-5"
-        ["openai"]="gpt-5-mini"
-        ["gemini"]="gemini-3-flash-preview"
-        ["groq"]="moonshotai/kimi-k2-instruct-0905"
-        ["cerebras"]="zai-glm-4.7"
-        ["mistral"]="mistral-large-latest"
-        ["together_ai"]="meta-llama/Llama-3.3-70B-Instruct-Turbo"
-        ["deepseek"]="deepseek-chat"
+    declare -A PROVIDERS=(
+        ["ANTHROPIC_API_KEY"]="anthropic;Anthropic (Claude);claude-haiku-4-5;https://console.anthropic.com/settings/keys"
+        ["OPENAI_API_KEY"]="openai;OpenAI (GPT);gpt-5-mini;https://platform.openai.com/api-keys"
+        ["GEMINI_API_KEY"]="gemini;Google Gemini;gemini-3-flash-preview;https://aistudio.google.com/apikey"
+        ["GOOGLE_API_KEY"]="google;Google AI;;"
+        ["GROQ_API_KEY"]="groq;Groq;moonshotai/kimi-k2-instruct-0905;https://console.groq.com/keys"
+        ["CEREBRAS_API_KEY"]="cerebras;Cerebras;zai-glm-4.7;https://cloud.cerebras.ai/"
+        ["MISTRAL_API_KEY"]="mistral;Mistral;mistral-large-latest;"
+        ["TOGETHER_API_KEY"]="together;Together AI;meta-llama/Llama-3.3-70B-Instruct-Turbo;"
+        ["DEEPSEEK_API_KEY"]="deepseek;DeepSeek;deepseek-chat;"
     )
 
     # Model choices per provider: composite-key associative arrays
@@ -470,17 +447,20 @@ if [ "$USE_ASSOC_ARRAYS" = true ]; then
     )
 
     # Helper functions for Bash 4+
-    get_provider_name() {
-        echo "${PROVIDER_NAMES[$1]}"
+    get_provider_field() {
+        local env_var="$1"
+        local field_index="$2"
+        local provider_string="${PROVIDERS[$env_var]}"
+        # Use parameter expansion to split the string
+        local fields
+        IFS=';' read -r -a fields <<< "$provider_string"
+        echo "${fields[$field_index]}"
     }
 
-    get_provider_id() {
-        echo "${PROVIDER_IDS[$1]}"
-    }
-
-    get_default_model() {
-        echo "${DEFAULT_MODELS[$1]}"
-    }
+    get_provider_id() { get_provider_field "$1" 0; }
+    get_provider_name() { get_provider_field "$1" 1; }
+    get_default_model() { get_provider_field "$1" 2; }
+    get_signup_url() { get_provider_field "$1" 3; }
 
     get_model_choice_count() {
         echo "${MODEL_CHOICES_COUNT[$1]:-0}"
@@ -500,8 +480,9 @@ if [ "$USE_ASSOC_ARRAYS" = true ]; then
 else
     # Bash 3.2 - use parallel indexed arrays
     PROVIDER_ENV_VARS=(ANTHROPIC_API_KEY OPENAI_API_KEY GEMINI_API_KEY GOOGLE_API_KEY GROQ_API_KEY CEREBRAS_API_KEY MISTRAL_API_KEY TOGETHER_API_KEY DEEPSEEK_API_KEY)
-    PROVIDER_DISPLAY_NAMES=("Anthropic (Claude)" "OpenAI (GPT)" "Google Gemini" "Google AI" "Groq" "Cerebras" "Mistral" "Together AI" "DeepSeek")
     PROVIDER_ID_LIST=(anthropic openai gemini google groq cerebras mistral together deepseek)
+    PROVIDER_DISPLAY_NAMES=("Anthropic (Claude)" "OpenAI (GPT)" "Google Gemini" "Google AI" "Groq" "Cerebras" "Mistral" "Together AI" "DeepSeek")
+    PROVIDER_SIGNUP_URLS=("https://console.anthropic.com/settings/keys" "https://platform.openai.com/api-keys" "https://aistudio.google.com/apikey" "" "https://console.groq.com/keys" "https://cloud.cerebras.ai/" "" "" "")
 
     # Default models by provider id (parallel arrays)
     MODEL_PROVIDER_IDS=(anthropic openai gemini groq cerebras mistral together_ai deepseek)
@@ -540,6 +521,18 @@ else
         while [ $i -lt ${#MODEL_PROVIDER_IDS[@]} ]; do
             if [ "${MODEL_PROVIDER_IDS[$i]}" = "$provider_id" ]; then
                 echo "${MODEL_DEFAULTS[$i]}"
+                return
+            fi
+            i=$((i + 1))
+        done
+    }
+
+    get_signup_url() {
+        local env_var="$1"
+        local i=0
+        while [ $i -lt ${#PROVIDER_ENV_VARS[@]} ]; do
+            if [ "${PROVIDER_ENV_VARS[$i]}" = "$env_var" ]; then
+                echo "${PROVIDER_SIGNUP_URLS[$i]}"
                 return
             fi
             i=$((i + 1))
@@ -796,8 +789,10 @@ fi
 
 # Detect API key providers
 if [ "$USE_ASSOC_ARRAYS" = true ]; then
-    for env_var in "${!PROVIDER_NAMES[@]}"; do
-        if [ -n "${!env_var}" ]; then
+    # Bash 4+ - iterate over associative array keys
+    for env_var in "${!PROVIDERS[@]}"; do
+        value="${!env_var}"
+        if [ -n "$value" ]; then
             FOUND_PROVIDERS+=("$(get_provider_name "$env_var")")
             FOUND_ENV_VARS+=("$env_var")
         fi
