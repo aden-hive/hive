@@ -313,8 +313,10 @@ class SharedMemory:
                 # Long strings that look like code are suspicious
                 if self._contains_code_indicators(value):
                     logger.warning(
-                        f"⚠ Suspicious write to key '{key}': appears to be code "
-                        f"({len(value)} chars). Consider using validate=False if intended."
+                        "⚠ Suspicious write to key '%s': appears to be code "
+                        "(%d chars). Consider using validate=False if intended.",
+                        key,
+                        len(value),
                     )
                     raise MemoryWriteError(
                         f"Rejected suspicious content for key '{key}': "
@@ -356,8 +358,10 @@ class SharedMemory:
                 if len(value) > 5000:
                     if self._contains_code_indicators(value):
                         logger.warning(
-                            f"⚠ Suspicious write to key '{key}': appears to be code "
-                            f"({len(value)} chars). Consider using validate=False if intended."
+                            "⚠ Suspicious write to key '%s': appears to be code "
+                            "(%d chars). Consider using validate=False if intended.",
+                            key,
+                            len(value),
                         )
                         raise MemoryWriteError(
                             f"Rejected suspicious content for key '{key}': "
