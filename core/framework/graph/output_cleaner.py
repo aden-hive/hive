@@ -7,6 +7,7 @@ to clean malformed outputs before they flow to the next node.
 This prevents cascading failures and dramatically improves execution success rates.
 """
 
+import asyncio
 import json
 import logging
 import re
@@ -70,6 +71,7 @@ class CleansingConfig:
     cache_successful_patterns: bool = True
     fallback_to_raw: bool = True  # If cleaning fails, pass raw output
     log_cleanings: bool = True  # Log when cleansing happens
+    timeout_seconds: int = 30  # Timeout for LLM cleaning call
 
 
 @dataclass
@@ -121,10 +123,14 @@ class OutputCleaner:
                     )
                     logger.info(f"✓ Initialized OutputCleaner with {config.fast_model}")
                 else:
-                    logger.warning("⚠ CEREBRAS_API_KEY not found, output cleaning will be disabled")
+                    logger.warning(
+                        "⚠ CEREBRAS_API_KEY not found, output cleaning will be disabled"
+                    )
                     self.llm = None
             except ImportError:
-                logger.warning("⚠ LiteLLMProvider not available, output cleaning disabled")
+                logger.warning(
+                    "⚠ LiteLLMProvider not available, output cleaning disabled"
+                )
                 self.llm = None
         else:
             self.llm = None
@@ -181,7 +187,10 @@ class OutputCleaner:
                         )
 
             # Check 3: Type validation (if schema provided)
-            if hasattr(target_node_spec, "input_schema") and target_node_spec.input_schema:
+            if (
+                hasattr(target_node_spec, "input_schema")
+                and target_node_spec.input_schema
+            ):
                 expected_schema = target_node_spec.input_schema.get(key)
                 if expected_schema:
                     expected_type = expected_schema.get("type")
@@ -288,13 +297,24 @@ Return ONLY valid JSON matching the expected schema. No explanations, no markdow
                     f"🧹 Cleaning output from '{source_node_id}' using {self.config.fast_model}"
                 )
 
-            response = await self.llm.acomplete(
-                messages=[{"role": "user", "content": prompt}],
-                system=(
-                    "You clean malformed agent outputs. Return only valid JSON matching the schema."
-                ),
-                max_tokens=2048,  # Sufficient for cleaning most outputs
-            )
+            try:
+                response = await asyncio.wait_for(
+                    self.llm.acomplete(
+                        messages=[{"role": "user", "content": prompt}],
+                        system=(
+                            "You clean malformed agent outputs. Return only valid JSON matching the schema."
+                        ),
+                        max_tokens=2048,  # Sufficient for cleaning most outputs
+                    ),
+                    timeout=self.config.timeout_seconds,
+                )
+            except TimeoutError:
+                logger.error(
+                    f"✗ Output cleaning timed out after {self.config.timeout_seconds}s"
+                )
+                if self.config.fallback_to_raw:
+                    return output
+                raise
 
             # Parse cleaned output
             cleaned_text = response.content.strip()
@@ -318,7 +338,9 @@ Return ONLY valid JSON matching the expected schema. No explanations, no markdow
                 if self.config.fallback_to_raw:
                     return output
                 else:
-                    raise ValueError(f"Cleaning produced {type(cleaned)}, expected dict")
+                    raise ValueError(
+                        f"Cleaning produced {type(cleaned)}, expected dict"
+                    )
 
         except json.JSONDecodeError as e:
             logger.error(f"✗ Failed to parse cleaned JSON: {e}")
