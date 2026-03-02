@@ -369,14 +369,16 @@ def register_queen_lifecycle_tools(
         last = _status_last_called.get("ts", 0.0)
         if now - last < _STATUS_COOLDOWN:
             remaining = int(_STATUS_COOLDOWN - (now - last))
-            return json.dumps({
-                "status": "cooldown",
-                "message": (
-                    f"Status was checked {int(now - last)}s ago. "
-                    f"Wait {remaining}s before checking again. "
-                    "Do NOT call this tool in a loop — wait for user input instead."
-                ),
-            })
+            return json.dumps(
+                {
+                    "status": "cooldown",
+                    "message": (
+                        f"Status was checked {int(now - last)}s ago. "
+                        f"Wait {remaining}s before checking again. "
+                        "Do NOT call this tool in a loop — wait for user input instead."
+                    ),
+                }
+            )
         _status_last_called["ts"] = now
 
         runtime = _get_runtime()
