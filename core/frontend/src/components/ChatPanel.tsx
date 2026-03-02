@@ -39,22 +39,23 @@ function getColor(_agent: string, role?: "queen" | "worker"): string {
   return workerColor;
 }
 
-// Palette of distinct hues for tool pills — each tool name gets a consistent color
-const TOOL_COLORS = [
-  { text: "text-blue-600",    bg: "bg-blue-500/10",    border: "border-blue-500/20" },
-  { text: "text-violet-600",  bg: "bg-violet-500/10",  border: "border-violet-500/20" },
-  { text: "text-amber-600",   bg: "bg-amber-500/10",   border: "border-amber-500/20" },
-  { text: "text-cyan-600",    bg: "bg-cyan-500/10",    border: "border-cyan-500/20" },
-  { text: "text-rose-600",    bg: "bg-rose-500/10",    border: "border-rose-500/20" },
-  { text: "text-emerald-600", bg: "bg-emerald-500/10", border: "border-emerald-500/20" },
-  { text: "text-orange-600",  bg: "bg-orange-500/10",  border: "border-orange-500/20" },
-  { text: "text-teal-600",    bg: "bg-teal-500/10",    border: "border-teal-500/20" },
+// Honey-drizzle palette — based on color-hex.com/color-palette/80116
+// #8e4200 · #db6f02 · #ff9624 · #ffb825 · #ffd69c + adjacent warm tones
+const TOOL_HEX = [
+  "#db6f02", // rich orange
+  "#ffb825", // golden yellow
+  "#ff9624", // bright orange
+  "#c48820", // warm bronze
+  "#e89530", // honey
+  "#d4a040", // goldenrod
+  "#cc7a10", // caramel
+  "#e5a820", // sunflower
 ];
 
-function toolColor(name: string): (typeof TOOL_COLORS)[number] {
+function toolHex(name: string): string {
   let hash = 0;
   for (let i = 0; i < name.length; i++) hash = (hash * 31 + name.charCodeAt(i)) | 0;
-  return TOOL_COLORS[Math.abs(hash) % TOOL_COLORS.length];
+  return TOOL_HEX[Math.abs(hash) % TOOL_HEX.length];
 }
 
 function ToolActivityRow({ content }: { content: string }) {
@@ -96,11 +97,12 @@ function ToolActivityRow({ content }: { content: string }) {
     <div className="flex gap-3 pl-10">
       <div className="flex flex-wrap items-center gap-1.5">
         {runningPills.map((p) => {
-          const c = toolColor(p.name);
+          const hex = toolHex(p.name);
           return (
             <span
               key={`run-${p.name}`}
-              className={`inline-flex items-center gap-1 text-[11px] px-2.5 py-0.5 rounded-full border ${c.text} ${c.bg} ${c.border}`}
+              className="inline-flex items-center gap-1 text-[11px] px-2.5 py-0.5 rounded-full"
+              style={{ color: hex, backgroundColor: `${hex}18`, border: `1px solid ${hex}35` }}
             >
               <Loader2 className="w-2.5 h-2.5 animate-spin" />
               {p.name}
@@ -111,11 +113,12 @@ function ToolActivityRow({ content }: { content: string }) {
           );
         })}
         {donePills.map((p) => {
-          const c = toolColor(p.name);
+          const hex = toolHex(p.name);
           return (
             <span
               key={`done-${p.name}`}
-              className={`inline-flex items-center gap-1 text-[11px] px-2.5 py-0.5 rounded-full border ${c.text} ${c.bg} ${c.border} opacity-60`}
+              className="inline-flex items-center gap-1 text-[11px] px-2.5 py-0.5 rounded-full opacity-50"
+              style={{ color: hex, backgroundColor: `${hex}12`, border: `1px solid ${hex}25` }}
             >
               <Check className="w-2.5 h-2.5" />
               {p.name}
