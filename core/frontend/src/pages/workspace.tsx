@@ -1438,7 +1438,6 @@ export default function Workspace() {
     const state = agentStates[activeWorker];
     if (!state?.sessionId) return;
 
-    setLoadingWorker(true);
     try {
       await sessionsApi.loadWorker(state.sessionId, agentPath);
       // Success: worker_loaded SSE event will handle UI updates automatically
@@ -1448,7 +1447,6 @@ export default function Workspace() {
         const body = err.body as Record<string, unknown>;
         setCredentialAgentPath((body.agent_path as string) || null);
         setCredentialsOpen(true);
-        setLoadingWorker(false);
         return;
       }
 
@@ -1465,10 +1463,9 @@ export default function Workspace() {
           s.id === activeId ? { ...s, messages: [...s.messages, errorMsg] } : s
         ),
       }));
-    } finally {
-      setLoadingWorker(false);
     }
   }, [activeWorker, agentStates]);
+  void handleLoadAgent; // Used by load-agent modal (wired dynamically)
 
   const closeAgentTab = useCallback((agentType: string) => {
     setSelectedNode(null);
