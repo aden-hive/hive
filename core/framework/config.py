@@ -6,6 +6,7 @@ helper functions.
 """
 
 import json
+import logging
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -13,6 +14,7 @@ from typing import Any
 
 from framework.graph.edge import DEFAULT_MAX_TOKENS
 
+logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 # Low-level config file access
 # ---------------------------------------------------------------------------
@@ -27,7 +29,8 @@ def get_hive_config() -> dict[str, Any]:
     try:
         with open(HIVE_CONFIG_FILE, encoding="utf-8-sig") as f:
             return json.load(f)
-    except (json.JSONDecodeError, OSError):
+    except (json.JSONDecodeError, OSError) as e:
+        logger.warning("Failed to load config from %s: %s", HIVE_CONFIG_FILE, e)
         return {}
 
 
