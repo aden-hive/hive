@@ -587,6 +587,7 @@ class GraphExecutor:
             )
 
         try:
+            _reached_end = False  # Track whether the loop exited via break (legitimate)
             while steps < graph.max_steps:
                 steps += 1
 
@@ -667,6 +668,7 @@ class GraphExecutor:
                     )
                     if next_node is None:
                         self.logger.info("   → No more edges after visit limit, ending")
+                        _reached_end = True
                         break
                     current_node_id = next_node
                     continue
@@ -1065,6 +1067,7 @@ class GraphExecutor:
                 # Check if this is a terminal node - if so, we're done
                 if node_spec.id in graph.terminal_nodes:
                     self.logger.info(f"✓ Reached terminal node: {node_spec.name}")
+                    _reached_end = True
                     break
 
                 # Determine next node
@@ -1097,6 +1100,7 @@ class GraphExecutor:
 
                     if not traversable_edges:
                         self.logger.info("   → No more edges, ending execution")
+                        _reached_end = True
                         break  # No valid edge, end execution
 
                     # Check for fan-out (multiple traversable edges)
@@ -1144,6 +1148,7 @@ class GraphExecutor:
                         else:
                             # No convergence point - branches are terminal
                             self.logger.info("   → Parallel branches completed (no convergence)")
+                            _reached_end = True
                             break
                     else:
                         # Sequential: follow single edge (existing logic via _follow_edges)
@@ -1157,6 +1162,7 @@ class GraphExecutor:
                         )
                         if next_node is None:
                             self.logger.info("   → No more edges, ending execution")
+                            _reached_end = True
                             break
                         next_spec = graph.get_node(next_node)
                         self.logger.info(f"   → Next: {next_spec.name if next_spec else next_node}")
@@ -1337,7 +1343,9 @@ class GraphExecutor:
             # Collect output
             output = memory.read_all()
 
-            self.logger.info("\n✓ Execution complete!")
+            _status = "complete" if _reached_end else "truncated"
+            _icon = "\u2713" if _reached_end else "\u26a0"
+            self.logger.info(f"\n{_icon} Execution {_status}!")
             self.logger.info(f"   Steps: {steps}")
             self.logger.info(f"   Path: {' → '.join(path)}")
             self.logger.info(f"   Total tokens: {total_tokens}")
@@ -1346,11 +1354,27 @@ class GraphExecutor:
             # Calculate execution quality metrics
             total_retries_count = sum(node_retry_counts.values())
             nodes_failed = [nid for nid, count in node_retry_counts.items() if count > 0]
-            exec_quality = "degraded" if total_retries_count > 0 else "clean"
+
+            # Detect max_steps exhaustion: the loop exited without reaching
+            # a terminal node or running out of edges.  This means the agent
+            # consumed its entire step budget — likely stuck in a feedback
+            # loop — so treat as truncated, not successful.
+            if not _reached_end:
+                exec_quality = "truncated"
+                self.logger.warning(
+                    f"   ⚠ Execution exhausted max_steps ({graph.max_steps}) "
+                    f"without reaching a terminal node.  Last node: {current_node_id}"
+                )
+            elif total_retries_count > 0:
+                exec_quality = "degraded"
+            else:
+                exec_quality = "clean"
 
             # Update narrative to reflect execution quality
             quality_suffix = ""
-            if exec_quality == "degraded":
+            if exec_quality == "truncated":
+                quality_suffix = f" (TRUNCATED at step {steps}/{graph.max_steps})"
+            elif exec_quality == "degraded":
                 retries = total_retries_count
                 failed = len(nodes_failed)
                 quality_suffix = f" ({retries} retries across {failed} nodes)"
@@ -1369,6 +1393,11 @@ class GraphExecutor:
                     duration_ms=total_latency,
                     node_path=path,
                     execution_quality=exec_quality,
+                    total_retries=total_retries_count,
+                    nodes_with_failures=nodes_failed,
+                    retry_details=dict(node_retry_counts),
+                    had_partial_failures=len(nodes_failed) > 0,
+                    node_visit_counts=dict(node_visit_counts),
                 )
 
             return ExecutionResult(
