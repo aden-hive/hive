@@ -1,6 +1,13 @@
 """Schema definitions for runtime data."""
 
 from framework.schemas.decision import Decision, DecisionEvaluation, Option, Outcome
+from framework.schemas.failure_condition import (
+    ExecutionContext,
+    FailureCondition,
+    FailureEvaluator,
+    FailureResult,
+    FailureSeverity,
+)
 from framework.schemas.run import Problem, Run, RunSummary
 
 __all__ = [
@@ -11,4 +18,9 @@ __all__ = [
     "Run",
     "RunSummary",
     "Problem",
+    "ExecutionContext",
+    "FailureCondition",
+    "FailureEvaluator",
+    "FailureResult",
+    "FailureSeverity",
 ]

@@ -13,9 +13,16 @@ Goals are:
 
 from datetime import datetime
 from enum import StrEnum
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel, Field
+
+if TYPE_CHECKING:
+    from framework.schemas.failure_condition import (
+        ExecutionContext,
+        FailureEvaluator,
+        FailureResult,
+    )
 
 
 class GoalStatus(StrEnum):
@@ -128,6 +135,12 @@ class Goal(BaseModel):
     # What the agent must respect
     constraints: list[Constraint] = Field(default_factory=list)
 
+    # Failure conditions that indicate execution failure
+    failure_conditions: list["FailureCondition"] = Field(
+        default_factory=list,
+        description="Conditions that, when triggered, indicate execution failure",
+    )
+
     # Context for the agent
     context: dict[str, Any] = Field(
         default_factory=dict,
@@ -171,9 +184,56 @@ class Goal(BaseModel):
         """Check if a specific constraint is satisfied."""
         for c in self.constraints:
             if c.id == constraint_id:
-                # This would be expanded with actual evaluation logic
                 return True
         return True
+
+    def evaluate_failures(self, context: "ExecutionContext") -> list["FailureResult"]:
+        """
+        Evaluate all failure conditions against the execution context.
+
+        Args:
+            context: The execution context to evaluate against
+
+        Returns:
+            List of FailureResult objects from evaluating each condition
+        """
+        from framework.schemas.failure_condition import FailureEvaluator
+
+        if not self.failure_conditions:
+            return []
+
+        evaluator = FailureEvaluator(conditions=self.failure_conditions)
+        return evaluator.check_all(context)
+
+    def has_critical_failure(self, context: "ExecutionContext") -> bool:
+        """
+        Check if any critical failure condition is triggered.
+
+        Args:
+            context: The execution context to evaluate against
+
+        Returns:
+            True if any critical failure condition is triggered
+        """
+        from framework.schemas.failure_condition import FailureEvaluator
+
+        if not self.failure_conditions:
+            return False
+
+        evaluator = FailureEvaluator(conditions=self.failure_conditions)
+        results = evaluator.check_all(context)
+        return evaluator.has_critical_failure(results)
+
+    def get_failure_evaluator(self) -> "FailureEvaluator":
+        """
+        Get a FailureEvaluator configured with this goal's failure conditions.
+
+        Returns:
+            A FailureEvaluator instance ready to evaluate this goal's conditions
+        """
+        from framework.schemas.failure_condition import FailureEvaluator
+
+        return FailureEvaluator(conditions=self.failure_conditions)
 
     def to_prompt_context(self) -> str:
         """Generate context string for LLM prompts.
@@ -211,3 +271,8 @@ class Goal(BaseModel):
                 lines.append(f"- {key}: {value}")
 
         return "\n".join(lines)
+
+
+from framework.schemas.failure_condition import FailureCondition  # noqa: E402
+
+Goal.model_rebuild()
