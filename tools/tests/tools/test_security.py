@@ -1,6 +1,5 @@
 """Tests for security.py - get_secure_path() function."""
 
-
 from unittest.mock import patch
 
 import pytest
