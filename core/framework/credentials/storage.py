@@ -13,6 +13,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 from abc import ABC, abstractmethod
 from datetime import UTC, datetime
 from pathlib import Path
@@ -167,10 +168,31 @@ class EncryptedFileStorage(CredentialStorage):
         (self.base_path / "metadata").mkdir(parents=True, exist_ok=True)
 
     def _cred_path(self, credential_id: str) -> Path:
-        """Get the file path for a credential."""
-        # Sanitize credential_id to prevent path traversal
-        safe_id = credential_id.replace("/", "_").replace("\\", "_").replace("..", "_")
-        return self.base_path / "credentials" / f"{safe_id}.enc"
+        """Get the file path for a credential.
+
+        Sanitizes the credential_id to prevent path traversal attacks.
+        Only alphanumeric characters, hyphens, and underscores are allowed.
+
+        Raises:
+            ValueError: If the credential_id is empty after sanitization
+                        or if the resolved path escapes the credentials directory.
+        """
+        # Strip NUL bytes that could confuse C-level path routines
+        clean = credential_id.replace("\x00", "")
+        # Allow only alphanumeric, hyphens, and underscores
+        safe_id = re.sub(r"[^a-zA-Z0-9_-]", "_", clean)
+        if not safe_id:
+            raise ValueError(
+                "Invalid credential ID: results in empty string after sanitization"
+            )
+        result = self.base_path / "credentials" / f"{safe_id}.enc"
+        # Final guard: ensure the resolved path stays within the credentials dir
+        creds_dir = (self.base_path / "credentials").resolve()
+        if not result.resolve().is_relative_to(creds_dir):
+            raise ValueError(
+                f"Path traversal detected in credential ID: {credential_id!r}"
+            )
+        return result
 
     def save(self, credential: CredentialObject) -> None:
         """Encrypt and save credential."""
