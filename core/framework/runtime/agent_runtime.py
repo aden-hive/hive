@@ -411,7 +411,10 @@ class AgentRuntime:
                         )
                         continue
 
-                    def _make_cron_timer(entry_point_id: str, expr: str, immediate: bool):
+                    def _make_cron_timer(
+                        entry_point_id: str, expr: str, immediate: bool,
+                        idle_timeout: float = 300,
+                    ):
                         async def _cron_loop():
                             from croniter import croniter
 
@@ -442,12 +445,21 @@ class AgentRuntime:
                                     await asyncio.sleep(max(0, sleep_secs))
                                     continue
 
-                                # Gate: skip tick if previous execution still running
+                                # Gate: skip tick if agent is actively working.
+                                # If the execution is idle (no LLM/tool activity
+                                # beyond idle_timeout) let the timer proceed —
+                                # execute() will cancel the stale execution.
                                 _stream = self._streams.get(entry_point_id)
-                                if _stream and _stream.active_execution_ids:
+                                if (
+                                    _stream
+                                    and _stream.active_execution_ids
+                                    and _stream.agent_idle_seconds < idle_timeout
+                                ):
                                     logger.debug(
-                                        "Cron '%s': execution already in progress, skipping tick",
+                                        "Cron '%s': agent actively working (idle %.0fs < %ds), skipping tick",
                                         entry_point_id,
+                                        _stream.agent_idle_seconds,
+                                        idle_timeout,
                                     )
                                     self._timer_next_fire[entry_point_id] = (
                                         time.monotonic() + sleep_secs
@@ -517,7 +529,10 @@ class AgentRuntime:
                         return _cron_loop
 
                     task = asyncio.create_task(
-                        _make_cron_timer(ep_id, cron_expr, run_immediately)()
+                        _make_cron_timer(
+                            ep_id, cron_expr, run_immediately,
+                            idle_timeout=tc.get("idle_timeout_seconds", 300),
+                        )()
                     )
                     self._timer_tasks.append(task)
                     logger.info(
@@ -529,7 +544,10 @@ class AgentRuntime:
 
                 elif interval and interval > 0:
                     # Fixed interval mode (original behavior)
-                    def _make_timer(entry_point_id: str, mins: float, immediate: bool):
+                    def _make_timer(
+                        entry_point_id: str, mins: float, immediate: bool,
+                        idle_timeout: float = 300,
+                    ):
                         async def _timer_loop():
                             interval_secs = mins * 60
                             _persistent_session_id: str | None = None
@@ -551,12 +569,18 @@ class AgentRuntime:
                                     await asyncio.sleep(interval_secs)
                                     continue
 
-                                # Gate: skip tick if previous execution still running
+                                # Gate: skip tick if agent is actively working.
                                 _stream = self._streams.get(entry_point_id)
-                                if _stream and _stream.active_execution_ids:
+                                if (
+                                    _stream
+                                    and _stream.active_execution_ids
+                                    and _stream.agent_idle_seconds < idle_timeout
+                                ):
                                     logger.debug(
-                                        "Timer '%s': execution already in progress, skipping tick",
+                                        "Timer '%s': agent actively working (idle %.0fs < %ds), skipping tick",
                                         entry_point_id,
+                                        _stream.agent_idle_seconds,
+                                        idle_timeout,
                                     )
                                     self._timer_next_fire[entry_point_id] = (
                                         time.monotonic() + interval_secs
@@ -621,7 +645,12 @@ class AgentRuntime:
 
                         return _timer_loop
 
-                    task = asyncio.create_task(_make_timer(ep_id, interval, run_immediately)())
+                    task = asyncio.create_task(
+                        _make_timer(
+                            ep_id, interval, run_immediately,
+                            idle_timeout=tc.get("idle_timeout_seconds", 300),
+                        )()
+                    )
                     self._timer_tasks.append(task)
                     logger.info(
                         "Started timer for entry point '%s' every %s min%s",
@@ -1173,6 +1202,21 @@ class AgentRuntime:
         if self._last_user_input_time == 0.0:
             return float("inf")
         return time.monotonic() - self._last_user_input_time
+
+    @property
+    def agent_idle_seconds(self) -> float:
+        """Seconds since any stream last had activity (LLM call, tool call, etc.).
+
+        Returns the *minimum* idle time across all streams with active
+        executions.  Returns ``float('inf')`` if nothing is running.
+        """
+        min_idle = float("inf")
+        for reg in self._graphs.values():
+            for stream in reg.streams.values():
+                idle = stream.agent_idle_seconds
+                if idle < min_idle:
+                    min_idle = idle
+        return min_idle
 
     def get_graph_registration(self, graph_id: str) -> _GraphRegistration | None:
         """Get the registration for a specific graph (or None)."""

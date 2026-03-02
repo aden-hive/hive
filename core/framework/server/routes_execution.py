@@ -272,6 +272,14 @@ async def handle_stop(request: web.Request) -> web.Response:
         if reg is None:
             continue
         for _ep_id, stream in reg.streams.items():
+            # Signal shutdown on active nodes to abort in-flight LLM streams
+            for executor in stream._active_executors.values():
+                for node in executor.node_registry.values():
+                    if hasattr(node, "signal_shutdown"):
+                        node.signal_shutdown()
+                    if hasattr(node, "cancel_current_turn"):
+                        node.cancel_current_turn()
+
             cancelled = await stream.cancel_execution(execution_id)
             if cancelled:
                 return web.json_response(
