@@ -15,6 +15,7 @@ import base64
 import hashlib
 import http.server
 import json
+import os
 import platform
 import secrets
 import subprocess
@@ -100,7 +101,9 @@ def exchange_code_for_tokens(code: str, verifier: str) -> dict | None:
         return None
 
     if not token_data.get("access_token") or not token_data.get("refresh_token"):
-        print("\033[0;31mToken response missing required fields\033[0m", file=sys.stderr)
+        print(
+            "\033[0;31mToken response missing required fields\033[0m", file=sys.stderr
+        )
         return None
 
     return token_data
@@ -151,7 +154,8 @@ def save_credentials(token_data: dict, account_id: str) -> None:
         auth_data["tokens"]["id_token"] = token_data["id_token"]
 
     CODEX_AUTH_FILE.parent.mkdir(parents=True, exist_ok=True)
-    with open(CODEX_AUTH_FILE, "w") as f:
+    flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC
+    with os.fdopen(os.open(CODEX_AUTH_FILE, flags, 0o600), "w") as f:
         json.dump(auth_data, f, indent=2)
 
 
@@ -163,7 +167,9 @@ def open_browser(url: str) -> bool:
         if system == "Darwin":
             subprocess.Popen(["open", url], stdout=devnull, stderr=devnull)
         elif system == "Windows":
-            subprocess.Popen(["cmd", "/c", "start", url], stdout=devnull, stderr=devnull)
+            subprocess.Popen(
+                ["cmd", "/c", "start", url], stdout=devnull, stderr=devnull
+            )
         else:
             subprocess.Popen(["xdg-open", url], stdout=devnull, stderr=devnull)
         return True
@@ -224,7 +230,9 @@ def wait_for_callback(state: str, timeout_secs: int = 120) -> str | None:
     server.timeout = 1
 
     deadline = time.time() + timeout_secs
-    server_thread = threading.Thread(target=_serve_until_done, args=(server, deadline, state))
+    server_thread = threading.Thread(
+        target=_serve_until_done, args=(server, deadline, state)
+    )
     server_thread.daemon = True
     server_thread.start()
     server_thread.join(timeout=timeout_secs + 2)
@@ -236,10 +244,15 @@ def wait_for_callback(state: str, timeout_secs: int = 120) -> str | None:
     return None
 
 
-def _serve_until_done(server: http.server.HTTPServer, deadline: float, state: str) -> None:
+def _serve_until_done(
+    server: http.server.HTTPServer, deadline: float, state: str
+) -> None:
     while time.time() < deadline:
         server.handle_request()
-        if OAuthCallbackHandler.auth_code and OAuthCallbackHandler.received_state == state:
+        if (
+            OAuthCallbackHandler.auth_code
+            and OAuthCallbackHandler.received_state == state
+        ):
             return
 
 
@@ -287,7 +300,9 @@ def main() -> int:
         result = sock.connect_ex(("127.0.0.1", CALLBACK_PORT))
         sock.close()
         if result == 0:
-            print(f"\033[1;33mPort {CALLBACK_PORT} is in use. Using manual paste mode.\033[0m")
+            print(
+                f"\033[1;33mPort {CALLBACK_PORT} is in use. Using manual paste mode.\033[0m"
+            )
             server_available = False
     except Exception:
         server_available = True
@@ -308,7 +323,9 @@ def main() -> int:
 
     if server_available:
         print("  Waiting for authentication (up to 2 minutes)...")
-        print("  \033[2mOr paste the redirect URL below if the callback didn't work:\033[0m")
+        print(
+            "  \033[2mOr paste the redirect URL below if the callback didn't work:\033[0m"
+        )
         print()
 
         # Start callback server in background
@@ -371,7 +388,9 @@ def main() -> int:
     # Extract account_id from JWT
     account_id = get_account_id(token_data["access_token"])
     if not account_id:
-        print("\033[0;31mFailed to extract account ID from token.\033[0m", file=sys.stderr)
+        print(
+            "\033[0;31mFailed to extract account ID from token.\033[0m", file=sys.stderr
+        )
         return 1
 
     # Save credentials

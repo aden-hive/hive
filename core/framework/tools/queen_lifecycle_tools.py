@@ -485,7 +485,9 @@ def register_queen_lifecycle_tools(
                 )
                 return json.dumps(
                     {
-                        "error": "Security violation: path is on a different drive from project root"
+                        "error": (
+                            "Security violation: path is on a different drive from project root"
+                        )
                     }
                 )
 

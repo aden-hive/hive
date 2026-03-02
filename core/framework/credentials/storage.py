@@ -20,7 +20,12 @@ from typing import Any
 
 from pydantic import SecretStr
 
-from .models import CredentialDecryptionError, CredentialKey, CredentialObject, CredentialType
+from .models import (
+    CredentialDecryptionError,
+    CredentialKey,
+    CredentialObject,
+    CredentialType,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -183,7 +188,8 @@ class EncryptedFileStorage(CredentialStorage):
 
         # Write to file
         cred_path = self._cred_path(credential.id)
-        with open(cred_path, "wb") as f:
+        flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC
+        with os.fdopen(os.open(cred_path, flags, 0o600), "wb") as f:
             f.write(encrypted)
 
         # Update index

@@ -1,0 +1,11 @@
+total 96
+drwxr-xr-x@ 10 user  staff   320  2 Μαρ  10:04 .
+drwxr-xr-x@  7 user  staff   224  2 Μαρ  11:23 ..
+-rw-r--r--@  1 user  staff   948 20 Φεβ  19:58 auto-close-duplicates.yml
+-rw-r--r--@  1 user  staff  3203 20 Φεβ  19:58 ci.yml
+-rw-r--r--@  1 user  staff  5023 20 Φεβ  19:58 claude-issue-triage.yml
+-rw-r--r--@  1 user  staff   870  2 Μαρ  10:04 codeql.yml
+-rw-r--r--@  1 user  staff  7589 20 Φεβ  19:58 pr-check-command.yml
+-rw-r--r--@  1 user  staff  4968 20 Φεβ  19:58 pr-requirements-backfill.yml
+-rw-r--r--@  1 user  staff  7688 20 Φεβ  19:58 pr-requirements.yml
+-rw-r--r--@  1 user  staff  1007 20 Φεβ  19:58 release.yml

@@ -1,0 +1,19 @@
+completed	failure	chore: enable dependabot for automated security updates	PR Requirements Check	chore/47-enable-dependabot	pull_request_target	22569851205	7s	2026-03-02T09:33:25Z
+completed	success	chore: enable dependabot for automated security updates	CodeQL	chore/47-enable-dependabot	pull_request	22569851180	1m18s	2026-03-02T09:33:25Z
+in_progress		chore: enable dependabot for automated security updates	CI	chore/47-enable-dependabot	pull_request	22569851126	1h6m7s	2026-03-02T09:33:24Z
+in_progress		chore: standardize codebase formatting via ruff	CI	main	push	22569471685	1h16m22s	2026-03-02T09:23:09Z
+completed	success	chore: standardize codebase formatting via ruff	CodeQL	main	push	22569471680	1m58s	2026-03-02T09:23:09Z
+completed	failure	[Chore]: Implement Dependabot for automated dependency monitoring	Issue Triage	main	issues	22569459760	29s	2026-03-02T09:22:48Z
+completed	success	chore(docs): add standardized issue templates (#46)	CodeQL	main	push	22569327373	1m52s	2026-03-02T09:18:59Z
+completed	cancelled	chore(docs): add standardized issue templates (#46)	CI	main	push	22569327340	4m27s	2026-03-02T09:18:58Z
+completed	success	chore(docs): implement standardized issue templates	CodeQL	chore/45-standardize-templates	pull_request	22567855997	1m21s	2026-03-02T08:35:33Z
+in_progress		chore(docs): implement standardized issue templates	CI	chore/45-standardize-templates	pull_request	22567855996	2h3m58s	2026-03-02T08:35:33Z
+completed	success	chore(docs): implement standardized issue templates	PR Requirements Check	chore/45-standardize-templates	pull_request_target	22567855987	9s	2026-03-02T08:35:32Z
+completed	failure	[Chore]: Implement standardized Issue Templates	Issue Triage	main	issues	22567510869	22s	2026-03-02T08:25:17Z
+completed	success	chore: update continuous metrics	CodeQL	main	push	22566873836	1m46s	2026-03-02T08:05:08Z
+completed	cancelled	chore: update continuous metrics	CI	main	push	22566873828	1h14m8s	2026-03-02T08:05:08Z
+completed	cancelled	chore: update CODEOWNERS and add CodeQL security scanning (#44)	CI	main	push	22566867006	30s	2026-03-02T08:04:54Z
+completed	success	chore: update CODEOWNERS and add CodeQL security scanning (#44)	CodeQL	main	push	22566866893	1m55s	2026-03-02T08:04:54Z
+completed	success	chore: update CODEOWNERS and add CodeQL security scanning	CodeQL	chore/42-repo-hygiene	pull_request	22566859512	2m0s	2026-03-02T08:04:41Z
+in_progress		chore: update CODEOWNERS and add CodeQL security scanning	CI	chore/42-repo-hygiene	pull_request	22566859479	2h34m50s	2026-03-02T08:04:41Z
+completed	success	chore: update CODEOWNERS and add CodeQL security scanning	PR Requirements Check	chore/42-repo-hygiene	pull_request_target	22566859478	9s	2026-03-02T08:04:41Z
