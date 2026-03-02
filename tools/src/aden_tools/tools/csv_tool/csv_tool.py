@@ -45,6 +45,14 @@ def register_tools(mcp: FastMCP) -> None:
             if not path.lower().endswith(".csv"):
                 return {"error": "File must have .csv extension"}
 
+            # Check file size before reading to prevent OOM
+            max_size = 10 * 1024 * 1024  # 10MB
+            file_size = os.path.getsize(secure_path)
+            if file_size > max_size:
+                return {
+                    "error": f"File too large: {file_size} bytes. Max allowed is {max_size} bytes."
+                }
+
             # Read CSV
             with open(secure_path, encoding="utf-8", newline="") as f:
                 reader = csv.DictReader(f)
@@ -185,7 +193,9 @@ def register_tools(mcp: FastMCP) -> None:
             secure_path = get_secure_path(path, workspace_id, agent_id, session_id)
 
             if not os.path.exists(secure_path):
-                return {"error": f"File not found: {path}. Use csv_write to create a new file."}
+                return {
+                    "error": f"File not found: {path}. Use csv_write to create a new file."
+                }
 
             if not path.lower().endswith(".csv"):
                 return {"error": "File must have .csv extension"}
@@ -254,6 +264,14 @@ def register_tools(mcp: FastMCP) -> None:
 
             if not path.lower().endswith(".csv"):
                 return {"error": "File must have .csv extension"}
+
+            # Check file size before reading to prevent OOM
+            max_size = 10 * 1024 * 1024  # 10MB
+            file_size = os.path.getsize(secure_path)
+            if file_size > max_size:
+                return {
+                    "error": f"File too large: {file_size} bytes. Max allowed is {max_size} bytes."
+                }
 
             # Get file size
             file_size = os.path.getsize(secure_path)
@@ -352,6 +370,14 @@ def register_tools(mcp: FastMCP) -> None:
             if not path.lower().endswith(".csv"):
                 return {"error": "File must have .csv extension"}
 
+            # Check file size before reading to prevent OOM
+            max_size = 10 * 1024 * 1024  # 10MB
+            file_size = os.path.getsize(secure_path)
+            if file_size > max_size:
+                return {
+                    "error": f"File too large: {file_size} bytes. Max allowed is {max_size} bytes."
+                }
+
             if not query or not query.strip():
                 return {"error": "query cannot be empty"}
 
@@ -380,7 +406,9 @@ def register_tools(mcp: FastMCP) -> None:
             con = duckdb.connect(":memory:")
             try:
                 # Load CSV as 'data' table
-                con.execute(f"CREATE TABLE data AS SELECT * FROM read_csv_auto('{secure_path}')")
+                con.execute(
+                    f"CREATE TABLE data AS SELECT * FROM read_csv_auto('{secure_path}')"
+                )
 
                 # Execute user query
                 result = con.execute(query)
@@ -406,5 +434,7 @@ def register_tools(mcp: FastMCP) -> None:
             error_msg = str(e)
             # Make DuckDB errors more readable
             if "Catalog Error" in error_msg:
-                return {"error": f"SQL error: {error_msg}. Remember the table is named 'data'."}
+                return {
+                    "error": f"SQL error: {error_msg}. Remember the table is named 'data'."
+                }
             return {"error": f"Query failed: {error_msg}"}
