@@ -117,13 +117,13 @@ function ToolActivityRow({ content }: { content: string }) {
           return (
             <span
               key={`done-${p.name}`}
-              className="inline-flex items-center gap-1 text-[11px] px-2.5 py-0.5 rounded-full opacity-50"
-              style={{ color: hex, backgroundColor: `${hex}12`, border: `1px solid ${hex}25` }}
+              className="inline-flex items-center gap-1 text-[11px] px-2.5 py-0.5 rounded-full"
+              style={{ color: hex, backgroundColor: `${hex}18`, border: `1px solid ${hex}35` }}
             >
               <Check className="w-2.5 h-2.5" />
               {p.name}
               {p.count > 1 && (
-                <span className="text-[10px] font-medium opacity-70">×{p.count}</span>
+                <span className="text-[10px] opacity-80">×{p.count}</span>
               )}
             </span>
           );
