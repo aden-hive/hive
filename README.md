@@ -110,6 +110,61 @@ This sets up:
 - **LLM provider** - Interactive default model configuration
 - All required Python dependencies with `uv`
 
+
+### Select a Default LLM Provider
+
+During `./quickstart.sh`, Hive will ask you to:
+
+1. Select a default LLM provider (subscription-based or API-key based)
+2. Provide credentials if required (API-key mode only)
+3. Select a default model
+
+If using an API-key, you will be asked to provide your API-key.
+Hive will then store it in your shell configuration (e.g., `~/.zshrc`).
+
+After setup, reload your shell (e.g., `source ~/.zshrc`) or open a new terminal session.
+
+Then verify:
+
+```bash
+echo $HIVE_LLM_PROVIDER
+```
+
+Expected output (example):
+
+```bash
+openai
+```
+
+### Troubleshooting (only when using an API-key): HIVE_LLM_PROVIDER is empty
+
+If `echo $HIVE_LLM_PROVIDER` returns empty after setup, reload your shell 
+(e.g., `source ~/.zshrc`) or open a new terminal session and verify again.
+
+If `echo $HIVE_LLM_PROVIDER` still returns empty, manually set the `HIVE_LLM_PROVIDER` variable to match what you selected:
+
+```bash
+# Examples
+export HIVE_LLM_PROVIDER="openai"
+# or
+export HIVE_LLM_PROVIDER="anthropic"
+# or
+export HIVE_LLM_PROVIDER="gemini"
+```
+
+Reload your shell (or open a new terminal session), then verify:
+
+```bash
+echo $HIVE_LLM_PROVIDER
+```
+
+Expected output (example):
+
+```bash
+openai
+```
+
+
 ### Build Your First Agent
 
 ```bash
