@@ -89,7 +89,9 @@ class Runtime:
         Returns:
             The run ID
         """
-        run_id = f"run_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:8]}"
+        run_id = (
+            f"run_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:8]}"
+        )
         trace_id = uuid.uuid4().hex
         execution_id = uuid.uuid4().hex  # 32 hex, OTel/W3C-aligned for logs
 
@@ -125,7 +127,9 @@ class Runtime:
         if self._current_run is None:
             # Gracefully handle case where run was already ended or never started
             # This can happen during exception handling cascades
-            logger.warning("end_run called but no run in progress (already ended or never started)")
+            logger.warning(
+                "end_run called but no run in progress (already ended or never started)"
+            )
             return
 
         status = RunStatus.COMPLETED if success else RunStatus.FAILED
@@ -207,7 +211,8 @@ class Runtime:
             )
 
         # Create decision
-        decision_id = f"dec_{len(self._current_run.decisions)}"
+        # Use UUID to prevent collisions in concurrent environments
+        decision_id = f"dec_{uuid.uuid4().hex[:8]}"
         decision = Decision(
             id=decision_id,
             node_id=node_id or self._current_node,
