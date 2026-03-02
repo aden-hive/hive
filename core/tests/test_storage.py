@@ -5,6 +5,7 @@ New sessions use unified storage at sessions/{session_id}/state.json.
 These tests are kept for backward compatibility verification only.
 """
 
+import gc
 import json
 import time
 from pathlib import Path
@@ -327,6 +328,36 @@ class TestCacheEntry:
         old_timestamp = time.time() - 120  # 2 minutes ago
         entry = CacheEntry(value="test", timestamp=old_timestamp)
         assert entry.is_expired(ttl=60.0) is True
+
+
+class TestConcurrentStorageLockTracking:
+    """Lock lifecycle tests for ConcurrentStorage lock tracking internals."""
+
+    @pytest.mark.asyncio
+    async def test_index_lock_is_strongly_referenced(self, tmp_path: Path):
+        """Index locks should survive GC while tracked in LRU."""
+        storage = ConcurrentStorage(tmp_path, max_locks=10)
+
+        lock = await storage._get_lock("index:by_goal:test-goal")
+        lock_id = id(lock)
+
+        del lock
+        gc.collect()
+
+        same_lock = await storage._get_lock("index:by_goal:test-goal")
+        assert id(same_lock) == lock_id
+        assert "index:by_goal:test-goal" in storage._lru_tracking
+
+    @pytest.mark.asyncio
+    async def test_lru_tracks_both_run_and_index_locks(self, tmp_path: Path):
+        """Both run and index locks should be tracked with strong refs."""
+        storage = ConcurrentStorage(tmp_path, max_locks=10)
+
+        await storage._get_lock("run:run-1")
+        await storage._get_lock("index:by_status:completed")
+
+        assert "run:run-1" in storage._lru_tracking
+        assert "index:by_status:completed" in storage._lru_tracking
 
 
 # === CONCURRENTSTORAGE TESTS ===

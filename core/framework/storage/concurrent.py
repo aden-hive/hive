@@ -131,29 +131,30 @@ class ConcurrentStorage:
         lock = self._file_locks.get(lock_key)
 
         if lock is not None:
-            # OPTIMIZATION: Only update LRU for "run" locks.
-            # This prevents high-frequency "index" locks from flushing out
-            # the actual run locks we want to keep cached.
-            if lock_key.startswith("run:"):
-                if lock_key in self._lru_tracking:
-                    self._lru_tracking.move_to_end(lock_key)
+            # Touch LRU for all locks to keep an active strong reference.
+            # This prevents index locks from being garbage-collected while
+            # they are still in active use by concurrent tasks.
+            if lock_key in self._lru_tracking:
+                self._lru_tracking.move_to_end(lock_key)
+            else:
+                if len(self._lru_tracking) >= self._max_locks:
+                    self._lru_tracking.popitem(last=False)
+                self._lru_tracking[lock_key] = lock
             return lock
 
         # 2. Create new lock
         lock = asyncio.Lock()
         self._file_locks[lock_key] = lock
 
-        # CRITICAL: Only add "run:" locks to the strong-ref LRU tracking.
-        # Index locks live exclusively in WeakValueDictionary and are GC'd immediately.
-        if lock_key.startswith("run:"):
-            # Manage capacity only for run locks
-            if len(self._lru_tracking) >= self._max_locks:
-                # Remove oldest tracked lock (strong ref)
-                # WeakValueDictionary will auto-remove the lock once no longer in use
-                self._lru_tracking.popitem(last=False)
+        # Keep a strong reference for all lock types (run + index).
+        # Without this, index locks can be reclaimed immediately because
+        # _file_locks is weakly referenced, which can break mutual exclusion.
+        if len(self._lru_tracking) >= self._max_locks:
+            # Remove oldest tracked lock (strong ref)
+            # WeakValueDictionary will auto-remove the lock once no longer in use
+            self._lru_tracking.popitem(last=False)
 
-            # Add strong reference to keep run lock alive
-            self._lru_tracking[lock_key] = lock
+        self._lru_tracking[lock_key] = lock
 
         return lock
 
