@@ -28,6 +28,28 @@ Some tools require API keys to function. Credentials are managed through the enc
 | `BRAVE_SEARCH_API_KEY` | `web_search` tool (Brave)     | [brave.com/search/api](https://brave.com/search/api/)   |
 | `GOOGLE_API_KEY`       | `web_search` tool (Google)    | [console.cloud.google.com](https://console.cloud.google.com/) |
 | `GOOGLE_CSE_ID`        | `web_search` tool (Google)    | [programmablesearchengine.google.com](https://programmablesearchengine.google.com/) |
+| `EXA_API_KEY`          | `exa_*` tools                 | [exa.ai](https://exa.ai/)                                                           |
+| `SERPAPI_API_KEY`      | `scholar_*`, `patents_*` tools | [serpapi.com](https://serpapi.com/)                                                |
+| `NEWSDATA_API_KEY`     | `news_search`, `news_headlines`, `news_by_company` | [newsdata.io](https://newsdata.io/)                        |
+| `FINLIGHT_API_KEY`     | `news_sentiment` tool         | [finlight.me](https://finlight.me/)                                                 |
+| `GOOGLE_ACCESS_TOKEN`  | `gmail_*` tools               | [console.cloud.google.com](https://console.cloud.google.com/) (OAuth 2.0)           |
+| `RESEND_API_KEY`       | `send_email` tool             | [resend.com](https://resend.com/)                                                   |
+| `SLACK_BOT_TOKEN`      | `slack_*` tools               | [api.slack.com/apps](https://api.slack.com/apps)                                    |
+| `DISCORD_BOT_TOKEN`    | `discord_*` tools             | [discord.com/developers/applications](https://discord.com/developers/applications)  |
+| `TELEGRAM_BOT_TOKEN`   | `telegram_*` tools            | [@BotFather on Telegram](https://t.me/BotFather)                                    |
+| `GOOGLE_CALENDAR_ACCESS_TOKEN` | `calendar_*` tools    | [console.cloud.google.com](https://console.cloud.google.com/) (OAuth 2.0)           |
+| `HUBSPOT_ACCESS_TOKEN` | `hubspot_*` tools             | [developers.hubspot.com](https://developers.hubspot.com/)                           |
+| `APOLLO_API_KEY`       | `apollo_*` tools              | [app.apollo.io](https://app.apollo.io/)                                             |
+| `CALCOM_API_KEY`       | `calcom_*` tools              | [app.cal.com](https://app.cal.com/)                                                 |
+| `GOOGLE_CLOUD_VISION_API_KEY` | `vision_*` tools       | [console.cloud.google.com](https://console.cloud.google.com/)                       |
+| `GOOGLE_DOCS_ACCESS_TOKEN` | `google_docs_*` tools    | [console.cloud.google.com](https://console.cloud.google.com/) (OAuth 2.0)           |
+| `GOOGLE_MAPS_API_KEY`  | `maps_*` tools                | [console.cloud.google.com](https://console.cloud.google.com/)                       |
+| `GOOGLE_APPLICATION_CREDENTIALS` | `run_bigquery_query`, `describe_dataset` | [console.cloud.google.com](https://console.cloud.google.com/) (service account JSON path) |
+| `BIGQUERY_PROJECT_ID`  | `run_bigquery_query`, `describe_dataset` | [console.cloud.google.com](https://console.cloud.google.com/)              |
+| `RAZORPAY_API_KEY`     | `razorpay_*` tools            | [dashboard.razorpay.com](https://dashboard.razorpay.com/)                           |
+| `RAZORPAY_API_SECRET`  | `razorpay_*` tools            | [dashboard.razorpay.com](https://dashboard.razorpay.com/)                           |
+| `STRIPE_API_KEY`       | `stripe_*` tools              | [dashboard.stripe.com/apikeys](https://dashboard.stripe.com/apikeys)                |
+| `GITHUB_TOKEN`         | `github_*` tools              | [github.com/settings/tokens](https://github.com/settings/tokens)                   |
 
 > **Note:** `web_search` supports multiple providers. Set either Brave OR Google credentials. Brave is preferred for backward compatibility.
 
