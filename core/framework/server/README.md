@@ -136,7 +136,7 @@ DELETE /api/sessions/{session_id}/worker
 | `POST` | `/api/sessions/{session_id}/inject` | Inject input into a waiting node |
 | `POST` | `/api/sessions/{session_id}/chat` | Smart chat routing |
 | `POST` | `/api/sessions/{session_id}/stop` | Cancel a running execution |
-| `POST` | `/api/sessions/{session_id}/pause` | Alias for stop |
+| `POST` | `/api/sessions/{session_id}/pause` | Pause a running execution (resumable) |
 | `POST` | `/api/sessions/{session_id}/resume` | Resume a paused execution |
 | `POST` | `/api/sessions/{session_id}/replay` | Re-run from a checkpoint |
 | `GET` | `/api/sessions/{session_id}/goal-progress` | Evaluate goal progress |
@@ -173,6 +173,16 @@ POST /api/sessions/{session_id}/inject
 ```jsonc
 POST /api/sessions/{session_id}/stop
 { "execution_id": "..." }
+// Returns: { "stopped": true, "execution_id": "..." }
+// Terminates execution permanently. Use /trigger to start fresh.
+```
+
+**Pause:**
+```jsonc
+POST /api/sessions/{session_id}/pause
+{ "execution_id": "..." }
+// Returns: { "paused": true, "execution_id": "..." }
+// Freezes execution at current state. Use /resume to continue.
 ```
 
 **Resume:**
