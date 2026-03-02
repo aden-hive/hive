@@ -239,6 +239,7 @@ interface AgentBackendState {
   awaitingInput: boolean;
   /** The message ID of the current worker input request (for inline reply box) */
   workerInputMessageId: string | null;
+  queenBuilding: boolean;
   workerRunState: "idle" | "deploying" | "running";
   currentExecutionId: string | null;
   nodeLogs: Record<string, string[]>;
@@ -262,6 +263,7 @@ function defaultAgentState(): AgentBackendState {
     nodeSpecs: [],
     awaitingInput: false,
     workerInputMessageId: null,
+    queenBuilding: false,
     workerRunState: "idle",
     currentExecutionId: null,
     nodeLogs: {},
@@ -1064,7 +1066,7 @@ export default function Workspace() {
           if (event.type === "client_input_requested") {
             console.log('[CLIENT_INPUT_REQ] stream_id:', streamId, 'isQueen:', isQueen, 'node_id:', event.node_id, 'prompt:', (event.data?.prompt as string)?.slice(0, 80), 'agentType:', agentType);
             if (isQueen) {
-              updateAgentState(agentType, { awaitingInput: true, isTyping: false, isStreaming: false });
+              updateAgentState(agentType, { awaitingInput: true, isTyping: false, isStreaming: false, queenBuilding: false });
             } else {
               // Worker input request.
               // If the prompt is non-empty (explicit ask_user), create a visible
@@ -1182,6 +1184,15 @@ export default function Workspace() {
 
         case "tool_call_started": {
           console.log('[TOOL_PILL] tool_call_started received:', { isQueen, nodeId: event.node_id, streamId: event.stream_id, agentType, executionId: event.execution_id, toolName: event.data?.tool_name });
+
+          // Detect queen building: when the queen starts writing/editing files, she's building an agent
+          if (isQueen) {
+            const tn = (event.data?.tool_name as string) || "";
+            if (tn === "write_file" || tn === "edit_file") {
+              updateAgentState(agentType, { queenBuilding: true });
+            }
+          }
+
           if (event.node_id) {
             if (!isQueen) {
               const pendingText = agentStates[agentType]?.llmSnapshots[event.node_id];
@@ -1429,6 +1440,7 @@ export default function Workspace() {
           // Update agent state: new display name, reset graph so topology refetch triggers
           updateAgentState(agentType, {
             displayName,
+            queenBuilding: false,
             workerRunState: "idle",
             graphId: null,
             nodeSpecs: [],
@@ -1755,6 +1767,7 @@ export default function Workspace() {
               onRun={handleRun}
               onPause={handlePause}
               runState={activeAgentState?.workerRunState ?? "idle"}
+              building={activeAgentState?.queenBuilding ?? false}
             />
           </div>
         </div>
