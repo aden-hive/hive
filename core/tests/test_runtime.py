@@ -71,7 +71,8 @@ class TestDecisionRecording:
             reasoning="More formal",
         )
 
-        assert decision_id == "dec_0"
+        assert decision_id.startswith("dec_")
+        assert len(decision_id) == 36  # "dec_" (4) + 32 hex chars
         assert len(runtime.current_run.decisions) == 1
 
         decision = runtime.current_run.decisions[0]
@@ -111,6 +112,27 @@ class TestDecisionRecording:
 
         decision = runtime.current_run.decisions[0]
         assert decision.node_id == "search-node"
+
+        runtime.end_run(success=True)
+
+    def test_decision_ids_are_unique(self, tmp_path: Path):
+        """Test that decision IDs are globally unique and don't collide."""
+        runtime = Runtime(tmp_path)
+        runtime.start_run("test_goal", "Test")
+
+        decision_ids = set()
+        for i in range(100):
+            decision_id = runtime.decide(
+                intent=f"Decision {i}",
+                options=[{"id": "a", "description": "A"}],
+                chosen="a",
+                reasoning="Test",
+            )
+            assert decision_id not in decision_ids, f"Duplicate decision ID: {decision_id}"
+            decision_ids.add(decision_id)
+
+        assert len(decision_ids) == 100
+        assert all(did.startswith("dec_") for did in decision_ids)
 
         runtime.end_run(success=True)
 

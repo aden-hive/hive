@@ -207,7 +207,7 @@ class Runtime:
             )
 
         # Create decision
-        decision_id = f"dec_{len(self._current_run.decisions)}"
+        decision_id = f"dec_{uuid.uuid4().hex}"
         decision = Decision(
             id=decision_id,
             node_id=node_id or self._current_node,
