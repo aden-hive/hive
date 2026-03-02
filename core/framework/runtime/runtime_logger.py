@@ -174,29 +174,27 @@ class RuntimeLogger:
         """
         needs_attention = not success
         attention_reasons: list[str] = []
-        if not success and error:
-            attention_reasons.append(f"Node {node_id} failed: {error}")
-
+        
         # Enhanced attention flags
         if retry_count > 3:
             needs_attention = True
-            attention_reasons.append(f"Excessive retries: {retry_count}")
+            attention_reasons.append("high_retry_count")
 
         if escalate_count > 2:
             needs_attention = True
-            attention_reasons.append(f"Excessive escalations: {escalate_count}")
+            attention_reasons.append("escalation_pattern")
 
         if latency_ms > 60000:  # > 1 minute
             needs_attention = True
-            attention_reasons.append(f"High latency: {latency_ms}ms")
+            attention_reasons.append("high_latency")
 
         if tokens_used > 100000:  # High token usage
             needs_attention = True
-            attention_reasons.append(f"High token usage: {tokens_used}")
+            attention_reasons.append("high_token_usage")
 
         if total_steps > 20:  # Many iterations
             needs_attention = True
-            attention_reasons.append(f"Many iterations: {total_steps}")
+            attention_reasons.append("excessive_steps")
 
         # OTel / trace context for L2 correlation
         ctx = get_trace_context()
@@ -285,9 +283,10 @@ class RuntimeLogger:
             total_output = sum(nd.output_tokens for nd in node_details)
 
             needs_attention = any(nd.needs_attention for nd in node_details)
-            attention_reasons: list[str] = []
+            attention_reason_set: set[str] = set()
             for nd in node_details:
-                attention_reasons.extend(nd.attention_reasons)
+                attention_reason_set.update(nd.attention_reasons)
+            attention_reasons = sorted(attention_reason_set)
 
             # OTel / trace context for L1 correlation
             ctx = get_trace_context()
