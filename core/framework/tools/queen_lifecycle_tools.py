@@ -672,6 +672,76 @@ def register_queen_lifecycle_tools(
     )
     tools_registered += 1
 
+    # --- list_credentials -----------------------------------------------------
+
+    async def list_credentials(credential_id: str = "") -> str:
+        """List all authorized credentials in the local encrypted store.
+
+        Returns credential IDs, aliases, status, and identity metadata.
+        Never returns secret values. Optionally filter by credential_id.
+        """
+        try:
+            from framework.credentials.local.registry import LocalCredentialRegistry
+
+            registry = LocalCredentialRegistry.default()
+            accounts = registry.list_accounts(
+                credential_id=credential_id or None,
+            )
+
+            credentials = []
+            for info in accounts:
+                entry: dict[str, Any] = {
+                    "credential_id": info.credential_id,
+                    "alias": info.alias,
+                    "storage_id": info.storage_id,
+                    "status": info.status,
+                    "created_at": info.created_at.isoformat() if info.created_at else None,
+                    "last_validated": (
+                        info.last_validated.isoformat() if info.last_validated else None
+                    ),
+                }
+                identity = info.identity.to_dict()
+                if identity:
+                    entry["identity"] = identity
+                credentials.append(entry)
+
+            return json.dumps(
+                {
+                    "count": len(credentials),
+                    "credentials": credentials,
+                    "location": "~/.hive/credentials",
+                },
+                default=str,
+            )
+        except Exception as e:
+            return json.dumps({"error": f"Failed to list credentials: {e}"})
+
+    _list_creds_tool = Tool(
+        name="list_credentials",
+        description=(
+            "List all authorized credentials in the local store. Returns credential IDs, "
+            "aliases, status (active/failed/unknown), and identity metadata — never secret "
+            "values. Optionally filter by credential_id (e.g. 'brave_search')."
+        ),
+        parameters={
+            "type": "object",
+            "properties": {
+                "credential_id": {
+                    "type": "string",
+                    "description": (
+                        "Filter to a specific credential type (e.g. 'brave_search'). "
+                        "Omit to list all credentials."
+                    ),
+                },
+            },
+            "required": [],
+        },
+    )
+    registry.register(
+        "list_credentials", _list_creds_tool, lambda inputs: list_credentials(**inputs)
+    )
+    tools_registered += 1
+
     # --- load_built_agent (server context only) --------------------------------
 
     if session_manager is not None and manager_session_id is not None:

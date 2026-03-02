@@ -494,6 +494,9 @@ if ($NodeAvailable) {
             $null = & npm install --no-fund --no-audit 2>&1
             if ($LASTEXITCODE -eq 0) {
                 Write-Ok "ok"
+                # Clean stale tsbuildinfo cache — tsc -b incremental builds fail
+                # silently when these are out of sync with source files
+                Get-ChildItem -Path $frontendDir -Filter "tsconfig*.tsbuildinfo" -ErrorAction SilentlyContinue | Remove-Item -Force
                 Write-Host "  Building frontend... " -NoNewline
                 $null = & npm run build 2>&1
                 if ($LASTEXITCODE -eq 0) {

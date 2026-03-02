@@ -286,6 +286,9 @@ if [ "$NODE_AVAILABLE" = true ]; then
         fi
 
         if [ "$NODE_AVAILABLE" = true ]; then
+            # Clean stale tsbuildinfo cache — tsc -b incremental builds fail
+            # silently when these are out of sync with source files
+            rm -f "$FRONTEND_DIR"/tsconfig*.tsbuildinfo
             echo -n "  Building frontend... "
             if (cd "$FRONTEND_DIR" && npm run build) > /dev/null 2>&1; then
                 echo -e "${GREEN}ok${NC}"
