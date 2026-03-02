@@ -1,30 +1,19 @@
 ---
 name: Feature Request
-about: Suggest a new feature or enhancement
-title: "[Feature]: "
+about: Propose an enhancement for this fork
+title: '[Feature]: '
 labels: enhancement
 assignees: ''
-
 ---
 
 ## Problem Statement
-
-A clear and concise description of what problem this feature would solve.
-
-Ex. I'm always frustrated when [...]
+Is your feature request related to a problem? Please describe.
 
 ## Proposed Solution
-
 A clear and concise description of what you want to happen.
 
-## Alternatives Considered
+## Use Cases
+Describe how this feature would be used in practice.
 
-A description of any alternative solutions or features you've considered.
-
-## Additional Context
-
-Add any other context, mockups, or screenshots about the feature request here.
-
-## Implementation Ideas
-
-If you have ideas about how this could be implemented, share them here.
+## Alignment with Fork Direction
+How does this feature benefit the fork's specific mission (Production Safety / Performance)?
