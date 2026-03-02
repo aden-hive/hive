@@ -1,0 +1,9 @@
+{
+  "cycles_run": 2,
+  "issues_scanned": 10,
+  "prs_submitted": 2,
+  "prs_merged": 2,
+  "ci_pass_rate_first_try": 1.0,
+  "avg_time_to_green_ci": 0,
+  "recurring_failure_patterns": []
+}
