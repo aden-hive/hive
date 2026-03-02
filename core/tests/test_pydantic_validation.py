@@ -14,12 +14,14 @@ from framework.graph.validator import OutputValidator, ValidationResult
 # Test Pydantic models
 class SimpleOutput(BaseModel):
     """Simple test model."""
+
     message: str
     count: int
 
 
 class ComplexOutput(BaseModel):
     """Complex test model with nested types."""
+
     query: str
     results: list[str] = Field(min_length=1)
     confidence: float = Field(ge=0, le=1)
@@ -28,6 +30,7 @@ class ComplexOutput(BaseModel):
 
 class TicketAnalysis(BaseModel):
     """Realistic use case model."""
+
     category: str
     priority: int = Field(ge=1, le=5)
     summary: str = Field(min_length=10)
@@ -43,7 +46,7 @@ class TestNodeSpecOutputModel:
             id="test_node",
             name="Test Node",
             description="A test node",
-            node_type="llm_generate",
+            node_type="event_loop",
             output_model=SimpleOutput,
         )
 
@@ -293,7 +296,7 @@ class TestJSONSchemaGeneration:
                 "name": TicketAnalysis.__name__,
                 "schema": schema,
                 "strict": True,
-            }
+            },
         }
 
         # Should be valid structure
@@ -397,7 +400,7 @@ class TestPydanticValidationIntegrationExtended:
             id="full_test",
             name="Full Validation Test",
             description="Tests all validation options",
-            node_type="llm_generate",
+            node_type="event_loop",
             output_keys=["category", "priority", "summary", "suggested_action"],
             output_model=TicketAnalysis,
             max_validation_retries=3,
@@ -426,10 +429,7 @@ class TestPydanticValidationIntegrationExtended:
 
     def test_validation_result_error_property(self):
         """ValidationResult.error should combine all errors."""
-        result = ValidationResult(
-            success=False,
-            errors=["error1", "error2", "error3"]
-        )
+        result = ValidationResult(success=False, errors=["error1", "error2", "error3"])
 
         error_str = result.error
 

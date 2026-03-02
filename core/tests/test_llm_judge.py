@@ -35,22 +35,22 @@ class MockLLMProvider(LLMProvider):
         max_tokens=1024,
         response_format=None,
         json_mode=False,
+        max_retries=None,
     ):
-        self.complete_calls.append({
-            "messages": messages,
-            "system": system,
-            "max_tokens": max_tokens,
-            "json_mode": json_mode,
-        })
+        self.complete_calls.append(
+            {
+                "messages": messages,
+                "system": system,
+                "max_tokens": max_tokens,
+                "json_mode": json_mode,
+            }
+        )
         return LLMResponse(
             content=self.response_content,
             model="mock-model",
             input_tokens=100,
             output_tokens=50,
         )
-
-    def complete_with_tools(self, messages, system, tools, tool_executor, max_iterations=10):
-        raise NotImplementedError("Tool use not needed for judge tests")
 
 
 # ============================================================================
@@ -136,9 +136,7 @@ class TestLLMJudgeResponseParsing:
 
     def test_parse_plain_json(self):
         """Test parsing plain JSON response."""
-        provider = MockLLMProvider(
-            response_content='{"passes": true, "explanation": "OK"}'
-        )
+        provider = MockLLMProvider(response_content='{"passes": true, "explanation": "OK"}')
         judge = LLMJudge(llm_provider=provider)
 
         result = judge.evaluate(
@@ -204,9 +202,7 @@ class TestLLMJudgeResponseParsing:
     def test_passes_coerced_to_bool(self):
         """Test that passes value is coerced to boolean."""
         # Test truthy string
-        provider = MockLLMProvider(
-            response_content='{"passes": "yes", "explanation": "OK"}'
-        )
+        provider = MockLLMProvider(response_content='{"passes": "yes", "explanation": "OK"}')
         judge = LLMJudge(llm_provider=provider)
 
         result = judge.evaluate(
@@ -394,12 +390,8 @@ class TestLLMJudgeIntegrationPatterns:
         judge1 = LLMJudge(llm_provider=shared_provider)
         judge2 = LLMJudge(llm_provider=shared_provider)
 
-        judge1.evaluate(
-            constraint="c1", source_document="d1", summary="s1", criteria="cr1"
-        )
-        judge2.evaluate(
-            constraint="c2", source_document="d2", summary="s2", criteria="cr2"
-        )
+        judge1.evaluate(constraint="c1", source_document="d1", summary="s1", criteria="cr1")
+        judge2.evaluate(constraint="c2", source_document="d2", summary="s2", criteria="cr2")
 
         # Both judges should use the same provider
         assert len(shared_provider.complete_calls) == 2

@@ -1,7 +1,8 @@
-"""Tests for web_search tool (FastMCP)."""
-import pytest
+"""Tests for web_search tool with multi-provider support (FastMCP)."""
 
+import pytest
 from fastmcp import FastMCP
+
 from aden_tools.tools.web_search_tool import register_tools
 
 
@@ -15,14 +16,16 @@ def web_search_fn(mcp: FastMCP):
 class TestWebSearchTool:
     """Tests for web_search tool."""
 
-    def test_search_missing_api_key(self, web_search_fn, monkeypatch):
-        """Search without API key returns helpful error."""
+    def test_no_credentials_returns_error(self, web_search_fn, monkeypatch):
+        """Search without any credentials returns helpful error."""
         monkeypatch.delenv("BRAVE_SEARCH_API_KEY", raising=False)
+        monkeypatch.delenv("GOOGLE_API_KEY", raising=False)
+        monkeypatch.delenv("GOOGLE_CSE_ID", raising=False)
 
         result = web_search_fn(query="test query")
 
         assert "error" in result
-        assert "BRAVE_SEARCH_API_KEY" in result["error"]
+        assert "No search credentials configured" in result["error"]
         assert "help" in result
 
     def test_empty_query_returns_error(self, web_search_fn, monkeypatch):
@@ -42,16 +45,103 @@ class TestWebSearchTool:
 
         assert "error" in result
 
-    def test_num_results_clamped_to_valid_range(self, web_search_fn, monkeypatch):
-        """num_results outside 1-20 is clamped (not error)."""
-        monkeypatch.setenv("BRAVE_SEARCH_API_KEY", "test-key")
 
-        # Test that the function handles out-of-range values gracefully
-        # The implementation clamps values, so we just verify it doesn't crash
-        # (actual API call would fail with invalid key, but that's expected)
-        result = web_search_fn(query="test", num_results=0)
-        # Should either clamp or error - both are acceptable
+class TestBraveProvider:
+    """Tests for Brave Search provider."""
+
+    def test_brave_missing_api_key(self, web_search_fn, monkeypatch):
+        """Brave provider without API key returns error."""
+        monkeypatch.delenv("BRAVE_SEARCH_API_KEY", raising=False)
+        monkeypatch.delenv("GOOGLE_API_KEY", raising=False)
+
+        result = web_search_fn(query="test", provider="brave")
+
+        assert "error" in result
+        assert "Brave credentials not configured" in result["error"]
+
+    def test_brave_explicit_provider(self, web_search_fn, monkeypatch):
+        """Brave provider can be explicitly selected."""
+        monkeypatch.setenv("BRAVE_SEARCH_API_KEY", "test-key")
+        monkeypatch.delenv("GOOGLE_API_KEY", raising=False)
+
+        result = web_search_fn(query="test", provider="brave")
         assert isinstance(result, dict)
 
-        result = web_search_fn(query="test", num_results=100)
+
+class TestGoogleProvider:
+    """Tests for Google Custom Search provider."""
+
+    def test_google_missing_api_key(self, web_search_fn, monkeypatch):
+        """Google provider without API key returns error."""
+        monkeypatch.delenv("GOOGLE_API_KEY", raising=False)
+        monkeypatch.delenv("GOOGLE_CSE_ID", raising=False)
+
+        result = web_search_fn(query="test", provider="google")
+
+        assert "error" in result
+        assert "Google credentials not configured" in result["error"]
+
+    def test_google_missing_cse_id(self, web_search_fn, monkeypatch):
+        """Google provider with API key but missing CSE ID returns error."""
+        monkeypatch.setenv("GOOGLE_API_KEY", "test-key")
+        monkeypatch.delenv("GOOGLE_CSE_ID", raising=False)
+
+        result = web_search_fn(query="test", provider="google")
+
+        assert "error" in result
+        assert "Google credentials not configured" in result["error"]
+
+    def test_google_explicit_provider(self, web_search_fn, monkeypatch):
+        """Google provider can be explicitly selected."""
+        monkeypatch.setenv("GOOGLE_API_KEY", "test-key")
+        monkeypatch.setenv("GOOGLE_CSE_ID", "test-cse-id")
+
+        result = web_search_fn(query="test", provider="google")
+        assert isinstance(result, dict)
+
+
+class TestAutoProvider:
+    """Tests for auto provider selection."""
+
+    def test_auto_prefers_brave_for_backward_compatibility(self, web_search_fn, monkeypatch):
+        """Auto mode uses Brave first for backward compatibility."""
+        monkeypatch.setenv("GOOGLE_API_KEY", "test-google-key")
+        monkeypatch.setenv("GOOGLE_CSE_ID", "test-cse-id")
+        monkeypatch.setenv("BRAVE_SEARCH_API_KEY", "test-brave-key")
+
+        result = web_search_fn(query="test", provider="auto")
+        assert isinstance(result, dict)
+
+    def test_auto_falls_back_to_google(self, web_search_fn, monkeypatch):
+        """Auto mode falls back to Google when Brave not available."""
+        monkeypatch.setenv("GOOGLE_API_KEY", "test-google-key")
+        monkeypatch.setenv("GOOGLE_CSE_ID", "test-cse-id")
+        monkeypatch.delenv("BRAVE_SEARCH_API_KEY", raising=False)
+
+        result = web_search_fn(query="test", provider="auto")
+        assert isinstance(result, dict)
+
+    def test_default_provider_is_auto(self, web_search_fn, monkeypatch):
+        """Default provider is auto."""
+        monkeypatch.setenv("BRAVE_SEARCH_API_KEY", "test-key")
+
+        result = web_search_fn(query="test")
+        assert isinstance(result, dict)
+
+
+class TestParameters:
+    """Tests for tool parameters."""
+
+    def test_custom_language_and_country(self, web_search_fn, monkeypatch):
+        """Custom language and country parameters are accepted."""
+        monkeypatch.setenv("BRAVE_SEARCH_API_KEY", "test-key")
+
+        result = web_search_fn(query="test", language="id", country="id")
+        assert isinstance(result, dict)
+
+    def test_num_results_parameter(self, web_search_fn, monkeypatch):
+        """num_results parameter is accepted."""
+        monkeypatch.setenv("BRAVE_SEARCH_API_KEY", "test-key")
+
+        result = web_search_fn(query="test", num_results=5)
         assert isinstance(result, dict)

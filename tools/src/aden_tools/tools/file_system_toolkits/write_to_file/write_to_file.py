@@ -1,12 +1,22 @@
 import os
+
 from mcp.server.fastmcp import FastMCP
+
 from ..security import get_secure_path
+
 
 def register_tools(mcp: FastMCP) -> None:
     """Register file write tools with the MCP server."""
 
     @mcp.tool()
-    def write_to_file(path: str, content: str, workspace_id: str, agent_id: str, session_id: str, append: bool = False) -> dict:
+    def write_to_file(
+        path: str,
+        content: str,
+        workspace_id: str,
+        agent_id: str,
+        session_id: str,
+        append: bool = False,
+    ) -> dict:
         """
         Purpose
             Create a new file or append content to an existing file.
@@ -45,7 +55,7 @@ def register_tools(mcp: FastMCP) -> None:
                 "success": True,
                 "path": path,
                 "mode": "appended" if append else "written",
-                "bytes_written": len(content.encode("utf-8"))
+                "bytes_written": len(content.encode("utf-8")),
             }
         except Exception as e:
             return {"error": f"Failed to write to file: {str(e)}"}

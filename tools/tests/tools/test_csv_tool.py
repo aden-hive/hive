@@ -1,11 +1,15 @@
 """Tests for csv_tool - Read and manipulate CSV files."""
-import pytest
+
+import importlib.util
 from pathlib import Path
 from unittest.mock import patch
 
+import pytest
 from fastmcp import FastMCP
+
 from aden_tools.tools.csv_tool.csv_tool import register_tools
 
+duckdb_available = importlib.util.find_spec("duckdb") is not None
 
 # Test IDs for sandbox
 TEST_WORKSPACE_ID = "test-workspace"
@@ -153,6 +157,49 @@ class TestCsvRead:
         # First row should be id=50
         assert result["rows"][0] == {"id": "50", "value": "500"}
 
+    def test_negative_limit(self, csv_tool_fn, basic_csv, tmp_path):
+        """Return error for negative limit."""
+        with patch("aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR", str(tmp_path)):
+            result = csv_tool_fn(
+                path="basic.csv",
+                workspace_id=TEST_WORKSPACE_ID,
+                agent_id=TEST_AGENT_ID,
+                session_id=TEST_SESSION_ID,
+                limit=-1,
+            )
+
+        assert "error" in result
+        assert "non-negative" in result["error"].lower()
+
+    def test_negative_offset(self, csv_tool_fn, basic_csv, tmp_path):
+        """Return error for negative offset."""
+        with patch("aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR", str(tmp_path)):
+            result = csv_tool_fn(
+                path="basic.csv",
+                workspace_id=TEST_WORKSPACE_ID,
+                agent_id=TEST_AGENT_ID,
+                session_id=TEST_SESSION_ID,
+                offset=-1,
+            )
+
+        assert "error" in result
+        assert "non-negative" in result["error"].lower()
+
+    def test_negative_limit_and_offset(self, csv_tool_fn, basic_csv, tmp_path):
+        """Return error for both negative limit and offset."""
+        with patch("aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR", str(tmp_path)):
+            result = csv_tool_fn(
+                path="basic.csv",
+                workspace_id=TEST_WORKSPACE_ID,
+                agent_id=TEST_AGENT_ID,
+                session_id=TEST_SESSION_ID,
+                limit=-5,
+                offset=-10,
+            )
+
+        assert "error" in result
+        assert "non-negative" in result["error"].lower()
+
     def test_file_not_found(self, csv_tool_fn, session_dir, tmp_path):
         """Return error for non-existent file."""
         with patch("aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR", str(tmp_path)):
@@ -269,7 +316,9 @@ class TestCsvRead:
     def test_quoted_fields(self, csv_tool_fn, session_dir, tmp_path):
         """Read CSV with quoted fields containing commas."""
         csv_file = session_dir / "quoted.csv"
-        csv_file.write_text('name,address,note\n"Smith, John","123 Main St, Apt 4","Hello, world"\n')
+        csv_file.write_text(
+            'name,address,note\n"Smith, John","123 Main St, Apt 4","Hello, world"\n'
+        )
 
         with patch("aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR", str(tmp_path)):
             result = csv_tool_fn(
@@ -439,6 +488,33 @@ class TestCsvWrite:
         content = (session_dir / "unicode.csv").read_text(encoding="utf-8")
         assert "太郎" in content
         assert "東京" in content
+
+    def test_write_no_parent_directory(self, csv_tools, session_dir, tmp_path):
+        """Write CSV to root without parent directory (fixes #1843)."""
+        with patch("aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR", str(tmp_path)):
+            result = csv_tools["csv_write"](
+                path="data.csv",
+                workspace_id=TEST_WORKSPACE_ID,
+                agent_id=TEST_AGENT_ID,
+                session_id=TEST_SESSION_ID,
+                columns=["id", "value"],
+                rows=[
+                    {"id": "1", "value": "test1"},
+                    {"id": "2", "value": "test2"},
+                ],
+            )
+
+        assert result["success"] is True
+        assert result["rows_written"] == 2
+
+        # Verify file was created at session root
+        csv_file = session_dir / "data.csv"
+        assert csv_file.exists()
+
+        content = csv_file.read_text()
+        assert "id,value" in content
+        assert "1,test1" in content
+        assert "2,test2" in content
 
 
 class TestCsvAppend:
@@ -617,6 +693,7 @@ class TestCsvInfo:
         assert ".csv" in result["error"].lower()
 
 
+@pytest.mark.skipif(not duckdb_available, reason="duckdb not installed")
 class TestCsvSql:
     """Tests for csv_sql function (requires duckdb)."""
 
@@ -675,7 +752,10 @@ class TestCsvSql:
                 workspace_id=TEST_WORKSPACE_ID,
                 agent_id=TEST_AGENT_ID,
                 session_id=TEST_SESSION_ID,
-                query="SELECT category, COUNT(*) as count, AVG(price) as avg_price FROM data GROUP BY category",
+                query=(
+                    "SELECT category, COUNT(*) as count, "
+                    "AVG(price) as avg_price FROM data GROUP BY category"
+                ),
             )
 
         assert result["success"] is True

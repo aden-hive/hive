@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "agent-builder": {
+      "command": "uv",
+      "args": ["run", "--directory", "core", "-m", "framework.mcp.agent_builder_server"],
+      "disabled": false
+    }
+  }
+}

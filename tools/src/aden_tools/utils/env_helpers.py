@@ -1,17 +1,17 @@
 """
 Environment variable helpers for Aden Tools.
 """
+
 from __future__ import annotations
 
 import os
-from typing import Optional
 
 
 def get_env_var(
     name: str,
-    default: Optional[str] = None,
+    default: str | None = None,
     required: bool = False,
-) -> Optional[str]:
+) -> str | None:
     """
     Get an environment variable with optional default and required validation.
 

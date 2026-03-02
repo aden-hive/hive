@@ -99,10 +99,10 @@ async def example_4_custom_agent_with_mcp_tools():
     """Example 4: Build custom agent that uses MCP tools"""
     print("\n=== Example 4: Custom Agent with MCP Tools ===\n")
 
-    from framework.builder.workflow import WorkflowBuilder
+    from framework.builder.workflow import GraphBuilder
 
     # Create a workflow builder
-    builder = WorkflowBuilder()
+    builder = GraphBuilder()
 
     # Define goal
     builder.set_goal(
@@ -122,7 +122,7 @@ async def example_4_custom_agent_with_mcp_tools():
         node_id="web-searcher",
         name="Web Search",
         description="Search the web for information",
-        node_type="llm_tool_use",
+        node_type="event_loop",
         system_prompt="Search for {query} and return the top results. Use the web_search tool.",
         tools=["web_search"],  # This tool comes from tools MCP server
         input_keys=["query"],
@@ -133,7 +133,7 @@ async def example_4_custom_agent_with_mcp_tools():
         node_id="summarizer",
         name="Summarize Results",
         description="Summarize the search results",
-        node_type="llm_generate",
+        node_type="event_loop",
         system_prompt="Summarize the following search results in 2-3 sentences: {search_results}",
         input_keys=["search_results"],
         output_keys=["summary"],

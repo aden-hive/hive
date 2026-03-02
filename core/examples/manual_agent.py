@@ -4,32 +4,45 @@ Minimal Manual Agent Example
 This example demonstrates how to build and run an agent programmatically
 without using the Claude Code CLI or external LLM APIs.
 
-It uses 'function' nodes to define logic in pure Python, making it perfect
-for understanding the core runtime loop:
+It uses custom NodeProtocol implementations to define logic in pure Python,
+making it perfect for understanding the core runtime loop:
 Setup -> Graph definition -> Execution -> Result
 
 Run with:
-    PYTHONPATH=core python core/examples/manual_agent.py
+    uv run python core/examples/manual_agent.py
 """
 
 import asyncio
 
 from framework.graph import EdgeCondition, EdgeSpec, Goal, GraphSpec, NodeSpec
 from framework.graph.executor import GraphExecutor
+from framework.graph.node import NodeContext, NodeProtocol, NodeResult
 from framework.runtime.core import Runtime
 
 
-# 1. Define Node Logic (Pure Python Functions)
-def greet(name: str) -> str:
+# 1. Define Node Logic (Custom NodeProtocol implementations)
+class GreeterNode(NodeProtocol):
     """Generate a simple greeting."""
-    return f"Hello, {name}!"
 
-def uppercase(greeting: str) -> str:
+    async def execute(self, ctx: NodeContext) -> NodeResult:
+        name = ctx.input_data.get("name", "World")
+        greeting = f"Hello, {name}!"
+        ctx.memory.write("greeting", greeting)
+        return NodeResult(success=True, output={"greeting": greeting})
+
+
+class UppercaserNode(NodeProtocol):
     """Convert text to uppercase."""
-    return greeting.upper()
+
+    async def execute(self, ctx: NodeContext) -> NodeResult:
+        greeting = ctx.input_data.get("greeting") or ctx.memory.read("greeting") or ""
+        result = greeting.upper()
+        ctx.memory.write("final_greeting", result)
+        return NodeResult(success=True, output={"final_greeting": result})
+
 
 async def main():
-    print("🚀 Setting up Manual Agent...")
+    print("Setting up Manual Agent...")
 
     # 2. Define the Goal
     # Every agent needs a goal with success criteria
@@ -42,9 +55,9 @@ async def main():
                 "id": "greeting_generated",
                 "description": "Greeting produced",
                 "metric": "custom",
-                "target": "any"
+                "target": "any",
             }
-        ]
+        ],
     )
 
     # 3. Define Nodes
@@ -53,20 +66,18 @@ async def main():
         id="greeter",
         name="Greeter",
         description="Generates a simple greeting",
-        node_type="function",
-        function="greet",  # Matches the registered function name
+        node_type="event_loop",
         input_keys=["name"],
-        output_keys=["greeting"]
+        output_keys=["greeting"],
     )
 
     node2 = NodeSpec(
         id="uppercaser",
         name="Uppercaser",
         description="Converts greeting to uppercase",
-        node_type="function",
-        function="uppercase",
+        node_type="event_loop",
         input_keys=["greeting"],
-        output_keys=["final_greeting"]
+        output_keys=["final_greeting"],
     )
 
     # 4. Define Edges
@@ -75,7 +86,7 @@ async def main():
         id="greet-to-upper",
         source="greeter",
         target="uppercaser",
-        condition=EdgeCondition.ON_SUCCESS
+        condition=EdgeCondition.ON_SUCCESS,
     )
 
     # 5. Create Graph
@@ -92,30 +103,28 @@ async def main():
     # 6. Initialize Runtime & Executor
     # Runtime handles state/memory; Executor runs the graph
     from pathlib import Path
+
     runtime = Runtime(storage_path=Path("./agent_logs"))
     executor = GraphExecutor(runtime=runtime)
 
-    # 7. Register Function Implementations
-    # Connect string names in NodeSpecs to actual Python functions
-    executor.register_function("greeter", greet)
-    executor.register_function("uppercaser", uppercase)
+    # 7. Register Node Implementations
+    # Connect node IDs in the graph to actual Python implementations
+    executor.register_node("greeter", GreeterNode())
+    executor.register_node("uppercaser", UppercaserNode())
 
     # 8. Execute Agent
-    print("▶ Executing agent with input: name='Alice'...")
+    print("Executing agent with input: name='Alice'...")
 
-    result = await executor.execute(
-        graph=graph,
-        goal=goal,
-        input_data={"name": "Alice"}
-    )
+    result = await executor.execute(graph=graph, goal=goal, input_data={"name": "Alice"})
 
     # 9. Verify Results
     if result.success:
-        print("\n✅ Success!")
+        print("\nSuccess!")
         print(f"Path taken: {' -> '.join(result.path)}")
         print(f"Final output: {result.output.get('final_greeting')}")
     else:
-        print(f"\n❌ Failed: {result.error}")
+        print(f"\nFailed: {result.error}")
+
 
 if __name__ == "__main__":
     # Optional: Enable logging to see internal decision flow

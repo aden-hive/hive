@@ -1,7 +1,8 @@
 """Tests for example_tool - A simple text processing tool."""
-import pytest
 
+import pytest
 from fastmcp import FastMCP
+
 from aden_tools.tools.example_tool.example_tool import register_tools
 
 
