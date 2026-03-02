@@ -19,7 +19,15 @@ from framework.runtime.runtime_log_schemas import (
     ToolCallLog,
 )
 from framework.runtime.runtime_log_store import RuntimeLogStore
-from framework.runtime.runtime_logger import RuntimeLogger
+from framework.runtime.runtime_logger import (
+    REASON_EXCESSIVE_ESCALATIONS,
+    REASON_EXCESSIVE_STEPS,
+    REASON_HIGH_LATENCY,
+    REASON_HIGH_RETRY_COUNT,
+    REASON_HIGH_TOKEN_USAGE,
+    REASON_NODE_FAILED,
+    RuntimeLogger,
+)
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -706,9 +714,7 @@ class TestRuntimeLogger:
         summary = await store.load_summary(run_id)
         assert summary is not None
         assert summary.needs_attention is True
-        assert any(
-            "failed" in r.lower() or "escalat" in r.lower() for r in summary.attention_reasons
-        )
+        assert any(r in (REASON_NODE_FAILED, REASON_EXCESSIVE_ESCALATIONS) for r in summary.attention_reasons)
 
     @pytest.mark.asyncio
     async def test_ensure_node_logged_no_op_if_already_logged(self, tmp_path: Path):
@@ -984,7 +990,7 @@ class TestRuntimeLogger:
         assert loaded is not None
         node = loaded.nodes[0]
         assert node.needs_attention is True
-        assert any("Excessive retries" in reason for reason in node.attention_reasons)
+        assert REASON_HIGH_RETRY_COUNT in node.attention_reasons
 
     @pytest.mark.asyncio
     async def test_attention_flags_high_latency(self, tmp_path: Path):
@@ -1007,7 +1013,7 @@ class TestRuntimeLogger:
         assert loaded is not None
         node = loaded.nodes[0]
         assert node.needs_attention is True
-        assert any("High latency" in reason for reason in node.attention_reasons)
+        assert REASON_HIGH_LATENCY in node.attention_reasons
 
     @pytest.mark.asyncio
     async def test_attention_flags_high_token_usage(self, tmp_path: Path):
@@ -1030,7 +1036,7 @@ class TestRuntimeLogger:
         assert loaded is not None
         node = loaded.nodes[0]
         assert node.needs_attention is True
-        assert any("High token usage" in reason for reason in node.attention_reasons)
+        assert REASON_HIGH_TOKEN_USAGE in node.attention_reasons
 
     @pytest.mark.asyncio
     async def test_attention_flags_many_iterations(self, tmp_path: Path):
@@ -1053,7 +1059,7 @@ class TestRuntimeLogger:
         assert loaded is not None
         node = loaded.nodes[0]
         assert node.needs_attention is True
-        assert any("Many iterations" in reason for reason in node.attention_reasons)
+        assert REASON_EXCESSIVE_STEPS in node.attention_reasons
 
     @pytest.mark.asyncio
     async def test_guard_failure_exit_status(self, tmp_path: Path):
@@ -1078,3 +1084,79 @@ class TestRuntimeLogger:
         node = loaded.nodes[0]
         assert node.exit_status == "guard_failure"
         assert node.success is False
+
+    @pytest.mark.asyncio
+    async def test_end_run_deduplicates_attention_reasons(self, tmp_path: Path):
+        """L1 summary deduplicates attention reason codes across multiple nodes."""
+        store = RuntimeLogStore(tmp_path / "logs")
+        rt_logger = RuntimeLogger(store=store, agent_id="test-agent")
+        run_id = rt_logger.start_run("goal-1")
+
+        # Two nodes both trigger high_retry_count and node-2 also triggers high_latency
+        rt_logger.log_node_complete(
+            node_id="node-1",
+            node_name="Retry Node A",
+            node_type="event_loop",
+            success=True,
+            retry_count=5,  # triggers REASON_HIGH_RETRY_COUNT
+        )
+        rt_logger.log_node_complete(
+            node_id="node-2",
+            node_name="Retry Node B",
+            node_type="event_loop",
+            success=True,
+            retry_count=4,  # also triggers REASON_HIGH_RETRY_COUNT
+            latency_ms=65000,  # also triggers REASON_HIGH_LATENCY
+        )
+
+        await rt_logger.end_run(
+            status="success",
+            duration_ms=70000,
+            node_path=["node-1", "node-2"],
+        )
+
+        summary = await store.load_summary(run_id)
+        assert summary is not None
+        # high_retry_count appeared twice across nodes — must appear exactly once in L1
+        assert summary.attention_reasons.count(REASON_HIGH_RETRY_COUNT) == 1
+        assert REASON_HIGH_LATENCY in summary.attention_reasons
+        # List must be sorted
+        assert summary.attention_reasons == sorted(summary.attention_reasons)
+
+    @pytest.mark.asyncio
+    async def test_attention_reason_codes_are_stable_strings(self, tmp_path: Path):
+        """Emitted attention reasons are the documented stable codes, not free-text."""
+        from framework.runtime import runtime_logger as rl_module
+
+        store = RuntimeLogStore(tmp_path / "logs")
+        rt_logger = RuntimeLogger(store=store, agent_id="test-agent")
+        rt_logger.start_run("goal-1")
+
+        # Trigger every attention flag
+        rt_logger.log_node_complete(
+            node_id="node-1",
+            node_name="All Flags",
+            node_type="event_loop",
+            success=False,
+            error="something went wrong",
+            retry_count=5,
+            escalate_count=3,
+            latency_ms=65000,
+            tokens_used=150000,
+            total_steps=25,
+        )
+
+        details = store.read_node_details_sync(rt_logger._run_id)
+        reasons = set(details[0].attention_reasons)
+
+        expected_codes = {
+            rl_module.REASON_NODE_FAILED,
+            rl_module.REASON_HIGH_RETRY_COUNT,
+            rl_module.REASON_EXCESSIVE_ESCALATIONS,
+            rl_module.REASON_HIGH_LATENCY,
+            rl_module.REASON_HIGH_TOKEN_USAGE,
+            rl_module.REASON_EXCESSIVE_STEPS,
+        }
+        assert reasons == expected_codes, (
+            f"Expected stable codes {expected_codes}, got {reasons}"
+        )

@@ -37,6 +37,20 @@ from framework.runtime.runtime_log_store import RuntimeLogStore
 
 logger = logging.getLogger(__name__)
 
+# ---------------------------------------------------------------------------
+# Stable attention reason codes
+#
+# Use these constants instead of free-text strings so that downstream tooling
+# (debuggers, aggregators, dashboards) can match on stable identifiers rather
+# than parsing human-readable messages.
+# ---------------------------------------------------------------------------
+REASON_NODE_FAILED = "node_failed"
+REASON_HIGH_RETRY_COUNT = "high_retry_count"
+REASON_EXCESSIVE_ESCALATIONS = "excessive_escalations"
+REASON_HIGH_LATENCY = "high_latency"
+REASON_HIGH_TOKEN_USAGE = "high_token_usage"
+REASON_EXCESSIVE_STEPS = "excessive_steps"
+
 
 class RuntimeLogger:
     """Captures runtime data during graph execution.
@@ -175,28 +189,28 @@ class RuntimeLogger:
         needs_attention = not success
         attention_reasons: list[str] = []
         if not success and error:
-            attention_reasons.append(f"Node {node_id} failed: {error}")
+            attention_reasons.append(REASON_NODE_FAILED)
 
         # Enhanced attention flags
         if retry_count > 3:
             needs_attention = True
-            attention_reasons.append(f"Excessive retries: {retry_count}")
+            attention_reasons.append(REASON_HIGH_RETRY_COUNT)
 
         if escalate_count > 2:
             needs_attention = True
-            attention_reasons.append(f"Excessive escalations: {escalate_count}")
+            attention_reasons.append(REASON_EXCESSIVE_ESCALATIONS)
 
         if latency_ms > 60000:  # > 1 minute
             needs_attention = True
-            attention_reasons.append(f"High latency: {latency_ms}ms")
+            attention_reasons.append(REASON_HIGH_LATENCY)
 
         if tokens_used > 100000:  # High token usage
             needs_attention = True
-            attention_reasons.append(f"High token usage: {tokens_used}")
+            attention_reasons.append(REASON_HIGH_TOKEN_USAGE)
 
         if total_steps > 20:  # Many iterations
             needs_attention = True
-            attention_reasons.append(f"Many iterations: {total_steps}")
+            attention_reasons.append(REASON_EXCESSIVE_STEPS)
 
         # OTel / trace context for L2 correlation
         ctx = get_trace_context()
@@ -285,9 +299,12 @@ class RuntimeLogger:
             total_output = sum(nd.output_tokens for nd in node_details)
 
             needs_attention = any(nd.needs_attention for nd in node_details)
-            attention_reasons: list[str] = []
+            all_reasons: list[str] = []
             for nd in node_details:
-                attention_reasons.extend(nd.attention_reasons)
+                all_reasons.extend(nd.attention_reasons)
+            # Deduplicate and sort so the L1 summary lists each code once,
+            # regardless of how many nodes triggered it.
+            attention_reasons = sorted(set(all_reasons))
 
             # OTel / trace context for L1 correlation
             ctx = get_trace_context()

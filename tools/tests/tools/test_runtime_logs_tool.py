@@ -138,7 +138,7 @@ def runtime_logs_dir(tmp_path: Path) -> Path:
                 "total_input_tokens": 10000,
                 "total_output_tokens": 5000,
                 "needs_attention": True,
-                "attention_reasons": ["Node node-1 failed: Max iterations exhausted"],
+                "attention_reasons": ["node_failed"],
                 "started_at": "2025-01-01T00:00:02",
                 "duration_ms": 60000,
                 "execution_quality": "failed",
@@ -158,7 +158,7 @@ def runtime_logs_dir(tmp_path: Path) -> Path:
                 "exit_status": "failure",
                 "retry_count": 50,
                 "needs_attention": True,
-                "attention_reasons": ["Node node-1 failed: Max iterations exhausted"],
+                "attention_reasons": ["node_failed"],
             },
         ],
     )
