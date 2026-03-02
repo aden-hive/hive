@@ -1,15 +1,15 @@
 # Default owners for everything in the repo
-* @adenhq/maintainers
+* @kostasuser01gr
 
-# Frontend
-/honeycomb/ @adenhq/maintainers
+# Core framework
+/core/ @kostasuser01gr
 
-# Backend
-/hive/ @adenhq/maintainers
+# Tools
+/tools/ @kostasuser01gr
 
 # Infrastructure
-/.github/ @adenhq/maintainers
+/.github/ @kostasuser01gr
 
 # Documentation
-/docs/ @adenhq/maintainers
-*.md @adenhq/maintainers
+/docs/ @kostasuser01gr
+*.md @kostasuser01gr
