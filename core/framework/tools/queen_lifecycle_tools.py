@@ -397,7 +397,7 @@ def register_queen_lifecycle_tools(
 
         # Find an active node that can accept injected input
         for stream in reg.streams.values():
-            injectable = stream.get_injectable_nodes()
+            injectable = await stream.get_injectable_nodes()
             if injectable:
                 target_node_id = injectable[0]["node_id"]
                 ok = await stream.inject_input(target_node_id, content)
