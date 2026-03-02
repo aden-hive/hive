@@ -757,7 +757,7 @@ $ModelChoices = @{
     )
     gemini = @(
         @{ Id = "gemini-3-flash-preview"; Label = "Gemini 3 Flash - Fast (recommended)"; MaxTokens = 8192 },
-        @{ Id = "gemini-3-pro-preview";   Label = "Gemini 3 Pro - Best quality";         MaxTokens = 8192 }
+        @{ Id = "gemini-3.1-pro-preview";  Label = "Gemini 3.1 Pro - Best quality";        MaxTokens = 8192 }
     )
     groq = @(
         @{ Id = "moonshotai/kimi-k2-instruct-0905"; Label = "Kimi K2 - Best quality (recommended)"; MaxTokens = 8192 },
