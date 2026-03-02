@@ -37,8 +37,11 @@ export function backendMessageToChatMessage(
   thread: string,
   agentDisplayName?: string,
 ): ChatMessage {
+  // Use file-mtime created_at (epoch seconds → ms) for cross-conversation
+  // ordering; fall back to seq for backwards compatibility.
+  const createdAt = msg.created_at ? msg.created_at * 1000 : msg.seq;
   return {
-    id: `backend-${msg.seq}`,
+    id: `backend-${msg._node_id}-${msg.seq}`,
     agent: msg.role === "user" ? "You" : agentDisplayName || msg._node_id || "Agent",
     agentColor: "",
     content: msg.content,
@@ -46,7 +49,7 @@ export function backendMessageToChatMessage(
     type: msg.role === "user" ? "user" : undefined,
     role: msg.role === "user" ? undefined : "worker",
     thread,
-    createdAt: msg.seq,  // seq preserves backend insertion order
+    createdAt,
   };
 }
 

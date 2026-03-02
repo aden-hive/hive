@@ -603,6 +603,7 @@ export default function Workspace() {
       // Check worker session status (detects running worker).
       // Only restore messages when rejoining an existing backend session.
       let isWorkerRunning = false;
+      const restoredMsgs: ChatMessage[] = [];
       try {
         const { sessions: workerSessions } = await sessionsApi.workerSessions(session.session_id);
         const resumable = workerSessions.find(
@@ -612,16 +613,8 @@ export default function Workspace() {
 
         if (isResumedSession && resumable) {
           const { messages } = await sessionsApi.messages(session.session_id, resumable.session_id);
-          if (messages.length > 0) {
-            const chatMsgs = messages.map((m: Message) =>
-              backendMessageToChatMessage(m, agentType, displayName),
-            );
-            setSessionsByAgent((prev) => ({
-              ...prev,
-              [agentType]: (prev[agentType] || []).map((s, i) =>
-                i === 0 ? { ...s, messages: [...s.messages, ...chatMsgs] } : s,
-              ),
-            }));
+          for (const m of messages as Message[]) {
+            restoredMsgs.push(backendMessageToChatMessage(m, agentType, displayName));
           }
         }
       } catch {
@@ -632,24 +625,25 @@ export default function Workspace() {
       if (isResumedSession) {
         try {
           const { messages: queenMsgs } = await sessionsApi.queenMessages(session.session_id);
-          if (queenMsgs.length > 0) {
-            const chatMsgs = queenMsgs.map((m: Message) => {
-              const msg = backendMessageToChatMessage(m, agentType, "Queen Bee");
-              if (msg) msg.role = "queen";
-              return msg;
-            }).filter(Boolean);
-            if (chatMsgs.length > 0) {
-              setSessionsByAgent((prev) => ({
-                ...prev,
-                [agentType]: (prev[agentType] || []).map((s, i) =>
-                  i === 0 ? { ...s, messages: [...chatMsgs, ...s.messages] } : s,
-                ),
-              }));
-            }
+          for (const m of queenMsgs as Message[]) {
+            const msg = backendMessageToChatMessage(m, agentType, "Queen Bee");
+            msg.role = "queen";
+            restoredMsgs.push(msg);
           }
         } catch {
           // Queen messages not available — not critical
         }
+      }
+
+      // Merge queen + worker messages in chronological order
+      if (restoredMsgs.length > 0) {
+        restoredMsgs.sort((a, b) => (a.createdAt ?? 0) - (b.createdAt ?? 0));
+        setSessionsByAgent((prev) => ({
+          ...prev,
+          [agentType]: (prev[agentType] || []).map((s, i) =>
+            i === 0 ? { ...s, messages: [...restoredMsgs, ...s.messages] } : s,
+          ),
+        }));
       }
 
       updateAgentState(agentType, {
@@ -853,28 +847,16 @@ export default function Workspace() {
             const idx = s.messages.findIndex((m) => m.id === chatMsg.id);
             let newMessages: ChatMessage[];
             if (idx >= 0) {
-              // Update existing message in place, preserve original createdAt
+              // Update existing message in place, preserve position
               newMessages = s.messages.map((m, i) =>
                 i === idx ? { ...chatMsg, createdAt: m.createdAt ?? chatMsg.createdAt } : m,
               );
             } else {
-              // Insert at correct chronological position based on createdAt.
-              // This ensures queen and worker messages interleave correctly
-              // even when SSE events arrive out of logical order.
-              const msgTime = chatMsg.createdAt ?? Date.now();
-              let insertIdx = s.messages.length; // default: append
-              for (let i = s.messages.length - 1; i >= 0; i--) {
-                if ((s.messages[i].createdAt ?? 0) <= msgTime) {
-                  insertIdx = i + 1;
-                  break;
-                }
-                insertIdx = i;
-              }
-              newMessages = [
-                ...s.messages.slice(0, insertIdx),
-                chatMsg,
-                ...s.messages.slice(insertIdx),
-              ];
+              // Append — SSE events arrive in server-timestamp order via the
+              // shared EventBus, so arrival order already interleaves queen
+              // and worker correctly.  Local user messages are always created
+              // before their server responses, so append is safe there too.
+              newMessages = [...s.messages, chatMsg];
             }
             return { ...s, messages: newMessages };
           }),
@@ -1067,7 +1049,7 @@ export default function Workspace() {
 
         case "node_loop_iteration":
           turnCounterRef.current[turnKey] = currentTurn + 1;
-          updateAgentState(agentType, { isStreaming: false, activeToolCalls: {} });
+          updateAgentState(agentType, { isStreaming: false, activeToolCalls: {}, awaitingInput: false });
           if (!isQueen && event.node_id) {
             const pendingText = agentStates[agentType]?.llmSnapshots[event.node_id];
             if (pendingText?.trim()) {

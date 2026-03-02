@@ -131,6 +131,8 @@ export interface Message {
   is_transition_marker?: boolean;
   is_client_input?: boolean;
   tool_calls?: unknown[];
+  /** Epoch seconds from file mtime — used for cross-conversation ordering */
+  created_at?: number;
   [key: string]: unknown;
 }
 
