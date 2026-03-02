@@ -79,7 +79,7 @@ async def handle_list_nodes(request: web.Request) -> web.Response:
         )
         if state_path.exists():
             try:
-                state = json.loads(state_path.read_text())
+                state = json.loads(state_path.read_text(encoding="utf-8"))
                 progress = state.get("progress", {})
                 visit_counts = progress.get("node_visit_counts", {})
                 failures = progress.get("nodes_with_failures", [])
