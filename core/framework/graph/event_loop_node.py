@@ -17,8 +17,8 @@ import logging
 import re
 import time
 from collections.abc import Awaitable, Callable
-from datetime import datetime, timezone
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Literal, Protocol, runtime_checkable
 
@@ -57,7 +57,7 @@ class _EscalationReceiver:
         self._event = asyncio.Event()
         self._response: str | None = None
 
-    async def inject_event(self, content: str) -> None:
+    async def inject_event(self, content: str, *, is_client_input: bool = False) -> None:
         """Called by ExecutionStream.inject_input() when the user responds."""
         self._response = content
         self._event.set()
@@ -1591,7 +1591,9 @@ class EventLoopNode(NodeProtocol):
             # Phase 1: triage — handle framework tools immediately,
             # queue real tools and subagents for parallel execution.
             results_by_id: dict[str, ToolResult] = {}
-            timing_by_id: dict[str, dict[str, Any]] = {}  # tool_use_id -> {start_timestamp, duration_s}
+            timing_by_id: dict[
+                str, dict[str, Any]
+            ] = {}  # tool_use_id -> {start_timestamp, duration_s}
             pending_real: list[ToolCallEvent] = []
             pending_subagent: list[ToolCallEvent] = []
 
@@ -1620,7 +1622,7 @@ class EventLoopNode(NodeProtocol):
                 if tc.tool_name == "set_output":
                     # --- Framework-level set_output handling ---
                     _tc_start = time.time()
-                    _tc_ts = datetime.now(timezone.utc).isoformat()
+                    _tc_ts = datetime.now(UTC).isoformat()
                     result = self._handle_set_output(tc.tool_input, ctx.node_spec.output_keys)
                     result = ToolResult(
                         tool_use_id=tc.tool_use_id,
@@ -1775,7 +1777,7 @@ class EventLoopNode(NodeProtocol):
                 ) -> tuple[ToolResult | BaseException, str, float]:
                     """Execute a tool and return (result, start_iso, duration_s)."""
                     _s = time.time()
-                    _iso = datetime.now(timezone.utc).isoformat()
+                    _iso = datetime.now(UTC).isoformat()
                     try:
                         _r = await self._execute_tool(_tc)
                     except BaseException as _exc:
@@ -1796,7 +1798,7 @@ class EventLoopNode(NodeProtocol):
                 for tc, entry in zip(pending_real, timed_results, strict=True):
                     if isinstance(entry, BaseException):
                         raw = entry
-                        _start_iso = datetime.now(timezone.utc).isoformat()
+                        _start_iso = datetime.now(UTC).isoformat()
                         _dur_s = 0
                     else:
                         raw, _start_iso, _dur_s = entry
@@ -1822,7 +1824,7 @@ class EventLoopNode(NodeProtocol):
                     _tc: ToolCallEvent,
                 ) -> tuple[ToolResult | BaseException, str, float]:
                     _s = time.time()
-                    _iso = datetime.now(timezone.utc).isoformat()
+                    _iso = datetime.now(UTC).isoformat()
                     try:
                         _r = await self._execute_subagent(
                             _ctx,
@@ -1841,7 +1843,7 @@ class EventLoopNode(NodeProtocol):
                 for tc, entry in zip(pending_subagent, subagent_timed, strict=True):
                     if isinstance(entry, BaseException):
                         raw = entry
-                        _start_iso = datetime.now(timezone.utc).isoformat()
+                        _start_iso = datetime.now(UTC).isoformat()
                         _dur_s = 0
                     else:
                         raw, _start_iso, _dur_s = entry

@@ -473,7 +473,7 @@ def register_file_tools(
 
     @mcp.tool()
     def search_files(pattern: str, path: str = ".", include: str = "") -> str:
-        """Search file contents using regex. Uses ripgrep when available, falls back to Python regex.
+        """Search file contents using regex. Uses ripgrep if available.
 
         Results sorted by file with line numbers.
 
@@ -538,9 +538,7 @@ def register_file_tools(
                     if include and not fnmatch.fnmatch(fname, include):
                         continue
                     fpath = os.path.join(root, fname)
-                    display_path = (
-                        os.path.relpath(fpath, project_root) if project_root else fpath
-                    )
+                    display_path = os.path.relpath(fpath, project_root) if project_root else fpath
                     try:
                         with open(fpath, encoding="utf-8", errors="ignore") as f:
                             for i, line in enumerate(f, 1):

@@ -243,6 +243,7 @@ interface AgentBackendState {
   currentExecutionId: string | null;
   nodeLogs: Record<string, string[]>;
   nodeActionPlans: Record<string, string>;
+  subagentReports: { subagent_id: string; message: string; data?: Record<string, unknown>; timestamp: string }[];
   isTyping: boolean;
   isStreaming: boolean;
   llmSnapshots: Record<string, string>;
@@ -265,6 +266,7 @@ function defaultAgentState(): AgentBackendState {
     currentExecutionId: null,
     nodeLogs: {},
     nodeActionPlans: {},
+    subagentReports: [],
     isTyping: false,
     isStreaming: false,
     llmSnapshots: {},
@@ -988,6 +990,7 @@ export default function Workspace() {
               workerRunState: "running",
               currentExecutionId: event.execution_id || agentStates[agentType]?.currentExecutionId || null,
               nodeLogs: {},
+              subagentReports: [],
               llmSnapshots: {},
               activeToolCalls: {},
             });
@@ -1192,6 +1195,28 @@ export default function Workspace() {
                 });
               }
               appendNodeLog(agentType, event.node_id, `${ts} INFO  Calling ${(event.data?.tool_name as string) || "unknown"}(${event.data?.tool_input ? truncate(JSON.stringify(event.data.tool_input), 200) : ""})`);
+
+              // Track subagent delegation start
+              if ((event.data?.tool_name as string) === "delegate_to_sub_agent") {
+                const saInput = event.data?.tool_input as Record<string, unknown> | undefined;
+                const saId = (saInput?.agent_id as string) || "";
+                if (saId) {
+                  setAgentStates(prev => {
+                    const state = prev[agentType];
+                    if (!state) return prev;
+                    return {
+                      ...prev,
+                      [agentType]: {
+                        ...state,
+                        subagentReports: [
+                          ...state.subagentReports,
+                          { subagent_id: saId, message: "Delegating...", timestamp: event.timestamp, status: "running" as const },
+                        ],
+                      },
+                    };
+                  });
+                }
+              }
             }
 
             const toolName = (event.data?.tool_name as string) || "unknown";
@@ -1241,6 +1266,31 @@ export default function Workspace() {
               appendNodeLog(agentType, event.node_id, `${ts} INFO  ${toolName} done${resultStr}`);
             }
 
+            // Track subagent delegation completion
+            if (toolName === "delegate_to_sub_agent" && result) {
+              try {
+                const parsed = JSON.parse(result);
+                const saId = (parsed?.metadata?.agent_id as string) || "";
+                const success = parsed?.metadata?.success as boolean;
+                if (saId) {
+                  setAgentStates(prev => {
+                    const state = prev[agentType];
+                    if (!state) return prev;
+                    return {
+                      ...prev,
+                      [agentType]: {
+                        ...state,
+                        subagentReports: [
+                          ...state.subagentReports,
+                          { subagent_id: saId, message: success ? "Completed" : "Failed", timestamp: event.timestamp, status: success ? "complete" as const : "error" as const },
+                        ],
+                      },
+                    };
+                  });
+                }
+              } catch { /* ignore parse errors */ }
+            }
+
             // Mark tool as done and update activity row
             const sid = event.stream_id;
             setAgentStates(prev => {
@@ -1280,6 +1330,32 @@ export default function Workspace() {
             }
           }
           break;
+
+        case "subagent_report": {
+          if (!isQueen && event.node_id) {
+            const subagentId = (event.data?.subagent_id as string) || "";
+            const message = (event.data?.message as string) || "";
+            const data = event.data?.data as Record<string, unknown> | undefined;
+            // Extract parent node ID from "parentNodeId:subagent:agentId" format
+            const parentNodeId = event.node_id.split(":subagent:")[0] || event.node_id;
+            appendNodeLog(agentType, parentNodeId, `${ts} INFO  [Subagent:${subagentId}] ${truncate(message, 200)}`);
+            setAgentStates(prev => {
+              const state = prev[agentType];
+              if (!state) return prev;
+              return {
+                ...prev,
+                [agentType]: {
+                  ...state,
+                  subagentReports: [
+                    ...state.subagentReports,
+                    { subagent_id: subagentId, message, data, timestamp: event.timestamp },
+                  ],
+                },
+              };
+            });
+          }
+          break;
+        }
 
         case "node_stalled":
           if (!isQueen && event.node_id) {
@@ -1818,6 +1894,8 @@ export default function Workspace() {
                 <NodeDetailPanel
                   node={selectedNode}
                   nodeSpec={activeAgentState?.nodeSpecs.find(n => n.id === selectedNode.id) ?? null}
+                  allNodeSpecs={activeAgentState?.nodeSpecs}
+                  subagentReports={activeAgentState?.subagentReports}
                   sessionId={activeAgentState?.sessionId || undefined}
                   graphId={activeAgentState?.graphId || undefined}
                   workerSessionId={null}

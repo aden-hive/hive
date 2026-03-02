@@ -43,10 +43,7 @@ def ts():
 
 def log(turn: int | str, action: str, result_summary: str, elapsed: float):
     """Pretty-print a turn log line."""
-    print(
-        f"  [{ts()}] Turn {turn:>2} | {elapsed:5.1f}s "
-        f"| {action:<45} | {result_summary}"
-    )
+    print(f"  [{ts()}] Turn {turn:>2} | {elapsed:5.1f}s | {action:<45} | {result_summary}")
 
 
 async def reproduce_agent_session(session: BrowserSession):

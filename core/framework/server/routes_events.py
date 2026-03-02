@@ -37,6 +37,7 @@ DEFAULT_EVENT_TYPES = [
     EventType.CONTEXT_COMPACTED,
     EventType.WORKER_LOADED,
     EventType.CREDENTIALS_REQUIRED,
+    EventType.SUBAGENT_REPORT,
 ]
 
 # Keepalive interval in seconds

@@ -414,9 +414,7 @@ def register_queen_lifecycle_tools(
         try:
             # Pending user question (from ask_user tool)
             if result.get("status") == "waiting_for_input":
-                input_events = bus.get_history(
-                    event_type=EventType.CLIENT_INPUT_REQUESTED, limit=1
-                )
+                input_events = bus.get_history(event_type=EventType.CLIENT_INPUT_REQUESTED, limit=1)
                 if input_events:
                     prompt = input_events[0].data.get("prompt", "")
                     if prompt:
@@ -434,22 +432,17 @@ def register_queen_lifecycle_tools(
                 result["current_iteration"] = iter_events[0].data.get("iteration")
 
             # Running tool calls (started but not yet completed)
-            tool_started = bus.get_history(
-                event_type=EventType.TOOL_CALL_STARTED, limit=last_n * 2
-            )
+            tool_started = bus.get_history(event_type=EventType.TOOL_CALL_STARTED, limit=last_n * 2)
             tool_completed = bus.get_history(
                 event_type=EventType.TOOL_CALL_COMPLETED, limit=last_n * 2
             )
             completed_ids = {
-                evt.data.get("tool_use_id")
-                for evt in tool_completed
-                if evt.data.get("tool_use_id")
+                evt.data.get("tool_use_id") for evt in tool_completed if evt.data.get("tool_use_id")
             }
             running = [
                 evt
                 for evt in tool_started
-                if evt.data.get("tool_use_id")
-                and evt.data.get("tool_use_id") not in completed_ids
+                if evt.data.get("tool_use_id") and evt.data.get("tool_use_id") not in completed_ids
             ]
             if running:
                 result["running_tools"] = [
@@ -505,19 +498,23 @@ def register_queen_lifecycle_tools(
             doom_loops = bus.get_history(event_type=EventType.NODE_TOOL_DOOM_LOOP, limit=5)
             issues = []
             for evt in stalls:
-                issues.append({
-                    "type": "stall",
-                    "node": evt.node_id,
-                    "reason": evt.data.get("reason", "")[:200],
-                    "time": evt.timestamp.isoformat(),
-                })
+                issues.append(
+                    {
+                        "type": "stall",
+                        "node": evt.node_id,
+                        "reason": evt.data.get("reason", "")[:200],
+                        "time": evt.timestamp.isoformat(),
+                    }
+                )
             for evt in doom_loops:
-                issues.append({
-                    "type": "tool_doom_loop",
-                    "node": evt.node_id,
-                    "description": evt.data.get("description", "")[:200],
-                    "time": evt.timestamp.isoformat(),
-                })
+                issues.append(
+                    {
+                        "type": "tool_doom_loop",
+                        "node": evt.node_id,
+                        "description": evt.data.get("description", "")[:200],
+                        "time": evt.timestamp.isoformat(),
+                    }
+                )
             if issues:
                 result["issues"] = issues
 
@@ -542,16 +539,10 @@ def register_queen_lifecycle_tools(
                 pass
 
             # Token summary
-            llm_events = bus.get_history(
-                event_type=EventType.LLM_TURN_COMPLETE, limit=200
-            )
+            llm_events = bus.get_history(event_type=EventType.LLM_TURN_COMPLETE, limit=200)
             if llm_events:
-                total_in = sum(
-                    evt.data.get("input_tokens", 0) or 0 for evt in llm_events
-                )
-                total_out = sum(
-                    evt.data.get("output_tokens", 0) or 0 for evt in llm_events
-                )
+                total_in = sum(evt.data.get("input_tokens", 0) or 0 for evt in llm_events)
+                total_out = sum(evt.data.get("output_tokens", 0) or 0 for evt in llm_events)
                 result["token_summary"] = {
                     "llm_turns": len(llm_events),
                     "input_tokens": total_in,
@@ -560,27 +551,27 @@ def register_queen_lifecycle_tools(
                 }
 
             # Execution completions/failures
-            exec_completed = bus.get_history(
-                event_type=EventType.EXECUTION_COMPLETED, limit=5
-            )
-            exec_failed = bus.get_history(
-                event_type=EventType.EXECUTION_FAILED, limit=5
-            )
+            exec_completed = bus.get_history(event_type=EventType.EXECUTION_COMPLETED, limit=5)
+            exec_failed = bus.get_history(event_type=EventType.EXECUTION_FAILED, limit=5)
             if exec_completed or exec_failed:
                 result["execution_outcomes"] = []
                 for evt in exec_completed:
-                    result["execution_outcomes"].append({
-                        "outcome": "completed",
-                        "execution_id": evt.execution_id,
-                        "time": evt.timestamp.isoformat(),
-                    })
+                    result["execution_outcomes"].append(
+                        {
+                            "outcome": "completed",
+                            "execution_id": evt.execution_id,
+                            "time": evt.timestamp.isoformat(),
+                        }
+                    )
                 for evt in exec_failed:
-                    result["execution_outcomes"].append({
-                        "outcome": "failed",
-                        "execution_id": evt.execution_id,
-                        "error": evt.data.get("error", "")[:200],
-                        "time": evt.timestamp.isoformat(),
-                    })
+                    result["execution_outcomes"].append(
+                        {
+                            "outcome": "failed",
+                            "execution_id": evt.execution_id,
+                            "error": evt.data.get("error", "")[:200],
+                            "time": evt.timestamp.isoformat(),
+                        }
+                    )
         except Exception:
             pass  # Non-critical enrichment
 
@@ -606,9 +597,7 @@ def register_queen_lifecycle_tools(
             "required": [],
         },
     )
-    registry.register(
-        "get_worker_status", _status_tool, lambda inputs: get_worker_status(**inputs)
-    )
+    registry.register("get_worker_status", _status_tool, lambda inputs: get_worker_status(**inputs))
     tools_registered += 1
 
     # --- inject_worker_message ------------------------------------------------

@@ -190,7 +190,11 @@ async def handle_get_live_session(request: web.Request) -> web.Response:
                 "entry_node": ep.entry_node,
                 "trigger_type": ep.trigger_type,
                 "trigger_config": ep.trigger_config,
-                **({"next_fire_in": nf} if (nf := rt.get_timer_next_fire_in(ep.id)) is not None else {}),
+                **(
+                    {"next_fire_in": nf}
+                    if (nf := rt.get_timer_next_fire_in(ep.id)) is not None
+                    else {}
+                ),
             }
             for ep in rt.get_entry_points()
         ]
@@ -321,7 +325,11 @@ async def handle_session_entry_points(request: web.Request) -> web.Response:
                     "entry_node": ep.entry_node,
                     "trigger_type": ep.trigger_type,
                     "trigger_config": ep.trigger_config,
-                    **({"next_fire_in": nf} if rt and (nf := rt.get_timer_next_fire_in(ep.id)) is not None else {}),
+                    **(
+                        {"next_fire_in": nf}
+                        if rt and (nf := rt.get_timer_next_fire_in(ep.id)) is not None
+                        else {}
+                    ),
                 }
                 for ep in eps
             ]
