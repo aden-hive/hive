@@ -15,7 +15,8 @@ intake_node = NodeSpec(
     client_facing=True,
     max_node_visits=0,
     input_keys=["rules", "max_emails"],
-    output_keys=["rules", "max_emails"],
+    output_keys=["rules", "max_emails", "query"],
+    nullable_output_keys=["query"],
     system_prompt="""\
 You are an inbox management assistant. The user has provided rules for managing their emails.
 
@@ -53,6 +54,39 @@ Call gmail_list_labels() to show the user their current Gmail labels. This helps
 
 - set_output("rules", <ALL active rules as a clear text description>)
 - set_output("max_emails", <the confirmed max_emails as a string number, e.g. "100">)
+- set_output("query", <Gmail search query if the user wants to target specific emails>)
+
+**TARGETED QUERY (optional):**
+
+If the user's rules target specific emails (e.g. "delete all emails from newsletters@example.com"),
+build a Gmail search query to fetch ONLY matching emails instead of the entire inbox. This is much
+faster and more efficient.
+
+Gmail search query syntax:
+- `from:sender@example.com` — from a specific sender
+- `to:recipient@example.com` — to a specific recipient
+- `subject:keyword` — subject contains keyword
+- `is:unread` / `is:read` — read status
+- `is:starred` / `is:important` — flags
+- `has:attachment` — has attachments
+- `filename:pdf` — attachment filename
+- `label:LABEL_NAME` — has a specific label
+- `category:promotions` / `category:social` / `category:updates` — Gmail categories
+- `newer_than:7d` / `older_than:30d` — relative time (d=days, m=months, y=years)
+- `after:2024/01/01` / `before:2024/12/31` — absolute dates
+- Combine with spaces (AND): `from:boss@co.com subject:urgent`
+- OR operator: `from:alice OR from:bob`
+- NOT / exclude: `-from:noreply@example.com` or `NOT from:noreply`
+- Grouping: `{from:alice from:bob}` (same as OR)
+
+Examples:
+- User says "trash all promotional emails" → query: `category:promotions`
+- User says "star emails from my boss jane@co.com" → query: `from:jane@co.com`
+- User says "mark unread emails older than a week as read" → query: `is:unread older_than:7d`
+- User says "apply rules to all inbox emails" → no query needed (default: `label:INBOX`)
+
+If the rules apply broadly to ALL emails, do NOT set a query — the default `label:INBOX` will be used.
+Only set a query when it would meaningfully narrow the search.
 
 """,
     tools=["gmail_list_labels"],
@@ -72,18 +106,19 @@ fetch_emails_node = NodeSpec(
     node_type="event_loop",
     client_facing=False,
     max_node_visits=0,
-    input_keys=["rules", "max_emails", "next_page_token", "last_processed_timestamp"],
+    input_keys=["rules", "max_emails", "next_page_token", "last_processed_timestamp", "query"],
     output_keys=["emails", "next_page_token"],
     nullable_output_keys=["next_page_token"],
     system_prompt="""\
 You are a data pipeline step. Your job is to fetch ONE PAGE of emails from Gmail.
 
 **INSTRUCTIONS:**
-1. Read "max_emails", "next_page_token", and "last_processed_timestamp" from input context.
+1. Read "max_emails", "next_page_token", "last_processed_timestamp", and "query" from input context.
 2. Call bulk_fetch_emails with:
    - max_emails=<max_emails value, default "100">
    - page_token=<next_page_token value, if present and non-empty>
    - after_timestamp=<last_processed_timestamp value, if present and non-empty>
+   - query=<query value, if present and non-empty; omit to default to "label:INBOX">
 3. The tool returns {"filename": "emails.jsonl", "count": N, "next_page_token": "<token or null>"}.
 4. Call set_output("emails", "emails.jsonl").
 5. Call set_output("next_page_token", <the next_page_token from the tool result, or "" if null>).

@@ -31,9 +31,10 @@ TOOLS = {
     "bulk_fetch_emails": Tool(
         name="bulk_fetch_emails",
         description=(
-            "Fetch emails from the Gmail inbox and write them to a JSONL file. "
+            "Fetch emails from Gmail and write them to a JSONL file. "
             "Returns {filename, count, next_page_token}. Pass next_page_token "
-            "from a previous call to fetch the next page."
+            "from a previous call to fetch the next page. "
+            "Supports Gmail search query syntax via the 'query' parameter."
         ),
         parameters={
             "type": "object",
@@ -61,6 +62,18 @@ TOOLS = {
                     "description": (
                         "Account alias to use (e.g. 'timothy-home'). "
                         "Required when multiple Google accounts are connected."
+                    ),
+                },
+                "query": {
+                    "type": "string",
+                    "description": (
+                        "Gmail search query. Defaults to 'label:INBOX'. Supports full Gmail "
+                        "search syntax: from:, to:, subject:, is:unread, is:starred, "
+                        "has:attachment, label:, newer_than:, older_than:, category:, "
+                        "filename:, and boolean operators (AND, OR, NOT, -, {}). "
+                        "Examples: 'from:boss@example.com', 'subject:invoice is:unread', "
+                        "'label:INBOX -from:noreply'. The after_timestamp parameter is "
+                        "appended automatically if provided."
                     ),
                 },
             },
@@ -151,8 +164,9 @@ def _bulk_fetch_emails(
     page_token: str = "",
     after_timestamp: str = "",
     account: str = "",
+    query: str = "",
 ) -> dict:
-    """Fetch inbox emails and write them to emails.jsonl.
+    """Fetch emails from Gmail and write them to emails.jsonl.
 
     Uses synchronous httpx.Client since this runs as a tool call inside
     an already-running async event loop.
@@ -162,6 +176,8 @@ def _bulk_fetch_emails(
         page_token: Gmail API page token for pagination. Omit for the first page.
         after_timestamp: Unix epoch seconds — only fetch emails after this time.
         account: Account alias (e.g. 'timothy-home') for multi-account routing.
+        query: Gmail search query. Defaults to 'label:INBOX'. Supports full
+               Gmail search syntax (from:, subject:, is:, label:, etc.).
 
     Returns:
         Dict with {filename, count, next_page_token}.
@@ -177,9 +193,9 @@ def _bulk_fetch_emails(
     }
 
     # Build Gmail query
-    query = "label:INBOX"
+    gmail_query = query.strip() if query and query.strip() else "label:INBOX"
     if after_timestamp and after_timestamp.strip():
-        query += f" after:{after_timestamp.strip()}"
+        gmail_query += f" after:{after_timestamp.strip()}"
 
     message_ids: list[str] = []
     current_page_token: str | None = page_token if page_token else None
@@ -192,7 +208,7 @@ def _bulk_fetch_emails(
             page_size = min(remaining, 500)
 
             params: dict[str, str | int] = {
-                "q": query,
+                "q": gmail_query,
                 "maxResults": page_size,
             }
             if current_page_token:
@@ -315,6 +331,7 @@ def tool_executor(tool_use: ToolUse) -> ToolResult:
                 page_token=tool_use.input.get("page_token", ""),
                 after_timestamp=tool_use.input.get("after_timestamp", ""),
                 account=tool_use.input.get("account", ""),
+                query=tool_use.input.get("query", ""),
             )
             return ToolResult(
                 tool_use_id=tool_use.id,
