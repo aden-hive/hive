@@ -92,11 +92,23 @@ async def handle_events(request: web.Request) -> web.StreamResponse:
         "worker_loaded",
     }
 
+    client_disconnected = asyncio.Event()
+
     async def on_event(event) -> None:
         """Push event dict into queue; drop non-critical events if full."""
+        if client_disconnected.is_set():
+            return
+
         evt_dict = event.to_dict()
         if evt_dict.get("type") in _CRITICAL_EVENTS:
-            await queue.put(evt_dict)  # block rather than drop
+            try:
+                queue.put_nowait(evt_dict)
+            except asyncio.QueueFull:
+                logger.warning(
+                    "SSE client queue full on critical event; disconnecting session='%s'",
+                    session.id
+                )
+                client_disconnected.set()
         else:
             try:
                 queue.put_nowait(evt_dict)
@@ -120,7 +132,7 @@ async def handle_events(request: web.Request) -> web.StreamResponse:
     event_count = 0
     close_reason = "unknown"
     try:
-        while True:
+        while not client_disconnected.is_set():
             try:
                 data = await asyncio.wait_for(queue.get(), timeout=KEEPALIVE_INTERVAL)
                 await sse.send_event(data)
@@ -137,6 +149,9 @@ async def handle_events(request: web.Request) -> web.StreamResponse:
             except Exception as exc:
                 close_reason = f"error: {exc}"
                 break
+
+        if client_disconnected.is_set() and close_reason == "unknown":
+            close_reason = "slow_client"
     except asyncio.CancelledError:
         close_reason = "cancelled"
     finally:

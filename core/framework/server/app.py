@@ -18,7 +18,7 @@ def safe_path_segment(value: str) -> str:
     traversal sequences.  aiohttp decodes ``%2F`` inside route params,
     so a raw ``{session_id}`` can contain ``/`` or ``..`` after decoding.
     """
-    if "/" in value or "\\" in value or ".." in value:
+    if not value or value == "." or "/" in value or "\\" in value or ".." in value:
         raise web.HTTPBadRequest(reason="Invalid path parameter")
     return value
 
