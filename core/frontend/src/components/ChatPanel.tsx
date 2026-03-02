@@ -1,5 +1,5 @@
 import { memo, useState, useRef, useEffect } from "react";
-import { Send, Square, Crown, Cpu, Check, ChevronRight, Loader2, Reply } from "lucide-react";
+import { Send, Square, Crown, Cpu, Check, Loader2, Reply } from "lucide-react";
 import MarkdownContent from "@/components/MarkdownContent";
 
 export interface ChatMessage {
@@ -39,15 +39,29 @@ function getColor(_agent: string, role?: "queen" | "worker"): string {
   return workerColor;
 }
 
-function ToolActivityRow({ content }: { content: string }) {
-  const [expanded, setExpanded] = useState(false);
+// Palette of distinct hues for tool pills — each tool name gets a consistent color
+const TOOL_COLORS = [
+  { text: "text-blue-600",    bg: "bg-blue-500/10",    border: "border-blue-500/20" },
+  { text: "text-violet-600",  bg: "bg-violet-500/10",  border: "border-violet-500/20" },
+  { text: "text-amber-600",   bg: "bg-amber-500/10",   border: "border-amber-500/20" },
+  { text: "text-cyan-600",    bg: "bg-cyan-500/10",    border: "border-cyan-500/20" },
+  { text: "text-rose-600",    bg: "bg-rose-500/10",    border: "border-rose-500/20" },
+  { text: "text-emerald-600", bg: "bg-emerald-500/10", border: "border-emerald-500/20" },
+  { text: "text-orange-600",  bg: "bg-orange-500/10",  border: "border-orange-500/20" },
+  { text: "text-teal-600",    bg: "bg-teal-500/10",    border: "border-teal-500/20" },
+];
 
+function toolColor(name: string): (typeof TOOL_COLORS)[number] {
+  let hash = 0;
+  for (let i = 0; i < name.length; i++) hash = (hash * 31 + name.charCodeAt(i)) | 0;
+  return TOOL_COLORS[Math.abs(hash) % TOOL_COLORS.length];
+}
+
+function ToolActivityRow({ content }: { content: string }) {
   let tools: { name: string; done: boolean }[] = [];
-  let allDone = false;
   try {
     const parsed = JSON.parse(content);
     tools = parsed.tools || [];
-    allDone = parsed.allDone ?? false;
   } catch {
     // Legacy plain-text fallback
     return (
@@ -61,48 +75,56 @@ function ToolActivityRow({ content }: { content: string }) {
 
   if (tools.length === 0) return null;
 
-  const total = tools.length;
+  // Group by tool name → count done vs running
+  const grouped = new Map<string, { done: number; running: number }>();
+  for (const t of tools) {
+    const entry = grouped.get(t.name) || { done: 0, running: 0 };
+    if (t.done) entry.done++;
+    else entry.running++;
+    grouped.set(t.name, entry);
+  }
 
-  if (allDone && !expanded) {
-    return (
-      <div className="flex gap-3 pl-10">
-        <button
-          onClick={() => setExpanded(true)}
-          className="flex items-center gap-1.5 text-[11px] text-muted-foreground hover:text-foreground transition-colors"
-        >
-          <ChevronRight className="w-3 h-3" />
-          <Check className="w-3 h-3 text-emerald-500" />
-          <span>{total} tool{total === 1 ? "" : "s"} used</span>
-        </button>
-      </div>
-    );
+  // Build pill list: running first, then done
+  const runningPills: { name: string; count: number }[] = [];
+  const donePills: { name: string; count: number }[] = [];
+  for (const [name, counts] of grouped) {
+    if (counts.running > 0) runningPills.push({ name, count: counts.running });
+    if (counts.done > 0) donePills.push({ name, count: counts.done });
   }
 
   return (
     <div className="flex gap-3 pl-10">
       <div className="flex flex-wrap items-center gap-1.5">
-        {allDone && (
-          <button onClick={() => setExpanded(false)} className="text-muted-foreground hover:text-foreground transition-colors">
-            <ChevronRight className="w-3 h-3 rotate-90" />
-          </button>
-        )}
-        {tools.map((t, i) => (
-          <span
-            key={i}
-            className={`inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full border ${
-              t.done
-                ? "text-emerald-600 bg-emerald-500/10 border-emerald-500/20"
-                : "text-muted-foreground bg-muted/40 border-border/40"
-            }`}
-          >
-            {t.done ? (
-              <Check className="w-2.5 h-2.5" />
-            ) : (
+        {runningPills.map((p) => {
+          const c = toolColor(p.name);
+          return (
+            <span
+              key={`run-${p.name}`}
+              className={`inline-flex items-center gap-1 text-[11px] px-2.5 py-0.5 rounded-full border ${c.text} ${c.bg} ${c.border}`}
+            >
               <Loader2 className="w-2.5 h-2.5 animate-spin" />
-            )}
-            {t.name}
-          </span>
-        ))}
+              {p.name}
+              {p.count > 1 && (
+                <span className="text-[10px] font-medium opacity-70">×{p.count}</span>
+              )}
+            </span>
+          );
+        })}
+        {donePills.map((p) => {
+          const c = toolColor(p.name);
+          return (
+            <span
+              key={`done-${p.name}`}
+              className={`inline-flex items-center gap-1 text-[11px] px-2.5 py-0.5 rounded-full border ${c.text} ${c.bg} ${c.border} opacity-60`}
+            >
+              <Check className="w-2.5 h-2.5" />
+              {p.name}
+              {p.count > 1 && (
+                <span className="text-[10px] font-medium opacity-70">×{p.count}</span>
+              )}
+            </span>
+          );
+        })}
       </div>
     </div>
   );
