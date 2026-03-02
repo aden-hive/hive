@@ -258,7 +258,7 @@ Present a clean, readable summary:
 
 3. **No Action Taken** — Any emails that didn't match any rules (if applicable).
 
-Then ask: "Would you like to run another inbox triage with new rules?"
+Then ask: "Would you like to run another inbox management cycle with new rules?"
 
 **STEP 3 — After the user responds, call set_output to persist state:**
 - set_output("summary_report", <the formatted report text>)
