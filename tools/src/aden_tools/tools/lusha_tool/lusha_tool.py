@@ -118,6 +118,7 @@ class _LushaClient:
         industry_ids: list[int] | None = None,
         search_text: str | None = None,
         limit: int = 10,
+        page: int = 0,
     ) -> dict[str, Any]:
         """Search prospects via /prospecting/contact/search."""
         contact_include: dict[str, Any] = {}
@@ -144,8 +145,15 @@ class _LushaClient:
         if company_include:
             filters["companies"] = {"include": company_include}
 
+        if not filters:
+            return {
+                "error": "At least one search filter is required",
+                "help": "Provide at least one of: job_titles, seniority, departments, "
+                "locations, company_names, industry_ids, or search_text.",
+            }
+
         body: dict[str, Any] = {
-            "pages": {"size": max(10, min(limit, 50)), "page": 0},
+            "pages": {"size": max(10, min(limit, 50)), "page": max(0, page)},
             "filters": filters,
         }
         return self._request("POST", "/prospecting/contact/search", body=body)
@@ -159,6 +167,7 @@ class _LushaClient:
         company_names: list[str] | None = None,
         search_text: str | None = None,
         limit: int = 10,
+        page: int = 0,
     ) -> dict[str, Any]:
         """Search companies via /prospecting/company/search."""
         company_include: dict[str, Any] = {}
@@ -177,8 +186,15 @@ class _LushaClient:
         if search_text:
             company_include["searchText"] = search_text
 
+        if not company_include:
+            return {
+                "error": "At least one search filter is required",
+                "help": "Provide at least one of: industry_ids, employee_size, "
+                "locations, company_names, or search_text.",
+            }
+
         body: dict[str, Any] = {
-            "pages": {"size": max(10, min(limit, 50)), "page": 0},
+            "pages": {"size": max(10, min(limit, 50)), "page": max(0, page)},
             "filters": {
                 "companies": {
                     "include": company_include,
@@ -303,6 +319,7 @@ def register_tools(
         industry_ids: list[int] | None = None,
         search_text: str | None = None,
         limit: int = 10,
+        page: int = 0,
     ) -> dict:
         """
         Search prospects using structured Lusha filters.
@@ -319,7 +336,8 @@ def register_tools(
             industry_ids: Lusha mainIndustriesIds (numeric). Refer to Lusha API
                 docs for the ID-to-industry mapping.
             search_text: Optional free-text search across contact fields
-            limit: Max results to return (10-50, default 10)
+            limit: Max results per page (10-50, default 10)
+            page: Page number for pagination (0-indexed, default 0)
 
         Returns:
             Matching contact list payload (including IDs) or error dict.
@@ -338,6 +356,7 @@ def register_tools(
                 industry_ids=industry_ids,
                 search_text=search_text,
                 limit=limit,
+                page=page,
             )
         except httpx.TimeoutException:
             return {"error": "Request timed out"}
@@ -352,6 +371,7 @@ def register_tools(
         company_names: list[str] | None = None,
         search_text: str | None = None,
         limit: int = 10,
+        page: int = 0,
     ) -> dict:
         """
         Search companies using firmographic filters.
@@ -364,7 +384,8 @@ def register_tools(
                 docs for the ID-to-industry mapping.
             company_names: Filter by company names (e.g. ["Apple", "Microsoft"])
             search_text: Optional free-text search across company fields
-            limit: Max results to return (10-50, default 10)
+            limit: Max results per page (10-50, default 10)
+            page: Page number for pagination (0-indexed, default 0)
 
         Returns:
             Matching company list payload or error dict.
@@ -381,6 +402,7 @@ def register_tools(
                 company_names=company_names,
                 search_text=search_text,
                 limit=limit,
+                page=page,
             )
         except httpx.TimeoutException:
             return {"error": "Request timed out"}

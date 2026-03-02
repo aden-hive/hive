@@ -140,6 +140,40 @@ class TestLushaClient:
         assert body["filters"]["contacts"]["include"]["departments"] == ["Engineering & Technical"]
 
     @patch("aden_tools.tools.lusha_tool.lusha_tool.httpx.request")
+    def test_search_people_pagination(self, mock_request):
+        mock_response = MagicMock(spec=httpx.Response)
+        mock_response.status_code = 200
+        mock_response.json.return_value = {"contacts": []}
+        mock_request.return_value = mock_response
+
+        self.client.search_people(job_titles=["CTO"], page=3)
+
+        body = mock_request.call_args.kwargs["json"]
+        assert body["pages"]["page"] == 3
+
+    def test_search_people_empty_filters(self):
+        result = self.client.search_people()
+        assert "error" in result
+        assert "At least one search filter" in result["error"]
+
+    def test_search_companies_empty_filters(self):
+        result = self.client.search_companies()
+        assert "error" in result
+        assert "At least one search filter" in result["error"]
+
+    @patch("aden_tools.tools.lusha_tool.lusha_tool.httpx.request")
+    def test_search_companies_pagination(self, mock_request):
+        mock_response = MagicMock(spec=httpx.Response)
+        mock_response.status_code = 200
+        mock_response.json.return_value = {"companies": []}
+        mock_request.return_value = mock_response
+
+        self.client.search_companies(employee_size="51-200", page=5)
+
+        body = mock_request.call_args.kwargs["json"]
+        assert body["pages"]["page"] == 5
+
+    @patch("aden_tools.tools.lusha_tool.lusha_tool.httpx.request")
     def test_search_people_limit_capped_at_50(self, mock_request):
         mock_response = MagicMock(spec=httpx.Response)
         mock_response.status_code = 200
