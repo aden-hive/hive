@@ -281,30 +281,40 @@ def register_queen_lifecycle_tools(
     # --- stop_worker ----------------------------------------------------------
 
     async def stop_worker() -> str:
-        """Cancel all active worker executions.
+        """Cancel all active worker executions across all graphs.
 
-        Stops the worker gracefully. Returns the IDs of cancelled executions.
+        Stops the worker immediately. Returns the IDs of cancelled executions.
         """
         runtime = _get_runtime()
         if runtime is None:
             return json.dumps({"error": "No worker loaded in this session."})
 
         cancelled = []
-        graph_id = runtime.graph_id
 
-        # Get the primary graph's streams
-        reg = runtime.get_graph_registration(graph_id)
-        if reg is None:
-            return json.dumps({"error": "Worker graph not found"})
+        # Iterate ALL registered graphs — multiple entrypoint requests
+        # can spawn executions in different graphs within the same session.
+        for graph_id in runtime.list_graphs():
+            reg = runtime.get_graph_registration(graph_id)
+            if reg is None:
+                continue
 
-        for _ep_id, stream in reg.streams.items():
-            for exec_id in list(stream.active_execution_ids):
-                try:
-                    ok = await stream.cancel_execution(exec_id)
-                    if ok:
-                        cancelled.append(exec_id)
-                except Exception as e:
-                    logger.warning("Failed to cancel %s: %s", exec_id, e)
+            for _ep_id, stream in reg.streams.items():
+                # Signal shutdown on all active EventLoopNodes first so they
+                # exit cleanly and cancel their in-flight LLM streams.
+                for executor in stream._active_executors.values():
+                    for node in executor.node_registry.values():
+                        if hasattr(node, "signal_shutdown"):
+                            node.signal_shutdown()
+                        if hasattr(node, "cancel_current_turn"):
+                            node.cancel_current_turn()
+
+                for exec_id in list(stream.active_execution_ids):
+                    try:
+                        ok = await stream.cancel_execution(exec_id)
+                        if ok:
+                            cancelled.append(exec_id)
+                    except Exception as e:
+                        logger.warning("Failed to cancel %s: %s", exec_id, e)
 
         # Pause timers so the next tick doesn't restart execution
         runtime.pause_timers()
@@ -393,6 +403,8 @@ def register_queen_lifecycle_tools(
             result["active_executions"] = active_execs
             if waiting_nodes:
                 result["waiting_node_id"] = waiting_nodes[0]["node_id"]
+
+        result["agent_idle_seconds"] = round(runtime.agent_idle_seconds, 1)
 
         # --- EventBus enrichment ---
         bus = _get_event_bus()
