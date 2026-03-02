@@ -45,18 +45,15 @@ export function topologyToGraphNodes(topology: GraphTopology): GraphNode[] {
     adj.set(triggerId, triggerNode.next!);
   }
 
-  // BFS — start from trigger nodes (if any), then entry_node.
-  // Always include entry_node so the DAG ordering stays correct
-  // even when triggers target a node other than entry.
+  // BFS — start from trigger nodes if any, else entry_node
   const order: string[] = [];
   const position = new Map<string, number>();
   const visited = new Set<string>();
 
-  const entryStart = entry_node || nodes[0].id;
   const starts =
     triggerMap.size > 0
-      ? [...triggerMap.keys(), entryStart]
-      : [entryStart];
+      ? [...triggerMap.keys()]
+      : [entry_node || nodes[0].id];
   const queue = [...starts];
   for (const s of starts) visited.add(s);
 

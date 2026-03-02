@@ -173,8 +173,9 @@ class TokenLifecycleManager:
         Returns:
             True if revocation succeeded
         """
-        credential = self.store.get_credential(self.credential_id, refresh_if_needed=False)
-        if credential:
+        if credential := self.store.get_credential(
+            self.credential_id, refresh_if_needed=False
+        ):
             self.provider.revoke(credential)
 
         self.store.delete_credential(self.credential_id)
@@ -243,8 +244,7 @@ class TokenLifecycleManager:
             return None
 
         expires_at = None
-        access_key = credential.keys.get("access_token")
-        if access_key:
+        if access_key := credential.keys.get("access_token"):
             expires_at = access_key.expires_at
 
         return OAuth2Token(
@@ -357,7 +357,4 @@ class TokenLifecycleManager:
         Returns empty dict if no valid token.
         """
         token = self.sync_get_valid_token()
-        if token is None:
-            return {}
-
-        return self.provider.format_for_request(token)
+        return {} if token is None else self.provider.format_for_request(token)

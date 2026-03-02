@@ -310,9 +310,7 @@ class BaseHttpHealthChecker:
 
     def _build_auth(self, credential_value: str) -> tuple[str, str] | None:
         """Build HTTP Basic auth tuple for AUTH_BASIC type."""
-        if self.AUTH_TYPE == self.AUTH_BASIC:
-            return (credential_value, "")
-        return None
+        return (credential_value, "") if self.AUTH_TYPE == self.AUTH_BASIC else None
 
     def _build_json_body(self, credential_value: str) -> dict | None:
         """Build JSON request body. Override for POST requests that need one."""
@@ -986,20 +984,19 @@ class TelegramHealthChecker(BaseHttpHealthChecker):
         if response.status_code == 200:
             try:
                 data = response.json()
-                if data.get("ok"):
-                    username = data.get("result", {}).get("username", "unknown")
-                    identity = {"username": username} if username != "unknown" else {}
-                    return HealthCheckResult(
-                        valid=True,
-                        message=f"Telegram bot token valid (bot: @{username})",
-                        details={"identity": identity},
-                    )
-                else:
+                if not data.get("ok"):
                     return HealthCheckResult(
                         valid=False,
                         message="Telegram bot token is invalid",
                         details={"telegram_error": data.get("description", "")},
                     )
+                username = data.get("result", {}).get("username", "unknown")
+                identity = {"username": username} if username != "unknown" else {}
+                return HealthCheckResult(
+                    valid=True,
+                    message=f"Telegram bot token valid (bot: @{username})",
+                    details={"identity": identity},
+                )
             except Exception:
                 return HealthCheckResult(
                     valid=True,
@@ -1058,16 +1055,6 @@ class BrevoHealthChecker(BaseHttpHealthChecker):
         return identity
 
 
-class IntercomHealthChecker(OAuthBearerHealthChecker):
-    """Health checker for Intercom access tokens."""
-
-    def __init__(self):
-        super().__init__(
-            endpoint="https://api.intercom.io/me",
-            service_name="Intercom",
-        )
-
-
 # Registry of health checkers
 HEALTH_CHECKERS: dict[str, CredentialHealthChecker] = {
     "discord": DiscordHealthChecker(),
@@ -1080,7 +1067,6 @@ HEALTH_CHECKERS: dict[str, CredentialHealthChecker] = {
     "google_maps": GoogleMapsHealthChecker(),
     "anthropic": AnthropicHealthChecker(),
     "github": GitHubHealthChecker(),
-    "intercom": IntercomHealthChecker(),
     "resend": ResendHealthChecker(),
     "stripe": StripeHealthChecker(),
     "exa_search": ExaSearchHealthChecker(),
@@ -1126,9 +1112,7 @@ def check_credential_health(
     checker = HEALTH_CHECKERS.get(credential_name)
 
     if checker is None:
-        # No dedicated checker — try generic fallback using the spec's endpoint
-        endpoint = kwargs.get("health_check_endpoint")
-        if endpoint:
+        if endpoint := kwargs.get("health_check_endpoint"):
             checker = OAuthBearerHealthChecker(
                 endpoint=endpoint,
                 service_name=credential_name.replace("_", " ").title(),

@@ -49,7 +49,7 @@ def register_tools(mcp: FastMCP) -> None:
                 entry = {
                     "name": item,
                     "type": "directory" if is_dir else "file",
-                    "size_bytes": os.path.getsize(full_path) if not is_dir else None,
+                    "size_bytes": None if is_dir else os.path.getsize(full_path),
                 }
                 entries.append(entry)
 

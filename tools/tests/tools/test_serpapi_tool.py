@@ -147,12 +147,11 @@ class TestInputValidation:
 
 def _mock_response(status_code: int, json_data: dict | None = None, text: str = ""):
     """Create a mock httpx.Response."""
-    resp = httpx.Response(
+    return httpx.Response(
         status_code=status_code,
         json=json_data,
         request=httpx.Request("GET", "https://serpapi.com/search.json"),
     )
-    return resp
 
 
 class TestHTTPErrors:

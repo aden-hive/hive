@@ -30,11 +30,10 @@ class FlakyNode(NodeProtocol):
                 error=f"Simulated failure {self.attempt}/{self.fail_count}",
             )
 
-        # Get the output keys from the node spec and populate them
-        output = {}
-        for key in ctx.node_spec.output_keys:
-            output[key] = f"succeeded after {self.attempt} attempts"
-
+        output = {
+            key: f"succeeded after {self.attempt} attempts"
+            for key in ctx.node_spec.output_keys
+        }
         return NodeResult(
             success=True,
             output=output,
@@ -48,11 +47,7 @@ class AlwaysSucceedsNode(NodeProtocol):
     """A node that always succeeds immediately."""
 
     async def execute(self, ctx: NodeContext) -> NodeResult:
-        # Get the output keys from the node spec and populate them
-        output = {}
-        for key in ctx.node_spec.output_keys:
-            output[key] = "success"
-
+        output = {key: "success" for key in ctx.node_spec.output_keys}
         return NodeResult(
             success=True,
             output=output,

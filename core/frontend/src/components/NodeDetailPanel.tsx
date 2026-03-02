@@ -69,7 +69,7 @@ function ToolRow({ tool }: { tool: Tool }) {
     <div className="rounded-xl border border-border/20 overflow-hidden">
       <button
         onClick={() => hasCreds && setExpanded(v => !v)}
-        className={`w-full flex items-start gap-3 p-3 bg-muted/30 hover:bg-muted/50 transition-colors text-left ${!hasCreds ? "cursor-default" : ""}`}
+        className={`w-full flex items-start gap-3 p-3 bg-muted/30 hover:bg-muted/50 transition-colors text-left ${hasCreds ? "" : "cursor-default"}`}
       >
         <span className="text-base leading-none mt-0.5 flex-shrink-0">{tool.icon}</span>
         <div className="min-w-0 flex-1">

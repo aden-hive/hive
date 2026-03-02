@@ -165,15 +165,13 @@ class SharedStateManager:
         3. Global state (if isolation != ISOLATED)
         """
         # Always check execution-local first
-        if execution_id in self._execution_state:
-            if key in self._execution_state[execution_id]:
-                return self._execution_state[execution_id][key]
+        if execution_id in self._execution_state and key in self._execution_state[execution_id]:
+            return self._execution_state[execution_id][key]
 
         # Check stream-level (unless isolated)
         if isolation != IsolationLevel.ISOLATED:
-            if stream_id in self._stream_state:
-                if key in self._stream_state[stream_id]:
-                    return self._stream_state[stream_id][key]
+            if stream_id in self._stream_state and key in self._stream_state[stream_id]:
+                return self._stream_state[stream_id][key]
 
             # Check global
             if key in self._global_state:
@@ -302,7 +300,7 @@ class SharedStateManager:
 
         # Start with global (if visible)
         if isolation != IsolationLevel.ISOLATED:
-            result.update(self._global_state)
+            result |= self._global_state
 
             # Add stream state (overwrites global)
             if stream_id in self._stream_state:
@@ -484,7 +482,7 @@ class StreamMemory:
 
         # Global (if visible)
         if self._isolation != IsolationLevel.ISOLATED:
-            result.update(self._manager._global_state)
+            result |= self._manager._global_state
             if self._stream_id in self._manager._stream_state:
                 result.update(self._manager._stream_state[self._stream_id])
 

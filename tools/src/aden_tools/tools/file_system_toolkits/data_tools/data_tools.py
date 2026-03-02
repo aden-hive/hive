@@ -66,11 +66,11 @@ def register_tools(mcp: FastMCP) -> None:
 
     @mcp.tool()
     def load_data(
-        filename: str,
-        data_dir: str,
-        offset_bytes: int = 0,
-        limit_bytes: int = 10000,
-    ) -> dict:
+            filename: str,
+            data_dir: str,
+            offset_bytes: int = 0,
+            limit_bytes: int = 10000,
+        ) -> dict:
         """
         Purpose
             Load data from a previously saved file with byte-based pagination.
@@ -108,8 +108,8 @@ def register_tools(mcp: FastMCP) -> None:
             return {"error": "data_dir is required"}
 
         try:
-            offset_bytes = int(offset_bytes)
-            limit_bytes = int(limit_bytes)
+            offset_bytes = offset_bytes
+            limit_bytes = limit_bytes
             path = Path(data_dir) / filename
             if not path.exists():
                 return {"error": f"File not found: {filename}"}

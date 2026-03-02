@@ -23,9 +23,7 @@ def _get_graph_registration(session, graph_id: str):
 def _get_graph_spec(session, graph_id: str):
     """Get GraphSpec for a graph_id. Returns (graph_spec, None) or (None, error_response)."""
     reg, err = _get_graph_registration(session, graph_id)
-    if err:
-        return None, err
-    return reg.graph, None
+    return (None, err) if err else (reg.graph, None)
 
 
 def _node_to_dict(node) -> dict:
@@ -79,7 +77,7 @@ async def handle_list_nodes(request: web.Request) -> web.Response:
         )
         if state_path.exists():
             try:
-                state = json.loads(state_path.read_text(encoding="utf-8"))
+                state = json.loads(state_path.read_text())
                 progress = state.get("progress", {})
                 visit_counts = progress.get("node_visit_counts", {})
                 failures = progress.get("nodes_with_failures", [])
@@ -172,12 +170,14 @@ async def handle_node_criteria(request: web.Request) -> web.Response:
 
     worker_session_id = request.query.get("session_id")
     if worker_session_id and session.worker_runtime:
-        log_store = getattr(session.worker_runtime, "_runtime_log_store", None)
-        if log_store:
+        if log_store := getattr(
+            session.worker_runtime, "_runtime_log_store", None
+        ):
             details = await log_store.load_details(worker_session_id)
             if details:
-                node_details = [n for n in details.nodes if n.node_id == node_id]
-                if node_details:
+                if node_details := [
+                    n for n in details.nodes if n.node_id == node_id
+                ]:
                     latest = node_details[-1]
                     result["last_execution"] = {
                         "success": latest.success,
@@ -212,8 +212,7 @@ async def handle_node_tools(request: web.Request) -> web.Response:
     all_tools = registry.get_tools() if registry else {}
 
     for name in node_spec.tools:
-        tool = all_tools.get(name)
-        if tool:
+        if tool := all_tools.get(name):
             tools_out.append(
                 {
                     "name": tool.name,

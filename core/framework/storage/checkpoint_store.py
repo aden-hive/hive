@@ -95,7 +95,7 @@ class CheckpointStore:
                 return None
 
             try:
-                return Checkpoint.model_validate_json(checkpoint_path.read_text(encoding="utf-8"))
+                return Checkpoint.model_validate_json(checkpoint_path.read_text())
             except Exception as e:
                 logger.error(f"Failed to load checkpoint {checkpoint_id}: {e}")
                 return None
@@ -123,8 +123,7 @@ class CheckpointStore:
                 return None
 
             try:
-                content = self.index_path.read_text(encoding="utf-8")
-                return CheckpointIndex.model_validate_json(content)
+                return CheckpointIndex.model_validate_json(self.index_path.read_text())
             except Exception as e:
                 logger.error(f"Failed to load checkpoint index: {e}")
                 return None
@@ -274,12 +273,10 @@ class CheckpointStore:
                 f.write(index.model_dump_json(indent=2))
 
         # Load or create index
-        index = await self.load_index()
-        if not index:
-            index = CheckpointIndex(
-                session_id=checkpoint.session_id,
-                checkpoints=[],
-            )
+        index = await self.load_index() or CheckpointIndex(
+                        session_id=checkpoint.session_id,
+                        checkpoints=[],
+                    )
 
         # Add checkpoint to index
         index.add_checkpoint(checkpoint)

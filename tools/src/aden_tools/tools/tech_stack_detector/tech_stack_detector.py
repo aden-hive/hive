@@ -128,7 +128,7 @@ def register_tools(mcp: FastMCP) -> None:
             and grade_input for the risk_scorer tool.
         """
         if not url.startswith(("http://", "https://")):
-            url = "https://" + url
+            url = f"https://{url}"
         # Ensure trailing slash for base URL
         base_url = url.rstrip("/")
 
@@ -249,18 +249,15 @@ def _detect_server(headers: httpx.Headers) -> dict | None:
     if not server_header:
         return None
 
-    # Try to parse name and version
-    match = re.match(r"^([\w.-]+)(?:/(\S+))?", server_header)
-    if match:
-        return {"name": match.group(1), "version": match.group(2), "raw": server_header}
+    if match := re.match(r"^([\w.-]+)(?:/(\S+))?", server_header):
+        return {"name": match[1], "version": match[2], "raw": server_header}
     return {"name": server_header, "version": None, "raw": server_header}
 
 
 def _detect_cdn(headers: httpx.Headers) -> str | None:
     """Detect CDN from response headers."""
     for header_name, cdn_name in CDN_HEADERS.items():
-        value = headers.get(header_name)
-        if value:
+        if value := headers.get(header_name):
             if cdn_name:
                 return cdn_name
             # Try to infer from value
@@ -280,8 +277,7 @@ def _detect_cdn(headers: httpx.Headers) -> str | None:
 
 def _detect_framework_from_headers(headers: httpx.Headers) -> str | None:
     """Detect framework from HTTP headers."""
-    powered_by = headers.get("x-powered-by")
-    if powered_by:
+    if powered_by := headers.get("x-powered-by"):
         return powered_by
     return None
 
@@ -295,9 +291,7 @@ def _detect_framework_from_html(html: str) -> str | None:
     if "csrf-token" in html and "data-turbo" in html:
         return "Ruby on Rails"
     # Laravel
-    if "laravel" in html.lower():
-        return "Laravel"
-    return None
+    return "Laravel" if "laravel" in html.lower() else None
 
 
 def _detect_language(headers: httpx.Headers, cookies: httpx.Cookies) -> str | None:
@@ -324,16 +318,13 @@ def _detect_js_libraries(html: str) -> list[str]:
     found = []
     for lib_name, patterns in JS_PATTERNS.items():
         for pattern in patterns:
-            match = pattern.search(html)
-            if match:
-                # Try to extract version
-                version_match = re.search(
+            if match := pattern.search(html):
+                if version_match := re.search(
                     rf"{lib_name.lower().replace('.', r'.')}[/-](\d+\.\d+(?:\.\d+)?)",
                     html,
                     re.I,
-                )
-                if version_match:
-                    found.append(f"{lib_name} {version_match.group(1)}")
+                ):
+                    found.append(f"{lib_name} {version_match[1]}")
                 else:
                     found.append(lib_name)
                 break
@@ -377,20 +368,15 @@ def _detect_cms_from_html(html: str) -> str | None:
 
     # Check meta generator tag
     gen_match = re.search(
-        r'<meta[^>]+name=["\']generator["\'][^>]+content=["\'](.*?)["\']',
-        html,
-        re.I,
-    )
-    if not gen_match:
-        gen_match = re.search(
-            r'<meta[^>]+content=["\'](.*?)["\'][^>]+name=["\']generator["\']',
+            r'<meta[^>]+name=["\']generator["\'][^>]+content=["\'](.*?)["\']',
             html,
             re.I,
-        )
-    if gen_match:
-        return gen_match.group(1)
-
-    return None
+        ) or re.search(
+                r'<meta[^>]+content=["\'](.*?)["\'][^>]+name=["\']generator["\']',
+                html,
+                re.I,
+            )
+    return gen_match[1] if gen_match else None
 
 
 def _analyze_cookies(headers: httpx.Headers) -> list[dict]:

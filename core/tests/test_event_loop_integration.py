@@ -553,19 +553,20 @@ async def test_event_loop_conversation_compaction():
     # Build enough scripts for 4 iterations (CountingJudge retries 3 times then accepts)
     scripts = []
     for i in range(4):
-        scripts.append(
-            StreamScript(
-                tool_calls=[
-                    {
-                        "name": "set_output",
-                        "id": f"tc_{i}",
-                        "input": {"key": "result", "value": f"val_{i}"},
-                    }
-                ],
+        scripts.extend(
+            (
+                StreamScript(
+                    tool_calls=[
+                        {
+                            "name": "set_output",
+                            "id": f"tc_{i}",
+                            "input": {"key": "result", "value": f"val_{i}"},
+                        }
+                    ],
+                ),
+                StreamScript(text=f"Iteration {i} done. " + "x" * 200),
             )
         )
-        scripts.append(StreamScript(text=f"Iteration {i} done. " + "x" * 200))
-
     llm = make_llm(scripts)
     ctx = make_ctx(llm=llm, output_keys=["result"])
 

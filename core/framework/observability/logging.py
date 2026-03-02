@@ -65,7 +65,7 @@ class StructuredFormatter(logging.Formatter):
         }
 
         # Add trace context (trace_id, execution_id, agent_id, etc.) - AUTOMATIC!
-        log_entry.update(context)
+        log_entry |= context
 
         # Add custom fields from extra (optional)
         event = getattr(record, "event", None)
@@ -187,11 +187,7 @@ def configure_logging(
         log_format_env = os.getenv("LOG_FORMAT", "").lower()
         env = os.getenv("ENV", "development").lower()
 
-        if log_format_env == "json" or env == "production":
-            format = "json"
-        else:
-            format = "human"
-
+        format = "json" if log_format_env == "json" or env == "production" else "human"
     # Select formatter
     if format == "json":
         formatter = StructuredFormatter()

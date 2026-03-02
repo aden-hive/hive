@@ -5,6 +5,7 @@ Contains the core infrastructure: CredentialSpec, CredentialManager, and Credent
 Credential specs are defined in separate category files (llm.py, search.py, etc.).
 """
 
+
 from __future__ import annotations
 
 import os
@@ -13,10 +14,6 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from dotenv import dotenv_values
-
-if TYPE_CHECKING:
-    pass
-
 
 @dataclass
 class CredentialSpec:
@@ -174,9 +171,7 @@ class CredentialManager:
         if spec is None:
             return None
 
-        # 2. Check os.environ (takes precedence)
-        env_value = os.environ.get(spec.env_var)
-        if env_value:
+        if env_value := os.environ.get(spec.env_var):
             return env_value
 
         # 3. Fallback: read from .env file (hot-reload)
@@ -286,9 +281,7 @@ class CredentialManager:
             creds.validate_for_tools(["web_search", "file_read"])
             # Raises CredentialError if BRAVE_SEARCH_API_KEY is not set
         """
-        missing = self.get_missing_for_tools(tool_names)
-
-        if missing:
+        if missing := self.get_missing_for_tools(tool_names):
             raise CredentialError(self._format_missing_error(missing, tool_names))
 
     def _format_missing_error(
@@ -297,9 +290,10 @@ class CredentialManager:
         tool_names: list[str],
     ) -> str:
         """Format a clear, actionable error message for missing credentials."""
-        lines = ["Cannot run agent: Missing credentials\n"]
-        lines.append("The following tools require credentials that are not set:\n")
-
+        lines = [
+            "Cannot run agent: Missing credentials\n",
+            "The following tools require credentials that are not set:\n",
+        ]
         for _cred_name, spec in missing:
             # Find which of the requested tools need this credential
             affected_tools = [t for t in tool_names if t in spec.tools]
@@ -310,9 +304,7 @@ class CredentialManager:
                 lines.append(f"    {spec.description}")
             if spec.help_url:
                 lines.append(f"    Get an API key at: {spec.help_url}")
-            lines.append(f"    Set via: export {spec.env_var}=your_key")
-            lines.append("")
-
+            lines.extend((f"    Set via: export {spec.env_var}=your_key", ""))
         lines.append("Set these environment variables and re-run the agent.")
         return "\n".join(lines)
 
@@ -360,9 +352,7 @@ class CredentialManager:
             creds.validate_for_node_types(["event_loop"])
             # Raises CredentialError if ANTHROPIC_API_KEY is not set
         """
-        missing = self.get_missing_for_node_types(node_types)
-
-        if missing:
+        if missing := self.get_missing_for_node_types(node_types):
             raise CredentialError(self._format_missing_node_type_error(missing, node_types))
 
     def _format_missing_node_type_error(
@@ -371,9 +361,10 @@ class CredentialManager:
         node_types: list[str],
     ) -> str:
         """Format a clear, actionable error message for missing node type credentials."""
-        lines = ["Cannot run agent: Missing credentials\n"]
-        lines.append("The following node types require credentials that are not set:\n")
-
+        lines = [
+            "Cannot run agent: Missing credentials\n",
+            "The following node types require credentials that are not set:\n",
+        ]
         for _cred_name, spec in missing:
             # Find which of the requested node types need this credential
             affected_types = [t for t in node_types if t in spec.node_types]
@@ -384,9 +375,7 @@ class CredentialManager:
                 lines.append(f"    {spec.description}")
             if spec.help_url:
                 lines.append(f"    Get an API key at: {spec.help_url}")
-            lines.append(f"    Set via: export {spec.env_var}=your_key")
-            lines.append("")
-
+            lines.extend((f"    Set via: export {spec.env_var}=your_key", ""))
         lines.append("Set these environment variables and re-run the agent.")
         return "\n".join(lines)
 
@@ -404,13 +393,11 @@ class CredentialManager:
             creds = CredentialManager()
             creds.validate_startup()  # Fails if ANTHROPIC_API_KEY is not set
         """
-        missing: list[tuple[str, CredentialSpec]] = []
-
-        for cred_name, spec in self._specs.items():
-            if spec.startup_required and not self.is_available(cred_name):
-                missing.append((cred_name, spec))
-
-        if missing:
+        if missing := [
+            (cred_name, spec)
+            for cred_name, spec in self._specs.items()
+            if spec.startup_required and not self.is_available(cred_name)
+        ]:
             raise CredentialError(self._format_startup_error(missing))
 
     def _format_startup_error(
@@ -426,9 +413,7 @@ class CredentialManager:
                 lines.append(f"    {spec.description}")
             if spec.help_url:
                 lines.append(f"    Get an API key at: {spec.help_url}")
-            lines.append(f"    Set via: export {spec.env_var}=your_key")
-            lines.append("")
-
+            lines.extend((f"    Set via: export {spec.env_var}=your_key", ""))
         lines.append("Set these environment variables and restart the server.")
         return "\n".join(lines)
 

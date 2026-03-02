@@ -190,7 +190,7 @@ def cmd_test_debug(args: argparse.Namespace) -> int:
     # Find which file contains the test
     test_file = None
     for py_file in tests_dir.glob("test_*.py"):
-        content = py_file.read_text(encoding="utf-8")
+        content = py_file.read_text()
         if f"def {test_name}" in content or f"async def {test_name}" in content:
             test_file = py_file
             break
@@ -238,34 +238,32 @@ def _scan_test_files(tests_dir: Path) -> list[dict]:
 
     for test_file in sorted(tests_dir.glob("test_*.py")):
         try:
-            content = test_file.read_text(encoding="utf-8")
+            content = test_file.read_text()
             tree = ast.parse(content)
 
             for node in ast.walk(tree):
-                if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                    if node.name.startswith("test_"):
-                        # Determine test type from filename
-                        if "constraint" in test_file.name:
-                            test_type = "constraint"
-                        elif "success" in test_file.name:
-                            test_type = "success"
-                        elif "edge" in test_file.name:
-                            test_type = "edge_case"
-                        else:
-                            test_type = "unknown"
-
-                        docstring = ast.get_docstring(node) or ""
-
-                        tests.append(
-                            {
-                                "test_name": node.name,
-                                "file": test_file.name,
-                                "line": node.lineno,
-                                "test_type": test_type,
-                                "is_async": isinstance(node, ast.AsyncFunctionDef),
-                                "description": docstring[:100] if docstring else None,
-                            }
-                        )
+                if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name.startswith("test_"):
+                    if "constraint" in test_file.name:
+                        test_type = "constraint"
+                    elif "success" in test_file.name:
+                        test_type = "success"
+                    elif "edge" in test_file.name:
+                        test_type = "edge_case"
+                    else:
+                        test_type = "unknown"
+                
+                    docstring = ast.get_docstring(node) or ""
+                
+                    tests.append(
+                        {
+                            "test_name": node.name,
+                            "file": test_file.name,
+                            "line": node.lineno,
+                            "test_type": test_type,
+                            "is_async": isinstance(node, ast.AsyncFunctionDef),
+                            "description": docstring[:100] if docstring else None,
+                        }
+                    )
         except SyntaxError as e:
             print(f"  Warning: Syntax error in {test_file.name}: {e}")
         except Exception as e:
@@ -359,7 +357,8 @@ def cmd_test_stats(args: argparse.Namespace) -> int:
     test_files = list(tests_dir.glob("test_*.py"))
     print(f"\n  Test files ({len(test_files)}):")
     for f in sorted(test_files):
-        count = sum(1 for t in tests if t["file"] == f.name)
+        count = sum(bool(t["file"] == f.name)
+                for t in tests)
         print(f"    {f.name} ({count} tests)")
 
     print(f"\nRun all tests: pytest {tests_dir} -v")

@@ -161,9 +161,7 @@ class AdenCachedStorage(CredentialStorage):
         Returns:
             CredentialObject if found, None otherwise.
         """
-        # Check provider index first — Aden-synced credentials take priority
-        resolved_ids = self._provider_index.get(credential_id)
-        if resolved_ids:
+        if resolved_ids := self._provider_index.get(credential_id):
             for rid in resolved_ids:
                 if rid != credential_id:
                     result = self._load_by_id(rid)
@@ -201,8 +199,7 @@ class AdenCachedStorage(CredentialStorage):
 
         # Try to refresh stale local credential from Aden
         try:
-            aden_cred = self._aden_provider.fetch_from_aden(credential_id)
-            if aden_cred:
+            if aden_cred := self._aden_provider.fetch_from_aden(credential_id):
                 self.save(aden_cred)
                 logger.debug(f"Fetched credential '{credential_id}' from Aden")
                 return aden_cred
@@ -224,8 +221,7 @@ class AdenCachedStorage(CredentialStorage):
         """
         results: list[CredentialObject] = []
         for cid in self._provider_index.get(provider_name, []):
-            cred = self._load_by_id(cid)
-            if cred:
+            if cred := self._load_by_id(cid):
                 results.append(cred)
         return results
 
@@ -266,9 +262,7 @@ class AdenCachedStorage(CredentialStorage):
         """
         if self._local.exists(credential_id):
             return True
-        # Check provider index
-        resolved_ids = self._provider_index.get(credential_id)
-        if resolved_ids:
+        if resolved_ids := self._provider_index.get(credential_id):
             for rid in resolved_ids:
                 if rid != credential_id and self._local.exists(rid):
                     return True
@@ -323,19 +317,15 @@ class AdenCachedStorage(CredentialStorage):
         integration_type_key = credential.keys.get("_integration_type")
         if integration_type_key is None:
             return
-        provider_name = integration_type_key.value.get_secret_value()
-        if provider_name:
+        if provider_name := integration_type_key.value.get_secret_value():
             if provider_name not in self._provider_index:
                 self._provider_index[provider_name] = []
             if credential.id not in self._provider_index[provider_name]:
                 self._provider_index[provider_name].append(credential.id)
             logger.debug(f"Indexed provider '{provider_name}' -> '{credential.id}'")
 
-            # Index by alias for multi-account routing
-            alias_key = credential.keys.get("_alias")
-            if alias_key:
-                alias = alias_key.value.get_secret_value()
-                if alias:
+            if alias_key := credential.keys.get("_alias"):
+                if alias := alias_key.value.get_secret_value():
                     self._alias_index[f"{provider_name}:{alias}"] = credential.id
 
     def load_by_alias(self, provider_name: str, alias: str) -> CredentialObject | None:
@@ -348,8 +338,7 @@ class AdenCachedStorage(CredentialStorage):
         Returns:
             CredentialObject if found, None otherwise.
         """
-        cred_id = self._alias_index.get(f"{provider_name}:{alias}")
-        if cred_id:
+        if cred_id := self._alias_index.get(f"{provider_name}:{alias}"):
             return self._load_by_id(cred_id)
         return None
 
@@ -366,8 +355,7 @@ class AdenCachedStorage(CredentialStorage):
         self._alias_index.clear()
         indexed = 0
         for cred_id in self._local.list_all():
-            cred = self._local.load(cred_id)
-            if cred:
+            if cred := self._local.load(cred_id):
                 before = len(self._provider_index)
                 self._index_provider(cred)
                 if len(self._provider_index) > before:
@@ -396,8 +384,9 @@ class AdenCachedStorage(CredentialStorage):
                     continue
 
                 try:
-                    cred = self._aden_provider.fetch_from_aden(info.integration_id)
-                    if cred:
+                    if cred := self._aden_provider.fetch_from_aden(
+                        info.integration_id
+                    ):
                         self.save(cred)
                         synced += 1
                         logger.info(f"Synced credential '{info.alias}' from Aden")
@@ -420,8 +409,7 @@ class AdenCachedStorage(CredentialStorage):
         info = {}
 
         for cred_id in self.list_all():
-            cached_at = self._cache_timestamps.get(cred_id)
-            if cached_at:
+            if cached_at := self._cache_timestamps.get(cred_id):
                 ttl_remaining = (cached_at + self._cache_ttl - now).total_seconds()
                 info[cred_id] = {
                     "cached_at": cached_at.isoformat(),

@@ -62,23 +62,21 @@ def _fix_unescaped_newlines_in_json(json_str: str) -> str:
             i += 1
             continue
 
-        # Fix unescaped newlines inside strings
-        if in_string and char == "\n":
-            result.append("\\n")
-            i += 1
-            continue
+        if in_string:
+            if char == "\n":
+                result.append("\\n")
+                i += 1
+                continue
 
-        # Fix unescaped carriage returns inside strings
-        if in_string and char == "\r":
-            result.append("\\r")
-            i += 1
-            continue
+            if char == "\r":
+                result.append("\\r")
+                i += 1
+                continue
 
-        # Fix unescaped tabs inside strings
-        if in_string and char == "\t":
-            result.append("\\t")
-            i += 1
-            continue
+            if char == "\t":
+                result.append("\\t")
+                i += 1
+                continue
 
         result.append(char)
         i += 1
@@ -307,20 +305,16 @@ class SharedMemory:
         if self._allowed_write and key not in self._allowed_write:
             raise PermissionError(f"Node not allowed to write key: {key}")
 
-        if validate and isinstance(value, str):
-            # Check for obviously hallucinated content
-            if len(value) > 5000:
-                # Long strings that look like code are suspicious
-                if self._contains_code_indicators(value):
-                    logger.warning(
-                        f"⚠ Suspicious write to key '{key}': appears to be code "
-                        f"({len(value)} chars). Consider using validate=False if intended."
-                    )
-                    raise MemoryWriteError(
-                        f"Rejected suspicious content for key '{key}': "
-                        f"appears to be hallucinated code ({len(value)} chars). "
-                        "If this is intentional, use validate=False."
-                    )
+        if validate and isinstance(value, str) and len(value) > 5000 and self._contains_code_indicators(value):
+            logger.warning(
+                f"⚠ Suspicious write to key '{key}': appears to be code "
+                f"({len(value)} chars). Consider using validate=False if intended."
+            )
+            raise MemoryWriteError(
+                f"Rejected suspicious content for key '{key}': "
+                f"appears to be hallucinated code ({len(value)} chars). "
+                "If this is intentional, use validate=False."
+            )
 
         self._data[key] = value
 
@@ -352,18 +346,16 @@ class SharedMemory:
 
         # Acquire per-key lock and write
         async with self._key_locks[key]:
-            if validate and isinstance(value, str):
-                if len(value) > 5000:
-                    if self._contains_code_indicators(value):
-                        logger.warning(
-                            f"⚠ Suspicious write to key '{key}': appears to be code "
-                            f"({len(value)} chars). Consider using validate=False if intended."
-                        )
-                        raise MemoryWriteError(
-                            f"Rejected suspicious content for key '{key}': "
-                            f"appears to be hallucinated code ({len(value)} chars). "
-                            "If this is intentional, use validate=False."
-                        )
+            if validate and isinstance(value, str) and len(value) > 5000 and self._contains_code_indicators(value):
+                logger.warning(
+                    f"⚠ Suspicious write to key '{key}': appears to be code "
+                    f"({len(value)} chars). Consider using validate=False if intended."
+                )
+                raise MemoryWriteError(
+                    f"Rejected suspicious content for key '{key}': "
+                    f"appears to be hallucinated code ({len(value)} chars). "
+                    "If this is intentional, use validate=False."
+                )
             self._data[key] = value
 
     def _contains_code_indicators(self, value: str) -> bool:
@@ -672,8 +664,8 @@ class NodeProtocol(ABC):
         Returns:
             List of validation error messages (empty if valid)
         """
-        errors = []
-        for key in ctx.node_spec.input_keys:
-            if key not in ctx.input_data and ctx.memory.read(key) is None:
-                errors.append(f"Missing required input: {key}")
-        return errors
+        return [
+            f"Missing required input: {key}"
+            for key in ctx.node_spec.input_keys
+            if key not in ctx.input_data and ctx.memory.read(key) is None
+        ]

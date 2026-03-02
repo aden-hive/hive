@@ -127,9 +127,7 @@ class DebugTool:
             if result.error_category:
                 debug_info.error_category = result.error_category.value
             elif not result.passed:
-                # Categorize if not already done
-                category = self.categorizer.categorize(result)
-                if category:
+                if category := self.categorizer.categorize(result):
                     debug_info.error_category = category.value
 
         # Get runtime data if available
@@ -177,8 +175,7 @@ class DebugTool:
         if result.error_category:
             debug_info.error_category = result.error_category.value
         elif not result.passed:
-            category = self.categorizer.categorize(result)
-            if category:
+            if category := self.categorizer.categorize(result):
                 debug_info.error_category = category.value
 
         # Runtime data

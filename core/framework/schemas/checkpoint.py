@@ -155,10 +155,14 @@ class CheckpointIndex(BaseModel):
 
     def get_checkpoint_summary(self, checkpoint_id: str) -> CheckpointSummary | None:
         """Get checkpoint summary by ID."""
-        for summary in self.checkpoints:
-            if summary.checkpoint_id == checkpoint_id:
-                return summary
-        return None
+        return next(
+            (
+                summary
+                for summary in self.checkpoints
+                if summary.checkpoint_id == checkpoint_id
+            ),
+            None,
+        )
 
     def filter_by_type(self, checkpoint_type: str) -> list[CheckpointSummary]:
         """Filter checkpoints by type."""

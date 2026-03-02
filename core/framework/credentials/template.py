@@ -75,14 +75,14 @@ class TemplateResolver:
         """
 
         def replace_match(match: re.Match) -> str:
-            cred_id = match.group(1)
-            key_name = match.group(2)  # May be None
+            cred_id = match[1]
+            key_name = match[2]
 
             credential = self._store.get_credential(cred_id, refresh_if_needed=True)
             if credential is None:
                 if fail_on_missing:
                     raise CredentialNotFoundError(f"Credential '{cred_id}' not found")
-                return match.group(0)  # Return original template
+                return match[0]
 
             # Get specific key or default
             if key_name:

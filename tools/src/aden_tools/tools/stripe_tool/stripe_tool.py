@@ -71,10 +71,10 @@ class _StripeClient:
 
     def get_customer_by_email(self, email: str) -> dict[str, Any]:
         result = self._stripe().customers.list({"email": email, "limit": 1})
-        items = result.data
-        if not items:
+        if items := result.data:
+            return self._format_customer(items[0])
+        else:
             return {"error": f"No customer found with email: {email}"}
-        return self._format_customer(items[0])
 
     def update_customer(
         self,
@@ -137,14 +137,14 @@ class _StripeClient:
 
     def get_subscription_status(self, customer_id: str) -> dict[str, Any]:
         result = self._stripe().subscriptions.list({"customer": customer_id, "limit": 10})
-        subs = result.data
-        if not subs:
+        if subs := result.data:
+            return {
+                "customer_id": customer_id,
+                "status": subs[0].status,
+                "subscriptions": [self._format_subscription(s) for s in subs],
+            }
+        else:
             return {"customer_id": customer_id, "status": "no_subscription", "subscriptions": []}
-        return {
-            "customer_id": customer_id,
-            "status": subs[0].status,
-            "subscriptions": [self._format_subscription(s) for s in subs],
-        }
 
     def list_subscriptions(
         self,
@@ -1004,9 +1004,7 @@ def register_tools(
     def _get_client() -> _StripeClient | dict[str, str]:
         """Get a Stripe client, or return an error dict if no credentials."""
         key = _get_api_key()
-        if isinstance(key, dict):
-            return key
-        return _StripeClient(key)
+        return key if isinstance(key, dict) else _StripeClient(key)
 
     def _stripe_error(e: stripe.StripeError) -> dict[str, Any]:
         return {"error": str(e)}

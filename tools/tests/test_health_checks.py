@@ -74,7 +74,6 @@ class TestHealthCheckerRegistry:
             "google_maps",
             "anthropic",
             "github",
-            "intercom",
             "resend",
             "google_calendar_oauth",
             "google",
@@ -543,10 +542,7 @@ class HealthCheckerTestSuite:
     def _mock_response(self, status_code, json_data=None):
         response = MagicMock(spec=httpx.Response)
         response.status_code = status_code
-        if json_data:
-            response.json.return_value = json_data
-        else:
-            response.json.return_value = {}
+        response.json.return_value = json_data or {}
         return response
 
     def _setup_mock(self, mock_client_cls, status_code=200, json_data=None):

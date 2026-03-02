@@ -41,9 +41,7 @@ def _ensure_list(value: str | list[str] | None) -> list[str] | None:
     list parameters.  This normalises the input so Pydantic validation
     doesn't reject it.
     """
-    if isinstance(value, str):
-        return [value]
-    return value
+    return [value] if isinstance(value, str) else value
 
 
 def register_tools(
@@ -77,7 +75,7 @@ def register_tools(
 
     def _handle_error(response: httpx.Response) -> dict | None:
         """Return error dict for non-200 responses, or None if OK."""
-        if response.status_code == 200 or response.status_code == 204:
+        if response.status_code in [200, 204]:
             return None
         if response.status_code == 401:
             return {

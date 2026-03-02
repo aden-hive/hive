@@ -165,8 +165,9 @@ class LocalCredentialRegistry:
 
         if identity:
             valid_fields = set(CredentialIdentity.model_fields)
-            filtered = {k: v for k, v in identity.items() if k in valid_fields}
-            if filtered:
+            if filtered := {
+                k: v for k, v in identity.items() if k in valid_fields
+            }:
                 cred_obj.set_identity(**filtered)
 
         cred_obj.last_refreshed = now if run_health_check else None
@@ -203,16 +204,12 @@ class LocalCredentialRegistry:
             The secret value, or None if not found.
         """
         cred = self.get_account(credential_id, alias)
-        if cred is None:
-            return None
-        return cred.get_key(key_name)
+        return None if cred is None else cred.get_key(key_name)
 
     def get_account_info(self, credential_id: str, alias: str) -> LocalAccountInfo | None:
         """Load a LocalAccountInfo for a specific account."""
         cred = self.get_account(credential_id, alias)
-        if cred is None:
-            return None
-        return self._to_account_info(cred)
+        return None if cred is None else self._to_account_info(cred)
 
     # ------------------------------------------------------------------
     # Delete
@@ -257,8 +254,7 @@ class LocalCredentialRegistry:
 
         try:
             kwargs: dict[str, Any] = {}
-            cse_id = cred.get_key("cse_id")
-            if cse_id:
+            if cse_id := cred.get_key("cse_id"):
                 kwargs["cse_id"] = cse_id
 
             result = check_credential_health(credential_id, api_key, **kwargs)
@@ -274,12 +270,11 @@ class LocalCredentialRegistry:
         cred.set_key("_status", new_status)
         cred.last_refreshed = datetime.now(UTC)
 
-        # Re-extract identity if available
-        identity = result.details.get("identity", {})
-        if identity:
+        if identity := result.details.get("identity", {}):
             valid_fields = set(CredentialIdentity.model_fields)
-            filtered = {k: v for k, v in identity.items() if k in valid_fields}
-            if filtered:
+            if filtered := {
+                k: v for k, v in identity.items() if k in valid_fields
+            }:
                 cred.set_identity(**filtered)
 
         self._storage.save(cred)

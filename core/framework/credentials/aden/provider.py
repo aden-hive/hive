@@ -143,10 +143,7 @@ class AdenSyncProvider(CredentialProvider):
 
         # Check for Aden-managed flag in metadata
         aden_flag = credential.keys.get("_aden_managed")
-        if aden_flag and aden_flag.value.get_secret_value() == "true":
-            return True
-
-        return False
+        return bool(aden_flag and aden_flag.value.get_secret_value() == "true")
 
     def refresh(self, credential: CredentialObject) -> CredentialObject:
         """
@@ -201,10 +198,9 @@ class AdenSyncProvider(CredentialProvider):
 
             # Check if local token is still valid
             access_key = credential.keys.get("access_token")
-            if access_key and access_key.expires_at:
-                if datetime.now(UTC) < access_key.expires_at:
-                    logger.warning(f"Aden unavailable, using cached token for '{credential.id}'")
-                    return credential
+            if access_key and access_key.expires_at and datetime.now(UTC) < access_key.expires_at:
+                logger.warning(f"Aden unavailable, using cached token for '{credential.id}'")
+                return credential
 
             raise CredentialRefreshError(
                 f"Aden server unavailable and token expired for '{credential.id}'"
@@ -302,8 +298,7 @@ class AdenSyncProvider(CredentialProvider):
                     continue
 
                 try:
-                    cred = self.fetch_from_aden(info.integration_id)
-                    if cred:
+                    if cred := self.fetch_from_aden(info.integration_id):
                         store.save_credential(cred)
                         synced += 1
                         logger.info(f"Synced credential '{info.alias}' from Aden")

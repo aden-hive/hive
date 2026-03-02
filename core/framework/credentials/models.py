@@ -154,9 +154,7 @@ class CredentialObject(BaseModel):
             The key's secret value, or None if not found
         """
         key = self.keys.get(key_name)
-        if key is None:
-            return None
-        return key.get_secret_value()
+        return None if key is None else key.get_secret_value()
 
     def set_key(
         self,
@@ -189,10 +187,7 @@ class CredentialObject(BaseModel):
     @property
     def needs_refresh(self) -> bool:
         """Check if any key is expired or near expiration."""
-        for key in self.keys.values():
-            if key.is_expired:
-                return True
-        return False
+        return any(key.is_expired for key in self.keys.values())
 
     @property
     def is_valid(self) -> bool:

@@ -93,11 +93,7 @@ def _create_bigquery_client(project_id: str | None = None) -> Any:
         ) from None
 
     # Create client - will use ADC if GOOGLE_APPLICATION_CREDENTIALS not set
-    if project_id:
-        return bigquery.Client(project=project_id)
-    else:
-        # Let the client infer project from credentials
-        return bigquery.Client()
+    return bigquery.Client(project=project_id) if project_id else bigquery.Client()
 
 
 def register_tools(

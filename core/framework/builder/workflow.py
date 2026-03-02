@@ -197,7 +197,7 @@ class GraphBuilder:
             suggestions.append("Specify required_capabilities (e.g., ['llm', 'tools'])")
 
         return ValidationResult(
-            valid=len(errors) == 0,
+            valid=not errors,
             errors=errors,
             warnings=warnings,
             suggestions=suggestions,
@@ -249,7 +249,7 @@ class GraphBuilder:
             if node.tools and not node.system_prompt:
                 warnings.append(f"Event loop node '{node.id}' should have a system_prompt")
 
-        if node.node_type == "router":
+        elif node.node_type == "router":
             if not node.routes:
                 errors.append(f"Router node '{node.id}' must specify routes")
 
@@ -260,7 +260,7 @@ class GraphBuilder:
             suggestions.append(f"Consider specifying output_keys for '{node.id}'")
 
         return ValidationResult(
-            valid=len(errors) == 0,
+            valid=not errors,
             errors=errors,
             warnings=warnings,
             suggestions=suggestions,
@@ -338,22 +338,18 @@ class GraphBuilder:
             errors.append("Edge must have an id")
 
         # Check source exists
-        if not any(n.id == edge.source for n in self.session.nodes):
+        if all(n.id != edge.source for n in self.session.nodes):
             errors.append(f"Edge source '{edge.source}' not found in nodes")
 
         # Check target exists
-        if not any(n.id == edge.target for n in self.session.nodes):
+        if all(n.id != edge.target for n in self.session.nodes):
             errors.append(f"Edge target '{edge.target}' not found in nodes")
 
         # Warn about conditional edges without expressions
         if edge.condition == EdgeCondition.CONDITIONAL and not edge.condition_expr:
             warnings.append(f"Conditional edge '{edge.id}' has no condition_expr")
 
-        return ValidationResult(
-            valid=len(errors) == 0,
-            errors=errors,
-            warnings=warnings,
-        )
+        return ValidationResult(valid=not errors, errors=errors, warnings=warnings)
 
     # =========================================================================
     # VALIDATION & TESTING
@@ -377,10 +373,10 @@ class GraphBuilder:
         entry_candidates = []
         for node in self.session.nodes:
             # A node is an entry candidate if no edges point to it
-            if not any(e.target == node.id for e in self.session.edges):
+            if all(e.target != node.id for e in self.session.edges):
                 entry_candidates.append(node.id)
 
-        if len(entry_candidates) == 0 and self.session.nodes:
+        if not entry_candidates and self.session.nodes:
             errors.append("No entry node found (all nodes have incoming edges)")
         elif len(entry_candidates) > 1:
             warnings.append(f"Multiple entry candidates: {entry_candidates}. Specify one.")
@@ -388,7 +384,7 @@ class GraphBuilder:
         # Check for terminal nodes
         terminal_candidates = []
         for node in self.session.nodes:
-            if not any(e.source == node.id for e in self.session.edges):
+            if all(e.source != node.id for e in self.session.edges):
                 terminal_candidates.append(node.id)
 
         if not terminal_candidates and self.session.nodes:
@@ -401,14 +397,13 @@ class GraphBuilder:
             reachable = set()
             for candidate in entry_candidates:
                 reachable |= self._compute_reachable(candidate)
-            unreachable = [n.id for n in self.session.nodes if n.id not in reachable]
-            if unreachable:
+            if unreachable := [
+                n.id for n in self.session.nodes if n.id not in reachable
+            ]:
                 errors.append(f"Unreachable nodes: {unreachable}")
 
         validation = ValidationResult(
-            valid=len(errors) == 0,
-            errors=errors,
-            warnings=warnings,
+            valid=not errors, errors=errors, warnings=warnings
         )
         self._pending_validation = validation
         return validation
@@ -431,9 +426,7 @@ class GraphBuilder:
             # Also follow router routes
             for node in self.session.nodes:
                 if node.id == current and node.routes:
-                    for target in node.routes.values():
-                        to_visit.append(target)
-
+                    to_visit.extend(target for target in node.routes.values())
         return reachable
 
     def add_test(self, test: TestCase) -> None:
@@ -581,8 +574,9 @@ class GraphBuilder:
 
         # Check test results
         if self.session.test_cases:
-            failed_tests = [t for t in self.session.test_results if not t.passed]
-            if failed_tests:
+            if failed_tests := [
+                t for t in self.session.test_results if not t.passed
+            ]:
                 self._pending_validation = ValidationResult(
                     valid=False,
                     errors=[f"Failed tests: {[t.test_id for t in failed_tests]}"],
@@ -622,19 +616,19 @@ class GraphBuilder:
 
     def _build_graph(self) -> GraphSpec:
         """Build a GraphSpec from current session."""
-        # Determine entry node
-        entry_node = None
-        for node in self.session.nodes:
-            if not any(e.target == node.id for e in self.session.edges):
-                entry_node = node.id
-                break
-
-        # Determine terminal nodes
-        terminal_nodes = []
-        for node in self.session.nodes:
-            if not any(e.source == node.id for e in self.session.edges):
-                terminal_nodes.append(node.id)
-
+        entry_node = next(
+            (
+                node.id
+                for node in self.session.nodes
+                if all(e.target != node.id for e in self.session.edges)
+            ),
+            None,
+        )
+        terminal_nodes = [
+            node.id
+            for node in self.session.nodes
+            if all(e.source != node.id for e in self.session.edges)
+        ]
         # Collect all memory keys
         memory_keys = set()
         for node in self.session.nodes:
@@ -686,8 +680,7 @@ class GraphBuilder:
         if self.session.goal:
             goal_json = self.session.goal.model_dump_json(indent=4)
             lines.append("GOAL = Goal.model_validate_json('''")
-            lines.append(goal_json)
-            lines.append("''')")
+            lines.extend((goal_json, "''')"))
         else:
             lines.append("GOAL = None")
 
@@ -703,9 +696,7 @@ class GraphBuilder:
         for node in self.session.nodes:
             node_json = node.model_dump_json(indent=4)
             lines.append("    NodeSpec.model_validate_json('''")
-            lines.append(node_json)
-            lines.append("    '''),")
-
+            lines.extend((node_json, "    '''),"))
         lines.extend(
             [
                 "]",
@@ -719,9 +710,7 @@ class GraphBuilder:
         for edge in self.session.edges:
             edge_json = edge.model_dump_json(indent=4)
             lines.append("    EdgeSpec.model_validate_json('''")
-            lines.append(edge_json)
-            lines.append("    '''),")
-
+            lines.extend((edge_json, "    '''),"))
         lines.extend(
             [
                 "]",
@@ -733,9 +722,7 @@ class GraphBuilder:
 
         graph_json = graph.model_dump_json(indent=4)
         lines.append("GRAPH = GraphSpec.model_validate_json('''")
-        lines.append(graph_json)
-        lines.append("''')")
-
+        lines.extend((graph_json, "''')"))
         return "\n".join(lines)
 
     # =========================================================================
@@ -761,15 +748,13 @@ class GraphBuilder:
         path = self.storage_path / f"{session_id}.json"
         if not path.exists():
             raise FileNotFoundError(f"Session not found: {session_id}")
-        return BuildSession.model_validate_json(path.read_text(encoding="utf-8"))
+        return BuildSession.model_validate_json(path.read_text())
 
     @classmethod
     def list_sessions(cls, storage_path: Path | str | None = None) -> list[str]:
         """List all saved sessions."""
         path = Path(storage_path) if storage_path else Path.home() / ".core" / "builds"
-        if not path.exists():
-            return []
-        return [f.stem for f in path.glob("*.json")]
+        return [f.stem for f in path.glob("*.json")] if path.exists() else []
 
     # =========================================================================
     # STATUS
@@ -785,7 +770,8 @@ class GraphBuilder:
             "nodes": len(self.session.nodes),
             "edges": len(self.session.edges),
             "tests": len(self.session.test_cases),
-            "tests_passed": sum(1 for t in self.session.test_results if t.passed),
+            "tests_passed": sum(bool(t.passed)
+                            for t in self.session.test_results),
             "approvals": len(self.session.approvals),
             "pending_validation": self._pending_validation.model_dump()
             if self._pending_validation
@@ -811,22 +797,27 @@ class GraphBuilder:
 
         if self.session.nodes:
             lines.append("Nodes:")
-            for node in self.session.nodes:
-                lines.append(f"  [{node.id}] {node.name} ({node.node_type})")
+            lines.extend(
+                f"  [{node.id}] {node.name} ({node.node_type})"
+                for node in self.session.nodes
+            )
             lines.append("")
 
         if self.session.edges:
             lines.append("Edges:")
-            for edge in self.session.edges:
-                lines.append(f"  {edge.source} --{edge.condition.value}--> {edge.target}")
+            lines.extend(
+                f"  {edge.source} --{edge.condition.value}--> {edge.target}"
+                for edge in self.session.edges
+            )
             lines.append("")
 
         if self._pending_validation:
-            lines.append("Pending Validation:")
-            lines.append(f"  Valid: {self._pending_validation.valid}")
-            for err in self._pending_validation.errors:
-                lines.append(f"  ERROR: {err}")
-            for warn in self._pending_validation.warnings:
-                lines.append(f"  WARN: {warn}")
-
+            lines.extend(
+                (
+                    "Pending Validation:",
+                    f"  Valid: {self._pending_validation.valid}",
+                )
+            )
+            lines.extend(f"  ERROR: {err}" for err in self._pending_validation.errors)
+            lines.extend(f"  WARN: {warn}" for warn in self._pending_validation.warnings)
         return "\n".join(lines)

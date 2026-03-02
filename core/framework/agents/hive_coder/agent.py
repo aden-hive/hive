@@ -127,7 +127,7 @@ identity_prompt = (
 )
 loop_config = {
     "max_iterations": 100,
-    "max_tool_calls_per_turn": 30,
+    "max_tool_calls_per_turn": 20,
     "max_history_tokens": 32000,
 }
 
@@ -160,8 +160,8 @@ queen_graph = GraphSpec(
     edges=[],
     conversation_mode="continuous",
     loop_config={
-        "max_iterations": 999_999,
-        "max_tool_calls_per_turn": 30,
+        "max_iterations": 200,
+        "max_tool_calls_per_turn": 10,
         "max_history_tokens": 32000,
     },
 )
@@ -346,11 +346,7 @@ class HiveCoderAgent:
             if node_id not in node_ids:
                 errors.append(f"Entry point '{ep_id}' references unknown node '{node_id}'")
 
-        return {
-            "valid": len(errors) == 0,
-            "errors": errors,
-            "warnings": warnings,
-        }
+        return {"valid": not errors, "errors": errors, "warnings": warnings}
 
 
 # Create default instance

@@ -5,6 +5,7 @@ Generic tests parameterized over credential-requiring tools:
 - Missing required params returns {"error": "..."}
 """
 
+
 from __future__ import annotations
 
 import importlib
@@ -30,9 +31,9 @@ from .conftest import (
 _CRED_TOOL_ENTRIES: list[tuple[str, str]] = []
 
 for _spec_name, _spec in CREDENTIAL_SPECS.items():
-    for _tool_name in _spec.tools:
-        _CRED_TOOL_ENTRIES.append((_spec_name, _tool_name))
-
+    _CRED_TOOL_ENTRIES.extend(
+        (_spec_name, _tool_name) for _tool_name in _spec.tools
+    )
 _CRED_TOOL_IDS = [f"{spec}:{tool}" for spec, tool in _CRED_TOOL_ENTRIES]
 
 
@@ -72,10 +73,10 @@ def _register_and_get_fn(tool_name: str):
 
 # --- Env vars to clear for each credential spec ---
 
-_ENV_VARS_TO_CLEAR: dict[str, list[str]] = {}
-for _spec_name, _spec in CREDENTIAL_SPECS.items():
-    _ENV_VARS_TO_CLEAR[_spec_name] = [_spec.env_var]
-
+_ENV_VARS_TO_CLEAR: dict[str, list[str]] = {
+    _spec_name: [_spec.env_var]
+    for _spec_name, _spec in CREDENTIAL_SPECS.items()
+}
 # Also clear related env vars (e.g., EMAIL_FROM for email tools)
 _EXTRA_ENV_VARS: dict[str, list[str]] = {
     "resend": ["EMAIL_FROM"],

@@ -15,7 +15,6 @@ import base64
 import hashlib
 import http.server
 import json
-import os
 import platform
 import secrets
 import subprocess
@@ -151,9 +150,8 @@ def save_credentials(token_data: dict, account_id: str) -> None:
     if "id_token" in token_data:
         auth_data["tokens"]["id_token"] = token_data["id_token"]
 
-    CODEX_AUTH_FILE.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-    fd = os.open(CODEX_AUTH_FILE, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-    with os.fdopen(fd, "w") as f:
+    CODEX_AUTH_FILE.parent.mkdir(parents=True, exist_ok=True)
+    with open(CODEX_AUTH_FILE, "w") as f:
         json.dump(auth_data, f, indent=2)
 
 
@@ -255,15 +253,11 @@ def parse_manual_input(value: str, expected_state: str) -> str | None:
         params = urllib.parse.parse_qs(parsed.query)
         code = params.get("code", [None])[0]
         state = params.get("state", [None])[0]
-        if state and state != expected_state:
-            return None
-        return code
+        return None if state and state != expected_state else code
     except Exception:
         pass
     # Maybe it's just the raw code
-    if len(value) > 10 and " " not in value:
-        return value
-    return None
+    return value if len(value) > 10 and " " not in value else None
 
 
 def main() -> int:

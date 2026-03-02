@@ -378,7 +378,7 @@ class TestHMACVerification:
                     assert resp.status == 401
 
             await asyncio.sleep(0.05)
-            assert len(received) == 0  # No event published
+            assert not received
         finally:
             await server.stop()
 
@@ -415,7 +415,7 @@ class TestHMACVerification:
                     assert resp.status == 401
 
             await asyncio.sleep(0.05)
-            assert len(received) == 0
+            assert not received
         finally:
             await server.stop()
 

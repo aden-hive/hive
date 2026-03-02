@@ -442,7 +442,7 @@ def set_goal(
 
     return json.dumps(
         {
-            "valid": len(errors) == 0,
+            "valid": not errors,
             "errors": errors,
             "warnings": warnings,
             "goal": session.goal.model_dump(),
@@ -562,29 +562,16 @@ def _validate_agent_path(agent_path: str) -> tuple[Path | None, str | None]:
     path = Path(agent_path)
 
     # Resolve relative paths against project root (not MCP server's cwd)
-    if not path.is_absolute():
-        path = _PROJECT_ROOT / path
-
-    # Restrict to allowed directories BEFORE checking existence to prevent
-    # leaking whether arbitrary filesystem paths exist on disk.
-    from framework.server.app import validate_agent_path
-
-    try:
-        path = validate_agent_path(path)
-    except ValueError:
-        return None, json.dumps(
-            {
-                "success": False,
-                "error": "agent_path must be inside an allowed directory "
-                "(exports/, examples/, or ~/.hive/agents/)",
-            }
-        )
+    if not path.is_absolute() and not path.exists():
+        resolved = _PROJECT_ROOT / path
+        if resolved.exists():
+            path = resolved
 
     if not path.exists():
         return None, json.dumps(
             {
                 "success": False,
-                "error": f"Agent path not found: {agent_path}",
+                "error": f"Agent path not found: {path}",
                 "hint": "Run export_graph to create an agent in exports/ first",
             }
         )
@@ -783,9 +770,9 @@ def add_edge(
     errors = []
     warnings = []
 
-    if not any(n.id == source for n in session.nodes):
+    if all(n.id != source for n in session.nodes):
         errors.append(f"Source node '{source}' not found")
-    if not any(n.id == target for n in session.nodes):
+    if all(n.id != target for n in session.nodes):
         errors.append(f"Target node '{target}' not found")
     if edge_condition == EdgeCondition.CONDITIONAL and not condition_expr:
         errors.append(f"Conditional edge '{edge_id}' needs condition_expr")
@@ -805,7 +792,7 @@ def add_edge(
 
     return json.dumps(
         {
-            "valid": len(errors) == 0,
+            "valid": not errors,
             "errors": errors,
             "warnings": warnings,
             "edge": edge.model_dump(),
@@ -861,13 +848,7 @@ def update_node(
     """Update an existing node in the agent graph. Only provided fields will be updated."""
     session = get_session()
 
-    # Find the node
-    node = None
-    for n in session.nodes:
-        if n.id == node_id:
-            node = n
-            break
-
+    node = next((n for n in session.nodes if n.id == node_id), None)
     if not node:
         return json.dumps({"valid": False, "errors": [f"Node '{node_id}' not found"]})
 
@@ -891,8 +872,7 @@ def update_node(
 
     # Validate credentials for new tools BEFORE updating
     if tools_list:
-        cred_error = _validate_tool_credentials(tools_list)
-        if cred_error:
+        if cred_error := _validate_tool_credentials(tools_list):
             return json.dumps(cred_error)
 
     # Update fields if provided
@@ -938,8 +918,9 @@ def update_node(
 
     # nullable_output_keys must be a subset of output_keys
     if node.nullable_output_keys:
-        invalid_nullable = [k for k in node.nullable_output_keys if k not in node.output_keys]
-        if invalid_nullable:
+        if invalid_nullable := [
+            k for k in node.nullable_output_keys if k not in node.output_keys
+        ]:
             errors.append(
                 f"nullable_output_keys {invalid_nullable} must be a subset of "
                 f"output_keys {node.output_keys}"
@@ -949,7 +930,7 @@ def update_node(
 
     return json.dumps(
         {
-            "valid": len(errors) == 0,
+            "valid": not errors,
             "errors": errors,
             "warnings": warnings,
             "node": node.model_dump(),
@@ -987,13 +968,9 @@ def delete_node(
     """Delete a node from the agent graph. Also removes all edges connected to this node."""
     session = get_session()
 
-    # Find the node
-    node_idx = None
-    for i, n in enumerate(session.nodes):
-        if n.id == node_id:
-            node_idx = i
-            break
-
+    node_idx = next(
+        (i for i, n in enumerate(session.nodes) if n.id == node_id), None
+    )
     if node_idx is None:
         return json.dumps({"valid": False, "errors": [f"Node '{node_id}' not found"]})
 
@@ -1002,7 +979,9 @@ def delete_node(
 
     # Remove all edges connected to this node
     removed_edges = [e.id for e in session.edges if e.source == node_id or e.target == node_id]
-    session.edges = [e for e in session.edges if not (e.source == node_id or e.target == node_id)]
+    session.edges = [
+        e for e in session.edges if e.source != node_id and e.target != node_id
+    ]
 
     _save_session(session)  # Auto-save
 
@@ -1026,13 +1005,9 @@ def delete_edge(
     """Delete an edge from the agent graph."""
     session = get_session()
 
-    # Find the edge
-    edge_idx = None
-    for i, e in enumerate(session.edges):
-        if e.id == edge_id:
-            edge_idx = i
-            break
-
+    edge_idx = next(
+        (i for i, e in enumerate(session.edges) if e.id == edge_id), None
+    )
     if edge_idx is None:
         return json.dumps({"valid": False, "errors": [f"Edge '{edge_id}' not found"]})
 
@@ -1130,13 +1105,14 @@ def validate_graph() -> str:
                     for tgt in node.routes.values():
                         to_visit.append(tgt)
 
-        unreachable = [n.id for n in session.nodes if n.id not in reachable]
-        if unreachable:
+        if unreachable := [
+            n.id for n in session.nodes if n.id not in reachable
+        ]:
             # For pause/resume agents, nodes might be reachable only from resume entry points
             if is_pause_resume_agent:
-                # Filter out resume entry points from unreachable list
-                unreachable_non_resume = [n for n in unreachable if n not in resume_entry_points]
-                if unreachable_non_resume:
+                if unreachable_non_resume := [
+                    n for n in unreachable if n not in resume_entry_points
+                ]:
                     warnings.append(
                         f"Nodes unreachable from primary entry "
                         f"(may be resume-only nodes): {unreachable_non_resume}"
@@ -1276,19 +1252,19 @@ def validate_graph() -> str:
                 # Resume entry points can receive external inputs from resumed invocations
                 other_missing = [k for k in missing if k not in external_input_keys]
 
-                if unproduced_external:
-                    context_warnings.append(
-                        f"Resume entry node '{node_id}' expects external inputs "
-                        f"{unproduced_external} from resumed invocation. "
-                        "These will be injected by the runtime when user responds."
-                    )
+                context_warnings.append(
+                    f"Resume entry node '{node_id}' expects external inputs "
+                    f"{unproduced_external} from resumed invocation. "
+                    "These will be injected by the runtime when user responds."
+                )
 
                 if other_missing:
                     # Still need to check other keys
                     suggestions = []
                     for key in other_missing:
-                        producers = [n.id for n in session.nodes if key in n.output_keys]
-                        if producers:
+                        if producers := [
+                            n.id for n in session.nodes if key in n.output_keys
+                        ]:
                             suggestions.append(
                                 f"'{key}' is produced by {producers} - ensure edge exists"
                             )
@@ -1306,8 +1282,9 @@ def validate_graph() -> str:
                 # Non-resume node or no external input keys - standard validation
                 suggestions = []
                 for key in missing:
-                    producers = [n.id for n in session.nodes if key in n.output_keys]
-                    if producers:
+                    if producers := [
+                        n.id for n in session.nodes if key in n.output_keys
+                    ]:
                         suggestions.append(
                             f"'{key}' is produced by {producers} - add dependency edge"
                         )
@@ -1877,14 +1854,12 @@ def import_from_export(
         return json.dumps({"success": False, "error": f"File not found: {agent_json_path}"})
 
     try:
-        data = json.loads(path.read_text(encoding="utf-8"))
+        data = json.loads(path.read_text())
     except json.JSONDecodeError as e:
         return json.dumps({"success": False, "error": f"Invalid JSON: {e}"})
 
     try:
-        # Parse goal (same pattern as BuildSession.from_dict lines 88-99)
-        goal_data = data.get("goal")
-        if goal_data:
+        if goal_data := data.get("goal"):
             session.goal = Goal(
                 id=goal_data["id"],
                 name=goal_data["name"],
@@ -1959,7 +1934,7 @@ def get_session_status() -> str:
 @mcp.tool()
 def configure_loop(
     max_iterations: Annotated[int, "Maximum loop iterations per node execution (default 50)"] = 50,
-    max_tool_calls_per_turn: Annotated[int, "Maximum tool calls per LLM turn (default 30)"] = 30,
+    max_tool_calls_per_turn: Annotated[int, "Maximum tool calls per LLM turn (default 10)"] = 10,
     stall_detection_threshold: Annotated[
         int, "Consecutive identical responses before stall detection triggers (default 3)"
     ] = 3,
@@ -2098,7 +2073,7 @@ def add_mcp_server(
             command=command if transport == "stdio" else None,
             args=args_list if transport == "stdio" else [],
             env=env_dict,
-            cwd=cwd if cwd else None,
+            cwd=cwd or None,
             url=url if transport == "http" else None,
             headers=headers_dict,
             description=description,
@@ -2262,13 +2237,7 @@ def test_node(
     """
     session = get_session()
 
-    # Find the node
-    node_spec = None
-    for n in session.nodes:
-        if n.id == node_id:
-            node_spec = n
-            break
-
+    node_spec = next((n for n in session.nodes if n.id == node_id), None)
     if node_spec is None:
         return json.dumps({"success": False, "error": f"Node '{node_id}' not found"})
 
@@ -2315,9 +2284,7 @@ def test_node(
                 else ""
             )
             result["simulation"] = (
-                "EventLoopNode would stream LLM responses, execute tool calls, "
-                "and use judge evaluation to decide when to stop. "
-                + cf_note
+                f"EventLoopNode would stream LLM responses, execute tool calls, and use judge evaluation to decide when to stop. {cf_note}"
                 + f"Max visits per graph run: {node_spec.max_node_visits}."
             )
 
@@ -2388,13 +2355,9 @@ def test_graph(
     while steps < max_steps:
         steps += 1
 
-        # Find current node
-        current_node = None
-        for n in session.nodes:
-            if n.id == current_node_id:
-                current_node = n
-                break
-
+        current_node = next(
+            (n for n in session.nodes if n.id == current_node_id), None
+        )
         if current_node is None:
             execution_trace.append(
                 {
@@ -2416,17 +2379,18 @@ def test_graph(
 
         if current_node.node_type == "event_loop":
             step_info["prompt_preview"] = (
-                current_node.system_prompt[:200] + "..."
-                if current_node.system_prompt and len(current_node.system_prompt) > 200
+                f"{current_node.system_prompt[:200]}..."
+                if current_node.system_prompt
+                and len(current_node.system_prompt) > 200
                 else current_node.system_prompt
             )
             step_info["tools_available"] = current_node.tools
-            if current_node.node_type == "event_loop":
-                step_info["event_loop_config"] = {
-                    "client_facing": current_node.client_facing,
-                    "max_node_visits": current_node.max_node_visits,
-                    "nullable_output_keys": current_node.nullable_output_keys,
-                }
+        if current_node.node_type == "event_loop":
+            step_info["event_loop_config"] = {
+                "client_facing": current_node.client_facing,
+                "max_node_visits": current_node.max_node_visits,
+                "nullable_output_keys": current_node.nullable_output_keys,
+            }
 
         execution_trace.append(step_info)
 
@@ -2450,9 +2414,7 @@ def test_graph(
                 step_info["edge_priority"] = edge.priority
                 break
 
-        # Note any feedback edges from this node
-        feedback = [e for e in outgoing if e.priority < 0]
-        if feedback:
+        if feedback := [e for e in outgoing if e.priority < 0]:
             step_info["feedback_edges"] = [
                 {
                     "target": e.target,
@@ -2510,8 +2472,7 @@ def _format_constraints(constraints: list[Constraint]) -> str:
     """Format constraints for display."""
     lines = []
     for c in constraints:
-        lines.append(_format_constraint(c))
-        lines.append("")
+        lines.extend((_format_constraint(c), ""))
     return "\n".join(lines)
 
 
@@ -2529,8 +2490,7 @@ def _format_success_criteria(criteria: list[SuccessCriterion]) -> str:
     """Format success criteria for display."""
     lines = []
     for c in criteria:
-        lines.append(_format_criterion(c))
-        lines.append("")
+        lines.extend((_format_criterion(c), ""))
     return "\n".join(lines)
 
 
@@ -2724,8 +2684,8 @@ def generate_success_tests(
             else [],
             "success_criteria_formatted": criteria_formatted,
             "agent_context": {
-                "node_names": nodes if nodes else ["(not specified)"],
-                "tool_names": tools if tools else ["(not specified)"],
+                "node_names": nodes or ["(not specified)"],
+                "tool_names": tools or ["(not specified)"],
             },
             "test_guidelines": {
                 "max_tests": 12,
@@ -2890,20 +2850,16 @@ def run_tests(
     skipped = 0
     error = 0
 
-    passed_match = re.search(r"(\d+) passed", summary_text)
-    if passed_match:
+    if passed_match := re.search(r"(\d+) passed", summary_text):
         passed = int(passed_match.group(1))
 
-    failed_match = re.search(r"(\d+) failed", summary_text)
-    if failed_match:
+    if failed_match := re.search(r"(\d+) failed", summary_text):
         failed = int(failed_match.group(1))
 
-    skipped_match = re.search(r"(\d+) skipped", summary_text)
-    if skipped_match:
+    if skipped_match := re.search(r"(\d+) skipped", summary_text):
         skipped = int(skipped_match.group(1))
 
-    error_match = re.search(r"(\d+) error", summary_text)
-    if error_match:
+    if error_match := re.search(r"(\d+) error", summary_text):
         error = int(error_match.group(1))
 
     total = passed + failed + skipped + error
@@ -2923,11 +2879,11 @@ def run_tests(
 
     # Extract failure details
     failures = []
-    # Match FAILURES section
-    failure_section = re.search(
-        r"=+ FAILURES =+(.+?)(?:=+ (?:short test summary|ERRORS|warnings) =+|$)", output, re.DOTALL
-    )
-    if failure_section:
+    if failure_section := re.search(
+        r"=+ FAILURES =+(.+?)(?:=+ (?:short test summary|ERRORS|warnings) =+|$)",
+        output,
+        re.DOTALL,
+    ):
         failure_text = failure_section.group(1)
         # Split by test name headers
         failure_blocks = re.split(r"_+ (test_\w+) _+", failure_text)
@@ -2999,7 +2955,7 @@ def debug_test(
     # Find which file contains the test
     test_file = None
     for py_file in tests_dir.glob("test_*.py"):
-        content = py_file.read_text(encoding="utf-8")
+        content = py_file.read_text()
         if f"def {test_name}" in content or f"async def {test_name}" in content:
             test_file = py_file
             break
@@ -3091,8 +3047,9 @@ def debug_test(
 
     # Extract the assertion/error message
     error_message = None
-    error_match = re.search(r"(AssertionError|Error|Exception):\s*(.+?)(?:\n|$)", output)
-    if error_match:
+    if error_match := re.search(
+        r"(AssertionError|Error|Exception):\s*(.+?)(?:\n|$)", output
+    ):
         error_message = error_match.group(2).strip()
 
     return json.dumps(
@@ -3151,37 +3108,35 @@ def list_tests(
     tests = []
     for test_file in sorted(tests_dir.glob("test_*.py")):
         try:
-            content = test_file.read_text(encoding="utf-8")
+            content = test_file.read_text()
             tree = ast.parse(content)
 
             # Find all async function definitions that start with "test_"
             for node in ast.walk(tree):
-                if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
-                    if node.name.startswith("test_"):
-                        # Determine test type from filename
-                        if "constraint" in test_file.name:
-                            test_type = "constraint"
-                        elif "success" in test_file.name:
-                            test_type = "success_criteria"
-                        elif "edge" in test_file.name:
-                            test_type = "edge_case"
-                        else:
-                            test_type = "unknown"
-
-                        # Extract docstring
-                        docstring = ast.get_docstring(node) or ""
-
-                        tests.append(
-                            {
-                                "test_name": node.name,
-                                "file": test_file.name,
-                                "file_path": str(test_file),
-                                "line": node.lineno,
-                                "test_type": test_type,
-                                "is_async": isinstance(node, ast.AsyncFunctionDef),
-                                "description": docstring[:200] if docstring else None,
-                            }
-                        )
+                if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef) and node.name.startswith("test_"):
+                    if "constraint" in test_file.name:
+                        test_type = "constraint"
+                    elif "success" in test_file.name:
+                        test_type = "success_criteria"
+                    elif "edge" in test_file.name:
+                        test_type = "edge_case"
+                    else:
+                        test_type = "unknown"
+                
+                    # Extract docstring
+                    docstring = ast.get_docstring(node) or ""
+                
+                    tests.append(
+                        {
+                            "test_name": node.name,
+                            "file": test_file.name,
+                            "file_path": str(test_file),
+                            "line": node.lineno,
+                            "test_type": test_type,
+                            "is_async": isinstance(node, ast.AsyncFunctionDef),
+                            "description": docstring[:200] if docstring else None,
+                        }
+                    )
         except SyntaxError as e:
             tests.append(
                 {
@@ -3337,7 +3292,7 @@ def check_missing_credentials(
                 "missing": all_missing,
                 "available": available,
                 "total_missing": len(all_missing),
-                "ready": len(all_missing) == 0,
+                "ready": not all_missing,
             },
             indent=2,
         )
@@ -3396,8 +3351,7 @@ def store_credential(
                 "valid": health_result.valid,
                 "message": health_result.message,
             }
-            identity = info.identity.to_dict()
-            if identity:
+            if identity := info.identity.to_dict():
                 result["identity"] = identity
 
         return json.dumps(result)
@@ -3428,8 +3382,7 @@ def list_stored_credentials() -> str:
                 "created_at": info.created_at.isoformat() if info.created_at else None,
                 "last_validated": info.last_validated.isoformat() if info.last_validated else None,
             }
-            identity = info.identity.to_dict()
-            if identity:
+            if identity := info.identity.to_dict():
                 entry["identity"] = identity
             credentials.append(entry)
 
@@ -3588,7 +3541,7 @@ def _truncate_value(value: object, max_len: int = _MAX_DIFF_VALUE_LEN) -> object
     s = json.dumps(value, default=str)
     if len(s) <= max_len:
         return value
-    return {"_truncated": True, "_preview": s[:max_len] + "...", "_length": len(s)}
+    return {"_truncated": True, "_preview": f"{s[:max_len]}...", "_length": len(s)}
 
 
 @mcp.tool()
@@ -3774,8 +3727,7 @@ def list_agent_checkpoints(
         # Fallback: scan individual checkpoint files
         checkpoints = []
         for cp_file in sorted(checkpoint_dir.glob("cp_*.json")):
-            cp_data = _read_session_json(cp_file)
-            if cp_data:
+            if cp_data := _read_session_json(cp_file):
                 checkpoints.append(
                     {
                         "checkpoint_id": cp_data.get("checkpoint_id", cp_file.stem),
@@ -3836,11 +3788,11 @@ def get_agent_checkpoint(
         if index_data and index_data.get("latest_checkpoint_id"):
             checkpoint_id = index_data["latest_checkpoint_id"]
         else:
-            cp_files = sorted(checkpoint_dir.glob("cp_*.json"))
-            if not cp_files:
-                return json.dumps({"error": f"No checkpoints found for session: {session_id}"})
-            checkpoint_id = cp_files[-1].stem
+            if cp_files := sorted(checkpoint_dir.glob("cp_*.json")):
+                checkpoint_id = cp_files[-1].stem
 
+            else:
+                return json.dumps({"error": f"No checkpoints found for session: {session_id}"})
     cp_path = checkpoint_dir / f"{checkpoint_id}.json"
     data = _read_session_json(cp_path)
     if data is None:

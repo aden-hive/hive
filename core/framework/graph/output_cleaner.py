@@ -33,10 +33,8 @@ def _heuristic_repair(text: str) -> dict | None:
     text = re.sub(r"\s*```$", "", text, flags=re.MULTILINE)
     text = text.strip()
 
-    # 2. Find outermost JSON-like structure (greedy match)
-    match = re.search(r"(\{.*\}|\[.*\])", text, re.DOTALL)
-    if match:
-        candidate = match.group(1)
+    if match := re.search(r"(\{.*\}|\[.*\])", text, re.DOTALL):
+        candidate = match[1]
 
         # 3. Common fixes
         # Fix Python constants
@@ -113,8 +111,7 @@ class OutputCleaner:
 
                 from framework.llm.litellm import LiteLLMProvider
 
-                api_key = os.environ.get("CEREBRAS_API_KEY")
-                if api_key:
+                if api_key := os.environ.get("CEREBRAS_API_KEY"):
                     self.llm = LiteLLMProvider(
                         api_key=api_key,
                         model=config.fast_model,
@@ -182,8 +179,7 @@ class OutputCleaner:
 
             # Check 3: Type validation (if schema provided)
             if hasattr(target_node_spec, "input_schema") and target_node_spec.input_schema:
-                expected_schema = target_node_spec.input_schema.get(key)
-                if expected_schema:
+                if expected_schema := target_node_spec.input_schema.get(key):
                     expected_type = expected_schema.get("type")
                     if expected_type and not self._type_matches(value, expected_type):
                         actual_type = type(value).__name__
@@ -192,7 +188,7 @@ class OutputCleaner:
                         )
 
         # Warnings don't make validation fail, but errors do
-        is_valid = len(errors) == 0
+        is_valid = not errors
 
         if not is_valid and self.config.log_cleanings:
             logger.warning(
@@ -300,11 +296,7 @@ Return ONLY valid JSON matching the expected schema. No explanations, no markdow
             cleaned_text = response.content.strip()
 
             # Apply heuristic repair to the LLM's output too (just in case)
-            cleaned = _heuristic_repair(cleaned_text)
-
-            if not cleaned:
-                # Fallback to standard load if heuristic returns None (unlikely for LLM output)
-                cleaned = json.loads(cleaned_text)
+            cleaned = _heuristic_repair(cleaned_text) or json.loads(cleaned_text)
 
             if isinstance(cleaned, dict):
                 self.cleansing_count += 1
@@ -322,12 +314,11 @@ Return ONLY valid JSON matching the expected schema. No explanations, no markdow
 
         except json.JSONDecodeError as e:
             logger.error(f"✗ Failed to parse cleaned JSON: {e}")
-            if self.config.fallback_to_raw:
-                logger.info("↩ Falling back to raw output")
-                return output
-            else:
+            if not self.config.fallback_to_raw:
                 raise
 
+            logger.info("↩ Falling back to raw output")
+            return output
         except Exception as e:
             logger.error(f"✗ Output cleaning failed: {e}")
             if self.config.fallback_to_raw:
@@ -353,7 +344,7 @@ Return ONLY valid JSON matching the expected schema. No explanations, no markdow
                     line += f"  // {description}"
                 if required:
                     line += " (required)"
-                lines.append(line + ",")
+                lines.append(f"{line},")
             else:
                 # No schema, just show the key
                 lines.append(f'  "{key}": any  // (required)')
@@ -379,8 +370,7 @@ Return ONLY valid JSON matching the expected schema. No explanations, no markdow
             "any": object,  # Matches everything
         }
 
-        expected_class = type_map.get(expected_type.lower())
-        if expected_class:
+        if expected_class := type_map.get(expected_type.lower()):
             return isinstance(value, expected_class)
 
         # Unknown type, allow it

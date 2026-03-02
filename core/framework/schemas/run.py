@@ -159,19 +159,12 @@ class Run(BaseModel):
 
     def _generate_narrative(self) -> str:
         """Generate a default narrative from the run data."""
-        parts = []
-
         # Opening
         status_text = "completed successfully" if self.status == RunStatus.COMPLETED else "failed"
-        parts.append(f"Run {status_text}.")
-
-        # Decision summary
-        parts.append(
-            f"Made {self.metrics.total_decisions} decisions: "
-            f"{self.metrics.successful_decisions} succeeded, "
-            f"{self.metrics.failed_decisions} failed."
-        )
-
+        parts = [
+            f"Run {status_text}.",
+            f"Made {self.metrics.total_decisions} decisions: {self.metrics.successful_decisions} succeeded, {self.metrics.failed_decisions} failed.",
+        ]
         # Problems
         if self.problems:
             critical = [p for p in self.problems if p.severity == "critical"]
@@ -181,9 +174,7 @@ class Run(BaseModel):
             if warnings:
                 parts.append(f"Warnings: {', '.join(p.description for p in warnings)}")
 
-        # Key decisions
-        failed_decisions = [d for d in self.decisions if not d.was_successful]
-        if failed_decisions:
+        if failed_decisions := [d for d in self.decisions if not d.was_successful]:
             parts.append(f"Failed on: {', '.join(d.intent for d in failed_decisions[:3])}")
 
         return " ".join(parts)
@@ -238,11 +229,11 @@ class RunSummary(BaseModel):
         critical = [p.description for p in run.problems if p.severity == "critical"]
         warnings = [p.description for p in run.problems if p.severity == "warning"]
 
-        # Extract successes
-        successes = []
-        for d in run.decisions:
-            if d.was_successful and d.outcome and d.outcome.summary:
-                successes.append(d.outcome.summary)
+        successes = [
+            d.outcome.summary
+            for d in run.decisions
+            if d.was_successful and d.outcome and d.outcome.summary
+        ]
         successes = successes[:3]  # Limit to 3
 
         return cls(

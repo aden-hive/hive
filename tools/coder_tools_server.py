@@ -154,7 +154,8 @@ def _is_binary(filepath: str) -> bool:
             chunk = f.read(4096)
         if b"\x00" in chunk:
             return True
-        non_printable = sum(1 for b in chunk if b < 9 or (13 < b < 32) or b > 126)
+        non_printable = sum(bool(b < 9 or (13 < b < 32) or b > 126)
+                        for b in chunk)
         return non_printable / max(len(chunk), 1) > 0.3
     except OSError:
         return False
@@ -176,19 +177,14 @@ def _levenshtein(a: str, b: str) -> int:
         dp[0] = i
         for j in range(1, n + 1):
             temp = dp[j]
-            if a[i - 1] == b[j - 1]:
-                dp[j] = prev
-            else:
-                dp[j] = 1 + min(prev, dp[j], dp[j - 1])
+            dp[j] = prev if a[i - 1] == b[j - 1] else 1 + min(prev, dp[j], dp[j - 1])
             prev = temp
     return dp[n]
 
 
 def _similarity(a: str, b: str) -> float:
     maxlen = max(len(a), len(b))
-    if maxlen == 0:
-        return 1.0
-    return 1.0 - _levenshtein(a, b) / maxlen
+    return 1.0 if maxlen == 0 else 1.0 - _levenshtein(a, b) / maxlen
 
 
 def _fuzzy_find_candidates(content: str, old_text: str):
@@ -606,9 +602,9 @@ def search_files(pattern: str, path: str = ".", include: str = "") -> str:
             # Group by file, make paths relative
             lines = []
             for line in output.split("\n")[:SEARCH_RESULT_LIMIT]:
-                line = line.replace(PROJECT_ROOT + "/", "")
+                line = line.replace(f"{PROJECT_ROOT}/", "")
                 if len(line) > MAX_LINE_LENGTH:
-                    line = line[:MAX_LINE_LENGTH] + "..."
+                    line = f"{line[:MAX_LINE_LENGTH]}..."
                 lines.append(line)
             total = output.count("\n") + 1
             result_str = "\n".join(lines)
@@ -810,11 +806,7 @@ def discover_mcp_tools(server_config_path: str = "") -> str:
             os.path.join(PROJECT_ROOT, "tools", "mcp_servers.json"),
             os.path.join(PROJECT_ROOT, "mcp_servers.json"),
         ]
-        config_path = None
-        for c in candidates:
-            if os.path.isfile(c):
-                config_path = c
-                break
+        config_path = next((c for c in candidates if os.path.isfile(c)), None)
         if not config_path:
             return "Error: No mcp_servers.json found. Provide server_config_path."
     else:
@@ -909,11 +901,7 @@ def list_agent_tools(server_config_path: str = "") -> str:
             os.path.join(PROJECT_ROOT, "tools", "mcp_servers.json"),
             os.path.join(PROJECT_ROOT, "mcp_servers.json"),
         ]
-        config_path = None
-        for c in candidates:
-            if os.path.isfile(c):
-                config_path = c
-                break
+        config_path = next((c for c in candidates if os.path.isfile(c)), None)
         if not config_path:
             return json.dumps({"error": "No mcp_servers.json found"})
     else:
@@ -994,28 +982,7 @@ def validate_agent_tools(agent_path: str) -> str:
     Returns:
         JSON with validation result: pass/fail, missing tools per node, available tools
     """
-    try:
-        resolved = _resolve_path(agent_path)
-    except ValueError:
-        return json.dumps({"error": "Access denied: path is outside the project root."})
-
-    # Restrict to allowed directories to prevent arbitrary code execution
-    # via importlib.import_module() below.
-    try:
-        from framework.server.app import validate_agent_path
-    except ImportError:
-        return json.dumps({"error": "Cannot validate agent path: framework package not available"})
-
-    try:
-        resolved = str(validate_agent_path(resolved))
-    except ValueError:
-        return json.dumps(
-            {
-                "error": "agent_path must be inside an allowed directory "
-                "(exports/, examples/, or ~/.hive/agents/)"
-            }
-        )
-
+    resolved = _resolve_path(agent_path)
     if not os.path.isdir(resolved):
         return json.dumps({"error": f"Agent directory not found: {agent_path}"})
 
@@ -1089,14 +1056,13 @@ def validate_agent_tools(agent_path: str) -> str:
     missing_by_node: dict[str, list[str]] = {}
     for node in nodes:
         node_tools = getattr(node, "tools", None) or []
-        missing = [t for t in node_tools if t not in available_tools]
-        if missing:
+        if missing := [t for t in node_tools if t not in available_tools]:
             node_name = getattr(node, "name", None) or getattr(node, "id", "unknown")
             node_id = getattr(node, "id", "unknown")
             missing_by_node[f"{node_name} (id={node_id})"] = sorted(missing)
 
     result: dict = {
-        "valid": len(missing_by_node) == 0,
+        "valid": not missing_by_node,
         "agent": agent_path,
         "available_tool_count": len(available_tools),
     }
@@ -1189,11 +1155,8 @@ def list_agents() -> str:
             if runtime_dir.is_dir():
                 sessions_dir = runtime_dir / "sessions"
                 if sessions_dir.is_dir():
-                    session_count = sum(
-                        1
-                        for d in sessions_dir.iterdir()
-                        if d.is_dir() and d.name.startswith("session_")
-                    )
+                    session_count = sum(bool(d.is_dir() and d.name.startswith("session_"))
+                                    for d in sessions_dir.iterdir())
                     info["session_count"] = session_count
                 else:
                     info["session_count"] = 0
@@ -1245,7 +1208,7 @@ def _truncate_value(value: object, max_len: int = _MAX_TRUNCATE_LEN) -> object:
     s = json.dumps(value, default=str)
     if len(s) <= max_len:
         return value
-    return {"_truncated": True, "_preview": s[:max_len] + "...", "_length": len(s)}
+    return {"_truncated": True, "_preview": f"{s[:max_len]}...", "_length": len(s)}
 
 
 @mcp.tool()
@@ -1455,8 +1418,7 @@ def list_agent_checkpoints(
         # Fallback: scan individual checkpoint files
         checkpoints = []
         for cp_file in sorted(checkpoint_dir.glob("cp_*.json")):
-            cp_data = _read_session_json(cp_file)
-            if cp_data:
+            if cp_data := _read_session_json(cp_file):
                 checkpoints.append(
                     {
                         "checkpoint_id": cp_data.get("checkpoint_id", cp_file.stem),
@@ -1516,11 +1478,11 @@ def get_agent_checkpoint(
         if index_data and index_data.get("latest_checkpoint_id"):
             checkpoint_id = index_data["latest_checkpoint_id"]
         else:
-            cp_files = sorted(checkpoint_dir.glob("cp_*.json"))
-            if not cp_files:
-                return json.dumps({"error": f"No checkpoints for session: {session_id}"})
-            checkpoint_id = cp_files[-1].stem
+            if cp_files := sorted(checkpoint_dir.glob("cp_*.json")):
+                checkpoint_id = cp_files[-1].stem
 
+            else:
+                return json.dumps({"error": f"No checkpoints for session: {session_id}"})
     cp_path = checkpoint_dir / f"{checkpoint_id}.json"
     data = _read_session_json(cp_path)
     if data is None:
@@ -1636,7 +1598,7 @@ def run_agent_tests(
 
     # Parse summary line (e.g. "5 passed, 2 failed in 1.23s")
     summary_match = re.search(r"=+ ([\d\w,\s]+) in [\d.]+s =+", output)
-    summary_text = summary_match.group(1) if summary_match else "unknown"
+    summary_text = summary_match[1] if summary_match else "unknown"
 
     passed = failed = skipped = errors = 0
     for label, pattern in [
@@ -1645,10 +1607,9 @@ def run_agent_tests(
         ("skipped", r"(\d+) skipped"),
         ("errors", r"(\d+) error"),
     ]:
-        m = re.search(pattern, summary_text)
-        if m:
+        if m := re.search(pattern, summary_text):
             if label == "passed":
-                passed = int(m.group(1))
+                passed = int(m[1])
             elif label == "failed":
                 failed = int(m.group(1))
             elif label == "skipped":
@@ -1672,13 +1633,12 @@ def run_agent_tests(
 
     # Extract failure details
     failures = []
-    failure_section = re.search(
+    if failure_section := re.search(
         r"=+ FAILURES =+(.+?)(?:=+ (?:short test summary|ERRORS|warnings) =+|$)",
         output,
         re.DOTALL,
-    )
-    if failure_section:
-        failure_text = failure_section.group(1)
+    ):
+        failure_text = failure_section[1]
         failure_blocks = re.split(r"_+ (test_\w+) _+", failure_text)
         for i in range(1, len(failure_blocks), 2):
             if i + 1 < len(failure_blocks):

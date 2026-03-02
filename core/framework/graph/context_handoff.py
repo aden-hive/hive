@@ -117,16 +117,11 @@ class ContextHandoff:
 
         if handoff.key_outputs:
             sections.append("KEY OUTPUTS:")
-            for k, v in handoff.key_outputs.items():
-                sections.append(f"- {k}: {v}")
+            sections.extend(f"- {k}: {v}" for k, v in handoff.key_outputs.items())
             sections.append("")
 
         summary_text = handoff.summary or "No summary available."
-        sections.append("SUMMARY:")
-        sections.append(summary_text)
-        sections.append("")
-        sections.append("--- END CONTEXT ---")
-
+        sections.extend(("SUMMARY:", summary_text, "", "--- END CONTEXT ---"))
         return "\n".join(sections)
 
     # ------------------------------------------------------------------
@@ -149,11 +144,8 @@ class ContextHandoff:
         if not assistant_msgs:
             return "No assistant responses."
 
-        parts: list[str] = []
-
         first = assistant_msgs[0].content
-        parts.append(first[:_TRUNCATE_CHARS])
-
+        parts: list[str] = [first[:_TRUNCATE_CHARS]]
         if len(assistant_msgs) > 1:
             last = assistant_msgs[-1].content
             parts.append(last[:_TRUNCATE_CHARS])
@@ -167,20 +159,15 @@ class ContextHandoff:
 
         conversation_text = "\n".join(f"[{m.role}]: {m.content}" for m in messages)
 
-        key_hint = ""
         if output_keys:
             key_hint = (
                 "\nThe following output keys are especially important: "
                 + ", ".join(output_keys)
                 + ".\n"
             )
-
-        system_prompt = (
-            "You are a concise summarizer. Given the conversation below, "
-            "produce a brief summary (at most ~500 tokens) that captures the "
-            "key decisions, findings, and outcomes. Focus on what was concluded "
-            "rather than the back-and-forth process." + key_hint
-        )
+        else:
+            key_hint = ""
+        system_prompt = f"You are a concise summarizer. Given the conversation below, produce a brief summary (at most ~500 tokens) that captures the key decisions, findings, and outcomes. Focus on what was concluded rather than the back-and-forth process.{key_hint}"
 
         response = self.llm.complete(
             messages=[{"role": "user", "content": conversation_text}],

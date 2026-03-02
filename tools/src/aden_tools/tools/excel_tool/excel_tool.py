@@ -14,14 +14,14 @@ def register_tools(mcp: FastMCP) -> None:
 
     @mcp.tool()
     def excel_read(
-        path: str,
-        workspace_id: str,
-        agent_id: str,
-        session_id: str,
-        sheet: str | None = None,
-        limit: int | None = None,
-        offset: int = 0,
-    ) -> dict:
+            path: str,
+            workspace_id: str,
+            agent_id: str,
+            session_id: str,
+            sheet: str | None = None,
+            limit: int | None = None,
+            offset: int = 0,
+        ) -> dict:
         """
         Read an Excel file and return its contents.
 
@@ -113,10 +113,7 @@ def register_tools(mcp: FastMCP) -> None:
                 for row in data_rows:
                     row_dict = {}
                     for i, value in enumerate(row):
-                        if i < len(columns) and columns[i]:
-                            col_name = columns[i]
-                        else:
-                            col_name = f"Column_{i + 1}"
+                        col_name = columns[i] if i < len(columns) and columns[i] else f"Column_{i + 1}"
                         row_dict[str(col_name)] = value
                     rows_as_dicts.append(row_dict)
 
@@ -795,7 +792,4 @@ def _convert_cell_value(value: Any) -> Any:
         return None
     if isinstance(value, datetime):
         return value.isoformat()
-    if isinstance(value, (int, float, str, bool)):
-        return value
-    # For any other type, convert to string
-    return str(value)
+    return value if isinstance(value, (int, float, str, bool)) else str(value)

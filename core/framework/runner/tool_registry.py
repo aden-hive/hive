@@ -244,7 +244,7 @@ class ToolRegistry:
                 return result
             return ToolResult(
                 tool_use_id=tool_use_id,
-                content=json.dumps(result) if not isinstance(result, str) else result,
+                content=result if isinstance(result, str) else json.dumps(result),
                 is_error=False,
             )
 
@@ -418,11 +418,11 @@ class ToolRegistry:
 
                 # Create executor that calls the MCP server
                 def make_mcp_executor(
-                    client_ref: MCPClient,
-                    tool_name: str,
-                    registry_ref,
-                    tool_params: set[str],
-                ):
+                                client_ref: MCPClient,
+                                tool_name: str,
+                                registry_ref,
+                                tool_params: set[str],
+                            ):
                     def executor(inputs: dict) -> Any:
                         try:
                             # Build base context: session < execution (execution wins)
@@ -435,15 +435,7 @@ class ToolRegistry:
                             filtered_context = {
                                 k: v for k, v in base_context.items() if k in tool_params
                             }
-                            # Strip context params from LLM inputs — the framework
-                            # values are authoritative (prevents the LLM from passing
-                            # e.g. data_dir="/data" and overriding the real path).
-                            clean_inputs = {
-                                k: v
-                                for k, v in inputs.items()
-                                if k not in registry_ref.CONTEXT_PARAMS
-                            }
-                            merged_inputs = {**clean_inputs, **filtered_context}
+                            merged_inputs = filtered_context | inputs
                             result = client_ref.call_tool(tool_name, merged_inputs)
                             # MCP tools return content array, extract the result
                             if isinstance(result, list) and len(result) > 0:
@@ -493,8 +485,7 @@ class ToolRegistry:
         properties = {k: v for k, v in properties.items() if k not in self.CONTEXT_PARAMS}
         required = [r for r in required if r not in self.CONTEXT_PARAMS]
 
-        # Convert to framework Tool format
-        tool = Tool(
+        return Tool(
             name=mcp_tool.name,
             description=mcp_tool.description,
             parameters={
@@ -503,8 +494,6 @@ class ToolRegistry:
                 "required": required,
             },
         )
-
-        return tool
 
     # ------------------------------------------------------------------
     # Provider-based tool filtering
@@ -524,8 +513,7 @@ class ToolRegistry:
 
         self._provider_index.clear()
         for spec in CREDENTIAL_SPECS.values():
-            provider = spec.aden_provider_name
-            if provider:
+            if provider := spec.aden_provider_name:
                 if provider not in self._provider_index:
                     self._provider_index[provider] = set()
                 self._provider_index[provider].update(spec.tools)

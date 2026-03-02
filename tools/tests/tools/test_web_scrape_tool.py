@@ -348,7 +348,7 @@ class TestWebScrapeToolLinkConversion:
         assert "Valid Link" in texts
         # Empty and whitespace-only text should be filtered
         assert "" not in texts
-        assert len([t for t in texts if not t.strip()]) == 0
+        assert not [t for t in texts if not t.strip()]
 
 
 class TestWebScrapeToolErrorHandling:

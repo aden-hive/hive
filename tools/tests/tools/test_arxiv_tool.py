@@ -231,4 +231,4 @@ class TestDownloadPaper:
 
         assert result["success"] is False
         # No leftover partial files
-        assert list(tmp_path.iterdir()) == []
+        assert not list(tmp_path.iterdir())

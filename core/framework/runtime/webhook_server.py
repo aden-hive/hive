@@ -120,9 +120,8 @@ class WebhookServer:
             )
 
         # Verify HMAC signature if secret is configured
-        if route.secret:
-            if not self._verify_signature(request, body, route.secret):
-                return web.json_response({"error": "Invalid signature"}, status=401)
+        if route.secret and not self._verify_signature(request, body, route.secret):
+            return web.json_response({"error": "Invalid signature"}, status=401)
 
         # Parse body as JSON (fall back to raw text for non-JSON)
         try:

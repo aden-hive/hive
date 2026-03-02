@@ -369,9 +369,7 @@ class _SlackClient:
         if "error" in result:
             return result
 
-        # Return in same format as old API for compatibility
-        files = result.get("files", [])
-        if files:
+        if files := result.get("files", []):
             return {"ok": True, "file": files[0]}
         return {"ok": True}
 

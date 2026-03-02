@@ -110,9 +110,7 @@ class CredentialSetupScreen(ModalScreen[bool | None]):
                         yield Label(f"[dim]Required for OAuth sync: {', '.join(aden_names)}[/dim]")
                         yield Label("[cyan]Get key:[/cyan] https://hive.adenhq.com")
                         yield Input(
-                            placeholder="Paste ADEN_API_KEY..."
-                            if not aden_key
-                            else "Already set (leave blank to keep)",
+                            placeholder="Already set (leave blank to keep)" if aden_key else "Paste ADEN_API_KEY...",
                             password=True,
                             id="key-aden",
                         )
@@ -123,8 +121,7 @@ class CredentialSetupScreen(ModalScreen[bool | None]):
                         continue  # Handled via Aden sync above
                     with Vertical(classes="cred-entry"):
                         yield Label(f"[bold]{cred.env_var}[/bold]")
-                        affected = cred.tools or cred.node_types
-                        if affected:
+                        if affected := cred.tools or cred.node_types:
                             yield Label(f"[dim]Required by: {', '.join(affected)}[/dim]")
                         if cred.description:
                             yield Label(f"[dim]{cred.description}[/dim]")
@@ -160,9 +157,20 @@ class CredentialSetupScreen(ModalScreen[bool | None]):
             aden_input = self.query_one("#key-aden", Input)
             aden_key = aden_input.value.strip()
             if aden_key:
-                from framework.credentials.key_storage import save_aden_api_key
+                os.environ["ADEN_API_KEY"] = aden_key
+                # Persist to shell config
+                try:
+                    from aden_tools.credentials.shell_config import (
+                        add_env_var_to_shell_config,
+                    )
 
-                save_aden_api_key(aden_key)
+                    add_env_var_to_shell_config(
+                        "ADEN_API_KEY",
+                        aden_key,
+                        comment="Aden Platform API key",
+                    )
+                except Exception:
+                    pass
                 configured += 1  # ADEN_API_KEY itself counts as configured
 
             # Run Aden sync for all Aden-backed creds (best-effort)
@@ -247,8 +255,7 @@ class CredentialSetupScreen(ModalScreen[bool | None]):
             cred_id = cred.credential_id or cred.credential_name
             if store.is_available(cred_id):
                 try:
-                    value = store.get_key(cred_id, cred.credential_key)
-                    if value:
+                    if value := store.get_key(cred_id, cred.credential_key):
                         os.environ[cred.env_var] = value
                         self._persist_to_local_store(cred_id, cred.credential_key, value)
                         synced += 1

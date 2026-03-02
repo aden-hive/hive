@@ -66,8 +66,7 @@ def get_api_key() -> str | None:
         try:
             from framework.runner.runner import get_claude_code_token
 
-            token = get_claude_code_token()
-            if token:
+            if token := get_claude_code_token():
                 return token
         except ImportError:
             pass
@@ -77,15 +76,12 @@ def get_api_key() -> str | None:
         try:
             from framework.runner.runner import get_codex_token
 
-            token = get_codex_token()
-            if token:
+            if token := get_codex_token():
                 return token
         except ImportError:
             pass
 
-    # Standard env-var path (covers ZAI Code and all API-key providers)
-    api_key_env_var = llm.get("api_key_env_var")
-    if api_key_env_var:
+    if api_key_env_var := llm.get("api_key_env_var"):
         return os.environ.get(api_key_env_var)
     return None
 
@@ -112,14 +108,12 @@ def get_llm_extra_kwargs() -> dict[str, Any]:
     """
     llm = get_hive_config().get("llm", {})
     if llm.get("use_claude_code_subscription"):
-        api_key = get_api_key()
-        if api_key:
+        if api_key := get_api_key():
             return {
                 "extra_headers": {"authorization": f"Bearer {api_key}"},
             }
     if llm.get("use_codex_subscription"):
-        api_key = get_api_key()
-        if api_key:
+        if api_key := get_api_key():
             headers: dict[str, str] = {
                 "Authorization": f"Bearer {api_key}",
                 "User-Agent": "CodexBar",
@@ -127,8 +121,7 @@ def get_llm_extra_kwargs() -> dict[str, Any]:
             try:
                 from framework.runner.runner import get_codex_account_id
 
-                account_id = get_codex_account_id()
-                if account_id:
+                if account_id := get_codex_account_id():
                     headers["ChatGPT-Account-Id"] = account_id
             except ImportError:
                 pass

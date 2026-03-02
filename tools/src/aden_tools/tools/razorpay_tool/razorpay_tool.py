@@ -162,12 +162,12 @@ class _RazorpayClient:
 
         if customer_name or customer_email or customer_contact:
             body["customer"] = {}
-            if customer_name:
-                body["customer"]["name"] = customer_name
-            if customer_email:
-                body["customer"]["email"] = customer_email
-            if customer_contact:
-                body["customer"]["contact"] = customer_contact
+        if customer_name:
+            body["customer"]["name"] = customer_name
+        if customer_email:
+            body["customer"]["email"] = customer_email
+        if customer_contact:
+            body["customer"]["contact"] = customer_contact
 
         response = httpx.post(
             f"{RAZORPAY_API_BASE}/payment_links",

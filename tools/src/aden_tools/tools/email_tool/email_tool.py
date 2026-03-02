@@ -145,7 +145,7 @@ def register_tools(
         if isinstance(value, str):
             return [value] if value.strip() else None
         filtered = [v for v in value if isinstance(v, str) and v.strip()]
-        return filtered if filtered else None
+        return filtered or None
 
     def _send_email_impl(
         to: str | list[str],

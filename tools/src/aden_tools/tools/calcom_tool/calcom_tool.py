@@ -41,7 +41,7 @@ class _CalcomClient:
         """Add API key to query parameters."""
         p = {"apiKey": self._api_key}
         if params:
-            p.update(params)
+            p |= params
         return p
 
     def _handle_response(self, response: httpx.Response) -> dict[str, Any]:
@@ -152,7 +152,7 @@ class _CalcomClient:
             f"{CALCOM_API_BASE}/bookings/{booking_id}",
             headers=self._headers,
             params=self._get_params(),
-            json=data if data else None,
+            json=data or None,
             timeout=DEFAULT_TIMEOUT,
         )
         return self._handle_response(response)

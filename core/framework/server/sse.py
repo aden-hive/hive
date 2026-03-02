@@ -57,9 +57,7 @@ class SSEResponse:
         if event is not None:
             parts.append(f"event: {event}\n")
         payload = json.dumps(data, default=str)
-        parts.append(f"data: {payload}\n")
-        parts.append("\n")
-
+        parts.extend((f"data: {payload}\n", "\n"))
         await self._response.write("".join(parts).encode("utf-8"))
 
     async def send_keepalive(self) -> None:

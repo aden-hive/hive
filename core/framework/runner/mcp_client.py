@@ -7,6 +7,7 @@ Supports both STDIO and HTTP transports using the official MCP Python SDK.
 import asyncio
 import logging
 import os
+import threading
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
@@ -69,6 +70,7 @@ class MCPClient:
         self._http_client: httpx.Client | None = None
         self._tools: dict[str, MCPTool] = {}
         self._connected = False
+        self._devnull = None  # SE-02: tracked so it can be closed in disconnect()
 
         # Background event loop for persistent STDIO connection
         self._loop = None
@@ -85,13 +87,9 @@ class MCPClient:
             Result of the coroutine
         """
         # If we have a persistent loop (for STDIO), use it
-        if self._loop is not None:
-            # Check if loop is running AND not closed
-            if self._loop.is_running() and not self._loop.is_closed():
-                future = asyncio.run_coroutine_threadsafe(coro, self._loop)
-                return future.result()
-            # else: fall through to the standard approach below
-            # This handles the case when STDIO loop exists but is stopped/closed
+        if self._loop is not None and (self._loop.is_running() and not self._loop.is_closed()):
+            future = asyncio.run_coroutine_threadsafe(coro, self._loop)
+            return future.result()
 
         # Standard approach: handle both sync and async contexts
         try:
@@ -99,8 +97,6 @@ class MCPClient:
             asyncio.get_running_loop()
             # If we're here, we're in an async context
             # Create a new thread to run the coroutine
-            import threading
-
             result = None
             exception = None
 
@@ -118,8 +114,13 @@ class MCPClient:
 
             thread = threading.Thread(target=run_in_thread)
             thread.start()
-            thread.join()
+            thread.join(timeout=self._TOOL_CALL_TIMEOUT)
 
+            if thread.is_alive():
+                raise RuntimeError(
+                    f"MCP tool-call thread did not complete within "
+                    f"{self._TOOL_CALL_TIMEOUT}s — the tool may be hung."
+                )
             if exception:
                 raise exception
             return result
@@ -132,16 +133,23 @@ class MCPClient:
         if self._connected:
             return
 
-        if self.config.transport == "stdio":
-            self._connect_stdio()
-        elif self.config.transport == "http":
-            self._connect_http()
-        else:
-            raise ValueError(f"Unsupported transport: {self.config.transport}")
+        try:
+            if self.config.transport == "stdio":
+                self._connect_stdio()
+            elif self.config.transport == "http":
+                self._connect_http()
+            else:
+                raise ValueError(f"Unsupported transport: {self.config.transport}")
 
-        # Discover tools
-        self._discover_tools()
-        self._connected = True
+            # Discover tools
+            self._discover_tools()
+            self._connected = True
+        except Exception:
+            # Clean up any partially-opened resources (e.g. _devnull fd opened
+            # inside _connect_stdio) so callers don't need to call disconnect()
+            # on a client that was never fully connected.
+            self.disconnect()
+            raise
 
     def _connect_stdio(self) -> None:
         """Connect to MCP server via STDIO transport using MCP SDK with persistent connection."""
@@ -149,8 +157,6 @@ class MCPClient:
             raise ValueError("command is required for STDIO transport")
 
         try:
-            import threading
-
             from mcp import StdioServerParameters
 
             # Create server parameters
@@ -186,8 +192,8 @@ class MCPClient:
                         # Create persistent stdio client context.
                         # Redirect server stderr to devnull to prevent raw
                         # output from leaking behind the TUI.
-                        devnull = open(os.devnull, "w")  # noqa: SIM115
-                        self._stdio_context = stdio_client(server_params, errlog=devnull)
+                        self._devnull = open(os.devnull, "w")  # noqa: SIM115
+                        self._stdio_context = stdio_client(server_params, errlog=self._devnull)
                         (
                             self._read_stream,
                             self._write_stream,
@@ -284,18 +290,14 @@ class MCPClient:
         # List tools using persistent session
         response = await self._session.list_tools()
 
-        # Convert tools to dict format
-        tools_list = []
-        for tool in response.tools:
-            tools_list.append(
-                {
-                    "name": tool.name,
-                    "description": tool.description,
-                    "inputSchema": tool.inputSchema,
-                }
-            )
-
-        return tools_list
+        return [
+            {
+                "name": tool.name,
+                "description": tool.description,
+                "inputSchema": tool.inputSchema,
+            }
+            for tool in response.tools
+        ]
 
     def _list_tools_http(self) -> list[dict]:
         """List tools via HTTP protocol."""
@@ -418,6 +420,9 @@ class MCPClient:
 
     _CLEANUP_TIMEOUT = 10
     _THREAD_JOIN_TIMEOUT = 12
+    # Maximum seconds to wait for a tool-call thread spawned from an async context.
+    # Prevents _run_async() from blocking the outer event loop indefinitely on a hung tool.
+    _TOOL_CALL_TIMEOUT = 300
 
     async def _cleanup_stdio_async(self) -> None:
         """Async cleanup for STDIO session and context managers.
@@ -526,6 +531,14 @@ class MCPClient:
             self._write_stream = None
             self._loop = None
             self._loop_thread = None
+
+            # SE-02: close the devnull fd that was opened to suppress MCP server stderr.
+            if self._devnull is not None:
+                try:
+                    self._devnull.close()
+                except Exception:
+                    pass
+                self._devnull = None
 
         # Clean up HTTP client
         if self._http_client:

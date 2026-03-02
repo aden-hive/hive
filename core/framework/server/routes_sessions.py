@@ -30,12 +30,7 @@ from pathlib import Path
 
 from aiohttp import web
 
-from framework.server.app import (
-    resolve_session,
-    safe_path_segment,
-    sessions_dir,
-    validate_agent_path,
-)
+from framework.server.app import resolve_session, safe_path_segment, sessions_dir
 from framework.server.session_manager import SessionManager
 
 logger = logging.getLogger(__name__)
@@ -123,12 +118,6 @@ async def handle_create_session(request: web.Request) -> web.Response:
     model = body.get("model")
     initial_prompt = body.get("initial_prompt")
 
-    if agent_path:
-        try:
-            agent_path = str(validate_agent_path(agent_path))
-        except ValueError as e:
-            return web.json_response({"error": str(e)}, status=400)
-
     try:
         if agent_path:
             # One-step: create session + load worker
@@ -154,17 +143,14 @@ async def handle_create_session(request: web.Request) -> web.Response:
                 status=409,
             )
         return web.json_response({"error": msg}, status=409)
-    except FileNotFoundError:
-        return web.json_response(
-            {"error": f"Agent not found: {agent_path or 'no path'}"},
-            status=404,
-        )
+    except FileNotFoundError as e:
+        return web.json_response({"error": str(e)}, status=404)
     except Exception as e:
         resp = _credential_error_response(e, agent_path)
         if resp is not None:
             return resp
         logger.exception("Error creating session: %s", e)
-        return web.json_response({"error": "Internal server error"}, status=500)
+        return web.json_response({"error": str(e)}, status=500)
 
     return web.json_response(_session_to_live_dict(session), status=201)
 
@@ -244,11 +230,6 @@ async def handle_load_worker(request: web.Request) -> web.Response:
     if not agent_path:
         return web.json_response({"error": "agent_path is required"}, status=400)
 
-    try:
-        agent_path = str(validate_agent_path(agent_path))
-    except ValueError as e:
-        return web.json_response({"error": str(e)}, status=400)
-
     worker_id = body.get("worker_id")
     model = body.get("model")
 
@@ -261,14 +242,14 @@ async def handle_load_worker(request: web.Request) -> web.Response:
         )
     except ValueError as e:
         return web.json_response({"error": str(e)}, status=409)
-    except FileNotFoundError:
-        return web.json_response({"error": f"Agent not found: {agent_path}"}, status=404)
+    except FileNotFoundError as e:
+        return web.json_response({"error": str(e)}, status=404)
     except Exception as e:
         resp = _credential_error_response(e, agent_path)
         if resp is not None:
             return resp
         logger.exception("Error loading worker: %s", e)
-        return web.json_response({"error": "Internal server error"}, status=500)
+        return web.json_response({"error": str(e)}, status=500)
 
     return web.json_response(_session_to_live_dict(session))
 
@@ -388,7 +369,7 @@ async def handle_list_worker_sessions(request: web.Request) -> web.Response:
         state_path = d / "state.json"
         if state_path.exists():
             try:
-                state = json.loads(state_path.read_text(encoding="utf-8"))
+                state = json.loads(state_path.read_text())
                 entry["status"] = state.get("status", "unknown")
                 entry["started_at"] = state.get("started_at")
                 entry["completed_at"] = state.get("completed_at")
@@ -400,7 +381,8 @@ async def handle_list_worker_sessions(request: web.Request) -> web.Response:
 
         cp_dir = d / "checkpoints"
         if cp_dir.exists():
-            entry["checkpoint_count"] = sum(1 for f in cp_dir.iterdir() if f.suffix == ".json")
+            entry["checkpoint_count"] = sum(bool(f.suffix == ".json")
+                                        for f in cp_dir.iterdir())
         else:
             entry["checkpoint_count"] = 0
 
@@ -427,7 +409,7 @@ async def handle_get_worker_session(request: web.Request) -> web.Response:
         return web.json_response({"error": "Session not found"}, status=404)
 
     try:
-        state = json.loads(state_path.read_text(encoding="utf-8"))
+        state = json.loads(state_path.read_text())
     except (json.JSONDecodeError, OSError) as e:
         return web.json_response({"error": f"Failed to read session: {e}"}, status=500)
 
@@ -455,7 +437,7 @@ async def handle_list_checkpoints(request: web.Request) -> web.Response:
         if f.suffix != ".json":
             continue
         try:
-            data = json.loads(f.read_text(encoding="utf-8"))
+            data = json.loads(f.read_text())
             checkpoints.append(
                 {
                     "checkpoint_id": f.stem,
@@ -565,7 +547,7 @@ async def handle_messages(request: web.Request) -> web.Response:
             if part_file.suffix != ".json":
                 continue
             try:
-                part = json.loads(part_file.read_text(encoding="utf-8"))
+                part = json.loads(part_file.read_text())
                 part["_node_id"] = node_dir.name
                 all_messages.append(part)
             except (json.JSONDecodeError, OSError):
@@ -619,7 +601,7 @@ async def handle_queen_messages(request: web.Request) -> web.Response:
             if part_file.suffix != ".json":
                 continue
             try:
-                part = json.loads(part_file.read_text(encoding="utf-8"))
+                part = json.loads(part_file.read_text())
                 part["_node_id"] = node_dir.name
                 all_messages.append(part)
             except (json.JSONDecodeError, OSError):
@@ -652,9 +634,8 @@ async def handle_discover(request: web.Request) -> web.Response:
     loaded_paths = {str(s.worker_path) for s in manager.list_sessions() if s.worker_path}
 
     groups = discover_agents()
-    result = {}
-    for category, entries in groups.items():
-        result[category] = [
+    result = {
+        category: [
             {
                 "path": str(entry.path),
                 "name": entry.name,
@@ -669,6 +650,8 @@ async def handle_discover(request: web.Request) -> web.Response:
             }
             for entry in entries
         ]
+        for category, entries in groups.items()
+    }
     return web.json_response(result)
 
 

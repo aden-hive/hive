@@ -2,13 +2,13 @@
 
 import asyncio
 import logging
+import os
 
 from aiohttp import web
 from pydantic import SecretStr
 
 from framework.credentials.models import CredentialKey, CredentialObject
 from framework.credentials.store import CredentialStore
-from framework.server.app import validate_agent_path
 
 logger = logging.getLogger(__name__)
 
@@ -34,8 +34,7 @@ async def handle_list_credentials(request: web.Request) -> web.Response:
     cred_ids = store.list_credentials()
     credentials = []
     for cid in cred_ids:
-        cred = store.get_credential(cid, refresh_if_needed=False)
-        if cred:
+        if cred := store.get_credential(cid, refresh_if_needed=False):
             credentials.append(_credential_to_dict(cred))
     return web.json_response({"credentials": credentials})
 
@@ -63,15 +62,25 @@ async def handle_save_credential(request: web.Request) -> web.Response:
     if not credential_id or not keys or not isinstance(keys, dict):
         return web.json_response({"error": "credential_id and keys are required"}, status=400)
 
-    # ADEN_API_KEY is stored in the encrypted store via key_storage module
+    # ADEN_API_KEY lives in env + shell config, not the encrypted store
     if credential_id == "aden_api_key":
         key = keys.get("api_key", "").strip()
         if not key:
             return web.json_response({"error": "api_key is required"}, status=400)
 
-        from framework.credentials.key_storage import save_aden_api_key
+        os.environ["ADEN_API_KEY"] = key
 
-        save_aden_api_key(key)
+        # Persist to shell config (best-effort, same pattern as TUI setup)
+        try:
+            from aden_tools.credentials.shell_config import add_env_var_to_shell_config
+
+            add_env_var_to_shell_config(
+                "ADEN_API_KEY",
+                key,
+                comment="Aden Platform API key",
+            )
+        except Exception as exc:
+            logger.warning("Could not persist ADEN_API_KEY to shell config: %s", exc)
 
         # Immediately sync OAuth tokens from Aden (runs in executor because
         # _presync_aden_tokens makes blocking HTTP calls to the Aden server).
@@ -101,16 +110,20 @@ async def handle_delete_credential(request: web.Request) -> web.Response:
     credential_id = request.match_info["credential_id"]
 
     if credential_id == "aden_api_key":
-        from framework.credentials.key_storage import delete_aden_api_key
+        os.environ.pop("ADEN_API_KEY", None)
+        try:
+            from aden_tools.credentials.shell_config import remove_env_var_from_shell_config
 
-        delete_aden_api_key()
+            remove_env_var_from_shell_config("ADEN_API_KEY")
+        except Exception as exc:
+            logger.warning("Could not remove ADEN_API_KEY from shell config: %s", exc)
         return web.json_response({"deleted": True})
 
     store = _get_store(request)
-    deleted = store.delete_credential(credential_id)
-    if not deleted:
+    if deleted := store.delete_credential(credential_id):
+        return web.json_response({"deleted": True})
+    else:
         return web.json_response({"error": f"Credential '{credential_id}' not found"}, status=404)
-    return web.json_response({"deleted": True})
 
 
 async def handle_check_agent(request: web.Request) -> web.Response:
@@ -130,11 +143,6 @@ async def handle_check_agent(request: web.Request) -> web.Response:
         return web.json_response({"error": "agent_path is required"}, status=400)
 
     try:
-        agent_path = str(validate_agent_path(agent_path))
-    except ValueError as e:
-        return web.json_response({"error": str(e)}, status=400)
-
-    try:
         from framework.credentials.setup import load_agent_nodes
         from framework.credentials.validation import (
             ensure_credential_key_env,
@@ -145,9 +153,7 @@ async def handle_check_agent(request: web.Request) -> web.Response:
         ensure_credential_key_env()
 
         nodes = load_agent_nodes(agent_path)
-        result = validate_agent_credentials(
-            nodes, verify=verify, raise_on_error=False, force_refresh=True
-        )
+        result = validate_agent_credentials(nodes, verify=verify, raise_on_error=False)
 
         # If any credential needs Aden, include ADEN_API_KEY as a first-class row
         if any(c.aden_supported for c in result.credentials):
@@ -197,7 +203,6 @@ def _status_to_dict(c) -> dict:
         "credential_key": c.credential_key,
         "valid": c.valid,
         "validation_message": c.validation_message,
-        "alternative_group": c.alternative_group,
     }
 
 

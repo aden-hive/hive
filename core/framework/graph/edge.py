@@ -27,7 +27,7 @@ import re
 from enum import StrEnum
 from typing import Any
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, PrivateAttr, model_validator
 
 from framework.graph.safe_eval import safe_eval
 
@@ -253,9 +253,7 @@ Respond with ONLY a JSON object:
                 max_tokens=150,
             )
 
-            # Parse response
-            json_match = re.search(r"\{[^{}]*\}", response.content, re.DOTALL)
-            if json_match:
+            if json_match := re.search(r"\{[^{}]*\}", response.content, re.DOTALL):
                 data = json.loads(json_match.group())
                 proceed = data.get("proceed", False)
                 reasoning = data.get("reasoning", "")
@@ -466,6 +464,19 @@ class GraphSpec(BaseModel):
 
     model_config = {"extra": "allow"}
 
+    # PERF: O(1) lookup indices — built by model_post_init, not serialized
+    _node_index: dict[str, Any] = PrivateAttr(default_factory=dict)
+    _outgoing_edges_index: dict[str, list[EdgeSpec]] = PrivateAttr(default_factory=dict)
+
+    def model_post_init(self, __context: Any) -> None:
+        self._node_index = {node.id: node for node in self.nodes}
+        outgoing: dict[str, list[EdgeSpec]] = {}
+        for edge in self.edges:
+            outgoing.setdefault(edge.source, []).append(edge)
+        self._outgoing_edges_index = {
+            src: sorted(edges, key=lambda e: -e.priority) for src, edges in outgoing.items()
+        }
+
     @model_validator(mode="before")
     @classmethod
     def _resolve_max_tokens(cls, values: Any) -> Any:
@@ -478,10 +489,7 @@ class GraphSpec(BaseModel):
 
     def get_node(self, node_id: str) -> Any | None:
         """Get a node by ID."""
-        for node in self.nodes:
-            if node.id == node_id:
-                return node
-        return None
+        return self._node_index.get(node_id)
 
     def has_async_entry_points(self) -> bool:
         """Check if this graph uses async entry points (multi-stream execution)."""
@@ -489,58 +497,17 @@ class GraphSpec(BaseModel):
 
     def get_async_entry_point(self, entry_point_id: str) -> AsyncEntryPointSpec | None:
         """Get an async entry point by ID."""
-        for ep in self.async_entry_points:
-            if ep.id == entry_point_id:
-                return ep
-        return None
+        return next(
+            (ep for ep in self.async_entry_points if ep.id == entry_point_id), None
+        )
 
     def get_outgoing_edges(self, node_id: str) -> list[EdgeSpec]:
         """Get all edges leaving a node, sorted by priority."""
-        edges = [e for e in self.edges if e.source == node_id]
-        return sorted(edges, key=lambda e: -e.priority)
+        return self._outgoing_edges_index.get(node_id, [])
 
     def get_incoming_edges(self, node_id: str) -> list[EdgeSpec]:
         """Get all edges entering a node."""
         return [e for e in self.edges if e.target == node_id]
-
-    def build_capability_summary(self, from_node_id: str) -> str:
-        """Build a summary of the agent's downstream workflow phases and tools.
-
-        Walks the graph from *from_node_id* and collects all reachable nodes
-        (excluding the starting node itself) so that client-facing entry nodes
-        can inform the user about what the overall agent is capable of.
-
-        Returns:
-            A formatted string listing each downstream node's name,
-            description, and tools — or an empty string when there are
-            no downstream nodes.
-        """
-        reachable: list[Any] = []
-        visited: set[str] = set()
-        queue = [from_node_id]
-        while queue:
-            nid = queue.pop()
-            if nid in visited:
-                continue
-            visited.add(nid)
-            node = self.get_node(nid)
-            if node and nid != from_node_id:
-                reachable.append(node)
-            for edge in self.get_outgoing_edges(nid):
-                queue.append(edge.target)
-
-        if not reachable:
-            return ""
-
-        lines = [
-            "## Agent Capabilities",
-            "This agent has the following workflow phases and tools:",
-        ]
-        for node in reachable:
-            tool_str = f" (tools: {', '.join(node.tools)})" if node.tools else ""
-            lines.append(f"- {node.name}: {node.description}{tool_str}")
-
-        return "\n".join(lines)
 
     def detect_fan_out_nodes(self) -> dict[str, list[str]]:
         """
@@ -599,9 +566,7 @@ class GraphSpec(BaseModel):
             if resume_key in self.entry_points:
                 return self.entry_points[resume_key]
 
-        # Check for explicit resume_from
-        resume_from = session_state.get("resume_from")
-        if resume_from:
+        if resume_from := session_state.get("resume_from"):
             if resume_from in self.entry_points:
                 return self.entry_points[resume_from]
             elif resume_from in [n.id for n in self.nodes]:

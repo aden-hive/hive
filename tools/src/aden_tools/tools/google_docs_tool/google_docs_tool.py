@@ -91,8 +91,7 @@ def _get_document_end_index(doc: dict[str, Any]) -> int:
         The index to insert at for appending to end of document
     """
     body = doc.get("body", {})
-    content = body.get("content", [])
-    if content:
+    if content := body.get("content", []):
         last_element = content[-1]
         end_index = last_element.get("endIndex", 1)
         return end_index - 1  # Insert before the final newline
@@ -322,9 +321,7 @@ class _GoogleDocsClient:
         height_pt: float | None = None,
     ) -> dict[str, Any]:
         """Insert an image into the document body via URI."""
-        # Validate image URI before making API call
-        validation_error = _validate_image_uri(image_uri)
-        if validation_error:
+        if validation_error := _validate_image_uri(image_uri):
             return validation_error
 
         request: dict[str, Any] = {

@@ -339,9 +339,7 @@ class BaseOAuth2Provider(CredentialProvider):
             True if credential has valid access_token
         """
         access_key = credential.keys.get("access_token")
-        if access_key is None:
-            return False
-        return not access_key.is_expired
+        return False if access_key is None else not access_key.is_expired
 
     def should_refresh(self, credential: CredentialObject) -> bool:
         """
@@ -371,15 +369,11 @@ class BaseOAuth2Provider(CredentialProvider):
         """
         success = True
 
-        # Revoke access token
-        access_token = credential.get_key("access_token")
-        if access_token:
+        if access_token := credential.get_key("access_token"):
             if not self.revoke_token(access_token, "access_token"):
                 success = False
 
-        # Revoke refresh token
-        refresh_token = credential.get_key("refresh_token")
-        if refresh_token:
+        if refresh_token := credential.get_key("refresh_token"):
             if not self.revoke_token(refresh_token, "refresh_token"):
                 success = False
 

@@ -136,7 +136,7 @@ def _has_api_key(env_var: str) -> bool:
         creds = CredentialStoreAdapter.with_env_storage()
         provider_name = env_var.replace("_API_KEY", "").lower()
         return creds.is_available(provider_name)
-    except (ImportError, Exception):
+    except Exception:
         return False
 
 
@@ -238,7 +238,7 @@ class TestRealAPIToolCallStreaming:
 
         # Must have a tool call event
         tool_calls = [e for e in events if isinstance(e, ToolCallEvent)]
-        assert len(tool_calls) >= 1, "No ToolCallEvent received"
+        assert tool_calls, "No ToolCallEvent received"
 
         tc = tool_calls[0]
         assert tc.tool_name == "web_search"

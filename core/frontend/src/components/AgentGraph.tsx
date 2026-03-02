@@ -136,12 +136,11 @@ const triggerIcons: Record<string, string> = {
   event: "\u223F",    // sine wave
 };
 
-/** Truncate label to fit within `availablePx` at the given fontSize. */
-function truncateLabel(label: string, availablePx: number, fontSize: number): string {
-  const avgCharW = fontSize * 0.58;
-  const maxChars = Math.floor(availablePx / avgCharW);
-  if (label.length <= maxChars) return label;
-  return label.slice(0, Math.max(maxChars - 1, 1)) + "\u2026";
+function formatLabel(id: string): string {
+  return id
+    .split("-")
+    .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+    .join(" ");
 }
 
 export default function AgentGraph({ nodes, title: _title, onNodeClick, onRun, onPause, version, runState: externalRunState }: AgentGraphProps) {
@@ -404,13 +403,10 @@ export default function AgentGraph({ nodes, title: _title, onNodeClick, onRun, o
   const renderTriggerNode = (node: GraphNode, i: number) => {
     const pos = nodePos(i);
     const icon = triggerIcons[node.triggerType || ""] || "\u26A1";
-    const triggerFontSize = nodeW < 140 ? 10.5 : 11.5;
-    const triggerAvailW = nodeW - 38;
-    const triggerDisplayLabel = truncateLabel(node.label, triggerAvailW, triggerFontSize);
+    const clipId = `clip-trigger-${node.id}`;
 
     return (
       <g key={node.id} onClick={() => onNodeClick?.(node)} style={{ cursor: onNodeClick ? "pointer" : "default" }}>
-        <title>{node.label}</title>
         {/* Pill-shaped background with dashed border */}
         <rect
           x={pos.x} y={pos.y}
@@ -432,15 +428,19 @@ export default function AgentGraph({ nodes, title: _title, onNodeClick, onRun, o
         </text>
 
         {/* Label */}
+        <clipPath id={clipId}>
+          <rect x={pos.x + 30} y={pos.y} width={nodeW - 38} height={NODE_H} />
+        </clipPath>
         <text
           x={pos.x + 32} y={pos.y + NODE_H / 2}
           fill={triggerColors.text}
-          fontSize={triggerFontSize}
+          fontSize={nodeW < 140 ? 10.5 : 11.5}
           fontWeight={500}
           dominantBaseline="middle"
           letterSpacing="0.01em"
+          clipPath={`url(#${clipId})`}
         >
-          {triggerDisplayLabel}
+          {node.label}
         </text>
       </g>
     );
@@ -453,14 +453,10 @@ export default function AgentGraph({ nodes, title: _title, onNodeClick, onRun, o
     const isActive = node.status === "running" || node.status === "looping";
     const isDone = node.status === "complete";
     const colors = statusColors[node.status];
-
-    const fontSize = nodeW < 140 ? 10.5 : 12.5;
-    const labelAvailW = nodeW - 38;
-    const displayLabel = truncateLabel(node.label, labelAvailW, fontSize);
+    const clipId = `clip-label-${node.id}`;
 
     return (
       <g key={node.id} onClick={() => onNodeClick?.(node)} style={{ cursor: onNodeClick ? "pointer" : "default" }}>
-        <title>{node.label}</title>
         {/* Ambient glow for active nodes */}
         {isActive && (
           <>
@@ -508,16 +504,20 @@ export default function AgentGraph({ nodes, title: _title, onNodeClick, onRun, o
           </text>
         )}
 
-        {/* Label -- truncated with ellipsis for narrow nodes */}
+        {/* Label -- properly capitalized, clipped for narrow nodes */}
+        <clipPath id={clipId}>
+          <rect x={pos.x + 30} y={pos.y} width={nodeW - 38} height={NODE_H} />
+        </clipPath>
         <text
           x={pos.x + 32} y={pos.y + NODE_H / 2}
           fill={isActive ? "hsl(45,90%,85%)" : isDone ? "hsl(40,20%,75%)" : "hsl(35,10%,45%)"}
-          fontSize={fontSize}
+          fontSize={nodeW < 140 ? 10.5 : 12.5}
           fontWeight={isActive ? 600 : isDone ? 500 : 400}
           dominantBaseline="middle"
           letterSpacing="0.01em"
+          clipPath={`url(#${clipId})`}
         >
-          {displayLabel}
+          {formatLabel(node.id)}
         </text>
 
         {/* Status label for active nodes */}

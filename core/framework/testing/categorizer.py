@@ -113,13 +113,14 @@ class ErrorCategorizer:
             if pattern.search(error_text):
                 return ErrorCategory.IMPLEMENTATION_ERROR
 
-        # Then edge cases (new scenarios)
-        for pattern in self._edge_patterns:
-            if pattern.search(error_text):
-                return ErrorCategory.EDGE_CASE
-
-        # Default to implementation error (most common)
-        return ErrorCategory.IMPLEMENTATION_ERROR
+        return next(
+            (
+                ErrorCategory.EDGE_CASE
+                for pattern in self._edge_patterns
+                if pattern.search(error_text)
+            ),
+            ErrorCategory.IMPLEMENTATION_ERROR,
+        )
 
     def categorize_with_confidence(self, result: TestResult) -> tuple[ErrorCategory | None, float]:
         """
@@ -137,9 +138,12 @@ class ErrorCategorizer:
         error_text = self._get_error_text(result)
 
         # Count pattern matches for each category
-        logic_matches = sum(1 for p in self._logic_patterns if p.search(error_text))
-        impl_matches = sum(1 for p in self._impl_patterns if p.search(error_text))
-        edge_matches = sum(1 for p in self._edge_patterns if p.search(error_text))
+        logic_matches = sum(bool(p.search(error_text))
+                        for p in self._logic_patterns)
+        impl_matches = sum(bool(p.search(error_text))
+                       for p in self._impl_patterns)
+        edge_matches = sum(bool(p.search(error_text))
+                       for p in self._edge_patterns)
 
         total_matches = logic_matches + impl_matches + edge_matches
 
@@ -170,10 +174,11 @@ class ErrorCategorizer:
             parts.append(result.stack_trace)
 
         # Include log messages
-        for log in result.runtime_logs:
-            if log.get("level") in ("ERROR", "CRITICAL", "WARNING"):
-                parts.append(str(log.get("msg", "")))
-
+        parts.extend(
+            str(log.get("msg", ""))
+            for log in result.runtime_logs
+            if log.get("level") in ("ERROR", "CRITICAL", "WARNING")
+        )
         return " ".join(parts)
 
     def get_fix_suggestion(self, category: ErrorCategory) -> str:

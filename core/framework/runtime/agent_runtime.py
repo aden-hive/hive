@@ -724,8 +724,7 @@ class AgentRuntime:
         # Active graph
         target = self._active_graph_id
         if target != self._graph_id:
-            reg = self._graphs.get(target)
-            if reg:
+            if reg := self._graphs.get(target):
                 stream = reg.streams.get(entry_point_id)
                 if stream is not None:
                     return stream
@@ -1134,9 +1133,7 @@ class AgentRuntime:
         result = []
         if self._graph_id in self._graphs:
             result.append(self._graph_id)
-        for gid in self._graphs:
-            if gid != self._graph_id:
-                result.append(gid)
+        result.extend(gid for gid in self._graphs if gid != self._graph_id)
         return result
 
     @property
@@ -1160,9 +1157,7 @@ class AgentRuntime:
         if self._active_graph_id == self._graph_id:
             return self.graph
         reg = self._graphs.get(self._active_graph_id)
-        if reg is not None:
-            return reg.graph
-        return self.graph
+        return reg.graph if reg is not None else self.graph
 
     @property
     def user_idle_seconds(self) -> float:
@@ -1342,9 +1337,7 @@ class AgentRuntime:
             True if cancelled, False if not found
         """
         stream = self._resolve_stream(entry_point_id, graph_id)
-        if stream is None:
-            return False
-        return await stream.cancel_execution(execution_id)
+        return False if stream is None else await stream.cancel_execution(execution_id)
 
     # === QUERY OPERATIONS ===
 
@@ -1396,8 +1389,7 @@ class AgentRuntime:
         graph_id: str | None = None,
     ) -> ExecutionResult | None:
         """Get result of a completed execution."""
-        stream = self._resolve_stream(entry_point_id, graph_id)
-        if stream:
+        if stream := self._resolve_stream(entry_point_id, graph_id):
             return stream.get_result(execution_id)
         return None
 
@@ -1437,10 +1429,9 @@ class AgentRuntime:
 
     def get_stats(self) -> dict:
         """Get comprehensive runtime statistics."""
-        stream_stats = {}
-        for ep_id, stream in self._streams.items():
-            stream_stats[ep_id] = stream.get_stats()
-
+        stream_stats = {
+            ep_id: stream.get_stats() for ep_id, stream in self._streams.items()
+        }
         return {
             "running": self._running,
             "entry_points": len(self._entry_points),
@@ -1460,19 +1451,17 @@ class AgentRuntime:
         result: list[dict[str, Any]] = []
         for graph_id, reg in self._graphs.items():
             for ep_id, stream in reg.streams.items():
-                active = stream.active_execution_ids
-                if not active:
-                    continue
-                result.append(
-                    {
-                        "graph_id": graph_id,
-                        "stream_id": stream.stream_id,
-                        "entry_point_id": ep_id,
-                        "active_execution_ids": active,
-                        "is_awaiting_input": stream.is_awaiting_input,
-                        "waiting_nodes": stream.get_waiting_nodes(),
-                    }
-                )
+                if active := stream.active_execution_ids:
+                    result.append(
+                        {
+                            "graph_id": graph_id,
+                            "stream_id": stream.stream_id,
+                            "entry_point_id": ep_id,
+                            "active_execution_ids": active,
+                            "is_awaiting_input": stream.is_awaiting_input,
+                            "waiting_nodes": stream.get_waiting_nodes(),
+                        }
+                    )
         return result
 
     def get_waiting_nodes(self) -> list[dict[str, Any]]:
@@ -1484,14 +1473,14 @@ class AgentRuntime:
         result: list[dict[str, Any]] = []
         for graph_id, reg in self._graphs.items():
             for _ep_id, stream in reg.streams.items():
-                for waiting in stream.get_waiting_nodes():
-                    result.append(
-                        {
-                            "graph_id": graph_id,
-                            "stream_id": stream.stream_id,
-                            **waiting,
-                        }
-                    )
+                result.extend(
+                    {
+                        "graph_id": graph_id,
+                        "stream_id": stream.stream_id,
+                        **waiting,
+                    }
+                    for waiting in stream.get_waiting_nodes()
+                )
         return result
 
     # === PROPERTIES ===

@@ -5,7 +5,7 @@ from pathlib import Path
 
 @contextmanager
 def atomic_write(path: Path, mode: str = "w", encoding: str = "utf-8"):
-    tmp_path = path.with_suffix(path.suffix + ".tmp")
+    tmp_path = path.with_suffix(f"{path.suffix}.tmp")
     try:
         with open(tmp_path, mode, encoding=encoding) as f:
             yield f

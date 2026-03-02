@@ -92,7 +92,7 @@ class TestRegisterToolsSignature:
         mod = importlib.import_module(import_path)
         sig = inspect.signature(mod.register_tools)
         params = list(sig.parameters.keys())
-        assert len(params) >= 1, f"{import_path}.register_tools has no parameters"
+        assert params, f"{import_path}.register_tools has no parameters"
         assert params[0] == "mcp", (
             f"{import_path}.register_tools first param should be 'mcp', got '{params[0]}'"
         )

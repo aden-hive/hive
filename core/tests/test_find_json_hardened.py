@@ -241,7 +241,7 @@ class TestLargeOutputRegression:
         too_deep = "{" * (_TEST_NESTING_DEPTH + 10)
         too_deep += "}" * (_TEST_NESTING_DEPTH + 10)
         valid = '{"found": "after_deep"}'
-        raw = too_deep + " " + valid
+        raw = f"{too_deep} {valid}"
         start = time.perf_counter()
         result = find_json_object(raw)
         elapsed = time.perf_counter() - start

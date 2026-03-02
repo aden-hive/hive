@@ -136,16 +136,15 @@ def _make_fanout_graph(
     if fan_in_node is not None:
         nodes.append(fan_in_node)
         terminal_nodes = [fan_in_node.id]
-        for b in branch_nodes:
-            edges.append(
-                EdgeSpec(
-                    id=f"{b.id}_to_{fan_in_node.id}",
-                    source=b.id,
-                    target=fan_in_node.id,
-                    condition=EdgeCondition.ON_SUCCESS,
-                )
+        edges.extend(
+            EdgeSpec(
+                id=f"{b.id}_to_{fan_in_node.id}",
+                source=b.id,
+                target=fan_in_node.id,
+                condition=EdgeCondition.ON_SUCCESS,
             )
-
+            for b in branch_nodes
+        )
     return GraphSpec(
         id="fanout_graph",
         goal_id="g1",

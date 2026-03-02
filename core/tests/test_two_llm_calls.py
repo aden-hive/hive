@@ -389,5 +389,3 @@ def _validate_tool_args(tool_calls: list[ToolCallEvent]) -> bool:
     return ok
 
 
-if __name__ == "__main__":
-    pass

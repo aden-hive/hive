@@ -24,9 +24,7 @@ class FakeHeaders:
         self._cookies = set_cookie_values
 
     def get_list(self, name: str) -> list[str]:
-        if name == "set-cookie":
-            return self._cookies
-        return []
+        return self._cookies if name == "set-cookie" else []
 
 
 class TestAnalyzeCookies:
@@ -156,9 +154,9 @@ class TestAnalyzeCookies:
         ]
 
         # Replicate the grade_input logic from tech_stack_detector
-        assert all(c.get("secure", False) for c in cookies_all_secure) is True
-        assert all(c.get("httponly", False) for c in cookies_all_secure) is True
-        assert all(c.get("secure", False) for c in cookies_one_insecure) is False
+        assert all(c.get("secure", False) for c in cookies_all_secure)
+        assert all(c.get("httponly", False) for c in cookies_all_secure)
+        assert not all(c.get("secure", False) for c in cookies_one_insecure)
 
     def test_secure_at_end_of_header(self):
         """Secure flag at the very end without trailing semicolon."""

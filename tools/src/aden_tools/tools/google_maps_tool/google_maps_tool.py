@@ -59,7 +59,7 @@ class _GoogleMapsClient:
         Returns None if the status is OK or ZERO_RESULTS (valid responses).
         Returns an error dict for all other statuses.
         """
-        if api_status in ("OK", "ZERO_RESULTS"):
+        if api_status in {"OK", "ZERO_RESULTS"}:
             return None
 
         status_messages = {

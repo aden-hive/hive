@@ -55,21 +55,13 @@ class FailureAnalysis:
             "",
             "Decision Chain Leading to Failure:",
         ]
-        for i, dec in enumerate(self.decision_chain, 1):
-            lines.append(f"  {i}. {dec}")
-
+        lines.extend(f"  {i}. {dec}" for i, dec in enumerate(self.decision_chain, 1))
         if self.problems:
-            lines.append("")
-            lines.append("Reported Problems:")
-            for prob in self.problems:
-                lines.append(f"  - {prob}")
-
+            lines.extend(("", "Reported Problems:"))
+            lines.extend(f"  - {prob}" for prob in self.problems)
         if self.suggestions:
-            lines.append("")
-            lines.append("Suggestions:")
-            for sug in self.suggestions:
-                lines.append(f"  → {sug}")
-
+            lines.extend(("", "Suggestions:"))
+            lines.extend(f"  → {sug}" for sug in self.suggestions)
         return "\n".join(lines)
 
 
@@ -111,17 +103,17 @@ class PatternAnalysis:
         ]
 
         if self.common_failures:
-            lines.append("")
-            lines.append("Common Failures:")
-            for failure, count in self.common_failures:
-                lines.append(f"  - {failure} ({count} occurrences)")
-
+            lines.extend(("", "Common Failures:"))
+            lines.extend(
+                f"  - {failure} ({count} occurrences)"
+                for failure, count in self.common_failures
+            )
         if self.problematic_nodes:
-            lines.append("")
-            lines.append("Problematic Nodes (failure rate):")
-            for node, rate in self.problematic_nodes:
-                lines.append(f"  - {node}: {rate:.1%} failure rate")
-
+            lines.extend(("", "Problematic Nodes (failure rate):"))
+            lines.extend(
+                f"  - {node}: {rate:.1%} failure rate"
+                for node, rate in self.problematic_nodes
+            )
         return "\n".join(lines)
 
 
@@ -151,8 +143,7 @@ class BuilderQuery:
         run_ids = self.storage.get_runs_by_goal(goal_id)
         summaries = []
         for run_id in run_ids:
-            summary = self.storage.load_summary(run_id)
-            if summary:
+            if summary := self.storage.load_summary(run_id):
                 summaries.append(summary)
         return summaries
 
@@ -161,8 +152,7 @@ class BuilderQuery:
         run_ids = self.storage.get_runs_by_status(RunStatus.FAILED)
         summaries = []
         for run_id in run_ids[:limit]:
-            summary = self.storage.load_summary(run_id)
-            if summary:
+            if summary := self.storage.load_summary(run_id):
                 summaries.append(summary)
         return summaries
 
@@ -213,9 +203,7 @@ class BuilderQuery:
     def get_decision_trace(self, run_id: str) -> list[str]:
         """Get a readable trace of all decisions in a run."""
         run = self.storage.load_run(run_id)
-        if run is None:
-            return []
-        return [d.summary_for_builder() for d in run.decisions]
+        return [] if run is None else [d.summary_for_builder() for d in run.decisions]
 
     # === WHAT PATTERNS EMERGE? ===
 
@@ -231,8 +219,7 @@ class BuilderQuery:
 
         runs = []
         for run_id in run_ids:
-            run = self.storage.load_run(run_id)
-            if run:
+            if run := self.storage.load_run(run_id):
                 runs.append(run)
 
         if not runs:
@@ -317,36 +304,31 @@ class BuilderQuery:
         if patterns is None:
             return []
 
-        suggestions = []
-
-        # Suggestion: Fix problematic nodes
-        for node_id, failure_rate in patterns.problematic_nodes:
-            suggestions.append(
-                {
-                    "type": "node_improvement",
-                    "target": node_id,
-                    "reason": f"Node has {failure_rate:.1%} failure rate",
-                    "recommendation": (
-                        f"Review and improve node '{node_id}' - "
-                        "high failure rate suggests prompt or tool issues"
-                    ),
-                    "priority": "high" if failure_rate > 0.3 else "medium",
-                }
-            )
-
+        suggestions = [
+            {
+                "type": "node_improvement",
+                "target": node_id,
+                "reason": f"Node has {failure_rate:.1%} failure rate",
+                "recommendation": (
+                    f"Review and improve node '{node_id}' - "
+                    "high failure rate suggests prompt or tool issues"
+                ),
+                "priority": "high" if failure_rate > 0.3 else "medium",
+            }
+            for node_id, failure_rate in patterns.problematic_nodes
+        ]
         # Suggestion: Address common failures
-        for failure, count in patterns.common_failures:
-            if count >= 2:
-                suggestions.append(
-                    {
-                        "type": "error_handling",
-                        "target": failure,
-                        "reason": f"Error occurred {count} times",
-                        "recommendation": f"Add handling for: {failure}",
-                        "priority": "high" if count >= 5 else "medium",
-                    }
-                )
-
+        suggestions.extend(
+            {
+                "type": "error_handling",
+                "target": failure,
+                "reason": f"Error occurred {count} times",
+                "recommendation": f"Add handling for: {failure}",
+                "priority": "high" if count >= 5 else "medium",
+            }
+            for failure, count in patterns.common_failures
+            if count >= 2
+        )
         # Suggestion: Overall success rate
         if patterns.success_rate < 0.8:
             suggestions.append(
@@ -374,8 +356,7 @@ class BuilderQuery:
         decision_types: dict[str, int] = defaultdict(int)
 
         for run_id in run_ids:
-            run = self.storage.load_run(run_id)
-            if run:
+            if run := self.storage.load_run(run_id):
                 for decision in run.decisions:
                     if decision.node_id == node_id:
                         total_decisions += 1
@@ -408,10 +389,13 @@ class BuilderQuery:
         for decision in failed_decisions:
             # Check if there were alternatives
             if len(decision.options) > 1:
-                chosen = decision.chosen_option
-                alternatives = [o for o in decision.options if o.id != decision.chosen_option_id]
-                if alternatives:
+                if alternatives := [
+                    o
+                    for o in decision.options
+                    if o.id != decision.chosen_option_id
+                ]:
                     alt_desc = alternatives[0].description
+                    chosen = decision.chosen_option
                     chosen_desc = chosen.description if chosen else "unknown"
                     suggestions.append(
                         f"Consider alternative: '{alt_desc}' instead of '{chosen_desc}'"
@@ -445,9 +429,9 @@ class BuilderQuery:
             for decision in run.decisions:
                 type_counts[decision.decision_type.value] += 1
 
-                # Track which options are chosen for similar intents
-                intent_key = decision.intent[:50]  # Truncate for grouping
                 if decision.chosen_option:
+                    # Track which options are chosen for similar intents
+                    intent_key = decision.intent[:50]  # Truncate for grouping
                     option_counts[intent_key][decision.chosen_option.description] += 1
 
         # Find most common choices per intent

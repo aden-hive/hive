@@ -53,7 +53,7 @@ def _get_last_active(agent_name: str) -> str | None:
         if not state_file.exists():
             continue
         try:
-            data = json.loads(state_file.read_text(encoding="utf-8"))
+            data = json.loads(state_file.read_text())
             ts = data.get("timestamps", {}).get("updated_at")
             if ts and (latest is None or ts > latest):
                 latest = ts
@@ -67,7 +67,8 @@ def _count_sessions(agent_name: str) -> int:
     sessions_dir = Path.home() / ".hive" / "agents" / agent_name / "sessions"
     if not sessions_dir.exists():
         return 0
-    return sum(1 for d in sessions_dir.iterdir() if d.is_dir() and d.name.startswith("session_"))
+    return sum(bool(d.is_dir() and d.name.startswith("session_"))
+           for d in sessions_dir.iterdir())
 
 
 def _extract_agent_stats(agent_path: Path) -> tuple[int, int, list[str]]:
@@ -84,14 +85,13 @@ def _extract_agent_stats(agent_path: Path) -> tuple[int, int, list[str]]:
     agent_py = agent_path / "agent.py"
     if agent_py.exists():
         try:
-            tree = ast.parse(agent_py.read_text(encoding="utf-8"))
+            tree = ast.parse(agent_py.read_text())
             for node in ast.walk(tree):
                 # Find `nodes = [...]` assignment
                 if isinstance(node, ast.Assign):
                     for target in node.targets:
-                        if isinstance(target, ast.Name) and target.id == "nodes":
-                            if isinstance(node.value, ast.List):
-                                node_count = len(node.value.elts)
+                        if isinstance(target, ast.Name) and target.id == "nodes" and isinstance(node.value, ast.List):
+                            node_count = len(node.value.elts)
         except Exception:
             pass
 
@@ -99,7 +99,7 @@ def _extract_agent_stats(agent_path: Path) -> tuple[int, int, list[str]]:
     agent_json = agent_path / "agent.json"
     if agent_json.exists():
         try:
-            data = json.loads(agent_json.read_text(encoding="utf-8"))
+            data = json.loads(agent_json.read_text())
             json_nodes = data.get("nodes", [])
             if node_count == 0:
                 node_count = len(json_nodes)
@@ -150,7 +150,7 @@ def discover_agents() -> dict[str, list[AgentEntry]]:
                 agent_json = path / "agent.json"
                 if agent_json.exists():
                     try:
-                        data = json.loads(agent_json.read_text(encoding="utf-8"))
+                        data = json.loads(agent_json.read_text())
                         meta = data.get("agent", {})
                         name = meta.get("name", name)
                         desc = meta.get("description", desc)
@@ -185,7 +185,7 @@ def _render_agent_option(agent: AgentEntry) -> Group:
         line1.append(f"  {agent.session_count} sessions", style="dim cyan")
 
     # Line 2: description (word-wrapped by the widget)
-    desc = agent.description if agent.description else "No description"
+    desc = agent.description or "No description"
     line2 = Text(desc, style="dim")
 
     # Line 3: stats chips
@@ -354,8 +354,7 @@ class AgentPickerScreen(ModalScreen[str | None]):
         # Handle agent selection from other tabs
         idx = event.option_index
         agent_map = self._option_map.get(list_id, {})
-        agent = agent_map.get(idx)
-        if agent:
+        if agent := agent_map.get(idx):
             self.dismiss(str(agent.path))
 
     def action_dismiss_picker(self) -> None:

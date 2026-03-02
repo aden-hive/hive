@@ -15,6 +15,7 @@ Usage:
     Then open http://localhost:8766 in your browser.
 """
 
+
 import asyncio
 import json
 import logging
@@ -78,8 +79,7 @@ _composite = CompositeStorage(
 CREDENTIALS = CredentialStoreAdapter(CredentialStore(storage=_composite))
 
 for _name in ["brave_search", "hubspot"]:
-    _val = CREDENTIALS.get(_name)
-    if _val:
+    if _val := CREDENTIALS.get(_name):
         logger.debug("credential %s: OK (len=%d)", _name, len(_val))
     else:
         logger.debug("credential %s: not found", _name)
@@ -160,7 +160,7 @@ def _exec_web_scrape(inputs: dict) -> dict:
     url = inputs.get("url", "")
     max_length = max(1000, min(inputs.get("max_length", 50000), 500000))
     if not url.startswith(("http://", "https://")):
-        url = "https://" + url
+        url = f"https://{url}"
     try:
         resp = httpx.get(
             url,
@@ -183,7 +183,7 @@ def _exec_web_scrape(inputs: dict) -> dict:
         text = main.get_text(separator=" ", strip=True) if main else ""
         text = " ".join(text.split())
         if len(text) > max_length:
-            text = text[:max_length] + "..."
+            text = f"{text[:max_length]}..."
         return {
             "url": url,
             "title": title,
@@ -751,7 +751,7 @@ async def _run_pipeline(websocket, topic: str):
         judge=None,  # implicit judge: accept when output_keys filled
         config=LoopConfig(
             max_iterations=20,
-            max_tool_calls_per_turn=30,
+            max_tool_calls_per_turn=10,
             max_history_tokens=32_000,
         ),
         conversation_store=store_a,
@@ -849,7 +849,7 @@ async def _run_pipeline(websocket, topic: str):
         judge=None,  # implicit judge
         config=LoopConfig(
             max_iterations=10,
-            max_tool_calls_per_turn=30,
+            max_tool_calls_per_turn=5,
             max_history_tokens=32_000,
         ),
         conversation_store=store_b,

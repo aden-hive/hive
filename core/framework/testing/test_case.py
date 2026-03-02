@@ -131,6 +131,4 @@ class Test(BaseModel):
     @property
     def pass_rate(self) -> float | None:
         """Calculate pass rate if test has been run."""
-        if self.run_count == 0:
-            return None
-        return self.pass_count / self.run_count
+        return None if self.run_count == 0 else self.pass_count / self.run_count

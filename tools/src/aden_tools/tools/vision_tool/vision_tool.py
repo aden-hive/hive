@@ -165,18 +165,17 @@ class _VisionClient:
         if "error" in result:
             return result
 
-        faces = []
-        for face in result.get("faceAnnotations", []):
-            faces.append(
-                {
-                    "joy": face.get("joyLikelihood", "UNKNOWN"),
-                    "sorrow": face.get("sorrowLikelihood", "UNKNOWN"),
-                    "anger": face.get("angerLikelihood", "UNKNOWN"),
-                    "surprise": face.get("surpriseLikelihood", "UNKNOWN"),
-                    "confidence": round(face.get("detectionConfidence", 0), 3),
-                    "bounds": face.get("boundingPoly", {}).get("vertices", []),
-                }
-            )
+        faces = [
+            {
+                "joy": face.get("joyLikelihood", "UNKNOWN"),
+                "sorrow": face.get("sorrowLikelihood", "UNKNOWN"),
+                "anger": face.get("angerLikelihood", "UNKNOWN"),
+                "surprise": face.get("surpriseLikelihood", "UNKNOWN"),
+                "confidence": round(face.get("detectionConfidence", 0), 3),
+                "bounds": face.get("boundingPoly", {}).get("vertices", []),
+            }
+            for face in result.get("faceAnnotations", [])
+        ]
         return {"faces": faces}
 
     def localize_objects(self, image_source: str, max_results: int = 10) -> dict[str, Any]:
@@ -235,8 +234,7 @@ class _VisionClient:
         landmarks = []
         for lm in result.get("landmarkAnnotations", []):
             location = {}
-            locations = lm.get("locations", [])
-            if locations:
+            if locations := lm.get("locations", []):
                 lat_lng = locations[0].get("latLng", {})
                 location = {
                     "latitude": lat_lng.get("latitude"),
@@ -280,17 +278,14 @@ class _VisionClient:
                 }
             )
 
-        # Extract crop hints
-        crop_hints = []
         hints_annotation = result.get("cropHintsAnnotation", {})
-        for hint in hints_annotation.get("cropHints", []):
-            crop_hints.append(
-                {
-                    "bounds": hint.get("boundingPoly", {}).get("vertices", []),
-                    "confidence": round(hint.get("confidence", 0), 3),
-                }
-            )
-
+        crop_hints = [
+            {
+                "bounds": hint.get("boundingPoly", {}).get("vertices", []),
+                "confidence": round(hint.get("confidence", 0), 3),
+            }
+            for hint in hints_annotation.get("cropHints", [])
+        ]
         return {"colors": colors, "crop_hints": crop_hints}
 
     def web_detection(self, image_source: str) -> dict[str, Any]:

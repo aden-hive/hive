@@ -181,7 +181,7 @@ async def test_codex_stream():
         text = ""
         async for chunk in response:
             chunk_count += 1
-            choices = chunk.choices if chunk.choices else []
+            choices = chunk.choices or []
             delta = choices[0].delta if choices else None
             content = delta.content if delta and delta.content else ""
             if content:

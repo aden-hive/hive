@@ -460,9 +460,8 @@ class _GitHubClient:
 
         # 1. Check profile for public email
         profile = self.get_user_profile(username)
-        if isinstance(profile, dict) and "error" not in profile:
-            if profile.get("email"):
-                emails[profile["email"]] = "profile"
+        if isinstance(profile, dict) and "error" not in profile and profile.get("email"):
+            emails[profile["email"]] = "profile"
 
         # 2. Check recent public events for commit emails
         response = httpx.get(

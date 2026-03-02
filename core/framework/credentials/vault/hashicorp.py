@@ -251,7 +251,7 @@ class HashiCorpVaultStorage(CredentialStorage):
         keys: dict[str, CredentialKey] = {}
 
         # Find all non-metadata keys
-        key_names = [k for k in data.keys() if not k.startswith("_")]
+        key_names = [k for k in data if not k.startswith("_")]
 
         for key_name in key_names:
             value = data[key_name]

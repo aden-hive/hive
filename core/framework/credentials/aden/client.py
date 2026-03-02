@@ -324,15 +324,15 @@ class AdenCredentialClient:
 
             except (httpx.ConnectError, httpx.TimeoutException) as e:
                 last_error = e
-                if attempt < self.config.retry_attempts - 1:
-                    delay = self.config.retry_delay * (2**attempt)
-                    logger.warning(
-                        f"Aden request failed (attempt {attempt + 1}), retrying in {delay}s: {e}"
-                    )
-                    time.sleep(delay)
-                else:
-                    raise AdenClientError(f"Failed to connect to Aden server: {e}") from e
-
+                if attempt >= self.config.retry_attempts - 1:
+                    raise AdenClientError(
+                        f"Failed to connect to Aden server: {last_error}"
+                    ) from last_error
+                delay = self.config.retry_delay * (2**attempt)
+                logger.warning(
+                    f"Aden request failed (attempt {attempt + 1}), retrying in {delay}s: {last_error}"
+                )
+                time.sleep(delay)
             except (
                 AdenAuthenticationError,
                 AdenNotFoundError,

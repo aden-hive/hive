@@ -53,9 +53,7 @@ class StatusBar(Container):
         total = int(seconds)
         hours, remainder = divmod(total, 3600)
         mins, secs = divmod(remainder, 60)
-        if hours:
-            return f"{hours}:{mins:02d}:{secs:02d}"
-        return f"{mins}:{secs:02d}"
+        return f"{hours}:{mins:02d}:{secs:02d}" if hours else f"{mins}:{secs:02d}"
 
     def _refresh(self) -> None:
         parts: list[str] = []
@@ -264,8 +262,7 @@ class AdenTUI(App):
         # Check if any SelectableRichLog has an active selection to copy
         for widget in self.query(SelectableRichLog):
             if widget.selection is not None:
-                text = widget.copy_selection()
-                if text:
+                if text := widget.copy_selection():
                     widget.clear_selection()
                     self.notify("Copied to clipboard", severity="information", timeout=2)
                     return
@@ -375,10 +372,7 @@ class AdenTUI(App):
             runner = await loop.run_in_executor(None, load_fn)
         except CredentialError as e:
             self.status_bar.set_graph_id("")
-            self._show_credential_setup(
-                str(agent_path),
-                credential_error=e,
-            )
+            self._show_credential_setup(agent_path, credential_error=e)
             return
         except Exception as e:
             self.status_bar.set_graph_id("")
@@ -984,8 +978,7 @@ class AdenTUI(App):
         try:
             import asyncio
 
-            entry_points = self.runtime.get_entry_points()
-            if entry_points:
+            if entry_points := self.runtime.get_entry_points():
                 ep = entry_points[0]
                 future = asyncio.run_coroutine_threadsafe(
                     self.runtime.trigger(
@@ -1625,14 +1618,14 @@ class AdenTUI(App):
 
             task_cancelled = False
             all_streams = []
-            active_reg = self.runtime.get_graph_registration(self.runtime.active_graph_id)
-            if active_reg:
+            if active_reg := self.runtime.get_graph_registration(
+                self.runtime.active_graph_id
+            ):
                 all_streams.extend(active_reg.streams.values())
             for gid in self.runtime.list_graphs():
                 if gid == self.runtime.active_graph_id:
                     continue
-                reg = self.runtime.get_graph_registration(gid)
-                if reg:
+                if reg := self.runtime.get_graph_registration(gid):
                     all_streams.extend(reg.streams.values())
 
             for stream in all_streams:
@@ -1724,8 +1717,7 @@ class AdenTUI(App):
             if self.chat_repl and self.chat_repl._current_exec_id and self.runtime:
                 all_streams = []
                 for gid in self.runtime.list_graphs():
-                    reg = self.runtime.get_graph_registration(gid)
-                    if reg:
+                    if reg := self.runtime.get_graph_registration(gid):
                         all_streams.extend(reg.streams.values())
                 for stream in all_streams:
                     exec_id = self.chat_repl._current_exec_id

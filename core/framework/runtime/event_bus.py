@@ -313,15 +313,11 @@ class EventBus:
                 except Exception:
                     pass  # never break event delivery
 
-        # Find matching subscriptions
-        matching_handlers: list[EventHandler] = []
-
-        for subscription in self._subscriptions.values():
-            if self._matches(subscription, event):
-                matching_handlers.append(subscription.handler)
-
-        # Execute handlers concurrently
-        if matching_handlers:
+        if matching_handlers := [
+            subscription.handler
+            for subscription in self._subscriptions.values()
+            if self._matches(subscription, event)
+        ]:
             await self._execute_handlers(event, matching_handlers)
 
     def _matches(self, subscription: Subscription, event: AgentEvent) -> bool:
@@ -343,10 +339,10 @@ class EventBus:
             return False
 
         # Check graph filter
-        if subscription.filter_graph and subscription.filter_graph != event.graph_id:
-            return False
-
-        return True
+        return (
+            not subscription.filter_graph
+            or subscription.filter_graph == event.graph_id
+        )
 
     async def _execute_handlers(
         self,

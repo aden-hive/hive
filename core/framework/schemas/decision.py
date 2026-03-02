@@ -151,10 +151,9 @@ class Decision(BaseModel):
     @property
     def chosen_option(self) -> Option | None:
         """Get the option that was chosen."""
-        for opt in self.options:
-            if opt.id == self.chosen_option_id:
-                return opt
-        return None
+        return next(
+            (opt for opt in self.options if opt.id == self.chosen_option_id), None
+        )
 
     @computed_field
     @property

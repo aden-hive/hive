@@ -281,7 +281,7 @@ def register_tools(
                 subject=subject,
                 html_content=html_content,
                 sender=sender,
-                text_content=text_content if text_content else None,
+                text_content=text_content or None,
                 cc=cc,
                 bcc=bcc,
                 reply_to=reply_to,
@@ -340,7 +340,7 @@ def register_tools(
                 recipient=recipient,
                 content=content,
                 sms_type=sms_type,
-                tag=tag if tag else None,
+                tag=tag or None,
             )
             if "error" in result:
                 return result

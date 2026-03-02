@@ -12,6 +12,7 @@ Usage:
     Then open http://localhost:8765 in your browser.
 """
 
+
 import asyncio
 import json
 import logging
@@ -105,8 +106,7 @@ CREDENTIALS = CredentialStoreAdapter(_cred_store)
 
 # Debug: log which credentials resolved
 for _name in ["brave_search", "hubspot", "anthropic"]:
-    _val = CREDENTIALS.get(_name)
-    if _val:
+    if _val := CREDENTIALS.get(_name):
         logger.debug("credential %s: OK (len=%d)", _name, len(_val))
     else:
         logger.debug("credential %s: not found", _name)
@@ -208,7 +208,7 @@ def _exec_web_scrape(inputs: dict) -> dict:
     url = inputs.get("url", "")
     max_length = max(1000, min(inputs.get("max_length", 50000), 500000))
     if not url.startswith(("http://", "https://")):
-        url = "https://" + url
+        url = f"https://{url}"
     try:
         resp = httpx.get(url, timeout=30.0, follow_redirects=True, headers=_SCRAPE_HEADERS)
         if resp.status_code != 200:
@@ -226,7 +226,7 @@ def _exec_web_scrape(inputs: dict) -> dict:
         text = main.get_text(separator=" ", strip=True) if main else ""
         text = " ".join(text.split())
         if len(text) > max_length:
-            text = text[:max_length] + "..."
+            text = f"{text[:max_length]}..."
         return {"url": url, "title": title, "content": text, "length": len(text)}
     except httpx.TimeoutException:
         return {"error": "Request timed out"}

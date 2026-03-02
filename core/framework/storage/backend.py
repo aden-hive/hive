@@ -61,7 +61,7 @@ class FileStorage:
         Raises:
             ValueError: If key contains path traversal or dangerous patterns
         """
-        if not key or key.strip() == "":
+        if not key or not key.strip():
             raise ValueError("Key cannot be empty")
 
         # Block path separators
@@ -117,9 +117,7 @@ class FileStorage:
         """Load just the summary (faster than full run)."""
         summary_path = self.base_path / "summaries" / f"{run_id}.json"
         if not summary_path.exists():
-            # Fall back to computing from full run
-            run = self.load_run(run_id)
-            if run:
+            if run := self.load_run(run_id):
                 return RunSummary.from_run(run)
             return None
 
@@ -134,9 +132,7 @@ class FileStorage:
         if not run_path.exists():
             return False
 
-        # Load run to get index keys
-        run = self.load_run(run_id)
-        if run:
+        if run := self.load_run(run_id):
             self._remove_from_index("by_goal", run.goal_id, run_id)
             self._remove_from_index("by_status", run.status.value, run_id)
             for node_id in run.metrics.nodes_executed:
@@ -220,9 +216,7 @@ class FileStorage:
             stacklevel=2,
         )
         goals_dir = self.base_path / "indexes" / "by_goal"
-        if not goals_dir.exists():
-            return []
-        return [f.stem for f in goals_dir.glob("*.json")]
+        return [f.stem for f in goals_dir.glob("*.json")] if goals_dir.exists() else []
 
     # === INDEX OPERATIONS ===
 

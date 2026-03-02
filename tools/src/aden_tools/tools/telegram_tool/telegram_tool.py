@@ -171,7 +171,7 @@ def register_tools(
             return client.send_message(
                 chat_id=chat_id,
                 text=text,
-                parse_mode=parse_mode if parse_mode else None,
+                parse_mode=parse_mode or None,
                 disable_notification=disable_notification,
             )
         except httpx.TimeoutException:
@@ -209,8 +209,8 @@ def register_tools(
             return client.send_document(
                 chat_id=chat_id,
                 document=document,
-                caption=caption if caption else None,
-                parse_mode=parse_mode if parse_mode else None,
+                caption=caption or None,
+                parse_mode=parse_mode or None,
             )
         except httpx.TimeoutException:
             return {"error": "Telegram request timed out"}

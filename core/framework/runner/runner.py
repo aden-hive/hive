@@ -218,9 +218,7 @@ def _read_codex_keychain() -> dict | None:
         if result.returncode != 0:
             return None
         raw = result.stdout.strip()
-        if not raw:
-            return None
-        return json.loads(raw)
+        return json.loads(raw) if raw else None
     except (subprocess.TimeoutExpired, json.JSONDecodeError, OSError) as exc:
         logger.debug("Codex keychain read failed: %s", exc)
         return None
@@ -322,9 +320,8 @@ def _save_refreshed_codex_credentials(auth_data: dict, token_data: dict) -> None
         auth_data["tokens"] = tokens
         auth_data["last_refresh"] = datetime.now(UTC).isoformat()
 
-        CODEX_AUTH_FILE.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-        fd = os.open(CODEX_AUTH_FILE, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-        with os.fdopen(fd, "w") as f:
+        CODEX_AUTH_FILE.parent.mkdir(parents=True, exist_ok=True)
+        with open(CODEX_AUTH_FILE, "w") as f:
             json.dump(auth_data, f, indent=2)
         logger.debug("Codex credentials refreshed successfully")
     except (OSError, KeyError) as exc:
@@ -417,12 +414,9 @@ def get_codex_account_id() -> str | None:
     if not auth_data:
         return None
     tokens = auth_data.get("tokens", {})
-    account_id = tokens.get("account_id")
-    if account_id:
+    if account_id := tokens.get("account_id"):
         return account_id
-    # Fallback: extract from JWT
-    access_token = tokens.get("access_token")
-    if access_token:
+    if access_token := tokens.get("access_token"):
         return _get_account_id_from_jwt(access_token)
     return None
 
@@ -478,11 +472,7 @@ def load_agent_export(data: str | dict) -> tuple[GraphSpec, Goal]:
     graph_data = data.get("graph", {})
     goal_data = data.get("goal", {})
 
-    # Build NodeSpec objects
-    nodes = []
-    for node_data in graph_data.get("nodes", []):
-        nodes.append(NodeSpec(**node_data))
-
+    nodes = [NodeSpec(**node_data) for node_data in graph_data.get("nodes", [])]
     # Build EdgeSpec objects
     edges = []
     for edge_data in graph_data.get("edges", []):
@@ -505,22 +495,19 @@ def load_agent_export(data: str | dict) -> tuple[GraphSpec, Goal]:
         )
         edges.append(edge)
 
-    # Build AsyncEntryPointSpec objects for multi-entry-point support
-    async_entry_points = []
-    for aep_data in graph_data.get("async_entry_points", []):
-        async_entry_points.append(
-            AsyncEntryPointSpec(
-                id=aep_data["id"],
-                name=aep_data.get("name", aep_data["id"]),
-                entry_node=aep_data["entry_node"],
-                trigger_type=aep_data.get("trigger_type", "manual"),
-                trigger_config=aep_data.get("trigger_config", {}),
-                isolation_level=aep_data.get("isolation_level", "shared"),
-                priority=aep_data.get("priority", 0),
-                max_concurrent=aep_data.get("max_concurrent", 10),
-            )
+    async_entry_points = [
+        AsyncEntryPointSpec(
+            id=aep_data["id"],
+            name=aep_data.get("name", aep_data["id"]),
+            entry_node=aep_data["entry_node"],
+            trigger_type=aep_data.get("trigger_type", "manual"),
+            trigger_config=aep_data.get("trigger_config", {}),
+            isolation_level=aep_data.get("isolation_level", "shared"),
+            priority=aep_data.get("priority", 0),
+            max_concurrent=aep_data.get("max_concurrent", 10),
         )
-
+        for aep_data in graph_data.get("async_entry_points", [])
+    ]
     # Build GraphSpec
     graph = GraphSpec(
         id=graph_data.get("id", "agent-graph"),
@@ -541,30 +528,26 @@ def load_agent_export(data: str | dict) -> tuple[GraphSpec, Goal]:
     # Build Goal
     from framework.graph.goal import Constraint, SuccessCriterion
 
-    success_criteria = []
-    for sc_data in goal_data.get("success_criteria", []):
-        success_criteria.append(
-            SuccessCriterion(
-                id=sc_data["id"],
-                description=sc_data["description"],
-                metric=sc_data.get("metric", ""),
-                target=sc_data.get("target", ""),
-                weight=sc_data.get("weight", 1.0),
-            )
+    success_criteria = [
+        SuccessCriterion(
+            id=sc_data["id"],
+            description=sc_data["description"],
+            metric=sc_data.get("metric", ""),
+            target=sc_data.get("target", ""),
+            weight=sc_data.get("weight", 1.0),
         )
-
-    constraints = []
-    for c_data in goal_data.get("constraints", []):
-        constraints.append(
-            Constraint(
-                id=c_data["id"],
-                description=c_data["description"],
-                constraint_type=c_data.get("constraint_type", "hard"),
-                category=c_data.get("category", "safety"),
-                check=c_data.get("check", ""),
-            )
+        for sc_data in goal_data.get("success_criteria", [])
+    ]
+    constraints = [
+        Constraint(
+            id=c_data["id"],
+            description=c_data["description"],
+            constraint_type=c_data.get("constraint_type", "hard"),
+            category=c_data.get("category", "safety"),
+            check=c_data.get("check", ""),
         )
-
+        for c_data in goal_data.get("constraints", [])
+    ]
     goal = Goal(
         id=goal_data.get("id", ""),
         name=goal_data.get("name", ""),
@@ -657,15 +640,13 @@ class AgentRunner:
         # Set up storage
         if storage_path:
             self._storage_path = storage_path
-            self._temp_dir = None
         else:
             # Use persistent storage in ~/.hive/agents/{agent_name}/ per RUNTIME_LOGGING.md spec
             home = Path.home()
             default_storage = home / ".hive" / "agents" / agent_path.name
             default_storage.mkdir(parents=True, exist_ok=True)
             self._storage_path = default_storage
-            self._temp_dir = None
-
+        self._temp_dir = None
         # Load HIVE_CREDENTIAL_KEY from shell config if not in env.
         # Must happen before MCP subprocesses are spawned so they inherit it.
         _ensure_credential_key_env()
@@ -829,9 +810,8 @@ class AgentRunner:
 
             # Read model and max_tokens from agent's config if not explicitly provided
             agent_config = getattr(agent_module, "default_config", None)
-            if model is None:
-                if agent_config and hasattr(agent_config, "model"):
-                    model = agent_config.model
+            if model is None and (agent_config and hasattr(agent_config, "model")):
+                model = agent_config.model
 
             if agent_config and hasattr(agent_config, "max_tokens"):
                 max_tokens = agent_config.max_tokens
@@ -1072,8 +1052,7 @@ class AgentRunner:
                     "Authorization": f"Bearer {api_key}",
                     "User-Agent": "CodexBar",
                 }
-                account_id = get_codex_account_id()
-                if account_id:
+                if account_id := get_codex_account_id():
                     extra_headers["ChatGPT-Account-Id"] = account_id
                 self._llm = LiteLLMProvider(
                     model=self.model,
@@ -1103,9 +1082,7 @@ class AgentRunner:
                             api_base=api_base,
                         )
                     else:
-                        # Fall back to credential store
-                        api_key = self._get_api_key_from_credential_store()
-                        if api_key:
+                        if api_key := self._get_api_key_from_credential_store():
                             self._llm = LiteLLMProvider(
                                 model=self.model, api_key=api_key, api_base=api_base
                             )
@@ -1356,9 +1333,11 @@ class AgentRunner:
         validation = self.validate()
         if validation.missing_credentials:
             error_lines = ["Cannot run agent: missing required credentials\n"]
-            for warning in validation.warnings:
-                if "Missing " in warning:
-                    error_lines.append(f"  {warning}")
+            error_lines.extend(
+                f"  {warning}"
+                for warning in validation.warnings
+                if "Missing " in warning
+            )
             error_lines.append("\nSet the required environment variables and re-run the agent.")
             error_msg = "\n".join(error_lines)
             return ExecutionResult(
@@ -1438,11 +1417,7 @@ class AgentRunner:
         if entry_point_id is None:
             # Use first entry point or "default" if no entry points defined
             entry_points = self._agent_runtime.get_entry_points()
-            if entry_points:
-                entry_point_id = entry_points[0].id
-            else:
-                entry_point_id = "default"
-
+            entry_point_id = entry_points[0].id if entry_points else "default"
         try:
             # Trigger and wait for result
             result = await self._agent_runtime.trigger_and_wait(
@@ -1536,9 +1511,7 @@ class AgentRunner:
     @property
     def is_running(self) -> bool:
         """Check if the agent runtime is running (for multi-entry-point agents)."""
-        if self._agent_runtime is None:
-            return False
-        return self._agent_runtime.is_running
+        return False if self._agent_runtime is None else self._agent_runtime.is_running
 
     def info(self) -> AgentInfo:
         """Return agent metadata (nodes, edges, goal, required tools)."""
@@ -1684,7 +1657,7 @@ class AgentRunner:
                     )
 
         return ValidationResult(
-            valid=len(errors) == 0,
+            valid=not errors,
             errors=errors,
             warnings=warnings,
             missing_tools=missing_tools,
@@ -1764,8 +1737,7 @@ Respond with JSON only:
             # Parse response
             import re
 
-            json_match = re.search(r"\{[^{}]*\}", response.content, re.DOTALL)
-            if json_match:
+            if json_match := re.search(r"\{[^{}]*\}", response.content, re.DOTALL):
                 data = json.loads(json_match.group())
                 level_map = {
                     "best_fit": CapabilityLevel.BEST_FIT,
@@ -1799,9 +1771,8 @@ Respond with JSON only:
         matches = 0
         keywords = request_str.split()
         for keyword in keywords:
-            if len(keyword) > 3:  # Skip short words
-                if keyword in description_lower or keyword in goal_lower:
-                    matches += 1
+            if len(keyword) > 3 and (keyword in description_lower or keyword in goal_lower):
+                matches += 1
 
         # Determine level based on matches
         match_ratio = matches / max(len(keywords), 1)

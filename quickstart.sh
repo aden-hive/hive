@@ -424,7 +424,7 @@ if [ "$USE_ASSOC_ARRAYS" = true ]; then
         ["openai:0"]="gpt-5.2"
         ["openai:1"]="gpt-5-mini"
         ["gemini:0"]="gemini-3-flash-preview"
-        ["gemini:1"]="gemini-3.1-pro-preview"
+        ["gemini:1"]="gemini-3-pro-preview"
         ["groq:0"]="moonshotai/kimi-k2-instruct-0905"
         ["groq:1"]="openai/gpt-oss-120b"
         ["cerebras:0"]="zai-glm-4.7"
@@ -439,7 +439,7 @@ if [ "$USE_ASSOC_ARRAYS" = true ]; then
         ["openai:0"]="GPT-5.2 - Most capable (recommended)"
         ["openai:1"]="GPT-5 Mini - Fast + cheap"
         ["gemini:0"]="Gemini 3 Flash - Fast (recommended)"
-        ["gemini:1"]="Gemini 3.1 Pro - Best quality"
+        ["gemini:1"]="Gemini 3 Pro - Best quality"
         ["groq:0"]="Kimi K2 - Best quality (recommended)"
         ["groq:1"]="GPT-OSS 120B - Fast reasoning"
         ["cerebras:0"]="ZAI-GLM 4.7 - Best quality (recommended)"
@@ -549,8 +549,8 @@ else
     # Model choices per provider - flat parallel arrays with provider offsets
     # Provider order: anthropic(4), openai(2), gemini(2), groq(2), cerebras(2)
     MC_PROVIDERS=(anthropic anthropic anthropic anthropic openai openai gemini gemini groq groq cerebras cerebras)
-    MC_IDS=("claude-opus-4-6" "claude-sonnet-4-5-20250929" "claude-sonnet-4-20250514" "claude-haiku-4-5-20251001" "gpt-5.2" "gpt-5-mini" "gemini-3-flash-preview" "gemini-3.1-pro-preview" "moonshotai/kimi-k2-instruct-0905" "openai/gpt-oss-120b" "zai-glm-4.7" "qwen3-235b-a22b-instruct-2507")
-    MC_LABELS=("Opus 4.6 - Most capable (recommended)" "Sonnet 4.5 - Best balance" "Sonnet 4 - Fast + capable" "Haiku 4.5 - Fast + cheap" "GPT-5.2 - Most capable (recommended)" "GPT-5 Mini - Fast + cheap" "Gemini 3 Flash - Fast (recommended)" "Gemini 3.1 Pro - Best quality" "Kimi K2 - Best quality (recommended)" "GPT-OSS 120B - Fast reasoning" "ZAI-GLM 4.7 - Best quality (recommended)" "Qwen3 235B - Frontier reasoning")
+    MC_IDS=("claude-opus-4-6" "claude-sonnet-4-5-20250929" "claude-sonnet-4-20250514" "claude-haiku-4-5-20251001" "gpt-5.2" "gpt-5-mini" "gemini-3-flash-preview" "gemini-3-pro-preview" "moonshotai/kimi-k2-instruct-0905" "openai/gpt-oss-120b" "zai-glm-4.7" "qwen3-235b-a22b-instruct-2507")
+    MC_LABELS=("Opus 4.6 - Most capable (recommended)" "Sonnet 4.5 - Best balance" "Sonnet 4 - Fast + capable" "Haiku 4.5 - Fast + cheap" "GPT-5.2 - Most capable (recommended)" "GPT-5 Mini - Fast + cheap" "Gemini 3 Flash - Fast (recommended)" "Gemini 3 Pro - Best quality" "Kimi K2 - Best quality (recommended)" "GPT-OSS 120B - Fast reasoning" "ZAI-GLM 4.7 - Best quality (recommended)" "Qwen3 235B - Frontier reasoning")
     MC_MAXTOKENS=(32768 16384 8192 8192 16384 16384 8192 8192 8192 8192 8192 8192)
 
     # Helper: get number of model choices for a provider
@@ -1044,15 +1044,9 @@ echo ""
 
 HIVE_CRED_DIR="$HOME/.hive/credentials"
 
-HIVE_KEY_FILE="$HOME/.hive/secrets/credential_key"
-
-# Check if HIVE_CREDENTIAL_KEY already exists (from env, file, or shell rc)
+# Check if HIVE_CREDENTIAL_KEY already exists (from env or shell rc)
 if [ -n "$HIVE_CREDENTIAL_KEY" ]; then
     echo -e "${GREEN}  ✓ HIVE_CREDENTIAL_KEY already set${NC}"
-elif [ -f "$HIVE_KEY_FILE" ]; then
-    HIVE_CREDENTIAL_KEY=$(cat "$HIVE_KEY_FILE")
-    export HIVE_CREDENTIAL_KEY
-    echo -e "${GREEN}  ✓ HIVE_CREDENTIAL_KEY loaded from $HIVE_KEY_FILE${NC}"
 else
     # Generate a new Fernet encryption key
     echo -n "  Generating encryption key... "
@@ -1065,14 +1059,13 @@ else
     else
         echo -e "${GREEN}ok${NC}"
 
-        # Save to dedicated secrets file (chmod 600)
-        mkdir -p "$(dirname "$HIVE_KEY_FILE")"
-        chmod 700 "$(dirname "$HIVE_KEY_FILE")"
-        echo -n "$GENERATED_KEY" > "$HIVE_KEY_FILE"
-        chmod 600 "$HIVE_KEY_FILE"
+        # Save to shell rc file
+        echo "" >> "$SHELL_RC_FILE"
+        echo "# Encryption key for Hive credential store (~/.hive/credentials)" >> "$SHELL_RC_FILE"
+        echo "export HIVE_CREDENTIAL_KEY=\"$GENERATED_KEY\"" >> "$SHELL_RC_FILE"
         export HIVE_CREDENTIAL_KEY="$GENERATED_KEY"
 
-        echo -e "${GREEN}  ✓ Encryption key saved to $HIVE_KEY_FILE${NC}"
+        echo -e "${GREEN}  ✓ Encryption key saved to $SHELL_RC_FILE${NC}"
     fi
 fi
 
@@ -1270,8 +1263,21 @@ fi
 if [ -n "$HIVE_CREDENTIAL_KEY" ]; then
     echo -e "${BOLD}Credential Store:${NC}"
     echo -e "  ${GREEN}⬢${NC} ${DIM}~/.hive/credentials/${NC}  (encrypted)"
+    echo -e "  ${DIM}Set up agent credentials with:${NC} ${CYAN}/setup-credentials${NC}"
     echo ""
 fi
+
+echo -e "${BOLD}Build a New Agent (Claude):${NC}"
+echo ""
+echo -e "  1. Open Claude Code in this directory:"
+echo -e "     ${CYAN}claude${NC}"
+echo ""
+echo -e "  2. Build a new agent:"
+echo -e "     ${CYAN}/hive${NC}"
+echo ""
+echo -e "  3. Test an existing agent:"
+echo -e "     ${CYAN}/hive-test${NC}"
+echo ""
 
 # Show Codex instructions if available
 if [ "$CODEX_AVAILABLE" = true ]; then

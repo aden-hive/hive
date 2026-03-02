@@ -69,10 +69,11 @@ def _get_run_dirs(agent_work_dir: Path) -> list[tuple[str, Path]]:
     # Scan old location: runtime_logs/runs/ (deprecated)
     old_runs_dir = agent_work_dir / "runtime_logs" / "runs"
     if old_runs_dir.exists():
-        for run_dir in old_runs_dir.iterdir():
-            if run_dir.is_dir():
-                run_dirs.append((run_dir.name, run_dir))
-
+        run_dirs.extend(
+            (run_dir.name, run_dir)
+            for run_dir in old_runs_dir.iterdir()
+            if run_dir.is_dir()
+        )
     return run_dirs
 
 

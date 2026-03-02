@@ -48,9 +48,7 @@ def dispatch_event(event) -> str:
         "error": lambda e: f"error:{e.error}",
     }
     handler = handlers.get(event.type)
-    if handler is None:
-        return f"unknown:{event.type}"
-    return handler(event)
+    return f"unknown:{event.type}" if handler is None else handler(event)
 
 
 def collect_text(events: list) -> str:
@@ -572,7 +570,7 @@ class TestWP2NodeLevelRouting:
             )
         )
 
-        assert len(received) == 0
+        assert not received
 
     @pytest.mark.asyncio
     async def test_no_filter_node_receives_all_events(self, bus):

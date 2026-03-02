@@ -58,7 +58,7 @@ class TestClientFacingFanOut:
 
         errors = graph.validate()
         cf_errors = [e for e in errors if "multiple client-facing" in e]
-        assert len(cf_errors) == 0
+        assert not cf_errors
 
     def test_fan_out_zero_client_facing_passes(self):
         """No client-facing targets at all -> no error."""
@@ -79,7 +79,7 @@ class TestClientFacingFanOut:
 
         errors = graph.validate()
         cf_errors = [e for e in errors if "multiple client-facing" in e]
-        assert len(cf_errors) == 0
+        assert not cf_errors
 
 
 # ---------------------------------------------------------------------------
@@ -155,7 +155,7 @@ class TestEventLoopOutputKeyOverlap:
 
         errors = graph.validate()
         key_errors = [e for e in errors if "output_key" in e]
-        assert len(key_errors) == 0
+        assert not key_errors
 
 
 # ---------------------------------------------------------------------------
@@ -200,5 +200,5 @@ class TestNoFanOutUnaffected:
         errors = graph.validate()
         cf_errors = [e for e in errors if "multiple client-facing" in e]
         key_errors = [e for e in errors if "output_key" in e]
-        assert len(cf_errors) == 0
-        assert len(key_errors) == 0
+        assert not cf_errors
+        assert not key_errors

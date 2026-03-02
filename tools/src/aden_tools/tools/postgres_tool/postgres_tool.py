@@ -63,9 +63,7 @@ def validate_sql(sql: str) -> str:
     """
     sql = sql.strip()
 
-    if sql.endswith(";"):
-        sql = sql[:-1]
-
+    sql = sql.removesuffix(";")
     if ";" in sql:
         raise ValueError("Multiple statements are not allowed")
 
@@ -239,13 +237,7 @@ def _get_database_url(
     Returns:
         str | None: PostgreSQL connection string or None if not found.
     """
-    database_url: str | None = None
-
-    if credentials:
-        database_url = credentials.get("postgres")
-
-    if not database_url:
-        database_url = os.getenv("DATABASE_URL")
+    database_url = (credentials.get("postgres") if credentials else None) or os.getenv("DATABASE_URL")
 
     return database_url
 

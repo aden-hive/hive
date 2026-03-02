@@ -34,12 +34,12 @@ def register_tools(mcp: FastMCP) -> None:
 
     @mcp.tool()
     async def web_scrape(
-        url: str,
-        selector: str | None = None,
-        include_links: bool = False,
-        max_length: int = 50000,
-        respect_robots_txt: bool = True,
-    ) -> dict:
+            url: str,
+            selector: str | None = None,
+            include_links: bool = False,
+            max_length: int = 50000,
+            respect_robots_txt: bool = True,
+        ) -> dict:
         """
         Scrape and extract text content from a webpage.
 
@@ -60,7 +60,7 @@ def register_tools(mcp: FastMCP) -> None:
         try:
             # Validate URL
             if not url.startswith(("http://", "https://")):
-                url = "https://" + url
+                url = f"https://{url}"
 
             # Validate max_length
             max_length = max(1000, min(max_length, 500000))
@@ -116,7 +116,10 @@ def register_tools(mcp: FastMCP) -> None:
                         return {"error": f"HTTP {response.status}: Failed to fetch URL"}
 
                     content_type = response.headers.get("content-type", "").lower()
-                    if not any(t in content_type for t in ["text/html", "application/xhtml+xml"]):
+                    if all(
+                        t not in content_type
+                        for t in ["text/html", "application/xhtml+xml"]
+                    ):
                         return {
                             "error": (f"Skipping non-HTML content (Content-Type: {content_type})"),
                             "url": url,
@@ -173,7 +176,7 @@ def register_tools(mcp: FastMCP) -> None:
 
             # Truncate if needed
             if len(text) > max_length:
-                text = text[:max_length] + "..."
+                text = f"{text[:max_length]}..."
 
             result: dict[str, Any] = {
                 "url": url,

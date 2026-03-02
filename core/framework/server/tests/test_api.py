@@ -55,10 +55,7 @@ class MockGraphSpec:
     entry_node: str = ""
 
     def get_node(self, node_id: str):
-        for n in self.nodes:
-            if n.id == node_id:
-                return n
-        return None
+        return next((n for n in self.nodes if n.id == node_id), None)
 
 
 @dataclass
@@ -104,9 +101,7 @@ class MockRuntime:
         return ["primary"]
 
     def get_graph_registration(self, graph_id):
-        if graph_id == "primary":
-            return self._registration
-        return None
+        return self._registration if graph_id == "primary" else None
 
     def get_entry_points(self):
         return self._entry_points

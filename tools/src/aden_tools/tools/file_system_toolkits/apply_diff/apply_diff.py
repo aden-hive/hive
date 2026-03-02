@@ -60,7 +60,8 @@ def register_tools(mcp: FastMCP) -> None:
                     "all_successful": True,
                 }
             else:
-                failed_count = sum(1 for r in results if not r)
+                failed_count = sum(bool(not r)
+                               for r in results)
                 return {
                     "success": False,
                     "path": path,

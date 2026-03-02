@@ -137,16 +137,17 @@ class CredentialStore:
         """
         # First, check if credential specifies a provider
         if credential.provider_id:
-            provider = self._providers.get(credential.provider_id)
-            if provider:
+            if provider := self._providers.get(credential.provider_id):
                 return provider
 
-        # Fall back to finding a provider that supports this type
-        for provider in self._providers.values():
-            if provider.can_handle(credential):
-                return provider
-
-        return None
+        return next(
+            (
+                provider
+                for provider in self._providers.values()
+                if provider.can_handle(credential)
+            ),
+            None,
+        )
 
     # --- Usage Spec Management ---
 
@@ -222,9 +223,7 @@ class CredentialStore:
             The key value or None if not found
         """
         credential = self.get_credential(credential_id)
-        if credential is None:
-            return None
-        return credential.get_key(key_name)
+        return None if credential is None else credential.get_key(key_name)
 
     def get(self, credential_id: str) -> str | None:
         """
@@ -240,9 +239,7 @@ class CredentialStore:
             The primary key value or None
         """
         credential = self.get_credential(credential_id)
-        if credential is None:
-            return None
-        return credential.get_default_key()
+        return None if credential is None else credential.get_default_key()
 
     # --- Template Resolution ---
 
@@ -451,12 +448,11 @@ class CredentialStore:
         if credential is None:
             return [f"Credential '{credential_id}' not found"]
 
-        errors = []
-        for key_name in spec.required_keys:
-            if not credential.has_key(key_name):
-                errors.append(f"Missing required key '{key_name}'")
-
-        return errors
+        return [
+            f"Missing required key '{key_name}'"
+            for key_name in spec.required_keys
+            if not credential.has_key(key_name)
+        ]
 
     def validate_all(self) -> dict[str, list[str]]:
         """
@@ -468,8 +464,7 @@ class CredentialStore:
         """
         errors = {}
         for cred_id in self._usage_specs.keys():
-            cred_errors = self.validate_for_usage(cred_id)
-            if cred_errors:
+            if cred_errors := self.validate_for_usage(cred_id):
                 errors[cred_id] = cred_errors
         return errors
 
@@ -505,10 +500,7 @@ class CredentialStore:
             return False
 
         provider = self.get_provider_for_credential(credential)
-        if provider is None:
-            return False
-
-        return provider.should_refresh(credential)
+        return False if provider is None else provider.should_refresh(credential)
 
     def _refresh_credential(self, credential: CredentialObject) -> CredentialObject:
         """Refresh a credential using its provider."""
@@ -546,10 +538,7 @@ class CredentialStore:
             CredentialRefreshError: If refresh fails
         """
         credential = self.get_credential(credential_id, refresh_if_needed=False)
-        if credential is None:
-            return None
-
-        return self._refresh_credential(credential)
+        return None if credential is None else self._refresh_credential(credential)
 
     # --- Caching ---
 
@@ -606,15 +595,16 @@ class CredentialStore:
                 }
             })
         """
-        # Convert test data to CredentialObjects
-        cred_objects: dict[str, CredentialObject] = {}
-
-        for cred_id, keys in credentials.items():
-            cred_objects[cred_id] = CredentialObject(
+        cred_objects: dict[str, CredentialObject] = {
+            cred_id: CredentialObject(
                 id=cred_id,
-                keys={k: CredentialKey(name=k, value=SecretStr(v)) for k, v in keys.items()},
+                keys={
+                    k: CredentialKey(name=k, value=SecretStr(v))
+                    for k, v in keys.items()
+                },
             )
-
+            for cred_id, keys in credentials.items()
+        }
         return cls(
             storage=InMemoryStorage(cred_objects),
             auto_refresh=False,

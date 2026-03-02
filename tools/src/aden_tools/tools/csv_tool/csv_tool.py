@@ -66,7 +66,8 @@ def register_tools(mcp: FastMCP) -> None:
             # Get total row count (re-read for accurate count)
             with open(secure_path, encoding="utf-8", newline="") as f:
                 reader = csv.reader(f)
-                total_rows = sum(1 for row in reader if any(row)) - 1
+                total_rows = sum(bool(any(row))
+                             for row in reader) - 1
 
             return {
                 "success": True,
@@ -195,7 +196,8 @@ def register_tools(mcp: FastMCP) -> None:
             # Get new total row count
             with open(secure_path, encoding="utf-8", newline="") as f:
                 reader = csv.reader(f)
-                total_rows = sum(1 for row in reader if any(row)) - 1  # Subtract header
+                total_rows = sum(bool(any(row))
+                             for row in reader) - 1  # Subtract header
 
             return {
                 "success": True,
@@ -213,11 +215,11 @@ def register_tools(mcp: FastMCP) -> None:
 
     @mcp.tool()
     def csv_info(
-        path: str,
-        workspace_id: str,
-        agent_id: str,
-        session_id: str,
-    ) -> dict:
+            path: str,
+            workspace_id: str,
+            agent_id: str,
+            session_id: str,
+        ) -> dict:
         """
         Get metadata about a CSV file without reading all data.
 
@@ -252,7 +254,7 @@ def register_tools(mcp: FastMCP) -> None:
                 columns = list(reader.fieldnames)
 
                 # Count rows
-                total_rows = sum(1 for _ in reader)
+                total_rows = len(reader)
 
             return {
                 "success": True,

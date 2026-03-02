@@ -58,26 +58,18 @@ class MockLLMProvider(LLMProvider):
         """
         keys = []
 
-        # Pattern 1: output_keys: [key1, key2]
-        match = re.search(r"output_keys:\s*\[(.*?)\]", system, re.IGNORECASE)
-        if match:
-            keys_str = match.group(1)
-            keys = [k.strip().strip("\"'") for k in keys_str.split(",")]
-            return keys
-
-        # Pattern 2: "keys: key1, key2" or "Generate JSON with keys: key1, key2"
-        match = re.search(r"(?:keys|with keys):\s*([a-zA-Z0-9_,\s]+)", system, re.IGNORECASE)
-        if match:
+        if match := re.search(r"output_keys:\s*\[(.*?)\]", system, re.IGNORECASE):
+            keys_str = match[1]
+            return [k.strip().strip("\"'") for k in keys_str.split(",")]
+        if match := re.search(
+            r"(?:keys|with keys):\s*([a-zA-Z0-9_,\s]+)", system, re.IGNORECASE
+        ):
             keys_str = match.group(1)
             keys = [k.strip() for k in keys_str.split(",") if k.strip()]
             return keys
 
-        # Pattern 3: Look for JSON schema in system prompt
-        match = re.search(r'\{[^}]*"([a-zA-Z0-9_]+)":\s*', system)
-        if match:
-            # Found at least one key in a JSON-like structure
-            all_matches = re.findall(r'"([a-zA-Z0-9_]+)":\s*', system)
-            if all_matches:
+        if match := re.search(r'\{[^}]*"([a-zA-Z0-9_]+)":\s*', system):
+            if all_matches := re.findall(r'"([a-zA-Z0-9_]+)":\s*', system):
                 return list(set(all_matches))
 
         return keys
@@ -98,10 +90,7 @@ class MockLLMProvider(LLMProvider):
             Mock response string
         """
         if json_mode:
-            # Try to extract expected keys from system prompt
-            keys = self._extract_output_keys(system)
-
-            if keys:
+            if keys := self._extract_output_keys(system):
                 # Generate JSON with the expected keys
                 mock_data = {key: f"mock_{key}_value" for key in keys}
                 return json.dumps(mock_data, indent=2)
@@ -185,7 +174,7 @@ class MockLLMProvider(LLMProvider):
         accumulated = ""
 
         for i, word in enumerate(words):
-            chunk = word if i == 0 else " " + word
+            chunk = word if i == 0 else f" {word}"
             accumulated += chunk
             yield TextDeltaEvent(content=chunk, snapshot=accumulated)
 

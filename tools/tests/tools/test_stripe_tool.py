@@ -47,8 +47,7 @@ def _customer(**kwargs):
         "currency": "usd",
         "delinquent": False,
         "metadata": {},
-    }
-    defaults.update(kwargs)
+    } | kwargs
     obj = MagicMock()
     for k, v in defaults.items():
         setattr(obj, k, v)
@@ -67,8 +66,7 @@ def _subscription(**kwargs):
         "trial_end": None,
         "created": 1700000000,
         "metadata": {},
-    }
-    defaults.update(kwargs)
+    } | kwargs
     obj = MagicMock()
     for k, v in defaults.items():
         setattr(obj, k, v)
@@ -95,8 +93,7 @@ def _payment_intent(**kwargs):
         "created": 1700000000,
         "metadata": {},
         "client_secret": "pi_test123_secret_abc",
-    }
-    defaults.update(kwargs)
+    } | kwargs
     obj = MagicMock()
     for k, v in defaults.items():
         setattr(obj, k, v)
@@ -120,8 +117,7 @@ def _charge(**kwargs):
         "payment_intent": "pi_test123",
         "created": 1700000000,
         "metadata": {},
-    }
-    defaults.update(kwargs)
+    } | kwargs
     obj = MagicMock()
     for k, v in defaults.items():
         setattr(obj, k, v)
@@ -139,8 +135,7 @@ def _refund(**kwargs):
         "reason": "customer_request",
         "created": 1700000000,
         "metadata": {},
-    }
-    defaults.update(kwargs)
+    } | kwargs
     obj = MagicMock()
     for k, v in defaults.items():
         setattr(obj, k, v)
@@ -165,8 +160,7 @@ def _invoice(**kwargs):
         "period_start": 1700000000,
         "period_end": 1702592000,
         "metadata": {},
-    }
-    defaults.update(kwargs)
+    } | kwargs
     obj = MagicMock()
     for k, v in defaults.items():
         setattr(obj, k, v)
@@ -184,8 +178,7 @@ def _invoice_item(**kwargs):
         "quantity": 1,
         "created": 1700000000,
         "metadata": {},
-    }
-    defaults.update(kwargs)
+    } | kwargs
     obj = MagicMock()
     for k, v in defaults.items():
         setattr(obj, k, v)
@@ -201,8 +194,7 @@ def _product(**kwargs):
         "created": 1700000000,
         "updated": 1700000000,
         "metadata": {},
-    }
-    defaults.update(kwargs)
+    } | kwargs
     obj = MagicMock()
     for k, v in defaults.items():
         setattr(obj, k, v)
@@ -224,8 +216,7 @@ def _price(**kwargs):
         "recurring": rec,
         "created": 1700000000,
         "metadata": {},
-    }
-    defaults.update(kwargs)
+    } | kwargs
     obj = MagicMock()
     for k, v in defaults.items():
         setattr(obj, k, v)
@@ -246,8 +237,7 @@ def _payment_link(**kwargs):
         "line_items": line_items_obj,
         "created": 1700000000,
         "metadata": {},
-    }
-    defaults.update(kwargs)
+    } | kwargs
     obj = MagicMock()
     for k, v in defaults.items():
         setattr(obj, k, v)
@@ -268,8 +258,7 @@ def _coupon(**kwargs):
         "valid": True,
         "created": 1700000000,
         "metadata": {},
-    }
-    defaults.update(kwargs)
+    } | kwargs
     obj = MagicMock()
     for k, v in defaults.items():
         setattr(obj, k, v)
@@ -290,8 +279,7 @@ def _payment_method(**kwargs):
         "card": card,
         "created": 1700000000,
         "metadata": {},
-    }
-    defaults.update(kwargs)
+    } | kwargs
     obj = MagicMock()
     for k, v in defaults.items():
         setattr(obj, k, v)
@@ -1176,8 +1164,7 @@ def _setup_tools():
     cred = MagicMock()
     cred.get.return_value = "sk_test_key"
     register_tools(mcp, credentials=cred)
-    fn_map = {f.__name__: f for f in fns}
-    return fn_map
+    return {f.__name__: f for f in fns}
 
 
 class TestCustomerToolValidation:

@@ -129,9 +129,8 @@ class CredentialProvider(ABC):
         now = datetime.now(UTC)
 
         for key in credential.keys.values():
-            if key.expires_at is not None:
-                if key.expires_at <= now + buffer:
-                    return True
+            if key.expires_at is not None and key.expires_at <= now + buffer:
+                return True
         return False
 
     def revoke(self, credential: CredentialObject) -> bool:
@@ -257,11 +256,7 @@ class BearerTokenProvider(CredentialProvider):
         Returns True if token exists and is not expired.
         """
         access_key = credential.keys.get("access_token") or credential.keys.get("token")
-        if access_key is None:
-            return False
-
-        # Check if expired
-        return not access_key.is_expired
+        return False if access_key is None else not access_key.is_expired
 
     def should_refresh(self, credential: CredentialObject) -> bool:
         """
@@ -276,8 +271,7 @@ class BearerTokenProvider(CredentialProvider):
 
         for key_name in ["access_token", "token"]:
             key = credential.keys.get(key_name)
-            if key and key.expires_at:
-                if key.expires_at <= now + buffer:
-                    return True
+            if key and key.expires_at and key.expires_at <= now + buffer:
+                return True
 
         return False

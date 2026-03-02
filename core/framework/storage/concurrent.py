@@ -134,9 +134,8 @@ class ConcurrentStorage:
             # OPTIMIZATION: Only update LRU for "run" locks.
             # This prevents high-frequency "index" locks from flushing out
             # the actual run locks we want to keep cached.
-            if lock_key.startswith("run:"):
-                if lock_key in self._lru_tracking:
-                    self._lru_tracking.move_to_end(lock_key)
+            if lock_key.startswith("run:") and lock_key in self._lru_tracking:
+                self._lru_tracking.move_to_end(lock_key)
             return lock
 
         # 2. Create new lock
@@ -399,7 +398,8 @@ class ConcurrentStorage:
 
     def get_cache_stats(self) -> dict:
         """Get cache statistics."""
-        expired = sum(1 for entry in self._cache.values() if entry.is_expired(self._cache_ttl))
+        expired = sum(bool(entry.is_expired(self._cache_ttl))
+                  for entry in self._cache.values())
         return {
             "total_entries": len(self._cache),
             "expired_entries": expired,

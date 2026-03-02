@@ -113,7 +113,7 @@ def _extract_recent_context(conversation: NodeConversation, max_messages: int = 
         content = msg.content or ""
         # Truncate long tool results
         if msg.role == "tool" and len(content) > 200:
-            content = content[:200] + "..."
+            content = f"{content[:200]}..."
         if content.strip():
             parts.append(f"[{role}]: {content.strip()}")
 
@@ -137,7 +137,7 @@ def _format_outputs(accumulator_state: dict[str, Any]) -> str:
             for i, item in enumerate(value[:8]):
                 item_str = str(item)
                 if len(item_str) > 150:
-                    item_str = item_str[:150] + "..."
+                    item_str = f"{item_str[:150]}..."
                 items_preview.append(f"    [{i}]: {item_str}")
             val_str = f"list ({len(value)} items):\n" + "\n".join(items_preview)
             if len(value) > 8:
@@ -145,11 +145,11 @@ def _format_outputs(accumulator_state: dict[str, Any]) -> str:
         elif isinstance(value, dict):
             val_str = str(value)
             if len(val_str) > 400:
-                val_str = val_str[:400] + "..."
+                val_str = f"{val_str[:400]}..."
         else:
             val_str = str(value)
             if len(val_str) > 300:
-                val_str = val_str[:300] + "..."
+                val_str = f"{val_str[:300]}..."
         parts.append(f"  {key}: {val_str}")
     return "\n".join(parts)
 

@@ -43,7 +43,6 @@ from typing import TYPE_CHECKING, Any
 from framework.credentials.models import CredentialError
 from framework.credentials.validation import validate_agent_credentials
 from framework.runtime.event_bus import AgentEvent, EventType
-from framework.server.app import validate_agent_path
 
 if TYPE_CHECKING:
     from framework.runner.tool_registry import ToolRegistry
@@ -75,8 +74,7 @@ def build_worker_profile(runtime: AgentRuntime, agent_path: Path | str | None = 
     graph = runtime.graph
     goal = runtime.goal
 
-    lines = ["\n\n# Worker Profile"]
-    lines.append(f"Agent: {runtime.graph_id}")
+    lines = ["\n\n# Worker Profile", f"Agent: {runtime.graph_id}"]
     if agent_path:
         lines.append(f"Path: {agent_path}")
     lines.append(f"Goal: {goal.name}")
@@ -450,12 +448,9 @@ def register_queen_lifecycle_tools(
                     logger.error("Failed to unload existing worker: %s", e, exc_info=True)
                     return json.dumps({"error": f"Failed to unload existing worker: {e}"})
 
-            try:
-                resolved_path = validate_agent_path(agent_path)
-            except ValueError as e:
-                return json.dumps({"error": str(e)})
+            resolved_path = Path(agent_path).resolve()
             if not resolved_path.exists():
-                return json.dumps({"error": f"Agent path does not exist: {agent_path}"})
+                return json.dumps({"error": f"Agent path does not exist: {resolved_path}"})
 
             try:
                 updated_session = await session_manager.load_worker(

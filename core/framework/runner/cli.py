@@ -428,7 +428,7 @@ def _load_resume_state(
         if not cp_path.exists():
             return None
         try:
-            cp_data = json.loads(cp_path.read_text(encoding="utf-8"))
+            cp_data = json.loads(cp_path.read_text())
         except (json.JSONDecodeError, OSError):
             return None
         return {
@@ -444,7 +444,7 @@ def _load_resume_state(
         if not state_path.exists():
             return None
         try:
-            state_data = json.loads(state_path.read_text(encoding="utf-8"))
+            state_data = json.loads(state_path.read_text())
         except (json.JSONDecodeError, OSError):
             return None
         progress = state_data.get("progress", {})
@@ -708,12 +708,12 @@ def cmd_run(args: argparse.Namespace) -> int:
                                 print(f"\n{key}:")
                                 value_str = json.dumps(value, indent=2, default=str)
                                 if len(value_str) > 300:
-                                    value_str = value_str[:300] + "..."
+                                    value_str = f"{value_str[:300]}..."
                                 print(value_str)
                             else:
                                 val_str = str(value)
                                 if len(val_str) > 200:
-                                    val_str = val_str[:200] + "..."
+                                    val_str = f"{val_str[:200]}..."
                                 print(f"{key}: {val_str}")
             elif result.error:
                 print(f"\nError: {result.error}")
@@ -847,9 +847,11 @@ def cmd_list(args: argparse.Namespace) -> int:
                     {
                         "path": str(path),
                         "name": info.name,
-                        "description": info.description[:60] + "..."
-                        if len(info.description) > 60
-                        else info.description,
+                        "description": (
+                            f"{info.description[:60]}..."
+                            if len(info.description) > 60
+                            else info.description
+                        ),
                         "nodes": info.node_count,
                         "tools": len(info.required_tools),
                     }
@@ -912,10 +914,11 @@ def cmd_dispatch(args: argparse.Namespace) -> int:
             agent_paths.append((agent_name, agent_path))
     else:
         # Discover all agents
-        for path in agents_dir.iterdir():
-            if _is_valid_agent_dir(path):
-                agent_paths.append((path.name, path))
-
+        agent_paths.extend(
+            (path.name, path)
+            for path in agents_dir.iterdir()
+            if _is_valid_agent_dir(path)
+        )
     if not agent_paths:
         print(f"No agents found in {agents_dir}", file=sys.stderr)
         return 1
@@ -972,7 +975,7 @@ def cmd_dispatch(args: argparse.Namespace) -> int:
                 if "results" in data:
                     results_preview = json.dumps(data["results"], default=str)
                     if len(results_preview) > 200:
-                        results_preview = results_preview[:200] + "..."
+                        results_preview = f"{results_preview[:200]}..."
                     print(f"  Results: {results_preview}")
 
         if not args.quiet:
@@ -1014,7 +1017,7 @@ def _interactive_approval(request):
             else:
                 value_str = str(value)
                 if len(value_str) > 500:
-                    value_str = value_str[:500] + "... (truncated)"
+                    value_str = f"{value_str[:500]}... (truncated)"
                 print(f"  {value_str}")
 
     print()
@@ -1103,12 +1106,7 @@ Output ONLY valid JSON, no explanation:"""
 
         return json.loads(json_str)
     except Exception:
-        # Fallback: try to infer the main field
-        if len(input_keys) == 1:
-            return {input_keys[0]: user_input}
-        else:
-            # Put it in the first field as fallback
-            return {input_keys[0]: user_input}
+        return {input_keys[0]: user_input}
 
 
 def cmd_shell(args: argparse.Namespace) -> int:
@@ -1131,12 +1129,9 @@ def cmd_shell(args: argparse.Namespace) -> int:
         return _interactive_multi(agents_dir)
 
     # Single agent mode
-    agent_path = args.agent_path
+    agent_path = args.agent_path or _select_agent(agents_dir)
     if not agent_path:
-        # List available agents and let user choose
-        agent_path = _select_agent(agents_dir)
-        if not agent_path:
-            return 1
+        return 1
 
     try:
         runner = AgentRunner.load(agent_path)
@@ -1336,7 +1331,7 @@ def cmd_shell(args: argparse.Namespace) -> int:
         conversation_history.append(
             {
                 "input": context,
-                "output": result.output if result.output else {},
+                "output": result.output or {},
                 "status": "success" if result.success else "failed",
                 "paused_at": result.paused_at,
             }
@@ -1636,10 +1631,7 @@ def _select_agent(agents_dir: Path) -> str | None:
         print(f"Created directory: {agents_dir}", file=sys.stderr)
         # return None
 
-    agents = []
-    for path in agents_dir.iterdir():
-        if _is_valid_agent_dir(path):
-            agents.append(path)
+    agents = [path for path in agents_dir.iterdir() if _is_valid_agent_dir(path)]
     agents.sort(key=lambda p: p.name)
 
     if not agents:
@@ -1665,7 +1657,7 @@ def _select_agent(agents_dir: Path) -> str | None:
         for i, agent_path in enumerate(page_agents, start_idx + 1):
             try:
                 name, desc = _extract_python_agent_metadata(agent_path)
-                desc = desc[:50] + "..." if len(desc) > 50 else desc
+                desc = f"{desc[:50]}..." if len(desc) > 50 else desc
                 print(f"  {i}. {name}")
                 print(f"     {desc}")
             except Exception as e:
@@ -1706,8 +1698,7 @@ def _select_agent(agents_dir: Path) -> str | None:
             elif key.isdigit():
                 # Build number with support for backspace
                 buffer = key
-                print(key, end="", flush=True)
-
+                print(buffer, end="", flush=True)
                 while True:
                     ch = _getch()
                     if ch in ("\r", "\n"):
@@ -1742,7 +1733,7 @@ def _select_agent(agents_dir: Path) -> str | None:
                         print("Invalid selection")
                     except ValueError:
                         print("Invalid input")
-            elif key == "\r" or key == "\n":
+            elif key in ["\r", "\n"]:
                 print()  # Just pressed enter, redraw
             else:
                 print()
@@ -1843,7 +1834,7 @@ def _interactive_multi(agents_dir: Path) -> int:
                 if "results" in data:
                     results_preview = json.dumps(data["results"], default=str)
                     if len(results_preview) > 150:
-                        results_preview = results_preview[:150] + "..."
+                        results_preview = f"{results_preview[:150]}..."
                     print(f"    Results: {results_preview}")
 
         print(f"\nMessage trace: {len(result.messages)} messages")
@@ -1907,9 +1898,7 @@ def cmd_setup_credentials(args: argparse.Namespace) -> int:
     """Interactive credential setup for an agent."""
     from framework.credentials.setup import CredentialSetupSession
 
-    agent_path = getattr(args, "agent_path", None)
-
-    if agent_path:
+    if agent_path := getattr(args, "agent_path", None):
         # Setup credentials for a specific agent
         session = CredentialSetupSession.from_agent_path(agent_path)
     else:
@@ -1989,7 +1978,8 @@ def cmd_serve(args: argparse.Namespace) -> int:
         if has_frontend:
             print(f"Dashboard: {dashboard_url}")
         print(f"Health: {dashboard_url}/api/health")
-        print(f"Agents loaded: {sum(1 for s in manager.list_sessions() if s.worker_runtime)}")
+        print(f"Agents loaded: {sum(bool(s.worker_runtime)
+                                for s in manager.list_sessions())}")
         print()
         print("Press Ctrl+C to stop")
 

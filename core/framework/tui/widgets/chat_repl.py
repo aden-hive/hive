@@ -233,7 +233,7 @@ class ChatRepl(Vertical):
         """Convert bare file:// URIs to clickable Rich [link=...] markup with short display text."""
 
         def _shorten(match: re.Match) -> str:
-            uri = match.group(1)
+            uri = match[1]
             filename = uri.rsplit("/", 1)[-1] if "/" in uri else uri
             return f"[link={uri}]{filename}[/link]"
 
@@ -507,7 +507,7 @@ class ChatRepl(Vertical):
         for value in input_data.values():
             if isinstance(value, str) and value.strip():
                 label = value.strip()
-                return label[:60] + "..." if len(label) > 60 else label
+                return f"{label[:60]}..." if len(label) > 60 else label
         return "(no input)"
 
     async def _list_sessions(self, storage_path: Path) -> None:
@@ -631,8 +631,7 @@ class ChatRepl(Vertical):
             # Checkpoints
             checkpoint_dir = session_dir / "checkpoints"
             if checkpoint_dir.exists():
-                checkpoint_files = sorted(checkpoint_dir.glob("cp_*.json"))
-                if checkpoint_files:
+                if checkpoint_files := sorted(checkpoint_dir.glob("cp_*.json")):
                     self._write_history(
                         f"\n[bold]Available Checkpoints:[/bold] ({len(checkpoint_files)})"
                     )
@@ -1013,10 +1012,8 @@ class ChatRepl(Vertical):
 
     def _node_label(self, node_id: str | None = None) -> str:
         """Resolve a node_id to a Rich-formatted speaker label."""
-        nid = node_id or self._active_node_id
-        if nid:
-            node = self.runtime.graph.get_node(nid)
-            if node:
+        if nid := node_id or self._active_node_id:
+            if node := self.runtime.graph.get_node(nid):
                 name = node.name
             elif nid in self._EXTERNAL_NODE_NAMES:
                 name = self._EXTERNAL_NODE_NAMES[nid]
@@ -1216,8 +1213,7 @@ class ChatRepl(Vertical):
         else:
             # No execution → act as Send (submit whatever is in the input)
             chat_input = self.query_one("#chat-input", ChatTextArea)
-            text = chat_input.text.strip()
-            if text:
+            if text := chat_input.text.strip():
                 chat_input.clear()
                 await self._submit_input(text)
 
@@ -1294,9 +1290,7 @@ class ChatRepl(Vertical):
             # Get entry points for the active graph, preferring manual
             # (interactive) ones over event/timer-driven ones.
             entry_points = self.runtime.get_entry_points()
-            manual_eps = [ep for ep in entry_points if ep.trigger_type in ("manual", "api")]
-            if not manual_eps:
-                manual_eps = entry_points  # fallback: use whatever is available
+            manual_eps = [ep for ep in entry_points if ep.trigger_type in ("manual", "api")] or entry_points
             if not manual_eps:
                 self._write_history("[bold red]Error:[/bold red] No entry points")
                 return
@@ -1475,7 +1469,7 @@ class ChatRepl(Vertical):
 
     def handle_tool_completed(self, tool_name: str, result: str, is_error: bool) -> None:
         """Handle a tool call completing."""
-        if tool_name in ("ask_user", "escalate_to_coder"):
+        if tool_name in {"ask_user", "escalate_to_coder"}:
             return
 
         result_str = str(result)
@@ -1593,7 +1587,7 @@ class ChatRepl(Vertical):
         chat_input = self.query_one("#chat-input", ChatTextArea)
         chat_input.disabled = False
         node = self.runtime.graph.get_node(node_id) if node_id else None
-        name = node.name if node else self._EXTERNAL_NODE_NAMES.get(node_id or "", None)
+        name = node.name if node else self._EXTERNAL_NODE_NAMES.get(node_id or "")
         chat_input.placeholder = (
             f"Type your response to {name}..." if name else "Type your response..."
         )

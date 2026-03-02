@@ -156,11 +156,6 @@ def _check_dmarc(resolver: dns.resolver.Resolver, domain: str) -> dict:
                         "DMARC policy is 'none' — spoofed emails are not blocked. "
                         "Upgrade to p=quarantine or p=reject."
                     )
-                elif policy == "quarantine":
-                    pass  # Acceptable
-                elif policy == "reject":
-                    pass  # Best
-
                 return {
                     "present": True,
                     "record": txt,
@@ -185,8 +180,9 @@ def _check_dkim(resolver: dns.resolver.Resolver, domain: str) -> dict:
 
     for selector in DKIM_SELECTORS:
         try:
-            answers = resolver.resolve(f"{selector}._domainkey.{domain}", "TXT")
-            if answers:
+            if answers := resolver.resolve(
+                f"{selector}._domainkey.{domain}", "TXT"
+            ):
                 found.append(selector)
         except (dns.resolver.NoAnswer, dns.resolver.NXDOMAIN, dns.exception.DNSException):
             missing.append(selector)
@@ -200,8 +196,7 @@ def _check_dkim(resolver: dns.resolver.Resolver, domain: str) -> dict:
 def _check_dnssec(resolver: dns.resolver.Resolver, domain: str) -> dict:
     """Check if DNSSEC is enabled."""
     try:
-        answers = resolver.resolve(domain, "DNSKEY")
-        if answers:
+        if answers := resolver.resolve(domain, "DNSKEY"):
             return {"enabled": True, "issues": []}
     except dns.resolver.NoAnswer:
         pass
@@ -244,8 +239,9 @@ def _check_zone_transfer(resolver: dns.resolver.Resolver, domain: str) -> dict:
     for ns_rdata in ns_answers:
         ns_host = str(ns_rdata.target)
         try:
-            zone = dns.zone.from_xfr(dns.query.xfr(ns_host, domain, timeout=5))
-            if zone:
+            if zone := dns.zone.from_xfr(
+                dns.query.xfr(ns_host, domain, timeout=5)
+            ):
                 return {
                     "vulnerable": True,
                     "nameserver": ns_host,

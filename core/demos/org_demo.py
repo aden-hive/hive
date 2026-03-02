@@ -176,7 +176,7 @@ def _exec_web_scrape(inputs: dict) -> dict:
     url = inputs.get("url", "")
     max_length = max(1000, min(inputs.get("max_length", 50000), 500000))
     if not url.startswith(("http://", "https://")):
-        url = "https://" + url
+        url = f"https://{url}"
     try:
         resp = httpx.get(url, timeout=30.0, follow_redirects=True, headers=_SCRAPE_HEADERS)
         if resp.status_code != 200:
@@ -194,7 +194,7 @@ def _exec_web_scrape(inputs: dict) -> dict:
         text = main.get_text(separator=" ", strip=True) if main else ""
         text = " ".join(text.split())
         if len(text) > max_length:
-            text = text[:max_length] + "..."
+            text = f"{text[:max_length]}..."
         return {"url": url, "title": title, "content": text, "length": len(text)}
     except httpx.TimeoutException:
         return {"error": "Request timed out"}
@@ -514,8 +514,9 @@ class MessageRouter:
 
     async def wait_all(self, exclude: str = "", timeout: float = 10.0):
         """Wait for all running tasks (except exclude) to finish."""
-        remaining = [t for r, t in self._tasks.items() if r != exclude and not t.done()]
-        if remaining:
+        if remaining := [
+            t for r, t in self._tasks.items() if r != exclude and not t.done()
+        ]:
             _done, pending = await asyncio.wait(remaining, timeout=timeout)
             for t in pending:
                 t.cancel()
@@ -548,12 +549,9 @@ def _recover_send_args(raw: str) -> tuple[str, str]:
 
     to = ""
     message = ""
-    to_match = re.search(r'"to"\s*:\s*"(\w+)"', raw)
-    if to_match:
+    if to_match := re.search(r'"to"\s*:\s*"(\w+)"', raw):
         to = to_match.group(1)
-    # message is typically the longest field; grab everything after the key
-    msg_match = re.search(r'"message"\s*:\s*"', raw)
-    if msg_match:
+    if msg_match := re.search(r'"message"\s*:\s*"', raw):
         # Take from after the opening quote to the end, strip trailing "}
         start = msg_match.end()
         message = raw[start:].rstrip()
@@ -1257,7 +1255,7 @@ async def _run_org_pipeline(websocket, topic: str):
             judge=judge,
             config=LoopConfig(
                 max_iterations=30,
-                max_tool_calls_per_turn=30,
+                max_tool_calls_per_turn=25,
                 max_history_tokens=32_000,
             ),
             conversation_store=store,

@@ -58,8 +58,7 @@ def large_csv(session_dir: Path) -> Path:
     """Create a larger CSV file for pagination testing."""
     csv_file = session_dir / "large.csv"
     lines = ["id,value"]
-    for i in range(100):
-        lines.append(f"{i},{i * 10}")
+    lines.extend(f"{i},{i * 10}" for i in range(100))
     csv_file.write_text("\n".join(lines) + "\n")
     return csv_file
 

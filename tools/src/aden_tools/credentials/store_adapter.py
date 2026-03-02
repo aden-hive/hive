@@ -180,8 +180,7 @@ class CredentialStoreAdapter:
         Raises:
             CredentialError: If any required credentials are missing
         """
-        missing = self.get_missing_for_tools(tool_names)
-        if missing:
+        if missing := self.get_missing_for_tools(tool_names):
             raise CredentialError(self._format_missing_error(missing, tool_names))
 
     def get_missing_for_node_types(self, node_types: list[str]) -> list[tuple[str, CredentialSpec]]:
@@ -213,8 +212,7 @@ class CredentialStoreAdapter:
         Raises:
             CredentialError: If any required credentials are missing
         """
-        missing = self.get_missing_for_node_types(node_types)
-        if missing:
+        if missing := self.get_missing_for_node_types(node_types):
             raise CredentialError(self._format_missing_node_type_error(missing, node_types))
 
     def validate_startup(self) -> None:
@@ -224,13 +222,11 @@ class CredentialStoreAdapter:
         Raises:
             CredentialError: If any startup-required credentials are missing
         """
-        missing: list[tuple[str, CredentialSpec]] = []
-
-        for cred_name, spec in self._specs.items():
-            if spec.startup_required and not self.is_available(cred_name):
-                missing.append((cred_name, spec))
-
-        if missing:
+        if missing := [
+            (cred_name, spec)
+            for cred_name, spec in self._specs.items()
+            if spec.startup_required and not self.is_available(cred_name)
+        ]:
             raise CredentialError(self._format_startup_error(missing))
 
     # --- New CredentialStore Features ---
@@ -404,9 +400,10 @@ class CredentialStoreAdapter:
         tool_names: list[str],
     ) -> str:
         """Format a clear, actionable error message for missing credentials."""
-        lines = ["Cannot run agent: Missing credentials\n"]
-        lines.append("The following tools require credentials that are not set:\n")
-
+        lines = [
+            "Cannot run agent: Missing credentials\n",
+            "The following tools require credentials that are not set:\n",
+        ]
         for _cred_name, spec in missing:
             affected_tools = [t for t in tool_names if t in spec.tools]
             tools_str = ", ".join(affected_tools)
@@ -416,9 +413,7 @@ class CredentialStoreAdapter:
                 lines.append(f"    {spec.description}")
             if spec.help_url:
                 lines.append(f"    Get an API key at: {spec.help_url}")
-            lines.append(f"    Set via: export {spec.env_var}=your_key")
-            lines.append("")
-
+            lines.extend((f"    Set via: export {spec.env_var}=your_key", ""))
         lines.append("Set these environment variables and re-run the agent.")
         return "\n".join(lines)
 
@@ -428,9 +423,10 @@ class CredentialStoreAdapter:
         node_types: list[str],
     ) -> str:
         """Format a clear, actionable error message for missing node type credentials."""
-        lines = ["Cannot run agent: Missing credentials\n"]
-        lines.append("The following node types require credentials that are not set:\n")
-
+        lines = [
+            "Cannot run agent: Missing credentials\n",
+            "The following node types require credentials that are not set:\n",
+        ]
         for _cred_name, spec in missing:
             affected_types = [t for t in node_types if t in spec.node_types]
             types_str = ", ".join(affected_types)
@@ -440,9 +436,7 @@ class CredentialStoreAdapter:
                 lines.append(f"    {spec.description}")
             if spec.help_url:
                 lines.append(f"    Get an API key at: {spec.help_url}")
-            lines.append(f"    Set via: export {spec.env_var}=your_key")
-            lines.append("")
-
+            lines.extend((f"    Set via: export {spec.env_var}=your_key", ""))
         lines.append("Set these environment variables and re-run the agent.")
         return "\n".join(lines)
 
@@ -459,9 +453,7 @@ class CredentialStoreAdapter:
                 lines.append(f"    {spec.description}")
             if spec.help_url:
                 lines.append(f"    Get an API key at: {spec.help_url}")
-            lines.append(f"    Set via: export {spec.env_var}=your_key")
-            lines.append("")
-
+            lines.extend((f"    Set via: export {spec.env_var}=your_key", ""))
         lines.append("Set these environment variables and restart the server.")
         return "\n".join(lines)
 
@@ -500,13 +492,7 @@ class CredentialStoreAdapter:
 
         env_mapping = {name: spec.env_var for name, spec in specs.items()}
 
-        # --- Aden sync branch ---
-        # Note: we don't use CredentialStore.with_aden_sync() here because it
-        # only wraps EncryptedFileStorage.  We need CompositeStorage (encrypted
-        # + env var fallback) so non-Aden credentials like brave_search still
-        # resolve from environment variables.
-        aden_api_key = os.environ.get("ADEN_API_KEY")
-        if aden_api_key:
+        if aden_api_key := os.environ.get("ADEN_API_KEY"):
             try:
                 from framework.credentials.aden import (
                     AdenCachedStorage,

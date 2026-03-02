@@ -56,13 +56,7 @@ def get_shell_config_path(shell_type: ShellType | None = None) -> Path:
 
     home = Path.home()
 
-    if shell_type == "zsh":
-        return home / ".zshrc"
-    elif shell_type == "bash":
-        return home / ".bashrc"
-    else:
-        # Default to .bashrc for unknown shells
-        return home / ".bashrc"
+    return home / ".zshrc" if shell_type == "zsh" else home / ".bashrc"
 
 
 def check_env_var_in_shell_config(
@@ -88,10 +82,8 @@ def check_env_var_in_shell_config(
 
     # Look for export ENV_VAR=value or export ENV_VAR="value"
     pattern = rf"^export\s+{re.escape(env_var)}=(.+)$"
-    match = re.search(pattern, content, re.MULTILINE)
-
-    if match:
-        value = match.group(1).strip()
+    if match := re.search(pattern, content, re.MULTILINE):
+        value = match[1].strip()
         # Remove surrounding quotes if present
         if (value.startswith('"') and value.endswith('"')) or (
             value.startswith("'") and value.endswith("'")
@@ -191,8 +183,7 @@ def remove_env_var_from_shell_config(
             if stripped.startswith("# Added by Hive"):
                 # Check if next non-empty line is the export
                 for j in range(i + 1, len(lines)):
-                    next_line = lines[j].strip()
-                    if next_line:
+                    if next_line := lines[j].strip():
                         if next_line.startswith(f"export {env_var}="):
                             skip_next_comment = True
                         break

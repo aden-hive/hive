@@ -59,7 +59,7 @@ class SafeEvalVisitor(ast.NodeVisitor):
 
     def visit(self, node: ast.AST) -> Any:
         # Override visit to prevent default behavior and ensure only explicitly allowed nodes work
-        method = "visit_" + node.__class__.__name__
+        method = f"visit_{node.__class__.__name__}"
         visitor = getattr(self, method, self.generic_visit)
         return visitor(node)
 
@@ -103,6 +103,10 @@ class SafeEvalVisitor(ast.NodeVisitor):
         return op_func(self.visit(node.operand))
 
     def visit_Compare(self, node: ast.Compare) -> Any:
+        # Defensive guard: valid Python AST always has at least one op, but a
+        # manually-constructed AST with empty ops would silently return True.
+        if not node.ops:
+            raise ValueError("Compare node with no operators is not allowed")
         left = self.visit(node.left)
         for op, comparator in zip(node.ops, node.comparators, strict=False):
             op_func = SAFE_OPERATORS.get(type(op))
@@ -115,11 +119,24 @@ class SafeEvalVisitor(ast.NodeVisitor):
         return True
 
     def visit_BoolOp(self, node: ast.BoolOp) -> Any:
-        values = [self.visit(v) for v in node.values]
+        # Evaluate operands lazily so short-circuit semantics match native Python:
+        # `False and (1/0)` must return False without raising ZeroDivisionError.
+        # The old eager `[self.visit(v) for v in node.values]` evaluated everything
+        # upfront, causing exceptions in the "dead" branch to propagate incorrectly.
         if isinstance(node.op, ast.And):
-            return all(values)
+            result: Any = True
+            for v in node.values:
+                result = self.visit(v)
+                if not result:
+                    return result
+            return result
         elif isinstance(node.op, ast.Or):
-            return any(values)
+            result = False
+            for v in node.values:
+                result = self.visit(v)
+                if result:
+                    return result
+            return result
         raise ValueError(f"Boolean operator {type(node.op).__name__} is not allowed")
 
     def visit_IfExp(self, node: ast.IfExp) -> Any:
@@ -143,6 +160,11 @@ class SafeEvalVisitor(ast.NodeVisitor):
         idx = self.visit(node.slice)
         return val[idx]
 
+    # SE-01: only allow attribute access on these primitive/container types.
+    # Arbitrary objects in the eval context (e.g. Path, file handles) could
+    # expose side-effecting public methods such as write_text or close.
+    _SAFE_ATTRIBUTE_RECEIVER_TYPES = (str, int, float, bool, list, dict, tuple)
+
     def visit_Attribute(self, node: ast.Attribute) -> Any:
         # value.attr
         # STRICT CHECK: No access to private attributes (starting with _)
@@ -151,21 +173,16 @@ class SafeEvalVisitor(ast.NodeVisitor):
 
         val = self.visit(node.value)
 
-        # Safe attribute access: only allow if it's in the dict (if val is dict)
-        # or it's a safe property of a basic type?
-        # Actually, for flexibility, people often use dot access for dicts in these expressions.
-        # But standard Python dict doesn't support dot access.
-        # If val is a dict, Attribute access usually fails in Python unless wrapped.
-        # If the user context provides objects, we might want to allow attribute access.
-        # BUT we must be careful not to allow access to dangerous things like __class__ etc.
-        # The check starts_with("_") covers __class__, __init__, etc.
+        # SE-01: reject attribute access on anything that isn't a safe primitive/container.
+        if not isinstance(val, self._SAFE_ATTRIBUTE_RECEIVER_TYPES):
+            raise ValueError(
+                f"Attribute access on {type(val).__name__!r} is not allowed; "
+                "only str, int, float, bool, list, dict, and tuple are permitted"
+            )
 
         try:
             return getattr(val, node.attr)
         except AttributeError:
-            # Fallback: maybe it's a dict and they want dot access?
-            # (Only if we want to support that sugar, usually not standard python)
-            # Let's stick to standard python behavior + strict private check.
             pass
 
         raise AttributeError(f"Object has no attribute '{node.attr}'")
@@ -180,9 +197,8 @@ class SafeEvalVisitor(ast.NodeVisitor):
         # Easier: Check if node.func is a Name and that name is in SAFE_FUNCTIONS.
 
         is_safe = False
-        if isinstance(node.func, ast.Name):
-            if node.func.id in SAFE_FUNCTIONS:
-                is_safe = True
+        if isinstance(node.func, ast.Name) and node.func.id in SAFE_FUNCTIONS:
+            is_safe = True
 
         # Also allow methods on objects if they are safe?
         # E.g. "somestring".lower() or list.append() (if we allowed mutation, but we don't for now)

@@ -133,8 +133,7 @@ class StateWriter:
             else:
                 decisions.append(d_dict)
 
-        # Create Run object
-        run = Run(
+        return Run(
             id=state.session_id,  # Use session_id as run_id
             goal_id=state.goal_id,
             started_at=started_at,
@@ -147,8 +146,6 @@ class StateWriter:
             input_data=state.input_data,
             output_data=state.result.output,
         )
-
-        return run
 
     async def read_state(
         self,
@@ -173,7 +170,4 @@ class StateWriter:
 
         # Fall back to old format
         run = await self.old.load_run(session_id)
-        if run:
-            return SessionState.from_legacy_run(run, session_id)
-
-        return None
+        return SessionState.from_legacy_run(run, session_id) if run else None

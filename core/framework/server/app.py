@@ -11,52 +11,6 @@ from framework.server.session_manager import Session, SessionManager
 logger = logging.getLogger(__name__)
 
 
-# Anchor to the repository root so allowed roots are independent of CWD.
-# app.py lives at core/framework/server/app.py, so four .parent calls
-# reach the repo root where exports/ and examples/ live.
-_REPO_ROOT = Path(__file__).resolve().parent.parent.parent.parent
-
-_ALLOWED_AGENT_ROOTS: tuple[Path, ...] | None = None
-
-
-def _get_allowed_agent_roots() -> tuple[Path, ...]:
-    """Return resolved allowed root directories for agent loading.
-
-    Roots are anchored to the repository root (derived from ``__file__``)
-    so the allowlist is correct regardless of the process's working
-    directory.
-    """
-    global _ALLOWED_AGENT_ROOTS
-    if _ALLOWED_AGENT_ROOTS is None:
-        _ALLOWED_AGENT_ROOTS = (
-            (_REPO_ROOT / "exports").resolve(),
-            (_REPO_ROOT / "examples").resolve(),
-            (Path.home() / ".hive" / "agents").resolve(),
-        )
-    return _ALLOWED_AGENT_ROOTS
-
-
-def validate_agent_path(agent_path: str | Path) -> Path:
-    """Validate that an agent path resolves inside an allowed directory.
-
-    Prevents arbitrary code execution via ``importlib.import_module`` by
-    restricting agent loading to known safe directories: ``exports/``,
-    ``examples/``, and ``~/.hive/agents/``.
-
-    Returns the resolved ``Path`` on success.
-
-    Raises:
-        ValueError: If the path is outside all allowed roots.
-    """
-    resolved = Path(agent_path).expanduser().resolve()
-    for root in _get_allowed_agent_roots():
-        if resolved.is_relative_to(root) and resolved != root:
-            return resolved
-    raise ValueError(
-        "agent_path must be inside an allowed directory (exports/, examples/, or ~/.hive/agents/)"
-    )
-
-
 def safe_path_segment(value: str) -> str:
     """Validate a URL path parameter is a safe filesystem name.
 
@@ -64,7 +18,7 @@ def safe_path_segment(value: str) -> str:
     traversal sequences.  aiohttp decodes ``%2F`` inside route params,
     so a raw ``{session_id}`` can contain ``/`` or ``..`` after decoding.
     """
-    if not value or value == "." or "/" in value or "\\" in value or ".." in value:
+    if "/" in value or "\\" in value or ".." in value:
         raise web.HTTPBadRequest(reason="Invalid path parameter")
     return value
 
@@ -76,10 +30,10 @@ def resolve_session(request: web.Request):
     """
     manager: SessionManager = request.app["manager"]
     sid = request.match_info["session_id"]
-    session = manager.get_session(sid)
-    if not session:
+    if session := manager.get_session(sid):
+        return session, None
+    else:
         return None, web.json_response({"error": f"Session '{sid}' not found"}, status=404)
-    return session, None
 
 
 def sessions_dir(session: Session) -> Path:
@@ -102,10 +56,10 @@ def _is_cors_allowed(origin: str) -> bool:
     """Check if origin is localhost/127.0.0.1 on any port."""
     if not origin:
         return False
-    for base in _CORS_ORIGINS:
-        if origin == base or origin.startswith(base + ":"):
-            return True
-    return False
+    return any(
+        origin == base or origin.startswith(f"{base}:")
+        for base in _CORS_ORIGINS
+    )
 
 
 @web.middleware
@@ -160,7 +114,8 @@ async def handle_health(request: web.Request) -> web.Response:
         {
             "status": "ok",
             "sessions": len(sessions),
-            "agents_loaded": sum(1 for s in sessions if s.worker_runtime is not None),
+            "agents_loaded": sum(bool(s.worker_runtime is not None)
+                             for s in sessions),
         }
     )
 
@@ -185,18 +140,25 @@ def create_app(model: str | None = None) -> web.Application:
     try:
         from framework.credentials.validation import ensure_credential_key_env
 
-        # Load ALL credentials: HIVE_CREDENTIAL_KEY, ADEN_API_KEY, and LLM keys
         ensure_credential_key_env()
 
-        # Auto-generate credential key for web-only users who never ran the TUI
+        # Ensure HIVE_CREDENTIAL_KEY exists and is persisted (same as TUI setup flow).
+        # ensure_credential_key_env() loads from shell config but won't generate a new
+        # key. Web-only users who never ran the TUI need one auto-generated + persisted
+        # so credentials survive server restarts.
         if not os.environ.get("HIVE_CREDENTIAL_KEY"):
             try:
-                from framework.credentials.key_storage import generate_and_save_credential_key
+                from aden_tools.credentials.shell_config import add_env_var_to_shell_config
+                from cryptography.fernet import Fernet
 
-                generate_and_save_credential_key()
-                logger.info(
-                    "Generated and persisted HIVE_CREDENTIAL_KEY to ~/.hive/secrets/credential_key"
+                generated_key = Fernet.generate_key().decode()
+                os.environ["HIVE_CREDENTIAL_KEY"] = generated_key
+                add_env_var_to_shell_config(
+                    "HIVE_CREDENTIAL_KEY",
+                    generated_key,
+                    comment="Encryption key for Hive credential store",
                 )
+                logger.info("Generated and persisted HIVE_CREDENTIAL_KEY to shell config")
             except Exception as exc:
                 logger.warning("Could not auto-persist HIVE_CREDENTIAL_KEY: %s", exc)
 

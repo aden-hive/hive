@@ -169,11 +169,7 @@ class Goal(BaseModel):
 
     def check_constraint(self, constraint_id: str, value: Any) -> bool:
         """Check if a specific constraint is satisfied."""
-        for c in self.constraints:
-            if c.id == constraint_id:
-                # This would be expanded with actual evaluation logic
-                return True
-        return True
+        return next((True for c in self.constraints if c.id == constraint_id), True)
 
     def to_prompt_context(self) -> str:
         """Generate context string for LLM prompts.
@@ -194,20 +190,14 @@ class Goal(BaseModel):
             "## Success Criteria:",
         ]
 
-        for sc in self.success_criteria:
-            lines.append(f"- {sc.description}")
-
+        lines.extend(f"- {sc.description}" for sc in self.success_criteria)
         if self.constraints:
-            lines.append("")
-            lines.append("## Constraints:")
+            lines.extend(("", "## Constraints:"))
             for c in self.constraints:
                 severity = "MUST" if c.constraint_type == "hard" else "SHOULD"
                 lines.append(f"- [{severity}] {c.description}")
 
         if self.context:
-            lines.append("")
-            lines.append("## Context:")
-            for key, value in self.context.items():
-                lines.append(f"- {key}: {value}")
-
+            lines.extend(("", "## Context:"))
+            lines.extend(f"- {key}: {value}" for key, value in self.context.items())
         return "\n".join(lines)

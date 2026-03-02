@@ -110,12 +110,8 @@ def _pick_pdf_subprocess() -> Path | None:
             return None
 
         path = Path(path_str)
-        if path.is_file() and path.suffix.lower() == ".pdf":
-            return path
-
-        return None
-
-    except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
+        return path if path.is_file() and path.suffix.lower() == ".pdf" else None
+    except (subprocess.TimeoutExpired, OSError):
         return None
 
 
@@ -129,7 +125,4 @@ async def pick_pdf_file() -> Path | None:
         Path to the selected PDF, or None if the user cancelled,
         no GUI is available, or the dialog command was not found.
     """
-    if not _has_gui():
-        return None
-
-    return await asyncio.to_thread(_pick_pdf_subprocess)
+    return await asyncio.to_thread(_pick_pdf_subprocess) if _has_gui() else None

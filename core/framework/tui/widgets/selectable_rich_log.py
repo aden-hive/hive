@@ -138,12 +138,7 @@ class SelectableRichLog(RichLog):
         scroll_x, _ = self.scroll_offset
 
         # -1 means "to end of content line" — use viewport end
-        if end_x == -1:
-            end_x = cell_len
-        else:
-            # Convert content-space x to viewport-space x
-            end_x = end_x - scroll_x
-
+        end_x = cell_len if end_x == -1 else end_x - scroll_x
         # Convert content-space x to viewport-space x
         start_x = start_x - scroll_x
 
@@ -184,7 +179,7 @@ class SelectableRichLog(RichLog):
             # Selection coordinates can exceed line count when the virtual
             # canvas is larger than the actual content (e.g. after scroll).
             return None
-        return extracted if extracted else None
+        return extracted or None
 
     def copy_selection(self) -> str | None:
         """Copy selected text to system clipboard. Returns text or None."""

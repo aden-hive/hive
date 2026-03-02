@@ -128,9 +128,7 @@ def _score_to_grade(score: int) -> str:
         return "B"
     if score >= 60:
         return "C"
-    if score >= 40:
-        return "D"
-    return "F"
+    return "D" if score >= 40 else "F"
 
 
 def _parse_json(data: str) -> dict | None:
@@ -179,13 +177,13 @@ def register_tools(mcp: FastMCP) -> None:
 
     @mcp.tool()
     def risk_score(
-        ssl_results: str = "",
-        headers_results: str = "",
-        dns_results: str = "",
-        ports_results: str = "",
-        tech_results: str = "",
-        subdomain_results: str = "",
-    ) -> dict:
+            ssl_results: str = "",
+            headers_results: str = "",
+            dns_results: str = "",
+            ports_results: str = "",
+            tech_results: str = "",
+            subdomain_results: str = "",
+        ) -> dict:
         """
         Calculate a weighted risk score from scan results.
 
@@ -257,11 +255,7 @@ def register_tools(mcp: FastMCP) -> None:
                 all_findings.append((category, f, score))
 
         # Calculate overall score (normalize if some categories were skipped)
-        if total_weight > 0:
-            overall_score = round(weighted_sum / total_weight)
-        else:
-            overall_score = 0
-
+        overall_score = round(weighted_sum / total_weight) if total_weight > 0 else 0
         overall_grade = _score_to_grade(overall_score)
 
         # Build top risks — sorted by category score (worst first), then by finding

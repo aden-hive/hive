@@ -100,11 +100,13 @@ def build_accounts_prompt(
 
         # If node tools specified, only show providers with overlapping tools
         if node_tool_set is not None:
-            relevant_tools = [t for t in tools_for_provider if t in node_tool_set]
-            if not relevant_tools:
-                continue
-            tools_for_provider = relevant_tools
+            if relevant_tools := [
+                t for t in tools_for_provider if t in node_tool_set
+            ]:
+                tools_for_provider = relevant_tools
 
+            else:
+                continue
         # Local-only providers: tools read from env vars, no account= routing
         all_local = all(a.get("source") == "local" for a in acct_list)
 
@@ -113,7 +115,7 @@ def build_accounts_prompt(
         if tools_for_provider and not all_local:
             tools_str = ", ".join(tools_for_provider)
             sections.append(f'\n{display_name} (use account="<alias>" with: {tools_str}):')
-        elif tools_for_provider and all_local:
+        elif tools_for_provider:
             tools_str = ", ".join(tools_for_provider)
             sections.append(f"\n{display_name} (tools: {tools_str}):")
         else:
@@ -197,23 +199,20 @@ def build_narrative(
     if execution_path:
         phase_descriptions: list[str] = []
         for node_id in execution_path:
-            node_spec = graph.get_node(node_id)
-            if node_spec:
+            if node_spec := graph.get_node(node_id):
                 phase_descriptions.append(f"- {node_spec.name}: {node_spec.description}")
             else:
                 phase_descriptions.append(f"- {node_id}")
         parts.append("Phases completed:\n" + "\n".join(phase_descriptions))
 
-    # Describe key memory values (skip very long values)
-    all_memory = memory.read_all()
-    if all_memory:
+    if all_memory := memory.read_all():
         memory_lines: list[str] = []
         for key, value in all_memory.items():
             if value is None:
                 continue
             val_str = str(value)
             if len(val_str) > 200:
-                val_str = val_str[:200] + "..."
+                val_str = f"{val_str[:200]}..."
             memory_lines.append(f"- {key}: {val_str}")
         if memory_lines:
             parts.append("Current state:\n" + "\n".join(memory_lines))
@@ -246,18 +245,14 @@ def build_transition_marker(
     Returns:
         Transition marker message text.
     """
-    sections: list[str] = []
+    sections: list[str] = [
+        f"--- PHASE TRANSITION: {previous_node.name} → {next_node.name} ---",
+        f"\nCompleted: {previous_node.name}",
+    ]
 
-    # Header
-    sections.append(f"--- PHASE TRANSITION: {previous_node.name} → {next_node.name} ---")
-
-    # What just completed
-    sections.append(f"\nCompleted: {previous_node.name}")
     sections.append(f"  {previous_node.description}")
 
-    # Outputs in memory
-    all_memory = memory.read_all()
-    if all_memory:
+    if all_memory := memory.read_all():
         memory_lines: list[str] = []
         for key, value in all_memory.items():
             if value is None:
@@ -273,12 +268,12 @@ def build_transition_marker(
     if data_dir:
         data_path = Path(data_dir)
         if data_path.exists():
-            files = sorted(data_path.iterdir())
-            if files:
-                file_lines = [
-                    f"  {f.name} ({f.stat().st_size:,} bytes)" for f in files if f.is_file()
-                ]
-                if file_lines:
+            if files := sorted(data_path.iterdir()):
+                if file_lines := [
+                    f"  {f.name} ({f.stat().st_size:,} bytes)"
+                    for f in files
+                    if f.is_file()
+                ]:
                     sections.append(
                         "\nData files (use load_data to access):\n" + "\n".join(file_lines)
                     )

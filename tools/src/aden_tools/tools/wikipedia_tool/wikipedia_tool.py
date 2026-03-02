@@ -18,9 +18,7 @@ def register_tools(mcp: FastMCP) -> None:
 
     def _strip_html(text: str) -> str:
         """Remove HTML tags from a string."""
-        if not text:
-            return ""
-        return re.sub(r"<[^>]+>", "", text)
+        return re.sub(r"<[^>]+>", "", text) if text else ""
 
     @mcp.tool()
     def search_wikipedia(query: str, lang: str = "en", num_results: int = 3) -> dict:

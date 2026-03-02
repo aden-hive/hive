@@ -286,5 +286,5 @@ async def _check_port(ip: str, port: int, timeout: float) -> dict:
         writer.close()
         await writer.wait_closed()
         return {"open": True, "banner": banner}
-    except (TimeoutError, ConnectionRefusedError, OSError):
+    except (TimeoutError, OSError):
         return {"open": False}

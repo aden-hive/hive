@@ -147,17 +147,15 @@ class EncryptedFileStorage(CredentialStorage):
         # Get or generate encryption key
         if encryption_key:
             self._key = encryption_key
+        elif key_str := os.environ.get(key_env_var):
+            self._key = key_str.encode()
         else:
-            key_str = os.environ.get(key_env_var)
-            if key_str:
-                self._key = key_str.encode()
-            else:
-                # Generate new key
-                self._key = Fernet.generate_key()
-                logger.warning(
-                    f"Generated new encryption key. To persist credentials across restarts, "
-                    f"set {key_env_var}={self._key.decode()}"
-                )
+            # Generate new key
+            self._key = Fernet.generate_key()
+            logger.warning(
+                f"Generated new encryption key. To persist credentials across restarts, "
+                f"set {key_env_var}={self._key.decode()}"
+            )
 
         self._fernet = Fernet(self._key)
 
@@ -241,10 +239,8 @@ class EncryptedFileStorage(CredentialStorage):
 
         # Extract actual secret values from SecretStr
         for key_name, key_data in data.get("keys", {}).items():
-            if "value" in key_data:
-                # SecretStr serializes as "**********", need actual value
-                actual_key = credential.keys.get(key_name)
-                if actual_key:
+            if actual_key := credential.keys.get(key_name):
+                if "value" in key_data:
                     key_data["value"] = actual_key.get_secret_value()
 
         return data
@@ -330,9 +326,7 @@ class EnvVarStorage(CredentialStorage):
 
     def _read_env_value(self, env_var: str) -> str | None:
         """Read value from env var or .env file."""
-        # Check os.environ first (takes precedence)
-        value = os.environ.get(env_var)
-        if value:
+        if value := os.environ.get(env_var):
             return value
 
         # Fallback: read from .env file (hot-reload)
@@ -358,17 +352,15 @@ class EnvVarStorage(CredentialStorage):
     def load(self, credential_id: str) -> CredentialObject | None:
         """Load credential from environment variable."""
         env_var = self._get_env_var_name(credential_id)
-        value = self._read_env_value(env_var)
-
-        if not value:
+        if value := self._read_env_value(env_var):
+            return CredentialObject(
+                id=credential_id,
+                credential_type=CredentialType.API_KEY,
+                keys={"api_key": CredentialKey(name="api_key", value=SecretStr(value))},
+                description=f"Loaded from {env_var}",
+            )
+        else:
             return None
-
-        return CredentialObject(
-            id=credential_id,
-            credential_type=CredentialType.API_KEY,
-            keys={"api_key": CredentialKey(name="api_key", value=SecretStr(value))},
-            description=f"Loaded from {env_var}",
-        )
 
     def delete(self, credential_id: str) -> bool:
         """Cannot delete environment variables at runtime."""
@@ -378,14 +370,9 @@ class EnvVarStorage(CredentialStorage):
 
     def list_all(self) -> list[str]:
         """List credentials that are available in environment."""
-        available = []
-
-        # Check mapped credentials
-        for cred_id in self._env_mapping.keys():
-            if self.exists(cred_id):
-                available.append(cred_id)
-
-        return available
+        return [
+            cred_id for cred_id in self._env_mapping.keys() if self.exists(cred_id)
+        ]
 
     def exists(self, credential_id: str) -> bool:
         """Check if credential is available in environment."""

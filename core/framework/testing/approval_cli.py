@@ -213,9 +213,7 @@ def _process_action(
             return ApprovalResult.success_result(test.id, action, "Approved")
 
         elif action == ApprovalAction.REJECT:
-            reason = input("Rejection reason: ").strip()
-            if not reason:
-                reason = "No reason provided"
+            reason = input("Rejection reason: ").strip() or "No reason provided"
             test.reject(reason)
             storage.update_test(test)
             print(f"✗ Rejected: {reason}")

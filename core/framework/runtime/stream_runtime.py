@@ -235,21 +235,18 @@ class StreamRuntime:
             logger.warning(f"decide called but no run for execution {execution_id}: {intent}")
             return ""
 
-        # Build Option objects
-        option_objects = []
-        for opt in options:
-            option_objects.append(
-                Option(
-                    id=opt["id"],
-                    description=opt.get("description", ""),
-                    action_type=opt.get("action_type", "unknown"),
-                    action_params=opt.get("action_params", {}),
-                    pros=opt.get("pros", []),
-                    cons=opt.get("cons", []),
-                    confidence=opt.get("confidence", 0.5),
-                )
+        option_objects = [
+            Option(
+                id=opt["id"],
+                description=opt.get("description", ""),
+                action_type=opt.get("action_type", "unknown"),
+                action_params=opt.get("action_params", {}),
+                pros=opt.get("pros", []),
+                cons=opt.get("cons", []),
+                confidence=opt.get("confidence", 0.5),
             )
-
+            for opt in options
+        ]
         # Create decision
         decision_id = f"dec_{len(run.decisions)}"
         current_node = node_id or self._current_nodes.get(execution_id, "unknown")

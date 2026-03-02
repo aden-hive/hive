@@ -102,7 +102,7 @@ class TestDiscordClient:
         assert len(result) == 2
         assert result[0]["name"] == "general"
         assert result[1]["name"] == "incidents"
-        assert not any(c["type"] == 2 for c in result)
+        assert all(c["type"] != 2 for c in result)
 
     @patch("aden_tools.tools.discord_tool.discord_tool.httpx.request")
     def test_list_channels_all_types(self, mock_request):

@@ -89,9 +89,7 @@ class TestStorage:
         if not test_path.exists():
             return False
 
-        # Load test to get index keys
-        test = self.load_test(goal_id, test_id)
-        if test:
+        if test := self.load_test(goal_id, test_id):
             self._remove_from_index("by_goal", test.goal_id, test_id)
             self._remove_from_index("by_approval", test.approval_status.value, test_id)
             self._remove_from_index("by_type", test.test_type.value, test_id)
@@ -133,8 +131,7 @@ class TestStorage:
         test_ids = self._get_index("by_goal", goal_id)
         tests = []
         for test_id in test_ids:
-            test = self.load_test(goal_id, test_id)
-            if test:
+            if test := self.load_test(goal_id, test_id):
                 tests.append(test)
         return tests
 

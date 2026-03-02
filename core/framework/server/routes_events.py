@@ -92,23 +92,11 @@ async def handle_events(request: web.Request) -> web.StreamResponse:
         "worker_loaded",
     }
 
-    client_disconnected = asyncio.Event()
-
     async def on_event(event) -> None:
         """Push event dict into queue; drop non-critical events if full."""
-        if client_disconnected.is_set():
-            return
-
         evt_dict = event.to_dict()
         if evt_dict.get("type") in _CRITICAL_EVENTS:
-            try:
-                queue.put_nowait(evt_dict)
-            except asyncio.QueueFull:
-                logger.warning(
-                    "SSE client queue full on critical event; disconnecting session='%s'",
-                    session.id,
-                )
-                client_disconnected.set()
+            await queue.put(evt_dict)  # block rather than drop
         else:
             try:
                 queue.put_nowait(evt_dict)
@@ -125,46 +113,27 @@ async def handle_events(request: web.Request) -> web.StreamResponse:
 
     sse = SSEResponse()
     await sse.prepare(request)
-    logger.info(
-        "SSE connected: session='%s', sub_id='%s', types=%d", session.id, sub_id, len(event_types)
-    )
 
-    event_count = 0
-    close_reason = "unknown"
     try:
-        while not client_disconnected.is_set():
+        while True:
             try:
                 data = await asyncio.wait_for(queue.get(), timeout=KEEPALIVE_INTERVAL)
                 await sse.send_event(data)
-                event_count += 1
-                if event_count == 1:
-                    logger.info(
-                        "SSE first event: session='%s', type='%s'", session.id, data.get("type")
-                    )
             except TimeoutError:
                 await sse.send_keepalive()
-            except (ConnectionResetError, ConnectionError):
-                close_reason = "client_disconnected"
+            except ConnectionError:
                 break
             except Exception as exc:
-                close_reason = f"error: {exc}"
+                logger.debug("SSE stream closed: %s", exc)
                 break
-
-        if client_disconnected.is_set() and close_reason == "unknown":
-            close_reason = "slow_client"
     except asyncio.CancelledError:
-        close_reason = "cancelled"
+        pass
     finally:
         try:
             event_bus.unsubscribe(sub_id)
         except Exception:
             pass
-        logger.info(
-            "SSE disconnected: session='%s', events_sent=%d, reason='%s'",
-            session.id,
-            event_count,
-            close_reason,
-        )
+        logger.debug("SSE client disconnected from session '%s'", session.id)
 
     return sse.response
 

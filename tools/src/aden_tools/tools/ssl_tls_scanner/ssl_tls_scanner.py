@@ -238,8 +238,7 @@ def _format_dn(dn_tuple: tuple) -> str:
     """Format a certificate distinguished name tuple into a readable string."""
     parts = []
     for rdn in dn_tuple:
-        for attr_type, attr_value in rdn:
-            parts.append(f"{attr_type}={attr_value}")
+        parts.extend(f"{attr_type}={attr_value}" for attr_type, attr_value in rdn)
     return ", ".join(parts)
 
 

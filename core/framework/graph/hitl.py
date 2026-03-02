@@ -206,9 +206,7 @@ Example format:
             import re
 
             response_text = message.content[0].text.strip()
-            json_match = re.search(r"\{[^{}]*\}", response_text, re.DOTALL)
-
-            if json_match:
+            if json_match := re.search(r"\{[^{}]*\}", response_text, re.DOTALL):
                 parsed = json.loads(json_match.group())
                 response.answers = parsed
 
@@ -244,12 +242,8 @@ Example format:
 
         if request.missing_info:
             parts.append("\n📝 Missing Information:")
-            for info in request.missing_info:
-                parts.append(f"  • {info}")
-
+            parts.extend(f"  • {info}" for info in request.missing_info)
         if request.examples:
             parts.append("\n📚 Examples:")
-            for example in request.examples:
-                parts.append(f"  • {example}")
-
+            parts.extend(f"  • {example}" for example in request.examples)
         return "\n".join(parts)

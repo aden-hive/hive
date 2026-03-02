@@ -94,11 +94,20 @@ def tool_call_scenario(
     events = []
     if text:
         events.append(TextDeltaEvent(content=text, snapshot=text))
-    events.append(
-        ToolCallEvent(tool_use_id=tool_use_id, tool_name=tool_name, tool_input=tool_input)
-    )
-    events.append(
-        FinishEvent(stop_reason="tool_calls", input_tokens=10, output_tokens=5, model="mock")
+    events.extend(
+        (
+            ToolCallEvent(
+                tool_use_id=tool_use_id,
+                tool_name=tool_name,
+                tool_input=tool_input,
+            ),
+            FinishEvent(
+                stop_reason="tool_calls",
+                input_tokens=10,
+                output_tokens=5,
+                model="mock",
+            ),
+        )
     )
     return events
 
@@ -111,7 +120,7 @@ def tool_call_scenario(
 @pytest.fixture
 def runtime():
     rt = MagicMock(spec=Runtime)
-    rt.start_run = MagicMock(return_value="session_20250101_000000_eventlp01")
+    rt.start_run = MagicMock(return_value="run_1")
     rt.decide = MagicMock(return_value="dec_1")
     rt.record_outcome = MagicMock()
     rt.end_run = MagicMock()
@@ -625,7 +634,7 @@ class TestClientFacingBlocking:
         await node.execute(ctx)
         await task
 
-        assert len(received) >= 1
+        assert received
         assert received[0].type == EventType.CLIENT_INPUT_REQUESTED
 
     @pytest.mark.asyncio

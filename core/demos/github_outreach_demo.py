@@ -284,8 +284,8 @@ def load_data(filename: str, offset: int = 0, limit: int = 50) -> dict:
     """
     if not filename or ".." in filename or "/" in filename:
         return {"error": "Invalid filename"}
-    offset = int(offset)
-    limit = int(limit)
+    offset = offset
+    limit = limit
     path = _DATA_DIR / filename
     if not path.exists():
         return {"error": f"File not found: {filename}"}
@@ -330,15 +330,14 @@ def list_data_files() -> dict:
     """
     if not _DATA_DIR.exists():
         return {"files": []}
-    files = []
-    for f in sorted(_DATA_DIR.iterdir()):
-        if f.is_file():
-            files.append(
-                {
-                    "filename": f.name,
-                    "size_bytes": f.stat().st_size,
-                }
-            )
+    files = [
+        {
+            "filename": f.name,
+            "size_bytes": f.stat().st_size,
+        }
+        for f in sorted(_DATA_DIR.iterdir())
+        if f.is_file()
+    ]
     return {"files": files}
 
 
@@ -787,9 +786,7 @@ def _send_email_via_resend(
     if not api_key:
         return {"error": "Resend API key not configured"}
 
-    # Testing override: redirect all recipients to a single address
-    override_to = os.getenv("EMAIL_OVERRIDE_TO")
-    if override_to:
+    if override_to := os.getenv("EMAIL_OVERRIDE_TO"):
         subject = f"[TEST -> {to}] {subject}"
         to = override_to
 
@@ -931,9 +928,7 @@ class SchemaJudge:
 
     async def evaluate(self, context: dict) -> JudgeVerdict:
         accumulator = context.get("output_accumulator", {})
-        missing = context.get("missing_keys", [])
-
-        if missing:
+        if missing := context.get("missing_keys", []):
             return JudgeVerdict(
                 action="RETRY",
                 feedback=f"Missing output keys: {missing}. Use set_output to provide them.",
@@ -1751,7 +1746,7 @@ async def _run_pipeline(websocket, initial_message: str):
         # blocking handle termination (same pattern as review/approval).
     }
 
-    all_judges: dict = {**client_judges, **schema_judges}
+    all_judges: dict = client_judges | schema_judges
 
     # --- Build EventLoopNode for each event_loop node ---
 
@@ -1768,7 +1763,7 @@ async def _run_pipeline(websocket, initial_message: str):
             judge=judge,
             config=LoopConfig(
                 max_iterations=30,
-                max_tool_calls_per_turn=30,
+                max_tool_calls_per_turn=15,
                 max_history_tokens=64000,
                 max_tool_result_chars=8_000,
                 spillover_dir=str(_DATA_DIR),

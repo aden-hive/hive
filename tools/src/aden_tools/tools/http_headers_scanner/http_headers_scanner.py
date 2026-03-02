@@ -111,7 +111,7 @@ def register_tools(mcp: FastMCP) -> None:
             leaky headers, and grade_input for the risk_scorer tool.
         """
         if not url.startswith(("http://", "https://")):
-            url = "https://" + url
+            url = f"https://{url}"
 
         try:
             async with httpx.AsyncClient(
@@ -173,7 +173,7 @@ def register_tools(mcp: FastMCP) -> None:
             "x_content_type_options": "x-content-type-options" in header_lower,
             "referrer_policy": "referrer-policy" in header_lower,
             "permissions_policy": "permissions-policy" in header_lower,
-            "no_leaky_headers": len(leaky_found) == 0,
+            "no_leaky_headers": not leaky_found,
         }
 
         return {

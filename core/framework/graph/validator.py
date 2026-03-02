@@ -137,7 +137,7 @@ class OutputValidator:
                     if key not in nullable_keys:
                         errors.append(f"Output key '{key}' is empty string")
 
-        return ValidationResult(success=len(errors) == 0, errors=errors)
+        return ValidationResult(success=not errors, errors=errors)
 
     def validate_with_pydantic(
         self,
@@ -184,8 +184,7 @@ class OutputValidator:
         # Get the model's JSON schema for reference
         schema = model.model_json_schema()
 
-        feedback = "Your previous response had validation errors:\n\n"
-        feedback += "ERRORS:\n"
+        feedback = "Your previous response had validation errors:\n\n" + "ERRORS:\n"
         for error in validation_result.errors:
             feedback += f"  - {error}\n"
 
@@ -241,7 +240,7 @@ class OutputValidator:
                     f"Output key '{key}' exceeds max length ({len(value)} > {max_length})"
                 )
 
-        return ValidationResult(success=len(errors) == 0, errors=errors)
+        return ValidationResult(success=not errors, errors=errors)
 
     def validate_schema(
         self,
@@ -271,7 +270,7 @@ class OutputValidator:
             path = ".".join(str(p) for p in error.path) if error.path else "root"
             errors.append(f"{path}: {error.message}")
 
-        return ValidationResult(success=len(errors) == 0, errors=errors)
+        return ValidationResult(success=not errors, errors=errors)
 
     def validate_all(
         self,
@@ -311,4 +310,4 @@ class OutputValidator:
             result = self.validate_no_hallucination(output)
             all_errors.extend(result.errors)
 
-        return ValidationResult(success=len(all_errors) == 0, errors=all_errors)
+        return ValidationResult(success=not all_errors, errors=all_errors)

@@ -277,13 +277,13 @@ class SessionManager:
             if not state_path.exists():
                 continue
             try:
-                state = json.loads(state_path.read_text(encoding="utf-8"))
+                state = json.loads(state_path.read_text())
                 if state.get("status") != "active":
                     continue
                 state["status"] = "cancelled"
                 state.setdefault("result", {})["error"] = "Stale session: runtime restarted"
                 state.setdefault("timestamps", {})["updated_at"] = datetime.now().isoformat()
-                state_path.write_text(json.dumps(state, indent=2), encoding="utf-8")
+                state_path.write_text(json.dumps(state, indent=2))
                 logger.info(
                     "Marked stale session '%s' as cancelled for agent '%s'", d.name, agent_path.name
                 )
@@ -682,18 +682,16 @@ class SessionManager:
 
     def get_session_by_worker_id(self, worker_id: str) -> Session | None:
         """Find a session by its loaded worker's ID."""
-        for s in self._sessions.values():
-            if s.worker_id == worker_id:
-                return s
-        return None
+        return next(
+            (s for s in self._sessions.values() if s.worker_id == worker_id), None
+        )
 
     def get_session_for_agent(self, agent_id: str) -> Session | None:
         """Resolve an agent_id to a session (backward compat).
 
         Checks session.id first, then session.worker_id.
         """
-        s = self._sessions.get(agent_id)
-        if s:
+        if s := self._sessions.get(agent_id):
             return s
         return self.get_session_by_worker_id(agent_id)
 

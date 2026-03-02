@@ -245,7 +245,7 @@ class AgentOrchestrator:
 
                     # Pass results to next agent
                     if "results" in response.content:
-                        accumulated_context.update(response.content["results"])
+                        accumulated_context |= response.content["results"]
                 except Exception as e:
                     results[agent_name] = {"error": str(e)}
                     # Try fallback if available
@@ -361,19 +361,19 @@ class AgentOrchestrator:
 
         results = await asyncio.gather(*tasks, return_exceptions=True)
 
-        capabilities = {}
-        for name, result in zip(agent_names, results, strict=False):
-            if isinstance(result, Exception):
-                capabilities[name] = CapabilityResponse(
+        return {
+            name: (
+                CapabilityResponse(
                     agent_name=name,
                     level=CapabilityLevel.CANNOT_HANDLE,
                     confidence=0.0,
                     reasoning=f"Error: {result}",
                 )
-            else:
-                capabilities[name] = result
-
-        return capabilities
+                if isinstance(result, Exception)
+                else result
+            )
+            for name, result in zip(agent_names, results, strict=False)
+        }
 
     async def _route_request(
         self,
@@ -405,13 +405,11 @@ class AgentOrchestrator:
         if len(capable) > 1 and self._llm:
             return await self._llm_route(request, intent, capable)
 
-        # If no capable agents, check uncertain ones
-        uncertain = [
+        if uncertain := [
             (name, cap)
             for name, cap in capabilities.items()
             if cap.level == CapabilityLevel.UNCERTAIN
-        ]
-        if uncertain:
+        ]:
             uncertain.sort(key=lambda x: -x[1].confidence)
             return RoutingDecision(
                 selected_agents=[uncertain[0][0]],
@@ -470,13 +468,10 @@ Respond with JSON only:
 
             import re
 
-            json_match = re.search(r"\{[^{}]*\}", response.content, re.DOTALL)
-            if json_match:
+            if json_match := re.search(r"\{[^{}]*\}", response.content, re.DOTALL):
                 data = json.loads(json_match.group())
                 selected = data.get("selected", [])
-                # Validate selected agents exist
-                selected = [s for s in selected if s in self._agents]
-                if selected:
+                if selected := [s for s in selected if s in self._agents]:
                     return RoutingDecision(
                         selected_agents=selected,
                         reasoning=data.get("reasoning", ""),

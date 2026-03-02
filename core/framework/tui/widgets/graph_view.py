@@ -240,7 +240,7 @@ class GraphOverview(Vertical):
                 continue
             # Walk forward to find the last line in this node's section
             last_section_line = source_node_line
-            for li in range(source_node_line + 1, len(lines)):
+            for li in range(last_section_line + 1, len(lines)):
                 if li in all_node_lines_set:
                     break
                 last_section_line = li
@@ -252,16 +252,16 @@ class GraphOverview(Vertical):
             lines.insert(insert_at, "")  # placeholder for connector
             source_line_for_be[be_idx] = insert_at
             # Shift node_line_map entries that come after the insertion point
-            for nid in node_line_map:
-                if node_line_map[nid] > insert_after:
+            for nid, value in node_line_map.items():
+                if value > insert_after:
                     node_line_map[nid] += 1
             # Also shift already-assigned source lines
-            for prev_idx in source_line_for_be:
-                if prev_idx != be_idx and source_line_for_be[prev_idx] > insert_after:
+            for prev_idx, value_ in source_line_for_be.items():
+                if prev_idx != be_idx and value_ > insert_after:
                     source_line_for_be[prev_idx] += 1
 
         # Recompute max content width after insertions
-        max_content_w = max(_plain_len(ln) for ln in lines) if lines else 0
+        max_content_w = max((_plain_len(ln) for ln in lines), default=0)
 
         # Check if we have room for channels
         channels_total_w = num_channels * _CHANNEL_WIDTH
@@ -328,8 +328,7 @@ class GraphOverview(Vertical):
             pad = max_content_w - pw
             overlay_chars = overlays[i] if i < len(overlays) else []
             overlay_str = "".join(overlay_chars)
-            overlay_trimmed = overlay_str.rstrip()
-            if overlay_trimmed:
+            if overlay_trimmed := overlay_str.rstrip():
                 is_target_line = any(ci["target_line"] == i for ci in channel_info)
                 if is_target_line:
                     overlay_trimmed = "◄" + overlay_trimmed[1:]
@@ -429,9 +428,7 @@ class GraphOverview(Vertical):
             for edge_line in self._render_edges(node_id, order_idx):
                 lines.append(edge_line)
 
-        # --- Pass 2: Overlay return channels for back-edges ---
-        back_edges = self._detect_back_edges(ordered)
-        if back_edges:
+        if back_edges := self._detect_back_edges(ordered):
             # Try to get actual widget width; default to a reasonable value
             try:
                 available_width = self.size.width or 60
@@ -508,8 +505,7 @@ class GraphOverview(Vertical):
                     path = route.get("path", "/webhook")
                     display.write(f"     [dim]{host}:{port}{path}[/dim]")
                 else:
-                    event_types = ep.trigger_config.get("event_types", [])
-                    if event_types:
+                    if event_types := ep.trigger_config.get("event_types", []):
                         display.write(f"     [dim]events: {', '.join(event_types)}[/dim]")
 
     # ------------------------------------------------------------------
@@ -567,11 +563,7 @@ class GraphOverview(Vertical):
 
     def handle_tool_call(self, node_id: str, tool_name: str, *, started: bool) -> None:
         """Show tool activity next to the active node."""
-        if started:
-            self._node_status[node_id] = f"{tool_name}..."
-        else:
-            # Restore to generic thinking status after tool completes
-            self._node_status[node_id] = "thinking..."
+        self._node_status[node_id] = f"{tool_name}..." if started else "thinking..."
         self._display_graph()
 
     def handle_stalled(self, node_id: str, reason: str) -> None:

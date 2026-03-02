@@ -112,9 +112,7 @@ class TestSuiteResult(BaseModel):
     @property
     def pass_rate(self) -> float:
         """Calculate pass rate."""
-        if self.total == 0:
-            return 0.0
-        return self.passed / self.total
+        return 0.0 if self.total == 0 else self.passed / self.total
 
     def summary_dict(self) -> dict[str, Any]:
         """Return summary for reporting."""

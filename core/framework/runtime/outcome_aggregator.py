@@ -167,9 +167,7 @@ class OutcomeAggregator:
             outcome: The outcome
         """
         key = f"{stream_id}:{execution_id}:{decision_id}"
-        record = self._decisions_by_id.get(key)
-
-        if record:
+        if record := self._decisions_by_id.get(key):
             record.outcome = outcome
 
             if outcome.success:
@@ -299,9 +297,7 @@ class OutcomeAggregator:
 
             # Publish progress event
             if self._event_bus:
-                # Get any stream ID for the event
-                stream_ids = {d.stream_id for d in self._decisions}
-                if stream_ids:
+                if stream_ids := {d.stream_id for d in self._decisions}:
                     await self._event_bus.emit_goal_progress(
                         stream_id=list(stream_ids)[0],
                         progress=result["overall_progress"],
@@ -341,10 +337,11 @@ class OutcomeAggregator:
             # No evidence yet
             return status
 
-        # Calculate success rate for relevant decisions
-        outcomes = [d.outcome for d in relevant_decisions if d.outcome is not None]
-        if outcomes:
-            success_count = sum(1 for o in outcomes if o.success)
+        if outcomes := [
+            d.outcome for d in relevant_decisions if d.outcome is not None
+        ]:
+            success_count = sum(bool(o.success)
+                            for o in outcomes)
 
             # Progress is computed as raw success rate of decision outcomes.
             status.progress = success_count / len(outcomes)
@@ -379,7 +376,8 @@ class OutcomeAggregator:
         criterion_keywords = criterion.description.lower().split()
         decision_text = f"{decision.intent} {decision.reasoning}".lower()
 
-        matches = sum(1 for kw in criterion_keywords if kw in decision_text)
+        matches = sum(bool(kw in decision_text)
+                  for kw in criterion_keywords)
         return matches >= 2  # At least 2 keyword matches
 
     def _get_recommendation(self, result: dict) -> str:
@@ -387,10 +385,9 @@ class OutcomeAggregator:
         progress = result["overall_progress"]
         violations = result["constraint_violations"]
 
-        # Check for hard constraint violations
-        hard_violations = [v for v in violations if self._is_hard_constraint(v["constraint_id"])]
-
-        if hard_violations:
+        if hard_violations := [
+            v for v in violations if self._is_hard_constraint(v["constraint_id"])
+        ]:
             return "adjust"  # Must address violations
 
         if progress >= 0.95:
@@ -403,10 +400,14 @@ class OutcomeAggregator:
 
     def _is_hard_constraint(self, constraint_id: str) -> bool:
         """Check if a constraint is a hard constraint."""
-        for constraint in self.goal.constraints:
-            if constraint.id == constraint_id:
-                return constraint.constraint_type == "hard"
-        return False
+        return next(
+            (
+                constraint.constraint_type == "hard"
+                for constraint in self.goal.constraints
+                if constraint.id == constraint_id
+            ),
+            False,
+        )
 
     # === QUERY OPERATIONS ===
 

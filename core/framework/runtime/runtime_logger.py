@@ -105,18 +105,16 @@ class RuntimeLogger:
         if tool_calls is None:
             tool_calls = []
 
-        call_logs = []
-        for tc in tool_calls:
-            call_logs.append(
-                ToolCallLog(
-                    tool_use_id=tc.get("tool_use_id", ""),
-                    tool_name=tc.get("tool_name", ""),
-                    tool_input=tc.get("tool_input", {}),
-                    result=tc.get("content", ""),
-                    is_error=tc.get("is_error", False),
-                )
+        call_logs = [
+            ToolCallLog(
+                tool_use_id=tc.get("tool_use_id", ""),
+                tool_name=tc.get("tool_name", ""),
+                tool_input=tc.get("tool_input", {}),
+                result=tc.get("content", ""),
+                is_error=tc.get("is_error", False),
             )
-
+            for tc in tool_calls
+        ]
         # OTel / trace context: from observability ContextVar (empty if not set)
         ctx = get_trace_context()
         trace_id = ctx.get("trace_id", "")

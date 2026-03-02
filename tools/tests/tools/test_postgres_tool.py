@@ -123,7 +123,7 @@ class TestPgQuery:
     def test_invalid_sql_returns_error(self, pg_query_fn, monkeypatch):
         monkeypatch.setattr(
             "aden_tools.tools.postgres_tool.postgres_tool.validate_sql",
-            lambda _: (_ for _ in ()).throw(ValueError("Invalid SQL")),
+            lambda _: iter(()).throw(ValueError("Invalid SQL")),
         )
 
         result = pg_query_fn(sql="DROP TABLE x")
@@ -246,7 +246,7 @@ class TestPgExplain:
     def test_explain_invalid_sql(self, pg_explain_fn, monkeypatch):
         monkeypatch.setattr(
             "aden_tools.tools.postgres_tool.postgres_tool.validate_sql",
-            lambda _: (_ for _ in ()).throw(ValueError("Invalid SQL")),
+            lambda _: iter(()).throw(ValueError("Invalid SQL")),
         )
 
         result = pg_explain_fn(sql="DELETE FROM x")
