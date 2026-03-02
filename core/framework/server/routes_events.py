@@ -10,7 +10,7 @@ from framework.server.app import resolve_session
 
 logger = logging.getLogger(__name__)
 
-# Default event types streamed to clients
+# Default event types streamed to clientss
 DEFAULT_EVENT_TYPES = [
     EventType.CLIENT_OUTPUT_DELTA,
     EventType.CLIENT_INPUT_REQUESTED,
