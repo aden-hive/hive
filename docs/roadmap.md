@@ -644,11 +644,11 @@ Expose basic REST/WebSocket endpoints for external control (Start, Stop, Pause, 
     - [x] State persistence
     - [x] Recovery mechanisms
 - [ ] **REST API Endpoints**
-    - [ ] Start endpoint for agent execution
-    - [ ] Stop endpoint for graceful shutdown
-    - [ ] Pause endpoint for execution suspension
-    - [ ] Resume endpoint for continuation
-    - [ ] Status query endpoint for monitoring
+    - [x] Start endpoint for agent execution
+    - [x] Stop endpoint for graceful shutdown
+    - [x] Pause endpoint for execution suspension
+    - [x] Resume endpoint for continuation
+    - [x] Status query endpoint for monitoring
 - [ ] **WebSocket API**
     - [ ] Real-time event streaming to clients
     - [ ] Bidirectional communication
