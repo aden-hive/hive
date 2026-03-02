@@ -70,3 +70,12 @@ def test_safe_eval_method_whitelist():
     # E.g. list.append (it's not in the whitelist in visit_Call)
     with pytest.raises(ValueError, match="Call to function/method is not allowed"):
         safe_eval("[].append(1)")
+
+
+def test_safe_eval_blocked_names():
+    # Blocked: names starting with underscore
+    with pytest.raises(ValueError, match="Access to private name"):
+        safe_eval("__builtins__")
+
+    with pytest.raises(ValueError, match="Access to private name"):
+        safe_eval("_private_var", {"_private_var": 123})

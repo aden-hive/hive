@@ -134,6 +134,9 @@ class SafeEvalVisitor(ast.NodeVisitor):
     # --- Variables and Attributes ---
     def visit_Name(self, node: ast.Name) -> Any:
         if isinstance(node.ctx, ast.Load):
+            if node.id.startswith("_"):
+                raise ValueError(f"Access to private name '{node.id}' is not allowed")
+
             if node.id in self.context:
                 return self.context[node.id]
             raise NameError(f"Name '{node.id}' is not defined")

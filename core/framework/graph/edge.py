@@ -97,7 +97,9 @@ class EdgeSpec(BaseModel):
     )
 
     # Priority for multiple outgoing edges
-    priority: int = Field(default=0, description="Higher priority edges are evaluated first")
+    priority: int = Field(
+        default=0, description="Higher priority edges are evaluated first"
+    )
 
     # Metadata
     description: str = ""
@@ -168,14 +170,16 @@ class EdgeSpec(BaseModel):
             return True
 
         # Build evaluation context
-        # Include memory keys directly for easier access in conditions
+        # Include memory keys directly for easier access in conditions (e.g. 'score > 80')
+        # We unpack memory FIRST so that fixed sandbox variables OVERRIDE any
+        # adversarial keys in memory (e.g. if memory contains a 'result' key).
         context = {
+            **memory,
             "output": output,
             "memory": memory,
             "result": output.get("result"),
             "true": True,  # Allow lowercase true/false in conditions
             "false": False,
-            **memory,  # Unpack memory keys directly into context
         }
 
         try:
@@ -198,7 +202,9 @@ class EdgeSpec(BaseModel):
             )
             return result
         except Exception as e:
-            logger.warning(f"      ⚠ Condition evaluation failed: {self.condition_expr}")
+            logger.warning(
+                f"      ⚠ Condition evaluation failed: {self.condition_expr}"
+            )
             logger.warning(f"         Error: {e}")
             logger.warning(f"         Available context keys: {list(context.keys())}")
             return False
@@ -261,7 +267,9 @@ Respond with ONLY a JSON object:
                 reasoning = data.get("reasoning", "")
 
                 # Log the decision (using basic print for now)
-                logger.info(f"      🤔 LLM routing decision: {'PROCEED' if proceed else 'SKIP'}")
+                logger.info(
+                    f"      🤔 LLM routing decision: {'PROCEED' if proceed else 'SKIP'}"
+                )
                 logger.info(f"         Reason: {reasoning}")
 
                 return proceed
@@ -332,9 +340,12 @@ class AsyncEntryPointSpec(BaseModel):
         description="Trigger-specific configuration (e.g., webhook URL, timer interval)",
     )
     isolation_level: str = Field(
-        default="shared", description="State isolation: isolated, shared, or synchronized"
+        default="shared",
+        description="State isolation: isolated, shared, or synchronized",
     )
-    priority: int = Field(default=0, description="Execution priority (higher = more priority)")
+    priority: int = Field(
+        default=0, description="Execution priority (higher = more priority)"
+    )
     max_concurrent: int = Field(
         default=10, description="Maximum concurrent executions for this entry point"
     )
@@ -408,14 +419,17 @@ class GraphSpec(BaseModel):
         default_factory=list, description="IDs of nodes that end execution"
     )
     pause_nodes: list[str] = Field(
-        default_factory=list, description="IDs of nodes that pause execution for HITL input"
+        default_factory=list,
+        description="IDs of nodes that pause execution for HITL input",
     )
 
     # Components
     nodes: list[Any] = Field(  # NodeSpec, but avoiding circular import
         default_factory=list, description="All node specifications"
     )
-    edges: list[EdgeSpec] = Field(default_factory=list, description="All edge specifications")
+    edges: list[EdgeSpec] = Field(
+        default_factory=list, description="All edge specifications"
+    )
 
     # Shared memory keys
     memory_keys: list[str] = Field(
@@ -432,7 +446,9 @@ class GraphSpec(BaseModel):
     cleanup_llm_model: str | None = None
 
     # Execution limits
-    max_steps: int = Field(default=100, description="Maximum node executions before timeout")
+    max_steps: int = Field(
+        default=100, description="Maximum node executions before timeout"
+    )
     max_retries_per_node: int = 3
 
     # EventLoopNode configuration (from configure_loop)
@@ -556,7 +572,9 @@ class GraphSpec(BaseModel):
         for node in self.nodes:
             outgoing = self.get_outgoing_edges(node.id)
             # Fan-out: multiple edges with ON_SUCCESS condition
-            success_edges = [e for e in outgoing if e.condition == EdgeCondition.ON_SUCCESS]
+            success_edges = [
+                e for e in outgoing if e.condition == EdgeCondition.ON_SUCCESS
+            ]
             if len(success_edges) > 1:
                 fan_outs[node.id] = [e.target for e in success_edges]
         return fan_outs
@@ -657,9 +675,13 @@ class GraphSpec(BaseModel):
         # Check edge references
         for edge in self.edges:
             if not self.get_node(edge.source):
-                errors.append(f"Edge '{edge.id}' references missing source '{edge.source}'")
+                errors.append(
+                    f"Edge '{edge.id}' references missing source '{edge.source}'"
+                )
             if not self.get_node(edge.target):
-                errors.append(f"Edge '{edge.id}' references missing target '{edge.target}'")
+                errors.append(
+                    f"Edge '{edge.id}' references missing target '{edge.target}'"
+                )
 
         # Check for unreachable nodes
         # Start with main entry node and all entry points (for pause/resume architecture)
@@ -704,7 +726,8 @@ class GraphSpec(BaseModel):
             client_facing_targets = [
                 t
                 for t in targets
-                if self.get_node(t) and getattr(self.get_node(t), "client_facing", False)
+                if self.get_node(t)
+                and getattr(self.get_node(t), "client_facing", False)
             ]
             if len(client_facing_targets) > 1:
                 errors.append(
@@ -717,7 +740,8 @@ class GraphSpec(BaseModel):
             event_loop_targets = [
                 t
                 for t in targets
-                if self.get_node(t) and getattr(self.get_node(t), "node_type", "") == "event_loop"
+                if self.get_node(t)
+                and getattr(self.get_node(t), "node_type", "") == "event_loop"
             ]
             if len(event_loop_targets) > 1:
                 seen_keys: dict[str, str] = {}
