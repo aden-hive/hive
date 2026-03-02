@@ -344,6 +344,9 @@ def register_queen_lifecycle_tools(
         """Get the session's event bus for querying history."""
         return getattr(session, "event_bus", None)
 
+    _status_last_called: dict[str, float] = {}  # {"ts": monotonic time}
+    _STATUS_COOLDOWN = 30.0  # seconds between full status checks
+
     async def get_worker_status(last_n: int = 20) -> str:
         """Comprehensive worker status: state, execution details, and recent activity.
 
@@ -359,6 +362,22 @@ def register_queen_lifecycle_tools(
         Args:
             last_n: Number of recent events to include per category (default 20).
         """
+        import time as _time
+
+        now = _time.monotonic()
+        last = _status_last_called.get("ts", 0.0)
+        if now - last < _STATUS_COOLDOWN:
+            remaining = int(_STATUS_COOLDOWN - (now - last))
+            return json.dumps({
+                "status": "cooldown",
+                "message": (
+                    f"Status was checked {int(now - last)}s ago. "
+                    f"Wait {remaining}s before checking again. "
+                    "Do NOT call this tool in a loop — wait for user input instead."
+                ),
+            })
+        _status_last_called["ts"] = now
+
         runtime = _get_runtime()
         if runtime is None:
             return json.dumps({"status": "not_loaded", "message": "No worker loaded."})
@@ -675,11 +694,40 @@ def register_queen_lifecycle_tools(
     # --- list_credentials -----------------------------------------------------
 
     async def list_credentials(credential_id: str = "") -> str:
-        """List all authorized credentials in the local encrypted store.
+        """List all authorized credentials (Aden OAuth + local encrypted store).
 
         Returns credential IDs, aliases, status, and identity metadata.
         Never returns secret values. Optionally filter by credential_id.
         """
+        try:
+            # Primary: CredentialStoreAdapter sees both Aden OAuth and local accounts
+            from aden_tools.credentials import CredentialStoreAdapter
+
+            store = CredentialStoreAdapter.default()
+            all_accounts = store.get_all_account_info()
+
+            # Filter by credential_id / provider if requested
+            if credential_id:
+                all_accounts = [
+                    a
+                    for a in all_accounts
+                    if a.get("credential_id", "").startswith(credential_id)
+                    or a.get("provider", "") == credential_id
+                ]
+
+            return json.dumps(
+                {
+                    "count": len(all_accounts),
+                    "credentials": all_accounts,
+                },
+                default=str,
+            )
+        except ImportError:
+            pass
+        except Exception as e:
+            return json.dumps({"error": f"Failed to list credentials: {e}"})
+
+        # Fallback: local encrypted store only
         try:
             from framework.credentials.local.registry import LocalCredentialRegistry
 

@@ -193,6 +193,9 @@ class GraphExecutor:
         # Pause/resume control
         self._pause_requested = asyncio.Event()
 
+        # Track the currently executing node for external injection routing
+        self.current_node_id: str | None = None
+
     def _write_progress(
         self,
         current_node: str,
@@ -696,6 +699,9 @@ class GraphExecutor:
                     self.logger.info(f"⏸ Paused at HITL node: {node_spec.name}")
                     # Execute this node, then pause
                     # (We'll check again after execution and save state)
+
+                # Expose current node for external injection routing
+                self.current_node_id = current_node_id
 
                 self.logger.info(f"\n▶ Step {steps}: {node_spec.name} ({node_spec.node_type})")
                 self.logger.info(f"   Inputs: {node_spec.input_keys}")
