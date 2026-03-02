@@ -700,12 +700,14 @@ export default function Workspace() {
   }, [sessionsByAgent, agentStates, loadAgentForType, updateAgentState]);
 
   // --- Fetch graph topology when a session becomes ready ---
-  const fetchGraphForAgent = useCallback(async (agentType: string, sessionId: string) => {
+  const fetchGraphForAgent = useCallback(async (agentType: string, sessionId: string, knownGraphId?: string) => {
     try {
-      const { graphs } = await sessionsApi.graphs(sessionId);
-      if (!graphs.length) return;
-
-      const graphId = graphs[0];
+      let graphId = knownGraphId;
+      if (!graphId) {
+        const { graphs } = await sessionsApi.graphs(sessionId);
+        if (!graphs.length) return;
+        graphId = graphs[0];
+      }
       const topology = await graphsApi.nodes(sessionId, graphId);
 
       updateAgentState(agentType, { graphId, nodeSpecs: topology.nodes });
@@ -741,6 +743,51 @@ export default function Workspace() {
       fetchGraphForAgent(agentType, state.sessionId);
     }
   }, [agentStates, fetchGraphForAgent]);
+
+  // Poll entry points every second for agents with timers to keep
+  // next_fire_in countdowns fresh without re-fetching the full topology.
+  useEffect(() => {
+    const id = setInterval(async () => {
+      for (const [agentType, sessions] of Object.entries(sessionsByAgent)) {
+        const session = sessions[0];
+        if (!session) continue;
+        const timerNodes = session.graphNodes.filter(
+          (n) => n.nodeType === "trigger" && n.triggerType === "timer",
+        );
+        if (timerNodes.length === 0) continue;
+        const state = agentStates[agentType];
+        if (!state?.sessionId) continue;
+        try {
+          const { entry_points } = await sessionsApi.entryPoints(state.sessionId);
+          const fireMap = new Map<string, number>();
+          for (const ep of entry_points) {
+            if (ep.next_fire_in != null) {
+              fireMap.set(`__trigger_${ep.id}`, ep.next_fire_in);
+            }
+          }
+          if (fireMap.size === 0) continue;
+          setSessionsByAgent((prev) => {
+            const ss = prev[agentType];
+            if (!ss?.length) return prev;
+            const updated = ss[0].graphNodes.map((n) => {
+              const nfi = fireMap.get(n.id);
+              if (nfi == null || n.nodeType !== "trigger") return n;
+              return { ...n, triggerConfig: { ...n.triggerConfig, next_fire_in: nfi } };
+            });
+            // Skip update if nothing changed
+            if (updated.every((n, idx) => n === ss[0].graphNodes[idx])) return prev;
+            return {
+              ...prev,
+              [agentType]: ss.map((s, i) => (i === 0 ? { ...s, graphNodes: updated } : s)),
+            };
+          });
+        } catch {
+          // Entry points fetch failed — skip this tick
+        }
+      }
+    }, 1_000);
+    return () => clearInterval(id);
+  }, [sessionsByAgent, agentStates]);
 
   // --- Graph node status helpers (now accept agentType) ---
   const updateGraphNodeStatus = useCallback(
@@ -972,7 +1019,8 @@ export default function Workspace() {
 
             // Re-fetch graph topology so timer countdowns refresh
             const sid = agentStates[agentType]?.sessionId;
-            if (sid) fetchGraphForAgent(agentType, sid);
+            const gid = agentStates[agentType]?.graphId;
+            if (sid) fetchGraphForAgent(agentType, sid, gid || undefined);
           }
           break;
 
