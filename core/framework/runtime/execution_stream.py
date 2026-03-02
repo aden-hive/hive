@@ -250,9 +250,7 @@ class ExecutionStream:
         # Graph-scoped event bus (stamps graph_id on published events)
         # Always wrap in GraphScopedEventBus so we can track last_activity_time.
         if self._event_bus:
-            self._scoped_event_bus = GraphScopedEventBus(
-                self._event_bus, self.graph_id or ""
-            )
+            self._scoped_event_bus = GraphScopedEventBus(self._event_bus, self.graph_id or "")
         else:
             self._scoped_event_bus = None
 
@@ -455,7 +453,8 @@ class ExecutionStream:
         for eid in active:
             logger.info(
                 "Cancelling running execution %s on stream '%s' before starting new one",
-                eid, self.stream_id,
+                eid,
+                self.stream_id,
             )
             executor = self._active_executors.get(eid)
             if executor:

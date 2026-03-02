@@ -155,6 +155,7 @@ export interface NodeSpec {
   client_facing: boolean;
   success_criteria: string | null;
   system_prompt: string;
+  sub_agents?: string[];
   // Runtime enrichment (when session_id provided)
   visit_count?: number;
   has_failures?: boolean;
@@ -269,7 +270,8 @@ export type EventTypeName =
   | "custom"
   | "escalation_requested"
   | "worker_loaded"
-  | "credentials_required";
+  | "credentials_required"
+  | "subagent_report";
 
 export interface AgentEvent {
   type: EventTypeName;

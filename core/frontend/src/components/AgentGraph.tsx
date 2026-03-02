@@ -30,6 +30,7 @@ interface AgentGraphProps {
   onPause?: () => void;
   version?: string;
   runState?: RunState;
+  building?: boolean;
 }
 
 // --- Extracted RunButton so hover state survives parent re-renders ---
@@ -144,7 +145,7 @@ function truncateLabel(label: string, availablePx: number, fontSize: number): st
   return label.slice(0, Math.max(maxChars - 1, 1)) + "\u2026";
 }
 
-export default function AgentGraph({ nodes, title: _title, onNodeClick, onRun, onPause, version, runState: externalRunState }: AgentGraphProps) {
+export default function AgentGraph({ nodes, title: _title, onNodeClick, onRun, onPause, version, runState: externalRunState, building }: AgentGraphProps) {
   const [localRunState, setLocalRunState] = useState<RunState>("idle");
   const runState = externalRunState ?? localRunState;
   const runBtnRef = useRef<HTMLButtonElement>(null);
@@ -279,7 +280,14 @@ export default function AgentGraph({ nodes, title: _title, onNodeClick, onRun, o
           <RunButton runState={runState} disabled={nodes.length === 0} onRun={handleRun} onPause={onPause ?? (() => {})} btnRef={runBtnRef} />
         </div>
         <div className="flex-1 flex items-center justify-center px-5">
-          <p className="text-xs text-muted-foreground/60 text-center italic">No pipeline configured yet.<br/>Chat with the Queen to get started.</p>
+          {building ? (
+            <div className="flex flex-col items-center gap-3">
+              <Loader2 className="w-6 h-6 animate-spin text-primary/60" />
+              <p className="text-xs text-muted-foreground/80 text-center">Building agent...</p>
+            </div>
+          ) : (
+            <p className="text-xs text-muted-foreground/60 text-center italic">No pipeline configured yet.<br/>Chat with the Queen to get started.</p>
+          )}
         </div>
       </div>
     );
@@ -591,18 +599,26 @@ export default function AgentGraph({ nodes, title: _title, onNodeClick, onRun, o
       </div>
 
       {/* Graph */}
-      <div className="flex-1 overflow-y-auto overflow-x-hidden px-3 pb-5">
+      <div className="flex-1 overflow-y-auto overflow-x-hidden px-3 pb-5 relative">
         <svg
           width={svgWidth}
           height={svgHeight}
           viewBox={`0 0 ${svgWidth} ${svgHeight}`}
-          className="select-none"
+          className={`select-none${building ? " opacity-30" : ""}`}
           style={{ fontFamily: "'Inter', system-ui, sans-serif" }}
         >
           {forwardEdges.map((e, i) => renderForwardEdge(e, i))}
           {backEdges.map((e, i) => renderBackEdge(e, i))}
           {nodes.map((n, i) => renderNode(n, i))}
         </svg>
+        {building && (
+          <div className="absolute inset-0 flex items-center justify-center">
+            <div className="flex flex-col items-center gap-3">
+              <Loader2 className="w-6 h-6 animate-spin text-primary/60" />
+              <p className="text-xs text-muted-foreground/80">Rebuilding agent...</p>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

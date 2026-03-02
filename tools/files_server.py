@@ -48,8 +48,9 @@ if "--stdio" in sys.argv:
 
     rich.console.Console.__init__ = _patched_console_init
 
-from aden_tools.file_ops import register_file_tools  # noqa: E402
 from fastmcp import FastMCP  # noqa: E402
+
+from aden_tools.file_ops import register_file_tools  # noqa: E402
 
 mcp = FastMCP("files-tools")
 register_file_tools(mcp)
@@ -80,8 +81,10 @@ def main() -> None:
     args = parser.parse_args()
 
     if not args.stdio:
-        logger.info("Registered 6 file tools: read_file, write_file, edit_file, "
-                     "list_directory, search_files, run_command")
+        logger.info(
+            "Registered 6 file tools: read_file, write_file, edit_file, "
+            "list_directory, search_files, run_command"
+        )
 
     if args.stdio:
         mcp.run(transport="stdio")

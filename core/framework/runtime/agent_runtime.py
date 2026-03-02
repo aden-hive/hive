@@ -412,7 +412,9 @@ class AgentRuntime:
                         continue
 
                     def _make_cron_timer(
-                        entry_point_id: str, expr: str, immediate: bool,
+                        entry_point_id: str,
+                        expr: str,
+                        immediate: bool,
                         idle_timeout: float = 300,
                     ):
                         async def _cron_loop():
@@ -458,8 +460,11 @@ class AgentRuntime:
                                         if _idle < _min_idle:
                                             _min_idle = _idle
                                 logger.info(
-                                    "Cron '%s': checking gate — any_active=%s, min_idle=%.1fs, timeout=%ds",
-                                    entry_point_id, _any_active, _min_idle, idle_timeout,
+                                    "Cron '%s': gate — active=%s, idle=%.1fs, timeout=%ds",
+                                    entry_point_id,
+                                    _any_active,
+                                    _min_idle,
+                                    idle_timeout,
                                 )
                                 if _any_active and _min_idle < idle_timeout:
                                     logger.info(
@@ -535,7 +540,9 @@ class AgentRuntime:
 
                     task = asyncio.create_task(
                         _make_cron_timer(
-                            ep_id, cron_expr, run_immediately,
+                            ep_id,
+                            cron_expr,
+                            run_immediately,
                             idle_timeout=tc.get("idle_timeout_seconds", 300),
                         )()
                     )
@@ -550,7 +557,9 @@ class AgentRuntime:
                 elif interval and interval > 0:
                     # Fixed interval mode (original behavior)
                     def _make_timer(
-                        entry_point_id: str, mins: float, immediate: bool,
+                        entry_point_id: str,
+                        mins: float,
+                        immediate: bool,
                         idle_timeout: float = 300,
                     ):
                         async def _timer_loop():
@@ -585,8 +594,11 @@ class AgentRuntime:
                                         if _idle < _min_idle:
                                             _min_idle = _idle
                                 logger.info(
-                                    "Timer '%s': checking gate — any_active=%s, min_idle=%.1fs, timeout=%ds",
-                                    entry_point_id, _any_active, _min_idle, idle_timeout,
+                                    "Timer '%s': gate — active=%s, idle=%.1fs, timeout=%ds",
+                                    entry_point_id,
+                                    _any_active,
+                                    _min_idle,
+                                    idle_timeout,
                                 )
                                 if _any_active and _min_idle < idle_timeout:
                                     logger.info(
@@ -658,7 +670,9 @@ class AgentRuntime:
 
                     task = asyncio.create_task(
                         _make_timer(
-                            ep_id, interval, run_immediately,
+                            ep_id,
+                            interval,
+                            run_immediately,
                             idle_timeout=tc.get("idle_timeout_seconds", 300),
                         )()
                     )
@@ -1043,8 +1057,12 @@ class AgentRuntime:
                                         if _idle < _min_idle:
                                             _min_idle = _idle
                             logger.info(
-                                "Timer '%s::%s': checking gate — any_active=%s, min_idle=%.1fs, timeout=%ds",
-                                gid, local_ep, _any_active, _min_idle, idle_timeout,
+                                "Timer '%s::%s': gate — active=%s, idle=%.1fs, timeout=%ds",
+                                gid,
+                                local_ep,
+                                _any_active,
+                                _min_idle,
+                                idle_timeout,
                             )
                             if _any_active and _min_idle < idle_timeout:
                                 logger.info(
@@ -1120,7 +1138,10 @@ class AgentRuntime:
 
                 task = asyncio.create_task(
                     _make_timer(
-                        graph_id, ep_id, interval, run_immediately,
+                        graph_id,
+                        ep_id,
+                        interval,
+                        run_immediately,
                         idle_timeout=tc.get("idle_timeout_seconds", 300),
                     )()
                 )

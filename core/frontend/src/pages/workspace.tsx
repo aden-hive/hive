@@ -239,10 +239,12 @@ interface AgentBackendState {
   awaitingInput: boolean;
   /** The message ID of the current worker input request (for inline reply box) */
   workerInputMessageId: string | null;
+  queenBuilding: boolean;
   workerRunState: "idle" | "deploying" | "running";
   currentExecutionId: string | null;
   nodeLogs: Record<string, string[]>;
   nodeActionPlans: Record<string, string>;
+  subagentReports: { subagent_id: string; message: string; data?: Record<string, unknown>; timestamp: string }[];
   isTyping: boolean;
   isStreaming: boolean;
   llmSnapshots: Record<string, string>;
@@ -261,10 +263,12 @@ function defaultAgentState(): AgentBackendState {
     nodeSpecs: [],
     awaitingInput: false,
     workerInputMessageId: null,
+    queenBuilding: false,
     workerRunState: "idle",
     currentExecutionId: null,
     nodeLogs: {},
     nodeActionPlans: {},
+    subagentReports: [],
     isTyping: false,
     isStreaming: false,
     llmSnapshots: {},
@@ -988,6 +992,7 @@ export default function Workspace() {
               workerRunState: "running",
               currentExecutionId: event.execution_id || agentStates[agentType]?.currentExecutionId || null,
               nodeLogs: {},
+              subagentReports: [],
               llmSnapshots: {},
               activeToolCalls: {},
             });
@@ -1061,7 +1066,7 @@ export default function Workspace() {
           if (event.type === "client_input_requested") {
             console.log('[CLIENT_INPUT_REQ] stream_id:', streamId, 'isQueen:', isQueen, 'node_id:', event.node_id, 'prompt:', (event.data?.prompt as string)?.slice(0, 80), 'agentType:', agentType);
             if (isQueen) {
-              updateAgentState(agentType, { awaitingInput: true, isTyping: false, isStreaming: false });
+              updateAgentState(agentType, { awaitingInput: true, isTyping: false, isStreaming: false, queenBuilding: false });
             } else {
               // Worker input request.
               // If the prompt is non-empty (explicit ask_user), create a visible
@@ -1179,6 +1184,15 @@ export default function Workspace() {
 
         case "tool_call_started": {
           console.log('[TOOL_PILL] tool_call_started received:', { isQueen, nodeId: event.node_id, streamId: event.stream_id, agentType, executionId: event.execution_id, toolName: event.data?.tool_name });
+
+          // Detect queen building: when the queen starts writing/editing files, she's building an agent
+          if (isQueen) {
+            const tn = (event.data?.tool_name as string) || "";
+            if (tn === "write_file" || tn === "edit_file") {
+              updateAgentState(agentType, { queenBuilding: true });
+            }
+          }
+
           if (event.node_id) {
             if (!isQueen) {
               const pendingText = agentStates[agentType]?.llmSnapshots[event.node_id];
@@ -1192,6 +1206,28 @@ export default function Workspace() {
                 });
               }
               appendNodeLog(agentType, event.node_id, `${ts} INFO  Calling ${(event.data?.tool_name as string) || "unknown"}(${event.data?.tool_input ? truncate(JSON.stringify(event.data.tool_input), 200) : ""})`);
+
+              // Track subagent delegation start
+              if ((event.data?.tool_name as string) === "delegate_to_sub_agent") {
+                const saInput = event.data?.tool_input as Record<string, unknown> | undefined;
+                const saId = (saInput?.agent_id as string) || "";
+                if (saId) {
+                  setAgentStates(prev => {
+                    const state = prev[agentType];
+                    if (!state) return prev;
+                    return {
+                      ...prev,
+                      [agentType]: {
+                        ...state,
+                        subagentReports: [
+                          ...state.subagentReports,
+                          { subagent_id: saId, message: "Delegating...", timestamp: event.timestamp, status: "running" as const },
+                        ],
+                      },
+                    };
+                  });
+                }
+              }
             }
 
             const toolName = (event.data?.tool_name as string) || "unknown";
@@ -1241,6 +1277,31 @@ export default function Workspace() {
               appendNodeLog(agentType, event.node_id, `${ts} INFO  ${toolName} done${resultStr}`);
             }
 
+            // Track subagent delegation completion
+            if (toolName === "delegate_to_sub_agent" && result) {
+              try {
+                const parsed = JSON.parse(result);
+                const saId = (parsed?.metadata?.agent_id as string) || "";
+                const success = parsed?.metadata?.success as boolean;
+                if (saId) {
+                  setAgentStates(prev => {
+                    const state = prev[agentType];
+                    if (!state) return prev;
+                    return {
+                      ...prev,
+                      [agentType]: {
+                        ...state,
+                        subagentReports: [
+                          ...state.subagentReports,
+                          { subagent_id: saId, message: success ? "Completed" : "Failed", timestamp: event.timestamp, status: success ? "complete" as const : "error" as const },
+                        ],
+                      },
+                    };
+                  });
+                }
+              } catch { /* ignore parse errors */ }
+            }
+
             // Mark tool as done and update activity row
             const sid = event.stream_id;
             setAgentStates(prev => {
@@ -1280,6 +1341,32 @@ export default function Workspace() {
             }
           }
           break;
+
+        case "subagent_report": {
+          if (!isQueen && event.node_id) {
+            const subagentId = (event.data?.subagent_id as string) || "";
+            const message = (event.data?.message as string) || "";
+            const data = event.data?.data as Record<string, unknown> | undefined;
+            // Extract parent node ID from "parentNodeId:subagent:agentId" format
+            const parentNodeId = event.node_id.split(":subagent:")[0] || event.node_id;
+            appendNodeLog(agentType, parentNodeId, `${ts} INFO  [Subagent:${subagentId}] ${truncate(message, 200)}`);
+            setAgentStates(prev => {
+              const state = prev[agentType];
+              if (!state) return prev;
+              return {
+                ...prev,
+                [agentType]: {
+                  ...state,
+                  subagentReports: [
+                    ...state.subagentReports,
+                    { subagent_id: subagentId, message, data, timestamp: event.timestamp },
+                  ],
+                },
+              };
+            });
+          }
+          break;
+        }
 
         case "node_stalled":
           if (!isQueen && event.node_id) {
@@ -1353,6 +1440,7 @@ export default function Workspace() {
           // Update agent state: new display name, reset graph so topology refetch triggers
           updateAgentState(agentType, {
             displayName,
+            queenBuilding: false,
             workerRunState: "idle",
             graphId: null,
             nodeSpecs: [],
@@ -1679,6 +1767,7 @@ export default function Workspace() {
               onRun={handleRun}
               onPause={handlePause}
               runState={activeAgentState?.workerRunState ?? "idle"}
+              building={activeAgentState?.queenBuilding ?? false}
             />
           </div>
         </div>
@@ -1818,6 +1907,8 @@ export default function Workspace() {
                 <NodeDetailPanel
                   node={selectedNode}
                   nodeSpec={activeAgentState?.nodeSpecs.find(n => n.id === selectedNode.id) ?? null}
+                  allNodeSpecs={activeAgentState?.nodeSpecs}
+                  subagentReports={activeAgentState?.subagentReports}
                   sessionId={activeAgentState?.sessionId || undefined}
                   graphId={activeAgentState?.graphId || undefined}
                   workerSessionId={null}

@@ -1169,9 +1169,7 @@ class AgentRunner:
                                 node.tools.append(tool_name)
 
         # For event_loop/gcu nodes: auto-register file tools MCP server, then expand tool lists
-        has_loop_nodes = any(
-            node.node_type in ("event_loop", "gcu") for node in self.graph.nodes
-        )
+        has_loop_nodes = any(node.node_type in ("event_loop", "gcu") for node in self.graph.nodes)
         if has_loop_nodes:
             from framework.graph.files import FILES_MCP_SERVER_CONFIG, FILES_MCP_SERVER_NAME
 
@@ -1182,9 +1180,7 @@ class AgentRunner:
                 if cwd and not Path(cwd).is_absolute():
                     files_config["cwd"] = str((self.agent_path / cwd).resolve())
                 self._tool_registry.register_mcp_server(files_config)
-                files_tool_names = self._tool_registry.get_server_tool_names(
-                    FILES_MCP_SERVER_NAME
-                )
+                files_tool_names = self._tool_registry.get_server_tool_names(FILES_MCP_SERVER_NAME)
 
             if files_tool_names:
                 for node in self.graph.nodes:
