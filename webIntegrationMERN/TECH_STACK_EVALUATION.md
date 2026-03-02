@@ -108,82 +108,6 @@ React Frontend → FastAPI Backend (Python) → Agent (native)
 
 ### Estimated Effort: 2-3 days
 
-```python
-# Example FastAPI structure
-from fastapi import FastAPI
-from fastapi.middleware.cors import CORSMiddleware
-from hive.framework import Agent
-
-app = FastAPI()
-app.add_middleware(CORSMiddleware, allow_origins=["*"])
-
-agent = Agent("customer_service_agent")
-
-@app.post("/api/hive/run")
-async def run_agent(request: RunRequest):
-    # Direct agent call - no subprocess!
-    result = await agent.run(request.input)
-    return result
-
-@app.get("/api/hive/agents")
-async def list_agents():
-    return agent.list_all()
-```
-
-## Alternative 2: Flask + React
-
-```
-React Frontend → Flask Backend (Python) → Agent (native)
-```
-
-### Pros ✅
-
-1. **Lightweight:**
-   - Minimal dependencies
-   - Very simple to understand
-   - Good for simple APIs
-
-2. **Well documented:**
-   - Huge community
-   - Many tutorials
-   - Stable ecosystem
-
-### Cons ❌
-
-1. **Synchronous only:**
-   - No async/await support
-   - Each request blocks process
-   - Harder to scale
-
-2. **More verbose:**
-   - More boilerplate than FastAPI
-   - Manual request parsing
-   - Manual response formatting
-
-### Estimated Effort: 3-4 days
-
-```python
-# Example Flask structure
-from flask import Flask, request
-from flask_cors import CORS
-from hive.framework import Agent
-
-app = Flask(__name__)
-CORS(app)
-
-agent = Agent("customer_service_agent")
-
-@app.route('/api/hive/run', methods=['POST'])
-def run_agent():
-    data = request.json
-    result = agent.run(data['input'])
-    return result
-
-@app.route('/api/hive/agents')
-def list_agents():
-    return agent.list_all()
-```
-
 ## Alternative 3: Django + React
 
 ```
@@ -219,18 +143,17 @@ React Frontend → Django Backend (Python) → Agent (native)
 
 ## Comparison Matrix
 
-| Aspect                    | Node.js+Python | FastAPI   | Flask    | Django |
-| ------------------------- | -------------- | --------- | -------- | ------ |
-| **Learning curve**        | Medium         | Medium    | Low      | High   |
-| **Deployment complexity** | High           | Low       | Low      | Medium |
-| **Development speed**     | Medium         | Fast      | Fast     | Slow   |
-| **Framework complexity**  | Low (2 simple) | Low       | Very Low | High   |
-| **Performance**           | Lower          | Excellent | Good     | Good   |
-| **Async support**         | Medium         | Excellent | Poor     | Fair   |
-| **Subprocess needed**     | ✅ Yes         | ❌ No     | ❌ No    | ❌ No  |
-| **Single language**       | ❌ No          | ✅ Yes    | ✅ Yes   | ✅ Yes |
-| **Scalability**           | ⭐⭐⭐         | ⭐⭐⭐⭐  | ⭐⭐     | ⭐⭐⭐ |
-| **Production ready**      | ✅ Yes         | ✅ Yes    | ✅ Yes   | ✅ Yes |
+| Aspect                    | Node.js+Python | FastAPI   | Django |
+| ------------------------- | -------------- | --------- | ------ |
+| **Learning curve**        | Medium         | Medium    | High   |
+| **Deployment complexity** | High           | Low       | Medium |
+| **Framework complexity**  | Low (2 simple) | Low       | High   |
+| **Performance**           | Lower          | Excellent | Good   |
+| **Async support**         | Medium         | Excellent | Fair   |
+| **Subprocess needed**     | ✅ Yes         | ❌ No    | ❌ No  |
+| **Single language**       | ❌ No          | ✅ Yes   | ✅ Yes |
+| **Scalability**           | ⭐⭐⭐        | ⭐⭐⭐⭐| ⭐⭐⭐ |
+| **Production ready**      | ✅ Yes         | ✅ Yes    | ✅ Yes |
 
 ## Cost Analysis
 
