@@ -43,6 +43,8 @@ SAFE_FUNCTIONS = {
     "dict": dict,
     "tuple": tuple,
     "set": set,
+    "bytes": bytes,
+    "frozenset": frozenset,
     "min": min,
     "max": max,
     "sum": sum,
@@ -143,29 +145,44 @@ class SafeEvalVisitor(ast.NodeVisitor):
         idx = self.visit(node.slice)
         return val[idx]
 
+    # Types allowed for attribute access. Only basic/immutable types are
+    # permitted — this prevents leaking methods on arbitrary user-supplied
+    # objects that could have side-effects or expose internal state.
+    _SAFE_ATTR_TYPES = (
+        str,
+        bytes,
+        int,
+        float,
+        bool,
+        list,
+        tuple,
+        dict,
+        set,
+        frozenset,
+        type(None),
+    )
+
     def visit_Attribute(self, node: ast.Attribute) -> Any:
         # value.attr
         # STRICT CHECK: No access to private attributes (starting with _)
         if node.attr.startswith("_"):
-            raise ValueError(f"Access to private attribute '{node.attr}' is not allowed")
+            raise ValueError(
+                f"Access to private attribute '{node.attr}' is not allowed"
+            )
 
         val = self.visit(node.value)
 
-        # Safe attribute access: only allow if it's in the dict (if val is dict)
-        # or it's a safe property of a basic type?
-        # Actually, for flexibility, people often use dot access for dicts in these expressions.
-        # But standard Python dict doesn't support dot access.
-        # If val is a dict, Attribute access usually fails in Python unless wrapped.
-        # If the user context provides objects, we might want to allow attribute access.
-        # BUT we must be careful not to allow access to dangerous things like __class__ etc.
-        # The check starts_with("_") covers __class__, __init__, etc.
+        # Security: restrict attribute access to safe built-in types only.
+        # This prevents calling methods on arbitrary user-supplied objects
+        # (e.g. context objects with dangerous side-effects).
+        if not isinstance(val, self._SAFE_ATTR_TYPES):
+            raise ValueError(
+                f"Attribute access is only allowed on basic types, not {type(val).__name__}"
+            )
 
         try:
             return getattr(val, node.attr)
         except AttributeError:
-            # Fallback: maybe it's a dict and they want dot access?
-            # (Only if we want to support that sugar, usually not standard python)
-            # Let's stick to standard python behavior + strict private check.
             pass
 
         raise AttributeError(f"Object has no attribute '{node.attr}'")
