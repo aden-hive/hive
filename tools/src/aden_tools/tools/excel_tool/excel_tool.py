@@ -52,9 +52,16 @@ def register_tools(mcp: FastMCP) -> None:
 
         try:
             secure_path = get_secure_path(path, workspace_id, agent_id, session_id)
-
             if not os.path.exists(secure_path):
-                return {"error": f"File not found: {path}"}
+                return {"error": f"Excel file not found: {path}"}
+
+            # Check file size before reading to prevent OOM
+            max_size = 10 * 1024 * 1024  # 10MB
+            file_size = os.path.getsize(secure_path)
+            if file_size > max_size:
+                return {
+                    "error": f"File too large: {file_size} bytes. Max allowed is {max_size} bytes."
+                }
 
             if not path.lower().endswith((".xlsx", ".xlsm")):
                 return {"error": "File must have .xlsx or .xlsm extension"}
@@ -122,7 +129,8 @@ def register_tools(mcp: FastMCP) -> None:
 
                 # Format column names
                 formatted_columns = [
-                    str(c) if c is not None else f"Column_{i + 1}" for i, c in enumerate(columns)
+                    str(c) if c is not None else f"Column_{i + 1}"
+                    for i, c in enumerate(columns)
                 ]
 
                 return {
@@ -142,7 +150,9 @@ def register_tools(mcp: FastMCP) -> None:
                 wb.close()
 
         except Exception as e:
-            return {"error": f"Failed to read Excel file: {str(e)}"}
+            return {
+                "error": f"Failed to read Excel file (not found or invalid): {str(e)}"
+            }
 
     @mcp.tool()
     def excel_write(
@@ -225,7 +235,9 @@ def register_tools(mcp: FastMCP) -> None:
             }
 
         except Exception as e:
-            return {"error": f"Failed to write Excel file: {str(e)}"}
+            return {
+                "error": f"Failed to write Excel file (not found or invalid): {str(e)}"
+            }
 
     @mcp.tool()
     def excel_append(
@@ -264,7 +276,9 @@ def register_tools(mcp: FastMCP) -> None:
             secure_path = get_secure_path(path, workspace_id, agent_id, session_id)
 
             if not os.path.exists(secure_path):
-                return {"error": f"File not found: {path}. Use excel_write to create a new file."}
+                return {
+                    "error": f"File not found: {path}. Use excel_write to create a new file."
+                }
 
             if not path.lower().endswith((".xlsx", ".xlsm")):
                 return {"error": "File must have .xlsx or .xlsm extension"}
@@ -313,7 +327,9 @@ def register_tools(mcp: FastMCP) -> None:
                 wb.save(secure_path)
 
                 # Get new total row count (excluding header)
-                total_rows = next_row - 2  # -1 for header, -1 because next_row was incremented
+                total_rows = (
+                    next_row - 2
+                )  # -1 for header, -1 because next_row was incremented
 
                 return {
                     "success": True,
@@ -327,7 +343,9 @@ def register_tools(mcp: FastMCP) -> None:
                 wb.close()
 
         except Exception as e:
-            return {"error": f"Failed to append to Excel file: {str(e)}"}
+            return {
+                "error": f"Failed to append to Excel file (not found or invalid): {str(e)}"
+            }
 
     @mcp.tool()
     def excel_info(
@@ -360,9 +378,16 @@ def register_tools(mcp: FastMCP) -> None:
 
         try:
             secure_path = get_secure_path(path, workspace_id, agent_id, session_id)
-
             if not os.path.exists(secure_path):
-                return {"error": f"File not found: {path}"}
+                return {"error": f"Excel file not found: {path}"}
+
+            # Check file size before reading to prevent OOM
+            max_size = 10 * 1024 * 1024  # 10MB
+            file_size = os.path.getsize(secure_path)
+            if file_size > max_size:
+                return {
+                    "error": f"File too large: {file_size} bytes. Max allowed is {max_size} bytes."
+                }
 
             if not path.lower().endswith((".xlsx", ".xlsm")):
                 return {"error": "File must have .xlsx or .xlsm extension"}
@@ -380,7 +405,9 @@ def register_tools(mcp: FastMCP) -> None:
 
                     # Get columns from first row
                     columns = []
-                    first_row = next(ws.iter_rows(min_row=1, max_row=1, values_only=True), None)
+                    first_row = next(
+                        ws.iter_rows(min_row=1, max_row=1, values_only=True), None
+                    )
                     if first_row:
                         columns = [
                             str(c) if c is not None else f"Column_{i + 1}"
@@ -414,7 +441,9 @@ def register_tools(mcp: FastMCP) -> None:
                 wb.close()
 
         except Exception as e:
-            return {"error": f"Failed to get Excel info: {str(e)}"}
+            return {
+                "error": f"Failed to get Excel info (not found or invalid): {str(e)}"
+            }
 
     @mcp.tool()
     def excel_sheet_list(
@@ -447,9 +476,16 @@ def register_tools(mcp: FastMCP) -> None:
 
         try:
             secure_path = get_secure_path(path, workspace_id, agent_id, session_id)
-
             if not os.path.exists(secure_path):
-                return {"error": f"File not found: {path}"}
+                return {"error": f"Excel file not found: {path}"}
+
+            # Check file size before reading to prevent OOM
+            max_size = 10 * 1024 * 1024  # 10MB
+            file_size = os.path.getsize(secure_path)
+            if file_size > max_size:
+                return {
+                    "error": f"File too large: {file_size} bytes. Max allowed is {max_size} bytes."
+                }
 
             if not path.lower().endswith((".xlsx", ".xlsm")):
                 return {"error": "File must have .xlsx or .xlsm extension"}
@@ -468,7 +504,7 @@ def register_tools(mcp: FastMCP) -> None:
                 wb.close()
 
         except Exception as e:
-            return {"error": f"Failed to list sheets: {str(e)}"}
+            return {"error": f"Failed to list sheets (not found or invalid): {str(e)}"}
 
     @mcp.tool()
     def excel_sql(
@@ -529,9 +565,16 @@ def register_tools(mcp: FastMCP) -> None:
 
         try:
             secure_path = get_secure_path(path, workspace_id, agent_id, session_id)
-
             if not os.path.exists(secure_path):
-                return {"error": f"File not found: {path}"}
+                return {"error": f"Excel file not found: {path}"}
+
+            # Check file size before reading to prevent OOM
+            max_size = 10 * 1024 * 1024  # 10MB
+            file_size = os.path.getsize(secure_path)
+            if file_size > max_size:
+                return {
+                    "error": f"File too large: {file_size} bytes. Max allowed is {max_size} bytes."
+                }
 
             if not path.lower().endswith((".xlsx", ".xlsm")):
                 return {"error": "File must have .xlsx or .xlsm extension"}
@@ -567,7 +610,11 @@ def register_tools(mcp: FastMCP) -> None:
                 # Determine target sheet for 'data' alias
                 if sheet:
                     if sheet not in wb.sheetnames:
-                        return {"error": (f"Sheet '{sheet}' not found. Available: {wb.sheetnames}")}
+                        return {
+                            "error": (
+                                f"Sheet '{sheet}' not found. Available: {wb.sheetnames}"
+                            )
+                        }
                     target_sheet = sheet
                 else:
                     target_sheet = wb.sheetnames[0]
@@ -651,7 +698,7 @@ def register_tools(mcp: FastMCP) -> None:
                     "error": f"SQL error: {error_msg}. "
                     "Use 'data' for target sheet or sheet names with underscores."
                 }
-            return {"error": f"Query failed: {error_msg}"}
+            return {"error": f"Query failed (file not found or invalid): {error_msg}"}
 
     @mcp.tool()
     def excel_search(
@@ -692,9 +739,16 @@ def register_tools(mcp: FastMCP) -> None:
 
         try:
             secure_path = get_secure_path(path, workspace_id, agent_id, session_id)
-
             if not os.path.exists(secure_path):
-                return {"error": f"File not found: {path}"}
+                return {"error": f"Excel file not found: {path}"}
+
+            # Check file size before reading to prevent OOM
+            max_size = 10 * 1024 * 1024  # 10MB
+            file_size = os.path.getsize(secure_path)
+            if file_size > max_size:
+                return {
+                    "error": f"File too large: {file_size} bytes. Max allowed is {max_size} bytes."
+                }
 
             if not path.lower().endswith((".xlsx", ".xlsm")):
                 return {"error": "File must have .xlsx or .xlsm extension"}
@@ -717,7 +771,9 @@ def register_tools(mcp: FastMCP) -> None:
                 sheets_to_search = [sheet] if sheet else wb.sheetnames
 
                 if sheet and sheet not in wb.sheetnames:
-                    return {"error": f"Sheet '{sheet}' not found. Available: {wb.sheetnames}"}
+                    return {
+                        "error": f"Sheet '{sheet}' not found. Available: {wb.sheetnames}"
+                    }
 
                 matches = []
                 for sheet_name in sheets_to_search:
@@ -725,7 +781,9 @@ def register_tools(mcp: FastMCP) -> None:
 
                     # Get headers for column names
                     headers = []
-                    first_row = next(ws.iter_rows(min_row=1, max_row=1, values_only=True), None)
+                    first_row = next(
+                        ws.iter_rows(min_row=1, max_row=1, values_only=True), None
+                    )
                     if first_row:
                         headers = [
                             str(c) if c is not None else f"Column_{i + 1}"
@@ -742,7 +800,9 @@ def register_tools(mcp: FastMCP) -> None:
 
                             # Convert to string for comparison
                             cell_str = str(cell_value)
-                            compare_val = cell_str if case_sensitive else cell_str.lower()
+                            compare_val = (
+                                cell_str if case_sensitive else cell_str.lower()
+                            )
 
                             # Check match
                             is_match = False
@@ -786,7 +846,7 @@ def register_tools(mcp: FastMCP) -> None:
                 wb.close()
 
         except Exception as e:
-            return {"error": f"Search failed: {str(e)}"}
+            return {"error": f"Search failed (file not found or invalid): {str(e)}"}
 
 
 def _convert_cell_value(value: Any) -> Any:
