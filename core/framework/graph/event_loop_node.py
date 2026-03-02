@@ -3724,7 +3724,7 @@ class EventLoopNode(NodeProtocol):
 
         except Exception as e:
             logger.exception(
-                "\n" + "!" * 60 + "\n❌ SUBAGENT '%s' FAILED\n!" * 60 + "\nError: %s\n" + "!" * 60,
+                "\n" + "!" * 60 + "\n❌ SUBAGENT '%s' FAILED\nError: %s\n" + "!" * 60,
                 agent_id,
                 str(e),
             )
@@ -4032,7 +4032,7 @@ class EventLoopNode(NodeProtocol):
 
         except Exception as e:
             logger.exception(
-                "\n" + "!" * 60 + "\n❌ SUBAGENT '%s' FAILED\n!" * 60 + "\nError: %s\n" + "!" * 60,
+                "\n" + "!" * 60 + "\n❌ SUBAGENT '%s' FAILED\nError: %s\n" + "!" * 60,
                 agent_id,
                 str(e),
             )

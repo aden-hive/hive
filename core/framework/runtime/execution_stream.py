@@ -324,13 +324,21 @@ class ExecutionStream:
         """Return nodes that support message injection (have ``inject_event``).
 
         Each entry is ``{"node_id": ..., "execution_id": ...}``.
+        The currently executing node is placed first so that
+        ``inject_worker_message`` targets the active node, not a stale one.
         """
         injectable: list[dict[str, str]] = []
+        current_first: list[dict[str, str]] = []
         for exec_id, executor in self._active_executors.items():
+            current = getattr(executor, "current_node_id", None)
             for node_id, node in executor.node_registry.items():
                 if hasattr(node, "inject_event"):
-                    injectable.append({"node_id": node_id, "execution_id": exec_id})
-        return injectable
+                    entry = {"node_id": node_id, "execution_id": exec_id}
+                    if node_id == current:
+                        current_first.append(entry)
+                    else:
+                        injectable.append(entry)
+        return current_first + injectable
 
     def _record_execution_result(self, execution_id: str, result: ExecutionResult) -> None:
         """Record a completed execution result with retention pruning."""
