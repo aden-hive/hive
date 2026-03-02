@@ -1,0 +1,320 @@
+name: Auto-close duplicate issues
+description: Auto-closes issues that are duplicates of existing issues
+on:
+  schedule:
+    - cron: "0 */6 * * *"
+  workflow_dispatch:
+
+jobs:
+  auto-close-duplicates:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      issues: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Run auto-close-duplicates tests
+        run: bun test scripts/auto-close-duplicates
+
+      - name: Auto-close duplicate issues
+        run: bun run scripts/auto-close-duplicates.ts
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY_OWNER: ${{ github.repository_owner }}
+          GITHUB_REPOSITORY_NAME: ${{ github.event.repository.name }}
+          STATSIG_API_KEY: ${{ secrets.STATSIG_API_KEY }}
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    name: Lint Python
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+
+      - name: Install dependencies
+        run: uv sync --project core --group dev
+
+      - name: Ruff lint
+        run: |
+          uv run --project core ruff check core/
+          uv run --project core ruff check tools/
+
+      - name: Ruff format
+        run: |
+          uv run --project core ruff format --check core/
+          uv run --project core ruff format --check tools/
+
+  test:
+    name: Test Python Framework
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+
+      - name: Install dependencies and run tests
+        run: |
+          cd core
+          uv sync
+          uv run pytest tests/ -v
+
+  test-tools:
+    name: Test Tools
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+
+      - name: Install dependencies and run tests
+        run: |
+          cd tools
+          uv sync --extra dev
+          uv run pytest tests/ -v
+
+  validate:
+    name: Validate Agent Exports
+    runs-on: ubuntu-latest
+    needs: [lint, test, test-tools]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+
+      - name: Install dependencies
+        run: |
+          cd core
+          uv sync
+
+      - name: Validate exported agents
+        run: |
+          # Check that agent exports have valid structure
+          if [ ! -d "exports" ]; then
+            echo "No exports/ directory found, skipping validation"
+            exit 0
+          fi
+
+          shopt -s nullglob
+          agent_dirs=(exports/*/)
+          shopt -u nullglob
+
+          if [ ${#agent_dirs[@]} -eq 0 ]; then
+            echo "No agent directories in exports/, skipping validation"
+            exit 0
+          fi
+
+          validated=0
+          for agent_dir in "${agent_dirs[@]}"; do
+            if [ -f "$agent_dir/agent.json" ]; then
+              echo "Validating $agent_dir"
+              uv run python -c "import json; json.load(open('$agent_dir/agent.json'))"
+              validated=$((validated + 1))
+            fi
+          done
+
+          if [ "$validated" -eq 0 ]; then
+            echo "No agent.json files found in exports/, skipping validation"
+          else
+            echo "Validated $validated agent(s)"
+          fi
+name: Issue Triage
+
+on:
+  issues:
+    types: [opened]
+
+jobs:
+  triage:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      issues: write
+      id-token: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Triage and check for duplicates
+        uses: anthropics/claude-code-action@v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          allowed_non_write_users: "*"
+          prompt: |
+            Analyze this new issue and perform triage tasks.
+
+            Issue: #${{ github.event.issue.number }}
+            Repository: ${{ github.repository }}
+
+            ## Your Tasks:
+
+            ### 1. Get issue details
+            Use mcp__github__get_issue to get the full details of issue #${{ github.event.issue.number }}
+
+            ### 2. Check for duplicates
+            Search for similar existing issues using mcp__github__search_issues with relevant keywords from the issue title and body.
+
+            Criteria for duplicates:
+            - Same bug or error being reported
+            - Same feature request (even if worded differently)
+            - Same question being asked
+            - Issues describing the same root problem
+
+            If you find a duplicate:
+            - Add a comment using EXACTLY this format (required for auto-close to work):
+              "Found a possible duplicate of #<issue_number>: <brief explanation of why it's a duplicate>"
+            - Do NOT apply the "duplicate" label yet (the auto-close script will add it after 12 hours if no objections)
+            - Suggest the user react with a thumbs-down if they disagree
+
+            ### 3. Check for Low-Quality / AI Spam
+            Analyze the issue quality. We are receiving many low-effort, AI-generated spam issues.
+            Flag the issue as INVALID if it matches these criteria:
+            - **Vague/Generic**: Title is "Fix bug" or "Error" without specific context.
+            - **Hallucinated**: Refers to files or features that do not exist in this repo.
+            - **Template Filler**: Body contains "Insert description here" or unrelated gibberish.
+            - **Low Effort**: No reproduction steps, no logs, only 1-2 sentences.
+
+            If identified as spam/low-quality:
+            - Add the "invalid" label.
+            - Add a comment:
+              "This issue has been automatically flagged as low-quality or potentially AI-generated spam. It lacks specific details (logs, reproduction steps, file references) required for us to help. Please open a new issue following the template exactly if this is a legitimate request."
+            - Do NOT proceed to other steps.
+
+            ### 4. Check for invalid issues (General)
+            If the issue is not spam but still lacks information:
+            - Add the "invalid" label
+            - Comment asking for clarification
+
+            ### 5. Categorize with labels (if NOT a duplicate or spam)
+            Apply appropriate labels based on the issue content. Use ONLY these labels:
+            - bug: Something isn't working
+            - enhancement: New feature or request
+            - question: Further information is requested
+            - documentation: Improvements or additions to documentation
+            - good first issue: Good for newcomers (if issue is well-defined and small scope)
+            - help wanted: Extra attention is needed (if issue needs community input)
+            - backlog: Tracked for the future, but not currently planned or prioritized
+
+            ### 6. Estimate size (if NOT a duplicate, spam, or invalid)
+            Apply exactly ONE size label to help contributors match their capacity to the task:
+            - "size: small": Docs, typos, single-file fixes, config changes
+            - "size: medium": Bug fixes with tests, adding a single tool, changes within one package
+            - "size: large": Cross-package changes (core + tools), new modules, complex logic, architectural refactors
+
+            You may apply multiple labels if appropriate (e.g., "bug", "size: small", and "good first issue").
+
+            ## Tools Available:
+            - mcp__github__get_issue: Get issue details
+            - mcp__github__search_issues: Search for similar issues
+            - mcp__github__list_issues: List recent issues if needed
+            - mcp__github__add_issue_comment: Add a comment
+            - mcp__github__update_issue: Add labels
+            - mcp__github__get_issue_comments: Get existing comments
+
+            Be thorough but efficient. Focus on accurate categorization and finding true duplicates.
+
+          claude_args: |
+            --model claude-haiku-4-5-20251001
+            --allowedTools "mcp__github__get_issue,mcp__github__search_issues,mcp__github__list_issues,mcp__github__add_issue_comment,mcp__github__update_issue,mcp__github__get_issue_comments"
+name: "CodeQL"
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    # The branches below must be a subset of the branches above
+    branches: [ "main" ]
+  schedule:
+    - cron: '34 1 * * 4'
+
+jobs:
+  analyze:
+    name: Analyze
+    runs-on: "ubuntu-latest"
+    timeout-minutes: 360
+    permissions:
+      actions: read
+      contents: read
+      security-events: write
+
+    strategy:
+      fail-fast: false
+      matrix:
+        language: [ 'python' ]
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Initialize CodeQL
+      uses: github/codeql-action/init@v3
+      with:
+        languages: ${{ matrix.language }}
+
+    - name: Autobuild
+      uses: github/codeql-action/autobuild@v3
+
+    - name: Perform CodeQL Analysis
+      uses: github/codeql-action/analyze@v3
+      with:
+        category: "/language:${{matrix.language}}"
+name: PR Check Command
+
+on:
+  issue_comment:
+    types: [created]
+
+jobs:

@@ -302,7 +302,8 @@ Return ONLY valid JSON matching the expected schema. No explanations, no markdow
                     self.llm.acomplete(
                         messages=[{"role": "user", "content": prompt}],
                         system=(
-                            "You clean malformed agent outputs. Return only valid JSON matching the schema."
+                            "You clean malformed agent outputs. "
+                            "Return only valid JSON matching the schema."
                         ),
                         max_tokens=2048,  # Sufficient for cleaning most outputs
                     ),
