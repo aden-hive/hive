@@ -183,7 +183,9 @@ class ChatRepl(Vertical):
         self._session_index: list[str] = []  # IDs from last listing
         self._show_logs: bool = False  # Clean mode by default
         self._log_buffer: list[str] = []  # Buffered log lines for backfill on toggle ON
-        self._attached_pdf: dict | None = None  # Pending PDF attachment for next message
+        self._attached_pdf: dict | None = (
+            None  # Pending PDF attachment for next message
+        )
 
         # Queen-primary mode: when set, user input defaults to the queen.
         # The worker only gets input when it explicitly asks (CLIENT_INPUT_REQUESTED).
@@ -191,7 +193,9 @@ class ChatRepl(Vertical):
         self._worker_waiting: bool = False  # True when worker asked for input
         self._worker_input_node_id: str | None = None
         self._worker_input_graph_id: str | None = None
-        self._streaming_source: str | None = None  # "queen" | None; set by app.py per event
+        self._streaming_source: str | None = (
+            None  # "queen" | None; set by app.py per event
+        )
 
         # Dedicated event loop for agent execution.
         # Keeps blocking runtime code (LLM calls, MCP tools) off
@@ -325,8 +329,12 @@ class ChatRepl(Vertical):
                 if 0 <= idx < len(self._session_index):
                     session_id = self._session_index[idx]
                 else:
-                    self._write_history(f"[bold red]Error:[/bold red] No session at index {arg}")
-                    self._write_history("  Use [bold]/resume[/bold] to see available sessions")
+                    self._write_history(
+                        f"[bold red]Error:[/bold red] No session at index {arg}"
+                    )
+                    self._write_history(
+                        "  Use [bold]/resume[/bold] to see available sessions"
+                    )
                     return
             else:
                 session_id = arg
@@ -338,7 +346,9 @@ class ChatRepl(Vertical):
                 self._write_history(
                     "[bold red]Error:[/bold red] /recover requires session_id and checkpoint_id"
                 )
-                self._write_history("  Usage: [bold]/recover <session_id> <checkpoint_id>[/bold]")
+                self._write_history(
+                    "  Usage: [bold]/recover <session_id> <checkpoint_id>[/bold]"
+                )
                 self._write_history(
                     "  Tip: Use [bold]/sessions <session_id>[/bold] to see checkpoints"
                 )
@@ -361,7 +371,7 @@ class ChatRepl(Vertical):
         elif cmd == "/agents":
             app = self.app
             if hasattr(app, "action_show_agent_picker"):
-                await app.action_show_agent_picker()
+                app.action_show_agent_picker()
         elif cmd == "/graphs":
             self._cmd_graphs()
         elif cmd == "/graph":
@@ -405,7 +415,9 @@ class ChatRepl(Vertical):
             self._write_history(f"[bold red]Error:[/bold red] File not found: {path}")
             return
         if path.suffix.lower() != ".pdf":
-            self._write_history("[bold red]Error:[/bold red] Only PDF files are supported")
+            self._write_history(
+                "[bold red]Error:[/bold red] Only PDF files are supported"
+            )
             return
 
         # Copy to ~/.hive/assets/, deduplicating like a normal filesystem:
@@ -425,7 +437,9 @@ class ChatRepl(Vertical):
         }
 
         self._write_history(f"[green]Attached:[/green] {path.name}")
-        self._write_history("[dim]PDF will be read by the agent on your next message.[/dim]")
+        self._write_history(
+            "[dim]PDF will be read by the agent on your next message.[/dim]"
+        )
 
     async def _cmd_attach(self, file_path: str | None = None) -> None:
         """Attach a PDF file for context injection into the next message."""
@@ -570,7 +584,9 @@ class ChatRepl(Vertical):
                     status_colored = f"[dim]{status}[/dim]"
 
                 # Session line with index and label
-                self._write_history(f"  [bold]{index}.[/bold] {label}  {status_colored}")
+                self._write_history(
+                    f"  [bold]{index}.[/bold] {label}  {status_colored}"
+                )
                 self._write_history(f"     [dim]{session_id}[/dim]")
                 self._write_history("")  # Blank line
 
@@ -578,7 +594,9 @@ class ChatRepl(Vertical):
                 self._write_history(f"   [dim red]Error reading: {e}[/dim red]")
 
         if self._session_index:
-            self._write_history("[dim]Use [bold]/resume <number>[/bold] to resume a session[/dim]")
+            self._write_history(
+                "[dim]Use [bold]/resume <number>[/bold] to resume a session[/dim]"
+            )
 
     async def _show_session_details(self, storage_path: Path, session_id: str) -> None:
         """Show detailed information about a specific session."""
@@ -588,7 +606,9 @@ class ChatRepl(Vertical):
         if not session_dir.exists():
             self._write_history("[bold red]Error:[/bold red] Session not found")
             self._write_history(f"  Path: {session_dir}")
-            self._write_history("  Tip: Use [bold]/sessions[/bold] to see available sessions")
+            self._write_history(
+                "  Tip: Use [bold]/sessions[/bold] to see available sessions"
+            )
             return
 
         state_file = session_dir / "state.json"
@@ -649,8 +669,12 @@ class ChatRepl(Vertical):
                             is_clean = cp_data.get("is_clean", False)
 
                             clean_marker = "✓" if is_clean else "⚠"
-                            self._write_history(f"  {i}. {clean_marker} [cyan]{cp_id}[/cyan]")
-                            self._write_history(f"     Type: {cp_type}, Node: {current_node}")
+                            self._write_history(
+                                f"  {i}. {clean_marker} [cyan]{cp_id}[/cyan]"
+                            )
+                            self._write_history(
+                                f"     Type: {cp_type}, Node: {current_node}"
+                            )
                         except Exception:
                             pass
 
@@ -675,14 +699,20 @@ class ChatRepl(Vertical):
 
             # Verify session exists
             if not session_dir.exists():
-                self._write_history(f"[bold red]Error:[/bold red] Session not found: {session_id}")
-                self._write_history("  Use [bold]/sessions[/bold] to see available sessions")
+                self._write_history(
+                    f"[bold red]Error:[/bold red] Session not found: {session_id}"
+                )
+                self._write_history(
+                    "  Use [bold]/sessions[/bold] to see available sessions"
+                )
                 return
 
             # Load session state
             state_file = session_dir / "state.json"
             if not state_file.exists():
-                self._write_history("[bold red]Error:[/bold red] Session state not found")
+                self._write_history(
+                    "[bold red]Error:[/bold red] Session state not found"
+                )
                 return
 
             import json
@@ -715,10 +745,14 @@ class ChatRepl(Vertical):
                 resume_info = "Retrying with same input"
 
             # Display resume info
-            self._write_history(f"[bold cyan]🔄 Resuming session[/bold cyan] {session_id}")
+            self._write_history(
+                f"[bold cyan]🔄 Resuming session[/bold cyan] {session_id}"
+            )
             self._write_history(f"   {resume_info}")
             if paused_at:
-                self._write_history("   [dim](Using session state, not checkpoint)[/dim]")
+                self._write_history(
+                    "   [dim](Using session state, not checkpoint)[/dim]"
+                )
 
             # Check if already executing
             if self._current_exec_id is not None:
@@ -744,7 +778,9 @@ class ChatRepl(Vertical):
             try:
                 entry_points = self.runtime.get_entry_points()
                 if not entry_points:
-                    self._write_history("[bold red]Error:[/bold red] No entry points available")
+                    self._write_history(
+                        "[bold red]Error:[/bold red] No entry points available"
+                    )
                     return
 
                 # Submit execution with resume state and original input data
@@ -785,8 +821,12 @@ class ChatRepl(Vertical):
 
             # Verify session exists
             if not session_dir.exists():
-                self._write_history(f"[bold red]Error:[/bold red] Session not found: {session_id}")
-                self._write_history("  Use [bold]/sessions[/bold] to see available sessions")
+                self._write_history(
+                    f"[bold red]Error:[/bold red] Session not found: {session_id}"
+                )
+                self._write_history(
+                    "  Use [bold]/sessions[/bold] to see available sessions"
+                )
                 return
 
             # Verify checkpoint exists
@@ -801,7 +841,9 @@ class ChatRepl(Vertical):
                 return
 
             # Display recover info
-            self._write_history(f"[bold cyan]⏪ Recovering session[/bold cyan] {session_id}")
+            self._write_history(
+                f"[bold cyan]⏪ Recovering session[/bold cyan] {session_id}"
+            )
             self._write_history(f"   From checkpoint: [cyan]{checkpoint_id}[/cyan]")
             self._write_history(
                 "   [dim](Checkpoint-based recovery for time-travel debugging)[/dim]"
@@ -834,7 +876,9 @@ class ChatRepl(Vertical):
             try:
                 entry_points = self.runtime.get_entry_points()
                 if not entry_points:
-                    self._write_history("[bold red]Error:[/bold red] No entry points available")
+                    self._write_history(
+                        "[bold red]Error:[/bold red] No entry points available"
+                    )
                     return
 
                 # Submit execution with checkpoint recovery state
@@ -857,7 +901,9 @@ class ChatRepl(Vertical):
                 self._set_button_pause_mode()
 
             except Exception as e:
-                self._write_history(f"[bold red]Error starting recovery:[/bold red] {e}")
+                self._write_history(
+                    f"[bold red]Error starting recovery:[/bold red] {e}"
+                )
                 indicator.display = False
                 chat_input.placeholder = "Enter input for agent..."
 
@@ -871,8 +917,12 @@ class ChatRepl(Vertical):
         """Immediately pause execution by cancelling task (same as Ctrl+Z)."""
         # Check if there's a current execution
         if not self._current_exec_id:
-            self._write_history("[bold yellow]No active execution to pause[/bold yellow]")
-            self._write_history("  Start an execution first, then use /pause during execution")
+            self._write_history(
+                "[bold yellow]No active execution to pause[/bold yellow]"
+            )
+            self._write_history(
+                "  Start an execution first, then use /pause during execution"
+            )
             return
 
         # Find and cancel the execution task - executor will catch and save state
@@ -883,12 +933,16 @@ class ChatRepl(Vertical):
             if task and not task.done():
                 task.cancel()
                 task_cancelled = True
-                self._write_history("[bold green]⏸ Execution paused - state saved[/bold green]")
+                self._write_history(
+                    "[bold green]⏸ Execution paused - state saved[/bold green]"
+                )
                 self._write_history("  Resume later with: [bold]/resume[/bold]")
                 break
 
         if not task_cancelled:
-            self._write_history("[bold yellow]Execution already completed[/bold yellow]")
+            self._write_history(
+                "[bold yellow]Execution already completed[/bold yellow]"
+            )
 
     async def _cmd_coder(self, reason: str = "") -> None:
         """User-initiated escalation to Hive Coder."""
@@ -954,7 +1008,9 @@ class ChatRepl(Vertical):
                 markers.append("active")
             marker_str = f" [dim]({', '.join(markers)})[/dim]" if markers else ""
             ep_list = ", ".join(reg.entry_points.keys())
-            active_execs = sum(len(s.active_execution_ids) for s in reg.streams.values())
+            active_execs = sum(
+                len(s.active_execution_ids) for s in reg.streams.values()
+            )
             exec_str = f" [green]{active_execs} running[/green]" if active_execs else ""
             lines.append(f"  [bold]{gid}[/bold]{marker_str} — eps: {ep_list}{exec_str}")
         self._write_history("\n".join(lines))
@@ -975,7 +1031,9 @@ class ChatRepl(Vertical):
         if hasattr(app, "action_switch_graph"):
             app.action_switch_graph(graph_id)
         else:
-            self._write_history(f"[bold green]Switched to graph: {graph_id}[/bold green]")
+            self._write_history(
+                f"[bold green]Switched to graph: {graph_id}[/bold green]"
+            )
 
     async def _cmd_load_graph(self, agent_path: str) -> None:
         """Load an agent graph into the session."""
@@ -1066,7 +1124,9 @@ class ChatRepl(Vertical):
                     "\n[bold cyan]🔄 Auto-recovering from checkpoint "
                     "(--resume-session + --checkpoint)[/bold cyan]"
                 )
-                self.call_later(self._cmd_recover, self._resume_session, self._resume_checkpoint)
+                self.call_later(
+                    self._cmd_recover, self._resume_session, self._resume_checkpoint
+                )
             else:
                 # Use /resume for session state resume
                 history.write(
@@ -1080,7 +1140,9 @@ class ChatRepl(Vertical):
 
         # Show agent intro message if available
         if self.runtime.intro_message:
-            history.write(f"[bold blue]Agent:[/bold blue] {self.runtime.intro_message}\n")
+            history.write(
+                f"[bold blue]Agent:[/bold blue] {self.runtime.intro_message}\n"
+            )
         else:
             history.write(
                 "[dim]Quick start: /sessions to see previous sessions, "
@@ -1132,7 +1194,9 @@ class ChatRepl(Vertical):
                 # Populate session index so /resume <number> works immediately
                 self._session_index = [s["session_id"] for s in resumable[:3]]
 
-                self._write_history("\n[bold yellow]Non-terminated sessions found:[/bold yellow]")
+                self._write_history(
+                    "\n[bold yellow]Non-terminated sessions found:[/bold yellow]"
+                )
                 for i, session in enumerate(resumable[:3], 1):  # Show top 3
                     status = session["status"]
                     label = session["label"]
@@ -1147,10 +1211,16 @@ class ChatRepl(Vertical):
                     else:
                         status_colored = f"[dim]{status}[/dim]"
 
-                    self._write_history(f"  [bold]{i}.[/bold] {label}  {status_colored}")
+                    self._write_history(
+                        f"  [bold]{i}.[/bold] {label}  {status_colored}"
+                    )
 
-                self._write_history("\n  Type [bold]/resume <number>[/bold] to continue a session")
-                self._write_history("  Or just type your input to start a new session\n")
+                self._write_history(
+                    "\n  Type [bold]/resume <number>[/bold] to continue a session"
+                )
+                self._write_history(
+                    "  Or just type your input to start a new session\n"
+                )
 
         except Exception:
             # Silently fail - don't block TUI startup
@@ -1189,7 +1259,9 @@ class ChatRepl(Vertical):
         except Exception:
             pass
 
-    async def on_chat_text_area_submitted(self, message: ChatTextArea.Submitted) -> None:
+    async def on_chat_text_area_submitted(
+        self, message: ChatTextArea.Submitted
+    ) -> None:
         """Handle chat input submission."""
         await self._submit_input(message.text)
 
@@ -1294,7 +1366,9 @@ class ChatRepl(Vertical):
             # Get entry points for the active graph, preferring manual
             # (interactive) ones over event/timer-driven ones.
             entry_points = self.runtime.get_entry_points()
-            manual_eps = [ep for ep in entry_points if ep.trigger_type in ("manual", "api")]
+            manual_eps = [
+                ep for ep in entry_points if ep.trigger_type in ("manual", "api")
+            ]
             if not manual_eps:
                 manual_eps = entry_points  # fallback: use whatever is available
             if not manual_eps:
@@ -1329,7 +1403,9 @@ class ChatRepl(Vertical):
             input_data = {input_key: user_input}
             if self._attached_pdf:
                 input_data["pdf_file_path"] = self._attached_pdf["path"]
-                self._write_history(f"[dim]Including PDF: {self._attached_pdf['filename']}[/dim]")
+                self._write_history(
+                    f"[dim]Including PDF: {self._attached_pdf['filename']}[/dim]"
+                )
                 self._attached_pdf = None
 
             # Submit execution to the dedicated agent loop so blocking
@@ -1384,7 +1460,9 @@ class ChatRepl(Vertical):
                 )
                 await asyncio.wrap_future(future)
             except Exception as e:
-                self._write_history(f"[bold red]Error delivering to worker:[/bold red] {e}")
+                self._write_history(
+                    f"[bold red]Error delivering to worker:[/bold red] {e}"
+                )
             return
 
         # 2. Default: inject into the queen
@@ -1473,7 +1551,9 @@ class ChatRepl(Vertical):
         if self._show_logs:
             self._write_history(line)
 
-    def handle_tool_completed(self, tool_name: str, result: str, is_error: bool) -> None:
+    def handle_tool_completed(
+        self, tool_name: str, result: str, is_error: bool
+    ) -> None:
         """Handle a tool call completing."""
         if tool_name in ("ask_user", "escalate_to_coder"):
             return
@@ -1558,7 +1638,9 @@ class ChatRepl(Vertical):
             self._clear_streaming()
 
         reason = data.get("reason", "")
-        self._write_history("[bold yellow]Agent is escalating to Hive Coder[/bold yellow]")
+        self._write_history(
+            "[bold yellow]Agent is escalating to Hive Coder[/bold yellow]"
+        )
         if reason:
             self._write_history(f"[dim]Reason: {reason}[/dim]")
 
@@ -1599,7 +1681,9 @@ class ChatRepl(Vertical):
         )
         chat_input.focus()
 
-    def handle_worker_input_requested(self, node_id: str, graph_id: str | None = None) -> None:
+    def handle_worker_input_requested(
+        self, node_id: str, graph_id: str | None = None
+    ) -> None:
         """Handle the worker asking for user input in queen-primary mode.
 
         Sets the worker override flag so the next user input goes to the
@@ -1608,7 +1692,9 @@ class ChatRepl(Vertical):
         """
         # Flush queen streaming if any
         if self._streaming_snapshot:
-            self._write_history(f"[bold blue]Queen:[/bold blue] {self._streaming_snapshot}")
+            self._write_history(
+                f"[bold blue]Queen:[/bold blue] {self._streaming_snapshot}"
+            )
             self._clear_streaming()
 
         self._worker_waiting = True
@@ -1651,7 +1737,9 @@ class ChatRepl(Vertical):
 
     def handle_execution_resumed(self, node_id: str) -> None:
         """Show that execution has been resumed."""
-        self._write_history(f"[bold green]▶ Resumed[/bold green] from [cyan]{node_id}[/cyan]")
+        self._write_history(
+            f"[bold green]▶ Resumed[/bold green] from [cyan]{node_id}[/cyan]"
+        )
 
     def handle_goal_achieved(self, data: dict[str, Any]) -> None:
         """Show goal achievement prominently."""
