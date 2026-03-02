@@ -407,6 +407,18 @@ export default function AgentGraph({ nodes, title: _title, onNodeClick, onRun, o
     const triggerFontSize = nodeW < 140 ? 10.5 : 11.5;
     const triggerAvailW = nodeW - 38;
     const triggerDisplayLabel = truncateLabel(node.label, triggerAvailW, triggerFontSize);
+    const nextFireIn = node.triggerConfig?.next_fire_in as number | undefined;
+
+    // Format countdown for display below node
+    let countdownLabel: string | null = null;
+    if (nextFireIn != null && nextFireIn > 0) {
+      const h = Math.floor(nextFireIn / 3600);
+      const m = Math.floor((nextFireIn % 3600) / 60);
+      const s = Math.floor(nextFireIn % 60);
+      countdownLabel = h > 0
+        ? `next in ${h}h ${String(m).padStart(2, "0")}m`
+        : `next in ${m}m ${String(s).padStart(2, "0")}s`;
+    }
 
     return (
       <g key={node.id} onClick={() => onNodeClick?.(node)} style={{ cursor: onNodeClick ? "pointer" : "default" }}>
@@ -442,6 +454,17 @@ export default function AgentGraph({ nodes, title: _title, onNodeClick, onRun, o
         >
           {triggerDisplayLabel}
         </text>
+
+        {/* Countdown label below node */}
+        {countdownLabel && (
+          <text
+            x={pos.x + nodeW / 2} y={pos.y + NODE_H + 13}
+            fill="hsl(210,30%,50%)" fontSize={9.5}
+            textAnchor="middle" fontStyle="italic" opacity={0.7}
+          >
+            {countdownLabel}
+          </text>
+        )}
       </g>
     );
   };

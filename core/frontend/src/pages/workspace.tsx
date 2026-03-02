@@ -20,6 +20,37 @@ import { ApiError } from "@/api/client";
 
 const makeId = () => Math.random().toString(36).slice(2, 9);
 
+/** Format seconds into a compact countdown string. */
+function formatCountdown(totalSecs: number): string {
+  const h = Math.floor(totalSecs / 3600);
+  const m = Math.floor((totalSecs % 3600) / 60);
+  const s = Math.floor(totalSecs % 60);
+  if (h > 0) return `${h}h ${String(m).padStart(2, "0")}m ${String(s).padStart(2, "0")}s`;
+  return `${m}m ${String(s).padStart(2, "0")}s`;
+}
+
+/** Live countdown from an initial seconds value, ticking every second. */
+function TimerCountdown({ initialSeconds }: { initialSeconds: number }) {
+  const [remaining, setRemaining] = useState(Math.max(0, Math.round(initialSeconds)));
+  const startRef = useRef({ wallTime: Date.now(), initial: Math.max(0, Math.round(initialSeconds)) });
+
+  useEffect(() => {
+    startRef.current = { wallTime: Date.now(), initial: Math.max(0, Math.round(initialSeconds)) };
+    setRemaining(Math.max(0, Math.round(initialSeconds)));
+  }, [initialSeconds]);
+
+  useEffect(() => {
+    const id = setInterval(() => {
+      const elapsed = (Date.now() - startRef.current.wallTime) / 1000;
+      setRemaining(Math.max(0, Math.round(startRef.current.initial - elapsed)));
+    }, 1000);
+    return () => clearInterval(id);
+  }, []);
+
+  if (remaining <= 0) return <span className="text-amber-400/80">firing...</span>;
+  return <span>{formatCountdown(remaining)}</span>;
+}
+
 // --- Session types ---
 interface Session {
   id: string;
@@ -938,6 +969,10 @@ export default function Workspace() {
               llmSnapshots: {},
             });
             markAllNodesAs(agentType, ["running", "looping"], "complete");
+
+            // Re-fetch graph topology so timer countdowns refresh
+            const sid = agentStates[agentType]?.sessionId;
+            if (sid) fetchGraphForAgent(agentType, sid);
           }
           break;
 
@@ -1708,6 +1743,17 @@ export default function Workspace() {
                           <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider mb-1.5">Schedule</p>
                           <p className="text-xs text-foreground/80 font-mono bg-muted/30 rounded-lg px-3 py-2 border border-border/20">
                             {scheduleLabel}
+                          </p>
+                        </div>
+                      ) : null;
+                    })()}
+                    {(() => {
+                      const nfi = (selectedNode.triggerConfig as Record<string, unknown> | undefined)?.next_fire_in as number | undefined;
+                      return nfi != null ? (
+                        <div>
+                          <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider mb-1.5">Next run</p>
+                          <p className="text-xs text-foreground/80 font-mono bg-muted/30 rounded-lg px-3 py-2 border border-border/20">
+                            <TimerCountdown initialSeconds={nfi} />
                           </p>
                         </div>
                       ) : null;

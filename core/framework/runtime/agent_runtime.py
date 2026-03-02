@@ -1368,6 +1368,23 @@ class AgentRuntime:
         # Fallback: primary graph
         return list(self._entry_points.values())
 
+    def get_timer_next_fire_in(self, entry_point_id: str) -> float | None:
+        """Return seconds until the next timer fire for *entry_point_id*.
+
+        Checks the primary graph's ``_timer_next_fire`` dict as well as
+        all registered secondary graphs.  Returns ``None`` when no fire
+        time is recorded (e.g. the timer is currently executing or the
+        entry point is not a timer).
+        """
+        mono = self._timer_next_fire.get(entry_point_id)
+        if mono is not None:
+            return max(0.0, mono - time.monotonic())
+        for reg in self._graphs.values():
+            mono = reg.timer_next_fire.get(entry_point_id)
+            if mono is not None:
+                return max(0.0, mono - time.monotonic())
+        return None
+
     def get_stream(self, entry_point_id: str) -> ExecutionStream | None:
         """Get a specific execution stream."""
         return self._streams.get(entry_point_id)

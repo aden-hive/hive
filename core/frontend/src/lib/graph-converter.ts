@@ -29,7 +29,10 @@ export function topologyToGraphNodes(topology: GraphTopology): GraphNode[] {
       status: "pending",
       nodeType: "trigger",
       triggerType: ep.trigger_type,
-      triggerConfig: ep.trigger_config,
+      triggerConfig: {
+        ...ep.trigger_config,
+        ...(ep.next_fire_in != null ? { next_fire_in: ep.next_fire_in } : {}),
+      },
       next: [ep.entry_node],
     });
   }
