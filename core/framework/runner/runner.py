@@ -322,8 +322,9 @@ def _save_refreshed_codex_credentials(auth_data: dict, token_data: dict) -> None
         auth_data["tokens"] = tokens
         auth_data["last_refresh"] = datetime.now(UTC).isoformat()
 
-        CODEX_AUTH_FILE.parent.mkdir(parents=True, exist_ok=True)
-        with open(CODEX_AUTH_FILE, "w") as f:
+        CODEX_AUTH_FILE.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+        fd = os.open(CODEX_AUTH_FILE, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, "w") as f:
             json.dump(auth_data, f, indent=2)
         logger.debug("Codex credentials refreshed successfully")
     except (OSError, KeyError) as exc:
