@@ -1,0 +1,135 @@
+.dashboard-container {
+  display: flex;
+  flex-direction: column;
+  gap: 30px;
+}
+
+.stats-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 20px;
+}
+
+.stat-card {
+  padding: 20px;
+  background: linear-gradient(135deg, #667eea15 0%, #764ba215 100%);
+  border: 2px solid #667eea30;
+  border-radius: 8px;
+  text-align: center;
+}
+
+.stat-card.online {
+  border-color: #22c55e30;
+  background: linear-gradient(135deg, #22c55e15 0%, #16a34a15 100%);
+}
+
+.stat-card.offline {
+  border-color: #ef444430;
+  background: linear-gradient(135deg, #ef444415 0%, #dc262615 100%);
+}
+
+.stat-card h4 {
+  margin: 0 0 12px 0;
+  color: #666;
+  font-size: 13px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.stat-value {
+  margin: 0;
+  font-size: 28px;
+  font-weight: 700;
+  color: #667eea;
+}
+
+.chart-container {
+  padding: 20px;
+  background: #f8f9fa;
+  border-radius: 8px;
+}
+
+.chart-container h3 {
+  margin: 0 0 20px 0;
+  color: #333;
+  font-size: 16px;
+}
+
+.simple-chart {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-around;
+  gap: 20px;
+  height: 200px;
+  padding: 20px;
+  background: white;
+  border-radius: 6px;
+  border: 1px solid #e9ecef;
+}
+
+.chart-bar {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  flex: 1;
+  height: 100%;
+}
+
+.bar {
+  width: 100%;
+  max-width: 50px;
+  border-radius: 4px 4px 0 0;
+  transition: all 0.3s ease;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+
+.bar:hover {
+  box-shadow: 0 4px 12px rgba(102, 126, 234, 0.3);
+}
+
+.chart-bar label {
+  font-size: 12px;
+  color: #999;
+  font-weight: 600;
+  text-align: center;
+}
+
+.info-box {
+  padding: 20px;
+  background: linear-gradient(135deg, #f0f9ff 0%, #f0fdf4 100%);
+  border-left: 4px solid #667eea;
+  border-radius: 8px;
+}
+
+.info-box h3 {
+  margin: 0 0 15px 0;
+  color: #333;
+  font-size: 16px;
+}
+
+.info-box ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.info-box li {
+  color: #666;
+  font-size: 14px;
+  padding-left: 20px;
+  position: relative;
+}
+
+.info-box li:before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 50%;
+  transform: translateY(-50%);
+}

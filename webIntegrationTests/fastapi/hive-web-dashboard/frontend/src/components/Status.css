@@ -1,0 +1,86 @@
+.status-container {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.status-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 20px;
+}
+
+.status-card {
+  padding: 20px;
+  border-radius: 8px;
+  border-left: 4px solid #ddd;
+  background: #f8f9fa;
+  transition: all 0.3s ease;
+}
+
+.status-card.success {
+  border-left-color: #22c55e;
+  background: #f0fdf4;
+}
+
+.status-card.error {
+  border-left-color: #ef4444;
+  background: #fef2f2;
+}
+
+.status-card h3 {
+  margin: 0 0 12px 0;
+  font-size: 16px;
+  color: #333;
+}
+
+.status-value {
+  font-size: 18px;
+  font-weight: 600;
+  color: #667eea;
+  margin: 0 0 8px 0;
+}
+
+.status-time, .status-message {
+  font-size: 12px;
+  color: #999;
+  margin: 0;
+}
+
+.error-box {
+  padding: 15px;
+  background: #fee2e2;
+  color: #991b1b;
+  border-radius: 8px;
+  border-left: 4px solid #ef4444;
+}
+
+.refresh-btn {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+  padding: 10px 20px;
+  border-radius: 6px;
+  font-weight: 600;
+  align-self: flex-start;
+}
+
+.refresh-btn:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 20px rgba(102, 126, 234, 0.4);
+}
+
+.spinner {
+  display: inline-block;
+  width: 20px;
+  height: 20px;
+  border: 3px solid #f3f3f3;
+  border-top: 3px solid #667eea;
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+  margin-right: 10px;
+}
+
+@keyframes spin {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}

@@ -1,0 +1,27 @@
+{
+    "name": "hive-web-dashboard-backend",
+    "version": "1.0.0",
+    "description": "Backend API for Hive Web Dashboard",
+    "main": "src/server.js",
+    "type": "module",
+    "scripts": {
+        "start": "node src/server.js",
+        "dev": "nodemon src/server.js"
+    },
+    "keywords": [
+        "hive",
+        "api",
+        "agent"
+    ],
+    "author": "",
+    "license": "Apache-2.0",
+    "dependencies": {
+        "express": "^4.18.2",
+        "cors": "^2.8.5",
+        "dotenv": "^16.3.1",
+        "child_process": "^1.0.2"
+    },
+    "devDependencies": {
+        "nodemon": "^3.0.2"
+    }
+}

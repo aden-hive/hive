@@ -1,0 +1,282 @@
+.integrations-container {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.integrations-header {
+  margin-bottom: 10px;
+}
+
+.integrations-header h2 {
+  margin: 0 0 8px 0;
+  color: #333;
+  font-size: 24px;
+}
+
+.subtitle {
+  margin: 0;
+  color: #999;
+  font-size: 14px;
+}
+
+.integrations-layout {
+  display: grid;
+  grid-template-columns: 1fr 2fr;
+  gap: 30px;
+  min-height: 500px;
+}
+
+@media (max-width: 1024px) {
+  .integrations-layout {
+    grid-template-columns: 1fr;
+  }
+}
+
+.integrations-list h3 {
+  margin: 0 0 15px 0;
+  color: #333;
+  font-size: 16px;
+}
+
+.integration-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 12px;
+}
+
+.integration-card {
+  padding: 15px;
+  background: #f8f9fa;
+  border: 2px solid #e9ecef;
+  border-radius: 8px;
+  cursor: pointer;
+  text-align: center;
+  transition: all 0.3s ease;
+  position: relative;
+}
+
+.integration-card:hover {
+  border-color: #667eea;
+  box-shadow: 0 4px 12px rgba(102, 126, 234, 0.15);
+  transform: translateY(-2px);
+}
+
+.integration-card.selected {
+  border-color: #667eea;
+  background: #f0f3ff;
+  box-shadow: 0 4px 12px rgba(102, 126, 234, 0.2);
+}
+
+.integration-card.configured {
+  border-color: #22c55e;
+  background: #f0fdf4;
+}
+
+.integration-icon {
+  font-size: 28px;
+  margin-bottom: 8px;
+}
+
+.integration-card h4 {
+  margin: 0 0 6px 0;
+  color: #333;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.integration-description {
+  margin: 0;
+  color: #999;
+  font-size: 11px;
+  line-height: 1.3;
+  display: none;
+}
+
+.configured-badge {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  background: #22c55e;
+  color: white;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.integrations-detail {
+  background: white;
+  border: 1px solid #e9ecef;
+  border-radius: 8px;
+  padding: 25px;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.detail-header h3 {
+  margin: 0 0 8px 0;
+  color: #333;
+  font-size: 20px;
+}
+
+.detail-description {
+  margin: 0;
+  color: #666;
+  font-size: 14px;
+}
+
+.credentials-form h4 {
+  margin: 0 0 15px 0;
+  color: #333;
+  font-size: 14px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.form-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+
+.form-group label {
+  font-size: 13px;
+  color: #666;
+  font-weight: 500;
+  text-transform: capitalize;
+}
+
+.form-group input {
+  padding: 10px 12px;
+  border: 1px solid #ddd;
+  border-radius: 6px;
+  font-size: 13px;
+  font-family: "Courier New", monospace;
+}
+
+.form-group input:focus {
+  outline: none;
+  border-color: #667eea;
+  box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+}
+
+.action-buttons {
+  display: flex;
+  gap: 10px;
+  margin-top: 15px;
+}
+
+.btn-configure,
+.btn-test {
+  flex: 1;
+  padding: 10px 16px;
+  border-radius: 6px;
+  font-weight: 600;
+  font-size: 13px;
+  border: none;
+  cursor: pointer;
+  transition: all 0.3s ease;
+}
+
+.btn-configure {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+}
+
+.btn-configure:hover:not(:disabled) {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 20px rgba(102, 126, 234, 0.4);
+}
+
+.btn-configure:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.btn-test {
+  background: #f0f3ff;
+  color: #667eea;
+  border: 1px solid #667eea;
+}
+
+.btn-test:hover:not(:disabled) {
+  background: #667eea;
+  color: white;
+}
+
+.btn-test:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.test-result {
+  padding: 15px;
+  border-radius: 8px;
+  border-left: 4px solid #ddd;
+}
+
+.test-result.success {
+  background: #f0fdf4;
+  border-left-color: #22c55e;
+}
+
+.test-result.error {
+  background: #fef2f2;
+  border-left-color: #ef4444;
+}
+
+.test-result h4 {
+  margin: 0 0 6px 0;
+  color: #333;
+  font-size: 13px;
+}
+
+.test-result p {
+  margin: 0;
+  color: #666;
+  font-size: 13px;
+}
+
+.empty-state {
+  text-align: center;
+  padding: 60px 20px;
+  color: #999;
+}
+
+.empty-state p {
+  margin: 0;
+  font-size: 16px;
+}
+
+.error-box {
+  padding: 12px 15px;
+  background: #fee2e2;
+  color: #991b1b;
+  border-radius: 6px;
+  border-left: 4px solid #ef4444;
+  font-size: 13px;
+}
+
+.spinner {
+  display: inline-block;
+  width: 20px;
+  height: 20px;
+  border: 3px solid #f3f3f3;
+  border-top: 3px solid #667eea;
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+  margin-right: 10px;
+}
+
+@keyframes spin {
+  0% {
+    transform: rotate(0deg);
+  }
+  100% {
+    transform: rotate(360deg);
+  }
+}
