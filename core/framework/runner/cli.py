@@ -2033,7 +2033,7 @@ def cmd_serve(args: argparse.Namespace) -> int:
                 print(f"Error loading {agent_path}: {e}")
 
         # Start server using AppRunner/TCPSite (same pattern as webhook_server.py)
-        runner = web.AppRunner(app)
+        runner = web.AppRunner(app, access_log=None)
         await runner.setup()
         site = web.TCPSite(runner, args.host, args.port)
         await site.start()

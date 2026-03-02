@@ -445,21 +445,26 @@ class AgentRuntime:
                                     await asyncio.sleep(max(0, sleep_secs))
                                     continue
 
-                                # Gate: skip tick if agent is actively working.
+                                # Gate: skip tick if ANY stream is actively working.
                                 # If the execution is idle (no LLM/tool activity
                                 # beyond idle_timeout) let the timer proceed —
                                 # execute() will cancel the stale execution.
-                                _stream = self._streams.get(entry_point_id)
-                                if (
-                                    _stream
-                                    and _stream.active_execution_ids
-                                    and _stream.agent_idle_seconds < idle_timeout
-                                ):
-                                    logger.debug(
-                                        "Cron '%s': agent actively working (idle %.0fs < %ds), skipping tick",
+                                _any_active = False
+                                _min_idle = float("inf")
+                                for _s in self._streams.values():
+                                    if _s.active_execution_ids:
+                                        _any_active = True
+                                        _idle = _s.agent_idle_seconds
+                                        if _idle < _min_idle:
+                                            _min_idle = _idle
+                                logger.info(
+                                    "Cron '%s': checking gate — any_active=%s, min_idle=%.1fs, timeout=%ds",
+                                    entry_point_id, _any_active, _min_idle, idle_timeout,
+                                )
+                                if _any_active and _min_idle < idle_timeout:
+                                    logger.info(
+                                        "Cron '%s': agent actively working, skipping tick",
                                         entry_point_id,
-                                        _stream.agent_idle_seconds,
-                                        idle_timeout,
                                     )
                                     self._timer_next_fire[entry_point_id] = (
                                         time.monotonic() + sleep_secs
@@ -570,17 +575,23 @@ class AgentRuntime:
                                     continue
 
                                 # Gate: skip tick if agent is actively working.
-                                _stream = self._streams.get(entry_point_id)
-                                if (
-                                    _stream
-                                    and _stream.active_execution_ids
-                                    and _stream.agent_idle_seconds < idle_timeout
-                                ):
-                                    logger.debug(
-                                        "Timer '%s': agent actively working (idle %.0fs < %ds), skipping tick",
+                                # Gate: skip tick if ANY stream is actively working.
+                                _any_active = False
+                                _min_idle = float("inf")
+                                for _s in self._streams.values():
+                                    if _s.active_execution_ids:
+                                        _any_active = True
+                                        _idle = _s.agent_idle_seconds
+                                        if _idle < _min_idle:
+                                            _min_idle = _idle
+                                logger.info(
+                                    "Timer '%s': checking gate — any_active=%s, min_idle=%.1fs, timeout=%ds",
+                                    entry_point_id, _any_active, _min_idle, idle_timeout,
+                                )
+                                if _any_active and _min_idle < idle_timeout:
+                                    logger.info(
+                                        "Timer '%s': agent actively working, skipping tick",
                                         entry_point_id,
-                                        _stream.agent_idle_seconds,
-                                        idle_timeout,
                                     )
                                     self._timer_next_fire[entry_point_id] = (
                                         time.monotonic() + interval_secs
@@ -990,6 +1001,7 @@ class AgentRuntime:
                     local_ep: str,
                     mins: float,
                     immediate: bool,
+                    idle_timeout: float = 300,
                 ):
                     async def _timer_loop():
                         interval_secs = mins * 60
@@ -1019,12 +1031,24 @@ class AgentRuntime:
                                 await asyncio.sleep(interval_secs)
                                 continue
 
-                            # Gate: skip tick if previous execution still running
+                            # Gate: skip tick if ANY stream in this graph is actively working.
                             _reg = self._graphs.get(gid)
-                            _stream = _reg.streams.get(local_ep) if _reg else None
-                            if _stream and _stream.active_execution_ids:
-                                logger.debug(
-                                    "Timer '%s::%s': execution already in progress, skipping tick",
+                            _any_active = False
+                            _min_idle = float("inf")
+                            if _reg:
+                                for _sid, _s in _reg.streams.items():
+                                    if _s.active_execution_ids:
+                                        _any_active = True
+                                        _idle = _s.agent_idle_seconds
+                                        if _idle < _min_idle:
+                                            _min_idle = _idle
+                            logger.info(
+                                "Timer '%s::%s': checking gate — any_active=%s, min_idle=%.1fs, timeout=%ds",
+                                gid, local_ep, _any_active, _min_idle, idle_timeout,
+                            )
+                            if _any_active and _min_idle < idle_timeout:
+                                logger.info(
+                                    "Timer '%s::%s': agent actively working, skipping tick",
                                     gid,
                                     local_ep,
                                 )
@@ -1095,7 +1119,10 @@ class AgentRuntime:
                     return _timer_loop
 
                 task = asyncio.create_task(
-                    _make_timer(graph_id, ep_id, interval, run_immediately)()
+                    _make_timer(
+                        graph_id, ep_id, interval, run_immediately,
+                        idle_timeout=tc.get("idle_timeout_seconds", 300),
+                    )()
                 )
                 timer_tasks.append(task)
                 logger.info("Timer task created for '%s::%s': %s", graph_id, ep_id, task)
