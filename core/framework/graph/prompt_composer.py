@@ -34,29 +34,105 @@ def _with_datetime(prompt: str) -> str:
     return f"{prompt}\n\n{stamp}" if prompt else stamp
 
 
-def build_accounts_prompt(accounts: list[dict[str, Any]]) -> str:
+def build_accounts_prompt(
+    accounts: list[dict[str, Any]],
+    tool_provider_map: dict[str, str] | None = None,
+    node_tool_names: list[str] | None = None,
+) -> str:
     """Build a prompt section describing connected accounts.
 
+    When tool_provider_map is provided, produces structured output grouped
+    by provider with tool mapping, so the LLM knows which ``account`` value
+    to pass to which tool.
+
+    When node_tool_names is also provided, filters to only show providers
+    whose tools overlap with the node's tool list.
+
     Args:
-        accounts: List of account info dicts from CredentialStoreAdapter.get_all_account_info().
+        accounts: List of account info dicts from
+            CredentialStoreAdapter.get_all_account_info().
+        tool_provider_map: Mapping of tool_name -> provider_name
+            (e.g. {"gmail_list_messages": "google"}).
+        node_tool_names: Tool names available to the current node.
+            When provided, only providers with matching tools are shown.
 
     Returns:
         Formatted accounts block, or empty string if no accounts.
     """
     if not accounts:
         return ""
-    lines = [
-        "Connected accounts (use the alias as the `account` parameter "
-        "when calling tools to target a specific account):"
-    ]
+
+    # Flat format (backward compat) when no tool mapping provided
+    if tool_provider_map is None:
+        lines = [
+            "Connected accounts (use the alias as the `account` parameter "
+            "when calling tools to target a specific account):"
+        ]
+        for acct in accounts:
+            provider = acct.get("provider", "unknown")
+            alias = acct.get("alias", "unknown")
+            identity = acct.get("identity", {})
+            detail_parts = [f"{k}: {v}" for k, v in identity.items() if v]
+            detail = f" ({', '.join(detail_parts)})" if detail_parts else ""
+            lines.append(f"- {provider}/{alias}{detail}")
+        return "\n".join(lines)
+
+    # --- Structured format: group by provider with tool mapping ---
+
+    # Invert tool_provider_map to provider -> [tools]
+    provider_tools: dict[str, list[str]] = {}
+    for tool_name, provider in tool_provider_map.items():
+        provider_tools.setdefault(provider, []).append(tool_name)
+
+    # Filter to relevant providers based on node tools
+    node_tool_set = set(node_tool_names) if node_tool_names else None
+
+    # Group accounts by provider
+    provider_accounts: dict[str, list[dict[str, Any]]] = {}
     for acct in accounts:
         provider = acct.get("provider", "unknown")
-        alias = acct.get("alias", "unknown")
-        identity = acct.get("identity", {})
-        detail_parts = [f"{k}: {v}" for k, v in identity.items() if v]
-        detail = f" ({', '.join(detail_parts)})" if detail_parts else ""
-        lines.append(f"- {provider}/{alias}{detail}")
-    return "\n".join(lines)
+        provider_accounts.setdefault(provider, []).append(acct)
+
+    sections: list[str] = ["Connected accounts:"]
+
+    for provider, acct_list in provider_accounts.items():
+        tools_for_provider = sorted(provider_tools.get(provider, []))
+
+        # If node tools specified, only show providers with overlapping tools
+        if node_tool_set is not None:
+            relevant_tools = [t for t in tools_for_provider if t in node_tool_set]
+            if not relevant_tools:
+                continue
+            tools_for_provider = relevant_tools
+
+        # Local-only providers: tools read from env vars, no account= routing
+        all_local = all(a.get("source") == "local" for a in acct_list)
+
+        # Provider header with tools
+        display_name = provider.replace("_", " ").title()
+        if tools_for_provider and not all_local:
+            tools_str = ", ".join(tools_for_provider)
+            sections.append(f'\n{display_name} (use account="<alias>" with: {tools_str}):')
+        elif tools_for_provider and all_local:
+            tools_str = ", ".join(tools_for_provider)
+            sections.append(f"\n{display_name} (tools: {tools_str}):")
+        else:
+            sections.append(f"\n{display_name}:")
+
+        # Account entries
+        for acct in acct_list:
+            alias = acct.get("alias", "unknown")
+            identity = acct.get("identity", {})
+            detail_parts = [f"{k}: {v}" for k, v in identity.items() if v]
+            detail = f" ({', '.join(detail_parts)})" if detail_parts else ""
+            source_tag = " [local]" if acct.get("source") == "local" else ""
+            sections.append(f"  - {provider}/{alias}{detail}{source_tag}")
+
+    # If filtering removed all providers, return empty
+    if len(sections) <= 1:
+        return ""
+
+    return "\n".join(sections)
 
 
 def compose_system_prompt(

@@ -1,4 +1,4 @@
-.PHONY: lint format check test install-hooks help
+.PHONY: lint format check test install-hooks help frontend-install frontend-dev frontend-build
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
@@ -26,3 +26,12 @@ test: ## Run all tests
 install-hooks: ## Install pre-commit hooks
 	uv pip install pre-commit
 	pre-commit install
+
+frontend-install: ## Install frontend npm packages
+	cd core/frontend && npm install
+
+frontend-dev: ## Start frontend dev server
+	cd core/frontend && npm run dev
+
+frontend-build: ## Build frontend for production
+	cd core/frontend && npm run build

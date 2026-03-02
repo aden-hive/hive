@@ -562,16 +562,29 @@ def _validate_agent_path(agent_path: str) -> tuple[Path | None, str | None]:
     path = Path(agent_path)
 
     # Resolve relative paths against project root (not MCP server's cwd)
-    if not path.is_absolute() and not path.exists():
-        resolved = _PROJECT_ROOT / path
-        if resolved.exists():
-            path = resolved
+    if not path.is_absolute():
+        path = _PROJECT_ROOT / path
+
+    # Restrict to allowed directories BEFORE checking existence to prevent
+    # leaking whether arbitrary filesystem paths exist on disk.
+    from framework.server.app import validate_agent_path
+
+    try:
+        path = validate_agent_path(path)
+    except ValueError:
+        return None, json.dumps(
+            {
+                "success": False,
+                "error": "agent_path must be inside an allowed directory "
+                "(exports/, examples/, or ~/.hive/agents/)",
+            }
+        )
 
     if not path.exists():
         return None, json.dumps(
             {
                 "success": False,
-                "error": f"Agent path not found: {path}",
+                "error": f"Agent path not found: {agent_path}",
                 "hint": "Run export_graph to create an agent in exports/ first",
             }
         )
@@ -1864,7 +1877,7 @@ def import_from_export(
         return json.dumps({"success": False, "error": f"File not found: {agent_json_path}"})
 
     try:
-        data = json.loads(path.read_text())
+        data = json.loads(path.read_text(encoding="utf-8"))
     except json.JSONDecodeError as e:
         return json.dumps({"success": False, "error": f"Invalid JSON: {e}"})
 
@@ -1946,7 +1959,7 @@ def get_session_status() -> str:
 @mcp.tool()
 def configure_loop(
     max_iterations: Annotated[int, "Maximum loop iterations per node execution (default 50)"] = 50,
-    max_tool_calls_per_turn: Annotated[int, "Maximum tool calls per LLM turn (default 10)"] = 10,
+    max_tool_calls_per_turn: Annotated[int, "Maximum tool calls per LLM turn (default 30)"] = 30,
     stall_detection_threshold: Annotated[
         int, "Consecutive identical responses before stall detection triggers (default 3)"
     ] = 3,
@@ -2986,7 +2999,7 @@ def debug_test(
     # Find which file contains the test
     test_file = None
     for py_file in tests_dir.glob("test_*.py"):
-        content = py_file.read_text()
+        content = py_file.read_text(encoding="utf-8")
         if f"def {test_name}" in content or f"async def {test_name}" in content:
             test_file = py_file
             break
@@ -3138,7 +3151,7 @@ def list_tests(
     tests = []
     for test_file in sorted(tests_dir.glob("test_*.py")):
         try:
-            content = test_file.read_text()
+            content = test_file.read_text(encoding="utf-8")
             tree = ast.parse(content)
 
             # Find all async function definitions that start with "test_"
@@ -3338,6 +3351,11 @@ def store_credential(
         str, "Logical credential name (e.g., 'hubspot', 'brave_search', 'anthropic')"
     ],
     credential_value: Annotated[str, "The secret value to store (API key, token, etc.)"],
+    alias: Annotated[
+        str,
+        "Named alias for this account (e.g., 'work', 'personal'). Defaults to 'default'. "
+        "Use aliases to store multiple accounts for the same service.",
+    ] = "default",
     key_name: Annotated[
         str, "Key name within the credential (e.g., 'api_key', 'access_token')"
     ] = "api_key",
@@ -3347,38 +3365,42 @@ def store_credential(
     Store a credential securely in the local encrypted store at ~/.hive/credentials.
 
     Uses Fernet encryption (AES-128-CBC + HMAC). Requires HIVE_CREDENTIAL_KEY env var.
+
+    Credentials are stored as {credential_name}/{alias}, allowing multiple named accounts
+    per service (e.g., 'brave_search/work', 'brave_search/personal').
+    A health check is run automatically to validate the key and extract identity metadata.
     """
     try:
-        from pydantic import SecretStr
+        from framework.credentials.local.registry import LocalCredentialRegistry
 
-        from framework.credentials import CredentialKey, CredentialObject
-
-        store = _get_credential_store()
-
-        if not display_name:
-            display_name = credential_name.replace("_", " ").title()
-
-        cred = CredentialObject(
-            id=credential_name,
-            name=display_name,
-            keys={
-                key_name: CredentialKey(
-                    name=key_name,
-                    value=SecretStr(credential_value),
-                )
-            },
+        registry = LocalCredentialRegistry.default()
+        info, health_result = registry.save_account(
+            credential_id=credential_name,
+            alias=alias,
+            api_key=credential_value,
+            run_health_check=True,
         )
-        store.save_credential(cred)
 
-        return json.dumps(
-            {
-                "success": True,
-                "credential": credential_name,
-                "key": key_name,
-                "location": "~/.hive/credentials",
-                "encrypted": True,
+        result: dict = {
+            "success": True,
+            "credential": credential_name,
+            "alias": alias,
+            "storage_id": info.storage_id,
+            "status": info.status,
+            "location": "~/.hive/credentials",
+            "encrypted": True,
+        }
+
+        if health_result is not None:
+            result["health_check"] = {
+                "valid": health_result.valid,
+                "message": health_result.message,
             }
-        )
+            identity = info.identity.to_dict()
+            if identity:
+                result["identity"] = identity
+
+        return json.dumps(result)
     except Exception as e:
         return json.dumps({"success": False, "error": str(e)})
 
@@ -3388,26 +3410,28 @@ def list_stored_credentials() -> str:
     """
     List all credentials currently stored in the local encrypted store.
 
-    Returns credential IDs and metadata (never returns secret values).
+    Returns credential IDs, aliases, status, and identity metadata (never returns secret values).
     """
     try:
-        store = _get_credential_store()
-        credential_ids = store.list_credentials()
+        from framework.credentials.local.registry import LocalCredentialRegistry
+
+        registry = LocalCredentialRegistry.default()
+        accounts = registry.list_accounts()
 
         credentials = []
-        for cred_id in credential_ids:
-            try:
-                cred = store.get_credential(cred_id)
-                credentials.append(
-                    {
-                        "id": cred.id,
-                        "name": cred.name,
-                        "keys": list(cred.keys.keys()),
-                        "created_at": cred.created_at.isoformat() if cred.created_at else None,
-                    }
-                )
-            except Exception:
-                credentials.append({"id": cred_id, "error": "Could not load"})
+        for info in accounts:
+            entry: dict = {
+                "credential_id": info.credential_id,
+                "alias": info.alias,
+                "storage_id": info.storage_id,
+                "status": info.status,
+                "created_at": info.created_at.isoformat() if info.created_at else None,
+                "last_validated": info.last_validated.isoformat() if info.last_validated else None,
+            }
+            identity = info.identity.to_dict()
+            if identity:
+                entry["identity"] = identity
+            credentials.append(entry)
 
         return json.dumps(
             {
@@ -3424,22 +3448,71 @@ def list_stored_credentials() -> str:
 @mcp.tool()
 def delete_stored_credential(
     credential_name: Annotated[str, "Logical credential name to delete (e.g., 'hubspot')"],
+    alias: Annotated[
+        str,
+        "Alias of the account to delete (e.g., 'work', 'personal'). Defaults to 'default'.",
+    ] = "default",
 ) -> str:
     """
     Delete a credential from the local encrypted store.
     """
     try:
-        store = _get_credential_store()
-        deleted = store.delete_credential(credential_name)
+        from framework.credentials.local.registry import LocalCredentialRegistry
+
+        registry = LocalCredentialRegistry.default()
+        storage_id = f"{credential_name}/{alias}"
+        deleted = registry.delete_account(credential_name, alias)
         return json.dumps(
             {
                 "success": deleted,
                 "credential": credential_name,
-                "message": f"Credential '{credential_name}' deleted"
+                "alias": alias,
+                "storage_id": storage_id,
+                "message": f"Credential '{storage_id}' deleted"
                 if deleted
-                else f"Credential '{credential_name}' not found",
+                else f"Credential '{storage_id}' not found",
             }
         )
+    except Exception as e:
+        return json.dumps({"success": False, "error": str(e)})
+
+
+@mcp.tool()
+def validate_credential(
+    credential_name: Annotated[
+        str, "Logical credential name to validate (e.g., 'brave_search', 'github')"
+    ],
+    alias: Annotated[
+        str,
+        "Alias of the account to validate (e.g., 'work', 'personal'). Defaults to 'default'.",
+    ] = "default",
+) -> str:
+    """
+    Re-run health check for a stored credential and update its status.
+
+    Makes a live API call to verify the credential is still valid and updates
+    the stored status and last_validated timestamp.
+    """
+    try:
+        from framework.credentials.local.registry import LocalCredentialRegistry
+
+        registry = LocalCredentialRegistry.default()
+        result = registry.validate_account(credential_name, alias)
+
+        response: dict = {
+            "credential": credential_name,
+            "alias": alias,
+            "storage_id": f"{credential_name}/{alias}",
+            "valid": result.valid,
+            "status": "active" if result.valid else "failed",
+            "message": result.message,
+        }
+
+        identity = result.details.get("identity") if result.details else None
+        if identity:
+            response["identity"] = identity
+
+        return json.dumps(response)
     except Exception as e:
         return json.dumps({"success": False, "error": str(e)})
 
