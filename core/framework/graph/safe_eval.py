@@ -2,6 +2,14 @@ import ast
 import operator
 from typing import Any
 
+# --- Safety limits ---
+MAX_EXPRESSION_LENGTH = 4096  # Hard cap on input expression size (bytes)
+MAX_POW_EXPONENT = 100  # Prevent 2**2**2**20 style DoS
+
+# Types allowed for attribute access — prevents leaking internals
+# of arbitrary objects (e.g., generators, classes, frames).
+SAFE_ATTR_TYPES = (dict, list, tuple, str, int, float, bool, set, frozenset)
+
 # Safe operators whitelist
 SAFE_OPERATORS = {
     ast.Add: operator.add,
@@ -94,7 +102,15 @@ class SafeEvalVisitor(ast.NodeVisitor):
         op_func = SAFE_OPERATORS.get(type(node.op))
         if op_func is None:
             raise ValueError(f"Operator {type(node.op).__name__} is not allowed")
-        return op_func(self.visit(node.left), self.visit(node.right))
+        left = self.visit(node.left)
+        right = self.visit(node.right)
+        # Guard against exponential DoS (e.g. 2**2**2**20)
+        if isinstance(node.op, ast.Pow):
+            if isinstance(right, (int, float)) and abs(right) > MAX_POW_EXPONENT:
+                raise ValueError(
+                    f"Exponent {right} exceeds maximum allowed value of {MAX_POW_EXPONENT}"
+                )
+        return op_func(left, right)
 
     def visit_UnaryOp(self, node: ast.UnaryOp) -> Any:
         op_func = SAFE_OPERATORS.get(type(node.op))
@@ -115,11 +131,23 @@ class SafeEvalVisitor(ast.NodeVisitor):
         return True
 
     def visit_BoolOp(self, node: ast.BoolOp) -> Any:
-        values = [self.visit(v) for v in node.values]
+        # Proper short-circuit evaluation — matches Python semantics.
+        # Without this, `x is not None and x > 0` crashes when x is None
+        # because the eager version evaluates all operands up front.
         if isinstance(node.op, ast.And):
-            return all(values)
+            result: Any = True
+            for v in node.values:
+                result = self.visit(v)
+                if not result:
+                    return result
+            return result
         elif isinstance(node.op, ast.Or):
-            return any(values)
+            result = False
+            for v in node.values:
+                result = self.visit(v)
+                if result:
+                    return result
+            return result
         raise ValueError(f"Boolean operator {type(node.op).__name__} is not allowed")
 
     def visit_IfExp(self, node: ast.IfExp) -> Any:
@@ -151,21 +179,17 @@ class SafeEvalVisitor(ast.NodeVisitor):
 
         val = self.visit(node.value)
 
-        # Safe attribute access: only allow if it's in the dict (if val is dict)
-        # or it's a safe property of a basic type?
-        # Actually, for flexibility, people often use dot access for dicts in these expressions.
-        # But standard Python dict doesn't support dot access.
-        # If val is a dict, Attribute access usually fails in Python unless wrapped.
-        # If the user context provides objects, we might want to allow attribute access.
-        # BUT we must be careful not to allow access to dangerous things like __class__ etc.
-        # The check starts_with("_") covers __class__, __init__, etc.
+        # Type restriction: only allow attribute access on known-safe types.
+        # This prevents leaking internals of arbitrary objects (generators,
+        # classes, frames, etc.) that might appear in the evaluation context.
+        if not isinstance(val, SAFE_ATTR_TYPES):
+            raise ValueError(
+                f"Attribute access on type '{type(val).__name__}' is not allowed"
+            )
 
         try:
             return getattr(val, node.attr)
         except AttributeError:
-            # Fallback: maybe it's a dict and they want dot access?
-            # (Only if we want to support that sugar, usually not standard python)
-            # Let's stick to standard python behavior + strict private check.
             pass
 
         raise AttributeError(f"Object has no attribute '{node.attr}'")
@@ -238,6 +262,12 @@ def safe_eval(expr: str, context: dict[str, Any] | None = None) -> Any:
     """
     if context is None:
         context = {}
+
+    # Input size guard — prevent parsing extremely large expressions
+    if len(expr) > MAX_EXPRESSION_LENGTH:
+        raise ValueError(
+            f"Expression too long ({len(expr)} chars, max {MAX_EXPRESSION_LENGTH})"
+        )
 
     # Add safe builtins to context
     full_context = context.copy()
