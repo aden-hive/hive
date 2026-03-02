@@ -994,7 +994,28 @@ def validate_agent_tools(agent_path: str) -> str:
     Returns:
         JSON with validation result: pass/fail, missing tools per node, available tools
     """
-    resolved = _resolve_path(agent_path)
+    try:
+        resolved = _resolve_path(agent_path)
+    except ValueError:
+        return json.dumps({"error": "Access denied: path is outside the project root."})
+
+    # Restrict to allowed directories to prevent arbitrary code execution
+    # via importlib.import_module() below.
+    try:
+        from framework.server.app import validate_agent_path
+    except ImportError:
+        return json.dumps({"error": "Cannot validate agent path: framework package not available"})
+
+    try:
+        resolved = str(validate_agent_path(resolved))
+    except ValueError:
+        return json.dumps(
+            {
+                "error": "agent_path must be inside an allowed directory "
+                "(exports/, examples/, or ~/.hive/agents/)"
+            }
+        )
+
     if not os.path.isdir(resolved):
         return json.dumps({"error": f"Agent directory not found: {agent_path}"})
 

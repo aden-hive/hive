@@ -30,7 +30,12 @@ from pathlib import Path
 
 from aiohttp import web
 
-from framework.server.app import resolve_session, safe_path_segment, sessions_dir
+from framework.server.app import (
+    resolve_session,
+    safe_path_segment,
+    sessions_dir,
+    validate_agent_path,
+)
 from framework.server.session_manager import SessionManager
 
 logger = logging.getLogger(__name__)
@@ -118,6 +123,12 @@ async def handle_create_session(request: web.Request) -> web.Response:
     model = body.get("model")
     initial_prompt = body.get("initial_prompt")
 
+    if agent_path:
+        try:
+            agent_path = str(validate_agent_path(agent_path))
+        except ValueError as e:
+            return web.json_response({"error": str(e)}, status=400)
+
     try:
         if agent_path:
             # One-step: create session + load worker
@@ -143,14 +154,17 @@ async def handle_create_session(request: web.Request) -> web.Response:
                 status=409,
             )
         return web.json_response({"error": msg}, status=409)
-    except FileNotFoundError as e:
-        return web.json_response({"error": str(e)}, status=404)
+    except FileNotFoundError:
+        return web.json_response(
+            {"error": f"Agent not found: {agent_path or 'no path'}"},
+            status=404,
+        )
     except Exception as e:
         resp = _credential_error_response(e, agent_path)
         if resp is not None:
             return resp
         logger.exception("Error creating session: %s", e)
-        return web.json_response({"error": str(e)}, status=500)
+        return web.json_response({"error": "Internal server error"}, status=500)
 
     return web.json_response(_session_to_live_dict(session), status=201)
 
@@ -230,6 +244,11 @@ async def handle_load_worker(request: web.Request) -> web.Response:
     if not agent_path:
         return web.json_response({"error": "agent_path is required"}, status=400)
 
+    try:
+        agent_path = str(validate_agent_path(agent_path))
+    except ValueError as e:
+        return web.json_response({"error": str(e)}, status=400)
+
     worker_id = body.get("worker_id")
     model = body.get("model")
 
@@ -242,14 +261,14 @@ async def handle_load_worker(request: web.Request) -> web.Response:
         )
     except ValueError as e:
         return web.json_response({"error": str(e)}, status=409)
-    except FileNotFoundError as e:
-        return web.json_response({"error": str(e)}, status=404)
+    except FileNotFoundError:
+        return web.json_response({"error": f"Agent not found: {agent_path}"}, status=404)
     except Exception as e:
         resp = _credential_error_response(e, agent_path)
         if resp is not None:
             return resp
         logger.exception("Error loading worker: %s", e)
-        return web.json_response({"error": str(e)}, status=500)
+        return web.json_response({"error": "Internal server error"}, status=500)
 
     return web.json_response(_session_to_live_dict(session))
 
