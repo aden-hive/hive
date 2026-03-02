@@ -558,6 +558,11 @@ critical issue. Use sparingly.
 this session. If a worker is already loaded, it is automatically unloaded \
 first. Call after building and validating an agent to make it available \
 immediately.
+
+## Credentials
+- list_credentials(credential_id?) — List all authorized credentials in the \
+local store. Returns IDs, aliases, status, and identity metadata (never \
+secrets). Optionally filter by credential_id.
 """
 
 _queen_behavior = """
@@ -822,6 +827,8 @@ ALL_QUEEN_TOOLS = _SHARED_TOOLS + [
     "notify_operator",
     # Agent loading
     "load_built_agent",
+    # Credentials
+    "list_credentials",
 ]
 
 __all__ = [
