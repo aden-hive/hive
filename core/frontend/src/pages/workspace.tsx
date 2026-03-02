@@ -895,7 +895,12 @@ export default function Workspace() {
       const displayName = isQueen ? "Queen Bee" : (agentDisplayName || undefined);
       const role = isQueen ? "queen" as const : "worker" as const;
       const ts = fmtLogTs(event.timestamp);
-      const currentTurn = turnCounterRef.current[agentType] ?? 0;
+      // Turn counter is per-stream so queen and worker tool pills don't
+      // interfere.  A worker node_loop_iteration no longer increments
+      // the queen's turn counter (which would cause pill ID mismatches
+      // between tool_call_started and tool_call_completed).
+      const turnKey = `${agentType}:${streamId}`;
+      const currentTurn = turnCounterRef.current[turnKey] ?? 0;
       // Backend event timestamp for correct queen/worker message ordering
       const eventCreatedAt = event.timestamp ? new Date(event.timestamp).getTime() : Date.now();
 
@@ -907,7 +912,7 @@ export default function Workspace() {
       switch (event.type) {
         case "execution_started":
           if (isQueen) {
-            turnCounterRef.current[agentType] = currentTurn + 1;
+            turnCounterRef.current[turnKey] = currentTurn + 1;
             updateAgentState(agentType, { isTyping: true });
           } else {
             // Warn if prior LLM snapshots are being dropped (edge case: execution_completed never arrived)
@@ -915,7 +920,7 @@ export default function Workspace() {
             if (Object.keys(priorSnapshots).length > 0) {
               console.debug(`[hive] execution_started: dropping ${Object.keys(priorSnapshots).length} unflushed LLM snapshot(s)`);
             }
-            turnCounterRef.current[agentType] = currentTurn + 1;
+            turnCounterRef.current[turnKey] = currentTurn + 1;
             updateAgentState(agentType, {
               isTyping: true,
               isStreaming: false,
@@ -1045,7 +1050,7 @@ export default function Workspace() {
         }
 
         case "node_loop_started":
-          turnCounterRef.current[agentType] = currentTurn + 1;
+          turnCounterRef.current[turnKey] = currentTurn + 1;
           updateAgentState(agentType, { isTyping: true, activeToolCalls: {} });
           if (!isQueen && event.node_id) {
             const sessions = sessionsRef.current[agentType] || [];
@@ -1061,7 +1066,7 @@ export default function Workspace() {
           break;
 
         case "node_loop_iteration":
-          turnCounterRef.current[agentType] = currentTurn + 1;
+          turnCounterRef.current[turnKey] = currentTurn + 1;
           updateAgentState(agentType, { isStreaming: false, activeToolCalls: {} });
           if (!isQueen && event.node_id) {
             const pendingText = agentStates[agentType]?.llmSnapshots[event.node_id];
