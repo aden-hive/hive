@@ -106,7 +106,7 @@ async def handle_events(request: web.Request) -> web.StreamResponse:
             except asyncio.QueueFull:
                 logger.warning(
                     "SSE client queue full on critical event; disconnecting session='%s'",
-                    session.id
+                    session.id,
                 )
                 client_disconnected.set()
         else:
