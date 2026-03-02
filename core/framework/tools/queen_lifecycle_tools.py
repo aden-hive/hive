@@ -400,6 +400,15 @@ def register_queen_lifecycle_tools(
             return json.dumps(result)
 
         try:
+            # Pending user question (from ask_user tool)
+            if result.get("status") == "waiting_for_input":
+                input_events = bus.get_history(
+                    event_type=EventType.CLIENT_INPUT_REQUESTED, limit=1
+                )
+                if input_events:
+                    prompt = input_events[0].data.get("prompt", "")
+                    if prompt:
+                        result["pending_question"] = prompt
             # Current node
             edge_events = bus.get_history(event_type=EventType.EDGE_TRAVERSED, limit=1)
             if edge_events:
