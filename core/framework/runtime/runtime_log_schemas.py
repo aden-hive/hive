@@ -117,7 +117,13 @@ class RunSummaryLog(BaseModel):
     attention_reasons: list[str] = Field(default_factory=list)
     started_at: str = ""  # ISO timestamp
     duration_ms: int = 0
-    execution_quality: str = ""  # "clean"|"degraded"|"failed"
+    execution_quality: str = ""  # "clean"|"degraded"|"failed"|"truncated"
+    # Execution quality details (populated by GraphExecutor):
+    total_retries: int = 0
+    nodes_with_failures: list[str] = Field(default_factory=list)
+    retry_details: dict[str, int] = Field(default_factory=dict)  # {node_id: count}
+    had_partial_failures: bool = False
+    node_visit_counts: dict[str, int] = Field(default_factory=dict)  # {node_id: visits}
     # OTel / trace context (from observability; empty if not set):
     trace_id: str = ""
     execution_id: str = ""

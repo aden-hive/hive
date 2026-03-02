@@ -270,6 +270,12 @@ class RuntimeLogger:
         duration_ms: int,
         node_path: list[str] | None = None,
         execution_quality: str = "",
+        # Execution quality details (from GraphExecutor):
+        total_retries: int = 0,
+        nodes_with_failures: list[str] | None = None,
+        retry_details: dict[str, int] | None = None,
+        had_partial_failures: bool = False,
+        node_visit_counts: dict[str, int] | None = None,
     ) -> None:
         """Read L2 from disk, aggregate into L1, write summary.json.
 
@@ -288,6 +294,13 @@ class RuntimeLogger:
             attention_reasons: list[str] = []
             for nd in node_details:
                 attention_reasons.extend(nd.attention_reasons)
+
+            # Flag truncated executions for operator attention
+            if execution_quality == "truncated":
+                needs_attention = True
+                attention_reasons.append(
+                    "Execution truncated: max_steps exhausted"
+                )
 
             # OTel / trace context for L1 correlation
             ctx = get_trace_context()
@@ -308,6 +321,11 @@ class RuntimeLogger:
                 started_at=self._started_at,
                 duration_ms=duration_ms,
                 execution_quality=execution_quality,
+                total_retries=total_retries,
+                nodes_with_failures=nodes_with_failures or [],
+                retry_details=retry_details or {},
+                had_partial_failures=had_partial_failures,
+                node_visit_counts=node_visit_counts or {},
                 trace_id=trace_id,
                 execution_id=execution_id,
             )
