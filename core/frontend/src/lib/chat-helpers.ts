@@ -46,6 +46,7 @@ export function backendMessageToChatMessage(
     type: msg.role === "user" ? "user" : undefined,
     role: msg.role === "user" ? undefined : "worker",
     thread,
+    createdAt: msg.seq,  // seq preserves backend insertion order
   };
 }
 
@@ -67,6 +68,8 @@ export function sseEventToChatMessage(
   const eid = event.execution_id ?? "";
   const tid = turnId != null ? String(turnId) : "";
   const idKey = eid && tid ? `${eid}-${tid}` : eid || tid || `t-${Date.now()}`;
+  // Use the backend event timestamp for message ordering
+  const createdAt = event.timestamp ? new Date(event.timestamp).getTime() : Date.now();
 
   switch (event.type) {
     case "client_output_delta": {
@@ -86,6 +89,7 @@ export function sseEventToChatMessage(
         timestamp: "",
         role: "worker",
         thread,
+        createdAt,
       };
     }
 
@@ -105,6 +109,7 @@ export function sseEventToChatMessage(
         timestamp: "",
         role: "worker",
         thread,
+        createdAt,
       };
     }
 
@@ -117,6 +122,7 @@ export function sseEventToChatMessage(
         timestamp: "",
         type: "system",
         thread,
+        createdAt,
       };
     }
 
@@ -130,6 +136,7 @@ export function sseEventToChatMessage(
         timestamp: "",
         type: "system",
         thread,
+        createdAt,
       };
     }
 

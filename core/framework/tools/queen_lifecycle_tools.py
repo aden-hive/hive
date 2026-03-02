@@ -158,6 +158,11 @@ def register_queen_lifecycle_tools(
 
     # --- start_worker ---------------------------------------------------------
 
+    # How long to wait for credential validation + MCP resync before
+    # proceeding with trigger anyway.  These are pre-flight checks that
+    # should not block the queen indefinitely.
+    _START_PREFLIGHT_TIMEOUT = 15  # seconds
+
     async def start_worker(task: str) -> str:
         """Start the worker agent with a task description.
 
@@ -169,25 +174,47 @@ def register_queen_lifecycle_tools(
             return json.dumps({"error": "No worker loaded in this session."})
 
         try:
-            # Validate credentials before running — same deferred check as
-            # handle_trigger.  Runs in executor because validate_agent_credentials
-            # makes blocking HTTP health-check calls.
+            # Pre-flight: validate credentials and resync MCP servers.
+            # Both are blocking I/O (HTTP health-checks, subprocess spawns)
+            # so they run in a thread-pool executor.  We cap the total
+            # preflight time so the queen never hangs waiting.
             loop = asyncio.get_running_loop()
-            await loop.run_in_executor(
-                None, lambda: validate_agent_credentials(runtime.graph.nodes)
-            )
 
-            # Resync MCP servers if credentials were added since the worker loaded
-            # (e.g. user connected an OAuth account mid-session via Aden UI).
-            runner = getattr(session, "runner", None)
-            if runner:
+            async def _preflight():
+                cred_error: CredentialError | None = None
                 try:
                     await loop.run_in_executor(
-                        None,
-                        lambda: runner._tool_registry.resync_mcp_servers_if_needed(),
+                        None, lambda: validate_agent_credentials(runtime.graph.nodes)
                     )
+                except CredentialError as e:
+                    cred_error = e
                 except Exception as e:
-                    logger.warning("MCP resync failed: %s", e)
+                    logger.warning("Credential validation failed: %s", e)
+
+                runner = getattr(session, "runner", None)
+                if runner:
+                    try:
+                        await loop.run_in_executor(
+                            None,
+                            lambda: runner._tool_registry.resync_mcp_servers_if_needed(),
+                        )
+                    except Exception as e:
+                        logger.warning("MCP resync failed: %s", e)
+
+                # Re-raise CredentialError after MCP resync so both steps
+                # get a chance to run before we bail.
+                if cred_error is not None:
+                    raise cred_error
+
+            try:
+                await asyncio.wait_for(_preflight(), timeout=_START_PREFLIGHT_TIMEOUT)
+            except TimeoutError:
+                logger.warning(
+                    "start_worker preflight timed out after %ds — proceeding with trigger",
+                    _START_PREFLIGHT_TIMEOUT,
+                )
+            except CredentialError:
+                raise  # handled below
 
             # Resume timers in case they were paused by a previous stop_worker
             runtime.resume_timers()
@@ -303,10 +330,24 @@ def register_queen_lifecycle_tools(
 
     # --- get_worker_status ----------------------------------------------------
 
-    async def get_worker_status() -> str:
-        """Check if the worker is idle, running, or waiting for user input.
+    def _get_event_bus():
+        """Get the session's event bus for querying history."""
+        return getattr(session, "event_bus", None)
 
-        Returns worker identity, execution state, active node, and iteration count.
+    async def get_worker_status(last_n: int = 20) -> str:
+        """Comprehensive worker status: state, execution details, and recent activity.
+
+        Returns everything the queen needs in a single call:
+        - Identity and high-level state (idle / running / waiting_for_input)
+        - Active execution details (elapsed time, current node, iteration)
+        - Running tool calls (started but not yet completed)
+        - Recent completed tool calls (name, success/error)
+        - Node transitions (execution path)
+        - Retries, stalls, and constraint violations
+        - Goal progress and token consumption
+
+        Args:
+            last_n: Number of recent events to include per category (default 20).
         """
         runtime = _get_runtime()
         if runtime is None:
@@ -318,55 +359,235 @@ def register_queen_lifecycle_tools(
         if reg is None:
             return json.dumps({"status": "not_loaded"})
 
-        base = {
+        result: dict[str, Any] = {
             "worker_graph_id": graph_id,
             "worker_goal": getattr(goal, "name", graph_id),
         }
 
+        # --- Execution state ---
         active_execs = []
         for ep_id, stream in reg.streams.items():
             for exec_id in stream.active_execution_ids:
-                active_execs.append(
-                    {
-                        "execution_id": exec_id,
-                        "entry_point": ep_id,
-                    }
-                )
+                exec_info: dict[str, Any] = {
+                    "execution_id": exec_id,
+                    "entry_point": ep_id,
+                }
+                ctx = stream.get_context(exec_id)
+                if ctx:
+                    from datetime import datetime
+
+                    elapsed = (datetime.now() - ctx.started_at).total_seconds()
+                    exec_info["elapsed_seconds"] = round(elapsed, 1)
+                    exec_info["exec_status"] = ctx.status
+                active_execs.append(exec_info)
 
         if not active_execs:
-            return json.dumps(
-                {
-                    **base,
-                    "status": "idle",
-                    "message": "Worker has no active executions.",
-                }
+            result["status"] = "idle"
+            result["message"] = "Worker has no active executions."
+        else:
+            waiting_nodes = []
+            for _ep_id, stream in reg.streams.items():
+                waiting_nodes.extend(stream.get_waiting_nodes())
+
+            result["status"] = "waiting_for_input" if waiting_nodes else "running"
+            result["active_executions"] = active_execs
+            if waiting_nodes:
+                result["waiting_node_id"] = waiting_nodes[0]["node_id"]
+
+        # --- EventBus enrichment ---
+        bus = _get_event_bus()
+        if not bus:
+            return json.dumps(result)
+
+        try:
+            # Current node
+            edge_events = bus.get_history(event_type=EventType.EDGE_TRAVERSED, limit=1)
+            if edge_events:
+                target = edge_events[0].data.get("target_node")
+                if target:
+                    result["current_node"] = target
+
+            # Current iteration
+            iter_events = bus.get_history(event_type=EventType.NODE_LOOP_ITERATION, limit=1)
+            if iter_events:
+                result["current_iteration"] = iter_events[0].data.get("iteration")
+
+            # Running tool calls (started but not yet completed)
+            tool_started = bus.get_history(
+                event_type=EventType.TOOL_CALL_STARTED, limit=last_n * 2
             )
+            tool_completed = bus.get_history(
+                event_type=EventType.TOOL_CALL_COMPLETED, limit=last_n * 2
+            )
+            completed_ids = {
+                evt.data.get("tool_use_id")
+                for evt in tool_completed
+                if evt.data.get("tool_use_id")
+            }
+            running = [
+                evt
+                for evt in tool_started
+                if evt.data.get("tool_use_id")
+                and evt.data.get("tool_use_id") not in completed_ids
+            ]
+            if running:
+                result["running_tools"] = [
+                    {
+                        "tool": evt.data.get("tool_name"),
+                        "node": evt.node_id,
+                        "started_at": evt.timestamp.isoformat(),
+                        "input_preview": str(evt.data.get("tool_input", ""))[:200],
+                    }
+                    for evt in running
+                ]
 
-        # Check if the worker is waiting for user input
-        waiting_nodes = []
-        for _ep_id, stream in reg.streams.items():
-            waiting_nodes.extend(stream.get_waiting_nodes())
+            # Recent completed tool calls
+            if tool_completed:
+                result["recent_tool_calls"] = [
+                    {
+                        "tool": evt.data.get("tool_name"),
+                        "error": bool(evt.data.get("is_error")),
+                        "node": evt.node_id,
+                        "time": evt.timestamp.isoformat(),
+                    }
+                    for evt in tool_completed[:last_n]
+                ]
 
-        status = "waiting_for_input" if waiting_nodes else "running"
-        result = {
-            **base,
-            "status": status,
-            "active_executions": active_execs,
-        }
-        if waiting_nodes:
-            result["waiting_node_id"] = waiting_nodes[0]["node_id"]
-        return json.dumps(result)
+            # Node transitions
+            edges = bus.get_history(event_type=EventType.EDGE_TRAVERSED, limit=last_n)
+            if edges:
+                result["node_transitions"] = [
+                    {
+                        "from": evt.data.get("source_node"),
+                        "to": evt.data.get("target_node"),
+                        "condition": evt.data.get("edge_condition"),
+                        "time": evt.timestamp.isoformat(),
+                    }
+                    for evt in edges
+                ]
+
+            # Retries
+            retries = bus.get_history(event_type=EventType.NODE_RETRY, limit=last_n)
+            if retries:
+                result["retries"] = [
+                    {
+                        "node": evt.node_id,
+                        "retry_count": evt.data.get("retry_count"),
+                        "error": evt.data.get("error", "")[:200],
+                        "time": evt.timestamp.isoformat(),
+                    }
+                    for evt in retries
+                ]
+
+            # Stalls and doom loops
+            stalls = bus.get_history(event_type=EventType.NODE_STALLED, limit=5)
+            doom_loops = bus.get_history(event_type=EventType.NODE_TOOL_DOOM_LOOP, limit=5)
+            issues = []
+            for evt in stalls:
+                issues.append({
+                    "type": "stall",
+                    "node": evt.node_id,
+                    "reason": evt.data.get("reason", "")[:200],
+                    "time": evt.timestamp.isoformat(),
+                })
+            for evt in doom_loops:
+                issues.append({
+                    "type": "tool_doom_loop",
+                    "node": evt.node_id,
+                    "description": evt.data.get("description", "")[:200],
+                    "time": evt.timestamp.isoformat(),
+                })
+            if issues:
+                result["issues"] = issues
+
+            # Constraint violations
+            violations = bus.get_history(event_type=EventType.CONSTRAINT_VIOLATION, limit=5)
+            if violations:
+                result["constraint_violations"] = [
+                    {
+                        "constraint": evt.data.get("constraint_id"),
+                        "description": evt.data.get("description", "")[:200],
+                        "time": evt.timestamp.isoformat(),
+                    }
+                    for evt in violations
+                ]
+
+            # Goal progress
+            try:
+                progress = await runtime.get_goal_progress()
+                if progress:
+                    result["goal_progress"] = progress
+            except Exception:
+                pass
+
+            # Token summary
+            llm_events = bus.get_history(
+                event_type=EventType.LLM_TURN_COMPLETE, limit=200
+            )
+            if llm_events:
+                total_in = sum(
+                    evt.data.get("input_tokens", 0) or 0 for evt in llm_events
+                )
+                total_out = sum(
+                    evt.data.get("output_tokens", 0) or 0 for evt in llm_events
+                )
+                result["token_summary"] = {
+                    "llm_turns": len(llm_events),
+                    "input_tokens": total_in,
+                    "output_tokens": total_out,
+                    "total_tokens": total_in + total_out,
+                }
+
+            # Execution completions/failures
+            exec_completed = bus.get_history(
+                event_type=EventType.EXECUTION_COMPLETED, limit=5
+            )
+            exec_failed = bus.get_history(
+                event_type=EventType.EXECUTION_FAILED, limit=5
+            )
+            if exec_completed or exec_failed:
+                result["execution_outcomes"] = []
+                for evt in exec_completed:
+                    result["execution_outcomes"].append({
+                        "outcome": "completed",
+                        "execution_id": evt.execution_id,
+                        "time": evt.timestamp.isoformat(),
+                    })
+                for evt in exec_failed:
+                    result["execution_outcomes"].append({
+                        "outcome": "failed",
+                        "execution_id": evt.execution_id,
+                        "error": evt.data.get("error", "")[:200],
+                        "time": evt.timestamp.isoformat(),
+                    })
+        except Exception:
+            pass  # Non-critical enrichment
+
+        return json.dumps(result, default=str, ensure_ascii=False)
 
     _status_tool = Tool(
         name="get_worker_status",
         description=(
-            "Check the worker agent's current state: idle (no execution), "
-            "running (actively processing), or waiting_for_input (blocked on "
-            "user response). Returns execution details."
+            "Get comprehensive worker status: state (idle/running/waiting_for_input), "
+            "execution details (elapsed time, current node, iteration), "
+            "recent tool calls, running tools, node transitions, retries, "
+            "stalls, constraint violations, goal progress, and token consumption. "
+            "One call gives the queen a complete picture."
         ),
-        parameters={"type": "object", "properties": {}},
+        parameters={
+            "type": "object",
+            "properties": {
+                "last_n": {
+                    "type": "integer",
+                    "description": "Number of recent events per category (default 20)",
+                },
+            },
+            "required": [],
+        },
     )
-    registry.register("get_worker_status", _status_tool, lambda inputs: get_worker_status())
+    registry.register(
+        "get_worker_status", _status_tool, lambda inputs: get_worker_status(**inputs)
+    )
     tools_registered += 1
 
     # --- inject_worker_message ------------------------------------------------

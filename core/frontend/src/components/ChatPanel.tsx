@@ -12,6 +12,8 @@ export interface ChatMessage {
   role?: "queen" | "worker";
   /** Which worker thread this message belongs to (worker agent name) */
   thread?: string;
+  /** Epoch ms when this message was first created — used for ordering queen/worker interleaving */
+  createdAt?: number;
 }
 
 interface ChatPanelProps {

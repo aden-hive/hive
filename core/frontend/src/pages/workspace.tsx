@@ -415,7 +415,7 @@ export default function Workspace() {
             const errorMsg: ChatMessage = {
               id: makeId(), agent: "System", agentColor: "",
               content: `Failed to trigger run: ${errMsg}`,
-              timestamp: "", type: "system", thread: activeWorker,
+              timestamp: "", type: "system", thread: activeWorker, createdAt: Date.now(),
             };
             return { ...s, messages: [...s.messages, errorMsg] };
           }),
@@ -472,7 +472,7 @@ export default function Workspace() {
           if (prompt) {
             const userMsg: ChatMessage = {
               id: makeId(), agent: "You", agentColor: "",
-              content: prompt, timestamp: "", type: "user", thread: agentType,
+              content: prompt, timestamp: "", type: "user", thread: agentType, createdAt: Date.now(),
             };
             setSessionsByAgent(prev => ({
               ...prev,
@@ -801,7 +801,7 @@ export default function Workspace() {
             const errorMsg: ChatMessage = {
               id: makeId(), agent: "System", agentColor: "",
               content: `Failed to pause: ${errMsg}`,
-              timestamp: "", type: "system", thread: activeWorker,
+              timestamp: "", type: "system", thread: activeWorker, createdAt: Date.now(),
             };
             return { ...s, messages: [...s.messages, errorMsg] };
           }),
@@ -843,20 +843,39 @@ export default function Workspace() {
   // --- SSE event handler ---
   const upsertChatMessage = useCallback(
     (agentType: string, chatMsg: ChatMessage) => {
-      console.log('[UPSERT] agentType:', agentType, 'msgId:', chatMsg.id, 'thread:', chatMsg.thread, 'role:', chatMsg.role, 'content:', chatMsg.content?.slice(0, 40));
       setSessionsByAgent((prev) => {
         const sessions = prev[agentType] || [];
         const activeId = activeSessionRef.current[agentType] || sessions[0]?.id;
-        console.log('[UPSERT-inner] sessions:', sessions.length, 'activeId:', activeId, 'sessionIds:', sessions.map(s => s.id));
         return {
           ...prev,
           [agentType]: sessions.map((s) => {
             if (s.id !== activeId) return s;
             const idx = s.messages.findIndex((m) => m.id === chatMsg.id);
-            const newMessages =
-              idx >= 0
-                ? s.messages.map((m, i) => (i === idx ? chatMsg : m))
-                : [...s.messages, chatMsg];
+            let newMessages: ChatMessage[];
+            if (idx >= 0) {
+              // Update existing message in place, preserve original createdAt
+              newMessages = s.messages.map((m, i) =>
+                i === idx ? { ...chatMsg, createdAt: m.createdAt ?? chatMsg.createdAt } : m,
+              );
+            } else {
+              // Insert at correct chronological position based on createdAt.
+              // This ensures queen and worker messages interleave correctly
+              // even when SSE events arrive out of logical order.
+              const msgTime = chatMsg.createdAt ?? Date.now();
+              let insertIdx = s.messages.length; // default: append
+              for (let i = s.messages.length - 1; i >= 0; i--) {
+                if ((s.messages[i].createdAt ?? 0) <= msgTime) {
+                  insertIdx = i + 1;
+                  break;
+                }
+                insertIdx = i;
+              }
+              newMessages = [
+                ...s.messages.slice(0, insertIdx),
+                chatMsg,
+                ...s.messages.slice(insertIdx),
+              ];
+            }
             return { ...s, messages: newMessages };
           }),
         };
@@ -877,6 +896,8 @@ export default function Workspace() {
       const role = isQueen ? "queen" as const : "worker" as const;
       const ts = fmtLogTs(event.timestamp);
       const currentTurn = turnCounterRef.current[agentType] ?? 0;
+      // Backend event timestamp for correct queen/worker message ordering
+      const eventCreatedAt = event.timestamp ? new Date(event.timestamp).getTime() : Date.now();
 
       // Mark queen as ready on the first queen SSE event
       if (isQueen && !agentStates[agentType]?.queenReady) {
@@ -989,6 +1010,7 @@ export default function Workspace() {
                   type: "worker_input_request",
                   role: "worker",
                   thread: agentType,
+                  createdAt: eventCreatedAt,
                 };
                 console.log('[CLIENT_INPUT_REQ] creating worker_input_request msg:', workerInputMsg.id, 'content:', prompt.slice(0, 80));
                 upsertChatMessage(agentType, workerInputMsg);
@@ -1123,6 +1145,7 @@ export default function Workspace() {
                 type: "tool_status",
                 role,
                 thread: agentType,
+                createdAt: eventCreatedAt,
               });
               return {
                 ...prev,
@@ -1168,6 +1191,7 @@ export default function Workspace() {
                 type: "tool_status",
                 role,
                 thread: agentType,
+                createdAt: eventCreatedAt,
               });
               return {
                 ...prev,
@@ -1336,12 +1360,12 @@ export default function Workspace() {
     if (!allRequiredCredentialsMet(activeSession.credentials)) {
       const userMsg: ChatMessage = {
         id: makeId(), agent: "You", agentColor: "",
-        content: text, timestamp: "", type: "user", thread,
+        content: text, timestamp: "", type: "user", thread, createdAt: Date.now(),
       };
       const promptMsg: ChatMessage = {
         id: makeId(), agent: "Queen Bee", agentColor: "",
         content: "Before we get started, you'll need to configure your credentials. Click the **Credentials** button in the top bar to connect the required integrations for this agent.",
-        timestamp: "", role: "queen" as const, thread,
+        timestamp: "", role: "queen" as const, thread, createdAt: Date.now(),
       };
       setSessionsByAgent(prev => ({
         ...prev,
@@ -1354,7 +1378,7 @@ export default function Workspace() {
 
     const userMsg: ChatMessage = {
       id: makeId(), agent: "You", agentColor: "",
-      content: text, timestamp: "", type: "user", thread,
+      content: text, timestamp: "", type: "user", thread, createdAt: Date.now(),
     };
     setSessionsByAgent(prev => ({
       ...prev,
@@ -1370,7 +1394,7 @@ export default function Workspace() {
         const errorChatMsg: ChatMessage = {
           id: makeId(), agent: "System", agentColor: "",
           content: `Failed to send message: ${errMsg}`,
-          timestamp: "", type: "system", thread,
+          timestamp: "", type: "system", thread, createdAt: Date.now(),
         };
         setSessionsByAgent(prev => ({
           ...prev,
@@ -1384,7 +1408,7 @@ export default function Workspace() {
       const errorMsg: ChatMessage = {
         id: makeId(), agent: "System", agentColor: "",
         content: "Cannot send message: backend is not connected. Please wait for the agent to load.",
-        timestamp: "", type: "system", thread,
+        timestamp: "", type: "system", thread, createdAt: Date.now(),
       };
       setSessionsByAgent(prev => ({
         ...prev,
@@ -1405,7 +1429,7 @@ export default function Workspace() {
     // Add user reply to chat thread
     const userMsg: ChatMessage = {
       id: makeId(), agent: "You", agentColor: "",
-      content: text, timestamp: "", type: "user", thread: activeWorker,
+      content: text, timestamp: "", type: "user", thread: activeWorker, createdAt: Date.now(),
     };
     setSessionsByAgent(prev => ({
       ...prev,
@@ -1422,7 +1446,7 @@ export default function Workspace() {
       const errorChatMsg: ChatMessage = {
         id: makeId(), agent: "System", agentColor: "",
         content: `Failed to send to worker: ${errMsg}`,
-        timestamp: "", type: "system", thread: activeWorker,
+        timestamp: "", type: "system", thread: activeWorker, createdAt: Date.now(),
       };
       setSessionsByAgent(prev => ({
         ...prev,
@@ -1455,7 +1479,7 @@ export default function Workspace() {
       const errorMsg: ChatMessage = {
         id: makeId(), agent: "System", agentColor: "",
         content: `Failed to load agent: ${errMsg}`,
-        timestamp: "", type: "system", thread: activeWorker,
+        timestamp: "", type: "system", thread: activeWorker, createdAt: Date.now(),
       };
       setSessionsByAgent(prev => ({
         ...prev,
