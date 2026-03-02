@@ -470,7 +470,6 @@ class EventLoopNode(NodeProtocol):
         if ctx.node_spec.client_facing and not ctx.event_triggered:
             if stream_id != "queen":
                 tools.append(self._build_ask_user_tool())
-            tools.append(self._build_escalate_tool())
 
         # Add delegate_to_sub_agent tool if:
         # - Node has sub_agents defined
@@ -836,7 +835,7 @@ class EventLoopNode(NodeProtocol):
             mcp_tool_calls = [
                 tc
                 for tc in logged_tool_calls
-                if tc.get("tool_name") not in ("set_output", "ask_user", "escalate_to_coder")
+                if tc.get("tool_name") not in ("set_output", "ask_user")
             ]
             if mcp_tool_calls:
                 fps = self._fingerprint_tool_calls(mcp_tool_calls)
@@ -889,11 +888,13 @@ class EventLoopNode(NodeProtocol):
             # (a) Explicit ask_user() — blocks, then skips judge (6i).
             #     The LLM intentionally asked a question; judging before the
             #     user answers would inject confusing "missing outputs"
-            #     feedback.
-            # (b) Auto-block — a text-only turn (no real tools, no
-            #     set_output) from a client-facing node.  Blocks for the
-            #     user's response, then falls through to judge so models
-            #     stuck in a clarification loop get RETRY feedback.
+            #     feedback.  Works for all client-facing nodes.
+            # (b) Auto-block (queen only) — a text-only turn (no real
+            #     tools, no set_output) from the queen node.  Blocks for
+            #     the user's response, then falls through to judge so
+            #     models stuck in a clarification loop get RETRY feedback.
+            #     Workers are autonomous and don't auto-block — they use
+            #     ask_user() explicitly when they need input.
             #
             # Turns that include tool calls or set_output are *work*, not
             # conversation — they flow through without blocking.
@@ -904,9 +905,16 @@ class EventLoopNode(NodeProtocol):
                 if user_input_requested:
                     _cf_block = True
                     _cf_prompt = ask_user_prompt
-                elif assistant_text and not real_tool_results and not outputs_set:
-                    # Text-only response from client-facing node — this is
-                    # addressed to the user.  Always block for their reply.
+                elif (
+                    stream_id == "queen"
+                    and assistant_text
+                    and not real_tool_results
+                    and not outputs_set
+                ):
+                    # Auto-block: only for the queen (conversational node).
+                    # Workers are autonomous — they block only on explicit
+                    # ask_user().  Text-only turns from workers are narration,
+                    # not questions addressed to the user.
                     _cf_block = True
                     _cf_auto = True
 
@@ -1680,26 +1688,6 @@ class EventLoopNode(NodeProtocol):
                     )
                     results_by_id[tc.tool_use_id] = result
 
-                elif tc.tool_name == "escalate_to_coder":
-                    # --- Framework-level escalation handling ---
-                    if self._event_bus:
-                        await self._event_bus.emit_escalation_requested(
-                            stream_id=stream_id,
-                            node_id=node_id,
-                            reason=tc.tool_input.get("reason", ""),
-                            context=tc.tool_input.get("context", ""),
-                            execution_id=ctx.execution_id,
-                        )
-                    # Block like ask_user — the TUI loads the coder,
-                    # and /back injects a message to unblock us.
-                    user_input_requested = True
-                    result = ToolResult(
-                        tool_use_id=tc.tool_use_id,
-                        content="Escalating to Hive Coder. You will resume when done.",
-                        is_error=False,
-                    )
-                    results_by_id[tc.tool_use_id] = result
-
                 elif tc.tool_name == "delegate_to_sub_agent":
                     # --- Framework-level subagent delegation ---
                     # Queue for parallel execution in Phase 2
@@ -1893,7 +1881,6 @@ class EventLoopNode(NodeProtocol):
                 if tc.tool_name not in (
                     "set_output",
                     "ask_user",
-                    "escalate_to_coder",
                     "delegate_to_sub_agent",
                     "report_to_parent",
                 ):
@@ -2042,46 +2029,6 @@ class EventLoopNode(NodeProtocol):
                     },
                 },
                 "required": [],
-            },
-        )
-
-    def _build_escalate_tool(self) -> Tool:
-        """Build the synthetic escalate_to_coder tool.
-
-        Client-facing nodes call this when the user's request requires
-        capabilities beyond the current agent (code changes, feature
-        expansion, debugging).  The TUI intercepts the event and loads
-        hive_coder in the foreground.
-        """
-        return Tool(
-            name="escalate_to_coder",
-            description=(
-                "Call this tool when the user requests something you "
-                "cannot handle — a code change, feature expansion, bug "
-                "fix, or framework-level modification. This will bring "
-                "in Hive Coder, a coding agent that can read and write "
-                "files. Provide a clear reason and relevant context so "
-                "the coder can pick up where you left off."
-            ),
-            parameters={
-                "type": "object",
-                "properties": {
-                    "reason": {
-                        "type": "string",
-                        "description": (
-                            "Why you are escalating (what the user needs that you cannot do)."
-                        ),
-                    },
-                    "context": {
-                        "type": "string",
-                        "description": (
-                            "Relevant context: what you discussed, "
-                            "what files are involved, what the user "
-                            "wants changed."
-                        ),
-                    },
-                },
-                "required": ["reason"],
             },
         )
 
