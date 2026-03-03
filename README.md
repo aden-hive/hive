@@ -126,6 +126,26 @@ hive tui
 hive run exports/your_agent_name --input '{"key": "value"}'
 ```
 
+## Frontend
+
+The v0.6.0 release introduced a new web workspace for visual agent building and monitoring.
+
+### Running the Frontend
+
+```bash
+cd core/frontend
+npm install
+npm run dev
+```
+
+The frontend provides:
+- Visual agent graph builder
+- Real-time session monitoring
+- Credential management UI
+- Chat interface for agent interaction
+
+For more details, see the [Frontend README](core/frontend/README.md).
+
 ## Coding Agent Support
 
 ### Codex CLI
