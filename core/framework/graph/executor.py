@@ -1624,17 +1624,7 @@ class GraphExecutor:
                 node_tool_names=node_spec.tools,
             )
 
-        # Build goal context, enriched with capability summary for
-        # client-facing nodes so the LLM knows what the full agent can do.
         goal_context = goal.to_prompt_context()
-        if graph and node_spec.client_facing:
-            capability_summary = graph.build_capability_summary(graph.entry_node)
-            if capability_summary:
-                goal_context = (
-                    f"{goal_context}\n\n{capability_summary}"
-                    if goal_context
-                    else capability_summary
-                )
 
         return NodeContext(
             runtime=self.runtime,
