@@ -138,6 +138,8 @@ from .azure_sql import AZURE_SQL_CREDENTIALS
 from .kafka import KAFKA_CREDENTIALS
 from .redshift import REDSHIFT_CREDENTIALS
 from .sap import SAP_CREDENTIALS
+from .salesforce import SALESFORCE_CREDENTIALS
+from .shopify import SHOPIFY_CREDENTIALS
 
 # Merged registry of all credentials
 CREDENTIAL_SPECS = {
@@ -209,6 +211,8 @@ CREDENTIAL_SPECS = {
     **KAFKA_CREDENTIALS,
     **REDSHIFT_CREDENTIALS,
     **SAP_CREDENTIALS,
+    **SALESFORCE_CREDENTIALS,
+    **SHOPIFY_CREDENTIALS,
 }
 
 __all__ = [
@@ -303,4 +307,6 @@ __all__ = [
     "KAFKA_CREDENTIALS",
     "REDSHIFT_CREDENTIALS",
     "SAP_CREDENTIALS",
+    "SALESFORCE_CREDENTIALS",
+    "SHOPIFY_CREDENTIALS",
 ]

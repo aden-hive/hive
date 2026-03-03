@@ -125,6 +125,8 @@ from .azure_sql_tool import register_tools as register_azure_sql
 from .kafka_tool import register_tools as register_kafka
 from .redshift_tool import register_tools as register_redshift
 from .sap_tool import register_tools as register_sap
+from .salesforce_tool import register_tools as register_salesforce
+from .shopify_tool import register_tools as register_shopify
 
 # Web and PDF tools
 from .wikipedia_tool import register_tools as register_wikipedia
@@ -348,6 +350,12 @@ def register_all_tools(
 
     # SAP S/4HANA Cloud (read-only procurement)
     register_sap(mcp, credentials=credentials)
+
+    # Salesforce CRM (Leads, Contacts, Opportunities, SOQL)
+    register_salesforce(mcp, credentials=credentials)
+
+    # Shopify Admin (Orders, Products, Customers)
+    register_shopify(mcp, credentials=credentials)
 
     # Return the list of all registered tool names
     return list(mcp._tool_manager._tools.keys())
