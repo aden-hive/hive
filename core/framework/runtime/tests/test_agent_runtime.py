@@ -898,6 +898,71 @@ class TestCancelAllTasks:
         finally:
             await runtime.stop()
 
+    @pytest.mark.asyncio
+    async def test_cancel_all_tasks_async_cancels_multiple_tasks_across_streams(
+        self, sample_graph, sample_goal, temp_storage
+    ):
+        """Test that cancel_all_tasks_async cancels tasks across multiple streams."""
+        runtime = AgentRuntime(
+            graph=sample_graph,
+            goal=sample_goal,
+            storage_path=temp_storage,
+        )
+
+        # Register two entry points so we get two streams
+        runtime.register_entry_point(
+            EntryPointSpec(
+                id="stream-a",
+                name="Stream A",
+                entry_node="process-webhook",
+                trigger_type="webhook",
+            )
+        )
+        runtime.register_entry_point(
+            EntryPointSpec(
+                id="stream-b",
+                name="Stream B",
+                entry_node="process-webhook",
+                trigger_type="webhook",
+            )
+        )
+        await runtime.start()
+
+        try:
+
+            async def hang_forever():
+                await asyncio.get_event_loop().create_future()
+
+            stream_a = runtime._streams["stream-a"]
+            stream_b = runtime._streams["stream-b"]
+
+            # Two tasks in stream A, one task in stream B
+            task_a1 = asyncio.ensure_future(hang_forever())
+            task_a2 = asyncio.ensure_future(hang_forever())
+            task_b1 = asyncio.ensure_future(hang_forever())
+
+            stream_a._execution_tasks["exec-a1"] = task_a1
+            stream_a._execution_tasks["exec-a2"] = task_a2
+            stream_b._execution_tasks["exec-b1"] = task_b1
+
+            result = await runtime.cancel_all_tasks_async()
+            assert result is True
+
+            # Let CancelledErrors propagate
+            for task in [task_a1, task_a2, task_b1]:
+                try:
+                    await task
+                except asyncio.CancelledError:
+                    pass
+                assert task.cancelled()
+
+            # Clean up
+            del stream_a._execution_tasks["exec-a1"]
+            del stream_a._execution_tasks["exec-a2"]
+            del stream_b._execution_tasks["exec-b1"]
+        finally:
+            await runtime.stop()
+
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
