@@ -35,6 +35,7 @@ from .csv_tool import register_tools as register_csv
 from .databricks_tool import register_tools as register_databricks
 from .discord_tool import register_tools as register_discord
 from .docker_hub_tool import register_tools as register_docker_hub
+from .duckduckgo_tool import register_tools as register_duckduckgo
 from .pipedrive_tool import register_tools as register_pipedrive
 
 # Security scanning tools
@@ -123,6 +124,7 @@ def register_all_tools(
     register_wikipedia(mcp)
     register_arxiv(mcp)
     register_yahoo_finance(mcp)
+    register_duckduckgo(mcp)
 
     # Tools that need credentials (pass credentials if provided)
     # web_search supports multiple providers (Google, Brave) with auto-detection
