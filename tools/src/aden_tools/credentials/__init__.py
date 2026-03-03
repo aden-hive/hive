@@ -94,6 +94,7 @@ from .store_adapter import CredentialStoreAdapter
 from .stripe import STRIPE_CREDENTIALS
 from .microsoft_graph import MICROSOFT_GRAPH_CREDENTIALS
 from .pushover import PUSHOVER_CREDENTIALS
+from .redis import REDIS_CREDENTIALS
 from .supabase import SUPABASE_CREDENTIALS
 from .telegram import TELEGRAM_CREDENTIALS
 from .youtube import YOUTUBE_CREDENTIALS
@@ -125,6 +126,7 @@ CREDENTIAL_SPECS = {
     **POSTGRES_CREDENTIALS,
     **MICROSOFT_GRAPH_CREDENTIALS,
     **PUSHOVER_CREDENTIALS,
+    **REDIS_CREDENTIALS,
     **SUPABASE_CREDENTIALS,
     **YOUTUBE_CREDENTIALS,
 }
@@ -178,6 +180,7 @@ __all__ = [
     "POSTGRES_CREDENTIALS",
     "MICROSOFT_GRAPH_CREDENTIALS",
     "PUSHOVER_CREDENTIALS",
+    "REDIS_CREDENTIALS",
     "SUPABASE_CREDENTIALS",
     "YOUTUBE_CREDENTIALS",
 ]

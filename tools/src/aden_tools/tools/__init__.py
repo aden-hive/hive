@@ -79,6 +79,7 @@ from .vision_tool import register_tools as register_vision
 from .web_scrape_tool import register_tools as register_web_scrape
 from .microsoft_graph_tool import register_tools as register_microsoft_graph
 from .pushover_tool import register_tools as register_pushover
+from .redis_tool import register_tools as register_redis
 from .supabase_tool import register_tools as register_supabase
 from .web_search_tool import register_tools as register_web_search
 
@@ -170,6 +171,9 @@ def register_all_tools(
 
     # Pushover push notifications
     register_pushover(mcp, credentials=credentials)
+
+    # Redis in-memory data store
+    register_redis(mcp, credentials=credentials)
 
     # Supabase (DB, Auth, Edge Functions)
     register_supabase(mcp, credentials=credentials)
