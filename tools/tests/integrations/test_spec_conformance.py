@@ -18,6 +18,7 @@ import pytest
 from fastmcp import FastMCP
 
 from aden_tools.credentials import (
+    ATTIO_CREDENTIALS,
     CREDENTIAL_SPECS,
     EMAIL_CREDENTIALS,
     GITHUB_CREDENTIALS,
@@ -210,6 +211,7 @@ class TestSpecsMergedIntoCredentialSpecs:
         "GITHUB_CREDENTIALS": GITHUB_CREDENTIALS,
         "HUBSPOT_CREDENTIALS": HUBSPOT_CREDENTIALS,
         "SLACK_CREDENTIALS": SLACK_CREDENTIALS,
+        "ATTIO_CREDENTIALS": ATTIO_CREDENTIALS,
     }
 
     @pytest.mark.parametrize("category_name", list(CATEGORY_DICTS.keys()))

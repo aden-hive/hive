@@ -1,4 +1,4 @@
-"""Attio CRM tool package for Aden Tools."""
+"""Attio Tool - CRM integration via Attio V2 REST API."""
 
 from .attio_tool import register_tools
 

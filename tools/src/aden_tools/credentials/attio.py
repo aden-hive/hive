@@ -1,7 +1,7 @@
 """
-Attio CRM credentials.
+Attio tool credentials.
 
-Contains credentials for Attio record, list, and task management.
+Contains credentials for Attio CRM integration.
 """
 
 from .base import CredentialSpec
@@ -10,28 +10,45 @@ ATTIO_CREDENTIALS = {
     "attio": CredentialSpec(
         env_var="ATTIO_API_KEY",
         tools=[
-            "attio_list_objects",
-            "attio_list_records",
-            "attio_search_records",
-            "attio_create_record",
+            "attio_record_list",
+            "attio_record_get",
+            "attio_record_create",
+            "attio_record_update",
+            "attio_record_assert",
             "attio_list_lists",
-            "attio_list_entries",
-            "attio_create_note",
-            "attio_list_tasks",
+            "attio_list_entries_get",
+            "attio_list_entry_create",
+            "attio_list_entry_delete",
+            "attio_task_create",
+            "attio_task_list",
+            "attio_task_get",
+            "attio_task_delete",
+            "attio_members_list",
+            "attio_member_get",
         ],
         required=True,
         startup_required=False,
-        help_url="https://docs.attio.com/rest-api/overview",
-        description="Attio API key for CRM record, list, and task management",
+        help_url="https://attio.com/help/apps/other-apps/generating-an-api-key",
+        description="Attio API key for CRM integration",
+        # Auth method support
+        aden_supported=False,
         direct_api_key_supported=True,
         api_key_instructions="""To get an Attio API key:
-1. Go to https://app.attio.com/settings/developers
-2. Click 'Create new integration'
-3. Configure required scopes (record_permission:read-write, object_configuration:read)
-4. Copy the access token
-5. Set the environment variable:
-   export ATTIO_API_KEY=your-access-token""",
-        health_check_endpoint="https://api.attio.com/v2/self",
+1. Go to Attio Settings > Developers > Access tokens
+2. Click "Generate new token"
+3. Name your token (e.g., "Hive Agent")
+4. Select required scopes:
+   - record_permission:read-write
+   - object_configuration:read
+   - list_entry:read-write
+   - list_configuration:read
+   - task:read-write
+   - user_management:read
+5. Copy the generated token""",
+        # Health check configuration
+        health_check_endpoint="https://api.attio.com/v2/workspace_members",
+        health_check_method="GET",
+        # Credential store mapping
         credential_id="attio",
         credential_key="api_key",
     ),
