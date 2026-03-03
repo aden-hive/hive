@@ -37,7 +37,7 @@
 
 ## Overview
 
-Build autonomous, reliable, self-improving AI agents without hardcoding workflows. Define your goal through conversation with a coding agent, and the framework generates a node graph with dynamically created connection code. When things break, the framework captures failure data, evolves the agent through the coding agent, and redeploys. Built-in human-in-the-loop nodes, credential management, and real-time monitoring give you control without sacrificing adaptability.
+Build autonomous, reliable, self-improving AI agents without hardcoding workflows. Define your goal through conversation with hive coding agent(queen), and the framework generates a node graph with dynamically created connection code. When things break, the framework captures failure data, evolves the agent through the coding agent, and redeploys. Built-in human-in-the-loop nodes, credential management, and real-time monitoring give you control without sacrificing adaptability.
 
 Visit [adenhq.com](https://adenhq.com) for complete documentation, examples, and guides.
 
@@ -81,7 +81,7 @@ Use Hive when you need:
 ### Prerequisites
 
 - Python 3.11+ for agent development
-- Claude Code, Codex CLI, or Cursor for utilizing agent skills
+- An LLM provider that powers the agents
 
 > **Note for Windows Users:** It is strongly recommended to use **WSL (Windows Subsystem for Linux)** or **Git Bash** to run this framework. Some core automation scripts may not execute correctly in standard Command Prompt or PowerShell.
 
@@ -202,6 +202,8 @@ flowchart LR
 ## Run Agents
 
 Now you can run an agent by selectiing the agent (either an existing agent or example agent). You can click the Run button on the top left, or talk to the queen agent and it can run the agent for you.
+
+<img width="2500" height="1214" alt="Image" src="https://github.com/user-attachments/assets/71c38206-2ad5-49aa-bde8-6698d0bc55f5" />
 
 ## Documentation
 
