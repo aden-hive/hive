@@ -1,12 +1,9 @@
 {
-  "mcpServers": {
-    "slack": {
-      "command": "uv",
-      "args": ["run", "python", "tools/slack_mcp_server.py"],
-      "description": "Slack integration: post messages, list channels",
-      "env": {
-        "SLACK_BOT_TOKEN": "${SLACK_BOT_TOKEN}"
-      }
-    }
+  "hive-tools": {
+    "transport": "stdio",
+    "command": "uv",
+    "args": ["run", "python", "mcp_server.py", "--stdio"],
+    "cwd": "../../../tools",
+    "description": "Hive tools MCP server providing save_data, serve_file_to_user, and slack_post_message"
   }
 }
