@@ -50,7 +50,7 @@ Hive is designed for developers and teams who want to build **production-grade A
 Hive is a good fit if you:
 
 - Want AI agents that **execute real business processes**, not demos
-- Prefer **goal-driven development** over hardcoded workflows
+- Need **fast or high volume agent execution** over open workflow
 - Need **self-healing and adaptive agents** that improve over time
 - Require **human-in-the-loop control**, observability, and cost limits
 - Plan to run agents in **production environments**
@@ -123,6 +123,12 @@ Type the agent you want to build in the home input box
 ### Use Template Agents
 
 Click "Try a sample agent" and check the templates. You can run a templates directly or choose to build your version on top of the existing template.
+
+### Run Agents
+
+Now you can run an agent by selectiing the agent (either an existing agent or example agent). You can click the Run button on the top left, or talk to the queen agent and it can run the agent for you.
+
+<img width="2500" height="1214" alt="Image" src="https://github.com/user-attachments/assets/71c38206-2ad5-49aa-bde8-6698d0bc55f5" />
 
 ## Features
 
@@ -198,12 +204,6 @@ flowchart LR
 3. **[Workers Execute](docs/key_concepts/worker_agent.md)** → SDK-wrapped nodes run with full observability and tool access
 4. **Control Plane Monitors** → Real-time metrics, budget enforcement, policy management
 5. **[Adaptiveness](docs/key_concepts/evolution.md)** → On failure, the system evolves the graph and redeploys automatically
-
-## Run Agents
-
-Now you can run an agent by selectiing the agent (either an existing agent or example agent). You can click the Run button on the top left, or talk to the queen agent and it can run the agent for you.
-
-<img width="2500" height="1214" alt="Image" src="https://github.com/user-attachments/assets/71c38206-2ad5-49aa-bde8-6698d0bc55f5" />
 
 ## Documentation
 
