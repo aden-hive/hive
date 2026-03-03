@@ -110,57 +110,19 @@ This sets up:
 - **LLM provider** - Interactive default model configuration
 - All required Python dependencies with `uv`
 
+- At last, it will initiate the open hive interface in your browser
+
+<img width="2500" height="1214" alt="home-screen" src="https://github.com/user-attachments/assets/134d897f-5e75-4874-b00b-e0505f6b45c4" />
+
 ### Build Your First Agent
 
-```bash
-# Build an agent using Claude Code
-claude> /hive
+Type the agent you want to build in the home input box
 
-# Test your agent
-claude> /hive-debugger
+<img width="2500" height="1214" alt="Image" src="https://github.com/user-attachments/assets/1ce19141-a78b-46f5-8d64-dbf987e048f4" />
 
-# Run directly
-hive run exports/your_agent_name --input '{"key": "value"}'
-```
+### Use Template Agents
 
-## Coding Agent Support
-
-### Codex CLI
-
-Hive includes native support for [OpenAI Codex CLI](https://github.com/openai/codex) (v0.101.0+).
-
-1. **Config:** `.codex/config.toml` with `agent-builder` MCP server (tracked in git)
-2. **Skills:** `.agents/skills/` symlinks to Hive skills (tracked in git)
-3. **Launch:** Run `codex` in the repo root, then type `use hive`
-
-Example:
-
-```
-codex> use hive
-```
-
-### Opencode
-
-Hive includes native support for [Opencode](https://github.com/opencode-ai/opencode).
-
-1. **Setup:** Run the quickstart script
-2. **Launch:** Open Opencode in the project root.
-3. **Activate:** Type `/hive` in the chat to switch to the Hive Agent.
-4. **Verify:** Ask the agent _"List your tools"_ to confirm the connection.
-
-The agent has access to all Hive skills and can scaffold agents, add tools, and debug workflows directly from the chat.
-
-**[📖 Complete Setup Guide](docs/environment-setup.md)** - Detailed instructions for agent development
-
-### Antigravity IDE Support
-
-Skills and MCP servers are also available in [Antigravity IDE](https://antigravity.google/) (Google's AI-powered IDE). **Easiest:** open a terminal in the hive repo folder and run (use `./` — the script is inside the repo):
-
-```bash
-./scripts/setup-antigravity-mcp.sh
-```
-
-**Important:** Always restart/refresh Antigravity IDE after running the setup script—MCP servers only load on startup. After restart, **agent-builder** and **tools** MCP servers should connect. Skills are under `.agent/skills/` (symlinks to `.claude/skills/`). See [docs/antigravity-setup.md](docs/antigravity-setup.md) for manual setup and troubleshooting.
+Click "Try a sample agent" and check the templates. You can run a templates directly or choose to build your version on top of the existing template.
 
 ## Features
 
@@ -422,7 +384,7 @@ This project is licensed under the Apache License 2.0 - see the [LICENSE](LICENS
 
 **Q: What LLM providers does Hive support?**
 
-Hive supports 100+ LLM providers through LiteLLM integration, including OpenAI (GPT-4, GPT-4o), Anthropic (Claude models), Google Gemini, DeepSeek, Mistral, Groq, and many more. Simply set the appropriate API key environment variable and specify the model name.
+Hive supports 100+ LLM providers through LiteLLM integration, including OpenAI (GPT-4, GPT-4o), Anthropic (Claude models), Google Gemini, DeepSeek, Mistral, Groq, and many more. Simply set the appropriate API key environment variable and specify the model name. We recommend using Claude, GLM and Gemini as they have the best performance.
 
 **Q: Can I use Hive with local AI models like Ollama?**
 
@@ -463,14 +425,6 @@ Visit [docs.adenhq.com](https://docs.adenhq.com/) for complete guides, API refer
 **Q: How can I contribute to Aden?**
 
 Contributions are welcome! Fork the repository, create your feature branch, implement your changes, and submit a pull request. See [CONTRIBUTING.md](CONTRIBUTING.md) for detailed guidelines.
-
-**Q: When will my team start seeing results from Aden's adaptive agents?**
-
-Aden's adaptation loop begins working from the first execution. When an agent fails, the framework captures the failure data, helping developers evolve the agent graph through the coding agent. How quickly this translates to measurable results depends on the complexity of your use case, the quality of your goal definitions, and the volume of executions generating feedback.
-
-**Q: How does Hive compare to other agent frameworks?**
-
-Hive focuses on generating agents that run real business processes, rather than generic agents. This vision emphasizes outcome-driven design, adaptability, and an easy-to-use set of tools and integrations.
 
 ---
 
