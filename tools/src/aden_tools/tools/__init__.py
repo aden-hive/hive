@@ -32,6 +32,7 @@ from .csv_tool import register_tools as register_csv
 from .databricks_tool import register_tools as register_databricks
 from .discord_tool import register_tools as register_discord
 from .docker_hub_tool import register_tools as register_docker_hub
+from .pipedrive_tool import register_tools as register_pipedrive
 
 # Security scanning tools
 from .dns_security_scanner import register_tools as register_dns_security_scanner
@@ -192,6 +193,9 @@ def register_all_tools(
 
     # Docker Hub repository & image management
     register_docker_hub(mcp, credentials=credentials)
+
+    # Pipedrive CRM (Deals, Contacts, Organizations, Activities)
+    register_pipedrive(mcp, credentials=credentials)
 
     # Return the list of all registered tool names
     return list(mcp._tool_manager._tools.keys())
