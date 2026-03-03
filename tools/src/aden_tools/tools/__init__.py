@@ -88,6 +88,7 @@ from .redis_tool import register_tools as register_redis
 from .supabase_tool import register_tools as register_supabase
 from .vercel_tool import register_tools as register_vercel
 from .web_search_tool import register_tools as register_web_search
+from .zoho_crm_tool import register_tools as register_zoho_crm
 
 # Web and PDF tools
 from .wikipedia_tool import register_tools as register_wikipedia
@@ -204,6 +205,9 @@ def register_all_tools(
 
     # Apify web scraping & automation
     register_apify(mcp, credentials=credentials)
+
+    # Zoho CRM (Leads, Contacts, Deals, Accounts)
+    register_zoho_crm(mcp, credentials=credentials)
 
     # Return the list of all registered tool names
     return list(mcp._tool_manager._tools.keys())

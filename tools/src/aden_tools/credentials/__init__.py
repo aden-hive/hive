@@ -104,6 +104,7 @@ from .supabase import SUPABASE_CREDENTIALS
 from .telegram import TELEGRAM_CREDENTIALS
 from .vercel import VERCEL_CREDENTIALS
 from .youtube import YOUTUBE_CREDENTIALS
+from .zoho_crm import ZOHO_CRM_CREDENTIALS
 
 # Merged registry of all credentials
 CREDENTIAL_SPECS = {
@@ -141,6 +142,7 @@ CREDENTIAL_SPECS = {
     **SUPABASE_CREDENTIALS,
     **VERCEL_CREDENTIALS,
     **YOUTUBE_CREDENTIALS,
+    **ZOHO_CRM_CREDENTIALS,
 }
 
 __all__ = [
@@ -201,4 +203,5 @@ __all__ = [
     "SUPABASE_CREDENTIALS",
     "VERCEL_CREDENTIALS",
     "YOUTUBE_CREDENTIALS",
+    "ZOHO_CRM_CREDENTIALS",
 ]
