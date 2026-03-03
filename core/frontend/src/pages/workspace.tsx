@@ -605,7 +605,11 @@ export default function Workspace() {
                   const result = await sessionsApi.get(existingSessionId);
                   if (result.loading) continue;
                   return result as LiveSession;
-                } catch {
+                } catch (pollErr) {
+                  // 404 = agent failed to load and was cleaned up — stop immediately
+                  if (pollErr instanceof ApiError && pollErr.status === 404) {
+                    throw new Error("Agent failed to load");
+                  }
                   if (i === maxAttempts - 1) throw loadErr;
                 }
               }
