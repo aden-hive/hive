@@ -119,7 +119,7 @@ class OutputCleaner:
                         api_key=api_key,
                         model=config.fast_model,
                     )
-                    logger.info(f"✓ Initialized OutputCleaner with {config.fast_model}")
+                    logger.info("✓ Initialized OutputCleaner with %s", config.fast_model)
                 else:
                     logger.warning("⚠ CEREBRAS_API_KEY not found, output cleaning will be disabled")
                     self.llm = None
@@ -196,8 +196,11 @@ class OutputCleaner:
 
         if not is_valid and self.config.log_cleanings:
             logger.warning(
-                f"⚠ Output validation failed for {source_node_id} → {target_node_spec.id}: "
-                f"{len(errors)} error(s), {len(warnings)} warning(s)"
+                "⚠ Output validation failed for %s → %s: %d error(s), %d warning(s)",
+                source_node_id,
+                target_node_spec.id,
+                len(errors),
+                len(warnings),
             )
 
         return ValidationResult(
@@ -285,7 +288,9 @@ Return ONLY valid JSON matching the expected schema. No explanations, no markdow
         try:
             if self.config.log_cleanings:
                 logger.info(
-                    f"🧹 Cleaning output from '{source_node_id}' using {self.config.fast_model}"
+                    "🧹 Cleaning output from '%s' using %s",
+                    source_node_id,
+                    self.config.fast_model,
                 )
 
             response = await self.llm.acomplete(
