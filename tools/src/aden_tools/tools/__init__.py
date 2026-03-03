@@ -127,6 +127,8 @@ from .redshift_tool import register_tools as register_redshift
 from .sap_tool import register_tools as register_sap
 from .salesforce_tool import register_tools as register_salesforce
 from .shopify_tool import register_tools as register_shopify
+from .zoom_tool import register_tools as register_zoom
+from .n8n_tool import register_tools as register_n8n
 
 # Web and PDF tools
 from .wikipedia_tool import register_tools as register_wikipedia
@@ -356,6 +358,12 @@ def register_all_tools(
 
     # Shopify Admin (Orders, Products, Customers)
     register_shopify(mcp, credentials=credentials)
+
+    # Zoom meeting management
+    register_zoom(mcp, credentials=credentials)
+
+    # n8n workflow automation
+    register_n8n(mcp, credentials=credentials)
 
     # Return the list of all registered tool names
     return list(mcp._tool_manager._tools.keys())
