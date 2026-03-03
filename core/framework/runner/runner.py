@@ -13,7 +13,6 @@ from framework.config import get_hive_config, get_preferred_model
 from framework.credentials.validation import (
     ensure_credential_key_env as _ensure_credential_key_env,
 )
-from framework.runner.preload_validation import run_preload_validation
 from framework.graph import Goal
 from framework.graph.edge import (
     DEFAULT_MAX_TOKENS,
@@ -25,6 +24,7 @@ from framework.graph.edge import (
 from framework.graph.executor import ExecutionResult
 from framework.graph.node import NodeSpec
 from framework.llm.provider import LLMProvider, Tool
+from framework.runner.preload_validation import run_preload_validation
 from framework.runner.tool_registry import ToolRegistry
 from framework.runtime.agent_runtime import AgentRuntime, AgentRuntimeConfig, create_agent_runtime
 from framework.runtime.execution_stream import EntryPointSpec
