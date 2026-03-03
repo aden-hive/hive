@@ -121,6 +121,8 @@ from .terraform_tool import register_tools as register_terraform
 from .lusha_tool import register_tools as register_lusha
 from .powerbi_tool import register_tools as register_powerbi
 from .snowflake_tool import register_tools as register_snowflake
+from .azure_sql_tool import register_tools as register_azure_sql
+from .kafka_tool import register_tools as register_kafka
 
 # Web and PDF tools
 from .wikipedia_tool import register_tools as register_wikipedia
@@ -332,6 +334,12 @@ def register_all_tools(
 
     # Snowflake SQL queries
     register_snowflake(mcp, credentials=credentials)
+
+    # Azure SQL Database management
+    register_azure_sql(mcp, credentials=credentials)
+
+    # Apache Kafka (Confluent REST Proxy)
+    register_kafka(mcp, credentials=credentials)
 
     # Return the list of all registered tool names
     return list(mcp._tool_manager._tools.keys())

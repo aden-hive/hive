@@ -134,6 +134,8 @@ from .terraform import TERRAFORM_CREDENTIALS
 from .lusha import LUSHA_CREDENTIALS
 from .powerbi import POWERBI_CREDENTIALS
 from .snowflake import SNOWFLAKE_CREDENTIALS
+from .azure_sql import AZURE_SQL_CREDENTIALS
+from .kafka import KAFKA_CREDENTIALS
 
 # Merged registry of all credentials
 CREDENTIAL_SPECS = {
@@ -201,6 +203,8 @@ CREDENTIAL_SPECS = {
     **LUSHA_CREDENTIALS,
     **POWERBI_CREDENTIALS,
     **SNOWFLAKE_CREDENTIALS,
+    **AZURE_SQL_CREDENTIALS,
+    **KAFKA_CREDENTIALS,
 }
 
 __all__ = [
@@ -291,4 +295,6 @@ __all__ = [
     "LUSHA_CREDENTIALS",
     "POWERBI_CREDENTIALS",
     "SNOWFLAKE_CREDENTIALS",
+    "AZURE_SQL_CREDENTIALS",
+    "KAFKA_CREDENTIALS",
 ]
