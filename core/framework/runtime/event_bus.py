@@ -130,6 +130,9 @@ class EventType(StrEnum):
     WORKER_ESCALATION_TICKET = "worker_escalation_ticket"
     QUEEN_INTERVENTION_REQUESTED = "queen_intervention_requested"
 
+    # Execution resurrection (auto-restart on non-fatal failure)
+    EXECUTION_RESURRECTED = "execution_resurrected"
+
     # Worker lifecycle (session manager → frontend)
     WORKER_LOADED = "worker_loaded"
     CREDENTIALS_REQUIRED = "credentials_required"
