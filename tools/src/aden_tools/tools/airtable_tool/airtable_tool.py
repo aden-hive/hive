@@ -76,7 +76,7 @@ def register_tools(mcp: FastMCP, credentials: Any = None) -> None:
         """
         hdrs = _get_headers()
         if hdrs is None:
-            return {"error": "AIRTABLE_PAT is required"}
+            return {"error": "AIRTABLE_PAT is required", "help": "Set AIRTABLE_PAT env var with your Airtable personal access token"}
         if not base_id or not table_name:
             return {"error": "base_id and table_name are required"}
 
@@ -127,7 +127,7 @@ def register_tools(mcp: FastMCP, credentials: Any = None) -> None:
         """
         hdrs = _get_headers()
         if hdrs is None:
-            return {"error": "AIRTABLE_PAT is required"}
+            return {"error": "AIRTABLE_PAT is required", "help": "Set AIRTABLE_PAT env var with your Airtable personal access token"}
         if not base_id or not table_name or not record_id:
             return {"error": "base_id, table_name, and record_id are required"}
 
@@ -158,7 +158,7 @@ def register_tools(mcp: FastMCP, credentials: Any = None) -> None:
         """
         hdrs = _get_headers()
         if hdrs is None:
-            return {"error": "AIRTABLE_PAT is required"}
+            return {"error": "AIRTABLE_PAT is required", "help": "Set AIRTABLE_PAT env var with your Airtable personal access token"}
         if not base_id or not table_name or not records:
             return {"error": "base_id, table_name, and records are required"}
 
@@ -211,7 +211,7 @@ def register_tools(mcp: FastMCP, credentials: Any = None) -> None:
         """
         hdrs = _get_headers()
         if hdrs is None:
-            return {"error": "AIRTABLE_PAT is required"}
+            return {"error": "AIRTABLE_PAT is required", "help": "Set AIRTABLE_PAT env var with your Airtable personal access token"}
         if not base_id or not table_name or not records:
             return {"error": "base_id, table_name, and records are required"}
 
@@ -250,7 +250,7 @@ def register_tools(mcp: FastMCP, credentials: Any = None) -> None:
         """List all Airtable bases accessible with the current token."""
         hdrs = _get_headers()
         if hdrs is None:
-            return {"error": "AIRTABLE_PAT is required"}
+            return {"error": "AIRTABLE_PAT is required", "help": "Set AIRTABLE_PAT env var with your Airtable personal access token"}
 
         url = f"{BASE_URL}/meta/bases"
         data = _get(url, hdrs)
@@ -281,7 +281,7 @@ def register_tools(mcp: FastMCP, credentials: Any = None) -> None:
         """
         hdrs = _get_headers()
         if hdrs is None:
-            return {"error": "AIRTABLE_PAT is required"}
+            return {"error": "AIRTABLE_PAT is required", "help": "Set AIRTABLE_PAT env var with your Airtable personal access token"}
         if not base_id:
             return {"error": "base_id is required"}
 
