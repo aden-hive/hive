@@ -3,6 +3,7 @@
 import argparse
 import asyncio
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -400,6 +401,19 @@ def register_commands(subparsers: argparse._SubParsersAction) -> None:
         help="Open dashboard in browser after server starts",
     )
     serve_parser.set_defaults(func=cmd_serve)
+
+    # doctor command (environment health check)
+    doctor_parser = subparsers.add_parser(
+        "doctor",
+        help="Check environment setup and diagnose issues",
+        description="Run diagnostics on your Hive installation and report missing dependencies or misconfigurations.",
+    )
+    doctor_parser.add_argument(
+        "--json",
+        action="store_true",
+        help="Output results as JSON",
+    )
+    doctor_parser.set_defaults(func=cmd_doctor)
 
 
 def _load_resume_state(
@@ -2074,3 +2088,180 @@ def cmd_serve(args: argparse.Namespace) -> int:
         print("\nServer stopped.")
 
     return 0
+
+
+def cmd_doctor(args: argparse.Namespace) -> int:
+    """Run environment diagnostics and report issues."""
+    import shutil
+    import subprocess
+
+    checks: list[dict] = []
+
+    def _check(name: str, passed: bool, fix: str = "", warn: bool = False):
+        status = "ok" if passed else ("warn" if warn else "fail")
+        entry = {"name": name, "status": status}
+        if fix and not passed:
+            entry["fix"] = fix
+        checks.append(entry)
+
+    # 1. Python version
+    v = sys.version_info
+    py_ok = v >= (3, 11)
+    _check(
+        f"Python {v.major}.{v.minor}.{v.micro} (>=3.11 required)",
+        py_ok,
+        fix="Install Python 3.11+ from https://python.org",
+    )
+
+    # 2. uv installed
+    uv_path = shutil.which("uv")
+    _check(
+        "uv package manager installed",
+        uv_path is not None,
+        fix="Install uv: https://docs.astral.sh/uv/getting-started/installation/",
+    )
+
+    # 3. Core framework importable
+    try:
+        import framework  # noqa: F401
+
+        _check("Core framework installed", True)
+    except ImportError:
+        _check(
+            "Core framework installed",
+            False,
+            fix="Run: uv pip install -e core/",
+        )
+
+    # 4. Tools package importable
+    try:
+        import aden_tools  # noqa: F401
+
+        _check("Tools package installed", True)
+    except ImportError:
+        _check(
+            "Tools package installed",
+            False,
+            fix="Run: uv pip install -e tools/",
+        )
+
+    # 5. Playwright available
+    try:
+        import playwright  # noqa: F401
+
+        _check("Playwright installed", True)
+    except ImportError:
+        _check(
+            "Playwright installed",
+            False,
+            fix="Run: uv pip install playwright && playwright install chromium",
+            warn=True,
+        )
+
+    # 6. API keys
+    api_keys = {
+        "ANTHROPIC_API_KEY": "https://console.anthropic.com/settings/keys",
+        "OPENAI_API_KEY": "https://platform.openai.com/api-keys",
+        "GEMINI_API_KEY": "https://aistudio.google.com/apikey",
+    }
+    any_key = False
+    for key, url in api_keys.items():
+        val = os.environ.get(key)
+        if val:
+            any_key = True
+            _check(f"{key} configured", True)
+        else:
+            _check(f"{key} configured", False, fix=f"Get key: {url}", warn=True)
+
+    if not any_key:
+        _check(
+            "At least one LLM API key set",
+            False,
+            fix="Set ANTHROPIC_API_KEY, OPENAI_API_KEY, or GEMINI_API_KEY",
+        )
+
+    # 7. Frontend built
+    framework_dir = Path(__file__).resolve().parent
+    project_root = framework_dir.parent.parent
+    dist_dir = project_root / "core" / "frontend" / "dist"
+    _check(
+        "Frontend built (dashboard available)",
+        dist_dir.is_dir() and any(dist_dir.iterdir()) if dist_dir.is_dir() else False,
+        fix="Run: cd core/frontend && npm install && npm run build",
+        warn=True,
+    )
+
+    # 8. MCP config exists
+    mcp_config = project_root / "core" / ".mcp.json"
+    if not mcp_config.exists():
+        mcp_config = project_root / ".mcp.json"
+    _check(
+        "MCP configuration found",
+        mcp_config.exists(),
+        fix="Run: python core/setup_mcp.py",
+        warn=True,
+    )
+
+    # 9. Agents directory
+    exports_dir = project_root / "exports"
+    has_agents = False
+    if exports_dir.is_dir():
+        has_agents = any(
+            (d / "agent.json").exists() or (d / "agent.py").exists()
+            for d in exports_dir.iterdir()
+            if d.is_dir()
+        )
+    _check(
+        "Agents found in exports/",
+        has_agents,
+        fix="Run 'hive tui' to create your first agent",
+        warn=True,
+    )
+
+    # 10. Git available
+    git_path = shutil.which("git")
+    _check(
+        "Git installed",
+        git_path is not None,
+        fix="Install Git: https://git-scm.com/downloads",
+        warn=True,
+    )
+
+    # --- Output ---
+    if getattr(args, "json", False):
+        print(json.dumps(checks, indent=2))
+    else:
+        print()
+        print("  Hive Environment Check")
+        print("  " + "-" * 40)
+        for c in checks:
+            if c["status"] == "ok":
+                icon = "\u2713"  # checkmark
+                color = "green"
+            elif c["status"] == "warn":
+                icon = "!"
+                color = "yellow"
+            else:
+                icon = "X"
+                color = "red"
+
+            # Use simple print with prefix
+            prefix = f"  {icon} "
+            print(f"  {prefix}{c['name']}")
+            if "fix" in c:
+                print(f"       Fix: {c['fix']}")
+
+        passed = sum(1 for c in checks if c["status"] == "ok")
+        warns = sum(1 for c in checks if c["status"] == "warn")
+        fails = sum(1 for c in checks if c["status"] == "fail")
+        total = len(checks)
+        print()
+        print(f"  Summary: {passed}/{total} passed", end="")
+        if warns:
+            print(f", {warns} warning(s)", end="")
+        if fails:
+            print(f", {fails} error(s)", end="")
+        print()
+        print()
+
+    return 1 if any(c["status"] == "fail" for c in checks) else 0
