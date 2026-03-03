@@ -662,8 +662,7 @@ class ExecutionStream:
                     ):
                         _resurrection_count += 1
                         logger.warning(
-                            "Execution %s failed (%s) — resurrecting (%d/%d) "
-                            "from node '%s'",
+                            "Execution %s failed (%s) — resurrecting (%d/%d) from node '%s'",
                             execution_id,
                             (result.error or "unknown")[:200],
                             _resurrection_count,
@@ -684,9 +683,7 @@ class ExecutionStream:
                                         "attempt": _resurrection_count,
                                         "max_resurrections": max_resurrections,
                                         "error": (result.error or "")[:500],
-                                        "resume_from": result.session_state.get(
-                                            "resume_from"
-                                        ),
+                                        "resume_from": result.session_state.get("resume_from"),
                                     },
                                 )
                             )

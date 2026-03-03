@@ -798,8 +798,7 @@ class EventLoopNode(NodeProtocol):
                     # result.  Inject a nudge to break the cycle.
                     _consecutive_empty_turns += 1
                     logger.warning(
-                        "[%s] iter=%d: empty response with missing outputs %s "
-                        "(consecutive=%d)",
+                        "[%s] iter=%d: empty response with missing outputs %s (consecutive=%d)",
                         node_id,
                         iteration,
                         missing,
