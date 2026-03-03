@@ -30,6 +30,7 @@ from .attio_tool import register_tools as register_attio
 from .bigquery_tool import register_tools as register_bigquery
 from .brevo_tool import register_tools as register_brevo
 from .calcom_tool import register_tools as register_calcom
+from .calendly_tool import register_tools as register_calendly
 from .confluence_tool import register_tools as register_confluence
 from .calendar_tool import register_tools as register_calendar
 from .csv_tool import register_tools as register_csv
@@ -106,6 +107,7 @@ from .greenhouse_tool import register_tools as register_greenhouse
 from .jira_tool import register_tools as register_jira
 from .mongodb_tool import register_tools as register_mongodb
 from .notion_tool import register_tools as register_notion
+from .pagerduty_tool import register_tools as register_pagerduty
 from .reddit_tool import register_tools as register_reddit
 from .twilio_tool import register_tools as register_twilio
 from .youtube_transcript_tool import register_tools as register_youtube_transcript
@@ -292,6 +294,12 @@ def register_all_tools(
 
     # Airtable records and bases
     register_airtable(mcp, credentials=credentials)
+
+    # PagerDuty incident management
+    register_pagerduty(mcp, credentials=credentials)
+
+    # Calendly scheduling events
+    register_calendly(mcp, credentials=credentials)
 
     # Return the list of all registered tool names
     return list(mcp._tool_manager._tools.keys())
