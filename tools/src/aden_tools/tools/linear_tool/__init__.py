@@ -1,4 +1,4 @@
-"""Linear issue tracker tool package for Aden Tools."""
+"""Linear Tool - Project management integration via Linear GraphQL API."""
 
 from .linear_tool import register_tools
 
