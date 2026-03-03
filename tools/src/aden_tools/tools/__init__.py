@@ -111,7 +111,9 @@ from .notion_tool import register_tools as register_notion
 from .pagerduty_tool import register_tools as register_pagerduty
 from .quickbooks_tool import register_tools as register_quickbooks
 from .reddit_tool import register_tools as register_reddit
+from .tines_tool import register_tools as register_tines
 from .twilio_tool import register_tools as register_twilio
+from .twitter_tool import register_tools as register_twitter
 from .youtube_transcript_tool import register_tools as register_youtube_transcript
 from .zendesk_tool import register_tools as register_zendesk
 from .zoho_crm_tool import register_tools as register_zoho_crm
@@ -308,6 +310,12 @@ def register_all_tools(
 
     # QuickBooks Online accounting
     register_quickbooks(mcp, credentials=credentials)
+
+    # Twitter/X social media
+    register_twitter(mcp, credentials=credentials)
+
+    # Tines security automation
+    register_tines(mcp, credentials=credentials)
 
     # Return the list of all registered tool names
     return list(mcp._tool_manager._tools.keys())
