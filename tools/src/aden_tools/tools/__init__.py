@@ -66,6 +66,7 @@ from .google_maps_tool import register_tools as register_google_maps
 from .google_search_console_tool import register_tools as register_google_search_console
 from .http_headers_scanner import register_tools as register_http_headers_scanner
 from .hubspot_tool import register_tools as register_hubspot
+from .linear_tool import register_tools as register_linear
 from .intercom_tool import register_tools as register_intercom
 from .news_tool import register_tools as register_news
 from .pdf_read_tool import register_tools as register_pdf_read
@@ -218,6 +219,9 @@ def register_all_tools(
 
     # Asana task & project management
     register_asana(mcp, credentials=credentials)
+
+    # Linear issue tracking
+    register_linear(mcp, credentials=credentials)
 
     # Return the list of all registered tool names
     return list(mcp._tool_manager._tools.keys())
