@@ -143,6 +143,7 @@ from .shopify import SHOPIFY_CREDENTIALS
 from .zoom import ZOOM_CREDENTIALS
 from .n8n import N8N_CREDENTIALS
 from .langfuse import LANGFUSE_CREDENTIALS
+from .obsidian import OBSIDIAN_CREDENTIALS
 
 # Merged registry of all credentials
 CREDENTIAL_SPECS = {
@@ -219,6 +220,7 @@ CREDENTIAL_SPECS = {
     **ZOOM_CREDENTIALS,
     **N8N_CREDENTIALS,
     **LANGFUSE_CREDENTIALS,
+    **OBSIDIAN_CREDENTIALS,
 }
 
 __all__ = [
@@ -318,4 +320,5 @@ __all__ = [
     "ZOOM_CREDENTIALS",
     "N8N_CREDENTIALS",
     "LANGFUSE_CREDENTIALS",
+    "OBSIDIAN_CREDENTIALS",
 ]

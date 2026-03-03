@@ -130,6 +130,7 @@ from .shopify_tool import register_tools as register_shopify
 from .zoom_tool import register_tools as register_zoom
 from .n8n_tool import register_tools as register_n8n
 from .langfuse_tool import register_tools as register_langfuse
+from .obsidian_tool import register_tools as register_obsidian
 
 # Web and PDF tools
 from .wikipedia_tool import register_tools as register_wikipedia
@@ -368,6 +369,9 @@ def register_all_tools(
 
     # Langfuse LLM observability
     register_langfuse(mcp, credentials=credentials)
+
+    # Obsidian knowledge management
+    register_obsidian(mcp, credentials=credentials)
 
     # Return the list of all registered tool names
     return list(mcp._tool_manager._tools.keys())
