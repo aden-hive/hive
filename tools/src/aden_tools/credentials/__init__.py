@@ -55,6 +55,7 @@ To add a new credential:
 3. If new category, import and merge it in this __init__.py
 """
 
+from .apify import APIFY_CREDENTIALS
 from .apollo import APOLLO_CREDENTIALS
 from .attio import ATTIO_CREDENTIALS
 from .base import CredentialError, CredentialSpec
@@ -111,6 +112,7 @@ CREDENTIAL_SPECS = {
     **SEARCH_CREDENTIALS,
     **EMAIL_CREDENTIALS,
     **GCP_VISION_CREDENTIALS,
+    **APIFY_CREDENTIALS,
     **APOLLO_CREDENTIALS,
     **ATTIO_CREDENTIALS,
     **DISCORD_CREDENTIALS,
@@ -178,6 +180,7 @@ __all__ = [
     "INTERCOM_CREDENTIALS",
     "GOOGLE_CALENDAR_CREDENTIALS",
     "SLACK_CREDENTIALS",
+    "APIFY_CREDENTIALS",
     "APOLLO_CREDENTIALS",
     "ATTIO_CREDENTIALS",
     "SERPAPI_CREDENTIALS",
