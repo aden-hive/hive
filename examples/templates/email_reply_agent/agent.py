@@ -90,7 +90,7 @@ edges = [
         source="confirm-draft",
         target="intake",
         condition=EdgeCondition.CONDITIONAL,
-        condition_expr="batch_complete == True",
+        condition_expr="batch_complete == True and send_started == True and send_count >= 1 and sent_message_ids is not None and len(sent_message_ids) >= 1",
         priority=1,
     ),
 ]
