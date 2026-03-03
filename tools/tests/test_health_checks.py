@@ -97,6 +97,8 @@ class TestHealthCheckerRegistry:
             "newsdata",
             "finlight",
             "brevo",
+            "calendly",
+            "zoho_crm",
         }
         assert set(HEALTH_CHECKERS.keys()) == expected
 
