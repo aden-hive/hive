@@ -105,7 +105,9 @@ from .greenhouse_tool import register_tools as register_greenhouse
 from .jira_tool import register_tools as register_jira
 from .notion_tool import register_tools as register_notion
 from .reddit_tool import register_tools as register_reddit
+from .twilio_tool import register_tools as register_twilio
 from .youtube_transcript_tool import register_tools as register_youtube_transcript
+from .zendesk_tool import register_tools as register_zendesk
 from .zoho_crm_tool import register_tools as register_zoho_crm
 
 # Web and PDF tools
@@ -276,6 +278,12 @@ def register_all_tools(
 
     # Google Sheets spreadsheet data
     register_google_sheets(mcp, credentials=credentials)
+
+    # Twilio SMS & WhatsApp messaging
+    register_twilio(mcp, credentials=credentials)
+
+    # Zendesk ticket management
+    register_zendesk(mcp, credentials=credentials)
 
     # Return the list of all registered tool names
     return list(mcp._tool_manager._tools.keys())

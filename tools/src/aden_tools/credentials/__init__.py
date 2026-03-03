@@ -119,6 +119,8 @@ from .greenhouse import GREENHOUSE_CREDENTIALS
 from .jira import JIRA_CREDENTIALS
 from .notion import NOTION_CREDENTIALS
 from .reddit import REDDIT_CREDENTIALS
+from .twilio import TWILIO_CREDENTIALS
+from .zendesk import ZENDESK_CREDENTIALS
 from .zoho_crm import ZOHO_CRM_CREDENTIALS
 
 # Merged registry of all credentials
@@ -172,6 +174,8 @@ CREDENTIAL_SPECS = {
     **JIRA_CREDENTIALS,
     **NOTION_CREDENTIALS,
     **REDDIT_CREDENTIALS,
+    **TWILIO_CREDENTIALS,
+    **ZENDESK_CREDENTIALS,
     **ZOHO_CRM_CREDENTIALS,
 }
 
@@ -248,5 +252,7 @@ __all__ = [
     "JIRA_CREDENTIALS",
     "NOTION_CREDENTIALS",
     "REDDIT_CREDENTIALS",
+    "TWILIO_CREDENTIALS",
+    "ZENDESK_CREDENTIALS",
     "ZOHO_CRM_CREDENTIALS",
 ]
