@@ -8,6 +8,7 @@ import TopBar from "@/components/TopBar";
 import { TAB_STORAGE_KEY, loadPersistedTabs, savePersistedTabs, type PersistedTabState } from "@/lib/tab-persistence";
 import NodeDetailPanel from "@/components/NodeDetailPanel";
 import CredentialsModal, { type Credential, createFreshCredentials, cloneCredentials, allRequiredCredentialsMet, clearCredentialCache } from "@/components/CredentialsModal";
+
 import { agentsApi } from "@/api/agents";
 import { executionApi } from "@/api/execution";
 import { graphsApi } from "@/api/graphs";
@@ -247,8 +248,18 @@ interface AgentBackendState {
   subagentReports: { subagent_id: string; message: string; data?: Record<string, unknown>; timestamp: string }[];
   isTyping: boolean;
   isStreaming: boolean;
+  /** True only when the queen's LLM is actively processing (not worker) */
+  queenIsTyping: boolean;
+  /** True only when a worker's LLM is actively processing (not queen) */
+  workerIsTyping: boolean;
   llmSnapshots: Record<string, string>;
   activeToolCalls: Record<string, { name: string; done: boolean; streamId: string }>;
+  /** Structured question text from ask_user with options */
+  pendingQuestion: string | null;
+  /** Predefined choices from ask_user (1-3 items); UI appends "Other" */
+  pendingOptions: string[] | null;
+  /** Whether the pending question came from queen or worker */
+  pendingQuestionSource: "queen" | "worker" | null;
 }
 
 function defaultAgentState(): AgentBackendState {
@@ -271,8 +282,13 @@ function defaultAgentState(): AgentBackendState {
     subagentReports: [],
     isTyping: false,
     isStreaming: false,
+    queenIsTyping: false,
+    workerIsTyping: false,
     llmSnapshots: {},
     activeToolCalls: {},
+    pendingQuestion: null,
+    pendingOptions: null,
+    pendingQuestionSource: null,
   };
 }
 
@@ -894,7 +910,7 @@ export default function Workspace() {
     } catch {
       // Best-effort — queen may have already finished
     }
-    updateAgentState(activeWorker, { isTyping: false, isStreaming: false });
+    updateAgentState(activeWorker, { isTyping: false, isStreaming: false, queenIsTyping: false, workerIsTyping: false });
   }, [agentStates, activeWorker, updateAgentState]);
 
   // --- Node log helper (writes into agentStates) ---
@@ -977,7 +993,7 @@ export default function Workspace() {
         case "execution_started":
           if (isQueen) {
             turnCounterRef.current[turnKey] = currentTurn + 1;
-            updateAgentState(agentType, { isTyping: true });
+            updateAgentState(agentType, { isTyping: true, queenIsTyping: true });
           } else {
             // Warn if prior LLM snapshots are being dropped (edge case: execution_completed never arrived)
             const priorSnapshots = agentStates[agentType]?.llmSnapshots || {};
@@ -988,6 +1004,7 @@ export default function Workspace() {
             updateAgentState(agentType, {
               isTyping: true,
               isStreaming: false,
+              workerIsTyping: true,
               awaitingInput: false,
               workerRunState: "running",
               currentExecutionId: event.execution_id || agentStates[agentType]?.currentExecutionId || null,
@@ -995,6 +1012,9 @@ export default function Workspace() {
               subagentReports: [],
               llmSnapshots: {},
               activeToolCalls: {},
+              pendingQuestion: null,
+              pendingOptions: null,
+              pendingQuestionSource: null,
             });
             markAllNodesAs(agentType, ["running", "looping", "complete", "error"], "pending");
           }
@@ -1002,7 +1022,7 @@ export default function Workspace() {
 
         case "execution_completed":
           if (isQueen) {
-            updateAgentState(agentType, { isTyping: false });
+            updateAgentState(agentType, { isTyping: false, queenIsTyping: false });
           } else {
             // Flush any remaining LLM snapshots before clearing state
             const completedSnapshots = agentStates[agentType]?.llmSnapshots || {};
@@ -1014,11 +1034,15 @@ export default function Workspace() {
             updateAgentState(agentType, {
               isTyping: false,
               isStreaming: false,
+              workerIsTyping: false,
               awaitingInput: false,
               workerInputMessageId: null,
               workerRunState: "idle",
               currentExecutionId: null,
               llmSnapshots: {},
+              pendingQuestion: null,
+              pendingOptions: null,
+              pendingQuestionSource: null,
             });
             markAllNodesAs(agentType, ["running", "looping"], "complete");
 
@@ -1043,7 +1067,7 @@ export default function Workspace() {
 
           // Mark streaming when LLM text is actively arriving
           if (event.type === "llm_text_delta" || event.type === "client_output_delta") {
-            updateAgentState(agentType, { isStreaming: true });
+            updateAgentState(agentType, { isStreaming: true, ...(isQueen ? {} : { workerIsTyping: false }) });
           }
 
           if (event.type === "llm_text_delta" && !isQueen && event.node_id) {
@@ -1065,8 +1089,20 @@ export default function Workspace() {
 
           if (event.type === "client_input_requested") {
             console.log('[CLIENT_INPUT_REQ] stream_id:', streamId, 'isQueen:', isQueen, 'node_id:', event.node_id, 'prompt:', (event.data?.prompt as string)?.slice(0, 80), 'agentType:', agentType);
+            const rawOptions = event.data?.options;
+            const options = Array.isArray(rawOptions) ? (rawOptions as string[]) : null;
             if (isQueen) {
-              updateAgentState(agentType, { awaitingInput: true, isTyping: false, isStreaming: false, queenBuilding: false });
+              const prompt = (event.data?.prompt as string) || "";
+              updateAgentState(agentType, {
+                awaitingInput: true,
+                isTyping: false,
+                isStreaming: false,
+                queenIsTyping: false,
+                queenBuilding: false,
+                pendingQuestion: prompt || null,
+                pendingOptions: options,
+                pendingQuestionSource: "queen",
+              });
             } else {
               // Worker input request.
               // If the prompt is non-empty (explicit ask_user), create a visible
@@ -1094,18 +1130,21 @@ export default function Workspace() {
                 awaitingInput: true,
                 isTyping: false,
                 isStreaming: false,
+                pendingQuestion: prompt || null,
+                pendingOptions: options,
+                pendingQuestionSource: options ? "worker" : null,
               });
             }
           }
           if (event.type === "execution_paused") {
-            updateAgentState(agentType, { isTyping: false, isStreaming: false, awaitingInput: false, workerInputMessageId: null });
+            updateAgentState(agentType, { isTyping: false, isStreaming: false, queenIsTyping: false, workerIsTyping: false, awaitingInput: false, workerInputMessageId: null, pendingQuestion: null, pendingOptions: null, pendingQuestionSource: null });
             if (!isQueen) {
               updateAgentState(agentType, { workerRunState: "idle", currentExecutionId: null });
               markAllNodesAs(agentType, ["running", "looping"], "pending");
             }
           }
           if (event.type === "execution_failed") {
-            updateAgentState(agentType, { isTyping: false, isStreaming: false, awaitingInput: false, workerInputMessageId: null });
+            updateAgentState(agentType, { isTyping: false, isStreaming: false, queenIsTyping: false, workerIsTyping: false, awaitingInput: false, workerInputMessageId: null, pendingQuestion: null, pendingOptions: null, pendingQuestionSource: null });
             if (!isQueen) {
               updateAgentState(agentType, { workerRunState: "idle", currentExecutionId: null });
               if (event.node_id) {
@@ -1137,7 +1176,11 @@ export default function Workspace() {
 
         case "node_loop_iteration":
           turnCounterRef.current[turnKey] = currentTurn + 1;
-          updateAgentState(agentType, { isStreaming: false, activeToolCalls: {}, awaitingInput: false });
+          if (isQueen) {
+            updateAgentState(agentType, { isStreaming: false, activeToolCalls: {}, awaitingInput: false, pendingQuestion: null, pendingOptions: null, pendingQuestionSource: null });
+          } else {
+            updateAgentState(agentType, { isStreaming: false, workerIsTyping: true, activeToolCalls: {}, awaitingInput: false, pendingQuestion: null, pendingOptions: null, pendingQuestionSource: null });
+          }
           if (!isQueen && event.node_id) {
             const pendingText = agentStates[agentType]?.llmSnapshots[event.node_id];
             if (pendingText?.trim()) {
@@ -1534,6 +1577,11 @@ export default function Workspace() {
       return;
     }
 
+    // If queen has a pending question widget, dismiss it when user types directly
+    if (agentStates[activeWorker]?.pendingQuestionSource === "queen") {
+      updateAgentState(activeWorker, { pendingQuestion: null, pendingOptions: null, pendingQuestionSource: null });
+    }
+
     const userMsg: ChatMessage = {
       id: makeId(), agent: "You", agentColor: "",
       content: text, timestamp: "", type: "user", thread, createdAt: Date.now(),
@@ -1544,7 +1592,7 @@ export default function Workspace() {
         s.id === activeSession.id ? { ...s, messages: [...s.messages, userMsg] } : s
       ),
     }));
-    updateAgentState(activeWorker, { isTyping: true });
+    updateAgentState(activeWorker, { isTyping: true, queenIsTyping: true });
 
     if (state?.sessionId && state?.ready) {
       executionApi.chat(state.sessionId, text).catch((err: unknown) => {
@@ -1560,7 +1608,7 @@ export default function Workspace() {
             s.id === activeSession.id ? { ...s, messages: [...s.messages, errorChatMsg] } : s
           ),
         }));
-        updateAgentState(activeWorker, { isTyping: false, isStreaming: false });
+        updateAgentState(activeWorker, { isTyping: false, isStreaming: false, queenIsTyping: false });
       });
     } else {
       const errorMsg: ChatMessage = {
@@ -1597,7 +1645,7 @@ export default function Workspace() {
     }));
 
     // Clear awaiting state optimistically
-    updateAgentState(activeWorker, { awaitingInput: false, workerInputMessageId: null, isTyping: true });
+    updateAgentState(activeWorker, { awaitingInput: false, workerInputMessageId: null, isTyping: true, pendingQuestion: null, pendingOptions: null, pendingQuestionSource: null });
 
     executionApi.workerInput(state.sessionId, text).catch((err: unknown) => {
       const errMsg = err instanceof Error ? err.message : String(err);
@@ -1615,6 +1663,90 @@ export default function Workspace() {
       updateAgentState(activeWorker, { isTyping: false, isStreaming: false });
     });
   }, [activeWorker, activeSession, agentStates, updateAgentState]);
+
+  // --- handleWorkerQuestionAnswer: route predefined answers direct to worker, "Other" through queen ---
+  const handleWorkerQuestionAnswer = useCallback((answer: string, isOther: boolean) => {
+    if (!activeSession) return;
+    const state = agentStates[activeWorker];
+    const question = state?.pendingQuestion || "";
+    const opts = state?.pendingOptions;
+
+    if (isOther) {
+      // "Other" free-text → route through queen for evaluation
+      updateAgentState(activeWorker, { pendingQuestion: null, pendingOptions: null, pendingQuestionSource: null });
+      if (question && opts && state?.sessionId && state?.ready) {
+        const formatted = `[Worker asked: "${question}" | Options: ${opts.join(", ")}]\nUser answered: "${answer}"`;
+        const userMsg: ChatMessage = {
+          id: makeId(), agent: "You", agentColor: "",
+          content: answer, timestamp: "", type: "user", thread: activeWorker, createdAt: Date.now(),
+        };
+        setSessionsByAgent(prev => ({
+          ...prev,
+          [activeWorker]: prev[activeWorker].map(s =>
+            s.id === activeSession.id ? { ...s, messages: [...s.messages, userMsg] } : s
+          ),
+        }));
+        updateAgentState(activeWorker, { isTyping: true, queenIsTyping: true });
+        executionApi.chat(state.sessionId, formatted).catch((err: unknown) => {
+          const errMsg = err instanceof Error ? err.message : String(err);
+          const errorChatMsg: ChatMessage = {
+            id: makeId(), agent: "System", agentColor: "",
+            content: `Failed to send message: ${errMsg}`,
+            timestamp: "", type: "system", thread: activeWorker, createdAt: Date.now(),
+          };
+          setSessionsByAgent(prev => ({
+            ...prev,
+            [activeWorker]: prev[activeWorker].map(s =>
+              s.id === activeSession.id ? { ...s, messages: [...s.messages, errorChatMsg] } : s
+            ),
+          }));
+          updateAgentState(activeWorker, { isTyping: false, isStreaming: false, queenIsTyping: false });
+        });
+      } else {
+        handleSend(answer, activeWorker);
+      }
+    } else {
+      // Predefined option → send directly to worker
+      handleWorkerReply(answer);
+      // Queue context for queen (fire-and-forget, no LLM response triggered)
+      if (question && state?.sessionId && state?.ready) {
+        const notification = `[Worker asked: "${question}" | User selected: "${answer}"]`;
+        executionApi.queenContext(state.sessionId, notification).catch(() => {});
+      }
+    }
+  }, [activeWorker, activeSession, agentStates, handleWorkerReply, handleSend, updateAgentState, setSessionsByAgent]);
+
+  // --- handleQueenQuestionAnswer: submit queen's own question answer via /chat ---
+  // The queen asked the question herself, so she already has context — just send the raw answer.
+  const handleQueenQuestionAnswer = useCallback((answer: string, _isOther: boolean) => {
+    updateAgentState(activeWorker, { pendingQuestion: null, pendingOptions: null, pendingQuestionSource: null });
+    handleSend(answer, activeWorker);
+  }, [activeWorker, handleSend, updateAgentState]);
+
+  // --- handleQuestionDismiss: user closed the question widget without answering ---
+  // Injects a dismiss signal so the blocked node can continue.
+  const handleQuestionDismiss = useCallback(() => {
+    const state = agentStates[activeWorker];
+    if (!state?.sessionId) return;
+    const source = state.pendingQuestionSource;
+    const question = state.pendingQuestion || "";
+
+    // Clear UI state immediately
+    updateAgentState(activeWorker, {
+      pendingQuestion: null,
+      pendingOptions: null,
+      pendingQuestionSource: null,
+      awaitingInput: false,
+    });
+
+    // Unblock the waiting node with a dismiss signal
+    const dismissMsg = `[User dismissed the question: "${question}"]`;
+    if (source === "worker") {
+      executionApi.workerInput(state.sessionId, dismissMsg).catch(() => {});
+    } else {
+      executionApi.chat(state.sessionId, dismissMsg).catch(() => {});
+    }
+  }, [agentStates, activeWorker, updateAgentState]);
 
   const handleLoadAgent = useCallback(async (agentPath: string) => {
     const state = agentStates[activeWorker];
@@ -1829,16 +1961,22 @@ export default function Workspace() {
                 messages={activeSession.messages}
                 onSend={handleSend}
                 onCancel={handleCancelQueen}
-                onWorkerReply={handleWorkerReply}
                 activeThread={activeWorker}
-                isWaiting={(activeAgentState?.isTyping && !activeAgentState?.isStreaming) ?? false}
-                workerAwaitingInput={
-                  (activeAgentState?.awaitingInput && activeAgentState?.workerRunState === "running") ?? false
-                }
+                isWaiting={(activeAgentState?.queenIsTyping && !activeAgentState?.isStreaming) ?? false}
+                isWorkerWaiting={(activeAgentState?.workerIsTyping && !activeAgentState?.isStreaming) ?? false}
+                isBusy={activeAgentState?.queenIsTyping ?? false}
                 disabled={
                   (activeAgentState?.loading ?? true) ||
                   !(activeAgentState?.queenReady)
                 }
+                pendingQuestion={activeAgentState?.awaitingInput ? activeAgentState.pendingQuestion : null}
+                pendingOptions={activeAgentState?.awaitingInput ? activeAgentState.pendingOptions : null}
+                onQuestionSubmit={
+                  activeAgentState?.pendingQuestionSource === "queen"
+                    ? handleQueenQuestionAnswer
+                    : handleWorkerQuestionAnswer
+                }
+                onQuestionDismiss={handleQuestionDismiss}
               />
             )}
           </div>

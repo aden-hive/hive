@@ -1,6 +1,7 @@
 import { memo, useState, useRef, useEffect } from "react";
-import { Send, Square, Crown, Cpu, Check, Loader2, Reply } from "lucide-react";
+import { Send, Square, Crown, Cpu, Check, Loader2 } from "lucide-react";
 import MarkdownContent from "@/components/MarkdownContent";
+import QuestionWidget from "@/components/QuestionWidget";
 
 export interface ChatMessage {
   id: string;
@@ -20,15 +21,23 @@ interface ChatPanelProps {
   messages: ChatMessage[];
   onSend: (message: string, thread: string) => void;
   isWaiting?: boolean;
+  /** When true a worker is thinking (not yet streaming) */
+  isWorkerWaiting?: boolean;
+  /** When true the queen is busy (typing or streaming) — shows the stop button */
+  isBusy?: boolean;
   activeThread: string;
-  /** When true, the worker is waiting for user input — shows inline reply box */
-  workerAwaitingInput?: boolean;
   /** When true, the input is disabled (e.g. during loading) */
   disabled?: boolean;
   /** Called when user clicks the stop button to cancel the queen's current turn */
   onCancel?: () => void;
-  /** Called when user submits a reply to the worker's input request */
-  onWorkerReply?: (message: string) => void;
+  /** Pending question from ask_user — replaces textarea when present */
+  pendingQuestion?: string | null;
+  /** Options for the pending question */
+  pendingOptions?: string[] | null;
+  /** Called when user submits an answer to the pending question */
+  onQuestionSubmit?: (answer: string, isOther: boolean) => void;
+  /** Called when user dismisses the pending question without answering */
+  onQuestionDismiss?: () => void;
 }
 
 const queenColor = "hsl(45,95%,58%)";
@@ -133,74 +142,6 @@ function ToolActivityRow({ content }: { content: string }) {
   );
 }
 
-/** Inline reply box that appears below a worker's input request in the chat thread. */
-function WorkerInputReply({ onSubmit, disabled }: { onSubmit: (text: string) => void; disabled?: boolean }) {
-  const [value, setValue] = useState("");
-  const [sent, setSent] = useState(false);
-  const inputRef = useRef<HTMLTextAreaElement>(null);
-
-  useEffect(() => {
-    if (!disabled && !sent) inputRef.current?.focus();
-  }, [disabled, sent]);
-
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!value.trim() || sent) return;
-    onSubmit(value.trim());
-    setSent(true);
-  };
-
-  if (sent) {
-    return (
-      <div className="ml-10 flex items-center gap-1.5 text-[11px] text-muted-foreground py-1">
-        <Check className="w-3 h-3 text-emerald-500" />
-        <span>Response sent</span>
-      </div>
-    );
-  }
-
-  return (
-    <form onSubmit={handleSubmit} className="ml-10 mt-1">
-      <div
-        className="flex items-center gap-2 rounded-xl px-3 py-2 border transition-colors"
-        style={{
-          backgroundColor: `${workerColor}08`,
-          borderColor: `${workerColor}30`,
-        }}
-      >
-        <Reply className="w-3.5 h-3.5 flex-shrink-0" style={{ color: workerColor }} />
-        <textarea
-          ref={inputRef}
-          rows={1}
-          value={value}
-          onChange={(e) => {
-            setValue(e.target.value);
-            const ta = e.target;
-            ta.style.height = "auto";
-            ta.style.height = `${Math.min(ta.scrollHeight, 120)}px`;
-          }}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" && !e.shiftKey) {
-              e.preventDefault();
-              handleSubmit(e);
-            }
-          }}
-          placeholder="Reply to worker..."
-          disabled={disabled}
-          className="flex-1 bg-transparent text-sm text-foreground outline-none placeholder:text-muted-foreground disabled:opacity-50 resize-none overflow-y-auto"
-        />
-        <button
-          type="submit"
-          disabled={!value.trim() || disabled}
-          className="p-1.5 rounded-lg transition-opacity disabled:opacity-30 hover:opacity-90"
-          style={{ backgroundColor: workerColor, color: "white" }}
-        >
-          <Send className="w-3.5 h-3.5" />
-        </button>
-      </div>
-    </form>
-  );
-}
 
 const MessageBubble = memo(function MessageBubble({ msg }: { msg: ChatMessage }) {
   const isUser = msg.type === "user";
@@ -272,10 +213,12 @@ const MessageBubble = memo(function MessageBubble({ msg }: { msg: ChatMessage })
   );
 }, (prev, next) => prev.msg.id === next.msg.id && prev.msg.content === next.msg.content);
 
-export default function ChatPanel({ messages, onSend, isWaiting, activeThread, workerAwaitingInput, disabled, onCancel, onWorkerReply }: ChatPanelProps) {
+export default function ChatPanel({ messages, onSend, isWaiting, isWorkerWaiting, isBusy, activeThread, disabled, onCancel, pendingQuestion, pendingOptions, onQuestionSubmit, onQuestionDismiss }: ChatPanelProps) {
   const [input, setInput] = useState("");
   const [readMap, setReadMap] = useState<Record<string, number>>({});
   const bottomRef = useRef<HTMLDivElement>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const stickToBottom = useRef(true);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   const threadMessages = messages.filter((m) => {
@@ -292,10 +235,24 @@ export default function ChatPanel({ messages, onSend, isWaiting, activeThread, w
   // Suppress unused var
   void readMap;
 
-  const lastMsg = threadMessages[threadMessages.length - 1];
+  // Autoscroll: only when user is already near the bottom
+  const handleScroll = () => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const distFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+    stickToBottom.current = distFromBottom < 80;
+  };
+
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [threadMessages.length, lastMsg?.content, workerAwaitingInput]);
+    if (stickToBottom.current) {
+      bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+    }
+  }, [threadMessages, pendingQuestion, isWaiting, isWorkerWaiting]);
+
+  // Always start pinned to bottom when switching threads
+  useEffect(() => {
+    stickToBottom.current = true;
+  }, [activeThread]);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -305,17 +262,6 @@ export default function ChatPanel({ messages, onSend, isWaiting, activeThread, w
     if (textareaRef.current) textareaRef.current.style.height = "auto";
   };
 
-  // Find the last worker message to attach the inline reply box below.
-  // For explicit ask_user, this will be the worker_input_request message.
-  // For auto-block, this will be the last client_output_delta streamed message.
-  const lastWorkerMsgIdx = workerAwaitingInput
-    ? threadMessages.reduce(
-        (last, m, i) =>
-          m.role === "worker" && m.type !== "tool_status" && m.type !== "system" ? i : last,
-        -1,
-      )
-    : -1;
-
   return (
     <div className="flex flex-col h-full min-w-0">
       {/* Compact sub-header */}
@@ -324,20 +270,44 @@ export default function ChatPanel({ messages, onSend, isWaiting, activeThread, w
       </div>
 
       {/* Messages */}
-      <div className="flex-1 overflow-auto px-5 py-4 space-y-3">
-        {threadMessages.map((msg, idx) => (
+      <div ref={scrollRef} onScroll={handleScroll} className="flex-1 overflow-auto px-5 py-4 space-y-3">
+        {threadMessages.map((msg) => (
           <div key={msg.id}>
             <MessageBubble msg={msg} />
-            {idx === lastWorkerMsgIdx && onWorkerReply && (
-              <WorkerInputReply onSubmit={onWorkerReply} />
-            )}
           </div>
         ))}
 
         {isWaiting && (
           <div className="flex gap-3">
-            <div className="w-7 h-7 rounded-xl bg-muted flex items-center justify-center">
-              <Cpu className="w-3.5 h-3.5 text-muted-foreground" />
+            <div
+              className="flex-shrink-0 w-9 h-9 rounded-xl flex items-center justify-center"
+              style={{
+                backgroundColor: `${queenColor}18`,
+                border: `1.5px solid ${queenColor}35`,
+                boxShadow: `0 0 12px ${queenColor}20`,
+              }}
+            >
+              <Crown className="w-4 h-4" style={{ color: queenColor }} />
+            </div>
+            <div className="border border-primary/20 bg-primary/5 rounded-2xl rounded-tl-md px-4 py-3">
+              <div className="flex gap-1.5">
+                <span className="w-1.5 h-1.5 rounded-full bg-muted-foreground animate-bounce" style={{ animationDelay: "0ms" }} />
+                <span className="w-1.5 h-1.5 rounded-full bg-muted-foreground animate-bounce" style={{ animationDelay: "150ms" }} />
+                <span className="w-1.5 h-1.5 rounded-full bg-muted-foreground animate-bounce" style={{ animationDelay: "300ms" }} />
+              </div>
+            </div>
+          </div>
+        )}
+        {isWorkerWaiting && !isWaiting && (
+          <div className="flex gap-3">
+            <div
+              className="flex-shrink-0 w-7 h-7 rounded-xl flex items-center justify-center"
+              style={{
+                backgroundColor: `${workerColor}18`,
+                border: `1.5px solid ${workerColor}35`,
+              }}
+            >
+              <Cpu className="w-3.5 h-3.5" style={{ color: workerColor }} />
             </div>
             <div className="bg-muted/60 rounded-2xl rounded-tl-md px-4 py-3">
               <div className="flex gap-1.5">
@@ -351,48 +321,57 @@ export default function ChatPanel({ messages, onSend, isWaiting, activeThread, w
         <div ref={bottomRef} />
       </div>
 
-      {/* Input — always connected to Queen */}
-      <form onSubmit={handleSubmit} className="p-4 border-t border-border">
-        <div className="flex items-center gap-3 bg-muted/40 rounded-xl px-4 py-2.5 border border-border focus-within:border-primary/40 transition-colors">
-          <textarea
-            ref={textareaRef}
-            rows={1}
-            value={input}
-            onChange={(e) => {
-              setInput(e.target.value);
-              const ta = e.target;
-              ta.style.height = "auto";
-              ta.style.height = `${Math.min(ta.scrollHeight, 160)}px`;
-            }}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" && !e.shiftKey) {
-                e.preventDefault();
-                handleSubmit(e);
-              }
-            }}
-            placeholder={disabled ? "Connecting to agent..." : "Message Queen Bee..."}
-            disabled={disabled}
-            className="flex-1 bg-transparent text-sm text-foreground outline-none placeholder:text-muted-foreground disabled:opacity-50 disabled:cursor-not-allowed resize-none overflow-y-auto"
-          />
-          {isWaiting && onCancel ? (
-            <button
-              type="button"
-              onClick={onCancel}
-              className="p-2 rounded-lg bg-destructive text-destructive-foreground hover:opacity-90 transition-opacity"
-            >
-              <Square className="w-4 h-4" />
-            </button>
-          ) : (
-            <button
-              type="submit"
-              disabled={!input.trim() || disabled}
-              className="p-2 rounded-lg bg-primary text-primary-foreground disabled:opacity-30 hover:opacity-90 transition-opacity"
-            >
-              <Send className="w-4 h-4" />
-            </button>
-          )}
-        </div>
-      </form>
+      {/* Input area — question widget replaces textarea when a question is pending */}
+      {pendingQuestion && pendingOptions && onQuestionSubmit ? (
+        <QuestionWidget
+          question={pendingQuestion}
+          options={pendingOptions}
+          onSubmit={onQuestionSubmit}
+          onDismiss={onQuestionDismiss}
+        />
+      ) : (
+        <form onSubmit={handleSubmit} className="p-4">
+          <div className="flex items-center gap-3 bg-muted/40 rounded-xl px-4 py-2.5 border border-border focus-within:border-primary/40 transition-colors">
+            <textarea
+              ref={textareaRef}
+              rows={1}
+              value={input}
+              onChange={(e) => {
+                setInput(e.target.value);
+                const ta = e.target;
+                ta.style.height = "auto";
+                ta.style.height = `${Math.min(ta.scrollHeight, 160)}px`;
+              }}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && !e.shiftKey) {
+                  e.preventDefault();
+                  handleSubmit(e);
+                }
+              }}
+              placeholder={disabled ? "Connecting to agent..." : "Message Queen Bee..."}
+              disabled={disabled}
+              className="flex-1 bg-transparent text-sm text-foreground outline-none placeholder:text-muted-foreground disabled:opacity-50 disabled:cursor-not-allowed resize-none overflow-y-auto"
+            />
+            {isBusy && onCancel ? (
+              <button
+                type="button"
+                onClick={onCancel}
+                className="p-2 rounded-lg bg-amber-500/15 text-amber-400 border border-amber-500/40 hover:bg-amber-500/25 transition-colors"
+              >
+                <Square className="w-4 h-4" />
+              </button>
+            ) : (
+              <button
+                type="submit"
+                disabled={!input.trim() || disabled}
+                className="p-2 rounded-lg bg-primary text-primary-foreground disabled:opacity-30 hover:opacity-90 transition-opacity"
+              >
+                <Send className="w-4 h-4" />
+              </button>
+            )}
+          </div>
+        </form>
+      )}
     </div>
   );
 }
