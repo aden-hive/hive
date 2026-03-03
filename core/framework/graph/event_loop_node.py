@@ -573,6 +573,7 @@ class EventLoopNode(NodeProtocol):
                         logged_tool_calls,
                         user_input_requested,
                         ask_user_prompt,
+                        ask_user_options,
                     ) = await self._run_single_turn(
                         ctx, conversation, tools, iteration, accumulator
                     )
@@ -774,22 +775,34 @@ class EventLoopNode(NodeProtocol):
                     accumulator, ctx.node_spec.output_keys, ctx.node_spec.nullable_output_keys
                 )
                 if not missing:
-                    logger.info(
-                        "[%s] iter=%d: empty response but all outputs set — accepting",
-                        node_id,
-                        iteration,
-                    )
-                    await self._publish_loop_completed(
-                        stream_id, node_id, iteration + 1, execution_id
-                    )
-                    latency_ms = int((time.time() - start_time) * 1000)
-                    return NodeResult(
-                        success=True,
-                        output=accumulator.to_dict(),
-                        tokens_used=total_input_tokens + total_output_tokens,
-                        latency_ms=latency_ms,
-                        conversation=conversation if _is_continuous else None,
-                    )
+                    if ctx.node_spec.client_facing:
+                        # Client-facing node got empty response but should
+                        # stay alive.  Fall through to auto-block for user
+                        # input instead of terminating.
+                        logger.warning(
+                            "[%s] iter=%d: empty response on client-facing "
+                            "node — will block for user input",
+                            node_id,
+                            iteration,
+                        )
+                        _consecutive_empty_turns = 0
+                    else:
+                        logger.info(
+                            "[%s] iter=%d: empty response but all outputs set — accepting",
+                            node_id,
+                            iteration,
+                        )
+                        await self._publish_loop_completed(
+                            stream_id, node_id, iteration + 1, execution_id
+                        )
+                        latency_ms = int((time.time() - start_time) * 1000)
+                        return NodeResult(
+                            success=True,
+                            output=accumulator.to_dict(),
+                            tokens_used=total_input_tokens + total_output_tokens,
+                            latency_ms=latency_ms,
+                            conversation=conversation if _is_continuous else None,
+                        )
                 else:
                     # Ghost empty stream: LLM returned nothing and outputs
                     # are still missing.  The conversation hasn't changed, so
@@ -972,16 +985,12 @@ class EventLoopNode(NodeProtocol):
                 if user_input_requested:
                     _cf_block = True
                     _cf_prompt = ask_user_prompt
-                elif (
-                    stream_id == "queen"
-                    and assistant_text
-                    and not real_tool_results
-                    and not outputs_set
-                ):
+                elif stream_id == "queen" and not real_tool_results and not outputs_set:
                     # Auto-block: only for the queen (conversational node).
                     # Workers are autonomous — they block only on explicit
-                    # ask_user().  Text-only turns from workers are narration,
-                    # not questions addressed to the user.
+                    # ask_user().  Turns without tool calls or set_output
+                    # (including empty ghost streams) are not work — block
+                    # and wait for user input.
                     _cf_block = True
                     _cf_auto = True
 
@@ -1083,7 +1092,7 @@ class EventLoopNode(NodeProtocol):
                     _cf_auto,
                 )
                 got_input = await self._await_user_input(
-                    ctx, prompt=_cf_prompt, skip_emit=user_input_requested
+                    ctx, prompt=_cf_prompt, options=ask_user_options
                 )
                 logger.info("[%s] iter=%d: unblocked, got_input=%s", node_id, iteration, got_input)
                 if not got_input:
@@ -1411,16 +1420,20 @@ class EventLoopNode(NodeProtocol):
 
         The content becomes a user message prepended to the next iteration.
         Thread-safe via asyncio.Queue.
-        Also unblocks _await_user_input() if the node is waiting.
+        Always unblocks _await_user_input() so the node processes the
+        message promptly — both real user input and external events
+        (e.g. worker ask_user forwarded via queenContext) need to wake
+        the node.
 
         Args:
             content: The message text.
             is_client_input: True when the message originates from a real
-                human user (e.g. /chat endpoint), False for external events.
+                human user (e.g. /chat endpoint), False for external events
+                (e.g. worker question forwarded by the frontend).  Controls
+                message formatting in _drain_injection_queue, not wake behavior.
         """
         await self._injection_queue.put((content, is_client_input))
-        if is_client_input:
-            self._input_ready.set()
+        self._input_ready.set()
 
     def signal_shutdown(self) -> None:
         """Signal the node to exit its loop cleanly.
@@ -1442,7 +1455,11 @@ class EventLoopNode(NodeProtocol):
             self._stream_task.cancel()
 
     async def _await_user_input(
-        self, ctx: NodeContext, prompt: str = "", *, skip_emit: bool = False
+        self,
+        ctx: NodeContext,
+        prompt: str = "",
+        *,
+        options: list[str] | None = None,
     ) -> bool:
         """Block until user input arrives or shutdown is signaled.
 
@@ -1453,8 +1470,9 @@ class EventLoopNode(NodeProtocol):
           before the judge runs.
 
         Args:
-            skip_emit: If True, skip emitting client_input_requested
-                (already emitted earlier, e.g. during ask_user detection).
+            options: Optional predefined choices for the user (from ask_user).
+                Passed through to the CLIENT_INPUT_REQUESTED event so the
+                frontend can render a QuestionWidget with buttons.
 
         Returns True if input arrived, False if shutdown was signaled.
         """
@@ -1469,12 +1487,13 @@ class EventLoopNode(NodeProtocol):
         # without injecting, so the wait still blocks until the user types.
         self._input_ready.clear()
 
-        if self._event_bus and not skip_emit:
+        if self._event_bus:
             await self._event_bus.emit_client_input_requested(
                 stream_id=ctx.stream_id or ctx.node_id,
                 node_id=ctx.node_id,
                 prompt=prompt,
                 execution_id=ctx.execution_id or "",
+                options=options,
             )
 
         self._awaiting_input = True
@@ -1495,11 +1514,11 @@ class EventLoopNode(NodeProtocol):
         tools: list[Tool],
         iteration: int,
         accumulator: OutputAccumulator,
-    ) -> tuple[str, list[dict], list[str], dict[str, int], list[dict], bool, str]:
+    ) -> tuple[str, list[dict], list[str], dict[str, int], list[dict], bool, str, list[str] | None]:
         """Run a single LLM turn with streaming and tool execution.
 
         Returns (assistant_text, real_tool_results, outputs_set, token_counts, logged_tool_calls,
-        user_input_requested, ask_user_prompt).
+        user_input_requested, ask_user_prompt, ask_user_options).
 
         ``real_tool_results`` contains only results from actual tools (web_search,
         etc.), NOT from the synthetic ``set_output`` or ``ask_user`` tools.
@@ -1523,6 +1542,7 @@ class EventLoopNode(NodeProtocol):
         outputs_set_this_turn: list[str] = []
         user_input_requested = False
         ask_user_prompt = ""
+        ask_user_options: list[str] | None = None
         # Accumulate ALL tool calls across inner iterations for L3 logging.
         # Unlike real_tool_results (reset each inner iteration), this persists.
         logged_tool_calls: list[dict] = []
@@ -1670,6 +1690,7 @@ class EventLoopNode(NodeProtocol):
                     logged_tool_calls,
                     user_input_requested,
                     ask_user_prompt,
+                    ask_user_options,
                 )
 
             # Execute tool calls — framework tools (set_output, ask_user)
@@ -1806,17 +1827,6 @@ class EventLoopNode(NodeProtocol):
                             iteration=iteration,
                         )
 
-                    # Emit immediately so the frontend transitions to
-                    # "awaiting input" without waiting for post-turn
-                    # processing (compaction, stall check, cursor write).
-                    if self._event_bus and ctx.node_spec.client_facing:
-                        await self._event_bus.emit_client_input_requested(
-                            stream_id=stream_id,
-                            node_id=node_id,
-                            prompt=ask_user_prompt,
-                            execution_id=execution_id,
-                            options=ask_user_options,
-                        )
                     result = ToolResult(
                         tool_use_id=tc.tool_use_id,
                         content="Waiting for user input...",
@@ -2106,6 +2116,7 @@ class EventLoopNode(NodeProtocol):
                     logged_tool_calls,
                     user_input_requested,
                     ask_user_prompt,
+                    ask_user_options,
                 )
 
             # --- Mid-turn pruning: prevent context blowup within a single turn ---
@@ -2133,6 +2144,7 @@ class EventLoopNode(NodeProtocol):
                     logged_tool_calls,
                     user_input_requested,
                     ask_user_prompt,
+                    ask_user_options,
                 )
 
             # Tool calls processed -- loop back to stream with updated conversation

@@ -1093,15 +1093,36 @@ export default function Workspace() {
             const options = Array.isArray(rawOptions) ? (rawOptions as string[]) : null;
             if (isQueen) {
               const prompt = (event.data?.prompt as string) || "";
-              updateAgentState(agentType, {
-                awaitingInput: true,
-                isTyping: false,
-                isStreaming: false,
-                queenIsTyping: false,
-                queenBuilding: false,
-                pendingQuestion: prompt || null,
-                pendingOptions: options,
-                pendingQuestionSource: "queen",
+              const isAutoBlock = !prompt && !options;
+              // Queen auto-block (empty prompt, no options) should not
+              // overwrite a pending worker question — the worker's
+              // QuestionWidget must stay visible.  Use the updater form
+              // to read the latest state and avoid stale-closure races
+              // when worker and queen events arrive in the same batch.
+              setAgentStates(prev => {
+                const cur = prev[agentType] || defaultAgentState();
+                const workerQuestionActive = cur.pendingQuestionSource === "worker";
+                if (isAutoBlock && workerQuestionActive) {
+                  return { ...prev, [agentType]: {
+                    ...cur,
+                    awaitingInput: true,
+                    isTyping: false,
+                    isStreaming: false,
+                    queenIsTyping: false,
+                    queenBuilding: false,
+                  }};
+                }
+                return { ...prev, [agentType]: {
+                  ...cur,
+                  awaitingInput: true,
+                  isTyping: false,
+                  isStreaming: false,
+                  queenIsTyping: false,
+                  queenBuilding: false,
+                  pendingQuestion: prompt || null,
+                  pendingOptions: options,
+                  pendingQuestionSource: "queen",
+                }};
               });
             } else {
               // Worker input request.
@@ -1130,6 +1151,7 @@ export default function Workspace() {
                 awaitingInput: true,
                 isTyping: false,
                 isStreaming: false,
+                queenIsTyping: false,
                 pendingQuestion: prompt || null,
                 pendingOptions: options,
                 pendingQuestionSource: options ? "worker" : null,
