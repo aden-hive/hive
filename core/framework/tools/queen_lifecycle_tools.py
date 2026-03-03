@@ -648,7 +648,7 @@ def register_queen_lifecycle_tools(
             injectable = stream.get_injectable_nodes()
             if injectable:
                 target_node_id = injectable[0]["node_id"]
-                ok = await stream.inject_input(target_node_id, content)
+                ok = await stream.inject_input(target_node_id, content, is_client_input=True)
                 if ok:
                     return json.dumps(
                         {
