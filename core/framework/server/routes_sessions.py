@@ -196,6 +196,7 @@ async def handle_get_live_session(request: web.Request) -> web.Response:
     data = _session_to_live_dict(session)
 
     if session.worker_runtime:
+        rt = session.worker_runtime
         data["entry_points"] = [
             {
                 "id": ep.id,
@@ -203,8 +204,13 @@ async def handle_get_live_session(request: web.Request) -> web.Response:
                 "entry_node": ep.entry_node,
                 "trigger_type": ep.trigger_type,
                 "trigger_config": ep.trigger_config,
+                **(
+                    {"next_fire_in": nf}
+                    if (nf := rt.get_timer_next_fire_in(ep.id)) is not None
+                    else {}
+                ),
             }
-            for ep in session.worker_runtime.get_entry_points()
+            for ep in rt.get_entry_points()
         ]
         data["graphs"] = session.worker_runtime.list_graphs()
 
@@ -327,7 +333,8 @@ async def handle_session_entry_points(request: web.Request) -> web.Response:
             status=404,
         )
 
-    eps = session.worker_runtime.get_entry_points() if session.worker_runtime else []
+    rt = session.worker_runtime
+    eps = rt.get_entry_points() if rt else []
     return web.json_response(
         {
             "entry_points": [
@@ -337,6 +344,11 @@ async def handle_session_entry_points(request: web.Request) -> web.Response:
                     "entry_node": ep.entry_node,
                     "trigger_type": ep.trigger_type,
                     "trigger_config": ep.trigger_config,
+                    **(
+                        {"next_fire_in": nf}
+                        if rt and (nf := rt.get_timer_next_fire_in(ep.id)) is not None
+                        else {}
+                    ),
                 }
                 for ep in eps
             ]
@@ -567,11 +579,12 @@ async def handle_messages(request: web.Request) -> web.Response:
             try:
                 part = json.loads(part_file.read_text(encoding="utf-8"))
                 part["_node_id"] = node_dir.name
+                part.setdefault("created_at", part_file.stat().st_mtime)
                 all_messages.append(part)
             except (json.JSONDecodeError, OSError):
                 continue
 
-    all_messages.sort(key=lambda m: m.get("seq", 0))
+    all_messages.sort(key=lambda m: m.get("created_at", m.get("seq", 0)))
 
     client_only = request.query.get("client_only", "").lower() in ("true", "1")
     if client_only:
@@ -621,11 +634,14 @@ async def handle_queen_messages(request: web.Request) -> web.Response:
             try:
                 part = json.loads(part_file.read_text(encoding="utf-8"))
                 part["_node_id"] = node_dir.name
+                # Use file mtime as created_at so frontend can order
+                # queen and worker messages chronologically.
+                part.setdefault("created_at", part_file.stat().st_mtime)
                 all_messages.append(part)
             except (json.JSONDecodeError, OSError):
                 continue
 
-    all_messages.sort(key=lambda m: m.get("seq", 0))
+    all_messages.sort(key=lambda m: m.get("created_at", m.get("seq", 0)))
 
     # Filter to client-facing messages only
     all_messages = [

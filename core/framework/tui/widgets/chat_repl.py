@@ -1460,10 +1460,6 @@ class ChatRepl(Vertical):
             indicator.update("Preparing question...")
             return
 
-        if tool_name == "escalate_to_coder":
-            indicator.update("Escalating to coder...")
-            return
-
         # Update indicator to show tool activity
         indicator.update(f"Using tool: {tool_name}...")
 
@@ -1475,7 +1471,7 @@ class ChatRepl(Vertical):
 
     def handle_tool_completed(self, tool_name: str, result: str, is_error: bool) -> None:
         """Handle a tool call completing."""
-        if tool_name in ("ask_user", "escalate_to_coder"):
+        if tool_name == "ask_user":
             return
 
         result_str = str(result)

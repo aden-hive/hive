@@ -7,19 +7,38 @@ from framework.graph import NodeSpec
 # Load reference docs at import time so they're always in the system prompt.
 # No voluntary read_file() calls needed — the LLM gets everything upfront.
 _ref_dir = Path(__file__).parent.parent / "reference"
-_framework_guide = (_ref_dir / "framework_guide.md").read_text(encoding="utf-8")
-_file_templates = (_ref_dir / "file_templates.md").read_text(encoding="utf-8")
-_anti_patterns = (_ref_dir / "anti_patterns.md").read_text(encoding="utf-8")
+_framework_guide = (_ref_dir / "framework_guide.md").read_text()
+_file_templates = (_ref_dir / "file_templates.md").read_text()
+_anti_patterns = (_ref_dir / "anti_patterns.md").read_text()
+_gcu_guide_path = _ref_dir / "gcu_guide.md"
+_gcu_guide = _gcu_guide_path.read_text() if _gcu_guide_path.exists() else ""
+
+
+def _is_gcu_enabled() -> bool:
+    try:
+        from framework.config import get_gcu_enabled
+
+        return get_gcu_enabled()
+    except Exception:
+        return False
+
+
+def _build_appendices() -> str:
+    parts = (
+        "\n\n# Appendix: Framework Reference\n\n"
+        + _framework_guide
+        + "\n\n# Appendix: File Templates\n\n"
+        + _file_templates
+        + "\n\n# Appendix: Anti-Patterns\n\n"
+        + _anti_patterns
+    )
+    if _is_gcu_enabled() and _gcu_guide:
+        parts += "\n\n# Appendix: GCU Browser Automation Guide\n\n" + _gcu_guide
+    return parts
+
 
 # Shared appendices — appended to every coding node's system prompt.
-_appendices = (
-    "\n\n# Appendix: Framework Reference\n\n"
-    + _framework_guide
-    + "\n\n# Appendix: File Templates\n\n"
-    + _file_templates
-    + "\n\n# Appendix: Anti-Patterns\n\n"
-    + _anti_patterns
-)
+_appendices = _build_appendices()
 
 # Tools available to both coder (worker) and queen.
 _SHARED_TOOLS = [
@@ -391,7 +410,10 @@ If list_agent_tools() shows these don't exist, use alternatives \
 **Node rules**:
 - **2-4 nodes MAX.** Never exceed 4. Merge thin nodes aggressively.
 - A node with 0 tools is NOT a real node — merge it.
-- node_type always "event_loop"
+- node_type "event_loop" for all regular graph nodes. Use "gcu" ONLY for
+  browser automation subagents (see GCU appendix). GCU nodes MUST be in a
+  parent node's sub_agents list, NEVER connected via edges, and NEVER used
+  as entry/terminal nodes.
 - max_node_visits default is 0 (unbounded) — correct for forever-alive. \
 Only set >0 in one-shot agents with bounded feedback loops.
 - Feedback inputs: nullable_output_keys
@@ -539,6 +561,11 @@ critical issue. Use sparingly.
 this session. If a worker is already loaded, it is automatically unloaded \
 first. Call after building and validating an agent to make it available \
 immediately.
+
+## Credentials
+- list_credentials(credential_id?) — List all authorized credentials in the \
+local store. Returns IDs, aliases, status, and identity metadata (never \
+secrets). Optionally filter by credential_id.
 """
 
 _queen_behavior = """
@@ -589,14 +616,29 @@ If NO worker is loaded, say so and offer to build one.
 - For tasks matching the worker's goal, call start_worker(task).
 - For everything else, do it directly.
 
+## When the user clicks Run (external event notification)
+When you receive an event that the user clicked Run:
+- If the worker started successfully, briefly acknowledge it — do NOT \
+repeat the full status. The user can see the graph is running.
+- If the worker failed to start (credential or structural error), \
+explain the problem clearly and help fix it. For credential errors, \
+guide the user to set up the missing credentials. For structural \
+issues, offer to fix the agent graph directly.
+
 ## When worker is running:
-- If the user asks about progress, call get_worker_status().
+- If the user asks about progress, call get_worker_status() ONCE and \
+report the result. Do NOT poll in a loop.
+- NEVER call get_worker_status() repeatedly without user input in between. \
+The worker will surface results through client-facing nodes. You do not \
+need to monitor it. One check per user request is enough.
 - If the user has a concern or instruction for the worker, call \
 inject_worker_message(content) to relay it.
 - You can still do coding tasks directly while the worker runs.
 - If an escalation ticket arrives from the judge, assess severity:
   - Low/transient: acknowledge silently, do not disturb the user.
   - High/critical: notify the user with a brief analysis and suggested action.
+- After starting the worker or checking its status, WAIT for the user's \
+next message. Do not take autonomous actions unless the user asks.
 
 ## When worker asks user a question:
 - The system will route the user's response directly to the worker. \
@@ -778,6 +820,8 @@ queen_node = NodeSpec(
         "notify_operator",
         # Agent loading
         "load_built_agent",
+        # Credentials
+        "list_credentials",
     ],
     system_prompt=(
         "You are the Queen — the user's primary interface. You are a coding agent "
@@ -803,6 +847,8 @@ ALL_QUEEN_TOOLS = _SHARED_TOOLS + [
     "notify_operator",
     # Agent loading
     "load_built_agent",
+    # Credentials
+    "list_credentials",
 ]
 
 __all__ = [

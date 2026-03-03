@@ -27,6 +27,8 @@ export interface EntryPoint {
   entry_node: string;
   trigger_type: string;
   trigger_config?: Record<string, unknown>;
+  /** Seconds until the next timer fire (only present for timer entry points). */
+  next_fire_in?: number;
 }
 
 export interface DiscoverEntry {
@@ -131,6 +133,8 @@ export interface Message {
   is_transition_marker?: boolean;
   is_client_input?: boolean;
   tool_calls?: unknown[];
+  /** Epoch seconds from file mtime — used for cross-conversation ordering */
+  created_at?: number;
   [key: string]: unknown;
 }
 
@@ -151,6 +155,7 @@ export interface NodeSpec {
   client_facing: boolean;
   success_criteria: string | null;
   system_prompt: string;
+  sub_agents?: string[];
   // Runtime enrichment (when session_id provided)
   visit_count?: number;
   has_failures?: boolean;
@@ -265,7 +270,8 @@ export type EventTypeName =
   | "custom"
   | "escalation_requested"
   | "worker_loaded"
-  | "credentials_required";
+  | "credentials_required"
+  | "subagent_report";
 
 export interface AgentEvent {
   type: EventTypeName;

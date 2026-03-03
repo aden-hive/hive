@@ -24,6 +24,8 @@ class ToolCallLog(BaseModel):
     tool_input: dict[str, Any] = Field(default_factory=dict)
     result: str = ""
     is_error: bool = False
+    start_timestamp: str = ""  # ISO 8601 timestamp when tool execution started
+    duration_s: float = 0.0  # Wall-clock execution time in seconds
 
 
 class NodeStepLog(BaseModel):

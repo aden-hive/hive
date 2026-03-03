@@ -123,8 +123,9 @@ class CheckpointStore:
                 return None
 
             try:
-                content = self.index_path.read_text(encoding="utf-8")
-                return CheckpointIndex.model_validate_json(content)
+                return CheckpointIndex.model_validate_json(
+                    self.index_path.read_text(encoding="utf-8")
+                )
             except Exception as e:
                 logger.error(f"Failed to load checkpoint index: {e}")
                 return None

@@ -12,7 +12,6 @@ from typing import TYPE_CHECKING, Any
 from framework.config import get_hive_config, get_preferred_model
 from framework.credentials.validation import (
     ensure_credential_key_env as _ensure_credential_key_env,
-    validate_agent_credentials,
 )
 from framework.graph import Goal
 from framework.graph.edge import (
@@ -25,6 +24,7 @@ from framework.graph.edge import (
 from framework.graph.executor import ExecutionResult
 from framework.graph.node import NodeSpec
 from framework.llm.provider import LLMProvider, Tool
+from framework.runner.preload_validation import run_preload_validation
 from framework.runner.tool_registry import ToolRegistry
 from framework.runtime.agent_runtime import AgentRuntime, AgentRuntimeConfig, create_agent_runtime
 from framework.runtime.execution_stream import EntryPointSpec
@@ -679,67 +679,28 @@ class AgentRunner:
         self._agent_runtime: AgentRuntime | None = None
         self._uses_async_entry_points = self.graph.has_async_entry_points()
 
-        # Validate credentials before spawning MCP servers.
+        # Pre-load validation: structural checks + credentials.
         # Fails fast with actionable guidance — no MCP noise on screen.
-        self._validate_credentials()
+        run_preload_validation(
+            self.graph,
+            interactive=self._interactive,
+            skip_credential_validation=self.skip_credential_validation,
+        )
 
         # Auto-discover tools from tools.py
         tools_path = agent_path / "tools.py"
         if tools_path.exists():
             self._tool_registry.discover_from_module(tools_path)
 
+        # Set environment variables for MCP subprocesses
+        # These are inherited by MCP servers (e.g., GCU browser tools)
+        os.environ["HIVE_AGENT_NAME"] = agent_path.name
+        os.environ["HIVE_STORAGE_PATH"] = str(self._storage_path)
+
         # Auto-discover MCP servers from mcp_servers.json
         mcp_config_path = agent_path / "mcp_servers.json"
         if mcp_config_path.exists():
             self._load_mcp_servers_from_config(mcp_config_path)
-
-    def _validate_credentials(self) -> None:
-        """Check that required credentials are available before spawning MCP servers.
-
-        If ``interactive`` is True and stdin is a TTY, automatically launches
-        the interactive credential setup flow so the user can fix the issue
-        in-place.  Re-validates after setup succeeds.
-
-        When ``interactive`` is False (e.g. TUI callers), the CredentialError
-        propagates immediately so the caller can handle it with its own UI.
-        """
-        if self.skip_credential_validation:
-            return
-
-        if not self._interactive:
-            # Let the CredentialError propagate — caller handles UI.
-            validate_agent_credentials(self.graph.nodes)
-            return
-
-        import sys
-
-        from framework.credentials.models import CredentialError
-
-        try:
-            validate_agent_credentials(self.graph.nodes)
-            return  # All good
-        except CredentialError as e:
-            if not sys.stdin.isatty():
-                raise
-
-            # Interactive: show the error then enter credential setup
-            print(f"\n{e}", file=sys.stderr)
-
-            from framework.credentials.validation import build_setup_session_from_error
-
-            session = build_setup_session_from_error(e, nodes=self.graph.nodes)
-            if not session.missing:
-                raise
-
-            result = session.run_interactive()
-            if not result.success:
-                raise CredentialError(
-                    "Credential setup incomplete. "
-                    "Run again after configuring the required credentials."
-                ) from None
-
-            # Re-validate after setup
-            validate_agent_credentials(self.graph.nodes)
 
     @staticmethod
     def _import_agent_module(agent_path: Path):
@@ -1119,7 +1080,9 @@ class AgentRunner:
 
             # Fail fast if the agent needs an LLM but none was configured
             if self._llm is None:
-                has_llm_nodes = any(node.node_type == "event_loop" for node in self.graph.nodes)
+                has_llm_nodes = any(
+                    node.node_type in ("event_loop", "gcu") for node in self.graph.nodes
+                )
                 if has_llm_nodes:
                     from framework.credentials.models import CredentialError
 
@@ -1136,6 +1099,53 @@ class AgentRunner:
                         else "Configure an API key for your LLM provider."
                     )
                     raise CredentialError(f"LLM API key not found for model '{self.model}'. {hint}")
+
+        # For GCU nodes: auto-register GCU MCP server if needed, then expand tool lists
+        has_gcu_nodes = any(node.node_type == "gcu" for node in self.graph.nodes)
+        if has_gcu_nodes:
+            from framework.graph.gcu import GCU_MCP_SERVER_CONFIG, GCU_SERVER_NAME
+
+            # Auto-register GCU MCP server if tools aren't loaded yet
+            gcu_tool_names = self._tool_registry.get_server_tool_names(GCU_SERVER_NAME)
+            if not gcu_tool_names:
+                # Resolve relative cwd against agent path
+                gcu_config = dict(GCU_MCP_SERVER_CONFIG)
+                cwd = gcu_config.get("cwd")
+                if cwd and not Path(cwd).is_absolute():
+                    gcu_config["cwd"] = str((self.agent_path / cwd).resolve())
+                self._tool_registry.register_mcp_server(gcu_config)
+                gcu_tool_names = self._tool_registry.get_server_tool_names(GCU_SERVER_NAME)
+
+            # Expand each GCU node's tools list to include all GCU server tools
+            if gcu_tool_names:
+                for node in self.graph.nodes:
+                    if node.node_type == "gcu":
+                        existing = set(node.tools)
+                        for tool_name in sorted(gcu_tool_names):
+                            if tool_name not in existing:
+                                node.tools.append(tool_name)
+
+        # For event_loop/gcu nodes: auto-register file tools MCP server, then expand tool lists
+        has_loop_nodes = any(node.node_type in ("event_loop", "gcu") for node in self.graph.nodes)
+        if has_loop_nodes:
+            from framework.graph.files import FILES_MCP_SERVER_CONFIG, FILES_MCP_SERVER_NAME
+
+            files_tool_names = self._tool_registry.get_server_tool_names(FILES_MCP_SERVER_NAME)
+            if not files_tool_names:
+                files_config = dict(FILES_MCP_SERVER_CONFIG)
+                cwd = files_config.get("cwd")
+                if cwd and not Path(cwd).is_absolute():
+                    files_config["cwd"] = str((self.agent_path / cwd).resolve())
+                self._tool_registry.register_mcp_server(files_config)
+                files_tool_names = self._tool_registry.get_server_tool_names(FILES_MCP_SERVER_NAME)
+
+            if files_tool_names:
+                for node in self.graph.nodes:
+                    if node.node_type in ("event_loop", "gcu"):
+                        existing = set(node.tools)
+                        for tool_name in sorted(files_tool_names):
+                            if tool_name not in existing:
+                                node.tools.append(tool_name)
 
         # Get tools for runtime
         tools = list(self._tool_registry.get_tools().values())
@@ -1264,6 +1274,7 @@ class AgentRunner:
                 isolation_level=async_ep.isolation_level,
                 priority=async_ep.priority,
                 max_concurrent=async_ep.max_concurrent,
+                max_resurrections=async_ep.max_resurrections,
             )
             entry_points.append(ep)
 
@@ -1673,7 +1684,9 @@ class AgentRunner:
                 warnings.append(warning_msg)
         except ImportError:
             # aden_tools not installed - fall back to direct check
-            has_llm_nodes = any(node.node_type == "event_loop" for node in self.graph.nodes)
+            has_llm_nodes = any(
+                node.node_type in ("event_loop", "gcu") for node in self.graph.nodes
+            )
             if has_llm_nodes:
                 api_key_env = self._get_api_key_env_var(self.model)
                 if api_key_env and not os.environ.get(api_key_env):

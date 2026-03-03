@@ -20,6 +20,37 @@ import { ApiError } from "@/api/client";
 
 const makeId = () => Math.random().toString(36).slice(2, 9);
 
+/** Format seconds into a compact countdown string. */
+function formatCountdown(totalSecs: number): string {
+  const h = Math.floor(totalSecs / 3600);
+  const m = Math.floor((totalSecs % 3600) / 60);
+  const s = Math.floor(totalSecs % 60);
+  if (h > 0) return `${h}h ${String(m).padStart(2, "0")}m ${String(s).padStart(2, "0")}s`;
+  return `${m}m ${String(s).padStart(2, "0")}s`;
+}
+
+/** Live countdown from an initial seconds value, ticking every second. */
+function TimerCountdown({ initialSeconds }: { initialSeconds: number }) {
+  const [remaining, setRemaining] = useState(Math.max(0, Math.round(initialSeconds)));
+  const startRef = useRef({ wallTime: Date.now(), initial: Math.max(0, Math.round(initialSeconds)) });
+
+  useEffect(() => {
+    startRef.current = { wallTime: Date.now(), initial: Math.max(0, Math.round(initialSeconds)) };
+    setRemaining(Math.max(0, Math.round(initialSeconds)));
+  }, [initialSeconds]);
+
+  useEffect(() => {
+    const id = setInterval(() => {
+      const elapsed = (Date.now() - startRef.current.wallTime) / 1000;
+      setRemaining(Math.max(0, Math.round(startRef.current.initial - elapsed)));
+    }, 1000);
+    return () => clearInterval(id);
+  }, []);
+
+  if (remaining <= 0) return <span className="text-amber-400/80">firing...</span>;
+  return <span>{formatCountdown(remaining)}</span>;
+}
+
 // --- Session types ---
 interface Session {
   id: string;
@@ -206,10 +237,14 @@ interface AgentBackendState {
   graphId: string | null;
   nodeSpecs: NodeSpec[];
   awaitingInput: boolean;
+  /** The message ID of the current worker input request (for inline reply box) */
+  workerInputMessageId: string | null;
+  queenBuilding: boolean;
   workerRunState: "idle" | "deploying" | "running";
   currentExecutionId: string | null;
   nodeLogs: Record<string, string[]>;
   nodeActionPlans: Record<string, string>;
+  subagentReports: { subagent_id: string; message: string; data?: Record<string, unknown>; timestamp: string }[];
   isTyping: boolean;
   isStreaming: boolean;
   llmSnapshots: Record<string, string>;
@@ -227,10 +262,13 @@ function defaultAgentState(): AgentBackendState {
     graphId: null,
     nodeSpecs: [],
     awaitingInput: false,
+    workerInputMessageId: null,
+    queenBuilding: false,
     workerRunState: "idle",
     currentExecutionId: null,
     nodeLogs: {},
     nodeActionPlans: {},
+    subagentReports: [],
     isTyping: false,
     isStreaming: false,
     llmSnapshots: {},
@@ -412,7 +450,7 @@ export default function Workspace() {
             const errorMsg: ChatMessage = {
               id: makeId(), agent: "System", agentColor: "",
               content: `Failed to trigger run: ${errMsg}`,
-              timestamp: "", type: "system", thread: activeWorker,
+              timestamp: "", type: "system", thread: activeWorker, createdAt: Date.now(),
             };
             return { ...s, messages: [...s.messages, errorMsg] };
           }),
@@ -469,7 +507,7 @@ export default function Workspace() {
           if (prompt) {
             const userMsg: ChatMessage = {
               id: makeId(), agent: "You", agentColor: "",
-              content: prompt, timestamp: "", type: "user", thread: agentType,
+              content: prompt, timestamp: "", type: "user", thread: agentType, createdAt: Date.now(),
             };
             setSessionsByAgent(prev => ({
               ...prev,
@@ -600,6 +638,7 @@ export default function Workspace() {
       // Check worker session status (detects running worker).
       // Only restore messages when rejoining an existing backend session.
       let isWorkerRunning = false;
+      const restoredMsgs: ChatMessage[] = [];
       try {
         const { sessions: workerSessions } = await sessionsApi.workerSessions(session.session_id);
         const resumable = workerSessions.find(
@@ -609,16 +648,8 @@ export default function Workspace() {
 
         if (isResumedSession && resumable) {
           const { messages } = await sessionsApi.messages(session.session_id, resumable.session_id);
-          if (messages.length > 0) {
-            const chatMsgs = messages.map((m: Message) =>
-              backendMessageToChatMessage(m, agentType, displayName),
-            );
-            setSessionsByAgent((prev) => ({
-              ...prev,
-              [agentType]: (prev[agentType] || []).map((s, i) =>
-                i === 0 ? { ...s, messages: [...s.messages, ...chatMsgs] } : s,
-              ),
-            }));
+          for (const m of messages as Message[]) {
+            restoredMsgs.push(backendMessageToChatMessage(m, agentType, displayName));
           }
         }
       } catch {
@@ -629,24 +660,25 @@ export default function Workspace() {
       if (isResumedSession) {
         try {
           const { messages: queenMsgs } = await sessionsApi.queenMessages(session.session_id);
-          if (queenMsgs.length > 0) {
-            const chatMsgs = queenMsgs.map((m: Message) => {
-              const msg = backendMessageToChatMessage(m, agentType, "Queen Bee");
-              if (msg) msg.role = "queen";
-              return msg;
-            }).filter(Boolean);
-            if (chatMsgs.length > 0) {
-              setSessionsByAgent((prev) => ({
-                ...prev,
-                [agentType]: (prev[agentType] || []).map((s, i) =>
-                  i === 0 ? { ...s, messages: [...chatMsgs, ...s.messages] } : s,
-                ),
-              }));
-            }
+          for (const m of queenMsgs as Message[]) {
+            const msg = backendMessageToChatMessage(m, agentType, "Queen Bee");
+            msg.role = "queen";
+            restoredMsgs.push(msg);
           }
         } catch {
           // Queen messages not available — not critical
         }
+      }
+
+      // Merge queen + worker messages in chronological order
+      if (restoredMsgs.length > 0) {
+        restoredMsgs.sort((a, b) => (a.createdAt ?? 0) - (b.createdAt ?? 0));
+        setSessionsByAgent((prev) => ({
+          ...prev,
+          [agentType]: (prev[agentType] || []).map((s, i) =>
+            i === 0 ? { ...s, messages: [...restoredMsgs, ...s.messages] } : s,
+          ),
+        }));
       }
 
       updateAgentState(agentType, {
@@ -672,12 +704,14 @@ export default function Workspace() {
   }, [sessionsByAgent, agentStates, loadAgentForType, updateAgentState]);
 
   // --- Fetch graph topology when a session becomes ready ---
-  const fetchGraphForAgent = useCallback(async (agentType: string, sessionId: string) => {
+  const fetchGraphForAgent = useCallback(async (agentType: string, sessionId: string, knownGraphId?: string) => {
     try {
-      const { graphs } = await sessionsApi.graphs(sessionId);
-      if (!graphs.length) return;
-
-      const graphId = graphs[0];
+      let graphId = knownGraphId;
+      if (!graphId) {
+        const { graphs } = await sessionsApi.graphs(sessionId);
+        if (!graphs.length) return;
+        graphId = graphs[0];
+      }
       const topology = await graphsApi.nodes(sessionId, graphId);
 
       updateAgentState(agentType, { graphId, nodeSpecs: topology.nodes });
@@ -713,6 +747,51 @@ export default function Workspace() {
       fetchGraphForAgent(agentType, state.sessionId);
     }
   }, [agentStates, fetchGraphForAgent]);
+
+  // Poll entry points every second for agents with timers to keep
+  // next_fire_in countdowns fresh without re-fetching the full topology.
+  useEffect(() => {
+    const id = setInterval(async () => {
+      for (const [agentType, sessions] of Object.entries(sessionsByAgent)) {
+        const session = sessions[0];
+        if (!session) continue;
+        const timerNodes = session.graphNodes.filter(
+          (n) => n.nodeType === "trigger" && n.triggerType === "timer",
+        );
+        if (timerNodes.length === 0) continue;
+        const state = agentStates[agentType];
+        if (!state?.sessionId) continue;
+        try {
+          const { entry_points } = await sessionsApi.entryPoints(state.sessionId);
+          const fireMap = new Map<string, number>();
+          for (const ep of entry_points) {
+            if (ep.next_fire_in != null) {
+              fireMap.set(`__trigger_${ep.id}`, ep.next_fire_in);
+            }
+          }
+          if (fireMap.size === 0) continue;
+          setSessionsByAgent((prev) => {
+            const ss = prev[agentType];
+            if (!ss?.length) return prev;
+            const updated = ss[0].graphNodes.map((n) => {
+              const nfi = fireMap.get(n.id);
+              if (nfi == null || n.nodeType !== "trigger") return n;
+              return { ...n, triggerConfig: { ...n.triggerConfig, next_fire_in: nfi } };
+            });
+            // Skip update if nothing changed
+            if (updated.every((n, idx) => n === ss[0].graphNodes[idx])) return prev;
+            return {
+              ...prev,
+              [agentType]: ss.map((s, i) => (i === 0 ? { ...s, graphNodes: updated } : s)),
+            };
+          });
+        } catch {
+          // Entry points fetch failed — skip this tick
+        }
+      }
+    }, 1_000);
+    return () => clearInterval(id);
+  }, [sessionsByAgent, agentStates]);
 
   // --- Graph node status helpers (now accept agentType) ---
   const updateGraphNodeStatus = useCallback(
@@ -798,7 +877,7 @@ export default function Workspace() {
             const errorMsg: ChatMessage = {
               id: makeId(), agent: "System", agentColor: "",
               content: `Failed to pause: ${errMsg}`,
-              timestamp: "", type: "system", thread: activeWorker,
+              timestamp: "", type: "system", thread: activeWorker, createdAt: Date.now(),
             };
             return { ...s, messages: [...s.messages, errorMsg] };
           }),
@@ -840,20 +919,27 @@ export default function Workspace() {
   // --- SSE event handler ---
   const upsertChatMessage = useCallback(
     (agentType: string, chatMsg: ChatMessage) => {
-      console.log('[UPSERT] agentType:', agentType, 'msgId:', chatMsg.id, 'thread:', chatMsg.thread, 'role:', chatMsg.role, 'content:', chatMsg.content?.slice(0, 40));
       setSessionsByAgent((prev) => {
         const sessions = prev[agentType] || [];
         const activeId = activeSessionRef.current[agentType] || sessions[0]?.id;
-        console.log('[UPSERT-inner] sessions:', sessions.length, 'activeId:', activeId, 'sessionIds:', sessions.map(s => s.id));
         return {
           ...prev,
           [agentType]: sessions.map((s) => {
             if (s.id !== activeId) return s;
             const idx = s.messages.findIndex((m) => m.id === chatMsg.id);
-            const newMessages =
-              idx >= 0
-                ? s.messages.map((m, i) => (i === idx ? chatMsg : m))
-                : [...s.messages, chatMsg];
+            let newMessages: ChatMessage[];
+            if (idx >= 0) {
+              // Update existing message in place, preserve position
+              newMessages = s.messages.map((m, i) =>
+                i === idx ? { ...chatMsg, createdAt: m.createdAt ?? chatMsg.createdAt } : m,
+              );
+            } else {
+              // Append — SSE events arrive in server-timestamp order via the
+              // shared EventBus, so arrival order already interleaves queen
+              // and worker correctly.  Local user messages are always created
+              // before their server responses, so append is safe there too.
+              newMessages = [...s.messages, chatMsg];
+            }
             return { ...s, messages: newMessages };
           }),
         };
@@ -873,7 +959,14 @@ export default function Workspace() {
       const displayName = isQueen ? "Queen Bee" : (agentDisplayName || undefined);
       const role = isQueen ? "queen" as const : "worker" as const;
       const ts = fmtLogTs(event.timestamp);
-      const currentTurn = turnCounterRef.current[agentType] ?? 0;
+      // Turn counter is per-stream so queen and worker tool pills don't
+      // interfere.  A worker node_loop_iteration no longer increments
+      // the queen's turn counter (which would cause pill ID mismatches
+      // between tool_call_started and tool_call_completed).
+      const turnKey = `${agentType}:${streamId}`;
+      const currentTurn = turnCounterRef.current[turnKey] ?? 0;
+      // Backend event timestamp for correct queen/worker message ordering
+      const eventCreatedAt = event.timestamp ? new Date(event.timestamp).getTime() : Date.now();
 
       // Mark queen as ready on the first queen SSE event
       if (isQueen && !agentStates[agentType]?.queenReady) {
@@ -883,7 +976,7 @@ export default function Workspace() {
       switch (event.type) {
         case "execution_started":
           if (isQueen) {
-            turnCounterRef.current[agentType] = currentTurn + 1;
+            turnCounterRef.current[turnKey] = currentTurn + 1;
             updateAgentState(agentType, { isTyping: true });
           } else {
             // Warn if prior LLM snapshots are being dropped (edge case: execution_completed never arrived)
@@ -891,7 +984,7 @@ export default function Workspace() {
             if (Object.keys(priorSnapshots).length > 0) {
               console.debug(`[hive] execution_started: dropping ${Object.keys(priorSnapshots).length} unflushed LLM snapshot(s)`);
             }
-            turnCounterRef.current[agentType] = currentTurn + 1;
+            turnCounterRef.current[turnKey] = currentTurn + 1;
             updateAgentState(agentType, {
               isTyping: true,
               isStreaming: false,
@@ -899,6 +992,7 @@ export default function Workspace() {
               workerRunState: "running",
               currentExecutionId: event.execution_id || agentStates[agentType]?.currentExecutionId || null,
               nodeLogs: {},
+              subagentReports: [],
               llmSnapshots: {},
               activeToolCalls: {},
             });
@@ -921,11 +1015,17 @@ export default function Workspace() {
               isTyping: false,
               isStreaming: false,
               awaitingInput: false,
+              workerInputMessageId: null,
               workerRunState: "idle",
               currentExecutionId: null,
               llmSnapshots: {},
             });
             markAllNodesAs(agentType, ["running", "looping"], "complete");
+
+            // Re-fetch graph topology so timer countdowns refresh
+            const sid = agentStates[agentType]?.sessionId;
+            const gid = agentStates[agentType]?.graphId;
+            if (sid) fetchGraphForAgent(agentType, sid, gid || undefined);
           }
           break;
 
@@ -964,17 +1064,48 @@ export default function Workspace() {
           }
 
           if (event.type === "client_input_requested") {
-            updateAgentState(agentType, { awaitingInput: true, isTyping: false, isStreaming: false });
+            console.log('[CLIENT_INPUT_REQ] stream_id:', streamId, 'isQueen:', isQueen, 'node_id:', event.node_id, 'prompt:', (event.data?.prompt as string)?.slice(0, 80), 'agentType:', agentType);
+            if (isQueen) {
+              updateAgentState(agentType, { awaitingInput: true, isTyping: false, isStreaming: false, queenBuilding: false });
+            } else {
+              // Worker input request.
+              // If the prompt is non-empty (explicit ask_user), create a visible
+              // message bubble.  For auto-block (empty prompt), the worker's text
+              // was already streamed via client_output_delta — just activate the
+              // reply box below the last worker message.
+              const eid = event.execution_id ?? "";
+              const prompt = (event.data?.prompt as string) || "";
+              if (prompt) {
+                const workerInputMsg: ChatMessage = {
+                  id: `worker-input-${eid}-${event.node_id || Date.now()}`,
+                  agent: displayName || event.node_id || "Worker",
+                  agentColor: "",
+                  content: prompt,
+                  timestamp: "",
+                  type: "worker_input_request",
+                  role: "worker",
+                  thread: agentType,
+                  createdAt: eventCreatedAt,
+                };
+                console.log('[CLIENT_INPUT_REQ] creating worker_input_request msg:', workerInputMsg.id, 'content:', prompt.slice(0, 80));
+                upsertChatMessage(agentType, workerInputMsg);
+              }
+              updateAgentState(agentType, {
+                awaitingInput: true,
+                isTyping: false,
+                isStreaming: false,
+              });
+            }
           }
           if (event.type === "execution_paused") {
-            updateAgentState(agentType, { isTyping: false, isStreaming: false, awaitingInput: false });
+            updateAgentState(agentType, { isTyping: false, isStreaming: false, awaitingInput: false, workerInputMessageId: null });
             if (!isQueen) {
               updateAgentState(agentType, { workerRunState: "idle", currentExecutionId: null });
               markAllNodesAs(agentType, ["running", "looping"], "pending");
             }
           }
           if (event.type === "execution_failed") {
-            updateAgentState(agentType, { isTyping: false, isStreaming: false, awaitingInput: false });
+            updateAgentState(agentType, { isTyping: false, isStreaming: false, awaitingInput: false, workerInputMessageId: null });
             if (!isQueen) {
               updateAgentState(agentType, { workerRunState: "idle", currentExecutionId: null });
               if (event.node_id) {
@@ -989,7 +1120,7 @@ export default function Workspace() {
         }
 
         case "node_loop_started":
-          turnCounterRef.current[agentType] = currentTurn + 1;
+          turnCounterRef.current[turnKey] = currentTurn + 1;
           updateAgentState(agentType, { isTyping: true, activeToolCalls: {} });
           if (!isQueen && event.node_id) {
             const sessions = sessionsRef.current[agentType] || [];
@@ -1005,8 +1136,8 @@ export default function Workspace() {
           break;
 
         case "node_loop_iteration":
-          turnCounterRef.current[agentType] = currentTurn + 1;
-          updateAgentState(agentType, { isStreaming: false, activeToolCalls: {} });
+          turnCounterRef.current[turnKey] = currentTurn + 1;
+          updateAgentState(agentType, { isStreaming: false, activeToolCalls: {}, awaitingInput: false });
           if (!isQueen && event.node_id) {
             const pendingText = agentStates[agentType]?.llmSnapshots[event.node_id];
             if (pendingText?.trim()) {
@@ -1053,6 +1184,15 @@ export default function Workspace() {
 
         case "tool_call_started": {
           console.log('[TOOL_PILL] tool_call_started received:', { isQueen, nodeId: event.node_id, streamId: event.stream_id, agentType, executionId: event.execution_id, toolName: event.data?.tool_name });
+
+          // Detect queen building: when the queen starts writing/editing files, she's building an agent
+          if (isQueen) {
+            const tn = (event.data?.tool_name as string) || "";
+            if (tn === "write_file" || tn === "edit_file") {
+              updateAgentState(agentType, { queenBuilding: true });
+            }
+          }
+
           if (event.node_id) {
             if (!isQueen) {
               const pendingText = agentStates[agentType]?.llmSnapshots[event.node_id];
@@ -1066,6 +1206,28 @@ export default function Workspace() {
                 });
               }
               appendNodeLog(agentType, event.node_id, `${ts} INFO  Calling ${(event.data?.tool_name as string) || "unknown"}(${event.data?.tool_input ? truncate(JSON.stringify(event.data.tool_input), 200) : ""})`);
+
+              // Track subagent delegation start
+              if ((event.data?.tool_name as string) === "delegate_to_sub_agent") {
+                const saInput = event.data?.tool_input as Record<string, unknown> | undefined;
+                const saId = (saInput?.agent_id as string) || "";
+                if (saId) {
+                  setAgentStates(prev => {
+                    const state = prev[agentType];
+                    if (!state) return prev;
+                    return {
+                      ...prev,
+                      [agentType]: {
+                        ...state,
+                        subagentReports: [
+                          ...state.subagentReports,
+                          { subagent_id: saId, message: "Delegating...", timestamp: event.timestamp, status: "running" as const },
+                        ],
+                      },
+                    };
+                  });
+                }
+              }
             }
 
             const toolName = (event.data?.tool_name as string) || "unknown";
@@ -1089,6 +1251,7 @@ export default function Workspace() {
                 type: "tool_status",
                 role,
                 thread: agentType,
+                createdAt: eventCreatedAt,
               });
               return {
                 ...prev,
@@ -1114,6 +1277,31 @@ export default function Workspace() {
               appendNodeLog(agentType, event.node_id, `${ts} INFO  ${toolName} done${resultStr}`);
             }
 
+            // Track subagent delegation completion
+            if (toolName === "delegate_to_sub_agent" && result) {
+              try {
+                const parsed = JSON.parse(result);
+                const saId = (parsed?.metadata?.agent_id as string) || "";
+                const success = parsed?.metadata?.success as boolean;
+                if (saId) {
+                  setAgentStates(prev => {
+                    const state = prev[agentType];
+                    if (!state) return prev;
+                    return {
+                      ...prev,
+                      [agentType]: {
+                        ...state,
+                        subagentReports: [
+                          ...state.subagentReports,
+                          { subagent_id: saId, message: success ? "Completed" : "Failed", timestamp: event.timestamp, status: success ? "complete" as const : "error" as const },
+                        ],
+                      },
+                    };
+                  });
+                }
+              } catch { /* ignore parse errors */ }
+            }
+
             // Mark tool as done and update activity row
             const sid = event.stream_id;
             setAgentStates(prev => {
@@ -1134,6 +1322,7 @@ export default function Workspace() {
                 type: "tool_status",
                 role,
                 thread: agentType,
+                createdAt: eventCreatedAt,
               });
               return {
                 ...prev,
@@ -1152,6 +1341,32 @@ export default function Workspace() {
             }
           }
           break;
+
+        case "subagent_report": {
+          if (!isQueen && event.node_id) {
+            const subagentId = (event.data?.subagent_id as string) || "";
+            const message = (event.data?.message as string) || "";
+            const data = event.data?.data as Record<string, unknown> | undefined;
+            // Extract parent node ID from "parentNodeId:subagent:agentId" format
+            const parentNodeId = event.node_id.split(":subagent:")[0] || event.node_id;
+            appendNodeLog(agentType, parentNodeId, `${ts} INFO  [Subagent:${subagentId}] ${truncate(message, 200)}`);
+            setAgentStates(prev => {
+              const state = prev[agentType];
+              if (!state) return prev;
+              return {
+                ...prev,
+                [agentType]: {
+                  ...state,
+                  subagentReports: [
+                    ...state.subagentReports,
+                    { subagent_id: subagentId, message, data, timestamp: event.timestamp },
+                  ],
+                },
+              };
+            });
+          }
+          break;
+        }
 
         case "node_stalled":
           if (!isQueen && event.node_id) {
@@ -1225,6 +1440,7 @@ export default function Workspace() {
           // Update agent state: new display name, reset graph so topology refetch triggers
           updateAgentState(agentType, {
             displayName,
+            queenBuilding: false,
             workerRunState: "idle",
             graphId: null,
             nodeSpecs: [],
@@ -1302,12 +1518,12 @@ export default function Workspace() {
     if (!allRequiredCredentialsMet(activeSession.credentials)) {
       const userMsg: ChatMessage = {
         id: makeId(), agent: "You", agentColor: "",
-        content: text, timestamp: "", type: "user", thread,
+        content: text, timestamp: "", type: "user", thread, createdAt: Date.now(),
       };
       const promptMsg: ChatMessage = {
         id: makeId(), agent: "Queen Bee", agentColor: "",
         content: "Before we get started, you'll need to configure your credentials. Click the **Credentials** button in the top bar to connect the required integrations for this agent.",
-        timestamp: "", role: "queen" as const, thread,
+        timestamp: "", role: "queen" as const, thread, createdAt: Date.now(),
       };
       setSessionsByAgent(prev => ({
         ...prev,
@@ -1320,7 +1536,7 @@ export default function Workspace() {
 
     const userMsg: ChatMessage = {
       id: makeId(), agent: "You", agentColor: "",
-      content: text, timestamp: "", type: "user", thread,
+      content: text, timestamp: "", type: "user", thread, createdAt: Date.now(),
     };
     setSessionsByAgent(prev => ({
       ...prev,
@@ -1331,31 +1547,12 @@ export default function Workspace() {
     updateAgentState(activeWorker, { isTyping: true });
 
     if (state?.sessionId && state?.ready) {
-      executionApi.chat(state.sessionId, text).then((result) => {
-        if (result.status === "started") {
-          // Queen wasn't ready — backend triggered worker directly
-          updateAgentState(activeWorker, {
-            currentExecutionId: result.execution_id || null,
-            workerRunState: "running",
-          });
-          const notice: ChatMessage = {
-            id: makeId(), agent: "System", agentColor: "",
-            content: "The queen wasn't ready yet — your message triggered an agent run directly.",
-            timestamp: "", type: "system", thread,
-          };
-          setSessionsByAgent(prev => ({
-            ...prev,
-            [activeWorker]: prev[activeWorker].map(s =>
-              s.id === activeSession.id ? { ...s, messages: [...s.messages, notice] } : s
-            ),
-          }));
-        }
-      }).catch((err: unknown) => {
+      executionApi.chat(state.sessionId, text).catch((err: unknown) => {
         const errMsg = err instanceof Error ? err.message : String(err);
         const errorChatMsg: ChatMessage = {
           id: makeId(), agent: "System", agentColor: "",
           content: `Failed to send message: ${errMsg}`,
-          timestamp: "", type: "system", thread,
+          timestamp: "", type: "system", thread, createdAt: Date.now(),
         };
         setSessionsByAgent(prev => ({
           ...prev,
@@ -1369,7 +1566,7 @@ export default function Workspace() {
       const errorMsg: ChatMessage = {
         id: makeId(), agent: "System", agentColor: "",
         content: "Cannot send message: backend is not connected. Please wait for the agent to load.",
-        timestamp: "", type: "system", thread,
+        timestamp: "", type: "system", thread, createdAt: Date.now(),
       };
       setSessionsByAgent(prev => ({
         ...prev,
@@ -1380,6 +1577,77 @@ export default function Workspace() {
       updateAgentState(activeWorker, { isTyping: false, isStreaming: false });
     }
   }, [activeWorker, activeSession, agentStates, updateAgentState]);
+
+  // --- handleWorkerReply: send user input to the worker via dedicated endpoint ---
+  const handleWorkerReply = useCallback((text: string) => {
+    if (!activeSession) return;
+    const state = agentStates[activeWorker];
+    if (!state?.sessionId || !state?.ready) return;
+
+    // Add user reply to chat thread
+    const userMsg: ChatMessage = {
+      id: makeId(), agent: "You", agentColor: "",
+      content: text, timestamp: "", type: "user", thread: activeWorker, createdAt: Date.now(),
+    };
+    setSessionsByAgent(prev => ({
+      ...prev,
+      [activeWorker]: prev[activeWorker].map(s =>
+        s.id === activeSession.id ? { ...s, messages: [...s.messages, userMsg] } : s
+      ),
+    }));
+
+    // Clear awaiting state optimistically
+    updateAgentState(activeWorker, { awaitingInput: false, workerInputMessageId: null, isTyping: true });
+
+    executionApi.workerInput(state.sessionId, text).catch((err: unknown) => {
+      const errMsg = err instanceof Error ? err.message : String(err);
+      const errorChatMsg: ChatMessage = {
+        id: makeId(), agent: "System", agentColor: "",
+        content: `Failed to send to worker: ${errMsg}`,
+        timestamp: "", type: "system", thread: activeWorker, createdAt: Date.now(),
+      };
+      setSessionsByAgent(prev => ({
+        ...prev,
+        [activeWorker]: prev[activeWorker].map(s =>
+          s.id === activeSession.id ? { ...s, messages: [...s.messages, errorChatMsg] } : s
+        ),
+      }));
+      updateAgentState(activeWorker, { isTyping: false, isStreaming: false });
+    });
+  }, [activeWorker, activeSession, agentStates, updateAgentState]);
+
+  const handleLoadAgent = useCallback(async (agentPath: string) => {
+    const state = agentStates[activeWorker];
+    if (!state?.sessionId) return;
+
+    try {
+      await sessionsApi.loadWorker(state.sessionId, agentPath);
+      // Success: worker_loaded SSE event will handle UI updates automatically
+    } catch (err) {
+      // 424 = credentials required — open the credentials modal
+      if (err instanceof ApiError && err.status === 424) {
+        const body = err.body as Record<string, unknown>;
+        setCredentialAgentPath((body.agent_path as string) || null);
+        setCredentialsOpen(true);
+        return;
+      }
+
+      const errMsg = err instanceof Error ? err.message : String(err);
+      const activeId = activeSessionRef.current[activeWorker];
+      const errorMsg: ChatMessage = {
+        id: makeId(), agent: "System", agentColor: "",
+        content: `Failed to load agent: ${errMsg}`,
+        timestamp: "", type: "system", thread: activeWorker, createdAt: Date.now(),
+      };
+      setSessionsByAgent(prev => ({
+        ...prev,
+        [activeWorker]: (prev[activeWorker] || []).map(s =>
+          s.id === activeId ? { ...s, messages: [...s.messages, errorMsg] } : s
+        ),
+      }));
+    }
+  }, [activeWorker, agentStates]);
+  void handleLoadAgent; // Used by load-agent modal (wired dynamically)
 
   const closeAgentTab = useCallback((agentType: string) => {
     setSelectedNode(null);
@@ -1499,6 +1767,7 @@ export default function Workspace() {
               onRun={handleRun}
               onPause={handlePause}
               runState={activeAgentState?.workerRunState ?? "idle"}
+              building={activeAgentState?.queenBuilding ?? false}
             />
           </div>
         </div>
@@ -1560,9 +1829,12 @@ export default function Workspace() {
                 messages={activeSession.messages}
                 onSend={handleSend}
                 onCancel={handleCancelQueen}
+                onWorkerReply={handleWorkerReply}
                 activeThread={activeWorker}
                 isWaiting={(activeAgentState?.isTyping && !activeAgentState?.isStreaming) ?? false}
-                awaitingInput={activeAgentState?.awaitingInput ?? false}
+                workerAwaitingInput={
+                  (activeAgentState?.awaitingInput && activeAgentState?.workerRunState === "running") ?? false
+                }
                 disabled={
                   (activeAgentState?.loading ?? true) ||
                   !(activeAgentState?.queenReady)
@@ -1612,6 +1884,17 @@ export default function Workspace() {
                         </div>
                       ) : null;
                     })()}
+                    {(() => {
+                      const nfi = (selectedNode.triggerConfig as Record<string, unknown> | undefined)?.next_fire_in as number | undefined;
+                      return nfi != null ? (
+                        <div>
+                          <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider mb-1.5">Next run</p>
+                          <p className="text-xs text-foreground/80 font-mono bg-muted/30 rounded-lg px-3 py-2 border border-border/20">
+                            <TimerCountdown initialSeconds={nfi} />
+                          </p>
+                        </div>
+                      ) : null;
+                    })()}
                     <div>
                       <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider mb-1.5">Fires into</p>
                       <p className="text-xs text-foreground/80 font-mono bg-muted/30 rounded-lg px-3 py-2 border border-border/20">
@@ -1624,6 +1907,8 @@ export default function Workspace() {
                 <NodeDetailPanel
                   node={selectedNode}
                   nodeSpec={activeAgentState?.nodeSpecs.find(n => n.id === selectedNode.id) ?? null}
+                  allNodeSpecs={activeAgentState?.nodeSpecs}
+                  subagentReports={activeAgentState?.subagentReports}
                   sessionId={activeAgentState?.sessionId || undefined}
                   graphId={activeAgentState?.graphId || undefined}
                   workerSessionId={null}
