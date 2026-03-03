@@ -1318,6 +1318,7 @@ class AgentRunner:
                 isolation_level=async_ep.isolation_level,
                 priority=async_ep.priority,
                 max_concurrent=async_ep.max_concurrent,
+                max_resurrections=async_ep.max_resurrections,
             )
             entry_points.append(ep)
 

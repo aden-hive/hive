@@ -511,6 +511,7 @@ class EventLoopNode(NodeProtocol):
         # 5. Stall / doom loop detection state (restored from cursor if resuming)
         recent_responses: list[str] = _restored_recent_responses
         recent_tool_fingerprints: list[list[tuple[str, str]]] = _restored_tool_fingerprints
+        _consecutive_empty_turns: int = 0
 
         # 6. Main loop
         for iteration in range(start_iteration, self._config.max_iterations):
@@ -649,6 +650,22 @@ class EventLoopNode(NodeProtocol):
                                 error=str(e)[:500],
                                 execution_id=execution_id,
                             )
+
+                        # For malformed tool call errors, inject feedback into
+                        # the conversation before retrying.  Retrying with the
+                        # same messages is futile — the LLM will reproduce the
+                        # same truncated JSON.  The nudge tells it to shorten
+                        # its arguments.
+                        error_str = str(e).lower()
+                        if "failed to parse tool call" in error_str:
+                            await conversation.add_user_message(
+                                "[System: Your previous tool call had malformed "
+                                "JSON arguments (likely truncated). Keep your "
+                                "tool call arguments shorter and simpler. Do NOT "
+                                "repeat the same long argument — summarize or "
+                                "split into multiple calls.]"
+                            )
+
                         await asyncio.sleep(delay)
                         continue  # retry same iteration
 
@@ -774,6 +791,58 @@ class EventLoopNode(NodeProtocol):
                         latency_ms=latency_ms,
                         conversation=conversation if _is_continuous else None,
                     )
+                else:
+                    # Ghost empty stream: LLM returned nothing and outputs
+                    # are still missing.  The conversation hasn't changed, so
+                    # repeating the same call will produce the same empty
+                    # result.  Inject a nudge to break the cycle.
+                    _consecutive_empty_turns += 1
+                    logger.warning(
+                        "[%s] iter=%d: empty response with missing outputs %s "
+                        "(consecutive=%d)",
+                        node_id,
+                        iteration,
+                        missing,
+                        _consecutive_empty_turns,
+                    )
+                    if _consecutive_empty_turns >= self._config.stall_detection_threshold:
+                        # Persistent ghost stream — fail the node.
+                        error_msg = (
+                            f"Ghost empty stream: {_consecutive_empty_turns} "
+                            f"consecutive empty responses with missing "
+                            f"outputs {missing}"
+                        )
+                        latency_ms = int((time.time() - start_time) * 1000)
+                        if ctx.runtime_logger:
+                            ctx.runtime_logger.log_node_complete(
+                                node_id=node_id,
+                                node_name=ctx.node_spec.name,
+                                node_type="event_loop",
+                                success=False,
+                                error=error_msg,
+                                total_steps=iteration + 1,
+                                tokens_used=total_input_tokens + total_output_tokens,
+                                input_tokens=total_input_tokens,
+                                output_tokens=total_output_tokens,
+                                latency_ms=latency_ms,
+                                exit_status="ghost_stream",
+                                accept_count=_accept_count,
+                                retry_count=_retry_count,
+                                escalate_count=_escalate_count,
+                                continue_count=_continue_count,
+                            )
+                        raise RuntimeError(error_msg)
+                    # First nudge — inject a system message to break the
+                    # empty-response cycle.
+                    await conversation.add_user_message(
+                        "[System: Your response was empty. You have required "
+                        f"outputs that are not yet set: {missing}. Review "
+                        "your task and call the appropriate tools to make "
+                        "progress.]"
+                    )
+                    continue
+            else:
+                _consecutive_empty_turns = 0
 
             # 6f. Stall detection
             recent_responses.append(assistant_text)
@@ -2502,6 +2571,7 @@ class EventLoopNode(NodeProtocol):
                 "service unavailable",
                 "bad gateway",
                 "overloaded",
+                "failed to parse tool call",
             ]
             return any(kw in error_str for kw in transient_keywords)
 

@@ -338,6 +338,10 @@ class AsyncEntryPointSpec(BaseModel):
     max_concurrent: int = Field(
         default=10, description="Maximum concurrent executions for this entry point"
     )
+    max_resurrections: int = Field(
+        default=3,
+        description="Auto-restart on non-fatal failure (0 to disable)",
+    )
 
     model_config = {"extra": "allow"}
 
