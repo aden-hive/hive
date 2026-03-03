@@ -36,6 +36,23 @@ from framework.runtime.llm_debug_logger import log_llm_turn
 
 logger = logging.getLogger(__name__)
 
+# Pattern for detecting context-window-exceeded errors across LLM providers.
+_CONTEXT_TOO_LARGE_RE = re.compile(
+    r"context.{0,20}(length|window|limit|size)|"
+    r"too.{0,10}(long|large|many.{0,10}tokens)|"
+    r"(exceed|exceeds|exceeded).{0,30}(limit|window|context|tokens)|"
+    r"maximum.{0,20}token|prompt.{0,20}too.{0,10}long",
+    re.IGNORECASE,
+)
+
+
+def _is_context_too_large_error(exc: BaseException) -> bool:
+    """Detect whether an exception indicates the LLM input was too large."""
+    cls = type(exc).__name__
+    if "ContextWindow" in cls:
+        return True
+    return bool(_CONTEXT_TOO_LARGE_RE.search(str(exc)))
+
 
 # ---------------------------------------------------------------------------
 # Escalation receiver (temporary routing target for subagent → user input)
@@ -552,7 +569,7 @@ class EventLoopNode(NodeProtocol):
 
             # 6d. Pre-turn compaction check (tiered)
             if conversation.needs_compaction():
-                await self._compact_tiered(ctx, conversation, accumulator)
+                await self._compact(ctx, conversation, accumulator)
 
             # 6e. Run single LLM turn (with transient error retry)
             logger.info(
@@ -753,7 +770,7 @@ class EventLoopNode(NodeProtocol):
 
             # 6e''. Post-turn compaction check (catches tool-result bloat)
             if conversation.needs_compaction():
-                await self._compact_tiered(ctx, conversation, accumulator)
+                await self._compact(ctx, conversation, accumulator)
 
             # Reset auto-block grace streak when real work happens
             if real_tool_results or outputs_set:
@@ -774,36 +791,30 @@ class EventLoopNode(NodeProtocol):
                 missing = self._get_missing_output_keys(
                     accumulator, ctx.node_spec.output_keys, ctx.node_spec.nullable_output_keys
                 )
-                if not missing:
-                    if ctx.node_spec.client_facing:
-                        # Client-facing node got empty response but should
-                        # stay alive.  Fall through to auto-block for user
-                        # input instead of terminating.
-                        logger.warning(
-                            "[%s] iter=%d: empty response on client-facing "
-                            "node — will block for user input",
-                            node_id,
-                            iteration,
-                        )
-                        _consecutive_empty_turns = 0
-                    else:
-                        logger.info(
-                            "[%s] iter=%d: empty response but all outputs set — accepting",
-                            node_id,
-                            iteration,
-                        )
-                        await self._publish_loop_completed(
-                            stream_id, node_id, iteration + 1, execution_id
-                        )
-                        latency_ms = int((time.time() - start_time) * 1000)
-                        return NodeResult(
-                            success=True,
-                            output=accumulator.to_dict(),
-                            tokens_used=total_input_tokens + total_output_tokens,
-                            latency_ms=latency_ms,
-                            conversation=conversation if _is_continuous else None,
-                        )
-                else:
+                # Only accept on empty response if the node actually has
+                # output_keys that are all satisfied.  Nodes with NO
+                # output_keys (e.g. the forever-alive queen) should never
+                # be terminated by a ghost empty stream — "missing" is
+                # trivially empty when there are no required outputs.
+                has_real_outputs = bool(ctx.node_spec.output_keys)
+                if not missing and has_real_outputs:
+                    logger.info(
+                        "[%s] iter=%d: empty response but all outputs set — accepting",
+                        node_id,
+                        iteration,
+                    )
+                    await self._publish_loop_completed(
+                        stream_id, node_id, iteration + 1, execution_id
+                    )
+                    latency_ms = int((time.time() - start_time) * 1000)
+                    return NodeResult(
+                        success=True,
+                        output=accumulator.to_dict(),
+                        tokens_used=total_input_tokens + total_output_tokens,
+                        latency_ms=latency_ms,
+                        conversation=conversation if _is_continuous else None,
+                    )
+                elif missing:
                     # Ghost empty stream: LLM returned nothing and outputs
                     # are still missing.  The conversation hasn't changed, so
                     # repeating the same call will produce the same empty
@@ -851,6 +862,37 @@ class EventLoopNode(NodeProtocol):
                         "your task and call the appropriate tools to make "
                         "progress.]"
                     )
+                    continue
+                else:
+                    # No output_keys and empty response — forever-alive node
+                    # got a ghost empty stream.  Nudge like the missing-outputs
+                    # path but without failing (no outputs to demand).
+                    _consecutive_empty_turns += 1
+                    logger.warning(
+                        "[%s] iter=%d: empty response on node with no output_keys "
+                        "(consecutive=%d)",
+                        node_id,
+                        iteration,
+                        _consecutive_empty_turns,
+                    )
+                    if _consecutive_empty_turns >= self._config.stall_detection_threshold:
+                        # Persistent ghost — but since this is a forever-alive
+                        # node, block for user input instead of crashing.
+                        logger.warning(
+                            "[%s] iter=%d: %d consecutive empty responses, "
+                            "blocking for user input",
+                            node_id,
+                            iteration,
+                            _consecutive_empty_turns,
+                        )
+                        await self._await_user_input(ctx, prompt="")
+                        _consecutive_empty_turns = 0
+                    else:
+                        await conversation.add_user_message(
+                            "[System: Your response was empty. Review the "
+                            "conversation and respond to the user or take "
+                            "action with your tools.]"
+                        )
                     continue
             else:
                 _consecutive_empty_turns = 0
@@ -1556,7 +1598,7 @@ class EventLoopNode(NodeProtocol):
                     "Pre-send guard: context at %.0f%% of budget, compacting",
                     conversation.usage_ratio() * 100,
                 )
-                await self._compact_tiered(ctx, conversation, accumulator)
+                await self._compact(ctx, conversation, accumulator)
 
             messages = conversation.to_llm_messages()
 
@@ -2514,78 +2556,11 @@ class EventLoopNode(NodeProtocol):
     ) -> str:
         """Build a compact tool call history from the conversation.
 
-        Used in compaction summaries to prevent the LLM from re-calling
-        tools it already called. Extracts:
-        - Tool call details: name, count, and *inputs* for key tools
-          (search queries, scrape URLs, loaded filenames)
-        - Files saved via save_data
-        - Outputs set via set_output
-        - Errors encountered
+        Delegates to :func:`extract_tool_call_history` in conversation.py.
         """
-        # Per-tool: list of input summaries (one per call)
-        tool_calls_detail: dict[str, list[str]] = {}
-        files_saved: list[str] = []
-        outputs_set: list[str] = []
-        errors: list[str] = []
+        from framework.graph.conversation import extract_tool_call_history
 
-        # Tool-specific input extractors: return a short summary string
-        def _summarize_input(name: str, args: dict) -> str:
-            if name == "web_search":
-                return args.get("query", "")
-            if name == "web_scrape":
-                return args.get("url", "")
-            if name == "load_data":
-                return args.get("filename", "")
-            if name == "save_data":
-                return args.get("filename", "")
-            return ""
-
-        for msg in conversation.messages:
-            if msg.role == "assistant" and msg.tool_calls:
-                for tc in msg.tool_calls:
-                    func = tc.get("function", {})
-                    name = func.get("name", "unknown")
-                    try:
-                        args = json.loads(func.get("arguments", "{}"))
-                    except (json.JSONDecodeError, TypeError):
-                        args = {}
-
-                    summary = _summarize_input(name, args)
-                    tool_calls_detail.setdefault(name, []).append(summary)
-
-                    if name == "save_data" and args.get("filename"):
-                        files_saved.append(args["filename"])
-                    if name == "set_output" and args.get("key"):
-                        outputs_set.append(args["key"])
-
-            if msg.role == "tool" and msg.is_error:
-                preview = msg.content[:120].replace("\n", " ")
-                errors.append(preview)
-
-        parts: list[str] = []
-        if tool_calls_detail:
-            lines: list[str] = []
-            for name, inputs in list(tool_calls_detail.items())[:max_entries]:
-                count = len(inputs)
-                # Include input details for tools where inputs matter
-                non_empty = [s for s in inputs if s]
-                if non_empty:
-                    detail_lines = [f"    - {s[:120]}" for s in non_empty[:8]]
-                    lines.append(f"  {name} ({count}x):\n" + "\n".join(detail_lines))
-                else:
-                    lines.append(f"  {name} ({count}x)")
-            parts.append("TOOLS ALREADY CALLED:\n" + "\n".join(lines))
-        if files_saved:
-            unique = list(dict.fromkeys(files_saved))
-            parts.append("FILES SAVED: " + ", ".join(unique))
-        if outputs_set:
-            unique = list(dict.fromkeys(outputs_set))
-            parts.append("OUTPUTS SET: " + ", ".join(unique))
-        if errors:
-            parts.append(
-                "ERRORS (do NOT retry these):\n" + "\n".join(f"  - {e}" for e in errors[:10])
-            )
-        return "\n\n".join(parts)
+        return extract_tool_call_history(conversation.messages, max_entries=max_entries)
 
     def _build_initial_message(self, ctx: NodeContext) -> str:
         """Build the initial user message from input data and memory.
@@ -2756,6 +2731,7 @@ class EventLoopNode(NodeProtocol):
             return
         try:
             adapt_path = Path(self._config.spillover_dir) / "adapt.md"
+            adapt_path.parent.mkdir(parents=True, exist_ok=True)
             content = adapt_path.read_text(encoding="utf-8") if adapt_path.exists() else ""
 
             if "## Outputs" not in content:
@@ -2933,131 +2909,304 @@ class EventLoopNode(NodeProtocol):
 
         return result
 
-    async def _compact_tiered(
+    # --- Compaction -----------------------------------------------------------
+
+    # Threshold above which LLM compaction is invoked (structural handles 80-95%).
+    _LLM_COMPACT_THRESHOLD = 0.95
+    # Max chars of formatted messages before proactively splitting for LLM.
+    _LLM_COMPACT_CHAR_LIMIT = 240_000
+    # Max recursion depth for binary-search splitting.
+    _LLM_COMPACT_MAX_DEPTH = 10
+
+    async def _compact(
         self,
         ctx: NodeContext,
         conversation: NodeConversation,
         accumulator: OutputAccumulator | None = None,
     ) -> None:
-        """Run compaction with aggressiveness scaled to usage level.
+        """Compact conversation history to stay within token budget.
 
-        | Usage          | Strategy                                    |
-        |----------------|---------------------------------------------|
-        | 80-100%        | Normal: LLM summary, keep 4 recent messages |
-        | 100-120%       | Aggressive: LLM summary, keep 2 recent      |
-        | >= 120%        | Emergency: static summary, keep 1 recent     |
+        1. Prune old tool results (always, free).
+        2. Structure-preserving compaction at >=80% (standard, then aggressive).
+        3. LLM compaction at >95% with recursive binary-search splitting.
+        4. Emergency deterministic summary only if LLM failed or unavailable.
         """
-        ratio = conversation.usage_ratio()
+        ratio_before = conversation.usage_ratio()
+        phase_grad = getattr(ctx, "continuous_mode", False)
 
-        # --- Tier 0: Prune old tool results (zero-cost, no LLM call) ---
+        # --- Step 1: Prune old tool results (free, no LLM) ---
         protect = max(2000, self._config.max_history_tokens // 12)
         pruned = await conversation.prune_old_tool_results(
             protect_tokens=protect,
             min_prune_tokens=max(1000, protect // 3),
         )
         if pruned > 0:
-            new_ratio = conversation.usage_ratio()
             logger.info(
                 "Pruned %d old tool results: %.0f%% -> %.0f%%",
                 pruned,
-                ratio * 100,
-                new_ratio * 100,
+                ratio_before * 100,
+                conversation.usage_ratio() * 100,
             )
-            if not conversation.needs_compaction():
-                # Pruning freed enough — skip full compaction entirely
-                prune_before = round(ratio * 100)
-                prune_after = round(new_ratio * 100)
-                if ctx.runtime_logger:
-                    ctx.runtime_logger.log_step(
-                        node_id=ctx.node_id,
-                        node_type="event_loop",
-                        step_index=-1,
-                        llm_text=f"Context pruned (tool results): "
-                        f"{prune_before}% \u2192 {prune_after}%",
-                        verdict="COMPACTION",
-                        verdict_feedback=f"level=prune_only "
-                        f"before={prune_before}% after={prune_after}%",
-                    )
-                if self._event_bus:
-                    from framework.runtime.event_bus import AgentEvent, EventType
+        if not conversation.needs_compaction():
+            await self._log_compaction(ctx, conversation, ratio_before)
+            return
 
-                    await self._event_bus.publish(
-                        AgentEvent(
-                            type=EventType.CONTEXT_COMPACTED,
-                            stream_id=ctx.stream_id or ctx.node_id,
-                            node_id=ctx.node_id,
-                            data={
-                                "level": "prune_only",
-                                "usage_before": prune_before,
-                                "usage_after": prune_after,
-                            },
-                        )
-                    )
-                return
-            ratio = new_ratio
-
-        _phase_grad = getattr(ctx, "continuous_mode", False)
-
-        if ratio >= 1.2:
-            level = "emergency"
-            keep = 1
-            logger.warning("Emergency compaction triggered (usage %.0f%%)", ratio * 100)
-        elif ratio >= 1.0:
-            level = "aggressive"
-            keep = 2
-            logger.info("Aggressive compaction triggered (usage %.0f%%)", ratio * 100)
-        else:
-            level = "normal"
-            keep = 4
-
+        # --- Step 2: Structure-preserving compaction (>=80%) ---
         spill_dir = self._config.spillover_dir
         if spill_dir:
-            # Structure-preserving: save freeform text to file, keep tool messages
+            pre_structural = conversation.usage_ratio()
             await conversation.compact_preserving_structure(
                 spillover_dir=spill_dir,
-                keep_recent=keep,
-                phase_graduated=_phase_grad,
+                keep_recent=4,
+                phase_graduated=phase_grad,
             )
-            # Circuit breaker: if structure-preserving compaction barely helped
-            # (still over budget), fall back to destructive compact() which
-            # replaces everything with a summary.
-            mid_ratio = conversation.usage_ratio()
-            if mid_ratio >= 0.9 * ratio:
-                logger.warning(
-                    "Structure-preserving compaction ineffective "
-                    "(%.0f%% -> %.0f%%), falling back to summary compaction",
-                    ratio * 100,
-                    mid_ratio * 100,
+            if conversation.usage_ratio() >= 0.9 * pre_structural:
+                logger.info(
+                    "Standard structural compaction ineffective "
+                    "(%.0f%% -> %.0f%%), trying aggressive",
+                    pre_structural * 100,
+                    conversation.usage_ratio() * 100,
                 )
-                summary = self._build_emergency_summary(ctx, accumulator, conversation)
-                await conversation.compact(summary, keep_recent=keep, phase_graduated=_phase_grad)
-        else:
-            # Fallback: LLM-based summary (no spillover dir available)
-            if level == "emergency":
-                summary = self._build_emergency_summary(ctx, accumulator, conversation)
-            else:
-                summary = await self._generate_compaction_summary(ctx, conversation)
-            await conversation.compact(summary, keep_recent=keep, phase_graduated=_phase_grad)
+                await conversation.compact_preserving_structure(
+                    spillover_dir=spill_dir,
+                    keep_recent=4,
+                    phase_graduated=phase_grad,
+                    aggressive=True,
+                )
+        if not conversation.needs_compaction():
+            await self._log_compaction(ctx, conversation, ratio_before)
+            return
 
-        new_ratio = conversation.usage_ratio()
-        logger.info(
-            "Compaction complete (%s): %.0f%% -> %.0f%%",
-            level,
-            ratio * 100,
-            new_ratio * 100,
+        # --- Step 3: LLM compaction at >95% (recursive binary-search) ---
+        if (
+            conversation.usage_ratio() > self._LLM_COMPACT_THRESHOLD
+            and ctx.llm is not None
+        ):
+            logger.info(
+                "LLM compaction triggered (%.0f%% usage)",
+                conversation.usage_ratio() * 100,
+            )
+            try:
+                summary = await self._llm_compact(
+                    ctx, list(conversation.messages), accumulator,
+                )
+                await conversation.compact(
+                    summary,
+                    keep_recent=2,
+                    phase_graduated=phase_grad,
+                )
+            except Exception as e:
+                logger.warning("LLM compaction failed: %s", e)
+
+        if not conversation.needs_compaction():
+            await self._log_compaction(ctx, conversation, ratio_before)
+            return
+
+        # --- Step 4: Emergency deterministic summary (LLM failed/unavailable) ---
+        logger.warning(
+            "Emergency compaction (%.0f%% usage)",
+            conversation.usage_ratio() * 100,
+        )
+        summary = self._build_emergency_summary(ctx, accumulator, conversation)
+        await conversation.compact(
+            summary, keep_recent=1, phase_graduated=phase_grad,
+        )
+        await self._log_compaction(ctx, conversation, ratio_before)
+
+    # --- LLM compaction with binary-search splitting ----------------------
+
+    async def _llm_compact(
+        self,
+        ctx: NodeContext,
+        messages: list,
+        accumulator: OutputAccumulator | None = None,
+        _depth: int = 0,
+    ) -> str:
+        """Summarise *messages* with LLM, splitting recursively if too large.
+
+        If the formatted text exceeds ``_LLM_COMPACT_CHAR_LIMIT`` or the LLM
+        rejects the call with a context-length error, the messages are split
+        in half and each half is summarised independently.  Tool history is
+        appended once at the top-level call (``_depth == 0``).
+        """
+        from framework.graph.conversation import extract_tool_call_history
+
+        if _depth > self._LLM_COMPACT_MAX_DEPTH:
+            raise RuntimeError(
+                f"LLM compaction recursion limit ({self._LLM_COMPACT_MAX_DEPTH})"
+            )
+
+        formatted = self._format_messages_for_summary(messages)
+
+        # Proactive split: avoid wasting an API call on oversized input
+        if len(formatted) > self._LLM_COMPACT_CHAR_LIMIT and len(messages) > 1:
+            summary = await self._llm_compact_split(
+                ctx, messages, accumulator, _depth,
+            )
+        else:
+            prompt = self._build_llm_compaction_prompt(
+                ctx, accumulator, formatted,
+            )
+            summary_budget = max(1024, self._config.max_history_tokens // 2)
+            try:
+                response = await ctx.llm.acomplete(
+                    messages=[{"role": "user", "content": prompt}],
+                    system=(
+                        "You are a conversation compactor for an AI agent. "
+                        "Write a detailed summary that allows the agent to "
+                        "continue its work. Preserve user-stated rules, "
+                        "constraints, and account/identity preferences verbatim."
+                    ),
+                    max_tokens=summary_budget,
+                )
+                summary = response.content
+            except Exception as e:
+                if _is_context_too_large_error(e) and len(messages) > 1:
+                    logger.info(
+                        "LLM context too large (depth=%d, msgs=%d) — splitting",
+                        _depth,
+                        len(messages),
+                    )
+                    summary = await self._llm_compact_split(
+                        ctx, messages, accumulator, _depth,
+                    )
+                else:
+                    raise
+
+        # Append tool history at top level only
+        if _depth == 0:
+            tool_history = extract_tool_call_history(messages)
+            if tool_history and "TOOLS ALREADY CALLED" not in summary:
+                summary += "\n\n" + tool_history
+
+        return summary
+
+    async def _llm_compact_split(
+        self,
+        ctx: NodeContext,
+        messages: list,
+        accumulator: OutputAccumulator | None,
+        _depth: int,
+    ) -> str:
+        """Split messages in half and summarise each half independently."""
+        mid = max(1, len(messages) // 2)
+        s1 = await self._llm_compact(ctx, messages[:mid], None, _depth + 1)
+        s2 = await self._llm_compact(
+            ctx, messages[mid:], accumulator, _depth + 1,
+        )
+        return s1 + "\n\n" + s2
+
+    # --- Compaction helpers ------------------------------------------------
+
+    @staticmethod
+    def _format_messages_for_summary(messages: list) -> str:
+        """Format messages as text for LLM summarisation."""
+        lines: list[str] = []
+        for m in messages:
+            if m.role == "tool":
+                content = m.content[:500]
+                if len(m.content) > 500:
+                    content += "..."
+                lines.append(f"[tool result]: {content}")
+            elif m.role == "assistant" and m.tool_calls:
+                names = [
+                    tc.get("function", {}).get("name", "?")
+                    for tc in m.tool_calls
+                ]
+                text = m.content[:200] if m.content else ""
+                lines.append(f"[assistant (calls: {', '.join(names)})]: {text}")
+            else:
+                lines.append(f"[{m.role}]: {m.content}")
+        return "\n\n".join(lines)
+
+    def _build_llm_compaction_prompt(
+        self,
+        ctx: NodeContext,
+        accumulator: OutputAccumulator | None,
+        formatted_messages: str,
+    ) -> str:
+        """Build prompt for LLM compaction targeting 50% of token budget."""
+        spec = ctx.node_spec
+        ctx_lines = [f"NODE: {spec.name} (id={spec.id})"]
+        if spec.description:
+            ctx_lines.append(f"PURPOSE: {spec.description}")
+        if spec.success_criteria:
+            ctx_lines.append(f"SUCCESS CRITERIA: {spec.success_criteria}")
+
+        if accumulator:
+            acc = accumulator.to_dict()
+            done = {k: v for k, v in acc.items() if v is not None}
+            todo = [k for k, v in acc.items() if v is None]
+            if done:
+                ctx_lines.append(
+                    "OUTPUTS ALREADY SET:\n"
+                    + "\n".join(
+                        f"  {k}: {str(v)[:150]}" for k, v in done.items()
+                    )
+                )
+            if todo:
+                ctx_lines.append(f"OUTPUTS STILL NEEDED: {', '.join(todo)}")
+        elif spec.output_keys:
+            ctx_lines.append(
+                f"OUTPUTS STILL NEEDED: {', '.join(spec.output_keys)}"
+            )
+
+        target_tokens = self._config.max_history_tokens // 2
+        target_chars = target_tokens * 4
+        node_ctx = "\n".join(ctx_lines)
+
+        return (
+            "You are compacting an AI agent's conversation history. "
+            "The agent is still working and needs to continue.\n\n"
+            f"AGENT CONTEXT:\n{node_ctx}\n\n"
+            f"CONVERSATION MESSAGES:\n{formatted_messages}\n\n"
+            "INSTRUCTIONS:\n"
+            f"Write a summary of approximately {target_chars} characters "
+            f"(~{target_tokens} tokens).\n"
+            "1. Preserve ALL user-stated rules, constraints, and preferences "
+            "verbatim.\n"
+            "2. Preserve key decisions made and results obtained.\n"
+            "3. Preserve in-progress work state so the agent can continue.\n"
+            "4. Be detailed enough that the agent can resume without "
+            "re-doing work.\n"
         )
 
-        # Log compaction to session logs (tool_logs.jsonl)
-        before_pct = round(ratio * 100)
-        after_pct = round(new_ratio * 100)
+    async def _log_compaction(
+        self,
+        ctx: NodeContext,
+        conversation: NodeConversation,
+        ratio_before: float,
+    ) -> None:
+        """Log compaction result to runtime logger and event bus."""
+        ratio_after = conversation.usage_ratio()
+        before_pct = round(ratio_before * 100)
+        after_pct = round(ratio_after * 100)
+
+        # Determine label from what happened
+        if after_pct >= before_pct - 1:
+            level = "prune_only"
+        elif ratio_after <= 0.6:
+            level = "llm"
+        else:
+            level = "structural"
+
+        logger.info(
+            "Compaction complete (%s): %d%% -> %d%%",
+            level,
+            before_pct,
+            after_pct,
+        )
+
         if ctx.runtime_logger:
             ctx.runtime_logger.log_step(
                 node_id=ctx.node_id,
                 node_type="event_loop",
-                step_index=-1,  # Not a regular LLM step
-                llm_text=f"Context compacted ({level}): {before_pct}% \u2192 {after_pct}%",
+                step_index=-1,
+                llm_text=f"Context compacted ({level}): "
+                f"{before_pct}% \u2192 {after_pct}%",
                 verdict="COMPACTION",
-                verdict_feedback=f"level={level} before={before_pct}% after={after_pct}%",
+                verdict_feedback=f"level={level} "
+                f"before={before_pct}% after={after_pct}%",
             )
 
         if self._event_bus:
@@ -3070,62 +3219,12 @@ class EventLoopNode(NodeProtocol):
                     node_id=ctx.node_id,
                     data={
                         "level": level,
-                        "usage_before": round(ratio * 100),
-                        "usage_after": round(new_ratio * 100),
+                        "usage_before": before_pct,
+                        "usage_after": after_pct,
                     },
                 )
             )
 
-    async def _generate_compaction_summary(
-        self,
-        ctx: NodeContext,
-        conversation: NodeConversation,
-    ) -> str:
-        """Use LLM to generate a conversation summary for compaction."""
-        tool_history = self._extract_tool_call_history(conversation)
-
-        messages_text = "\n".join(
-            f"[{m.role}]: {m.content[:200]}" for m in conversation.messages[-10:]
-        )
-        prompt = (
-            "Summarize this conversation so far in 2-3 sentences, "
-            "preserving key decisions and results.\n\n"
-            "IMPORTANT: Always preserve any user-stated rules, constraints, "
-            "or preferences — especially which account/identity to use, "
-            "formatting preferences, and behavioral instructions. "
-            "These MUST appear verbatim or near-verbatim in your summary.\n\n"
-            f"{messages_text}"
-        )
-        if tool_history:
-            prompt += (
-                "\n\nINCLUDE this tool history verbatim in your summary "
-                "(the agent needs it to avoid re-calling tools):\n\n"
-                f"{tool_history}"
-            )
-
-        # Dynamic budget: reasoning models (o1, gpt-5-mini) spend max_tokens on
-        # internal thinking. 500 leaves nothing for the actual summary.
-        summary_budget = max(1024, self._config.max_history_tokens // 10)
-        try:
-            response = await ctx.llm.acomplete(
-                messages=[{"role": "user", "content": prompt}],
-                system=(
-                    "Summarize conversations concisely. Always preserve the tool "
-                    "history section. Always preserve user-stated rules, constraints, "
-                    "and account/identity preferences verbatim."
-                ),
-                max_tokens=summary_budget,
-            )
-            summary = response.content
-            # Ensure tool history is present even if LLM dropped it
-            if tool_history and "TOOLS ALREADY CALLED" not in summary:
-                summary += "\n\n" + tool_history
-            return summary
-        except Exception as e:
-            logger.warning(f"Compaction summary generation failed: {e}")
-            if tool_history:
-                return f"Previous conversation context (summary unavailable).\n\n{tool_history}"
-            return "Previous conversation context (summary unavailable)."
 
     def _build_emergency_summary(
         self,

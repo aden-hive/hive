@@ -511,9 +511,11 @@ class ExecutionStream:
         logger.debug(f"Queued execution {execution_id} for stream {self.stream_id}")
         return execution_id
 
-    # Errors that indicate a fundamental configuration or environment problem.
-    # Resurrecting after these is pointless — the same error will recur.
+    # Errors that indicate resurrection won't help — the same error will recur.
+    # Includes both configuration/environment errors and deterministic node
+    # failures where the conversation/state hasn't changed.
     _FATAL_ERROR_PATTERNS: tuple[str, ...] = (
+        # Configuration / environment
         "credential",
         "authentication",
         "unauthorized",
@@ -525,6 +527,11 @@ class ExecutionStream:
         "permission denied",
         "invalid api",
         "configuration error",
+        # Deterministic node failures — resurrecting at the same node with
+        # the same conversation produces the same result.
+        "node stalled",
+        "ghost empty stream",
+        "max iterations",
     )
 
     @classmethod
