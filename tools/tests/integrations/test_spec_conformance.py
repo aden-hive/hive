@@ -31,6 +31,7 @@ from aden_tools.tools import register_all_tools
 
 from .conftest import (
     CREDENTIAL_STORE_META_MODULES,
+    UNREGISTERED_COMMUNITY_MODULES,
     CREDENTIAL_TOOL_MODULE_IDS,
     CREDENTIAL_TOOL_MODULES,
     KNOWN_PHANTOM_TOOLS,
@@ -297,6 +298,8 @@ class TestCredentialCoverage:
         """
         if short_name in CREDENTIAL_STORE_META_MODULES:
             pytest.skip(f"'{short_name}' is a credential-store meta-module")
+        if short_name in UNREGISTERED_COMMUNITY_MODULES:
+            pytest.skip(f"'{short_name}' is an unregistered community module")
         tools_in_module = MODULE_TO_TOOLS.get(short_name, [])
         for tool_name in tools_in_module:
             assert tool_name in all_spec_tools, (
