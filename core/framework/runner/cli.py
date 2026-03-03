@@ -1929,6 +1929,7 @@ def _open_browser(url: str) -> None:
     """Open URL in the default browser (best-effort, non-blocking)."""
     import subprocess
     import sys
+    import webbrowser
 
     try:
         if sys.platform == "darwin":
@@ -1937,6 +1938,8 @@ def _open_browser(url: str) -> None:
             subprocess.Popen(
                 ["xdg-open", url], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
             )
+        elif sys.platform == "win32":
+            webbrowser.open(url)
     except Exception:
         pass  # Best-effort — don't crash if browser can't open
 

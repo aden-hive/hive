@@ -130,7 +130,7 @@ def add_env_var_to_shell_config(
 
     try:
         if config_path.exists():
-            content = config_path.read_text()
+            content = config_path.read_text(encoding="utf-8")
 
             # Check if already exists
             pattern = rf"^export\s+{re.escape(env_var)}=.*$"
@@ -142,11 +142,11 @@ def add_env_var_to_shell_config(
                     content,
                     flags=re.MULTILINE,
                 )
-                config_path.write_text(new_content)
+                config_path.write_text(new_content, encoding="utf-8")
                 return True, str(config_path)
 
         # Append to file
-        with open(config_path, "a") as f:
+        with open(config_path, "a", encoding="utf-8") as f:
             f.write(f"\n# {comment}\n")
             f.write(f"{export_line}\n")
 

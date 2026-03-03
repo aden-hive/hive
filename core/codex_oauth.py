@@ -159,13 +159,15 @@ def save_credentials(token_data: dict, account_id: str) -> None:
 
 def open_browser(url: str) -> bool:
     """Open the URL in the user's default browser."""
+    import webbrowser
     system = platform.system()
     try:
         devnull = subprocess.DEVNULL
         if system == "Darwin":
             subprocess.Popen(["open", url], stdout=devnull, stderr=devnull)
         elif system == "Windows":
-            subprocess.Popen(["cmd", "/c", "start", url], stdout=devnull, stderr=devnull)
+            # Use webbrowser module for Windows to safely handle URLs with special characters
+            return webbrowser.open(url)
         else:
             subprocess.Popen(["xdg-open", url], stdout=devnull, stderr=devnull)
         return True
