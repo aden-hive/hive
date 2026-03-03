@@ -60,6 +60,10 @@ sql = [
 bigquery = [
     "google-cloud-bigquery>=3.0.0",
 ]
+mongodb = [
+	"pymongo>=4.16.0",
+]
+              
 all = [
     "RestrictedPython>=7.0",
     "pytesseract>=0.3.10",
