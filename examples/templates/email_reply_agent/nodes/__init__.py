@@ -83,8 +83,8 @@ confirm_draft_node = NodeSpec(
     client_facing=True,
     max_node_visits=0,
     input_keys=["email_list", "filter_criteria"],
-    output_keys=["batch_complete", "restart"],
-    nullable_output_keys=["batch_complete", "restart"],
+    output_keys=["batch_complete", "restart", "send_started", "send_count", "sent_message_ids", "send_failures"],
+    nullable_output_keys=["batch_complete", "restart", "send_started", "send_count", "sent_message_ids", "send_failures"],
     success_criteria="User confirmed recipients and personalized replies sent for each.",
     system_prompt="""\
 You are a Gmail reply assistant. Present emails for confirmation, then send personalized replies.
@@ -99,14 +99,22 @@ You are a Gmail reply assistant. Present emails for confirmation, then send pers
 **STEP 2 — Handle user response:**
 
 If user CONFIRMS (says yes, go ahead, sounds good, etc.):
-For EACH email in email_list:
-1. Read the subject and snippet
-2. Use tone_guidance from filter_criteria + any user-specified preferences
-3. Call gmail_reply_email with:
+1. Immediately call set_output("send_started", True) before any send tools.
+2. For EACH email in email_list, call gmail_reply_email with:
    - message_id: the email's message_id
-   - html: personalized 2-4 sentence reply based on email context
-   (The tool automatically handles recipient, subject, and threading)
-4. After all replies sent, call: set_output("batch_complete", True)
+   - html: personalized 2-4 sentence reply based on email context, using tone_guidance from filter_criteria and any new user preferences.
+3. Track send results during this run:
+   - send_count: number of successful gmail_reply_email calls
+   - sent_message_ids: list of message_ids successfully replied to
+   - send_failures: list of {"message_id": "...", "error": "..."} for failed sends
+4. REQUIRED completion gate:
+   - You MUST NOT set batch_complete=True unless send_started is True AND send_count >= 1 AND sent_message_ids is non-empty.
+   - If no sends succeeded, do NOT set batch_complete=True. Instead explain what failed and ask user whether to retry or restart.
+5. After successful sends, call set_output in a separate turn:
+   - set_output("send_count", <int>)
+   - set_output("sent_message_ids", <list>)
+   - set_output("send_failures", <list>)
+   - set_output("batch_complete", True)
 
 If user wants to CHANGE LOGIC/FILTER (says change filter, different criteria, not these emails, wrong emails, etc.):
 1. Acknowledge their request
