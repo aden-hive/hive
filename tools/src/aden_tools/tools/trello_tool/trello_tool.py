@@ -1,69 +1,16 @@
-"""
-Trello Tool - Board, list, and card management via REST API.
-
-Supports:
-- Trello API key + token authentication
-- Boards, lists, cards CRUD
-- Member info
-
-API Reference: https://developer.atlassian.com/cloud/trello/rest/
-"""
+"""Trello MCP tools."""
 
 from __future__ import annotations
 
 import os
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
-import httpx
 from fastmcp import FastMCP
+
+from .trello_client import TrelloClient
 
 if TYPE_CHECKING:
     from aden_tools.credentials import CredentialStoreAdapter
-
-BASE_URL = "https://api.trello.com/1"
-
-
-def _get_credentials(credentials: CredentialStoreAdapter | None) -> tuple[str | None, str | None]:
-    """Return (api_key, api_token)."""
-    if credentials is not None:
-        key = credentials.get("trello_key")
-        token = credentials.get("trello_token")
-        return key, token
-    return os.getenv("TRELLO_API_KEY"), os.getenv("TRELLO_TOKEN")
-
-
-def _request(method: str, path: str, key: str, token: str, **kwargs: Any) -> dict | list:
-    """Make a request to the Trello API."""
-    params = kwargs.pop("params", {})
-    params["key"] = key
-    params["token"] = token
-    try:
-        resp = getattr(httpx, method)(
-            f"{BASE_URL}{path}",
-            params=params,
-            timeout=30.0,
-            **kwargs,
-        )
-        if resp.status_code == 401:
-            return {"error": "Unauthorized. Check your TRELLO_API_KEY and TRELLO_TOKEN."}
-        if resp.status_code == 404:
-            return {"error": f"Not found: {path}"}
-        if resp.status_code not in (200, 201):
-            return {"error": f"Trello API error {resp.status_code}: {resp.text[:500]}"}
-        if not resp.content:
-            return {}
-        return resp.json()
-    except httpx.TimeoutException:
-        return {"error": "Request to Trello timed out"}
-    except Exception as e:
-        return {"error": f"Trello request failed: {e!s}"}
-
-
-def _auth_error() -> dict[str, Any]:
-    return {
-        "error": "TRELLO_API_KEY and TRELLO_TOKEN not set",
-        "help": "Get credentials at https://trello.com/power-ups/admin",
-    }
 
 
 def register_tools(
@@ -72,233 +19,288 @@ def register_tools(
 ) -> None:
     """Register Trello tools with the MCP server."""
 
+    limit_min = 1
+    limit_max = 1000
+    card_desc_max = 16384
+
+    def _get_credentials() -> tuple[str | None, str | None]:
+        if credentials is not None:
+            api_key = credentials.get("trello_api_key")
+            api_token = credentials.get("trello_api_token")
+        else:
+            api_key = None
+            api_token = None
+
+        api_key = api_key or os.getenv("TRELLO_API_KEY")
+        api_token = api_token or os.getenv("TRELLO_API_TOKEN")
+        return api_key, api_token
+
+    def _get_client() -> TrelloClient | dict[str, str]:
+        api_key, api_token = _get_credentials()
+        if not api_key or not api_token:
+            return {
+                "error": "Trello credentials not configured",
+                "help": (
+                    "Set TRELLO_API_KEY and TRELLO_API_TOKEN environment variables "
+                    "or configure via credential store"
+                ),
+            }
+        return TrelloClient(api_key, api_token)
+
+    def _validate_limit(limit: int | None) -> dict[str, str] | None:
+        if limit is None:
+            return None
+        if limit < limit_min or limit > limit_max:
+            return {
+                "error": f"limit must be between {limit_min} and {limit_max}",
+                "field": "limit",
+                "help": (
+                    "Reduce the limit or paginate by calling again with a smaller "
+                    "limit to fetch additional results."
+                ),
+            }
+        return None
+
+    def _validate_card_desc(desc: str | None) -> dict[str, str] | None:
+        if desc is None:
+            return None
+        if len(desc) > card_desc_max:
+            return {
+                "error": f"desc exceeds the {card_desc_max}-character limit",
+                "field": "desc",
+                "help": "Trim the description and retry.",
+            }
+        return None
+
     @mcp.tool()
-    def trello_list_boards() -> dict[str, Any]:
+    def trello_list_boards(
+        member_id: str = "me",
+        fields: list[str] | None = None,
+        limit: int | None = None,
+    ) -> dict:
         """
-        List all boards for the authenticated Trello user.
-
-        Returns:
-            Dict with boards list (id, name, url, closed)
-        """
-        key, token = _get_credentials(credentials)
-        if not key or not token:
-            return _auth_error()
-
-        data = _request("get", "/members/me/boards", key, token, params={"fields": "id,name,url,closed,dateLastActivity"})
-        if isinstance(data, dict) and "error" in data:
-            return data
-
-        boards = []
-        for b in data if isinstance(data, list) else []:
-            boards.append({
-                "id": b.get("id", ""),
-                "name": b.get("name", ""),
-                "url": b.get("url", ""),
-                "closed": b.get("closed", False),
-                "last_activity": b.get("dateLastActivity", ""),
-            })
-        return {"boards": boards, "count": len(boards)}
-
-    @mcp.tool()
-    def trello_get_board(board_id: str) -> dict[str, Any]:
-        """
-        Get details about a specific Trello board.
+        List Trello boards for a member.
 
         Args:
-            board_id: Board ID
-
-        Returns:
-            Dict with board details including lists and member count
+            member_id: Trello member id or "me" (default)
+            fields: Optional list of board fields (e.g., ["id", "name", "url",
+                "closed"] or ["all"]). Uses Trello board object field names.
+            limit: Optional max number of boards (1-1000).
         """
-        key, token = _get_credentials(credentials)
-        if not key or not token:
-            return _auth_error()
-        if not board_id:
-            return {"error": "board_id is required"}
-
-        data = _request("get", f"/boards/{board_id}", key, token)
-        if isinstance(data, dict) and "error" in data:
-            return data
-
-        b = data if isinstance(data, dict) else {}
-        return {
-            "id": b.get("id", ""),
-            "name": b.get("name", ""),
-            "desc": (b.get("desc", "") or "")[:500],
-            "url": b.get("url", ""),
-            "closed": b.get("closed", False),
-            "last_activity": b.get("dateLastActivity", ""),
-        }
+        limit_error = _validate_limit(limit)
+        if limit_error:
+            return limit_error
+        client = _get_client()
+        if isinstance(client, dict):
+            return client
+        result = client.list_boards(member_id=member_id, fields=fields, limit=limit)
+        if isinstance(result, list):
+            return {"boards": result}
+        return result
 
     @mcp.tool()
-    def trello_get_lists(board_id: str) -> dict[str, Any]:
+    def trello_get_member(
+        member_id: str = "me",
+        fields: list[str] | None = None,
+    ) -> dict:
         """
-        Get all lists on a Trello board.
+        Get Trello member info.
 
         Args:
-            board_id: Board ID
-
-        Returns:
-            Dict with lists (id, name, closed, pos)
+            member_id: Trello member id, username or "me" (default)
+            fields: Optional list of member fields (e.g., ["fullName", "username",
+                "url"] or ["all"]). Uses Trello member object field names.
         """
-        key, token = _get_credentials(credentials)
-        if not key or not token:
-            return _auth_error()
-        if not board_id:
-            return {"error": "board_id is required"}
-
-        data = _request("get", f"/boards/{board_id}/lists", key, token, params={"fields": "id,name,closed,pos"})
-        if isinstance(data, dict) and "error" in data:
-            return data
-
-        lists = []
-        for lst in data if isinstance(data, list) else []:
-            lists.append({
-                "id": lst.get("id", ""),
-                "name": lst.get("name", ""),
-                "closed": lst.get("closed", False),
-            })
-        return {"lists": lists, "count": len(lists)}
+        client = _get_client()
+        if isinstance(client, dict):
+            return client
+        return client.get_member(member_id=member_id, fields=fields)
 
     @mcp.tool()
-    def trello_get_cards(
-        list_id: str = "",
-        board_id: str = "",
-        limit: int = 100,
-    ) -> dict[str, Any]:
+    def trello_list_lists(
+        board_id: str,
+        fields: list[str] | None = None,
+    ) -> dict:
         """
-        Get cards from a list or board.
+        List lists in a Trello board.
 
         Args:
-            list_id: List ID to get cards from (preferred)
-            board_id: Board ID to get all cards (alternative)
-            limit: Max cards (1-1000, default 100)
-
-        Returns:
-            Dict with cards list (id, name, desc, due, labels, list_id)
+            board_id: Trello board id
+            fields: Optional list of list fields (e.g., ["id", "name", "closed"] or
+                ["all"]). Uses Trello list object field names.
         """
-        key, token = _get_credentials(credentials)
-        if not key or not token:
-            return _auth_error()
-        if not list_id and not board_id:
-            return {"error": "list_id or board_id is required"}
+        client = _get_client()
+        if isinstance(client, dict):
+            return client
+        result = client.list_lists(board_id=board_id, fields=fields)
+        if isinstance(result, list):
+            return {"lists": result}
+        return result
 
-        path = f"/lists/{list_id}/cards" if list_id else f"/boards/{board_id}/cards"
-        data = _request("get", path, key, token, params={
-            "fields": "id,name,desc,closed,due,dueComplete,idList,labels,dateLastActivity",
-            "limit": max(1, min(limit, 1000)),
-        })
-        if isinstance(data, dict) and "error" in data:
-            return data
+    @mcp.tool()
+    def trello_list_cards(
+        list_id: str,
+        fields: list[str] | None = None,
+        limit: int | None = None,
+    ) -> dict:
+        """
+        List cards in a Trello list.
 
-        cards = []
-        for c in data if isinstance(data, list) else []:
-            cards.append({
-                "id": c.get("id", ""),
-                "name": c.get("name", ""),
-                "desc": (c.get("desc", "") or "")[:300],
-                "closed": c.get("closed", False),
-                "due": c.get("due"),
-                "due_complete": c.get("dueComplete", False),
-                "list_id": c.get("idList", ""),
-                "labels": [l.get("name", "") for l in c.get("labels", [])],
-            })
-        return {"cards": cards, "count": len(cards)}
+        Args:
+            list_id: Trello list id
+            fields: Optional list of card fields (e.g., ["name", "desc", "url",
+                "idList", "idMembers", "labels", "due"] or ["all"]). Uses
+                Trello card object field names.
+            limit: Optional max number of cards (1-1000).
+        """
+        limit_error = _validate_limit(limit)
+        if limit_error:
+            return limit_error
+        client = _get_client()
+        if isinstance(client, dict):
+            return client
+        result = client.list_cards(list_id=list_id, fields=fields, limit=limit)
+        if isinstance(result, list):
+            return {"cards": result}
+        return result
 
     @mcp.tool()
     def trello_create_card(
         list_id: str,
         name: str,
-        desc: str = "",
-        due: str = "",
-        pos: str = "bottom",
-    ) -> dict[str, Any]:
+        desc: str | None = None,
+        due: str | None = None,
+        id_members: list[str] | None = None,
+        id_labels: list[str] | None = None,
+        pos: str | None = None,
+    ) -> dict:
         """
-        Create a new card in a Trello list.
+        Create a Trello card.
 
         Args:
-            list_id: List ID to create the card in (required)
-            name: Card title (required)
-            desc: Card description in markdown (optional)
-            due: Due date in ISO 8601 format (optional)
-            pos: Position: top, bottom, or positive number (default bottom)
-
-        Returns:
-            Dict with created card details
+            list_id: Trello list id to create the card in
+            name: Card name
+            desc: Optional card description (max 16384 characters)
+            due: Optional due date (ISO-8601 string)
+            id_members: Optional list of member ids
+            id_labels: Optional list of label ids
+            pos: Optional position ("top", "bottom", or numeric string)
         """
-        key, token = _get_credentials(credentials)
-        if not key or not token:
-            return _auth_error()
-        if not list_id or not name:
-            return {"error": "list_id and name are required"}
+        if not name:
+            return {"error": "Card name is required"}
+        desc_error = _validate_card_desc(desc)
+        if desc_error:
+            return desc_error
+        client = _get_client()
+        if isinstance(client, dict):
+            return client
+        return client.create_card(
+            list_id=list_id,
+            name=name,
+            desc=desc,
+            due=due,
+            id_members=id_members,
+            id_labels=id_labels,
+            pos=pos,
+        )
 
-        params: dict[str, Any] = {"idList": list_id, "name": name, "pos": pos}
-        if desc:
-            params["desc"] = desc
-        if due:
-            params["due"] = due
+    @mcp.tool()
+    def trello_move_card(
+        card_id: str,
+        list_id: str,
+        pos: str | None = None,
+    ) -> dict:
+        """
+        Move a card to another list.
 
-        data = _request("post", "/cards", key, token, params=params)
-        if isinstance(data, dict) and "error" in data:
-            return data
-
-        c = data if isinstance(data, dict) else {}
-        return {
-            "id": c.get("id", ""),
-            "name": c.get("name", ""),
-            "url": c.get("url", ""),
-            "status": "created",
-        }
+        Args:
+            card_id: Trello card id
+            list_id: Target Trello list id
+            pos: Optional position ("top", "bottom", or numeric string)
+        """
+        client = _get_client()
+        if isinstance(client, dict):
+            return client
+        return client.move_card(card_id=card_id, list_id=list_id, pos=pos)
 
     @mcp.tool()
     def trello_update_card(
         card_id: str,
-        name: str = "",
-        desc: str = "",
+        name: str | None = None,
+        desc: str | None = None,
+        due: str | None = None,
         closed: bool | None = None,
-        due: str = "",
-        list_id: str = "",
-    ) -> dict[str, Any]:
+        list_id: str | None = None,
+        pos: str | None = None,
+    ) -> dict:
         """
-        Update an existing Trello card.
+        Update a Trello card.
 
         Args:
-            card_id: Card ID to update (required)
-            name: New card title (optional)
-            desc: New description (optional)
-            closed: True to archive, False to unarchive (optional)
-            due: New due date ISO 8601 or empty to remove (optional)
-            list_id: Move card to this list (optional)
-
-        Returns:
-            Dict with updated card details
+            card_id: Trello card id
+            name: Optional new card name
+            desc: Optional new description (max 16384 characters)
+            due: Optional due date (ISO-8601 string)
+            closed: Optional archive flag
+            list_id: Optional new list id
+            pos: Optional position ("top", "bottom", or numeric string)
         """
-        key, token = _get_credentials(credentials)
-        if not key or not token:
-            return _auth_error()
-        if not card_id:
-            return {"error": "card_id is required"}
+        desc_error = _validate_card_desc(desc)
+        if desc_error:
+            return desc_error
+        client = _get_client()
+        if isinstance(client, dict):
+            return client
+        return client.update_card(
+            card_id=card_id,
+            name=name,
+            desc=desc,
+            due=due,
+            closed=closed,
+            list_id=list_id,
+            pos=pos,
+        )
 
-        params: dict[str, Any] = {}
-        if name:
-            params["name"] = name
-        if desc:
-            params["desc"] = desc
-        if closed is not None:
-            params["closed"] = str(closed).lower()
-        if due:
-            params["due"] = due
-        if list_id:
-            params["idList"] = list_id
+    @mcp.tool()
+    def trello_add_comment(
+        card_id: str,
+        text: str,
+    ) -> dict:
+        """
+        Add a comment to a Trello card.
 
-        data = _request("put", f"/cards/{card_id}", key, token, params=params)
-        if isinstance(data, dict) and "error" in data:
-            return data
+        Args:
+            card_id: Trello card id
+            text: Comment text
+        """
+        if not text:
+            return {"error": "Comment text is required"}
+        client = _get_client()
+        if isinstance(client, dict):
+            return client
+        return client.add_comment(card_id=card_id, text=text)
 
-        c = data if isinstance(data, dict) else {}
-        return {
-            "id": c.get("id", ""),
-            "name": c.get("name", ""),
-            "closed": c.get("closed", False),
-            "status": "updated",
-        }
+    @mcp.tool()
+    def trello_add_attachment(
+        card_id: str,
+        attachment_url: str,
+        name: str | None = None,
+    ) -> dict:
+        """
+        Add an attachment to a Trello card (URL attachment).
+
+        Args:
+            card_id: Trello card id
+            attachment_url: URL to attach
+            name: Optional attachment name
+        """
+        if not attachment_url:
+            return {"error": "attachment_url is required"}
+        client = _get_client()
+        if isinstance(client, dict):
+            return client
+        return client.add_attachment(
+            card_id=card_id,
+            attachment_url=attachment_url,
+            name=name,
+        )

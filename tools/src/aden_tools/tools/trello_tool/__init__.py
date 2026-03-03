@@ -1,4 +1,4 @@
-"""Trello project management tool package for Aden Tools."""
+"""Trello tools."""
 
 from .trello_tool import register_tools
 

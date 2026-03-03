@@ -1,150 +1,99 @@
-"""Tests for trello_tool - Trello board, list, and card management."""
+"""Tests for Trello tools (FastMCP)."""
 
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock
 
 import pytest
 from fastmcp import FastMCP
 
-from aden_tools.tools.trello_tool.trello_tool import register_tools
-
-ENV = {"TRELLO_API_KEY": "test-key", "TRELLO_TOKEN": "test-token"}
+from aden_tools.tools.trello_tool import register_tools
 
 
 @pytest.fixture
-def tool_fns(mcp: FastMCP):
-    register_tools(mcp, credentials=None)
+def trello_tools(mcp: FastMCP, monkeypatch):
+    monkeypatch.setenv("TRELLO_API_KEY", "test-key")
+    monkeypatch.setenv("TRELLO_API_TOKEN", "test-token")
+    register_tools(mcp)
     tools = mcp._tool_manager._tools
-    return {name: tools[name].fn for name in tools}
+    return {name: tools[name].fn for name in tools if name.startswith("trello_")}
 
 
-class TestTrelloListBoards:
-    def test_missing_credentials(self, tool_fns):
-        with patch.dict("os.environ", {}, clear=True):
-            result = tool_fns["trello_list_boards"]()
+class TestTrelloTools:
+    def test_missing_credentials_returns_error(self, mcp: FastMCP, monkeypatch):
+        monkeypatch.delenv("TRELLO_API_KEY", raising=False)
+        monkeypatch.delenv("TRELLO_API_TOKEN", raising=False)
+        register_tools(mcp)
+
+        fn = mcp._tool_manager._tools["trello_list_boards"].fn
+        result = fn()
+
+        assert "error" in result
+        assert "Trello credentials not configured" in result["error"]
+
+    def test_list_boards_success(self, trello_tools, monkeypatch):
+        def fake_request(method, url, params=None, timeout=None):
+            assert method == "GET"
+            assert url.endswith("/members/me/boards")
+            return MagicMock(status_code=200, json=lambda: [{"id": "b1"}])
+
+        monkeypatch.setattr("httpx.request", fake_request)
+
+        result = trello_tools["trello_list_boards"]()
+        assert "boards" in result
+        assert result["boards"][0]["id"] == "b1"
+
+    def test_list_boards_limit_out_of_range(self, trello_tools):
+        result = trello_tools["trello_list_boards"](limit=0)
+        assert "error" in result
+        assert "limit" in result["error"].lower()
+
+    def test_create_card_requires_name(self, trello_tools):
+        result = trello_tools["trello_create_card"](list_id="l1", name="")
         assert "error" in result
 
-    def test_successful_list(self, tool_fns):
-        mock_resp = MagicMock()
-        mock_resp.status_code = 200
-        mock_resp.content = b"[]"
-        mock_resp.json.return_value = [
-            {"id": "board-1", "name": "Sprint Board", "url": "https://trello.com/b/abc", "closed": False, "dateLastActivity": "2024-01-01T00:00:00Z"}
-        ]
-        with (
-            patch.dict("os.environ", ENV),
-            patch("aden_tools.tools.trello_tool.trello_tool.httpx.get", return_value=mock_resp),
-        ):
-            result = tool_fns["trello_list_boards"]()
+    def test_create_card_desc_too_long(self, trello_tools):
+        desc = "x" * 16385
+        result = trello_tools["trello_create_card"](list_id="l1", name="ok", desc=desc)
+        assert "error" in result
+        assert "desc" in result["error"].lower()
 
-        assert len(result["boards"]) == 1
-        assert result["boards"][0]["name"] == "Sprint Board"
-
-
-class TestTrelloGetBoard:
-    def test_missing_id(self, tool_fns):
-        with patch.dict("os.environ", ENV):
-            result = tool_fns["trello_get_board"](board_id="")
+    def test_add_comment_requires_text(self, trello_tools):
+        result = trello_tools["trello_add_comment"](card_id="c1", text="")
         assert "error" in result
 
-    def test_successful_get(self, tool_fns):
-        mock_resp = MagicMock()
-        mock_resp.status_code = 200
-        mock_resp.content = b"{}"
-        mock_resp.json.return_value = {
-            "id": "board-1", "name": "Sprint Board", "desc": "Main board",
-            "url": "https://trello.com/b/abc", "closed": False,
-        }
-        with (
-            patch.dict("os.environ", ENV),
-            patch("aden_tools.tools.trello_tool.trello_tool.httpx.get", return_value=mock_resp),
-        ):
-            result = tool_fns["trello_get_board"](board_id="board-1")
-
-        assert result["name"] == "Sprint Board"
-
-
-class TestTrelloGetLists:
-    def test_successful_get(self, tool_fns):
-        mock_resp = MagicMock()
-        mock_resp.status_code = 200
-        mock_resp.content = b"[]"
-        mock_resp.json.return_value = [
-            {"id": "list-1", "name": "To Do", "closed": False, "pos": 1},
-            {"id": "list-2", "name": "Done", "closed": False, "pos": 2},
-        ]
-        with (
-            patch.dict("os.environ", ENV),
-            patch("aden_tools.tools.trello_tool.trello_tool.httpx.get", return_value=mock_resp),
-        ):
-            result = tool_fns["trello_get_lists"](board_id="board-1")
-
-        assert len(result["lists"]) == 2
-
-
-class TestTrelloGetCards:
-    def test_missing_ids(self, tool_fns):
-        with patch.dict("os.environ", ENV):
-            result = tool_fns["trello_get_cards"]()
+    def test_list_cards_limit_out_of_range(self, trello_tools):
+        result = trello_tools["trello_list_cards"](list_id="l1", limit=1001)
         assert "error" in result
+        assert "limit" in result["error"].lower()
 
-    def test_successful_get(self, tool_fns):
-        mock_resp = MagicMock()
-        mock_resp.status_code = 200
-        mock_resp.content = b"[]"
-        mock_resp.json.return_value = [
-            {
-                "id": "card-1", "name": "Fix bug", "desc": "Important",
-                "closed": False, "due": "2024-06-15T00:00:00Z", "dueComplete": False,
-                "idList": "list-1", "labels": [{"name": "bug"}],
-            }
-        ]
-        with (
-            patch.dict("os.environ", ENV),
-            patch("aden_tools.tools.trello_tool.trello_tool.httpx.get", return_value=mock_resp),
-        ):
-            result = tool_fns["trello_get_cards"](list_id="list-1")
+    def test_rate_limit_error(self, trello_tools, monkeypatch):
+        def fake_request(method, url, params=None, timeout=None):
+            return MagicMock(status_code=429, json=lambda: {"message": "rate"}, text="rate")
 
-        assert len(result["cards"]) == 1
-        assert result["cards"][0]["labels"] == ["bug"]
+        monkeypatch.setattr("httpx.request", fake_request)
 
-
-class TestTrelloCreateCard:
-    def test_missing_params(self, tool_fns):
-        with patch.dict("os.environ", ENV):
-            result = tool_fns["trello_create_card"](list_id="", name="")
+        result = trello_tools["trello_list_boards"]()
         assert "error" in result
+        assert "rate limit" in result["error"].lower()
 
-    def test_successful_create(self, tool_fns):
-        mock_resp = MagicMock()
-        mock_resp.status_code = 200
-        mock_resp.content = b"{}"
-        mock_resp.json.return_value = {
-            "id": "card-new", "name": "New task", "url": "https://trello.com/c/xyz",
-        }
-        with (
-            patch.dict("os.environ", ENV),
-            patch("aden_tools.tools.trello_tool.trello_tool.httpx.post", return_value=mock_resp),
-        ):
-            result = tool_fns["trello_create_card"](list_id="list-1", name="New task")
+    def test_get_member_success(self, trello_tools, monkeypatch):
+        def fake_request(method, url, params=None, timeout=None):
+            assert method == "GET"
+            assert url.endswith("/members/me")
+            return MagicMock(status_code=200, json=lambda: {"id": "m1"})
 
-        assert result["status"] == "created"
+        monkeypatch.setattr("httpx.request", fake_request)
+
+        result = trello_tools["trello_get_member"]()
+        assert result["id"] == "m1"
 
 
-class TestTrelloUpdateCard:
-    def test_missing_id(self, tool_fns):
-        with patch.dict("os.environ", ENV):
-            result = tool_fns["trello_update_card"](card_id="")
+class TestTrelloClientErrorHandling:
+    def test_not_found(self, trello_tools, monkeypatch):
+        def fake_request(method, url, params=None, timeout=None):
+            return MagicMock(status_code=404, json=lambda: {"message": "nope"}, text="nope")
+
+        monkeypatch.setattr("httpx.request", fake_request)
+
+        result = trello_tools["trello_list_lists"](board_id="missing")
         assert "error" in result
-
-    def test_successful_update(self, tool_fns):
-        mock_resp = MagicMock()
-        mock_resp.status_code = 200
-        mock_resp.content = b"{}"
-        mock_resp.json.return_value = {"id": "card-1", "name": "Updated", "closed": False}
-        with (
-            patch.dict("os.environ", ENV),
-            patch("aden_tools.tools.trello_tool.trello_tool.httpx.put", return_value=mock_resp),
-        ):
-            result = tool_fns["trello_update_card"](card_id="card-1", name="Updated")
-
-        assert result["status"] == "updated"
+        assert "not found" in result["error"].lower()
