@@ -177,7 +177,12 @@ async def handle_list_live_sessions(request: web.Request) -> web.Response:
 
 
 async def handle_get_live_session(request: web.Request) -> web.Response:
-    """GET /api/sessions/{session_id} — get session detail."""
+    """GET /api/sessions/{session_id} — get session detail.
+
+    Falls back to cold session metadata (HTTP 200 with ``cold: true``) when the
+    session is not alive in memory but queen conversation files exist on disk.
+    This lets the frontend detect a server restart and restore message history.
+    """
     manager = _get_manager(request)
     session_id = request.match_info["session_id"]
     session = manager.get_session(session_id)
@@ -188,6 +193,10 @@ async def handle_get_live_session(request: web.Request) -> web.Response:
                 {"session_id": session_id, "loading": True},
                 status=202,
             )
+        # Check if conversation files survived on disk (post-restart scenario)
+        cold_info = SessionManager.get_cold_session_info(session_id)
+        if cold_info is not None:
+            return web.json_response(cold_info)
         return web.json_response(
             {"error": f"Session '{session_id}' not found"},
             status=404,
@@ -611,15 +620,17 @@ async def handle_messages(request: web.Request) -> web.Response:
 
 
 async def handle_queen_messages(request: web.Request) -> web.Response:
-    """GET /api/sessions/{session_id}/queen-messages — get queen conversation."""
-    session, err = resolve_session(request)
-    if err:
-        return err
+    """GET /api/sessions/{session_id}/queen-messages — get queen conversation.
 
-    queen_dir = Path.home() / ".hive" / "queen" / "session" / session.id
+    Reads directly from disk so it works for both live sessions and cold
+    (post-server-restart) sessions — no live session required.
+    """
+    session_id = request.match_info["session_id"]
+
+    queen_dir = Path.home() / ".hive" / "queen" / "session" / session_id
     convs_dir = queen_dir / "conversations"
     if not convs_dir.exists():
-        return web.json_response({"messages": []})
+        return web.json_response({"messages": [], "session_id": session_id})
 
     all_messages: list[dict] = []
     for node_dir in convs_dir.iterdir():
@@ -652,7 +663,26 @@ async def handle_queen_messages(request: web.Request) -> web.Response:
         and not (m["role"] == "assistant" and m.get("tool_calls"))
     ]
 
-    return web.json_response({"messages": all_messages})
+    return web.json_response({"messages": all_messages, "session_id": session_id})
+
+
+async def handle_session_history(request: web.Request) -> web.Response:
+    """GET /api/sessions/history — all queen sessions on disk (live + cold).
+
+    Returns every session directory under ~/.hive/queen/session/, newest first.
+    Live sessions have ``live: true, cold: false``; sessions that survived a
+    server restart have ``live: false, cold: true``.
+    """
+    manager = _get_manager(request)
+    live_ids = {s.id for s in manager.list_sessions()}
+
+    disk_sessions = SessionManager.list_cold_sessions()
+    for s in disk_sessions:
+        if s["session_id"] in live_ids:
+            s["cold"] = False
+            s["live"] = True
+
+    return web.json_response({"sessions": disk_sessions})
 
 
 # ------------------------------------------------------------------
@@ -701,6 +731,8 @@ def register_routes(app: web.Application) -> None:
     # Session lifecycle
     app.router.add_post("/api/sessions", handle_create_session)
     app.router.add_get("/api/sessions", handle_list_live_sessions)
+    # history must be registered before {session_id} so it takes priority
+    app.router.add_get("/api/sessions/history", handle_session_history)
     app.router.add_get("/api/sessions/{session_id}", handle_get_live_session)
     app.router.add_delete("/api/sessions/{session_id}", handle_stop_session)
 

@@ -19,6 +19,8 @@ export interface LiveSession {
 export interface LiveSessionDetail extends LiveSession {
   entry_points?: EntryPoint[];
   graphs?: string[];
+  /** True when the session exists on disk but is not live (server restarted). */
+  cold?: boolean;
 }
 
 export interface EntryPoint {

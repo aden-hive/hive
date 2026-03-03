@@ -482,29 +482,71 @@ export default function Workspace() {
 
         // Try to reconnect to stored backend session (e.g., after browser refresh)
         const storedId = sessionsRef.current[agentType]?.[0]?.backendSessionId;
+        // When the server restarts the session is "cold" — conversation files
+        // survive on disk but there is no live runtime.  Track the old ID so
+        // we can restore message history after creating a new session.
+        let coldRestoreId: string | undefined;
+
         if (storedId) {
           try {
-            liveSession = await sessionsApi.get(storedId);
+            const sessionData = await sessionsApi.get(storedId);
+            if (sessionData.cold) {
+              // Server restarted — files on disk, no live runtime
+              coldRestoreId = storedId;
+            } else {
+              liveSession = sessionData;
+            }
           } catch {
-            // Session gone — fall through to create new
+            // Session gone entirely (no disk files either)
           }
         }
 
         if (!liveSession) {
-          // Reconnect failed — clear stale cached messages from localStorage restore
-          if (storedId) {
-            setSessionsByAgent(prev => ({
-              ...prev,
-              [agentType]: (prev[agentType] || []).map((s, i) =>
-                i === 0 ? { ...s, messages: [], graphNodes: [] } : s,
-              ),
-            }));
-          }
-
           liveSession = await sessionsApi.create(undefined, undefined, undefined, prompt);
 
-          // Show the initial prompt as a user message in chat (only on fresh create)
-          if (prompt) {
+          // Restore previous conversation from disk when the server restarted
+          // (coldRestoreId) or the session ID was stored but is gone (storedId).
+          const restoreFrom = coldRestoreId ?? storedId;
+          let restoredMessageCount = 0;
+          if (restoreFrom) {
+            try {
+              const { messages: queenMsgs } = await sessionsApi.queenMessages(restoreFrom);
+              if (queenMsgs.length > 0) {
+                const restoredMsgs = (queenMsgs as Message[]).map(m => {
+                  const msg = backendMessageToChatMessage(m, agentType, "Queen Bee");
+                  msg.role = "queen";
+                  return msg;
+                });
+                restoredMsgs.sort((a, b) => (a.createdAt ?? 0) - (b.createdAt ?? 0));
+                setSessionsByAgent(prev => ({
+                  ...prev,
+                  [agentType]: (prev[agentType] || []).map((s, i) =>
+                    i === 0 ? { ...s, messages: restoredMsgs, graphNodes: [] } : s,
+                  ),
+                }));
+                restoredMessageCount = restoredMsgs.length;
+              } else {
+                // No messages on disk — wipe stale localStorage cache
+                setSessionsByAgent(prev => ({
+                  ...prev,
+                  [agentType]: (prev[agentType] || []).map((s, i) =>
+                    i === 0 ? { ...s, messages: [], graphNodes: [] } : s,
+                  ),
+                }));
+              }
+            } catch {
+              // Queen messages unavailable — wipe stale cache
+              setSessionsByAgent(prev => ({
+                ...prev,
+                [agentType]: (prev[agentType] || []).map((s, i) =>
+                  i === 0 ? { ...s, messages: [], graphNodes: [] } : s,
+                ),
+              }));
+            }
+          }
+
+          // Show the initial prompt as a user message only on a truly fresh session
+          if (prompt && restoredMessageCount === 0) {
             const userMsg: ChatMessage = {
               id: makeId(), agent: "You", agentColor: "",
               content: prompt, timestamp: "", type: "user", thread: agentType, createdAt: Date.now(),

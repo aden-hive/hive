@@ -709,6 +709,83 @@ class SessionManager:
     def list_sessions(self) -> list[Session]:
         return list(self._sessions.values())
 
+    # ------------------------------------------------------------------
+    # Cold session helpers (disk-only, no live runtime required)
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def get_cold_session_info(session_id: str) -> dict | None:
+        """Return disk metadata for a session that is no longer live in memory.
+
+        Checks whether queen conversation files exist at
+        ~/.hive/queen/session/{session_id}/conversations/.  Returns None when
+        no data is found so callers can fall through to a 404.
+        """
+        queen_dir = Path.home() / ".hive" / "queen" / "session" / session_id
+        convs_dir = queen_dir / "conversations"
+        if not convs_dir.exists():
+            return None
+
+        # Check whether any message part files are actually present
+        has_messages = False
+        try:
+            for node_dir in convs_dir.iterdir():
+                if not node_dir.is_dir():
+                    continue
+                parts_dir = node_dir / "parts"
+                if parts_dir.exists() and any(f.suffix == ".json" for f in parts_dir.iterdir()):
+                    has_messages = True
+                    break
+        except OSError:
+            pass
+
+        try:
+            created_at = queen_dir.stat().st_ctime
+        except OSError:
+            created_at = 0.0
+
+        return {
+            "session_id": session_id,
+            "cold": True,
+            "live": False,
+            "has_messages": has_messages,
+            "created_at": created_at,
+        }
+
+    @staticmethod
+    def list_cold_sessions() -> list[dict]:
+        """Return metadata for every queen session directory on disk, newest first."""
+        queen_sessions_dir = Path.home() / ".hive" / "queen" / "session"
+        if not queen_sessions_dir.exists():
+            return []
+
+        results: list[dict] = []
+        try:
+            entries = sorted(
+                queen_sessions_dir.iterdir(),
+                key=lambda p: p.stat().st_mtime,
+                reverse=True,
+            )
+        except OSError:
+            return []
+
+        for d in entries:
+            if not d.is_dir():
+                continue
+            try:
+                created_at = d.stat().st_ctime
+            except OSError:
+                created_at = 0.0
+            results.append({
+                "session_id": d.name,
+                "cold": True,   # caller overrides for live sessions
+                "live": False,
+                "has_messages": (d / "conversations").exists(),
+                "created_at": created_at,
+            })
+
+        return results
+
     async def shutdown_all(self) -> None:
         """Gracefully stop all sessions. Called on server shutdown."""
         session_ids = list(self._sessions.keys())

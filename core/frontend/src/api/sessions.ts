@@ -66,9 +66,13 @@ export const sessionsApi = {
   graphs: (sessionId: string) =>
     api.get<{ graphs: string[] }>(`/sessions/${sessionId}/graphs`),
 
-  /** Get queen conversation history for a session. */
+  /** Get queen conversation history for a session (works for cold/post-restart sessions too). */
   queenMessages: (sessionId: string) =>
-    api.get<{ messages: Message[] }>(`/sessions/${sessionId}/queen-messages`),
+    api.get<{ messages: Message[]; session_id: string }>(`/sessions/${sessionId}/queen-messages`),
+
+  /** List all queen sessions on disk — live + cold (post-restart). */
+  history: () =>
+    api.get<{ sessions: Array<{ session_id: string; cold: boolean; live: boolean; has_messages: boolean; created_at: number }> }>("/sessions/history"),
 
   // --- Worker session browsing (persisted execution runs) ---
 
