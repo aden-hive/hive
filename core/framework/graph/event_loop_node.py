@@ -807,6 +807,52 @@ class EventLoopNode(NodeProtocol):
                     _cf_auto = True
 
             if _cf_block:
+                # Auto-block grace: when required outputs are still
+                # missing and we're within the grace period, skip
+                # blocking and continue to the next LLM turn so the
+                # judge can apply RETRY pressure on lazy models.
+                # Without this, _await_user_input() would block
+                # forever since no inject_event is coming.
+                #
+                # When no outputs are missing (e.g. queen monitoring
+                # with output_keys=[]), text-only is legitimate
+                # conversation and should always block.
+                if _cf_auto:
+                    _auto_missing = (
+                        self._get_missing_output_keys(
+                            accumulator,
+                            ctx.node_spec.output_keys,
+                            ctx.node_spec.nullable_output_keys,
+                        )
+                        if accumulator is not None
+                        else True
+                    )
+                    if _auto_missing:
+                        _cf_text_only_streak += 1
+                        if _cf_text_only_streak <= self._config.cf_grace_turns:
+                            _continue_count += 1
+                            if ctx.runtime_logger:
+                                iter_latency_ms = int((time.time() - iter_start) * 1000)
+                                ctx.runtime_logger.log_step(
+                                    node_id=node_id,
+                                    node_type="event_loop",
+                                    step_index=iteration,
+                                    verdict="CONTINUE",
+                                    verdict_feedback=(
+                                        "Auto-block grace"
+                                        f" ({_cf_text_only_streak}"
+                                        f"/{self._config.cf_grace_turns})"
+                                    ),
+                                    tool_calls=logged_tool_calls,
+                                    llm_text=assistant_text,
+                                    input_tokens=turn_tokens.get("input", 0),
+                                    output_tokens=turn_tokens.get("output", 0),
+                                    latency_ms=iter_latency_ms,
+                                )
+                            continue
+                        # Beyond grace — block below, then fall
+                        # through to judge
+
                 if self._shutdown:
                     await self._publish_loop_completed(
                         stream_id, node_id, iteration + 1, execution_id
@@ -909,18 +955,11 @@ class EventLoopNode(NodeProtocol):
 
                 # -- Judge-skip decision after client-facing blocking --
                 #
-                # Explicit ask_user: skip judge while the agent is still
-                # gathering information from the user.  BUT if all required
-                # outputs have already been set, don't skip — fall through to
-                # the judge so it can accept the completed node.
-                #
-                # Auto-block (text-only, no tools): skip judge within a
-                # grace period of N consecutive text-only turns.  Normal
-                # conversations are 1-3 exchanges before set_output.
-                # After the grace period, fall through to judge so models
-                # stuck in a clarification loop get RETRY pressure.
+                # Explicit ask_user: skip judge while the agent is
+                # still gathering information from the user.  BUT if
+                # all required outputs have already been set, don't
+                # skip -- fall through to the judge so it can accept.
                 if not _cf_auto:
-                    # Explicit ask_user: skip judge only if outputs are incomplete
                     _missing = (
                         self._get_missing_output_keys(
                             accumulator,
@@ -941,7 +980,7 @@ class EventLoopNode(NodeProtocol):
                                 node_type="event_loop",
                                 step_index=iteration,
                                 verdict="CONTINUE",
-                                verdict_feedback="Blocked for ask_user input (skip judge)",
+                                verdict_feedback=("Blocked for ask_user input (skip judge)"),
                                 tool_calls=logged_tool_calls,
                                 llm_text=assistant_text,
                                 input_tokens=turn_tokens.get("input", 0),
@@ -949,31 +988,9 @@ class EventLoopNode(NodeProtocol):
                                 latency_ms=iter_latency_ms,
                             )
                         continue
-                    # All outputs set — fall through to judge for acceptance
+                    # All outputs set -- fall through to judge
 
-                # Auto-block: apply grace period
-                _cf_text_only_streak += 1
-                if _cf_text_only_streak <= self._config.cf_grace_turns:
-                    _continue_count += 1
-                    if ctx.runtime_logger:
-                        iter_latency_ms = int((time.time() - iter_start) * 1000)
-                        ctx.runtime_logger.log_step(
-                            node_id=node_id,
-                            node_type="event_loop",
-                            step_index=iteration,
-                            verdict="CONTINUE",
-                            verdict_feedback=(
-                                f"Auto-block grace ({_cf_text_only_streak}"
-                                f"/{self._config.cf_grace_turns})"
-                            ),
-                            tool_calls=logged_tool_calls,
-                            llm_text=assistant_text,
-                            input_tokens=turn_tokens.get("input", 0),
-                            output_tokens=turn_tokens.get("output", 0),
-                            latency_ms=iter_latency_ms,
-                        )
-                    continue
-                # Beyond grace period — fall through to judge (6i)
+                # Auto-block beyond grace -- fall through to judge (6i)
 
             # 6i. Judge evaluation
             should_judge = (
