@@ -280,9 +280,16 @@ export default function Workspace() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const rawAgent = searchParams.get("agent") || "new-agent";
-  const initialAgent = rawAgent;
   const hasExplicitAgent = searchParams.has("agent");
   const initialPrompt = searchParams.get("prompt") || "";
+
+  // When submitting a new prompt from home for "new-agent", use a unique key
+  // so each prompt gets its own tab instead of overwriting the previous one.
+  const [initialAgent] = useState(() =>
+    initialPrompt && hasExplicitAgent && rawAgent === "new-agent"
+      ? `new-agent-${makeId()}`
+      : rawAgent
+  );
 
   // Sessions grouped by agent type — restore from localStorage if available
   const [sessionsByAgent, setSessionsByAgent] = useState<Record<string, Session[]>>(() => {
@@ -315,11 +322,14 @@ export default function Workspace() {
 
     // If the user submitted a new prompt from the home page, always create
     // a fresh session so the prompt isn't lost into an existing session.
+    // initialAgent is already a unique key (e.g. "new-agent-abc123") when
+    // coming from home, so the new tab won't overwrite existing ones.
     if (initialPrompt && hasExplicitAgent) {
-      const newSession = initialAgent === "new-agent"
-        ? createSession("new-agent", "New Agent")
-        : createSession(initialAgent, formatAgentDisplayName(initialAgent));
-      initial[initialAgent] = [...(initial[initialAgent] || []), newSession];
+      const label = initialAgent.startsWith("new-agent")
+        ? "New Agent"
+        : formatAgentDisplayName(initialAgent);
+      const newSession = createSession(initialAgent, label);
+      initial[initialAgent] = [newSession];
       return initial;
     }
 
@@ -342,14 +352,8 @@ export default function Workspace() {
     if (persisted) {
       const restored = { ...persisted.activeSessionByAgent };
       const urlSessions = sessionsByAgent[initialAgent];
-      if (urlSessions?.length) {
-        // When a prompt was submitted from home, activate the newly created
-        // session (last in array) instead of the previously active one.
-        if (initialPrompt && hasExplicitAgent) {
-          restored[initialAgent] = urlSessions[urlSessions.length - 1].id;
-        } else if (!restored[initialAgent]) {
-          restored[initialAgent] = urlSessions[0].id;
-        }
+      if (urlSessions?.length && !restored[initialAgent]) {
+        restored[initialAgent] = urlSessions[0].id;
       }
       return restored;
     }
@@ -489,7 +493,7 @@ export default function Workspace() {
   // --- Agent loading: loadAgentForType ---
   const loadingRef = useRef(new Set<string>());
   const loadAgentForType = useCallback(async (agentType: string) => {
-    if (agentType === "new-agent") {
+    if (agentType === "new-agent" || agentType.startsWith("new-agent-")) {
       // Create a queen-only session (no worker) for agent building
       updateAgentState(agentType, { loading: true, error: null, ready: false, sessionId: null });
       try {
@@ -1948,7 +1952,7 @@ export default function Workspace() {
       <CredentialsModal
         agentType={activeWorker}
         agentLabel={activeWorkerLabel}
-        agentPath={credentialAgentPath || (activeWorker !== "new-agent" ? activeWorker : undefined)}
+        agentPath={credentialAgentPath || (!activeWorker.startsWith("new-agent") ? activeWorker : undefined)}
         open={credentialsOpen}
         onClose={() => { setCredentialsOpen(false); setCredentialAgentPath(null); setDismissedBanner(null); }}
         credentials={activeSession?.credentials || []}
