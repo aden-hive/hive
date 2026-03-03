@@ -702,4 +702,48 @@ class GraphSpec(BaseModel):
                         else:
                             seen_keys[key] = node_id
 
+        # GCU nodes must only be used as subagents
+        gcu_node_ids = {n.id for n in self.nodes if n.node_type == "gcu"}
+        if gcu_node_ids:
+            # GCU nodes must not be entry nodes
+            if self.entry_node in gcu_node_ids:
+                errors.append(
+                    f"GCU node '{self.entry_node}' is used as entry node. "
+                    "GCU nodes must only be used as subagents via delegate_to_sub_agent()."
+                )
+
+            # GCU nodes must not be terminal nodes
+            for term in self.terminal_nodes:
+                if term in gcu_node_ids:
+                    errors.append(
+                        f"GCU node '{term}' is used as terminal node. "
+                        "GCU nodes must only be used as subagents."
+                    )
+
+            # GCU nodes must not be connected via edges
+            for edge in self.edges:
+                if edge.source in gcu_node_ids:
+                    errors.append(
+                        f"GCU node '{edge.source}' is used as edge source (edge '{edge.id}'). "
+                        "GCU nodes must only be used as subagents, not connected via edges."
+                    )
+                if edge.target in gcu_node_ids:
+                    errors.append(
+                        f"GCU node '{edge.target}' is used as edge target (edge '{edge.id}'). "
+                        "GCU nodes must only be used as subagents, not connected via edges."
+                    )
+
+            # GCU nodes must be referenced in at least one parent's sub_agents
+            referenced_subagents = set()
+            for node in self.nodes:
+                for sa_id in (node.sub_agents or []):
+                    referenced_subagents.add(sa_id)
+
+            orphaned = gcu_node_ids - referenced_subagents
+            for nid in orphaned:
+                errors.append(
+                    f"GCU node '{nid}' is not referenced in any node's sub_agents list. "
+                    "GCU nodes must be declared as subagents of a parent node."
+                )
+
         return errors

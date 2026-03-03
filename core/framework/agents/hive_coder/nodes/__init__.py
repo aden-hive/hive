@@ -410,7 +410,10 @@ If list_agent_tools() shows these don't exist, use alternatives \
 **Node rules**:
 - **2-4 nodes MAX.** Never exceed 4. Merge thin nodes aggressively.
 - A node with 0 tools is NOT a real node — merge it.
-- node_type always "event_loop"
+- node_type "event_loop" for all regular graph nodes. Use "gcu" ONLY for
+  browser automation subagents (see GCU appendix). GCU nodes MUST be in a
+  parent node's sub_agents list, NEVER connected via edges, and NEVER used
+  as entry/terminal nodes.
 - max_node_visits default is 0 (unbounded) — correct for forever-alive. \
 Only set >0 in one-shot agents with bounded feedback loops.
 - Feedback inputs: nullable_output_keys
