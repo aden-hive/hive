@@ -193,6 +193,9 @@ class GraphExecutor:
         # Pause/resume control
         self._pause_requested = asyncio.Event()
 
+        # Track the currently executing node for external injection routing
+        self.current_node_id: str | None = None
+
     def _write_progress(
         self,
         current_node: str,
@@ -337,6 +340,9 @@ class GraphExecutor:
         cumulative_tools: list = []  # Tools accumulate, never removed
         cumulative_tool_names: set[str] = set()
         cumulative_output_keys: list[str] = []  # Output keys from all visited nodes
+
+        # Build node registry for subagent lookup
+        node_registry: dict[str, NodeSpec] = {node.id: node for node in graph.nodes}
 
         # Initialize checkpoint store if checkpointing is enabled
         checkpoint_store: CheckpointStore | None = None
@@ -694,6 +700,9 @@ class GraphExecutor:
                     # Execute this node, then pause
                     # (We'll check again after execution and save state)
 
+                # Expose current node for external injection routing
+                self.current_node_id = current_node_id
+
                 self.logger.info(f"\n▶ Step {steps}: {node_spec.name} ({node_spec.node_type})")
                 self.logger.info(f"   Inputs: {node_spec.input_keys}")
                 self.logger.info(f"   Outputs: {node_spec.output_keys}")
@@ -729,6 +738,7 @@ class GraphExecutor:
                     override_tools=cumulative_tools if is_continuous else None,
                     cumulative_output_keys=cumulative_output_keys if is_continuous else None,
                     event_triggered=_event_triggered,
+                    node_registry=node_registry,
                     identity_prompt=getattr(graph, "identity_prompt", ""),
                     narrative=_resume_narrative,
                     graph=graph,
@@ -1131,6 +1141,7 @@ class GraphExecutor:
                             source_result=result,
                             source_node_spec=node_spec,
                             path=path,
+                            node_registry=node_registry,
                         )
 
                         total_tokens += branch_tokens
@@ -1583,6 +1594,7 @@ class GraphExecutor:
         event_triggered: bool = False,
         identity_prompt: str = "",
         narrative: str = "",
+        node_registry: dict[str, NodeSpec] | None = None,
         graph: "GraphSpec | None" = None,
     ) -> NodeContext:
         """Build execution context for a node."""
@@ -1612,17 +1624,7 @@ class GraphExecutor:
                 node_tool_names=node_spec.tools,
             )
 
-        # Build goal context, enriched with capability summary for
-        # client-facing nodes so the LLM knows what the full agent can do.
         goal_context = goal.to_prompt_context()
-        if graph and node_spec.client_facing:
-            capability_summary = graph.build_capability_summary(graph.entry_node)
-            if capability_summary:
-                goal_context = (
-                    f"{goal_context}\n\n{capability_summary}"
-                    if goal_context
-                    else capability_summary
-                )
 
         return NodeContext(
             runtime=self.runtime,
@@ -1646,10 +1648,14 @@ class GraphExecutor:
             narrative=narrative,
             execution_id=self._execution_id,
             stream_id=self._stream_id,
+            node_registry=node_registry or {},
+            all_tools=list(self.tools),  # Full catalog for subagent tool resolution
+            shared_node_registry=self.node_registry,  # For subagent escalation routing
         )
 
     VALID_NODE_TYPES = {
         "event_loop",
+        "gcu",
     }
     # Node types removed in v0.5 — provide migration guidance
     REMOVED_NODE_TYPES = {
@@ -1684,8 +1690,8 @@ class GraphExecutor:
                 f"Must be one of: {sorted(self.VALID_NODE_TYPES)}."
             )
 
-        # Create based on type (only event_loop is valid)
-        if node_spec.node_type == "event_loop":
+        # Create based on type
+        if node_spec.node_type in ("event_loop", "gcu"):
             # Auto-create EventLoopNode with sensible defaults.
             # Custom configs can still be pre-registered via node_registry.
             from framework.graph.event_loop_node import EventLoopNode, LoopConfig
@@ -1902,6 +1908,7 @@ class GraphExecutor:
         source_result: NodeResult,
         source_node_spec: Any,
         path: list[str],
+        node_registry: dict[str, NodeSpec] | None = None,
     ) -> tuple[dict[str, NodeResult], int, int]:
         """
         Execute multiple branches in parallel using asyncio.gather.
@@ -2000,7 +2007,13 @@ class GraphExecutor:
 
                     # Build context for this branch
                     ctx = self._build_context(
-                        node_spec, memory, goal, mapped, graph.max_tokens, graph=graph
+                        node_spec,
+                        memory,
+                        goal,
+                        mapped,
+                        graph.max_tokens,
+                        node_registry=node_registry,
+                        graph=graph,
                     )
                     node_impl = self._get_node_implementation(node_spec, graph.cleanup_llm_model)
 

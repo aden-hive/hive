@@ -237,6 +237,11 @@ def _is_stream_transient_error(exc: BaseException) -> bool:
 
     Transient errors (recoverable=True): network issues, server errors, timeouts.
     Permanent errors (recoverable=False): auth, bad request, context window, etc.
+
+    NOTE: "Failed to parse tool call arguments" (malformed LLM output) is NOT
+    transient at the stream level — retrying with the same messages produces the
+    same malformed output.  This error is handled at the EventLoopNode level
+    where the conversation can be modified before retrying.
     """
     try:
         from litellm.exceptions import (
@@ -917,30 +922,6 @@ class LiteLLMProvider(LLMProvider):
                 # and we skip the retry path — nothing was yielded in vain.)
                 has_content = accumulated_text or tool_calls_acc
                 if not has_content:
-                    # If the conversation ends with an assistant or tool
-                    # message, an empty stream is expected — the LLM has
-                    # nothing new to say.  Don't burn retries on this;
-                    # let the caller (EventLoopNode) decide what to do.
-                    # Typical case: client_facing node where the LLM set
-                    # all outputs via set_output tool calls, and the tool
-                    # results are the last messages.
-                    last_role = next(
-                        (m["role"] for m in reversed(full_messages) if m.get("role") != "system"),
-                        None,
-                    )
-                    if last_role in ("assistant", "tool"):
-                        logger.warning(
-                            "[stream] %s returned empty stream after %s message "
-                            "(no text, no tool calls). Treating as a no-op turn. "
-                            "If this repeats, the agent may be stuck — check for "
-                            "ghost empty assistant messages in conversation history.",
-                            self.model,
-                            last_role,
-                        )
-                        for event in tail_events:
-                            yield event
-                        return
-
                     # finish_reason=length means the model exhausted
                     # max_tokens before producing content. Retrying with
                     # the same max_tokens will never help.
@@ -958,10 +939,16 @@ class LiteLLMProvider(LLMProvider):
                             yield event
                         return
 
-                    # Empty stream after a user message — use short fixed
-                    # retries, not the rate-limit backoff.  This is likely
-                    # a deterministic conversation-structure issue, so long
-                    # exponential waits don't help.
+                    # Empty stream — always retry regardless of last message
+                    # role.  Ghost empty streams after tool results are NOT
+                    # expected no-ops; they create infinite loops when the
+                    # conversation doesn't change between iterations.
+                    # After retries, return the empty result and let the
+                    # caller (EventLoopNode) decide how to handle it.
+                    last_role = next(
+                        (m["role"] for m in reversed(full_messages) if m.get("role") != "system"),
+                        None,
+                    )
                     if attempt < EMPTY_STREAM_MAX_RETRIES:
                         token_count, token_method = _estimate_tokens(
                             self.model,
@@ -974,7 +961,8 @@ class LiteLLMProvider(LLMProvider):
                             attempt=attempt,
                         )
                         logger.warning(
-                            f"[stream-retry] {self.model} returned empty stream — "
+                            f"[stream-retry] {self.model} returned empty stream "
+                            f"after {last_role} message — "
                             f"~{token_count} tokens ({token_method}). "
                             f"Request dumped to: {dump_path}. "
                             f"Retrying in {EMPTY_STREAM_RETRY_DELAY}s "
@@ -983,7 +971,17 @@ class LiteLLMProvider(LLMProvider):
                         await asyncio.sleep(EMPTY_STREAM_RETRY_DELAY)
                         continue
 
-                # Success (or final attempt) — flush remaining events.
+                    # All retries exhausted — log and return the empty
+                    # result.  EventLoopNode's empty response guard will
+                    # accept if all outputs are set, or handle the ghost
+                    # stream case if outputs are still missing.
+                    logger.error(
+                        f"[stream] {self.model} returned empty stream after "
+                        f"{EMPTY_STREAM_MAX_RETRIES} retries "
+                        f"(last_role={last_role}). Returning empty result."
+                    )
+
+                # Success (or empty after exhausted retries) — flush events.
                 for event in tail_events:
                     yield event
                 return

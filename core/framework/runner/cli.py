@@ -1941,11 +1941,73 @@ def _open_browser(url: str) -> None:
         pass  # Best-effort — don't crash if browser can't open
 
 
+def _build_frontend() -> bool:
+    """Build the frontend if source is newer than dist. Returns True if dist exists."""
+    import subprocess
+
+    # Find the frontend directory relative to this file or cwd
+    candidates = [
+        Path("core/frontend"),
+        Path(__file__).resolve().parent.parent.parent / "frontend",
+    ]
+    frontend_dir: Path | None = None
+    for c in candidates:
+        if (c / "package.json").is_file():
+            frontend_dir = c.resolve()
+            break
+
+    if frontend_dir is None:
+        return False
+
+    dist_dir = frontend_dir / "dist"
+    src_dir = frontend_dir / "src"
+
+    # Skip build if dist is up-to-date (newest src file older than dist index.html)
+    index_html = dist_dir / "index.html"
+    if index_html.exists() and src_dir.is_dir():
+        dist_mtime = index_html.stat().st_mtime
+        needs_build = False
+        for f in src_dir.rglob("*"):
+            if f.is_file() and f.stat().st_mtime > dist_mtime:
+                needs_build = True
+                break
+        if not needs_build:
+            return True
+
+    # Need to build
+    print("Building frontend...")
+    try:
+        # Ensure deps are installed
+        subprocess.run(
+            ["npm", "install", "--no-fund", "--no-audit"],
+            cwd=frontend_dir,
+            check=True,
+            capture_output=True,
+        )
+        subprocess.run(
+            ["npm", "run", "build"],
+            cwd=frontend_dir,
+            check=True,
+            capture_output=True,
+        )
+        print("Frontend built.")
+        return True
+    except FileNotFoundError:
+        print("Node.js not found — skipping frontend build.")
+        return dist_dir.is_dir()
+    except subprocess.CalledProcessError as exc:
+        stderr = exc.stderr.decode(errors="replace") if exc.stderr else ""
+        print(f"Frontend build failed: {stderr[:500]}")
+        return dist_dir.is_dir()
+
+
 def cmd_serve(args: argparse.Namespace) -> int:
     """Start the HTTP API server."""
     import logging
 
     from aiohttp import web
+
+    _build_frontend()
 
     from framework.server.app import create_app
 
@@ -1971,7 +2033,7 @@ def cmd_serve(args: argparse.Namespace) -> int:
                 print(f"Error loading {agent_path}: {e}")
 
         # Start server using AppRunner/TCPSite (same pattern as webhook_server.py)
-        runner = web.AppRunner(app)
+        runner = web.AppRunner(app, access_log=None)
         await runner.setup()
         site = web.TCPSite(runner, args.host, args.port)
         await site.start()

@@ -37,6 +37,9 @@ export const executionApi = {
   chat: (sessionId: string, message: string) =>
     api.post<ChatResult>(`/sessions/${sessionId}/chat`, { message }),
 
+  workerInput: (sessionId: string, message: string) =>
+    api.post<ChatResult>(`/sessions/${sessionId}/worker-input`, { message }),
+
   stop: (sessionId: string, executionId: string) =>
     api.post<StopResult>(`/sessions/${sessionId}/stop`, {
       execution_id: executionId,

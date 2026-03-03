@@ -166,7 +166,7 @@ class NodeSpec(BaseModel):
     # Node behavior type
     node_type: str = Field(
         default="event_loop",
-        description="Type: 'event_loop' (recommended), 'router', 'human_input'.",
+        description="Type: 'event_loop' (recommended), 'gcu' (browser automation).",
     )
 
     # Data flow
@@ -202,6 +202,16 @@ class NodeSpec(BaseModel):
     tools: list[str] = Field(default_factory=list, description="Tool names this node can use")
     model: str | None = Field(
         default=None, description="Specific model to use (defaults to graph default)"
+    )
+
+    # For subagent delegation
+    sub_agents: list[str] = Field(
+        default_factory=list,
+        description="Node IDs that can be invoked as subagents from this node",
+    )
+    # For function nodes
+    function: str | None = Field(
+        default=None, description="Function name or path for function nodes"
     )
 
     # For router nodes
@@ -519,6 +529,20 @@ class NodeContext:
     # Stream identity — the ExecutionStream this node runs within.
     # Falls back to node_id when not set (legacy / standalone executor).
     stream_id: str = ""
+
+    # Subagent mode
+    is_subagent_mode: bool = False  # True when running as a subagent (prevents nested delegation)
+    report_callback: Any = None  # async (message: str, data: dict | None) -> None
+    node_registry: dict[str, "NodeSpec"] = field(default_factory=dict)  # For subagent lookup
+
+    # Full tool catalog (unfiltered) — used by _execute_subagent to resolve
+    # subagent tools that aren't in the parent node's filtered available_tools.
+    all_tools: list[Tool] = field(default_factory=list)
+
+    # Shared reference to the executor's node_registry — used by subagent
+    # escalation (_EscalationReceiver) to register temporary receivers that
+    # the inject_input() routing chain can find.
+    shared_node_registry: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass

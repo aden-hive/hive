@@ -12,8 +12,27 @@ import type { GraphNode, NodeStatus } from "@/components/AgentGraph";
  *  4. Map session enrichment fields to NodeStatus
  */
 export function topologyToGraphNodes(topology: GraphTopology): GraphNode[] {
-  const { nodes, edges, entry_node, entry_points } = topology;
-  if (nodes.length === 0) return [];
+  const { nodes: allNodes, edges, entry_node, entry_points } = topology;
+  if (allNodes.length === 0) return [];
+
+  // Filter out subagent-only nodes (referenced in sub_agents but not in any edge)
+  const subagentIds = new Set<string>();
+  for (const n of allNodes) {
+    for (const sa of n.sub_agents ?? []) {
+      subagentIds.add(sa);
+    }
+  }
+  const edgeParticipants = new Set<string>();
+  for (const e of edges) {
+    edgeParticipants.add(e.source);
+    edgeParticipants.add(e.target);
+  }
+  const nodes = allNodes.filter(
+    (n) =>
+      !subagentIds.has(n.id) ||
+      edgeParticipants.has(n.id) ||
+      n.id === entry_node,
+  );
 
   // --- Synthesize trigger nodes for non-manual entry points ---
   const schedulerEntryPoints = (entry_points || []).filter(
@@ -29,7 +48,10 @@ export function topologyToGraphNodes(topology: GraphTopology): GraphNode[] {
       status: "pending",
       nodeType: "trigger",
       triggerType: ep.trigger_type,
-      triggerConfig: ep.trigger_config,
+      triggerConfig: {
+        ...ep.trigger_config,
+        ...(ep.next_fire_in != null ? { next_fire_in: ep.next_fire_in } : {}),
+      },
       next: [ep.entry_node],
     });
   }
