@@ -47,8 +47,11 @@ class DummyLLMProvider(LLMProvider):
     ) -> AsyncIterator[StreamEvent]:
         self._call_count += 1
 
-        if self._call_count == 1:
-            # First call: set the output via tool call
+        # Each execution takes 2 LLM calls:
+        # - Odd calls (1, 3, 5, ...): set output via tool call
+        # - Even calls (2, 4, 6, ...): finish with text
+        if self._call_count % 2 == 1:
+            # First call of each execution: set the output via tool call
             yield ToolCallEvent(
                 tool_use_id=f"tc_{self._call_count}",
                 tool_name="set_output",
@@ -56,7 +59,7 @@ class DummyLLMProvider(LLMProvider):
             )
             yield FinishEvent(stop_reason="tool_use", input_tokens=10, output_tokens=10)
         else:
-            # Subsequent calls: just finish with text
+            # Second call of each execution: finish with text
             yield TextDeltaEvent(content="Done.", snapshot="Done.")
             yield FinishEvent(stop_reason="end_turn", input_tokens=5, output_tokens=5)
 

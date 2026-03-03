@@ -410,7 +410,10 @@ If list_agent_tools() shows these don't exist, use alternatives \
 **Node rules**:
 - **2-4 nodes MAX.** Never exceed 4. Merge thin nodes aggressively.
 - A node with 0 tools is NOT a real node — merge it.
-- node_type always "event_loop"
+- node_type "event_loop" for all regular graph nodes. Use "gcu" ONLY for
+  browser automation subagents (see GCU appendix). GCU nodes MUST be in a
+  parent node's sub_agents list, NEVER connected via edges, and NEVER used
+  as entry/terminal nodes.
 - max_node_visits default is 0 (unbounded) — correct for forever-alive. \
 Only set >0 in one-shot agents with bounded feedback loops.
 - Feedback inputs: nullable_output_keys
@@ -612,6 +615,15 @@ If NO worker is loaded, say so and offer to build one.
 - Greet the user. Mention what the worker can do in one sentence.
 - For tasks matching the worker's goal, call start_worker(task).
 - For everything else, do it directly.
+
+## When the user clicks Run (external event notification)
+When you receive an event that the user clicked Run:
+- If the worker started successfully, briefly acknowledge it — do NOT \
+repeat the full status. The user can see the graph is running.
+- If the worker failed to start (credential or structural error), \
+explain the problem clearly and help fix it. For credential errors, \
+guide the user to set up the missing credentials. For structural \
+issues, offer to fix the agent graph directly.
 
 ## When worker is running:
 - If the user asks about progress, call get_worker_status() ONCE and \
