@@ -4,12 +4,15 @@ Shared agent instructions for this workspace.
 
 ## Coding Agent Notes
 
-- When adding a new `AGENTS.md` anywhere in the repo, also add a `CLAUDE.md` symlink pointing to it.
+- 
 - When working on a GitHub Issue or PR, print the full URL at the end of the task.
 - When answering questions, respond with high-confidence answers only: verify in code; do not guess.
 - Do not update dependencies casually. Version bumps, patched dependencies, overrides, or vendored dependency changes require explicit approval.
 - Add brief comments for tricky logic. Keep files reasonably small when practical; split or refactor large files instead of growing them indefinitely.
 - If shared guardrails are available locally, review them; otherwise follow this repo's guidance.
+- Use `uv` for Python execution and package management. Do not use `python` or `python3` directly unless the user explicitly asks for it.
+- Prefer `uv run` for scripts and tests, and `uv pip` for package operations.
+
 
 ## Multi-Agent Safety
 
