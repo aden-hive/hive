@@ -1927,16 +1927,12 @@ def cmd_setup_credentials(args: argparse.Namespace) -> int:
 
 def _open_browser(url: str) -> None:
     """Open URL in the default browser (best-effort, non-blocking)."""
-    import subprocess
-    import sys
+    import webbrowser
 
     try:
-        if sys.platform == "darwin":
-            subprocess.Popen(["open", url], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        elif sys.platform == "linux":
-            subprocess.Popen(
-                ["xdg-open", url], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
-            )
+        # webbrowser.open() is cross-platform (Windows, macOS, Linux)
+        # and non-blocking in most modern desktop environments.
+        webbrowser.open(url)
     except Exception:
         pass  # Best-effort — don't crash if browser can't open
 

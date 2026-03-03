@@ -839,6 +839,11 @@ $zaiKey = [System.Environment]::GetEnvironmentVariable("ZAI_API_KEY", "User")
 if (-not $zaiKey) { $zaiKey = $env:ZAI_API_KEY }
 if ($zaiKey) { $ZaiCredDetected = $true }
 
+$GitHubTokenDetected = $false
+$githubTokenPath = Join-Path $env:USERPROFILE ".hive\github_token"
+if (Test-Path $githubTokenPath) { $GitHubTokenDetected = $true }
+if (-not $GitHubTokenDetected) { if ($env:GITHUB_TOKEN) { $GitHubTokenDetected = $true } }
+
 # Detect API key providers
 $ProviderMenuEnvVars  = @("ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GEMINI_API_KEY", "GROQ_API_KEY", "CEREBRAS_API_KEY")
 $ProviderMenuNames    = @("Anthropic (Claude) - Recommended", "OpenAI (GPT)", "Google Gemini - Free tier available", "Groq - Fast, free tier", "Cerebras - Fast, free tier")
@@ -877,12 +882,19 @@ Write-Host ") OpenAI Codex Subscription  " -NoNewline
 Write-Color -Text "(use your Codex/ChatGPT Plus plan)" -Color DarkGray -NoNewline
 if ($CodexCredDetected) { Write-Color -Text "  (credential detected)" -Color Green } else { Write-Host "" }
 
+# 4) GitHub Models (Azure Inference)
+Write-Host "  " -NoNewline
+Write-Color -Text "4" -Color Cyan -NoNewline
+Write-Host ") GitHub Models (Free)        " -NoNewline
+Write-Color -Text "(use your GitHub token)" -Color DarkGray -NoNewline
+if ($GitHubTokenDetected) { Write-Color -Text "  (credential detected)" -Color Green } else { Write-Host "" }
+
 Write-Host ""
 Write-Color -Text "  API key providers:" -Color Cyan
 
-# 4-8) API key providers
+# 5-9) API key providers
 for ($idx = 0; $idx -lt $ProviderMenuEnvVars.Count; $idx++) {
-    $num = $idx + 4
+    $num = $idx + 5
     $envVal = [System.Environment]::GetEnvironmentVariable($ProviderMenuEnvVars[$idx], "Process")
     if (-not $envVal) { $envVal = [System.Environment]::GetEnvironmentVariable($ProviderMenuEnvVars[$idx], "User") }
     Write-Host "  " -NoNewline
@@ -892,17 +904,17 @@ for ($idx = 0; $idx -lt $ProviderMenuEnvVars.Count; $idx++) {
 }
 
 Write-Host "  " -NoNewline
-Write-Color -Text "9" -Color Cyan -NoNewline
+Write-Color -Text "10" -Color Cyan -NoNewline
 Write-Host ") Skip for now"
 Write-Host ""
 
 while ($true) {
-    $raw = Read-Host "Enter choice (1-9)"
+    $raw = Read-Host "Enter choice (1-10)"
     if ($raw -match '^\d+$') {
         $num = [int]$raw
-        if ($num -ge 1 -and $num -le 9) { break }
+        if ($num -ge 1 -and $num -le 10) { break }
     }
-    Write-Color -Text "Invalid choice. Please enter 1-9" -Color Red
+    Write-Color -Text "Invalid choice. Please enter 1-10" -Color Red
 }
 
 switch ($num) {
@@ -966,9 +978,39 @@ switch ($num) {
             Write-Ok "Using OpenAI Codex subscription"
         }
     }
-    { $_ -ge 4 -and $_ -le 8 } {
+    4 {
+        # GitHub Models (Azure Inference)
+        $SubscriptionMode   = "github_token"
+        $SelectedProviderId = "azure_ai_inference"
+        $SelectedModel      = "azure_ai_inference/gpt-4o"
+        $SelectedMaxTokens  = 8192
+        Write-Host ""
+        Write-Ok "Using GitHub Models (Azure Inference)"
+
+        if (-not $GitHubTokenDetected) {
+            Write-Host ""
+            Write-Host "Get your GitHub token from: " -NoNewline
+            Write-Color -Text "https://github.com/settings/tokens" -Color Cyan
+            Write-Host ""
+            $token = Read-Host "Paste your GitHub token (or press Enter to skip)"
+
+            if ($token) {
+                if (-not (Test-Path $HiveConfigDir)) { New-Item -ItemType Directory -Path $HiveConfigDir -Force }
+                $token | Out-File -FilePath $githubTokenPath -Encoding utf8
+                Write-Host ""
+                Write-Ok "GitHub token saved to $githubTokenPath"
+                $GitHubTokenDetected = $true
+            } else {
+                Write-Host ""
+                Write-Warn "Skipped. You'll need to set the GITHUB_TOKEN environment variable."
+                $SelectedProviderId = ""
+                $SubscriptionMode   = ""
+            }
+        }
+    }
+    { $_ -ge 5 -and $_ -le 9 } {
         # API key providers
-        $provIdx = $num - 4
+        $provIdx = $num - 5
         $SelectedEnvVar     = $ProviderMenuEnvVars[$provIdx]
         $SelectedProviderId = $ProviderMenuIds[$provIdx]
         $providerName       = $ProviderMenuNames[$provIdx] -replace ' - .*', ''  # strip description
@@ -999,7 +1041,7 @@ switch ($num) {
             }
         }
     }
-    9 {
+    10 {
         Write-Host ""
         Write-Warn "Skipped. An LLM API key is required to test and use worker agents."
         Write-Host "  Add your API key later by running:"
@@ -1067,6 +1109,8 @@ if ($SelectedProviderId) {
         $config.llm["use_claude_code_subscription"] = $true
     } elseif ($SubscriptionMode -eq "codex") {
         $config.llm["use_codex_subscription"] = $true
+    } elseif ($SubscriptionMode -eq "github_token") {
+        $config.llm["use_github_token"] = $true
     } elseif ($SubscriptionMode -eq "zai_code") {
         $config.llm["api_base"] = "https://api.z.ai/api/coding/paas/v4"
         $config.llm["api_key_env_var"] = $SelectedEnvVar
