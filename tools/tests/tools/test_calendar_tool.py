@@ -39,18 +39,18 @@ class TestCredentialErrors:
 
     def test_list_events_no_credentials(self, calendar_tools, monkeypatch):
         """list_events without credentials returns helpful error."""
-        monkeypatch.delenv("GOOGLE_CALENDAR_ACCESS_TOKEN", raising=False)
+        monkeypatch.delenv("GOOGLE_ACCESS_TOKEN", raising=False)
 
         result = calendar_tools["list_events"]()
 
         assert "error" in result
         assert "Calendar credentials not configured" in result["error"]
         assert "help" in result
-        assert "GOOGLE_CALENDAR_ACCESS_TOKEN" in result["help"]
+        assert "GOOGLE_ACCESS_TOKEN" in result["help"]
 
     def test_get_event_no_credentials(self, calendar_tools, monkeypatch):
         """get_event without credentials returns helpful error."""
-        monkeypatch.delenv("GOOGLE_CALENDAR_ACCESS_TOKEN", raising=False)
+        monkeypatch.delenv("GOOGLE_ACCESS_TOKEN", raising=False)
 
         result = calendar_tools["get_event"](event_id="test-event-id")
 
@@ -59,7 +59,7 @@ class TestCredentialErrors:
 
     def test_create_event_no_credentials(self, calendar_tools, monkeypatch):
         """create_event without credentials returns helpful error."""
-        monkeypatch.delenv("GOOGLE_CALENDAR_ACCESS_TOKEN", raising=False)
+        monkeypatch.delenv("GOOGLE_ACCESS_TOKEN", raising=False)
 
         result = calendar_tools["create_event"](
             summary="Test Event",
@@ -72,7 +72,7 @@ class TestCredentialErrors:
 
     def test_update_event_no_credentials(self, calendar_tools, monkeypatch):
         """update_event without credentials returns helpful error."""
-        monkeypatch.delenv("GOOGLE_CALENDAR_ACCESS_TOKEN", raising=False)
+        monkeypatch.delenv("GOOGLE_ACCESS_TOKEN", raising=False)
 
         result = calendar_tools["update_event"](event_id="test-event-id")
 
@@ -81,7 +81,7 @@ class TestCredentialErrors:
 
     def test_delete_event_no_credentials(self, calendar_tools, monkeypatch):
         """delete_event without credentials returns helpful error."""
-        monkeypatch.delenv("GOOGLE_CALENDAR_ACCESS_TOKEN", raising=False)
+        monkeypatch.delenv("GOOGLE_ACCESS_TOKEN", raising=False)
 
         result = calendar_tools["delete_event"](event_id="test-event-id")
 
@@ -90,7 +90,7 @@ class TestCredentialErrors:
 
     def test_list_calendars_no_credentials(self, calendar_tools, monkeypatch):
         """list_calendars without credentials returns helpful error."""
-        monkeypatch.delenv("GOOGLE_CALENDAR_ACCESS_TOKEN", raising=False)
+        monkeypatch.delenv("GOOGLE_ACCESS_TOKEN", raising=False)
 
         result = calendar_tools["list_calendars"]()
 
@@ -99,7 +99,7 @@ class TestCredentialErrors:
 
     def test_get_calendar_no_credentials(self, calendar_tools, monkeypatch):
         """get_calendar without credentials returns helpful error."""
-        monkeypatch.delenv("GOOGLE_CALENDAR_ACCESS_TOKEN", raising=False)
+        monkeypatch.delenv("GOOGLE_ACCESS_TOKEN", raising=False)
 
         result = calendar_tools["get_calendar"](calendar_id="primary")
 
@@ -108,7 +108,7 @@ class TestCredentialErrors:
 
     def test_check_availability_no_credentials(self, calendar_tools, monkeypatch):
         """check_availability without credentials returns helpful error."""
-        monkeypatch.delenv("GOOGLE_CALENDAR_ACCESS_TOKEN", raising=False)
+        monkeypatch.delenv("GOOGLE_ACCESS_TOKEN", raising=False)
 
         result = calendar_tools["check_availability"](
             time_min="2024-01-15T00:00:00Z",
@@ -124,7 +124,7 @@ class TestParameterValidation:
 
     def test_list_events_max_results_too_low(self, calendar_tools, monkeypatch):
         """max_results below 1 returns error."""
-        monkeypatch.setenv("GOOGLE_CALENDAR_ACCESS_TOKEN", "test-token")
+        monkeypatch.setenv("GOOGLE_ACCESS_TOKEN", "test-token")
 
         result = calendar_tools["list_events"](max_results=0)
 
@@ -133,7 +133,7 @@ class TestParameterValidation:
 
     def test_list_events_max_results_too_high(self, calendar_tools, monkeypatch):
         """max_results above 2500 returns error."""
-        monkeypatch.setenv("GOOGLE_CALENDAR_ACCESS_TOKEN", "test-token")
+        monkeypatch.setenv("GOOGLE_ACCESS_TOKEN", "test-token")
 
         result = calendar_tools["list_events"](max_results=2501)
 
@@ -142,7 +142,7 @@ class TestParameterValidation:
 
     def test_get_event_missing_event_id(self, calendar_tools, monkeypatch):
         """get_event without event_id returns error."""
-        monkeypatch.setenv("GOOGLE_CALENDAR_ACCESS_TOKEN", "test-token")
+        monkeypatch.setenv("GOOGLE_ACCESS_TOKEN", "test-token")
 
         result = calendar_tools["get_event"](event_id="")
 
@@ -151,7 +151,7 @@ class TestParameterValidation:
 
     def test_create_event_missing_summary(self, calendar_tools, monkeypatch):
         """create_event without summary returns error."""
-        monkeypatch.setenv("GOOGLE_CALENDAR_ACCESS_TOKEN", "test-token")
+        monkeypatch.setenv("GOOGLE_ACCESS_TOKEN", "test-token")
 
         result = calendar_tools["create_event"](
             summary="",
@@ -164,7 +164,7 @@ class TestParameterValidation:
 
     def test_create_event_missing_start_time(self, calendar_tools, monkeypatch):
         """create_event without start_time returns error."""
-        monkeypatch.setenv("GOOGLE_CALENDAR_ACCESS_TOKEN", "test-token")
+        monkeypatch.setenv("GOOGLE_ACCESS_TOKEN", "test-token")
 
         result = calendar_tools["create_event"](
             summary="Test Event",
@@ -177,7 +177,7 @@ class TestParameterValidation:
 
     def test_create_event_missing_end_time(self, calendar_tools, monkeypatch):
         """create_event without end_time returns error."""
-        monkeypatch.setenv("GOOGLE_CALENDAR_ACCESS_TOKEN", "test-token")
+        monkeypatch.setenv("GOOGLE_ACCESS_TOKEN", "test-token")
 
         result = calendar_tools["create_event"](
             summary="Test Event",
@@ -190,7 +190,7 @@ class TestParameterValidation:
 
     def test_update_event_missing_event_id(self, calendar_tools, monkeypatch):
         """update_event without event_id returns error."""
-        monkeypatch.setenv("GOOGLE_CALENDAR_ACCESS_TOKEN", "test-token")
+        monkeypatch.setenv("GOOGLE_ACCESS_TOKEN", "test-token")
 
         result = calendar_tools["update_event"](event_id="")
 
@@ -199,7 +199,7 @@ class TestParameterValidation:
 
     def test_delete_event_missing_event_id(self, calendar_tools, monkeypatch):
         """delete_event without event_id returns error."""
-        monkeypatch.setenv("GOOGLE_CALENDAR_ACCESS_TOKEN", "test-token")
+        monkeypatch.setenv("GOOGLE_ACCESS_TOKEN", "test-token")
 
         result = calendar_tools["delete_event"](event_id="")
 
@@ -208,7 +208,7 @@ class TestParameterValidation:
 
     def test_list_calendars_max_results_too_high(self, calendar_tools, monkeypatch):
         """list_calendars max_results above 250 returns error."""
-        monkeypatch.setenv("GOOGLE_CALENDAR_ACCESS_TOKEN", "test-token")
+        monkeypatch.setenv("GOOGLE_ACCESS_TOKEN", "test-token")
 
         result = calendar_tools["list_calendars"](max_results=251)
 
@@ -217,7 +217,7 @@ class TestParameterValidation:
 
     def test_get_calendar_missing_calendar_id(self, calendar_tools, monkeypatch):
         """get_calendar without calendar_id returns error."""
-        monkeypatch.setenv("GOOGLE_CALENDAR_ACCESS_TOKEN", "test-token")
+        monkeypatch.setenv("GOOGLE_ACCESS_TOKEN", "test-token")
 
         result = calendar_tools["get_calendar"](calendar_id="")
 
@@ -226,7 +226,7 @@ class TestParameterValidation:
 
     def test_check_availability_missing_time_min(self, calendar_tools, monkeypatch):
         """check_availability without time_min returns error."""
-        monkeypatch.setenv("GOOGLE_CALENDAR_ACCESS_TOKEN", "test-token")
+        monkeypatch.setenv("GOOGLE_ACCESS_TOKEN", "test-token")
 
         result = calendar_tools["check_availability"](
             time_min="",
@@ -238,7 +238,7 @@ class TestParameterValidation:
 
     def test_check_availability_missing_time_max(self, calendar_tools, monkeypatch):
         """check_availability without time_max returns error."""
-        monkeypatch.setenv("GOOGLE_CALENDAR_ACCESS_TOKEN", "test-token")
+        monkeypatch.setenv("GOOGLE_ACCESS_TOKEN", "test-token")
 
         result = calendar_tools["check_availability"](
             time_min="2024-01-15T00:00:00Z",
@@ -255,7 +255,7 @@ class TestMockedAPIResponses:
     @patch("aden_tools.tools.calendar_tool.calendar_tool.httpx.get")
     def test_list_events_success(self, mock_get, calendar_tools, monkeypatch):
         """list_events returns formatted events on success."""
-        monkeypatch.setenv("GOOGLE_CALENDAR_ACCESS_TOKEN", "test-token")
+        monkeypatch.setenv("GOOGLE_ACCESS_TOKEN", "test-token")
 
         mock_get.return_value = _mock_response(
             200,
@@ -286,7 +286,7 @@ class TestMockedAPIResponses:
     @patch("aden_tools.tools.calendar_tool.calendar_tool.httpx.get")
     def test_list_events_empty(self, mock_get, calendar_tools, monkeypatch):
         """list_events handles empty calendar."""
-        monkeypatch.setenv("GOOGLE_CALENDAR_ACCESS_TOKEN", "test-token")
+        monkeypatch.setenv("GOOGLE_ACCESS_TOKEN", "test-token")
 
         mock_get.return_value = _mock_response(200, {"items": []})
 
@@ -299,7 +299,7 @@ class TestMockedAPIResponses:
     @patch("aden_tools.tools.calendar_tool.calendar_tool.httpx.post")
     def test_create_event_success(self, mock_post, calendar_tools, monkeypatch):
         """create_event returns created event details."""
-        monkeypatch.setenv("GOOGLE_CALENDAR_ACCESS_TOKEN", "test-token")
+        monkeypatch.setenv("GOOGLE_ACCESS_TOKEN", "test-token")
 
         mock_post.return_value = _mock_response(
             200,
@@ -324,7 +324,7 @@ class TestMockedAPIResponses:
     @patch("aden_tools.tools.calendar_tool.calendar_tool.httpx.delete")
     def test_delete_event_success(self, mock_delete, calendar_tools, monkeypatch):
         """delete_event returns success message."""
-        monkeypatch.setenv("GOOGLE_CALENDAR_ACCESS_TOKEN", "test-token")
+        monkeypatch.setenv("GOOGLE_ACCESS_TOKEN", "test-token")
 
         mock_delete.return_value = _mock_response(204)
 
@@ -336,7 +336,7 @@ class TestMockedAPIResponses:
     @patch("aden_tools.tools.calendar_tool.calendar_tool.httpx.get")
     def test_list_calendars_success(self, mock_get, calendar_tools, monkeypatch):
         """list_calendars returns formatted calendar list."""
-        monkeypatch.setenv("GOOGLE_CALENDAR_ACCESS_TOKEN", "test-token")
+        monkeypatch.setenv("GOOGLE_ACCESS_TOKEN", "test-token")
 
         mock_get.return_value = _mock_response(
             200,
@@ -368,7 +368,7 @@ class TestMockedAPIResponses:
     @patch("aden_tools.tools.calendar_tool.calendar_tool.httpx.post")
     def test_check_availability_success(self, mock_post, calendar_tools, monkeypatch):
         """check_availability returns busy periods."""
-        monkeypatch.setenv("GOOGLE_CALENDAR_ACCESS_TOKEN", "test-token")
+        monkeypatch.setenv("GOOGLE_ACCESS_TOKEN", "test-token")
 
         mock_post.return_value = _mock_response(
             200,
@@ -398,7 +398,7 @@ class TestMockedAPIResponses:
     @patch("aden_tools.tools.calendar_tool.calendar_tool.httpx.get")
     def test_unauthorized_returns_error(self, mock_get, calendar_tools, monkeypatch):
         """401 response returns appropriate error."""
-        monkeypatch.setenv("GOOGLE_CALENDAR_ACCESS_TOKEN", "invalid-token")
+        monkeypatch.setenv("GOOGLE_ACCESS_TOKEN", "invalid-token")
 
         mock_get.return_value = _mock_response(401, {"error": {"message": "Invalid credentials"}})
 
@@ -410,7 +410,7 @@ class TestMockedAPIResponses:
     @patch("aden_tools.tools.calendar_tool.calendar_tool.httpx.get")
     def test_rate_limit_returns_error(self, mock_get, calendar_tools, monkeypatch):
         """429 response returns rate limit error."""
-        monkeypatch.setenv("GOOGLE_CALENDAR_ACCESS_TOKEN", "test-token")
+        monkeypatch.setenv("GOOGLE_ACCESS_TOKEN", "test-token")
 
         mock_get.return_value = _mock_response(429)
 
@@ -422,7 +422,7 @@ class TestMockedAPIResponses:
     @patch("aden_tools.tools.calendar_tool.calendar_tool.httpx.get")
     def test_not_found_returns_error(self, mock_get, calendar_tools, monkeypatch):
         """404 response returns not found error."""
-        monkeypatch.setenv("GOOGLE_CALENDAR_ACCESS_TOKEN", "test-token")
+        monkeypatch.setenv("GOOGLE_ACCESS_TOKEN", "test-token")
 
         mock_get.return_value = _mock_response(404)
 
@@ -441,10 +441,10 @@ class TestCredentialManager:
         from aden_tools.credentials import CredentialStoreAdapter
 
         # Don't set env var - only use credential store adapter
-        monkeypatch.delenv("GOOGLE_CALENDAR_ACCESS_TOKEN", raising=False)
+        monkeypatch.delenv("GOOGLE_ACCESS_TOKEN", raising=False)
 
         # Create credential store adapter with test token
-        creds = CredentialStoreAdapter.for_testing({"google_calendar_oauth": "test-oauth-token"})
+        creds = CredentialStoreAdapter.for_testing({"google": "test-oauth-token"})
         register_tools(mcp, credentials=creds)
 
         list_events_fn = mcp._tool_manager._tools["calendar_list_events"].fn
@@ -465,7 +465,7 @@ class TestTokenRefresh:
     @patch("aden_tools.tools.calendar_tool.calendar_tool.httpx.get")
     def test_expired_token_returns_helpful_error(self, mock_get, calendar_tools, monkeypatch):
         """401 response with simple token suggests re-authorization."""
-        monkeypatch.setenv("GOOGLE_CALENDAR_ACCESS_TOKEN", "expired-token")
+        monkeypatch.setenv("GOOGLE_ACCESS_TOKEN", "expired-token")
 
         mock_get.return_value = _mock_response(401, {"error": {"message": "Token expired"}})
 
@@ -489,7 +489,7 @@ class TestTokenRefresh:
         from aden_tools.credentials import CredentialStoreAdapter
 
         # Clear env var
-        monkeypatch.delenv("GOOGLE_CALENDAR_ACCESS_TOKEN", raising=False)
+        monkeypatch.delenv("GOOGLE_ACCESS_TOKEN", raising=False)
         monkeypatch.delenv("GOOGLE_OAUTH_CLIENT_ID", raising=False)
         monkeypatch.delenv("GOOGLE_OAUTH_CLIENT_SECRET", raising=False)
 
@@ -503,7 +503,7 @@ class TestTokenRefresh:
         # Create credential store with OAuth tokens
         store = CredentialStore.for_testing(
             {
-                "google_calendar_oauth": {
+                "google": {
                     "access_token": "old-token",
                     "refresh_token": "test-refresh-token",
                 }
@@ -532,12 +532,12 @@ class TestTokenRefresh:
 
         from aden_tools.credentials import CredentialStoreAdapter
 
-        monkeypatch.delenv("GOOGLE_CALENDAR_ACCESS_TOKEN", raising=False)
+        monkeypatch.delenv("GOOGLE_ACCESS_TOKEN", raising=False)
 
         # Create store with only access_token (no refresh_token)
         store = CredentialStore.for_testing(
             {
-                "google_calendar_oauth": {
+                "google": {
                     "access_token": "simple-token",
                 }
             }
@@ -558,7 +558,7 @@ class TestTokenRefresh:
     @patch("aden_tools.tools.calendar_tool.calendar_tool.httpx.get")
     def test_graceful_degradation_on_refresh_failure(self, mock_get, calendar_tools, monkeypatch):
         """If token refresh fails, returns helpful error message."""
-        monkeypatch.setenv("GOOGLE_CALENDAR_ACCESS_TOKEN", "invalid-token")
+        monkeypatch.setenv("GOOGLE_ACCESS_TOKEN", "invalid-token")
 
         # Simulate 401 (expired token that couldn't be refreshed)
         mock_get.return_value = _mock_response(401, {"error": {"message": "Invalid credentials"}})
@@ -578,7 +578,7 @@ class TestUpdateEventPatch:
     @patch("aden_tools.tools.calendar_tool.calendar_tool.httpx.patch")
     def test_update_event_patch_success(self, mock_patch, calendar_tools, monkeypatch):
         """update_event uses PATCH and returns updated event."""
-        monkeypatch.setenv("GOOGLE_CALENDAR_ACCESS_TOKEN", "test-token")
+        monkeypatch.setenv("GOOGLE_ACCESS_TOKEN", "test-token")
 
         mock_patch.return_value = _mock_response(
             200,
@@ -605,7 +605,7 @@ class TestUpdateEventPatch:
     @patch("aden_tools.tools.calendar_tool.calendar_tool.httpx.patch")
     def test_update_event_partial_fields(self, mock_patch, calendar_tools, monkeypatch):
         """update_event sends only provided fields in PATCH body."""
-        monkeypatch.setenv("GOOGLE_CALENDAR_ACCESS_TOKEN", "test-token")
+        monkeypatch.setenv("GOOGLE_ACCESS_TOKEN", "test-token")
 
         mock_patch.return_value = _mock_response(
             200,
@@ -632,7 +632,7 @@ class TestUpdateEventPatch:
     @patch("aden_tools.tools.calendar_tool.calendar_tool.httpx.patch")
     def test_update_event_with_timezone(self, mock_patch, calendar_tools, monkeypatch):
         """update_event includes timezone in start/end when provided."""
-        monkeypatch.setenv("GOOGLE_CALENDAR_ACCESS_TOKEN", "test-token")
+        monkeypatch.setenv("GOOGLE_ACCESS_TOKEN", "test-token")
 
         mock_patch.return_value = _mock_response(200, {"id": "event123"})
 
@@ -655,7 +655,7 @@ class TestAllDayEvents:
     @patch("aden_tools.tools.calendar_tool.calendar_tool.httpx.post")
     def test_create_all_day_event(self, mock_post, calendar_tools, monkeypatch):
         """create_event with all_day=True uses date field."""
-        monkeypatch.setenv("GOOGLE_CALENDAR_ACCESS_TOKEN", "test-token")
+        monkeypatch.setenv("GOOGLE_ACCESS_TOKEN", "test-token")
 
         mock_post.return_value = _mock_response(
             200,
@@ -684,7 +684,7 @@ class TestAllDayEvents:
 
     def test_create_all_day_event_invalid_start_format(self, calendar_tools, monkeypatch):
         """create_event with all_day=True rejects non-date start_time."""
-        monkeypatch.setenv("GOOGLE_CALENDAR_ACCESS_TOKEN", "test-token")
+        monkeypatch.setenv("GOOGLE_ACCESS_TOKEN", "test-token")
 
         result = calendar_tools["create_event"](
             summary="Bad Event",
@@ -699,7 +699,7 @@ class TestAllDayEvents:
 
     def test_create_all_day_event_invalid_end_format(self, calendar_tools, monkeypatch):
         """create_event with all_day=True rejects non-date end_time."""
-        monkeypatch.setenv("GOOGLE_CALENDAR_ACCESS_TOKEN", "test-token")
+        monkeypatch.setenv("GOOGLE_ACCESS_TOKEN", "test-token")
 
         result = calendar_tools["create_event"](
             summary="Bad Event",
@@ -715,7 +715,7 @@ class TestAllDayEvents:
     @patch("aden_tools.tools.calendar_tool.calendar_tool.httpx.patch")
     def test_update_to_all_day_event(self, mock_patch, calendar_tools, monkeypatch):
         """update_event can convert timed event to all-day."""
-        monkeypatch.setenv("GOOGLE_CALENDAR_ACCESS_TOKEN", "test-token")
+        monkeypatch.setenv("GOOGLE_ACCESS_TOKEN", "test-token")
 
         mock_patch.return_value = _mock_response(
             200,
@@ -744,7 +744,7 @@ class TestTimezoneValidation:
 
     def test_invalid_timezone_create_event(self, calendar_tools, monkeypatch):
         """create_event rejects invalid timezone."""
-        monkeypatch.setenv("GOOGLE_CALENDAR_ACCESS_TOKEN", "test-token")
+        monkeypatch.setenv("GOOGLE_ACCESS_TOKEN", "test-token")
 
         result = calendar_tools["create_event"](
             summary="Test",
@@ -761,7 +761,7 @@ class TestTimezoneValidation:
     @patch("aden_tools.tools.calendar_tool.calendar_tool.httpx.post")
     def test_valid_timezone_passes(self, mock_post, calendar_tools, monkeypatch):
         """create_event accepts valid timezone."""
-        monkeypatch.setenv("GOOGLE_CALENDAR_ACCESS_TOKEN", "test-token")
+        monkeypatch.setenv("GOOGLE_ACCESS_TOKEN", "test-token")
 
         mock_post.return_value = _mock_response(200, {"id": "event123"})
 
@@ -778,7 +778,7 @@ class TestTimezoneValidation:
 
     def test_invalid_timezone_update_event(self, calendar_tools, monkeypatch):
         """update_event rejects invalid timezone."""
-        monkeypatch.setenv("GOOGLE_CALENDAR_ACCESS_TOKEN", "test-token")
+        monkeypatch.setenv("GOOGLE_ACCESS_TOKEN", "test-token")
 
         result = calendar_tools["update_event"](
             event_id="event123",
@@ -792,7 +792,7 @@ class TestTimezoneValidation:
     @patch("aden_tools.tools.calendar_tool.calendar_tool.httpx.post")
     def test_all_day_event_ignores_timezone(self, mock_post, calendar_tools, monkeypatch):
         """create_event with all_day=True skips timezone validation."""
-        monkeypatch.setenv("GOOGLE_CALENDAR_ACCESS_TOKEN", "test-token")
+        monkeypatch.setenv("GOOGLE_ACCESS_TOKEN", "test-token")
 
         mock_post.return_value = _mock_response(200, {"id": "allday1"})
 
@@ -814,7 +814,7 @@ class TestCreateEventWithAttendees:
     @patch("aden_tools.tools.calendar_tool.calendar_tool.httpx.post")
     def test_create_event_with_attendees(self, mock_post, calendar_tools, monkeypatch):
         """create_event includes attendees in request body."""
-        monkeypatch.setenv("GOOGLE_CALENDAR_ACCESS_TOKEN", "test-token")
+        monkeypatch.setenv("GOOGLE_ACCESS_TOKEN", "test-token")
 
         mock_post.return_value = _mock_response(
             200,
@@ -850,7 +850,7 @@ class TestCreateEventWithAttendees:
         self, mock_post, calendar_tools, monkeypatch
     ):
         """create_event with attendees auto-generates conferenceData with unique requestId."""
-        monkeypatch.setenv("GOOGLE_CALENDAR_ACCESS_TOKEN", "test-token")
+        monkeypatch.setenv("GOOGLE_ACCESS_TOKEN", "test-token")
 
         mock_post.return_value = _mock_response(200, {"id": "event123"})
 
@@ -876,7 +876,7 @@ class TestCreateEventWithAttendees:
         self, mock_post, calendar_tools, monkeypatch
     ):
         """create_event with attendees includes conferenceDataVersion=1 in query params."""
-        monkeypatch.setenv("GOOGLE_CALENDAR_ACCESS_TOKEN", "test-token")
+        monkeypatch.setenv("GOOGLE_ACCESS_TOKEN", "test-token")
 
         mock_post.return_value = _mock_response(200, {"id": "event123"})
 
@@ -895,7 +895,7 @@ class TestCreateEventWithAttendees:
         self, mock_post, calendar_tools, monkeypatch
     ):
         """create_event without attendees does not add conferenceData."""
-        monkeypatch.setenv("GOOGLE_CALENDAR_ACCESS_TOKEN", "test-token")
+        monkeypatch.setenv("GOOGLE_ACCESS_TOKEN", "test-token")
 
         mock_post.return_value = _mock_response(200, {"id": "event123"})
 
@@ -919,7 +919,7 @@ class TestListEventsOutputFields:
         self, mock_get, calendar_tools, monkeypatch
     ):
         """list_events output includes description and hangoutLink fields."""
-        monkeypatch.setenv("GOOGLE_CALENDAR_ACCESS_TOKEN", "test-token")
+        monkeypatch.setenv("GOOGLE_ACCESS_TOKEN", "test-token")
 
         mock_get.return_value = _mock_response(
             200,
@@ -947,7 +947,7 @@ class TestListEventsOutputFields:
     @patch("aden_tools.tools.calendar_tool.calendar_tool.httpx.get")
     def test_list_events_includes_attendees(self, mock_get, calendar_tools, monkeypatch):
         """list_events output includes attendee emails when present."""
-        monkeypatch.setenv("GOOGLE_CALENDAR_ACCESS_TOKEN", "test-token")
+        monkeypatch.setenv("GOOGLE_ACCESS_TOKEN", "test-token")
 
         mock_get.return_value = _mock_response(
             200,
@@ -976,7 +976,7 @@ class TestListEventsOutputFields:
     @patch("aden_tools.tools.calendar_tool.calendar_tool.httpx.get")
     def test_list_events_no_attendees_omits_field(self, mock_get, calendar_tools, monkeypatch):
         """list_events without attendees omits the attendees field."""
-        monkeypatch.setenv("GOOGLE_CALENDAR_ACCESS_TOKEN", "test-token")
+        monkeypatch.setenv("GOOGLE_ACCESS_TOKEN", "test-token")
 
         mock_get.return_value = _mock_response(
             200,
@@ -1000,7 +1000,7 @@ class TestListEventsOutputFields:
     @patch("aden_tools.tools.calendar_tool.calendar_tool.httpx.get")
     def test_list_events_max_results_2500_accepted(self, mock_get, calendar_tools, monkeypatch):
         """list_events accepts max_results=2500 (the API maximum)."""
-        monkeypatch.setenv("GOOGLE_CALENDAR_ACCESS_TOKEN", "test-token")
+        monkeypatch.setenv("GOOGLE_ACCESS_TOKEN", "test-token")
 
         mock_get.return_value = _mock_response(200, {"items": []})
 
@@ -1016,7 +1016,7 @@ class TestIsNotNoneBehavior:
     @patch("aden_tools.tools.calendar_tool.calendar_tool.httpx.post")
     def test_create_event_empty_description_included(self, mock_post, calendar_tools, monkeypatch):
         """create_event with description='' includes it in body (not None check)."""
-        monkeypatch.setenv("GOOGLE_CALENDAR_ACCESS_TOKEN", "test-token")
+        monkeypatch.setenv("GOOGLE_ACCESS_TOKEN", "test-token")
 
         mock_post.return_value = _mock_response(200, {"id": "event123"})
 
@@ -1034,7 +1034,7 @@ class TestIsNotNoneBehavior:
     @patch("aden_tools.tools.calendar_tool.calendar_tool.httpx.post")
     def test_create_event_empty_location_included(self, mock_post, calendar_tools, monkeypatch):
         """create_event with location='' includes it in body (not None check)."""
-        monkeypatch.setenv("GOOGLE_CALENDAR_ACCESS_TOKEN", "test-token")
+        monkeypatch.setenv("GOOGLE_ACCESS_TOKEN", "test-token")
 
         mock_post.return_value = _mock_response(200, {"id": "event123"})
 
@@ -1052,7 +1052,7 @@ class TestIsNotNoneBehavior:
     @patch("aden_tools.tools.calendar_tool.calendar_tool.httpx.post")
     def test_create_event_none_description_excluded(self, mock_post, calendar_tools, monkeypatch):
         """create_event with description=None does not include it in body."""
-        monkeypatch.setenv("GOOGLE_CALENDAR_ACCESS_TOKEN", "test-token")
+        monkeypatch.setenv("GOOGLE_ACCESS_TOKEN", "test-token")
 
         mock_post.return_value = _mock_response(200, {"id": "event123"})
 
@@ -1072,7 +1072,7 @@ class TestEmptyPatchGuard:
 
     def test_update_event_no_fields_returns_error(self, calendar_tools, monkeypatch):
         """update_event with no fields to change returns error instead of empty PATCH."""
-        monkeypatch.setenv("GOOGLE_CALENDAR_ACCESS_TOKEN", "test-token")
+        monkeypatch.setenv("GOOGLE_ACCESS_TOKEN", "test-token")
 
         result = calendar_tools["update_event"](event_id="event123")
 
@@ -1087,7 +1087,7 @@ class TestRemoveAttendees:
     @patch("aden_tools.tools.calendar_tool.calendar_tool.httpx.get")
     def test_remove_single_attendee(self, mock_get, mock_patch, calendar_tools, monkeypatch):
         """remove_attendees removes specified email and keeps the rest."""
-        monkeypatch.setenv("GOOGLE_CALENDAR_ACCESS_TOKEN", "test-token")
+        monkeypatch.setenv("GOOGLE_ACCESS_TOKEN", "test-token")
 
         # GET returns current event with 3 attendees
         mock_get.return_value = _mock_response(
@@ -1135,7 +1135,7 @@ class TestRemoveAttendees:
         self, mock_get, mock_patch, calendar_tools, monkeypatch
     ):
         """remove_attendees matching is case-insensitive."""
-        monkeypatch.setenv("GOOGLE_CALENDAR_ACCESS_TOKEN", "test-token")
+        monkeypatch.setenv("GOOGLE_ACCESS_TOKEN", "test-token")
 
         mock_get.return_value = _mock_response(
             200,
@@ -1163,7 +1163,7 @@ class TestRemoveAttendees:
     @patch("aden_tools.tools.calendar_tool.calendar_tool.httpx.get")
     def test_remove_multiple_attendees(self, mock_get, mock_patch, calendar_tools, monkeypatch):
         """remove_attendees can remove multiple emails at once."""
-        monkeypatch.setenv("GOOGLE_CALENDAR_ACCESS_TOKEN", "test-token")
+        monkeypatch.setenv("GOOGLE_ACCESS_TOKEN", "test-token")
 
         mock_get.return_value = _mock_response(
             200,
@@ -1193,7 +1193,7 @@ class TestRemoveAttendees:
         self, mock_get, mock_patch, calendar_tools, monkeypatch
     ):
         """remove_attendees on event with no attendees sends empty list."""
-        monkeypatch.setenv("GOOGLE_CALENDAR_ACCESS_TOKEN", "test-token")
+        monkeypatch.setenv("GOOGLE_ACCESS_TOKEN", "test-token")
 
         mock_get.return_value = _mock_response(
             200,
@@ -1215,7 +1215,7 @@ class TestRemoveAttendees:
         self, mock_get, mock_patch, calendar_tools, monkeypatch
     ):
         """remove_attendees triggers conferenceDataVersion=1 in query params."""
-        monkeypatch.setenv("GOOGLE_CALENDAR_ACCESS_TOKEN", "test-token")
+        monkeypatch.setenv("GOOGLE_ACCESS_TOKEN", "test-token")
 
         mock_get.return_value = _mock_response(
             200,
@@ -1237,7 +1237,7 @@ class TestRemoveAttendees:
     @patch("aden_tools.tools.calendar_tool.calendar_tool.httpx.get")
     def test_remove_attendees_get_fails_returns_error(self, mock_get, calendar_tools, monkeypatch):
         """remove_attendees returns error if GET to fetch event fails."""
-        monkeypatch.setenv("GOOGLE_CALENDAR_ACCESS_TOKEN", "test-token")
+        monkeypatch.setenv("GOOGLE_ACCESS_TOKEN", "test-token")
 
         mock_get.return_value = _mock_response(404)
 
@@ -1256,7 +1256,7 @@ class TestUpdateMeetLink:
     @patch("aden_tools.tools.calendar_tool.calendar_tool.httpx.patch")
     def test_update_event_add_meet_link(self, mock_patch, calendar_tools, monkeypatch):
         """update_event with add_meet_link=True includes conferenceData."""
-        monkeypatch.setenv("GOOGLE_CALENDAR_ACCESS_TOKEN", "test-token")
+        monkeypatch.setenv("GOOGLE_ACCESS_TOKEN", "test-token")
 
         mock_patch.return_value = _mock_response(
             200,
@@ -1286,7 +1286,7 @@ class TestUpdateMeetLink:
         self, mock_patch, calendar_tools, monkeypatch
     ):
         """update_event without add_meet_link does not add conferenceData."""
-        monkeypatch.setenv("GOOGLE_CALENDAR_ACCESS_TOKEN", "test-token")
+        monkeypatch.setenv("GOOGLE_ACCESS_TOKEN", "test-token")
 
         mock_patch.return_value = _mock_response(200, {"id": "event123", "summary": "Updated"})
 
