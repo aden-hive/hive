@@ -56,6 +56,7 @@ To add a new credential:
 """
 
 from .apify import APIFY_CREDENTIALS
+from .asana import ASANA_CREDENTIALS
 from .apollo import APOLLO_CREDENTIALS
 from .attio import ATTIO_CREDENTIALS
 from .base import CredentialError, CredentialSpec
@@ -115,6 +116,7 @@ CREDENTIAL_SPECS = {
     **EMAIL_CREDENTIALS,
     **GCP_VISION_CREDENTIALS,
     **APIFY_CREDENTIALS,
+    **ASANA_CREDENTIALS,
     **APOLLO_CREDENTIALS,
     **ATTIO_CREDENTIALS,
     **DISCORD_CREDENTIALS,
@@ -186,6 +188,7 @@ __all__ = [
     "GOOGLE_CALENDAR_CREDENTIALS",
     "SLACK_CREDENTIALS",
     "APIFY_CREDENTIALS",
+    "ASANA_CREDENTIALS",
     "APOLLO_CREDENTIALS",
     "ATTIO_CREDENTIALS",
     "SERPAPI_CREDENTIALS",

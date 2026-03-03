@@ -23,6 +23,7 @@ if TYPE_CHECKING:
 # Import register_tools from each tool module
 from .account_info_tool import register_tools as register_account_info
 from .apify_tool import register_tools as register_apify
+from .asana_tool import register_tools as register_asana
 from .apollo_tool import register_tools as register_apollo
 from .arxiv_tool import register_tools as register_arxiv
 from .attio_tool import register_tools as register_attio
@@ -214,6 +215,9 @@ def register_all_tools(
 
     # Google Search Console (Analytics, Sitemaps, URL Inspection)
     register_google_search_console(mcp, credentials=credentials)
+
+    # Asana task & project management
+    register_asana(mcp, credentials=credentials)
 
     # Return the list of all registered tool names
     return list(mcp._tool_manager._tools.keys())
