@@ -2648,6 +2648,7 @@ class EventLoopNode(NodeProtocol):
             return
         try:
             adapt_path = Path(self._config.spillover_dir) / "adapt.md"
+            adapt_path.parent.mkdir(parents=True, exist_ok=True)
             content = adapt_path.read_text(encoding="utf-8") if adapt_path.exists() else ""
 
             if "## Outputs" not in content:
