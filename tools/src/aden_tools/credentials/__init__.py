@@ -136,6 +136,8 @@ from .powerbi import POWERBI_CREDENTIALS
 from .snowflake import SNOWFLAKE_CREDENTIALS
 from .azure_sql import AZURE_SQL_CREDENTIALS
 from .kafka import KAFKA_CREDENTIALS
+from .redshift import REDSHIFT_CREDENTIALS
+from .sap import SAP_CREDENTIALS
 
 # Merged registry of all credentials
 CREDENTIAL_SPECS = {
@@ -205,6 +207,8 @@ CREDENTIAL_SPECS = {
     **SNOWFLAKE_CREDENTIALS,
     **AZURE_SQL_CREDENTIALS,
     **KAFKA_CREDENTIALS,
+    **REDSHIFT_CREDENTIALS,
+    **SAP_CREDENTIALS,
 }
 
 __all__ = [
@@ -297,4 +301,6 @@ __all__ = [
     "SNOWFLAKE_CREDENTIALS",
     "AZURE_SQL_CREDENTIALS",
     "KAFKA_CREDENTIALS",
+    "REDSHIFT_CREDENTIALS",
+    "SAP_CREDENTIALS",
 ]

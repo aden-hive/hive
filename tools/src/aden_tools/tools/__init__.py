@@ -123,6 +123,8 @@ from .powerbi_tool import register_tools as register_powerbi
 from .snowflake_tool import register_tools as register_snowflake
 from .azure_sql_tool import register_tools as register_azure_sql
 from .kafka_tool import register_tools as register_kafka
+from .redshift_tool import register_tools as register_redshift
+from .sap_tool import register_tools as register_sap
 
 # Web and PDF tools
 from .wikipedia_tool import register_tools as register_wikipedia
@@ -340,6 +342,12 @@ def register_all_tools(
 
     # Apache Kafka (Confluent REST Proxy)
     register_kafka(mcp, credentials=credentials)
+
+    # Amazon Redshift Data API
+    register_redshift(mcp, credentials=credentials)
+
+    # SAP S/4HANA Cloud (read-only procurement)
+    register_sap(mcp, credentials=credentials)
 
     # Return the list of all registered tool names
     return list(mcp._tool_manager._tools.keys())
