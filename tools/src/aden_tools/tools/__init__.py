@@ -93,6 +93,7 @@ from .supabase_tool import register_tools as register_supabase
 from .vercel_tool import register_tools as register_vercel
 from .web_search_tool import register_tools as register_web_search
 from .yahoo_finance_tool import register_tools as register_yahoo_finance
+from .pinecone_tool import register_tools as register_pinecone
 from .zoho_crm_tool import register_tools as register_zoho_crm
 
 # Web and PDF tools
@@ -224,6 +225,9 @@ def register_all_tools(
 
     # Linear issue tracking
     register_linear(mcp, credentials=credentials)
+
+    # Pinecone vector database
+    register_pinecone(mcp, credentials=credentials)
 
     # Return the list of all registered tool names
     return list(mcp._tool_manager._tools.keys())
