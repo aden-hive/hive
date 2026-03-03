@@ -1,0 +1,151 @@
+{
+  "name": "OSS Contributor Accelerator",
+  "description": "Systematically identify and execute high-impact open source contributions through a structured 4-phase process",
+  "version": "1.0.0",
+  "author": "Hive Templates",
+  "tags": ["oss", "contributions", "github", "development", "accelerator"],
+  "category": "development",
+  "goal": {
+    "id": "oss-contributor-accelerator",
+    "name": "OSS Contributor Accelerator",
+    "description": "Help contributors systematically identify and execute high-impact open source contributions through a structured 4-phase process",
+    "success_criteria": [
+      {
+        "id": "profile-completeness",
+        "description": "Contributor profile is complete with skills and goals",
+        "metric": "profile_completion",
+        "target": "100%",
+        "weight": 0.2
+      },
+      {
+        "id": "issue-relevance",
+        "description": "Identified issues match contributor skills and interests",
+        "metric": "issue_relevance_score",
+        "target": ">=8/10",
+        "weight": 0.25
+      },
+      {
+        "id": "strategic-selection",
+        "description": "Selected issues have clear strategic rationale",
+        "metric": "selection_strategic_score",
+        "target": ">=8/10",
+        "weight": 0.25
+      },
+      {
+        "id": "execution-readiness",
+        "description": "Contribution brief provides clear implementation path",
+        "metric": "brief_completeness",
+        "target": "100%",
+        "weight": 0.3
+      }
+    ],
+    "constraints": [
+      {
+        "id": "time-bound",
+        "description": "Process should complete within reasonable timeframe",
+        "metric": "session_duration",
+        "constraint": "<=2 hours"
+      },
+      {
+        "id": "focused-scope",
+        "description": "Limit to 1-3 selected issues for focus",
+        "metric": "selected_issues_count",
+        "constraint": "<=3"
+      }
+    ]
+  },
+  "nodes": [
+    {
+      "id": "intake",
+      "name": "Contributor Intake",
+      "description": "Collect contributor profile and target repository context",
+      "type": "event_loop",
+      "client_facing": true,
+      "input_keys": ["initial_request"],
+      "output_keys": ["contributor_profile", "target_repo", "contribution_goals"],
+      "tools": []
+    },
+    {
+      "id": "issue-scout",
+      "name": "Issue Scout",
+      "description": "Discover and rank high-leverage issues in the target repository",
+      "type": "event_loop",
+      "client_facing": false,
+      "input_keys": ["contributor_profile", "target_repo", "contribution_goals"],
+      "output_keys": ["ranked_issues", "issue_analysis", "recommendations"],
+      "tools": ["web_search", "web_scrape", "load_data", "save_data", "append_data", "list_data_files"]
+    },
+    {
+      "id": "selection",
+      "name": "Issue Selection",
+      "description": "Help contributor select 1-3 target issues from the ranked list",
+      "type": "event_loop",
+      "client_facing": true,
+      "input_keys": ["ranked_issues", "issue_analysis", "recommendations", "contributor_profile"],
+      "output_keys": ["selected_issues", "selection_rationale"],
+      "tools": []
+    },
+    {
+      "id": "contribution-pack",
+      "name": "Contribution Pack Generator",
+      "description": "Generate execution-ready contribution brief with implementation plan",
+      "type": "event_loop",
+      "client_facing": false,
+      "input_keys": ["selected_issues", "selection_rationale", "contributor_profile", "target_repo"],
+      "output_keys": ["contribution_brief"],
+      "tools": ["web_search", "web_scrape", "load_data", "save_data", "append_data", "list_data_files"]
+    }
+  ],
+  "edges": [
+    {
+      "from": "intake",
+      "to": "issue-scout",
+      "condition": "contributor_profile != null AND target_repo != null AND contribution_goals != null"
+    },
+    {
+      "from": "issue-scout",
+      "to": "selection",
+      "condition": "ranked_issues != null AND issue_analysis != null"
+    },
+    {
+      "from": "selection",
+      "to": "contribution-pack",
+      "condition": "selected_issues != null AND selection_rationale != null"
+    }
+  ],
+  "entry_point": {
+    "node_id": "intake",
+    "initial_input_key": "initial_request"
+  },
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "initial_request": {
+        "type": "string",
+        "description": "Initial request describing what you want to contribute to"
+      }
+    },
+    "required": ["initial_request"]
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "contribution_brief": {
+        "type": "string",
+        "description": "Path to generated contribution brief with implementation plan"
+      }
+    },
+    "required": ["contribution_brief"]
+  },
+  "config": {
+    "llm_model": "gpt-4o-mini",
+    "temperature": 0.7,
+    "max_tokens": 4000,
+    "checkpoints_enabled": true,
+    "checkpoint_dir": "./checkpoints",
+    "web_search_max_results": 10,
+    "web_scrape_timeout": 30,
+    "max_issues_to_analyze": 20,
+    "max_selected_issues": 3
+  }
+}

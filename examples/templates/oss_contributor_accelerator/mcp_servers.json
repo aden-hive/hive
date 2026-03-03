@@ -1,0 +1,9 @@
+{
+  "servers": {
+    "web": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-web"],
+      "description": "Web search and scraping capabilities for issue discovery"
+    }
+  }
+}
