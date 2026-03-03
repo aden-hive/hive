@@ -60,10 +60,10 @@ class TestAgentStructure:
         assert "gmail_list_messages" in search_node.tools
         assert "gmail_get_message" in search_node.tools
 
-    def test_confirm_draft_node_has_draft_tool(self, agent_module):
-        """Confirm-draft node has draft creation tool."""
+    def test_confirm_draft_node_has_reply_tool(self, agent_module):
+        """Confirm-draft node has reply tool."""
         draft_node = next(n for n in agent_module.nodes if n.id == "confirm-draft")
-        assert "gmail_create_draft" in draft_node.tools
+        assert "gmail_reply_email" in draft_node.tools
 
     def test_confirm_draft_node_has_restart_output(self, agent_module):
         """Confirm-draft node has restart output key for logic changes."""

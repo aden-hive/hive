@@ -74,39 +74,39 @@ If no emails found, set empty array: set_output("email_list", [])
     tools=["gmail_list_messages", "gmail_get_message", "gmail_batch_get_messages"],
 )
 
-# Node 3: Confirm & Draft (client-facing)
+# Node 3: Confirm & Reply (client-facing)
 confirm_draft_node = NodeSpec(
     id="confirm-draft",
-    name="Confirm & Draft",
-    description="Present emails for confirmation, draft personalized replies",
+    name="Confirm & Reply",
+    description="Present emails for confirmation, send personalized replies",
     node_type="event_loop",
     client_facing=True,
     max_node_visits=0,
     input_keys=["email_list", "filter_criteria"],
     output_keys=["batch_complete", "restart"],
     nullable_output_keys=["batch_complete", "restart"],
-    success_criteria="User confirmed recipients and personalized drafts created for each.",
+    success_criteria="User confirmed recipients and personalized replies sent for each.",
     system_prompt="""\
-You are a Gmail reply drafter. Present emails for confirmation, then draft personalized replies.
+You are a Gmail reply assistant. Present emails for confirmation, then send personalized replies.
 
 **STEP 1 — Present for confirmation (text only, NO tool calls):**
 1. Show the email list in readable format:
    - #. Sender Name <email> - Subject (Date)
    - Snippet: first 150 chars
-2. Ask: "These are the people to reply to. Confirm? Any tone preferences or specific messages?"
+2. Ask: "These are the emails to reply to. Confirm? Any tone preferences or specific messages?"
 3. Wait for user response
 
 **STEP 2 — Handle user response:**
 
 If user CONFIRMS (says yes, go ahead, sounds good, etc.):
 For EACH email in email_list:
-1. Read the sender, subject, and snippet
+1. Read the subject and snippet
 2. Use tone_guidance from filter_criteria + any user-specified preferences
-3. Call gmail_create_draft with:
-   - to: sender email
-   - subject: "Re: " + original_subject
-   - body: personalized 2-4 sentence reply based on email context
-4. After all drafts created, call: set_output("batch_complete", True)
+3. Call gmail_reply_email with:
+   - message_id: the email's message_id
+   - html: personalized 2-4 sentence reply based on email context
+   (The tool automatically handles recipient, subject, and threading)
+4. After all replies sent, call: set_output("batch_complete", True)
 
 If user wants to CHANGE LOGIC/FILTER (says change filter, different criteria, not these emails, wrong emails, etc.):
 1. Acknowledge their request
@@ -118,7 +118,7 @@ Personalization rules:
 - If tone_guidance specifies style, follow it
 - Keep replies concise but warm
 """,
-    tools=["gmail_create_draft"],
+    tools=["gmail_reply_email"],
 )
 
 __all__ = ["intake_node", "search_node", "confirm_draft_node"]

@@ -18,7 +18,7 @@ from .nodes import intake_node, search_node, confirm_draft_node
 goal = Goal(
     id="email-reply-goal",
     name="Email Reply Agent",
-    description="Filter unreplied emails by user criteria, confirm recipients, draft personalized replies.",
+    description="Filter unreplied emails by user criteria, confirm recipients, send personalized replies.",
     success_criteria=[
         SuccessCriterion(
             id="sc-filter",
@@ -29,15 +29,15 @@ goal = Goal(
         ),
         SuccessCriterion(
             id="sc-confirm",
-            description="User confirms recipient list before drafting",
+            description="User confirms recipient list before sending",
             metric="Confirmation rate",
             target="100%",
             weight=0.25,
         ),
         SuccessCriterion(
             id="sc-personalize",
-            description="Drafts are personalized based on email content and tone guidance",
-            metric="User satisfaction with draft relevance",
+            description="Replies are personalized based on email content and tone guidance",
+            metric="User satisfaction with reply relevance",
             target="85%",
             weight=0.40,
         ),
@@ -45,7 +45,7 @@ goal = Goal(
     constraints=[
         Constraint(
             id="c-privacy",
-            description="Never auto-send emails; all replies go to drafts for user review",
+            description="Never send emails without explicit user confirmation; always present recipient list and get approval first",
             constraint_type="hard",
             category="functional",
         ),
@@ -103,7 +103,7 @@ terminal_nodes = []
 
 # Module-level vars read by AgentRunner.load()
 conversation_mode = "continuous"
-identity_prompt = "You are a helpful email reply assistant that filters unreplied emails and drafts personalized responses."
+identity_prompt = "You are a helpful email reply assistant that filters unreplied emails and sends personalized responses."
 loop_config = {
     "max_iterations": 100,
     "max_tool_calls_per_turn": 30,
