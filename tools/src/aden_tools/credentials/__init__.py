@@ -130,6 +130,8 @@ from .reddit import REDDIT_CREDENTIALS
 from .twilio import TWILIO_CREDENTIALS
 from .zendesk import ZENDESK_CREDENTIALS
 from .zoho_crm import ZOHO_CRM_CREDENTIALS
+from .terraform import TERRAFORM_CREDENTIALS
+from .lusha import LUSHA_CREDENTIALS
 
 # Merged registry of all credentials
 CREDENTIAL_SPECS = {
@@ -193,6 +195,8 @@ CREDENTIAL_SPECS = {
     **TWILIO_CREDENTIALS,
     **ZENDESK_CREDENTIALS,
     **ZOHO_CRM_CREDENTIALS,
+    **TERRAFORM_CREDENTIALS,
+    **LUSHA_CREDENTIALS,
 }
 
 __all__ = [
@@ -279,4 +283,6 @@ __all__ = [
     "TWILIO_CREDENTIALS",
     "ZENDESK_CREDENTIALS",
     "ZOHO_CRM_CREDENTIALS",
+    "TERRAFORM_CREDENTIALS",
+    "LUSHA_CREDENTIALS",
 ]

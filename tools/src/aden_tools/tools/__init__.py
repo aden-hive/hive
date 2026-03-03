@@ -117,6 +117,8 @@ from .twitter_tool import register_tools as register_twitter
 from .youtube_transcript_tool import register_tools as register_youtube_transcript
 from .zendesk_tool import register_tools as register_zendesk
 from .zoho_crm_tool import register_tools as register_zoho_crm
+from .terraform_tool import register_tools as register_terraform
+from .lusha_tool import register_tools as register_lusha
 
 # Web and PDF tools
 from .wikipedia_tool import register_tools as register_wikipedia
@@ -316,6 +318,12 @@ def register_all_tools(
 
     # Tines security automation
     register_tines(mcp, credentials=credentials)
+
+    # Terraform Cloud workspaces and runs
+    register_terraform(mcp, credentials=credentials)
+
+    # Lusha B2B contact and company data
+    register_lusha(mcp, credentials=credentials)
 
     # Return the list of all registered tool names
     return list(mcp._tool_manager._tools.keys())
