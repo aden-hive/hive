@@ -774,7 +774,13 @@ class EventLoopNode(NodeProtocol):
                 missing = self._get_missing_output_keys(
                     accumulator, ctx.node_spec.output_keys, ctx.node_spec.nullable_output_keys
                 )
-                if not missing:
+                # Only accept on empty response if the node actually has
+                # output_keys that are all satisfied.  Nodes with NO
+                # output_keys (e.g. the forever-alive queen) should never
+                # be terminated by a ghost empty stream — "missing" is
+                # trivially empty when there are no required outputs.
+                has_real_outputs = bool(ctx.node_spec.output_keys)
+                if not missing and has_real_outputs:
                     logger.info(
                         "[%s] iter=%d: empty response but all outputs set — accepting",
                         node_id,
@@ -791,7 +797,7 @@ class EventLoopNode(NodeProtocol):
                         latency_ms=latency_ms,
                         conversation=conversation if _is_continuous else None,
                     )
-                else:
+                elif missing:
                     # Ghost empty stream: LLM returned nothing and outputs
                     # are still missing.  The conversation hasn't changed, so
                     # repeating the same call will produce the same empty
@@ -839,6 +845,37 @@ class EventLoopNode(NodeProtocol):
                         "your task and call the appropriate tools to make "
                         "progress.]"
                     )
+                    continue
+                else:
+                    # No output_keys and empty response — forever-alive node
+                    # got a ghost empty stream.  Nudge like the missing-outputs
+                    # path but without failing (no outputs to demand).
+                    _consecutive_empty_turns += 1
+                    logger.warning(
+                        "[%s] iter=%d: empty response on node with no output_keys "
+                        "(consecutive=%d)",
+                        node_id,
+                        iteration,
+                        _consecutive_empty_turns,
+                    )
+                    if _consecutive_empty_turns >= self._config.stall_detection_threshold:
+                        # Persistent ghost — but since this is a forever-alive
+                        # node, block for user input instead of crashing.
+                        logger.warning(
+                            "[%s] iter=%d: %d consecutive empty responses, "
+                            "blocking for user input",
+                            node_id,
+                            iteration,
+                            _consecutive_empty_turns,
+                        )
+                        await self._await_user_input(ctx, prompt="")
+                        _consecutive_empty_turns = 0
+                    else:
+                        await conversation.add_user_message(
+                            "[System: Your response was empty. Review the "
+                            "conversation and respond to the user or take "
+                            "action with your tools.]"
+                        )
                     continue
             else:
                 _consecutive_empty_turns = 0
