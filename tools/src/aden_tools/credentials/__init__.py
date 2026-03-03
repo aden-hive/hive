@@ -64,6 +64,7 @@ from .bigquery import BIGQUERY_CREDENTIALS
 from .brevo import BREVO_CREDENTIALS
 from .browser import get_aden_auth_url, get_aden_setup_url, open_browser
 from .calcom import CALCOM_CREDENTIALS
+from .confluence import CONFLUENCE_CREDENTIALS
 from .databricks import DATABRICKS_CREDENTIALS
 from .discord import DISCORD_CREDENTIALS
 from .docker_hub import DOCKER_HUB_CREDENTIALS
@@ -110,6 +111,7 @@ from .vercel import VERCEL_CREDENTIALS
 from .youtube import YOUTUBE_CREDENTIALS
 from .pinecone import PINECONE_CREDENTIALS
 from .plaid import PLAID_CREDENTIALS
+from .trello import TRELLO_CREDENTIALS
 from .zoho_crm import ZOHO_CRM_CREDENTIALS
 
 # Merged registry of all credentials
@@ -154,6 +156,8 @@ CREDENTIAL_SPECS = {
     **YOUTUBE_CREDENTIALS,
     **PINECONE_CREDENTIALS,
     **PLAID_CREDENTIALS,
+    **TRELLO_CREDENTIALS,
+    **CONFLUENCE_CREDENTIALS,
     **ZOHO_CRM_CREDENTIALS,
 }
 
@@ -221,5 +225,7 @@ __all__ = [
     "YOUTUBE_CREDENTIALS",
     "PINECONE_CREDENTIALS",
     "PLAID_CREDENTIALS",
+    "TRELLO_CREDENTIALS",
+    "CONFLUENCE_CREDENTIALS",
     "ZOHO_CRM_CREDENTIALS",
 ]

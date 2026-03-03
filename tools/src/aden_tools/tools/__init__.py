@@ -30,6 +30,7 @@ from .attio_tool import register_tools as register_attio
 from .bigquery_tool import register_tools as register_bigquery
 from .brevo_tool import register_tools as register_brevo
 from .calcom_tool import register_tools as register_calcom
+from .confluence_tool import register_tools as register_confluence
 from .calendar_tool import register_tools as register_calendar
 from .csv_tool import register_tools as register_csv
 from .databricks_tool import register_tools as register_databricks
@@ -96,6 +97,7 @@ from .web_search_tool import register_tools as register_web_search
 from .yahoo_finance_tool import register_tools as register_yahoo_finance
 from .pinecone_tool import register_tools as register_pinecone
 from .plaid_tool import register_tools as register_plaid
+from .trello_tool import register_tools as register_trello
 from .zoho_crm_tool import register_tools as register_zoho_crm
 
 # Web and PDF tools
@@ -236,6 +238,12 @@ def register_all_tools(
 
     # HuggingFace Hub (models, datasets, spaces)
     register_huggingface(mcp, credentials=credentials)
+
+    # Trello board & card management
+    register_trello(mcp, credentials=credentials)
+
+    # Confluence wiki & knowledge management
+    register_confluence(mcp, credentials=credentials)
 
     # Return the list of all registered tool names
     return list(mcp._tool_manager._tools.keys())
