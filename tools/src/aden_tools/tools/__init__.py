@@ -23,6 +23,7 @@ if TYPE_CHECKING:
 # Import register_tools from each tool module
 from .account_info_tool import register_tools as register_account_info
 from .apify_tool import register_tools as register_apify
+from .aws_s3_tool import register_tools as register_aws_s3
 from .asana_tool import register_tools as register_asana
 from .apollo_tool import register_tools as register_apollo
 from .arxiv_tool import register_tools as register_arxiv
@@ -108,6 +109,7 @@ from .jira_tool import register_tools as register_jira
 from .mongodb_tool import register_tools as register_mongodb
 from .notion_tool import register_tools as register_notion
 from .pagerduty_tool import register_tools as register_pagerduty
+from .quickbooks_tool import register_tools as register_quickbooks
 from .reddit_tool import register_tools as register_reddit
 from .twilio_tool import register_tools as register_twilio
 from .youtube_transcript_tool import register_tools as register_youtube_transcript
@@ -300,6 +302,12 @@ def register_all_tools(
 
     # Calendly scheduling events
     register_calendly(mcp, credentials=credentials)
+
+    # AWS S3 object storage
+    register_aws_s3(mcp, credentials=credentials)
+
+    # QuickBooks Online accounting
+    register_quickbooks(mcp, credentials=credentials)
 
     # Return the list of all registered tool names
     return list(mcp._tool_manager._tools.keys())
