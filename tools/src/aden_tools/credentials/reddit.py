@@ -1,55 +1,73 @@
 """
-Reddit credentials.
+Reddit tool credentials.
 
-Contains credentials for Reddit community content monitoring and search.
-Requires REDDIT_CLIENT_ID and REDDIT_CLIENT_SECRET.
+Contains credentials for Reddit API integration using OAuth 2.0.
 """
 
 from .base import CredentialSpec
 
 REDDIT_CREDENTIALS = {
-    "reddit_client_id": CredentialSpec(
-        env_var="REDDIT_CLIENT_ID",
+    "reddit": CredentialSpec(
+        env_var="REDDIT_CREDENTIALS",
         tools=[
-            "reddit_search",
-            "reddit_get_posts",
+            # Search & Monitoring
+            "reddit_search_posts",
+            "reddit_get_subreddit_new",
+            "reddit_get_subreddit_hot",
+            "reddit_get_post",
             "reddit_get_comments",
-            "reddit_get_user",
+            # Content Creation
+            "reddit_submit_post",
+            "reddit_reply_to_post",
+            "reddit_reply_to_comment",
+            "reddit_edit_comment",
+            "reddit_delete_comment",
+            # User Engagement
+            "reddit_get_user_profile",
+            "reddit_upvote",
+            "reddit_downvote",
+            "reddit_save_post",
+            # Moderation
+            "reddit_remove_post",
+            "reddit_approve_post",
+            "reddit_ban_user",
         ],
         required=True,
         startup_required=False,
         help_url="https://www.reddit.com/prefs/apps",
-        description="Reddit app client ID for OAuth2 authentication",
+        description="Reddit API credentials (JSON object with OAuth 2.0 tokens)",
+        # Auth method support
+        aden_supported=False,  # Future OAuth support
+        aden_provider_name="reddit",
         direct_api_key_supported=True,
-        api_key_instructions="""To set up Reddit API access:
+        api_key_instructions="""To get Reddit API credentials:
 1. Go to https://www.reddit.com/prefs/apps
-2. Click 'create another app...' at the bottom
-3. Select 'script' as the app type
-4. Fill in the name and redirect URI (http://localhost)
-5. Copy the client ID (under the app name) and secret
-6. Set environment variables:
-   export REDDIT_CLIENT_ID=your-client-id
-   export REDDIT_CLIENT_SECRET=your-client-secret""",
-        health_check_endpoint="",
-        credential_id="reddit_client_id",
-        credential_key="api_key",
-    ),
-    "reddit_secret": CredentialSpec(
-        env_var="REDDIT_CLIENT_SECRET",
-        tools=[
-            "reddit_search",
-            "reddit_get_posts",
-            "reddit_get_comments",
-            "reddit_get_user",
-        ],
-        required=True,
-        startup_required=False,
-        help_url="https://www.reddit.com/prefs/apps",
-        description="Reddit app client secret for OAuth2 authentication",
-        direct_api_key_supported=True,
-        api_key_instructions="""See REDDIT_CLIENT_ID instructions above.""",
-        health_check_endpoint="",
-        credential_id="reddit_secret",
-        credential_key="api_key",
+2. Click "create another app..." at the bottom
+3. Fill in the details:
+   - Name: Your app name
+   - App type: Select "script" for personal use or "web app" for production
+   - Description: Brief description of your app
+   - About URL: Optional URL
+   - Redirect URI: http://localhost:8080 (for script type)
+4. Click "create app"
+5. Note your credentials:
+   - client_id: The string under "personal use script"
+   - client_secret: The "secret" value
+6. Generate a refresh token:
+   - For script apps: Use your Reddit username and password
+   - For web apps: Implement OAuth2 flow
+7. Set the environment variable as JSON:
+   export REDDIT_CREDENTIALS='{"client_id":"YOUR_CLIENT_ID",\
+"client_secret":"YOUR_SECRET","refresh_token":"YOUR_REFRESH_TOKEN",\
+"user_agent":"YOUR_APP_NAME/1.0"}'
+
+Required scopes: read, submit, vote, identity
+Optional scopes (for moderation): modposts""",
+        # Health check configuration
+        health_check_endpoint="https://oauth.reddit.com/api/v1/me",
+        health_check_method="GET",
+        # Credential store mapping
+        credential_id="reddit",
+        credential_key="credentials",  # JSON object with all fields
     ),
 }
