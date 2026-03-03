@@ -78,6 +78,7 @@ from .time_tool import register_tools as register_time
 from .vision_tool import register_tools as register_vision
 from .web_scrape_tool import register_tools as register_web_scrape
 from .microsoft_graph_tool import register_tools as register_microsoft_graph
+from .supabase_tool import register_tools as register_supabase
 from .web_search_tool import register_tools as register_web_search
 
 # Web and PDF tools
@@ -165,6 +166,9 @@ def register_all_tools(
 
     # Microsoft Graph (Outlook, Teams, OneDrive)
     register_microsoft_graph(mcp, credentials=credentials)
+
+    # Supabase (DB, Auth, Edge Functions)
+    register_supabase(mcp, credentials=credentials)
 
     # YouTube Data API
     register_youtube(mcp, credentials=credentials)
