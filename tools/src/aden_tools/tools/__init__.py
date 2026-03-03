@@ -99,6 +99,8 @@ from .pinecone_tool import register_tools as register_pinecone
 from .plaid_tool import register_tools as register_plaid
 from .trello_tool import register_tools as register_trello
 from .cloudinary_tool import register_tools as register_cloudinary
+from .gitlab_tool import register_tools as register_gitlab
+from .google_sheets_tool import register_tools as register_google_sheets
 from .greenhouse_tool import register_tools as register_greenhouse
 from .jira_tool import register_tools as register_jira
 from .notion_tool import register_tools as register_notion
@@ -268,6 +270,12 @@ def register_all_tools(
 
     # Jira issue tracking and project management
     register_jira(mcp, credentials=credentials)
+
+    # GitLab projects, issues, and merge requests
+    register_gitlab(mcp, credentials=credentials)
+
+    # Google Sheets spreadsheet data
+    register_google_sheets(mcp, credentials=credentials)
 
     # Return the list of all registered tool names
     return list(mcp._tool_manager._tools.keys())
