@@ -12,10 +12,19 @@ import io
 import base64
 from typing import Optional, Dict, Any, Union
 
-import boto3
-from botocore.exceptions import ClientError
-from botocore.config import Config
 from fastmcp import FastMCP
+
+try:
+    import boto3
+    from botocore.exceptions import ClientError
+    from botocore.config import Config
+
+    BOTO3_AVAILABLE = True
+except ImportError:
+    boto3 = None  # type: ignore[assignment]
+    ClientError = Exception  # type: ignore[misc,assignment]
+    Config = None  # type: ignore[misc,assignment]
+    BOTO3_AVAILABLE = False
 
 # Optional import for credential store
 try:

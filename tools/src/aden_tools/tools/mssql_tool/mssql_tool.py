@@ -15,8 +15,15 @@ from __future__ import annotations
 import os
 from typing import TYPE_CHECKING, Any
 
-import pyodbc
 from fastmcp import FastMCP
+
+try:
+    import pyodbc
+
+    PYODBC_AVAILABLE = True
+except ImportError:
+    pyodbc = None  # type: ignore[assignment]
+    PYODBC_AVAILABLE = False
 
 if TYPE_CHECKING:
     from aden_tools.credentials import CredentialStoreAdapter
