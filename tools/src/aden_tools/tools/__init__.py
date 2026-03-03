@@ -100,6 +100,8 @@ from .plaid_tool import register_tools as register_plaid
 from .trello_tool import register_tools as register_trello
 from .cloudinary_tool import register_tools as register_cloudinary
 from .greenhouse_tool import register_tools as register_greenhouse
+from .jira_tool import register_tools as register_jira
+from .notion_tool import register_tools as register_notion
 from .reddit_tool import register_tools as register_reddit
 from .youtube_transcript_tool import register_tools as register_youtube_transcript
 from .zoho_crm_tool import register_tools as register_zoho_crm
@@ -260,6 +262,12 @@ def register_all_tools(
 
     # YouTube Transcript (no credentials needed)
     register_youtube_transcript(mcp)
+
+    # Notion pages, databases, and search
+    register_notion(mcp, credentials=credentials)
+
+    # Jira issue tracking and project management
+    register_jira(mcp, credentials=credentials)
 
     # Return the list of all registered tool names
     return list(mcp._tool_manager._tools.keys())
