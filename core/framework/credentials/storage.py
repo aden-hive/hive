@@ -519,7 +519,7 @@ class EnvVarStorage(CredentialStorage):
     def exists(self, credential_id: str) -> bool:
         """Check if credential is available in environment."""
         env_var = self._get_env_var_name(credential_id)
-        return self._read_env_value(env_var) is not None
+        return bool(self._read_env_value(env_var))
 
     def add_mapping(self, credential_id: str, env_var: str) -> None:
         """
