@@ -715,15 +715,24 @@ class EventBus:
         node_id: str,
         prompt: str = "",
         execution_id: str | None = None,
+        options: list[str] | None = None,
     ) -> None:
-        """Emit client input requested event (client_facing=True nodes)."""
+        """Emit client input requested event (client_facing=True nodes).
+
+        Args:
+            options: Optional predefined choices for the user (1-3 items).
+                     The frontend appends an "Other" free-text option automatically.
+        """
+        data: dict[str, Any] = {"prompt": prompt}
+        if options:
+            data["options"] = options
         await self.publish(
             AgentEvent(
                 type=EventType.CLIENT_INPUT_REQUESTED,
                 stream_id=stream_id,
                 node_id=node_id,
                 execution_id=execution_id,
-                data={"prompt": prompt},
+                data=data,
             )
         )
 

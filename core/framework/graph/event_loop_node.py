@@ -468,8 +468,7 @@ class EventLoopNode(NodeProtocol):
         if set_output_tool:
             tools.append(set_output_tool)
         if ctx.node_spec.client_facing and not ctx.event_triggered:
-            if stream_id != "queen":
-                tools.append(self._build_ask_user_tool())
+            tools.append(self._build_ask_user_tool())
 
         # Add delegate_to_sub_agent tool if:
         # - Node has sub_agents defined
@@ -1420,7 +1419,8 @@ class EventLoopNode(NodeProtocol):
                 human user (e.g. /chat endpoint), False for external events.
         """
         await self._injection_queue.put((content, is_client_input))
-        self._input_ready.set()
+        if is_client_input:
+            self._input_ready.set()
 
     def signal_shutdown(self) -> None:
         """Signal the node to exit its loop cleanly.
@@ -1756,6 +1756,56 @@ class EventLoopNode(NodeProtocol):
                     # --- Framework-level ask_user handling ---
                     user_input_requested = True
                     ask_user_prompt = tc.tool_input.get("question", "")
+                    raw_options = tc.tool_input.get("options", None)
+                    # Defensive: ensure options is a list of strings.
+                    # Smaller models sometimes send a string instead of
+                    # an array — try to recover gracefully.
+                    ask_user_options: list[str] | None = None
+                    if isinstance(raw_options, list):
+                        ask_user_options = [str(o) for o in raw_options if o]
+                    elif isinstance(raw_options, str) and raw_options.strip():
+                        # Try JSON parse first (e.g. '["a","b"]')
+                        try:
+                            parsed = json.loads(raw_options)
+                            if isinstance(parsed, list):
+                                ask_user_options = [str(o) for o in parsed if o]
+                        except (json.JSONDecodeError, TypeError):
+                            pass
+                    if ask_user_options is not None and len(ask_user_options) < 2:
+                        ask_user_options = None  # fall back to free-text input
+
+                    # Workers MUST provide at least 2 options — no free-text
+                    # questions allowed.  Only the queen may omit options.
+                    if ask_user_options is None and stream_id != "queen":
+                        result = ToolResult(
+                            tool_use_id=tc.tool_use_id,
+                            content=(
+                                "ERROR: options are required. Provide at least "
+                                "2 predefined choices in the 'options' array. "
+                                'Example: {"question": "...", "options": '
+                                '["Yes", "No"]}'
+                            ),
+                            is_error=True,
+                        )
+                        results_by_id[tc.tool_use_id] = result
+                        user_input_requested = False
+                        continue
+
+                    # Free-form ask_user (no options): stream the question
+                    # text as a chat message so the user can see it.  When
+                    # options are present the QuestionWidget shows the
+                    # question, but without options nothing renders it.
+                    if ask_user_options is None and ask_user_prompt and ctx.node_spec.client_facing:
+                        await self._publish_text_delta(
+                            stream_id,
+                            node_id,
+                            content=ask_user_prompt,
+                            snapshot=ask_user_prompt,
+                            ctx=ctx,
+                            execution_id=execution_id,
+                            iteration=iteration,
+                        )
+
                     # Emit immediately so the frontend transitions to
                     # "awaiting input" without waiting for post-turn
                     # processing (compaction, stall check, cursor write).
@@ -1765,6 +1815,7 @@ class EventLoopNode(NodeProtocol):
                             node_id=node_id,
                             prompt=ask_user_prompt,
                             execution_id=execution_id,
+                            options=ask_user_options,
                         )
                     result = ToolResult(
                         tool_use_id=tc.tool_use_id,
@@ -2100,20 +2151,48 @@ class EventLoopNode(NodeProtocol):
         return Tool(
             name="ask_user",
             description=(
-                "Call this tool when you need to wait for the user's response. "
-                "Use it after greeting the user, asking a question, or requesting "
-                "approval. Do NOT call it when you are just providing a status "
-                "update or summary that doesn't require a response."
+                "You MUST call this tool whenever you need the user's response. "
+                "Always call it after greeting the user, asking a question, or "
+                "requesting approval. Do NOT call it for status updates or "
+                "summaries that don't require a response. "
+                "Always include 2-3 predefined options. The UI automatically "
+                "appends an 'Other' free-text input after your options, so NEVER "
+                "include catch-all options like 'Custom idea', 'Something else', "
+                "'Other', or 'None of the above' — the UI handles that. "
+                "When the question primarily needs a typed answer but you must "
+                "include options, make one option signal that typing is expected "
+                "(e.g. 'I\\'ll type my response'). This helps users discover the "
+                "free-text input. "
+                "The ONLY exception: omit options when the question demands a "
+                "free-form answer the user must type out (e.g. 'Describe your "
+                "agent idea', 'Paste the error message'). "
+                'Example: {"question": "What would you like to do?", "options": '
+                '["Build a new agent", "Modify existing agent", "Run tests"]} '
+                "Free-form example: "
+                '{"question": "Describe the agent you want to build."}'
             ),
             parameters={
                 "type": "object",
                 "properties": {
                     "question": {
                         "type": "string",
-                        "description": "Optional: the question or prompt shown to the user.",
+                        "description": "The question or prompt shown to the user.",
+                    },
+                    "options": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": (
+                            "2-3 specific predefined choices. Include in most cases. "
+                            'Example: ["Option A", "Option B", "Option C"]. '
+                            "The UI always appends an 'Other' free-text input, so "
+                            "do NOT include catch-alls like 'Custom idea' or 'Other'. "
+                            "Omit ONLY when the user must type a free-form answer."
+                        ),
+                        "minItems": 2,
+                        "maxItems": 3,
                     },
                 },
-                "required": [],
+                "required": ["question"],
             },
         )
 
