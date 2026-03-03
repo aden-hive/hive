@@ -66,6 +66,7 @@ from .google_docs_tool import register_tools as register_google_docs
 from .google_maps_tool import register_tools as register_google_maps
 from .google_search_console_tool import register_tools as register_google_search_console
 from .http_headers_scanner import register_tools as register_http_headers_scanner
+from .huggingface_tool import register_tools as register_huggingface
 from .hubspot_tool import register_tools as register_hubspot
 from .linear_tool import register_tools as register_linear
 from .intercom_tool import register_tools as register_intercom
@@ -232,6 +233,9 @@ def register_all_tools(
 
     # Plaid banking & financial data
     register_plaid(mcp, credentials=credentials)
+
+    # HuggingFace Hub (models, datasets, spaces)
+    register_huggingface(mcp, credentials=credentials)
 
     # Return the list of all registered tool names
     return list(mcp._tool_manager._tools.keys())
