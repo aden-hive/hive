@@ -107,17 +107,38 @@ _TC_ARG_LIMIT = 200  # max chars per tool_call argument after compaction
 def _compact_tool_calls(tool_calls: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Truncate tool_call arguments to save context tokens during compaction.
 
-    Preserves ``id``, ``type``, and ``function.name`` exactly.  Truncates
-    ``function.arguments`` (a JSON string) to at most ``_TC_ARG_LIMIT`` chars
-    so that large payloads (e.g. set_output with full findings) don't survive
-    compaction and defeat the purpose of context reduction.
+    Preserves ``id``, ``type``, and ``function.name`` exactly.  When arguments
+    exceed ``_TC_ARG_LIMIT``, replaces the full JSON string with a compact
+    **valid** JSON summary.  The Anthropic API parses tool_call arguments and
+    rejects requests with malformed JSON (e.g. unterminated strings), so we
+    must never produce broken JSON here.
     """
     compact = []
     for tc in tool_calls:
         func = tc.get("function", {})
         args = func.get("arguments", "")
         if len(args) > _TC_ARG_LIMIT:
-            args = args[:_TC_ARG_LIMIT] + "…[truncated]"
+            # Build a valid JSON summary instead of slicing mid-string.
+            # Try to extract top-level keys for a meaningful preview.
+            try:
+                parsed = json.loads(args)
+                if isinstance(parsed, dict):
+                    # Preserve key names, truncate values
+                    summary_parts = []
+                    for k, v in parsed.items():
+                        v_str = str(v)
+                        if len(v_str) > 60:
+                            v_str = v_str[:60] + "..."
+                        summary_parts.append(f"{k}={v_str}")
+                    summary = ", ".join(summary_parts)
+                    if len(summary) > _TC_ARG_LIMIT:
+                        summary = summary[:_TC_ARG_LIMIT] + "..."
+                    args = json.dumps({"_compacted": summary})
+                else:
+                    args = json.dumps({"_compacted": str(parsed)[:_TC_ARG_LIMIT]})
+            except (json.JSONDecodeError, TypeError):
+                # Args were already invalid JSON — wrap the preview safely
+                args = json.dumps({"_compacted": args[:_TC_ARG_LIMIT]})
         compact.append(
             {
                 "id": tc.get("id", ""),

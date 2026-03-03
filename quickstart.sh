@@ -286,6 +286,9 @@ if [ "$NODE_AVAILABLE" = true ]; then
         fi
 
         if [ "$NODE_AVAILABLE" = true ]; then
+            # Clean stale tsbuildinfo cache — tsc -b incremental builds fail
+            # silently when these are out of sync with source files
+            rm -f "$FRONTEND_DIR"/tsconfig*.tsbuildinfo
             echo -n "  Building frontend... "
             if (cd "$FRONTEND_DIR" && npm run build) > /dev/null 2>&1; then
                 echo -e "${GREEN}ok${NC}"
@@ -424,7 +427,7 @@ if [ "$USE_ASSOC_ARRAYS" = true ]; then
         ["openai:0"]="gpt-5.2"
         ["openai:1"]="gpt-5-mini"
         ["gemini:0"]="gemini-3-flash-preview"
-        ["gemini:1"]="gemini-3-pro-preview"
+        ["gemini:1"]="gemini-3.1-pro-preview"
         ["groq:0"]="moonshotai/kimi-k2-instruct-0905"
         ["groq:1"]="openai/gpt-oss-120b"
         ["cerebras:0"]="zai-glm-4.7"
@@ -439,7 +442,7 @@ if [ "$USE_ASSOC_ARRAYS" = true ]; then
         ["openai:0"]="GPT-5.2 - Most capable (recommended)"
         ["openai:1"]="GPT-5 Mini - Fast + cheap"
         ["gemini:0"]="Gemini 3 Flash - Fast (recommended)"
-        ["gemini:1"]="Gemini 3 Pro - Best quality"
+        ["gemini:1"]="Gemini 3.1 Pro - Best quality"
         ["groq:0"]="Kimi K2 - Best quality (recommended)"
         ["groq:1"]="GPT-OSS 120B - Fast reasoning"
         ["cerebras:0"]="ZAI-GLM 4.7 - Best quality (recommended)"
@@ -549,8 +552,8 @@ else
     # Model choices per provider - flat parallel arrays with provider offsets
     # Provider order: anthropic(4), openai(2), gemini(2), groq(2), cerebras(2)
     MC_PROVIDERS=(anthropic anthropic anthropic anthropic openai openai gemini gemini groq groq cerebras cerebras)
-    MC_IDS=("claude-opus-4-6" "claude-sonnet-4-5-20250929" "claude-sonnet-4-20250514" "claude-haiku-4-5-20251001" "gpt-5.2" "gpt-5-mini" "gemini-3-flash-preview" "gemini-3-pro-preview" "moonshotai/kimi-k2-instruct-0905" "openai/gpt-oss-120b" "zai-glm-4.7" "qwen3-235b-a22b-instruct-2507")
-    MC_LABELS=("Opus 4.6 - Most capable (recommended)" "Sonnet 4.5 - Best balance" "Sonnet 4 - Fast + capable" "Haiku 4.5 - Fast + cheap" "GPT-5.2 - Most capable (recommended)" "GPT-5 Mini - Fast + cheap" "Gemini 3 Flash - Fast (recommended)" "Gemini 3 Pro - Best quality" "Kimi K2 - Best quality (recommended)" "GPT-OSS 120B - Fast reasoning" "ZAI-GLM 4.7 - Best quality (recommended)" "Qwen3 235B - Frontier reasoning")
+    MC_IDS=("claude-opus-4-6" "claude-sonnet-4-5-20250929" "claude-sonnet-4-20250514" "claude-haiku-4-5-20251001" "gpt-5.2" "gpt-5-mini" "gemini-3-flash-preview" "gemini-3.1-pro-preview" "moonshotai/kimi-k2-instruct-0905" "openai/gpt-oss-120b" "zai-glm-4.7" "qwen3-235b-a22b-instruct-2507")
+    MC_LABELS=("Opus 4.6 - Most capable (recommended)" "Sonnet 4.5 - Best balance" "Sonnet 4 - Fast + capable" "Haiku 4.5 - Fast + cheap" "GPT-5.2 - Most capable (recommended)" "GPT-5 Mini - Fast + cheap" "Gemini 3 Flash - Fast (recommended)" "Gemini 3.1 Pro - Best quality" "Kimi K2 - Best quality (recommended)" "GPT-OSS 120B - Fast reasoning" "ZAI-GLM 4.7 - Best quality (recommended)" "Qwen3 235B - Frontier reasoning")
     MC_MAXTOKENS=(32768 16384 8192 8192 16384 16384 8192 8192 8192 8192 8192 8192)
 
     # Helper: get number of model choices for a provider
@@ -1029,6 +1032,64 @@ if [ -n "$SELECTED_PROVIDER_ID" ]; then
     fi
     echo -e "${GREEN}⬢${NC}"
     echo -e "  ${DIM}~/.hive/configuration.json${NC}"
+fi
+
+echo ""
+
+# ============================================================
+# Step 4b: Browser Automation (GCU)
+# ============================================================
+
+echo -e "${BOLD}Enable browser automation?${NC}"
+echo -e "${DIM}This lets your agents control a real browser — navigate websites, fill forms,${NC}"
+echo -e "${DIM}scrape dynamic pages, and interact with web UIs.${NC}"
+echo ""
+echo -e "  ${CYAN}${BOLD}1)${NC} ${BOLD}Yes${NC}"
+echo -e "  ${CYAN}2)${NC} No"
+echo ""
+
+while true; do
+    read -r -p "Enter choice (1-2, default 1): " gcu_choice || true
+    gcu_choice="${gcu_choice:-1}"
+    if [ "$gcu_choice" = "1" ] || [ "$gcu_choice" = "2" ]; then
+        break
+    fi
+    echo -e "${RED}Invalid choice. Please enter 1 or 2${NC}"
+done
+
+if [ "$gcu_choice" = "1" ]; then
+    GCU_ENABLED=true
+    echo -e "${GREEN}⬢${NC} Browser automation enabled"
+else
+    GCU_ENABLED=false
+    echo -e "${DIM}⬡ Browser automation skipped${NC}"
+fi
+
+# Patch gcu_enabled into configuration.json
+if [ "$GCU_ENABLED" = "true" ]; then
+    GCU_PY_VAL="True"
+else
+    GCU_PY_VAL="False"
+fi
+
+if [ -f "$HIVE_CONFIG_FILE" ]; then
+    uv run python -c "
+import json
+with open('$HIVE_CONFIG_FILE') as f:
+    config = json.load(f)
+config['gcu_enabled'] = $GCU_PY_VAL
+with open('$HIVE_CONFIG_FILE', 'w') as f:
+    json.dump(config, f, indent=2)
+"
+elif [ "$GCU_ENABLED" = "true" ]; then
+    # No config file yet (user skipped LLM provider) — create minimal one
+    mkdir -p "$HIVE_CONFIG_DIR"
+    uv run python -c "
+import json
+config = {'gcu_enabled': True, 'created_at': '$(date -u +"%Y-%m-%dT%H:%M:%S+00:00")'}
+with open('$HIVE_CONFIG_FILE', 'w') as f:
+    json.dump(config, f, indent=2)
+"
 fi
 
 echo ""

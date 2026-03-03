@@ -90,6 +90,11 @@ def get_api_key() -> str | None:
     return None
 
 
+def get_gcu_enabled() -> bool:
+    """Return whether GCU (browser automation) is enabled in user config."""
+    return get_hive_config().get("gcu_enabled", False)
+
+
 def get_api_base() -> str | None:
     """Return the api_base URL for OpenAI-compatible endpoints, if configured."""
     llm = get_hive_config().get("llm", {})

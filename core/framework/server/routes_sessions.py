@@ -30,7 +30,12 @@ from pathlib import Path
 
 from aiohttp import web
 
-from framework.server.app import resolve_session, safe_path_segment, sessions_dir
+from framework.server.app import (
+    resolve_session,
+    safe_path_segment,
+    sessions_dir,
+    validate_agent_path,
+)
 from framework.server.session_manager import SessionManager
 
 logger = logging.getLogger(__name__)
@@ -118,6 +123,12 @@ async def handle_create_session(request: web.Request) -> web.Response:
     model = body.get("model")
     initial_prompt = body.get("initial_prompt")
 
+    if agent_path:
+        try:
+            agent_path = str(validate_agent_path(agent_path))
+        except ValueError as e:
+            return web.json_response({"error": str(e)}, status=400)
+
     try:
         if agent_path:
             # One-step: create session + load worker
@@ -143,14 +154,17 @@ async def handle_create_session(request: web.Request) -> web.Response:
                 status=409,
             )
         return web.json_response({"error": msg}, status=409)
-    except FileNotFoundError as e:
-        return web.json_response({"error": str(e)}, status=404)
+    except FileNotFoundError:
+        return web.json_response(
+            {"error": f"Agent not found: {agent_path or 'no path'}"},
+            status=404,
+        )
     except Exception as e:
         resp = _credential_error_response(e, agent_path)
         if resp is not None:
             return resp
         logger.exception("Error creating session: %s", e)
-        return web.json_response({"error": str(e)}, status=500)
+        return web.json_response({"error": "Internal server error"}, status=500)
 
     return web.json_response(_session_to_live_dict(session), status=201)
 
@@ -182,6 +196,7 @@ async def handle_get_live_session(request: web.Request) -> web.Response:
     data = _session_to_live_dict(session)
 
     if session.worker_runtime:
+        rt = session.worker_runtime
         data["entry_points"] = [
             {
                 "id": ep.id,
@@ -189,8 +204,13 @@ async def handle_get_live_session(request: web.Request) -> web.Response:
                 "entry_node": ep.entry_node,
                 "trigger_type": ep.trigger_type,
                 "trigger_config": ep.trigger_config,
+                **(
+                    {"next_fire_in": nf}
+                    if (nf := rt.get_timer_next_fire_in(ep.id)) is not None
+                    else {}
+                ),
             }
-            for ep in session.worker_runtime.get_entry_points()
+            for ep in rt.get_entry_points()
         ]
         data["graphs"] = session.worker_runtime.list_graphs()
 
@@ -230,6 +250,11 @@ async def handle_load_worker(request: web.Request) -> web.Response:
     if not agent_path:
         return web.json_response({"error": "agent_path is required"}, status=400)
 
+    try:
+        agent_path = str(validate_agent_path(agent_path))
+    except ValueError as e:
+        return web.json_response({"error": str(e)}, status=400)
+
     worker_id = body.get("worker_id")
     model = body.get("model")
 
@@ -242,14 +267,14 @@ async def handle_load_worker(request: web.Request) -> web.Response:
         )
     except ValueError as e:
         return web.json_response({"error": str(e)}, status=409)
-    except FileNotFoundError as e:
-        return web.json_response({"error": str(e)}, status=404)
+    except FileNotFoundError:
+        return web.json_response({"error": f"Agent not found: {agent_path}"}, status=404)
     except Exception as e:
         resp = _credential_error_response(e, agent_path)
         if resp is not None:
             return resp
         logger.exception("Error loading worker: %s", e)
-        return web.json_response({"error": str(e)}, status=500)
+        return web.json_response({"error": "Internal server error"}, status=500)
 
     return web.json_response(_session_to_live_dict(session))
 
@@ -308,7 +333,8 @@ async def handle_session_entry_points(request: web.Request) -> web.Response:
             status=404,
         )
 
-    eps = session.worker_runtime.get_entry_points() if session.worker_runtime else []
+    rt = session.worker_runtime
+    eps = rt.get_entry_points() if rt else []
     return web.json_response(
         {
             "entry_points": [
@@ -318,6 +344,11 @@ async def handle_session_entry_points(request: web.Request) -> web.Response:
                     "entry_node": ep.entry_node,
                     "trigger_type": ep.trigger_type,
                     "trigger_config": ep.trigger_config,
+                    **(
+                        {"next_fire_in": nf}
+                        if rt and (nf := rt.get_timer_next_fire_in(ep.id)) is not None
+                        else {}
+                    ),
                 }
                 for ep in eps
             ]
@@ -548,11 +579,12 @@ async def handle_messages(request: web.Request) -> web.Response:
             try:
                 part = json.loads(part_file.read_text(encoding="utf-8"))
                 part["_node_id"] = node_dir.name
+                part.setdefault("created_at", part_file.stat().st_mtime)
                 all_messages.append(part)
             except (json.JSONDecodeError, OSError):
                 continue
 
-    all_messages.sort(key=lambda m: m.get("seq", 0))
+    all_messages.sort(key=lambda m: m.get("created_at", m.get("seq", 0)))
 
     client_only = request.query.get("client_only", "").lower() in ("true", "1")
     if client_only:
@@ -602,11 +634,14 @@ async def handle_queen_messages(request: web.Request) -> web.Response:
             try:
                 part = json.loads(part_file.read_text(encoding="utf-8"))
                 part["_node_id"] = node_dir.name
+                # Use file mtime as created_at so frontend can order
+                # queen and worker messages chronologically.
+                part.setdefault("created_at", part_file.stat().st_mtime)
                 all_messages.append(part)
             except (json.JSONDecodeError, OSError):
                 continue
 
-    all_messages.sort(key=lambda m: m.get("seq", 0))
+    all_messages.sort(key=lambda m: m.get("created_at", m.get("seq", 0)))
 
     # Filter to client-facing messages only
     all_messages = [
