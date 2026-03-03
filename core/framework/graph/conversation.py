@@ -152,6 +152,74 @@ def _compact_tool_calls(tool_calls: list[dict[str, Any]]) -> list[dict[str, Any]
     return compact
 
 
+def extract_tool_call_history(messages: list[Message], max_entries: int = 30) -> str:
+    """Build a compact tool call history from a list of messages.
+
+    Used in compaction summaries to prevent the LLM from re-calling
+    tools it already called.  Extracts tool call details, files saved,
+    outputs set, and errors encountered.
+    """
+    tool_calls_detail: dict[str, list[str]] = {}
+    files_saved: list[str] = []
+    outputs_set: list[str] = []
+    errors: list[str] = []
+
+    def _summarize_input(name: str, args: dict) -> str:
+        if name == "web_search":
+            return args.get("query", "")
+        if name == "web_scrape":
+            return args.get("url", "")
+        if name in ("load_data", "save_data"):
+            return args.get("filename", "")
+        return ""
+
+    for msg in messages:
+        if msg.role == "assistant" and msg.tool_calls:
+            for tc in msg.tool_calls:
+                func = tc.get("function", {})
+                name = func.get("name", "unknown")
+                try:
+                    args = json.loads(func.get("arguments", "{}"))
+                except (json.JSONDecodeError, TypeError):
+                    args = {}
+
+                summary = _summarize_input(name, args)
+                tool_calls_detail.setdefault(name, []).append(summary)
+
+                if name == "save_data" and args.get("filename"):
+                    files_saved.append(args["filename"])
+                if name == "set_output" and args.get("key"):
+                    outputs_set.append(args["key"])
+
+        if msg.role == "tool" and msg.is_error:
+            preview = msg.content[:120].replace("\n", " ")
+            errors.append(preview)
+
+    parts: list[str] = []
+    if tool_calls_detail:
+        lines: list[str] = []
+        for name, inputs in list(tool_calls_detail.items())[:max_entries]:
+            count = len(inputs)
+            non_empty = [s for s in inputs if s]
+            if non_empty:
+                detail_lines = [f"    - {s[:120]}" for s in non_empty[:8]]
+                lines.append(f"  {name} ({count}x):\n" + "\n".join(detail_lines))
+            else:
+                lines.append(f"  {name} ({count}x)")
+        parts.append("TOOLS ALREADY CALLED:\n" + "\n".join(lines))
+    if files_saved:
+        unique = list(dict.fromkeys(files_saved))
+        parts.append("FILES SAVED: " + ", ".join(unique))
+    if outputs_set:
+        unique = list(dict.fromkeys(outputs_set))
+        parts.append("OUTPUTS SET: " + ", ".join(unique))
+    if errors:
+        parts.append(
+            "ERRORS (do NOT retry these):\n" + "\n".join(f"  - {e}" for e in errors[:10])
+        )
+    return "\n\n".join(parts)
+
+
 # ---------------------------------------------------------------------------
 # ConversationStore protocol (Phase 2)
 # ---------------------------------------------------------------------------
@@ -653,6 +721,7 @@ class NodeConversation:
         spillover_dir: str,
         keep_recent: int = 4,
         phase_graduated: bool = False,
+        aggressive: bool = False,
     ) -> None:
         """Structure-preserving compaction: save freeform text to file, keep tool messages.
 
@@ -661,6 +730,11 @@ class NodeConversation:
         messages with tool_calls + tool result messages) that are already tiny
         after pruning.  Only freeform text exchanges (user messages,
         text-only assistant messages) are saved to a file and removed.
+
+        When *aggressive* is True, non-essential tool call pairs are also
+        collapsed into a compact summary instead of being kept individually.
+        Only ``set_output`` calls and error results are preserved; all other
+        old tool pairs are replaced by a tool-call history summary.
 
         The result: the agent retains exact knowledge of what tools it called,
         where each result is stored, and can load the conversation text if
@@ -693,35 +767,92 @@ class NodeConversation:
         # Classify old messages: structural (keep) vs freeform (save to file)
         kept_structural: list[Message] = []
         freeform_lines: list[str] = []
+        collapsed_msgs: list[Message] = []
 
-        for msg in old_messages:
-            if msg.role == "tool":
-                # Tool results — already pruned to ~30 tokens (file reference).
-                # Keep in conversation.
-                kept_structural.append(msg)
-            elif msg.role == "assistant" and msg.tool_calls:
-                # Assistant message with tool_calls — keep the tool_calls
-                # with truncated arguments, clear the freeform text content.
-                compact_tcs = _compact_tool_calls(msg.tool_calls)
-                kept_structural.append(
-                    Message(
-                        seq=msg.seq,
-                        role=msg.role,
-                        content="",
-                        tool_calls=compact_tcs,
-                        is_error=msg.is_error,
-                        phase_id=msg.phase_id,
-                        is_transition_marker=msg.is_transition_marker,
-                    )
+        if aggressive:
+            # Aggressive: only keep set_output tool pairs and error results.
+            # Everything else is collapsed into a tool-call history summary.
+            # We need to track tool_call IDs to pair assistant messages with
+            # their tool results.
+            protected_tc_ids: set[str] = set()
+            collapsible_tc_ids: set[str] = set()
+
+            # First pass: classify assistant messages
+            for msg in old_messages:
+                if msg.role != "assistant" or not msg.tool_calls:
+                    continue
+                has_protected = any(
+                    tc.get("function", {}).get("name") == "set_output"
+                    for tc in msg.tool_calls
                 )
-            else:
-                # Freeform text (user messages, text-only assistant messages)
-                # — save to file and remove from conversation.
-                role_label = msg.role
-                text = msg.content
-                if len(text) > 2000:
-                    text = text[:2000] + "…"
-                freeform_lines.append(f"[{role_label}] (seq={msg.seq}): {text}")
+                tc_ids = {tc.get("id", "") for tc in msg.tool_calls}
+                if has_protected:
+                    protected_tc_ids |= tc_ids
+                else:
+                    collapsible_tc_ids |= tc_ids
+
+            # Second pass: classify all messages
+            for msg in old_messages:
+                if msg.role == "tool":
+                    tc_id = msg.tool_use_id or ""
+                    if tc_id in protected_tc_ids:
+                        kept_structural.append(msg)
+                    elif msg.is_error:
+                        # Error results are always protected
+                        kept_structural.append(msg)
+                        # Protect the parent assistant message too
+                        protected_tc_ids.add(tc_id)
+                    else:
+                        collapsed_msgs.append(msg)
+                elif msg.role == "assistant" and msg.tool_calls:
+                    tc_ids = {tc.get("id", "") for tc in msg.tool_calls}
+                    if tc_ids & protected_tc_ids:
+                        # Has at least one protected tool call — keep entire msg
+                        compact_tcs = _compact_tool_calls(msg.tool_calls)
+                        kept_structural.append(
+                            Message(
+                                seq=msg.seq,
+                                role=msg.role,
+                                content="",
+                                tool_calls=compact_tcs,
+                                is_error=msg.is_error,
+                                phase_id=msg.phase_id,
+                                is_transition_marker=msg.is_transition_marker,
+                            )
+                        )
+                    else:
+                        collapsed_msgs.append(msg)
+                else:
+                    # Freeform text — save to file
+                    role_label = msg.role
+                    text = msg.content
+                    if len(text) > 2000:
+                        text = text[:2000] + "…"
+                    freeform_lines.append(f"[{role_label}] (seq={msg.seq}): {text}")
+        else:
+            # Standard mode: keep all tool call pairs as structural
+            for msg in old_messages:
+                if msg.role == "tool":
+                    kept_structural.append(msg)
+                elif msg.role == "assistant" and msg.tool_calls:
+                    compact_tcs = _compact_tool_calls(msg.tool_calls)
+                    kept_structural.append(
+                        Message(
+                            seq=msg.seq,
+                            role=msg.role,
+                            content="",
+                            tool_calls=compact_tcs,
+                            is_error=msg.is_error,
+                            phase_id=msg.phase_id,
+                            is_transition_marker=msg.is_transition_marker,
+                        )
+                    )
+                else:
+                    role_label = msg.role
+                    text = msg.content
+                    if len(text) > 2000:
+                        text = text[:2000] + "…"
+                    freeform_lines.append(f"[{role_label}] (seq={msg.seq}): {text}")
 
         # Write freeform text to a numbered conversation file
         spill_path = Path(spillover_dir)
@@ -741,13 +872,25 @@ class NodeConversation:
             conv_filename = ""
 
         # Build reference message
+        ref_parts: list[str] = []
         if conv_filename:
-            ref_content = (
+            ref_parts.append(
                 f"[Previous conversation saved to '{conv_filename}'. "
                 f"Use load_data('{conv_filename}') to review if needed.]"
             )
-        else:
-            ref_content = "[Previous freeform messages compacted.]"
+        elif not collapsed_msgs:
+            ref_parts.append("[Previous freeform messages compacted.]")
+
+        # Aggressive: add collapsed tool-call history to the reference
+        if collapsed_msgs:
+            tool_history = extract_tool_call_history(collapsed_msgs)
+            if tool_history:
+                ref_parts.append(tool_history)
+            elif not ref_parts:
+                ref_parts.append("[Previous tool calls compacted.]")
+
+        ref_content = "\n\n".join(ref_parts)
+
         # Use a seq just before the first kept message
         recent_messages = list(self._messages[split:])
         if kept_structural:
@@ -760,15 +903,15 @@ class NodeConversation:
 
         ref_msg = Message(seq=ref_seq, role="user", content=ref_content)
 
-        # Persist: delete old messages from store, write reference + kept structural
+        # Persist: delete old messages from store, write reference + kept structural.
+        # In aggressive mode, collapsed messages may be interspersed with kept
+        # messages, so we delete everything before the recent boundary and
+        # rewrite only what we want to keep.
         if self._store:
-            first_kept_seq = (
-                kept_structural[0].seq
-                if kept_structural
-                else (recent_messages[0].seq if recent_messages else self._next_seq)
+            recent_boundary = (
+                recent_messages[0].seq if recent_messages else self._next_seq
             )
-            # Delete everything before the first structural message we're keeping
-            await self._store.delete_parts_before(first_kept_seq)
+            await self._store.delete_parts_before(recent_boundary)
             # Write the reference message
             await self._store.write_part(ref_msg.seq, ref_msg.to_storage_dict())
             # Write kept structural messages (they may have been modified)

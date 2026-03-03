@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
+import json
 from typing import Any
 
 import pytest
 
-from framework.graph.conversation import Message, NodeConversation
+from framework.graph.conversation import Message, NodeConversation, extract_tool_call_history
 from framework.storage.conversation_store import FileConversationStore
 
 # ---------------------------------------------------------------------------
@@ -930,3 +931,250 @@ class TestConversationIntegration:
         assert restored.next_seq == 4
         assert restored.messages[0].content == "new msg"
         assert restored.messages[0].seq == 2
+
+
+# ---------------------------------------------------------------------------
+# Helpers for aggressive compaction tests
+# ---------------------------------------------------------------------------
+
+
+def _make_tool_call(call_id: str, name: str, args: dict) -> dict:
+    return {
+        "id": call_id,
+        "type": "function",
+        "function": {"name": name, "arguments": json.dumps(args)},
+    }
+
+
+async def _build_tool_heavy_conversation(
+    store: MockConversationStore | None = None,
+) -> NodeConversation:
+    """Build a conversation with many tool call pairs.
+
+    Layout: user msg, then 5x (assistant with append_data tool_call + tool result),
+    then 1x (assistant with set_output tool_call + tool result), then user msg + assistant msg.
+    """
+    conv = NodeConversation(store=store)
+    await conv.add_user_message("Process the data")  # seq 0
+
+    for i in range(5):
+        args = {"filename": "output.html", "content": "x" * 500}
+        tc = [_make_tool_call(f"call_{i}", "append_data", args)]
+        conv._messages.append(Message(
+            seq=conv._next_seq, role="assistant",
+            content=f"Appending part {i}", tool_calls=tc,
+        ))
+        if store:
+            await store.write_part(conv._next_seq, conv._messages[-1].to_storage_dict())
+        conv._next_seq += 1
+        conv._messages.append(Message(
+            seq=conv._next_seq, role="tool",
+            content='{"success": true}', tool_use_id=f"call_{i}",
+        ))
+        if store:
+            await store.write_part(conv._next_seq, conv._messages[-1].to_storage_dict())
+        conv._next_seq += 1
+
+    # set_output call — must be protected
+    so_tc = [_make_tool_call("call_so", "set_output", {"key": "result", "value": "done"})]
+    conv._messages.append(
+        Message(seq=conv._next_seq, role="assistant", content="Setting output", tool_calls=so_tc)
+    )
+    if store:
+        await store.write_part(conv._next_seq, conv._messages[-1].to_storage_dict())
+    conv._next_seq += 1
+    conv._messages.append(Message(
+        seq=conv._next_seq, role="tool",
+        content="Output 'result' set successfully.",
+        tool_use_id="call_so",
+    ))
+    if store:
+        await store.write_part(conv._next_seq, conv._messages[-1].to_storage_dict())
+    conv._next_seq += 1
+
+    # Recent messages
+    await conv.add_user_message("Continue")
+    await conv.add_assistant_message("Working on it")
+    return conv
+
+
+# ---------------------------------------------------------------------------
+# Tests: aggressive structural compaction
+# ---------------------------------------------------------------------------
+
+
+class TestAggressiveStructuralCompaction:
+    @pytest.mark.asyncio
+    async def test_aggressive_collapses_tool_pairs(self, tmp_path):
+        """Aggressive mode should collapse non-essential tool pairs into a summary."""
+        conv = await _build_tool_heavy_conversation()
+        spill = str(tmp_path)
+
+        await conv.compact_preserving_structure(
+            spillover_dir=spill, keep_recent=2, aggressive=True,
+        )
+
+        # The 5 append_data pairs (10 msgs) + 1 user msg should be collapsed.
+        # Remaining: ref_msg + set_output pair (2 msgs) + 2 recent = 5
+        assert conv.message_count == 5
+        assert conv.messages[0].role == "user"  # ref message
+        assert "TOOLS ALREADY CALLED" in conv.messages[0].content
+        assert "append_data (5x)" in conv.messages[0].content
+
+        # set_output pair should be preserved
+        assert conv.messages[1].role == "assistant"
+        assert conv.messages[1].tool_calls is not None
+        assert conv.messages[1].tool_calls[0]["function"]["name"] == "set_output"
+        assert conv.messages[2].role == "tool"
+
+        # Recent messages intact
+        assert conv.messages[3].content == "Continue"
+        assert conv.messages[4].content == "Working on it"
+
+    @pytest.mark.asyncio
+    async def test_aggressive_preserves_set_output(self, tmp_path):
+        """set_output tool calls are always protected in aggressive mode."""
+        conv = await _build_tool_heavy_conversation()
+        spill = str(tmp_path)
+
+        await conv.compact_preserving_structure(
+            spillover_dir=spill, keep_recent=2, aggressive=True,
+        )
+
+        # Find all tool calls in remaining messages
+        tool_names = []
+        for msg in conv.messages:
+            if msg.tool_calls:
+                for tc in msg.tool_calls:
+                    tool_names.append(tc["function"]["name"])
+
+        assert "set_output" in tool_names
+        # append_data should NOT be in remaining messages (collapsed)
+        assert "append_data" not in tool_names
+
+    @pytest.mark.asyncio
+    async def test_aggressive_preserves_errors(self, tmp_path):
+        """Error tool results are always protected in aggressive mode."""
+        conv = NodeConversation()
+        await conv.add_user_message("Start")
+
+        # Regular tool call
+        tc1 = [_make_tool_call("call_ok", "web_search", {"query": "test"})]
+        conv._messages.append(
+            Message(seq=conv._next_seq, role="assistant", content="", tool_calls=tc1)
+        )
+        conv._next_seq += 1
+        conv._messages.append(
+            Message(seq=conv._next_seq, role="tool", content="results", tool_use_id="call_ok")
+        )
+        conv._next_seq += 1
+
+        # Error tool call
+        tc2 = [_make_tool_call("call_err", "web_scrape", {"url": "http://broken.com"})]
+        conv._messages.append(
+            Message(seq=conv._next_seq, role="assistant", content="", tool_calls=tc2)
+        )
+        conv._next_seq += 1
+        conv._messages.append(
+            Message(
+                seq=conv._next_seq, role="tool", content="Connection timeout",
+                tool_use_id="call_err", is_error=True,
+            )
+        )
+        conv._next_seq += 1
+
+        await conv.add_user_message("Next")
+        await conv.add_assistant_message("OK")
+
+        spill = str(tmp_path)
+        await conv.compact_preserving_structure(
+            spillover_dir=spill, keep_recent=2, aggressive=True,
+        )
+
+        # Error pair should be preserved
+        error_msgs = [m for m in conv.messages if m.role == "tool" and m.is_error]
+        assert len(error_msgs) == 1
+        assert error_msgs[0].content == "Connection timeout"
+
+    @pytest.mark.asyncio
+    async def test_standard_mode_keeps_all_tool_pairs(self, tmp_path):
+        """Non-aggressive mode should keep all tool pairs (existing behavior)."""
+        conv = await _build_tool_heavy_conversation()
+        spill = str(tmp_path)
+
+        await conv.compact_preserving_structure(
+            spillover_dir=spill, keep_recent=2, aggressive=False,
+        )
+
+        # All 6 tool pairs (12 msgs) should be kept as structural.
+        # Removed: 1 user msg (freeform). Remaining: ref + 12 structural + 2 recent = 15
+        assert conv.message_count == 15
+
+    @pytest.mark.asyncio
+    async def test_two_pass_sequence(self, tmp_path):
+        """Standard pass then aggressive pass produces valid result."""
+        conv = await _build_tool_heavy_conversation()
+        spill = str(tmp_path)
+
+        # Pass 1: standard
+        await conv.compact_preserving_structure(
+            spillover_dir=spill, keep_recent=2,
+        )
+        after_standard = conv.message_count
+        assert after_standard == 15  # all structural kept
+
+        # Pass 2: aggressive
+        await conv.compact_preserving_structure(
+            spillover_dir=spill, keep_recent=2, aggressive=True,
+        )
+        after_aggressive = conv.message_count
+        assert after_aggressive < after_standard
+        # ref + set_output pair + 2 recent = 5
+        assert after_aggressive == 5
+
+    @pytest.mark.asyncio
+    async def test_aggressive_persists_correctly(self, tmp_path):
+        """Aggressive compaction correctly updates the store."""
+        store = MockConversationStore()
+        conv = await _build_tool_heavy_conversation(store=store)
+        spill = str(tmp_path)
+
+        await conv.compact_preserving_structure(
+            spillover_dir=spill, keep_recent=2, aggressive=True,
+        )
+
+        # Verify store state matches in-memory state
+        parts = await store.read_parts()
+        assert len(parts) == conv.message_count
+
+
+class TestExtractToolCallHistory:
+    def test_basic_extraction(self):
+        msgs = [
+            Message(seq=0, role="assistant", content="", tool_calls=[
+                _make_tool_call("c1", "web_search", {"query": "python async"}),
+            ]),
+            Message(seq=1, role="tool", content="results", tool_use_id="c1"),
+            Message(seq=2, role="assistant", content="", tool_calls=[
+                _make_tool_call("c2", "save_data", {"filename": "output.txt", "content": "data"}),
+            ]),
+            Message(seq=3, role="tool", content="saved", tool_use_id="c2"),
+        ]
+        result = extract_tool_call_history(msgs)
+        assert "web_search (1x)" in result
+        assert "save_data (1x)" in result
+        assert "FILES SAVED: output.txt" in result
+
+    def test_errors_included(self):
+        msgs = [
+            Message(
+                seq=0, role="tool", content="Connection refused",
+                is_error=True, tool_use_id="c1",
+            ),
+        ]
+        result = extract_tool_call_history(msgs)
+        assert "ERRORS" in result
+        assert "Connection refused" in result
+
+    def test_empty_messages(self):
+        assert extract_tool_call_history([]) == ""
