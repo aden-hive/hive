@@ -13,7 +13,7 @@ from framework.config import get_hive_config, get_preferred_model
 from framework.credentials.validation import (
     ensure_credential_key_env as _ensure_credential_key_env,
 )
-from framework.runner.prestart_validation import run_prestart_validation
+from framework.runner.preload_validation import run_preload_validation
 from framework.graph import Goal
 from framework.graph.edge import (
     DEFAULT_MAX_TOKENS,
@@ -679,9 +679,9 @@ class AgentRunner:
         self._agent_runtime: AgentRuntime | None = None
         self._uses_async_entry_points = self.graph.has_async_entry_points()
 
-        # Pre-start validation: structural checks + credentials.
+        # Pre-load validation: structural checks + credentials.
         # Fails fast with actionable guidance — no MCP noise on screen.
-        run_prestart_validation(
+        run_preload_validation(
             self.graph,
             interactive=self._interactive,
             skip_credential_validation=self.skip_credential_validation,

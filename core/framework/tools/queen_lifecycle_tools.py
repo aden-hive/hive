@@ -41,7 +41,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from framework.credentials.models import CredentialError
-from framework.credentials.validation import validate_agent_credentials
+from framework.runner.preload_validation import credential_errors_to_json, validate_credentials
 from framework.runtime.event_bus import AgentEvent, EventType
 from framework.server.app import validate_agent_path
 
@@ -185,12 +185,13 @@ def register_queen_lifecycle_tools(
                 cred_error: CredentialError | None = None
                 try:
                     await loop.run_in_executor(
-                        None, lambda: validate_agent_credentials(runtime.graph.nodes)
+                        None,
+                        lambda: validate_credentials(
+                            runtime.graph.nodes, interactive=False, skip=False,
+                        ),
                     )
                 except CredentialError as e:
                     cred_error = e
-                except Exception as e:
-                    logger.warning("Credential validation failed: %s", e)
 
                 runner = getattr(session, "runner", None)
                 if runner:
@@ -241,6 +242,13 @@ def register_queen_lifecycle_tools(
                 }
             )
         except CredentialError as e:
+            # Build structured error with per-credential details so the
+            # queen can report exactly what's missing and how to fix it.
+            error_payload = credential_errors_to_json(e)
+            error_payload["agent_path"] = str(
+                getattr(session, "worker_path", "") or ""
+            )
+
             # Emit SSE event so the frontend opens the credentials modal
             bus = getattr(session, "event_bus", None)
             if bus is not None:
@@ -248,14 +256,10 @@ def register_queen_lifecycle_tools(
                     AgentEvent(
                         type=EventType.CREDENTIALS_REQUIRED,
                         stream_id="queen",
-                        data={
-                            "error": "credentials_required",
-                            "message": str(e),
-                            "agent_path": str(getattr(session, "worker_path", "") or ""),
-                        },
+                        data=error_payload,
                     )
                 )
-            return json.dumps({"error": "credentials_required", "message": str(e)})
+            return json.dumps(error_payload)
         except Exception as e:
             return json.dumps({"error": f"Failed to start worker: {e}"})
 

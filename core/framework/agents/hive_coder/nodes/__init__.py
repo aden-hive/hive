@@ -616,6 +616,15 @@ If NO worker is loaded, say so and offer to build one.
 - For tasks matching the worker's goal, call start_worker(task).
 - For everything else, do it directly.
 
+## When the user clicks Run (external event notification)
+When you receive an event that the user clicked Run:
+- If the worker started successfully, briefly acknowledge it — do NOT \
+repeat the full status. The user can see the graph is running.
+- If the worker failed to start (credential or structural error), \
+explain the problem clearly and help fix it. For credential errors, \
+guide the user to set up the missing credentials. For structural \
+issues, offer to fix the agent graph directly.
+
 ## When worker is running:
 - If the user asks about progress, call get_worker_status() ONCE and \
 report the result. Do NOT poll in a loop.
