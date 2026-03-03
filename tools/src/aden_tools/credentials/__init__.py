@@ -92,7 +92,9 @@ from .shell_config import (
 from .slack import SLACK_CREDENTIALS
 from .store_adapter import CredentialStoreAdapter
 from .stripe import STRIPE_CREDENTIALS
+from .microsoft_graph import MICROSOFT_GRAPH_CREDENTIALS
 from .telegram import TELEGRAM_CREDENTIALS
+from .youtube import YOUTUBE_CREDENTIALS
 
 # Merged registry of all credentials
 CREDENTIAL_SPECS = {
@@ -119,6 +121,8 @@ CREDENTIAL_SPECS = {
     **STRIPE_CREDENTIALS,
     **BREVO_CREDENTIALS,
     **POSTGRES_CREDENTIALS,
+    **MICROSOFT_GRAPH_CREDENTIALS,
+    **YOUTUBE_CREDENTIALS,
 }
 
 __all__ = [
@@ -168,4 +172,6 @@ __all__ = [
     "STRIPE_CREDENTIALS",
     "BREVO_CREDENTIALS",
     "POSTGRES_CREDENTIALS",
+    "MICROSOFT_GRAPH_CREDENTIALS",
+    "YOUTUBE_CREDENTIALS",
 ]

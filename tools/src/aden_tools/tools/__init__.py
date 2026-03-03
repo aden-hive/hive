@@ -77,10 +77,12 @@ from .telegram_tool import register_tools as register_telegram
 from .time_tool import register_tools as register_time
 from .vision_tool import register_tools as register_vision
 from .web_scrape_tool import register_tools as register_web_scrape
+from .microsoft_graph_tool import register_tools as register_microsoft_graph
 from .web_search_tool import register_tools as register_web_search
 
 # Web and PDF tools
 from .wikipedia_tool import register_tools as register_wikipedia
+from .youtube_tool import register_tools as register_youtube
 
 
 def register_all_tools(
@@ -160,6 +162,12 @@ def register_all_tools(
 
     # Postgres tool
     register_postgres(mcp, credentials=credentials)
+
+    # Microsoft Graph (Outlook, Teams, OneDrive)
+    register_microsoft_graph(mcp, credentials=credentials)
+
+    # YouTube Data API
+    register_youtube(mcp, credentials=credentials)
 
     # Return the list of all registered tool names
     return list(mcp._tool_manager._tools.keys())
