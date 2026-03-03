@@ -41,7 +41,7 @@ Build autonomous, reliable, self-improving AI agents without hardcoding workflow
 
 Visit [adenhq.com](https://adenhq.com) for complete documentation, examples, and guides.
 
-https://github.com/user-attachments/assets/846c0cc7-ffd6-47fa-b4b7-495494857a55
+[![Hive Demo](https://img.youtube.com/vi/XDOG9fOaLjU/maxresdefault.jpg)](https://www.youtube.com/watch?v=XDOG9fOaLjU)
 
 ## Who Is Hive For?
 
@@ -119,10 +119,7 @@ claude> /hive
 # Test your agent
 claude> /hive-debugger
 
-# (at separate terminal) Launch the interactive dashboard
-hive tui
-
-# Or run directly
+# Run directly
 hive run exports/your_agent_name --input '{"key": "value"}'
 ```
 
@@ -173,7 +170,6 @@ Skills and MCP servers are also available in [Antigravity IDE](https://antigravi
 - **SDK-Wrapped Nodes** - Every node gets shared memory, local RLM memory, monitoring, tools, and LLM access out of the box
 - **[Human-in-the-Loop](docs/key_concepts/graph.md#human-in-the-loop)** - Intervention nodes that pause execution for human input with configurable timeouts and escalation
 - **Real-time Observability** - WebSocket streaming for live monitoring of agent execution, decisions, and node-to-node communication
-- **Interactive TUI Dashboard** - Terminal-based dashboard with live graph view, event log, and chat interface for agent interaction
 - **Cost & Budget Control** - Set spending limits, throttles, and automatic model degradation policies
 - **Production-Ready** - Self-hostable, built for scale and reliability
 
@@ -245,20 +241,12 @@ flowchart LR
 The `hive` CLI is the primary interface for running agents.
 
 ```bash
-# Browse and run agents interactively (Recommended)
-hive tui
-
-# Run a specific agent directly
+# Run a specific agent
 hive run exports/my_agent --input '{"task": "Your input here"}'
-
-# Run a specific agent with the TUI dashboard
-hive run exports/my_agent --tui
 
 # Interactive REPL
 hive shell
 ```
-
-The TUI scans both `exports/` and `examples/templates/` for available agents.
 
 > **Using Python directly (alternative):** You can also run agents with `PYTHONPATH=exports uv run python -m agent_name run --input '{...}'`
 
@@ -268,7 +256,6 @@ See [environment-setup.md](docs/environment-setup.md) for complete setup instruc
 
 - **[Developer Guide](docs/developer-guide.md)** - Comprehensive guide for developers
 - [Getting Started](docs/getting-started.md) - Quick setup instructions
-- [TUI Guide](docs/tui-selection-guide.md) - Interactive dashboard usage
 - [Configuration Guide](docs/configuration.md) - All configuration options
 - [Architecture Overview](docs/architecture/README.md) - System design and structure
 
