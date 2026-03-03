@@ -31,6 +31,7 @@ from .calendar_tool import register_tools as register_calendar
 from .csv_tool import register_tools as register_csv
 from .databricks_tool import register_tools as register_databricks
 from .discord_tool import register_tools as register_discord
+from .docker_hub_tool import register_tools as register_docker_hub
 
 # Security scanning tools
 from .dns_security_scanner import register_tools as register_dns_security_scanner
@@ -188,6 +189,9 @@ def register_all_tools(
 
     # YouTube Data API
     register_youtube(mcp, credentials=credentials)
+
+    # Docker Hub repository & image management
+    register_docker_hub(mcp, credentials=credentials)
 
     # Return the list of all registered tool names
     return list(mcp._tool_manager._tools.keys())

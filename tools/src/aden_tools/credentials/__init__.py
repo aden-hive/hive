@@ -63,6 +63,7 @@ from .browser import get_aden_auth_url, get_aden_setup_url, open_browser
 from .calcom import CALCOM_CREDENTIALS
 from .databricks import DATABRICKS_CREDENTIALS
 from .discord import DISCORD_CREDENTIALS
+from .docker_hub import DOCKER_HUB_CREDENTIALS
 from .email import EMAIL_CREDENTIALS
 from .gcp_vision import GCP_VISION_CREDENTIALS
 from .github import GITHUB_CREDENTIALS
@@ -124,6 +125,7 @@ CREDENTIAL_SPECS = {
     **BIGQUERY_CREDENTIALS,
     **CALCOM_CREDENTIALS,
     **DATABRICKS_CREDENTIALS,
+    **DOCKER_HUB_CREDENTIALS,
     **STRIPE_CREDENTIALS,
     **BREVO_CREDENTIALS,
     **POSTGRES_CREDENTIALS,
@@ -180,6 +182,7 @@ __all__ = [
     "CALCOM_CREDENTIALS",
     "DATABRICKS_CREDENTIALS",
     "DISCORD_CREDENTIALS",
+    "DOCKER_HUB_CREDENTIALS",
     "STRIPE_CREDENTIALS",
     "BREVO_CREDENTIALS",
     "POSTGRES_CREDENTIALS",
