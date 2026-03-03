@@ -99,7 +99,9 @@ from .pinecone_tool import register_tools as register_pinecone
 from .plaid_tool import register_tools as register_plaid
 from .trello_tool import register_tools as register_trello
 from .cloudinary_tool import register_tools as register_cloudinary
+from .greenhouse_tool import register_tools as register_greenhouse
 from .reddit_tool import register_tools as register_reddit
+from .youtube_transcript_tool import register_tools as register_youtube_transcript
 from .zoho_crm_tool import register_tools as register_zoho_crm
 
 # Web and PDF tools
@@ -252,6 +254,12 @@ def register_all_tools(
 
     # Reddit community content monitoring
     register_reddit(mcp, credentials=credentials)
+
+    # Greenhouse ATS & recruiting
+    register_greenhouse(mcp, credentials=credentials)
+
+    # YouTube Transcript (no credentials needed)
+    register_youtube_transcript(mcp)
 
     # Return the list of all registered tool names
     return list(mcp._tool_manager._tools.keys())
