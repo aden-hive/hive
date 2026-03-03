@@ -187,17 +187,18 @@ echo ""
 echo -n "  Installing workspace packages... "
 cd "$SCRIPT_DIR"
 
-if [ -f "pyproject.toml" ]; then
-    if uv sync > /dev/null 2>&1; then
+if uv sync > .uv_install.log 2>&1; then
         echo -e "${GREEN}  ✓ workspace packages installed${NC}"
+        rm .uv_install.log
     else
         echo -e "${RED}  ✗ workspace installation failed${NC}"
+        echo ""
+        echo -e "${YELLOW}Error details:${NC}"
+        cat .uv_install.log
+        rm .uv_install.log
         exit 1
     fi
-else
-    echo -e "${RED}failed (no root pyproject.toml)${NC}"
-    exit 1
-fi
+
 
 # Install Playwright browser
 echo -n "  Installing Playwright browser... "
