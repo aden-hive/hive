@@ -187,7 +187,9 @@ def register_queen_lifecycle_tools(
                     await loop.run_in_executor(
                         None,
                         lambda: validate_credentials(
-                            runtime.graph.nodes, interactive=False, skip=False,
+                            runtime.graph.nodes,
+                            interactive=False,
+                            skip=False,
                         ),
                     )
                 except CredentialError as e:
@@ -245,9 +247,7 @@ def register_queen_lifecycle_tools(
             # Build structured error with per-credential details so the
             # queen can report exactly what's missing and how to fix it.
             error_payload = credential_errors_to_json(e)
-            error_payload["agent_path"] = str(
-                getattr(session, "worker_path", "") or ""
-            )
+            error_payload["agent_path"] = str(getattr(session, "worker_path", "") or "")
 
             # Emit SSE event so the frontend opens the credentials modal
             bus = getattr(session, "event_bus", None)

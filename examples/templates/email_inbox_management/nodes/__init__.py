@@ -106,7 +106,13 @@ fetch_emails_node = NodeSpec(
     node_type="event_loop",
     client_facing=False,
     max_node_visits=0,
-    input_keys=["rules", "max_emails", "next_page_token", "last_processed_timestamp", "query"],
+    input_keys=[
+        "rules",
+        "max_emails",
+        "next_page_token",
+        "last_processed_timestamp",
+        "query",
+    ],
     output_keys=["emails", "next_page_token"],
     nullable_output_keys=["next_page_token"],
     system_prompt="""\

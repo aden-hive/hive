@@ -740,7 +740,7 @@ class GraphSpec(BaseModel):
             # GCU nodes must be referenced in at least one parent's sub_agents
             referenced_subagents = set()
             for node in self.nodes:
-                for sa_id in (node.sub_agents or []):
+                for sa_id in node.sub_agents or []:
                     referenced_subagents.add(sa_id)
 
             orphaned = gcu_node_ids - referenced_subagents

@@ -97,8 +97,7 @@ def validate_credentials(
             # Preserve the original validation_result so callers can
             # inspect which credentials are still missing.
             exc = CredentialError(
-                "Credential setup incomplete. "
-                "Run again after configuring the required credentials."
+                "Credential setup incomplete. Run again after configuring the required credentials."
             )
             if hasattr(e, "validation_result"):
                 exc.validation_result = e.validation_result  # type: ignore[attr-defined]
@@ -128,10 +127,16 @@ def credential_errors_to_json(exc: Exception) -> dict:
     failed = result.failed
     missing = []
     for c in failed:
+        if c.available:
+            status = "invalid"
+        elif c.aden_not_connected:
+            status = "aden_not_connected"
+        else:
+            status = "missing"
         entry: dict = {
             "credential": c.credential_name,
             "env_var": c.env_var,
-            "status": "invalid" if c.available else ("aden_not_connected" if c.aden_not_connected else "missing"),
+            "status": status,
         }
         if c.tools:
             entry["tools"] = c.tools
