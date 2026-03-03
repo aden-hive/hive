@@ -34,6 +34,8 @@ def register_tools(
     credentials: CredentialStoreAdapter | None = None,
 ) -> None:
     """Register MSSQL tools with the MCP server."""
+    if not PYODBC_AVAILABLE:
+        return
 
     def _get_connection_params() -> dict[str, str | None]:
         """Get MSSQL connection parameters from credentials or environment."""

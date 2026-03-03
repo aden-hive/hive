@@ -244,12 +244,14 @@ def register_tools(
 ) -> None:
     """
     Register S3 tools with MCP server.
-    
+
     Args:
         mcp: FastMCP server instance
         credentials: Optional CredentialStoreAdapter for AWS credentials
     """
-    
+    if not BOTO3_AVAILABLE:
+        return
+
     storage = S3Storage(
         region=os.getenv('AWS_DEFAULT_REGION'),
         access_key=os.getenv('AWS_ACCESS_KEY_ID'),
