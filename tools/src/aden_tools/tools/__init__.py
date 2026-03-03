@@ -62,6 +62,7 @@ from .gmail_tool import register_tools as register_gmail
 from .google_analytics_tool import register_tools as register_google_analytics
 from .google_docs_tool import register_tools as register_google_docs
 from .google_maps_tool import register_tools as register_google_maps
+from .google_search_console_tool import register_tools as register_google_search_console
 from .http_headers_scanner import register_tools as register_http_headers_scanner
 from .hubspot_tool import register_tools as register_hubspot
 from .intercom_tool import register_tools as register_intercom
@@ -208,6 +209,9 @@ def register_all_tools(
 
     # Zoho CRM (Leads, Contacts, Deals, Accounts)
     register_zoho_crm(mcp, credentials=credentials)
+
+    # Google Search Console (Analytics, Sitemaps, URL Inspection)
+    register_google_search_console(mcp, credentials=credentials)
 
     # Return the list of all registered tool names
     return list(mcp._tool_manager._tools.keys())
