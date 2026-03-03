@@ -108,6 +108,7 @@ from .telegram import TELEGRAM_CREDENTIALS
 from .vercel import VERCEL_CREDENTIALS
 from .youtube import YOUTUBE_CREDENTIALS
 from .pinecone import PINECONE_CREDENTIALS
+from .plaid import PLAID_CREDENTIALS
 from .zoho_crm import ZOHO_CRM_CREDENTIALS
 
 # Merged registry of all credentials
@@ -150,6 +151,7 @@ CREDENTIAL_SPECS = {
     **VERCEL_CREDENTIALS,
     **YOUTUBE_CREDENTIALS,
     **PINECONE_CREDENTIALS,
+    **PLAID_CREDENTIALS,
     **ZOHO_CRM_CREDENTIALS,
 }
 
@@ -215,5 +217,6 @@ __all__ = [
     "VERCEL_CREDENTIALS",
     "YOUTUBE_CREDENTIALS",
     "PINECONE_CREDENTIALS",
+    "PLAID_CREDENTIALS",
     "ZOHO_CRM_CREDENTIALS",
 ]
