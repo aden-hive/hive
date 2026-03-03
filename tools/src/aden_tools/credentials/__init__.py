@@ -98,6 +98,7 @@ from .pushover import PUSHOVER_CREDENTIALS
 from .redis import REDIS_CREDENTIALS
 from .supabase import SUPABASE_CREDENTIALS
 from .telegram import TELEGRAM_CREDENTIALS
+from .vercel import VERCEL_CREDENTIALS
 from .youtube import YOUTUBE_CREDENTIALS
 
 # Merged registry of all credentials
@@ -130,6 +131,7 @@ CREDENTIAL_SPECS = {
     **PUSHOVER_CREDENTIALS,
     **REDIS_CREDENTIALS,
     **SUPABASE_CREDENTIALS,
+    **VERCEL_CREDENTIALS,
     **YOUTUBE_CREDENTIALS,
 }
 
@@ -185,5 +187,6 @@ __all__ = [
     "PUSHOVER_CREDENTIALS",
     "REDIS_CREDENTIALS",
     "SUPABASE_CREDENTIALS",
+    "VERCEL_CREDENTIALS",
     "YOUTUBE_CREDENTIALS",
 ]

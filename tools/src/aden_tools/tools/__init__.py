@@ -82,6 +82,7 @@ from .microsoft_graph_tool import register_tools as register_microsoft_graph
 from .pushover_tool import register_tools as register_pushover
 from .redis_tool import register_tools as register_redis
 from .supabase_tool import register_tools as register_supabase
+from .vercel_tool import register_tools as register_vercel
 from .web_search_tool import register_tools as register_web_search
 
 # Web and PDF tools
@@ -181,6 +182,9 @@ def register_all_tools(
 
     # Supabase (DB, Auth, Edge Functions)
     register_supabase(mcp, credentials=credentials)
+
+    # Vercel deployment & hosting
+    register_vercel(mcp, credentials=credentials)
 
     # YouTube Data API
     register_youtube(mcp, credentials=credentials)
