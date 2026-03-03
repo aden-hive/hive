@@ -175,6 +175,7 @@ def register_all_tools(
     register_hubspot(mcp, credentials=credentials)
     register_intercom(mcp, credentials=credentials)
     register_apollo(mcp, credentials=credentials)
+    register_brevo(mcp, credentials=credentials)
     register_bigquery(mcp, credentials=credentials)
     register_calcom(mcp, credentials=credentials)
     register_calendar(mcp, credentials=credentials)
