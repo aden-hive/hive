@@ -329,6 +329,16 @@ export default function Workspace() {
       return initial;
     }
 
+    // If the user submitted a new prompt from the home page, always create
+    // a fresh session so the prompt isn't lost into an existing session.
+    if (initialPrompt && hasExplicitAgent) {
+      const newSession = initialAgent === "new-agent"
+        ? createSession("new-agent", "New Agent")
+        : createSession(initialAgent, formatAgentDisplayName(initialAgent));
+      initial[initialAgent] = [...(initial[initialAgent] || []), newSession];
+      return initial;
+    }
+
     if (initial[initialAgent]?.length) {
       return initial;
     }
@@ -348,8 +358,14 @@ export default function Workspace() {
     if (persisted) {
       const restored = { ...persisted.activeSessionByAgent };
       const urlSessions = sessionsByAgent[initialAgent];
-      if (urlSessions?.length && !restored[initialAgent]) {
-        restored[initialAgent] = urlSessions[0].id;
+      if (urlSessions?.length) {
+        // When a prompt was submitted from home, activate the newly created
+        // session (last in array) instead of the previously active one.
+        if (initialPrompt && hasExplicitAgent) {
+          restored[initialAgent] = urlSessions[urlSessions.length - 1].id;
+        } else if (!restored[initialAgent]) {
+          restored[initialAgent] = urlSessions[0].id;
+        }
       }
       return restored;
     }
@@ -496,8 +512,13 @@ export default function Workspace() {
         const prompt = initialPrompt || undefined;
         let liveSession: LiveSession | undefined;
 
+        // Find the active session for this agent type
+        const activeId = activeSessionRef.current[agentType];
+        const activeSess = sessionsRef.current[agentType]?.find(s => s.id === activeId)
+          || sessionsRef.current[agentType]?.[0];
+
         // Try to reconnect to stored backend session (e.g., after browser refresh)
-        const storedId = sessionsRef.current[agentType]?.[0]?.backendSessionId;
+        const storedId = activeSess?.backendSessionId;
         if (storedId) {
           try {
             liveSession = await sessionsApi.get(storedId);
@@ -508,11 +529,11 @@ export default function Workspace() {
 
         if (!liveSession) {
           // Reconnect failed — clear stale cached messages from localStorage restore
-          if (storedId) {
+          if (storedId && activeId) {
             setSessionsByAgent(prev => ({
               ...prev,
-              [agentType]: (prev[agentType] || []).map((s, i) =>
-                i === 0 ? { ...s, messages: [], graphNodes: [] } : s,
+              [agentType]: (prev[agentType] || []).map(s =>
+                s.id === activeId ? { ...s, messages: [], graphNodes: [] } : s,
               ),
             }));
           }
@@ -520,27 +541,29 @@ export default function Workspace() {
           liveSession = await sessionsApi.create(undefined, undefined, undefined, prompt);
 
           // Show the initial prompt as a user message in chat (only on fresh create)
-          if (prompt) {
+          if (prompt && activeId) {
             const userMsg: ChatMessage = {
               id: makeId(), agent: "You", agentColor: "",
               content: prompt, timestamp: "", type: "user", thread: agentType, createdAt: Date.now(),
             };
             setSessionsByAgent(prev => ({
               ...prev,
-              [agentType]: (prev[agentType] || []).map(s => ({
-                ...s, messages: [...s.messages, userMsg],
-              })),
+              [agentType]: (prev[agentType] || []).map(s =>
+                s.id === activeId ? { ...s, messages: [...s.messages, userMsg] } : s,
+              ),
             }));
           }
         }
 
-        // Store backendSessionId on the Session object for persistence
-        setSessionsByAgent(prev => ({
-          ...prev,
-          [agentType]: (prev[agentType] || []).map((s, i) =>
-            i === 0 ? { ...s, backendSessionId: liveSession!.session_id } : s,
-          ),
-        }));
+        // Store backendSessionId on the active Session object for persistence
+        if (activeId) {
+          setSessionsByAgent(prev => ({
+            ...prev,
+            [agentType]: (prev[agentType] || []).map(s =>
+              s.id === activeId ? { ...s, backendSessionId: liveSession!.session_id } : s,
+            ),
+          }));
+        }
 
         updateAgentState(agentType, {
           sessionId: liveSession.session_id,
