@@ -142,6 +142,7 @@ from .salesforce import SALESFORCE_CREDENTIALS
 from .shopify import SHOPIFY_CREDENTIALS
 from .zoom import ZOOM_CREDENTIALS
 from .n8n import N8N_CREDENTIALS
+from .langfuse import LANGFUSE_CREDENTIALS
 
 # Merged registry of all credentials
 CREDENTIAL_SPECS = {
@@ -217,6 +218,7 @@ CREDENTIAL_SPECS = {
     **SHOPIFY_CREDENTIALS,
     **ZOOM_CREDENTIALS,
     **N8N_CREDENTIALS,
+    **LANGFUSE_CREDENTIALS,
 }
 
 __all__ = [
@@ -315,4 +317,5 @@ __all__ = [
     "SHOPIFY_CREDENTIALS",
     "ZOOM_CREDENTIALS",
     "N8N_CREDENTIALS",
+    "LANGFUSE_CREDENTIALS",
 ]
