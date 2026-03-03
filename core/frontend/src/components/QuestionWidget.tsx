@@ -42,10 +42,11 @@ export default function QuestionWidget({ question, options, onSubmit, onDismiss 
     }
   }, [canSubmit, submitted, isOtherSelected, customText, options, selected, onSubmit]);
 
-  // Keyboard: Enter to submit, number keys to select
+  // Keyboard: Enter to submit, number keys to select (only when text input is not focused)
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (submitted) return;
+      const inTextInput = e.target === inputRef.current;
 
       if (e.key === "Enter" && !e.shiftKey) {
         e.preventDefault();
@@ -53,11 +54,13 @@ export default function QuestionWidget({ question, options, onSubmit, onDismiss 
         return;
       }
 
-      // Number keys 1-4 select options
-      const num = parseInt(e.key, 10);
-      if (num >= 1 && num <= options.length + 1) {
-        e.preventDefault();
-        setSelected(num - 1);
+      // Number keys 1-4 select options — skip when typing in the "Other" field
+      if (!inTextInput) {
+        const num = parseInt(e.key, 10);
+        if (num >= 1 && num <= options.length + 1) {
+          e.preventDefault();
+          setSelected(num - 1);
+        }
       }
     };
 

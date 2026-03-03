@@ -578,7 +578,11 @@ class TestClientFacingBlocking:
         """signal_shutdown should unblock a waiting client_facing node."""
         llm = MockStreamingLLM(
             scenarios=[
-                tool_call_scenario("ask_user", {"question": "Waiting..."}, tool_use_id="ask_1"),
+                tool_call_scenario(
+                    "ask_user",
+                    {"question": "Waiting...", "options": ["Continue", "Stop"]},
+                    tool_use_id="ask_1",
+                ),
             ]
         )
         bus = EventBus()
@@ -600,7 +604,11 @@ class TestClientFacingBlocking:
         """CLIENT_INPUT_REQUESTED should be published when ask_user blocks."""
         llm = MockStreamingLLM(
             scenarios=[
-                tool_call_scenario("ask_user", {"question": "Hello!"}, tool_use_id="ask_1"),
+                tool_call_scenario(
+                    "ask_user",
+                    {"question": "Hello!", "options": ["Yes", "No"]},
+                    tool_use_id="ask_1",
+                ),
             ]
         )
         bus = EventBus()
@@ -796,7 +804,7 @@ class TestClientFacingExpectingWork:
 
         async def user_then_shutdown():
             await asyncio.sleep(0.05)
-            await node.inject_event("furwise.app")
+            await node.inject_event("furwise.app", is_client_input=True)
             # Node should auto-block on "Monitoring..." text.
             # Give it time to reach the block, then shutdown.
             await asyncio.sleep(0.1)
