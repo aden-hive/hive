@@ -1,23 +1,46 @@
 # Git
 .git/
 .gitignore
+.gitattributes
 
-# Documentation
-*.md
+# Documentation (except READMEs needed by pyproject.toml)
 docs/
+CONTRIBUTING.md
+SECURITY.md
 LICENSE
 
-# IDE
+# IDE / Editor
 .idea/
 .vscode/
+.cursor/
+.cursorrules
+.editorconfig
+
+# Agent configs
+.agent/
+.agents/
+.claude/
+.codex/
+.opencode/
+.mcp.json
+core/.mcp.json
 
 # Dependencies (rebuilt in container)
 node_modules/
+venv/
+.venv/
+__pycache__/
+*.pyc
 
 # Build artifacts
 dist/
 build/
 coverage/
+*.egg-info/
+
+# Test caches
+.pytest_cache/
+.ruff_cache/
 
 # Environment files
 .env*
@@ -31,5 +54,24 @@ logs/
 .DS_Store
 Thumbs.db
 
-# GitHub
+# GitHub (not needed in image)
 .github/
+
+# Agent exports / examples (mounted at runtime, not baked in)
+exports/
+examples/
+
+# Lock files already copied explicitly
+# package-lock.json — not needed for Python image
+package.json
+package-lock.json
+tsconfig.base.json
+
+# Scripts (not needed in image)
+scripts/
+quickstart.sh
+quickstart.ps1
+hive.ps1
+Makefile
+.pre-commit-config.yaml
+.python-version

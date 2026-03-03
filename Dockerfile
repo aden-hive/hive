@@ -1,13 +1,10 @@
-# Aden Tools MCP Server
-# Exposes tools via Model Context Protocol
-# Multi-stage build for a smaller runtime image
+# Hive — Core CLI + Tools MCP Server
+# Multi-stage build for minimal production image
 
 # ──────────────────────────────────────────────
 # Stage 1: Build — resolve dependencies with uv
 # ──────────────────────────────────────────────
-# Using the Playwright image for the builder stage as well ensures that
-# the Python paths match perfectly between stages, preventing broken venv symlinks.
-FROM mcr.microsoft.com/playwright/python:v1.48.0-noble AS builder
+FROM python:3.12-slim AS builder
 
 # Install uv for fast, reproducible dependency resolution
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
@@ -17,10 +14,10 @@ WORKDIR /app
 # Ensure uv uses the system Python (3.12)
 ENV UV_PYTHON=python3.12
 
-# Copy workspace root config first
+# Copy workspace root config first (uv workspace definition)
 COPY pyproject.toml uv.lock ./
 
-# Copy workspace members
+# Copy both workspace members — core depends on tools via workspace reference
 COPY core/pyproject.toml core/README.md core/uv.lock ./core/
 COPY core/framework ./core/framework
 
@@ -28,13 +25,13 @@ COPY tools/pyproject.toml tools/README.md tools/uv.lock ./tools/
 COPY tools/src ./tools/src
 COPY tools/mcp_server.py ./tools/
 
-# Sync the tools project (this handles the workspace 'framework' dependency)
-RUN uv sync --project tools --no-dev --frozen
+# Sync the core project (pulls in tools as a workspace dependency)
+RUN uv sync --project core --no-dev --frozen
 
 # ──────────────────────────────────────────────
-# Stage 2: Runtime — optimized for browser tools
+# Stage 2: Runtime — minimal production image
 # ──────────────────────────────────────────────
-FROM mcr.microsoft.com/playwright/python:v1.48.0-noble
+FROM python:3.12-slim
 
 WORKDIR /app
 
@@ -42,28 +39,31 @@ WORKDIR /app
 COPY --from=builder /app/.venv /app/.venv
 COPY --from=builder /app/core /app/core
 COPY --from=builder /app/tools /app/tools
+COPY --from=builder /app/pyproject.toml /app/pyproject.toml
 
 # Make the venv the default Python environment
 ENV PATH="/app/.venv/bin:$PATH"
 ENV VIRTUAL_ENV="/app/.venv"
 
-# The Playwright image already has a user 'pwuser' with UID 1001.
-# We'll use that instead of creating a new one to avoid conflicts.
-RUN mkdir -p /app/workdir/workspaces && \
-    chown -R pwuser:pwuser /app
+# Create non-root user for security
+RUN useradd -m -u 1001 appuser
 
-USER pwuser
+# Create directories for workspace persistence and agent exports
+RUN mkdir -p /app/exports /app/workdir && \
+    chown -R appuser:appuser /app
 
-# Declare volume for workspace persistence across container runs
-VOLUME ["/app/workdir/workspaces"]
+USER appuser
 
-# Expose MCP server port
+# Persist workspaces and agent data across runs
+VOLUME ["/app/exports", "/app/workdir"]
+
+# Expose MCP server port (used when running the tools server)
 EXPOSE 4001
 
-# Health check - verify server is responding
-HEALTHCHECK --interval=30s --timeout=5s --start-period=60s --retries=3 \
-    CMD python -c "import httpx; httpx.get('http://localhost:4001/health').raise_for_status()" || exit 1
+# Health check — verifies the CLI is functional
+HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 \
+    CMD hive list /app/exports || exit 1
 
-# Run MCP server from the tools directory
-WORKDIR /app/tools
-CMD ["python", "mcp_server.py"]
+# Default: run the hive CLI (users pass subcommands via docker run args)
+ENTRYPOINT ["hive"]
+CMD ["--help"]

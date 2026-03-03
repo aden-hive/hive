@@ -1,0 +1,54 @@
+# Hive — Docker Compose
+#
+# Services:
+#   tools-server — MCP tools server (always running, port 4001)
+#   aden         — Hive CLI (one-shot commands via `docker compose run`)
+#
+# Quick start:
+#   docker compose up tools-server          # Start the MCP tools server
+#   docker compose run aden run exports/my-agent -i '{"key":"value"}'
+#
+# Environment:
+#   Copy .env.example to .env and set your API keys.
+
+services:
+  tools-server:
+    build:
+      context: .
+      dockerfile: ./tools/Dockerfile
+    ports:
+      - "4001:4001"
+    env_file:
+      - path: .env
+        required: false
+    volumes:
+      - workspaces:/app/workdir/workspaces
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import httpx; httpx.get('http://localhost:4001/health').raise_for_status()"]
+      interval: 30s
+      timeout: 5s
+      start_period: 10s
+      retries: 3
+
+  aden:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    env_file:
+      - path: .env
+        required: false
+    volumes:
+      - ./exports:/app/exports
+      - ./examples:/app/examples:ro
+      - workspaces:/app/workdir
+    depends_on:
+      tools-server:
+        condition: service_healthy
+    profiles:
+      - cli
+    # Override entrypoint args via: docker compose run aden <command>
+    # Example: docker compose run aden run exports/my-agent
+
+volumes:
+  workspaces:
