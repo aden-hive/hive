@@ -89,6 +89,7 @@ from .redis_tool import register_tools as register_redis
 from .supabase_tool import register_tools as register_supabase
 from .vercel_tool import register_tools as register_vercel
 from .web_search_tool import register_tools as register_web_search
+from .yahoo_finance_tool import register_tools as register_yahoo_finance
 from .zoho_crm_tool import register_tools as register_zoho_crm
 
 # Web and PDF tools
@@ -119,6 +120,7 @@ def register_all_tools(
     register_runtime_logs(mcp)
     register_wikipedia(mcp)
     register_arxiv(mcp)
+    register_yahoo_finance(mcp)
 
     # Tools that need credentials (pass credentials if provided)
     # web_search supports multiple providers (Google, Brave) with auto-detection
