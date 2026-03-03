@@ -55,6 +55,7 @@ To add a new credential:
 3. If new category, import and merge it in this __init__.py
 """
 
+from .airtable import AIRTABLE_CREDENTIALS
 from .apify import APIFY_CREDENTIALS
 from .asana import ASANA_CREDENTIALS
 from .apollo import APOLLO_CREDENTIALS
@@ -87,6 +88,7 @@ from .huggingface import HUGGINGFACE_CREDENTIALS
 from .hubspot import HUBSPOT_CREDENTIALS
 from .intercom import INTERCOM_CREDENTIALS
 from .linear import LINEAR_CREDENTIALS
+from .mongodb import MONGODB_CREDENTIALS
 from .llm import LLM_CREDENTIALS
 from .news import NEWS_CREDENTIALS
 from .postgres import POSTGRES_CREDENTIALS
@@ -125,6 +127,7 @@ from .zoho_crm import ZOHO_CRM_CREDENTIALS
 
 # Merged registry of all credentials
 CREDENTIAL_SPECS = {
+    **AIRTABLE_CREDENTIALS,
     **LLM_CREDENTIALS,
     **NEWS_CREDENTIALS,
     **SEARCH_CREDENTIALS,
@@ -144,6 +147,7 @@ CREDENTIAL_SPECS = {
     **HUBSPOT_CREDENTIALS,
     **INTERCOM_CREDENTIALS,
     **LINEAR_CREDENTIALS,
+    **MONGODB_CREDENTIALS,
     **GOOGLE_CALENDAR_CREDENTIALS,
     **SLACK_CREDENTIALS,
     **SERPAPI_CREDENTIALS,
@@ -203,6 +207,7 @@ __all__ = [
     # Merged registry
     "CREDENTIAL_SPECS",
     # Category registries (for direct access if needed)
+    "AIRTABLE_CREDENTIALS",
     "LLM_CREDENTIALS",
     "NEWS_CREDENTIALS",
     "SEARCH_CREDENTIALS",
@@ -217,6 +222,7 @@ __all__ = [
     "HUBSPOT_CREDENTIALS",
     "INTERCOM_CREDENTIALS",
     "LINEAR_CREDENTIALS",
+    "MONGODB_CREDENTIALS",
     "GOOGLE_CALENDAR_CREDENTIALS",
     "SLACK_CREDENTIALS",
     "APIFY_CREDENTIALS",

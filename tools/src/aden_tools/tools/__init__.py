@@ -98,11 +98,13 @@ from .yahoo_finance_tool import register_tools as register_yahoo_finance
 from .pinecone_tool import register_tools as register_pinecone
 from .plaid_tool import register_tools as register_plaid
 from .trello_tool import register_tools as register_trello
+from .airtable_tool import register_tools as register_airtable
 from .cloudinary_tool import register_tools as register_cloudinary
 from .gitlab_tool import register_tools as register_gitlab
 from .google_sheets_tool import register_tools as register_google_sheets
 from .greenhouse_tool import register_tools as register_greenhouse
 from .jira_tool import register_tools as register_jira
+from .mongodb_tool import register_tools as register_mongodb
 from .notion_tool import register_tools as register_notion
 from .reddit_tool import register_tools as register_reddit
 from .twilio_tool import register_tools as register_twilio
@@ -284,6 +286,12 @@ def register_all_tools(
 
     # Zendesk ticket management
     register_zendesk(mcp, credentials=credentials)
+
+    # MongoDB Atlas Data API
+    register_mongodb(mcp, credentials=credentials)
+
+    # Airtable records and bases
+    register_airtable(mcp, credentials=credentials)
 
     # Return the list of all registered tool names
     return list(mcp._tool_manager._tools.keys())
