@@ -11,7 +11,7 @@ EMAIL_CREDENTIALS = {
         env_var="RESEND_API_KEY",
         tools=["send_email"],
         node_types=[],
-        required=False,
+        required=True,
         startup_required=False,
         help_url="https://resend.com/api-keys",
         description="API key for Resend email service",
@@ -36,8 +36,7 @@ EMAIL_CREDENTIALS = {
     "google": CredentialSpec(
         env_var="GOOGLE_ACCESS_TOKEN",
         tools=[
-            # send_email is excluded: it's a multi-provider tool that checks
-            # credentials at runtime based on the provider parameter.
+            "send_email",
             "gmail_reply_email",
             "gmail_list_messages",
             "gmail_get_message",
@@ -45,6 +44,9 @@ EMAIL_CREDENTIALS = {
             "gmail_modify_message",
             "gmail_batch_modify_messages",
             "gmail_batch_get_messages",
+            "gmail_create_draft",
+            "gmail_list_labels",
+            "gmail_create_label",
         ],
         node_types=[],
         required=True,

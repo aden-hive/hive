@@ -5,7 +5,7 @@ Focused on minimal success and failure scenarios.
 
 import pytest
 
-from framework.graph.edge import EdgeCondition, EdgeSpec, GraphSpec
+from framework.graph.edge import GraphSpec
 from framework.graph.executor import GraphExecutor
 from framework.graph.goal import Goal
 from framework.graph.node import NodeResult, NodeSpec
@@ -13,6 +13,8 @@ from framework.graph.node import NodeResult, NodeSpec
 
 # ---- Dummy runtime (no real logging) ----
 class DummyRuntime:
+    execution_id = ""
+
     def start_run(self, **kwargs):
         return "run-1"
 
@@ -49,7 +51,7 @@ async def test_executor_single_node_success():
                 id="n1",
                 name="node1",
                 description="test node",
-                node_type="llm_generate",
+                node_type="event_loop",
                 input_keys=[],
                 output_keys=["result"],
                 max_retries=0,
@@ -104,7 +106,7 @@ async def test_executor_single_node_failure():
                 id="n1",
                 name="node1",
                 description="failing node",
-                node_type="llm_generate",
+                node_type="event_loop",
                 input_keys=[],
                 output_keys=["result"],
                 max_retries=0,
@@ -157,79 +159,6 @@ class FakeEventBus:
 
 
 @pytest.mark.asyncio
-async def test_executor_emits_node_events():
-    """Executor should emit NODE_LOOP_STARTED/COMPLETED for each non-event_loop node."""
-    runtime = DummyRuntime()
-    event_bus = FakeEventBus()
-
-    graph = GraphSpec(
-        id="graph-ev",
-        goal_id="g-ev",
-        nodes=[
-            NodeSpec(
-                id="n1",
-                name="first",
-                description="first node",
-                node_type="llm_generate",
-                input_keys=[],
-                output_keys=["result"],
-                max_retries=0,
-            ),
-            NodeSpec(
-                id="n2",
-                name="second",
-                description="second node",
-                node_type="llm_generate",
-                input_keys=["result"],
-                output_keys=["result"],
-                max_retries=0,
-            ),
-        ],
-        edges=[
-            EdgeSpec(
-                id="e1",
-                source="n1",
-                target="n2",
-                condition=EdgeCondition.ON_SUCCESS,
-            ),
-        ],
-        entry_node="n1",
-        terminal_nodes=["n2"],
-    )
-
-    executor = GraphExecutor(
-        runtime=runtime,
-        node_registry={
-            "n1": SuccessNode(),
-            "n2": SuccessNode(),
-        },
-        event_bus=event_bus,
-        stream_id="test-stream",
-    )
-
-    goal = Goal(id="g-ev", name="event-test", description="test events")
-    result = await executor.execute(graph=graph, goal=goal)
-
-    assert result.success is True
-    assert result.path == ["n1", "n2"]
-
-    # Should have 5 events: started/completed for n1, edge_traversed, then started/completed for n2
-    assert len(event_bus.events) == 5
-    assert event_bus.events[0] == ("started", {"stream_id": "test-stream", "node_id": "n1"})
-    assert event_bus.events[1] == (
-        "completed",
-        {"stream_id": "test-stream", "node_id": "n1", "iterations": 1},
-    )
-    assert event_bus.events[2] == (
-        "edge_traversed",
-        {"stream_id": "test-stream", "source_node": "n1", "target_node": "n2"},
-    )
-    assert event_bus.events[3] == ("started", {"stream_id": "test-stream", "node_id": "n2"})
-    assert event_bus.events[4] == (
-        "completed",
-        {"stream_id": "test-stream", "node_id": "n2", "iterations": 1},
-    )
-
 
 # ---- Fake event_loop node (registered, so executor won't emit for it) ----
 class FakeEventLoopNode:
@@ -292,7 +221,7 @@ async def test_executor_no_events_without_event_bus():
                 id="n1",
                 name="node1",
                 description="test node",
-                node_type="llm_generate",
+                node_type="event_loop",
                 input_keys=[],
                 output_keys=["result"],
                 max_retries=0,

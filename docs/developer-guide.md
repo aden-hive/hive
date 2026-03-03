@@ -278,7 +278,7 @@ claude> /hive-test
 2. **Design the Workflow**
 
    - The skill guides you through defining nodes
-   - Each node is a unit of work (LLM call, function, router)
+   - Each node is a unit of work (LLM call with event_loop)
    - Edges define how execution flows
 
 3. **Generate the Agent**
@@ -314,7 +314,7 @@ If you prefer to build agents manually:
     {
       "node_id": "analyze",
       "name": "Analyze Ticket",
-      "node_type": "llm_generate",
+      "node_type": "event_loop",
       "system_prompt": "Analyze this support ticket...",
       "input_keys": ["ticket_content"],
       "output_keys": ["category", "priority"]
@@ -610,7 +610,7 @@ def my_custom_tool(param1: str, param2: int) -> Dict[str, Any]:
   "nodes": [
     {
       "node_id": "use_tool",
-      "node_type": "function",
+      "node_type": "event_loop",
       "tools": ["my_custom_tool"],
       ...
     }
