@@ -98,6 +98,8 @@ from .yahoo_finance_tool import register_tools as register_yahoo_finance
 from .pinecone_tool import register_tools as register_pinecone
 from .plaid_tool import register_tools as register_plaid
 from .trello_tool import register_tools as register_trello
+from .cloudinary_tool import register_tools as register_cloudinary
+from .reddit_tool import register_tools as register_reddit
 from .zoho_crm_tool import register_tools as register_zoho_crm
 
 # Web and PDF tools
@@ -244,6 +246,12 @@ def register_all_tools(
 
     # Confluence wiki & knowledge management
     register_confluence(mcp, credentials=credentials)
+
+    # Cloudinary image/video management
+    register_cloudinary(mcp, credentials=credentials)
+
+    # Reddit community content monitoring
+    register_reddit(mcp, credentials=credentials)
 
     # Return the list of all registered tool names
     return list(mcp._tool_manager._tools.keys())

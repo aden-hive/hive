@@ -112,6 +112,8 @@ from .youtube import YOUTUBE_CREDENTIALS
 from .pinecone import PINECONE_CREDENTIALS
 from .plaid import PLAID_CREDENTIALS
 from .trello import TRELLO_CREDENTIALS
+from .cloudinary import CLOUDINARY_CREDENTIALS
+from .reddit import REDDIT_CREDENTIALS
 from .zoho_crm import ZOHO_CRM_CREDENTIALS
 
 # Merged registry of all credentials
@@ -158,6 +160,8 @@ CREDENTIAL_SPECS = {
     **PLAID_CREDENTIALS,
     **TRELLO_CREDENTIALS,
     **CONFLUENCE_CREDENTIALS,
+    **CLOUDINARY_CREDENTIALS,
+    **REDDIT_CREDENTIALS,
     **ZOHO_CRM_CREDENTIALS,
 }
 
@@ -227,5 +231,7 @@ __all__ = [
     "PLAID_CREDENTIALS",
     "TRELLO_CREDENTIALS",
     "CONFLUENCE_CREDENTIALS",
+    "CLOUDINARY_CREDENTIALS",
+    "REDDIT_CREDENTIALS",
     "ZOHO_CRM_CREDENTIALS",
 ]
