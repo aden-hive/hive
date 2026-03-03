@@ -35,6 +35,7 @@ class MockLLMProvider(LLMProvider):
         max_tokens=1024,
         response_format=None,
         json_mode=False,
+        max_retries=None,
     ):
         self.complete_calls.append(
             {
@@ -50,9 +51,6 @@ class MockLLMProvider(LLMProvider):
             input_tokens=100,
             output_tokens=50,
         )
-
-    def complete_with_tools(self, messages, system, tools, tool_executor, max_iterations=10):
-        raise NotImplementedError("Tool use not needed for judge tests")
 
 
 # ============================================================================

@@ -136,7 +136,8 @@ class EncryptedFileStorage(CredentialStorage):
             from cryptography.fernet import Fernet
         except ImportError as e:
             raise ImportError(
-                "Encrypted storage requires 'cryptography'. Install with: pip install cryptography"
+                "Encrypted storage requires 'cryptography'. "
+                "Install with: uv pip install cryptography"
             ) from e
 
         self.base_path = Path(base_path or self.DEFAULT_PATH).expanduser()

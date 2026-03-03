@@ -6,13 +6,13 @@ but require mandatory user approval before being stored.
 """
 
 from datetime import datetime
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 
 from pydantic import BaseModel, Field
 
 
-class ApprovalStatus(str, Enum):
+class ApprovalStatus(StrEnum):
     """Status of user approval for a generated test."""
 
     PENDING = "pending"  # Awaiting user review
@@ -21,7 +21,7 @@ class ApprovalStatus(str, Enum):
     REJECTED = "rejected"  # User declined (with reason)
 
 
-class TestType(str, Enum):
+class TestType(StrEnum):
     """Type of test based on what it validates."""
 
     __test__ = False  # Not a pytest test class

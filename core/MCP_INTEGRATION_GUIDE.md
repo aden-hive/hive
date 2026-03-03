@@ -119,7 +119,7 @@ builder = WorkflowBuilder()
 builder.add_node(
     node_id="researcher",
     name="Web Researcher",
-    node_type="llm_tool_use",
+    node_type="event_loop",
     system_prompt="Research the topic using web_search",
     tools=["web_search"],  # Tool from tools MCP server
     input_keys=["topic"],
@@ -137,7 +137,7 @@ Tools from MCP servers can be referenced in your agent.json just like built-in t
     {
       "id": "searcher",
       "name": "Web Searcher",
-      "node_type": "llm_tool_use",
+      "node_type": "event_loop",
       "system_prompt": "Search for information about {topic}",
       "tools": ["web_search", "web_scrape"],
       "input_keys": ["topic"],

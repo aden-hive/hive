@@ -5,7 +5,7 @@ This provides backward compatibility, allowing existing tools to work unchanged
 while enabling new features (template resolution, multi-key credentials, etc.).
 
 Usage:
-    from core.framework.credentials import CredentialStore
+    from framework.credentials import CredentialStore
     from aden_tools.credentials.store_adapter import CredentialStoreAdapter
 
     # Create new credential store
@@ -31,7 +31,7 @@ from typing import TYPE_CHECKING
 from .base import CredentialError, CredentialSpec
 
 if TYPE_CHECKING:
-    from core.framework.credentials import CredentialStore
+    from framework.credentials import CredentialStore
 
 
 class CredentialStoreAdapter:
@@ -85,7 +85,7 @@ class CredentialStoreAdapter:
 
     # --- Existing CredentialManager API ---
 
-    def get(self, name: str) -> str | None:
+    def get(self, name: str, account: str | None = None) -> str | None:
         """
         Get a credential value by logical name.
 
@@ -94,6 +94,10 @@ class CredentialStoreAdapter:
 
         Args:
             name: Logical credential name (e.g., "brave_search")
+            account: Optional alias for per-call routing to a specific named local
+                account (e.g. "work"). When provided, looks up the named account
+                from LocalCredentialRegistry before falling through to the store.
+                This mirrors the ``account=`` routing available for Aden credentials.
 
         Returns:
             The credential value, or None if not set
@@ -103,6 +107,16 @@ class CredentialStoreAdapter:
         """
         if name not in self._specs:
             raise KeyError(f"Unknown credential '{name}'. Available: {list(self._specs.keys())}")
+
+        if account is not None:
+            try:
+                from framework.credentials.local.registry import LocalCredentialRegistry
+
+                key = LocalCredentialRegistry.default().get_key(name, account)
+                if key is not None:
+                    return key
+            except Exception:
+                pass  # Fall through to standard store lookup
 
         return self._store.get(name)
 
@@ -272,6 +286,111 @@ class CredentialStoreAdapter:
         """Resolve credential templates in query parameters."""
         return self._store.resolve_params(params)
 
+    def list_accounts(self, provider_name: str) -> list[dict]:
+        """List all accounts for a provider type."""
+        return self._store.list_accounts(provider_name)
+
+    def get_all_account_info(self) -> list[dict]:
+        """Collect all accounts across all configured providers.
+
+        Includes both Aden OAuth accounts and named local API key accounts.
+        Deduplicates by (provider, alias) to avoid listing the same account
+        twice when it appears in both stores.
+        """
+        accounts: list[dict] = []
+        seen_specs: set[str] = set()
+        seen_accounts: set[tuple[str, str]] = set()
+
+        for name, spec in self._specs.items():
+            provider = spec.credential_id or name
+            if provider in seen_specs or not self.is_available(name):
+                continue
+            seen_specs.add(provider)
+            for acct in self._store.list_accounts(provider):
+                key = (acct.get("provider", ""), acct.get("alias", ""))
+                if key not in seen_accounts:
+                    seen_accounts.add(key)
+                    accounts.append(acct)
+
+        # Include named local API key accounts
+        for acct in self.list_local_accounts():
+            key = (acct.get("provider", ""), acct.get("alias", ""))
+            if key not in seen_accounts:
+                seen_accounts.add(key)
+                accounts.append(acct)
+
+        return accounts
+
+    def get_tool_provider_map(self) -> dict[str, str]:
+        """Map tool names to provider names for account routing.
+
+        Returns:
+            Dict mapping tool_name -> provider_name
+            (e.g. {"gmail_list_messages": "google", "slack_send_message": "slack"})
+        """
+        return dict(self._tool_to_cred)
+
+    def get_by_alias(self, provider_name: str, alias: str) -> str | None:
+        """Resolve a specific account's token by alias."""
+        cred = self._store.get_credential_by_alias(provider_name, alias)
+        return cred.get_default_key() if cred else None
+
+    def get_by_identity(self, provider_name: str, label: str) -> str | None:
+        """Alias for get_by_alias (backward compat)."""
+        return self.get_by_alias(provider_name, label)
+
+    # --- Local credential registry ---
+
+    def list_local_accounts(self, credential_id: str | None = None) -> list[dict]:
+        """
+        List named local API key accounts from LocalCredentialRegistry.
+
+        Args:
+            credential_id: If given, filter to this credential type only.
+
+        Returns:
+            List of account dicts (same shape as Aden account dicts, source='local').
+        """
+        try:
+            from framework.credentials.local.registry import LocalCredentialRegistry
+
+            registry = LocalCredentialRegistry.default()
+            return [info.to_account_dict() for info in registry.list_accounts(credential_id)]
+        except Exception:
+            return []
+
+    def activate_local_account(self, credential_id: str, alias: str) -> bool:
+        """
+        Inject a named local account's API key into the environment for this session.
+
+        This enables session-level routing: select an account → inject its key as
+        the env var that tools already read. No tool signature changes required.
+
+        Args:
+            credential_id: Logical credential name (e.g. "brave_search").
+            alias: Account alias (e.g. "work").
+
+        Returns:
+            True if the key was found and injected, False otherwise.
+        """
+        import os
+
+        try:
+            from framework.credentials.local.registry import LocalCredentialRegistry
+
+            key = LocalCredentialRegistry.default().get_key(credential_id, alias)
+            if key is None:
+                return False
+
+            spec = self._specs.get(credential_id)
+            if spec is None:
+                return False
+
+            os.environ[spec.env_var] = key
+            return True
+        except Exception:
+            return False
+
     @property
     def store(self) -> CredentialStore:
         """Access the underlying credential store for advanced operations."""
@@ -349,6 +468,106 @@ class CredentialStoreAdapter:
     # --- Factory Methods ---
 
     @classmethod
+    def default(
+        cls,
+        specs: dict[str, CredentialSpec] | None = None,
+    ) -> CredentialStoreAdapter:
+        """Create adapter with encrypted storage primary and env var fallback.
+
+        When ADEN_API_KEY is set, builds the store with AdenSyncProvider and
+        AdenCachedStorage so that OAuth credentials (Google, HubSpot, Slack)
+        auto-refresh via the Aden server.  Non-Aden credentials (brave_search,
+        anthropic, resend) still resolve from environment variables.
+
+        When ADEN_API_KEY is not set, behaves identically to before.
+        """
+        import logging
+        import os
+
+        from framework.credentials import CredentialStore
+        from framework.credentials.storage import (
+            CompositeStorage,
+            EncryptedFileStorage,
+            EnvVarStorage,
+        )
+
+        log = logging.getLogger(__name__)
+
+        if specs is None:
+            from . import CREDENTIAL_SPECS
+
+            specs = CREDENTIAL_SPECS
+
+        env_mapping = {name: spec.env_var for name, spec in specs.items()}
+
+        # --- Aden sync branch ---
+        # Note: we don't use CredentialStore.with_aden_sync() here because it
+        # only wraps EncryptedFileStorage.  We need CompositeStorage (encrypted
+        # + env var fallback) so non-Aden credentials like brave_search still
+        # resolve from environment variables.
+        aden_api_key = os.environ.get("ADEN_API_KEY")
+        if aden_api_key:
+            try:
+                from framework.credentials.aden import (
+                    AdenCachedStorage,
+                    AdenClientConfig,
+                    AdenCredentialClient,
+                    AdenSyncProvider,
+                )
+
+                # Local storage: encrypted primary + env var fallback
+                encrypted = EncryptedFileStorage()
+                env = EnvVarStorage(env_mapping)
+                local_composite = CompositeStorage(primary=encrypted, fallbacks=[env])
+
+                # Aden components
+                client = AdenCredentialClient(
+                    AdenClientConfig(
+                        base_url=os.environ.get("ADEN_API_URL", "https://api.adenhq.com"),
+                    )
+                )
+                provider = AdenSyncProvider(client=client)
+
+                # AdenCachedStorage wraps composite, giving Aden priority
+                cached_storage = AdenCachedStorage(
+                    local_storage=local_composite,
+                    aden_provider=provider,
+                    cache_ttl_seconds=300,
+                )
+
+                store = CredentialStore(
+                    storage=cached_storage,
+                    providers=[provider],
+                    auto_refresh=True,
+                )
+
+                # Initial sync: populate local cache from Aden
+                try:
+                    synced = provider.sync_all(store)
+                    log.info("Aden credential sync complete: %d credentials synced", synced)
+                except Exception as e:
+                    log.warning("Aden initial sync failed (will retry on access): %s", e)
+
+                return cls(store=store, specs=specs)
+
+            except Exception as e:
+                log.warning(
+                    "Aden credential sync unavailable, falling back to default storage: %s", e
+                )
+
+        # --- Default branch (no ADEN_API_KEY or Aden setup failed) ---
+        try:
+            encrypted = EncryptedFileStorage()
+            env = EnvVarStorage(env_mapping)
+            composite = CompositeStorage(primary=encrypted, fallbacks=[env])
+            store = CredentialStore(storage=composite)
+        except Exception as e:
+            log.warning("Encrypted credential storage unavailable, falling back to env vars: %s", e)
+            store = CredentialStore.with_env_storage(env_mapping)
+
+        return cls(store=store, specs=specs)
+
+    @classmethod
     def for_testing(
         cls,
         overrides: dict[str, str],
@@ -368,7 +587,7 @@ class CredentialStoreAdapter:
             credentials = CredentialStoreAdapter.for_testing({"brave_search": "test-key"})
             assert credentials.get("brave_search") == "test-key"
         """
-        from core.framework.credentials import CredentialStore
+        from framework.credentials import CredentialStore
 
         # Convert to CredentialStore.for_testing format
         # Simple credentials get a single "api_key" key
@@ -395,13 +614,14 @@ class CredentialStoreAdapter:
         Returns:
             CredentialStoreAdapter using env vars for storage
         """
-        from core.framework.credentials import CredentialStore
+        from framework.credentials import CredentialStore
 
         # Build env mapping from specs if not provided
-        if env_mapping is None and specs is None:
-            from . import CREDENTIAL_SPECS
+        if env_mapping is None:
+            if specs is None:
+                from . import CREDENTIAL_SPECS
 
-            specs = CREDENTIAL_SPECS
+                specs = CREDENTIAL_SPECS
             env_mapping = {name: spec.env_var for name, spec in specs.items()}
 
         store = CredentialStore.with_env_storage(env_mapping)

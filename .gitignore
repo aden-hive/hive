@@ -46,6 +46,7 @@ coverage/
 
 # TypeScript
 *.tsbuildinfo
+vite.config.d.ts
 
 # Python
 __pycache__/
@@ -54,7 +55,6 @@ __pycache__/
 *.egg-info/
 .eggs/
 *.egg
-uv.lock
 
 # Generated runtime data
 core/data/
@@ -69,4 +69,12 @@ exports/*
 
 .agent-builder-sessions/*
 
+.claude/settings.local.json
+
 .venv
+
+docs/github-issues/*
+core/tests/*dumps/*
+
+screenshots/*
+

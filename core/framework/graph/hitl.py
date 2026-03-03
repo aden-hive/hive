@@ -6,11 +6,11 @@ where agents need to gather input from humans.
 """
 
 from dataclasses import dataclass, field
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 
 
-class HITLInputType(str, Enum):
+class HITLInputType(StrEnum):
     """Type of input expected from human."""
 
     FREE_TEXT = "free_text"  # Open-ended text response
@@ -197,7 +197,7 @@ Example format:
 
             client = anthropic.Anthropic(api_key=api_key)
             message = client.messages.create(
-                model="claude-3-5-haiku-20241022",
+                model="claude-haiku-4-5-20251001",
                 max_tokens=500,
                 messages=[{"role": "user", "content": prompt}],
             )
