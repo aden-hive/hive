@@ -119,6 +119,8 @@ from .zendesk_tool import register_tools as register_zendesk
 from .zoho_crm_tool import register_tools as register_zoho_crm
 from .terraform_tool import register_tools as register_terraform
 from .lusha_tool import register_tools as register_lusha
+from .powerbi_tool import register_tools as register_powerbi
+from .snowflake_tool import register_tools as register_snowflake
 
 # Web and PDF tools
 from .wikipedia_tool import register_tools as register_wikipedia
@@ -324,6 +326,12 @@ def register_all_tools(
 
     # Lusha B2B contact and company data
     register_lusha(mcp, credentials=credentials)
+
+    # Power BI reports and datasets
+    register_powerbi(mcp, credentials=credentials)
+
+    # Snowflake SQL queries
+    register_snowflake(mcp, credentials=credentials)
 
     # Return the list of all registered tool names
     return list(mcp._tool_manager._tools.keys())

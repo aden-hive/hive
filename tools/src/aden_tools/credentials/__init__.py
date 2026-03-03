@@ -132,6 +132,8 @@ from .zendesk import ZENDESK_CREDENTIALS
 from .zoho_crm import ZOHO_CRM_CREDENTIALS
 from .terraform import TERRAFORM_CREDENTIALS
 from .lusha import LUSHA_CREDENTIALS
+from .powerbi import POWERBI_CREDENTIALS
+from .snowflake import SNOWFLAKE_CREDENTIALS
 
 # Merged registry of all credentials
 CREDENTIAL_SPECS = {
@@ -197,6 +199,8 @@ CREDENTIAL_SPECS = {
     **ZOHO_CRM_CREDENTIALS,
     **TERRAFORM_CREDENTIALS,
     **LUSHA_CREDENTIALS,
+    **POWERBI_CREDENTIALS,
+    **SNOWFLAKE_CREDENTIALS,
 }
 
 __all__ = [
@@ -285,4 +289,6 @@ __all__ = [
     "ZOHO_CRM_CREDENTIALS",
     "TERRAFORM_CREDENTIALS",
     "LUSHA_CREDENTIALS",
+    "POWERBI_CREDENTIALS",
+    "SNOWFLAKE_CREDENTIALS",
 ]
