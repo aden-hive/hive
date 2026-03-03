@@ -159,11 +159,7 @@ class CredentialValidationResult:
                     f"  {c.env_var} for {_label(c)}"
                     f"\n    Connect this integration at hive.adenhq.com first."
                 )
-        lines.append(
-            "\nTo fix: run /hive-credentials in Claude Code."
-            "\nIf you've already set up credentials, "
-            "restart your terminal to load them."
-        )
+        lines.append("\nIf you've already set up credentials, restart your terminal to load them.")
         return "\n".join(lines)
 
 

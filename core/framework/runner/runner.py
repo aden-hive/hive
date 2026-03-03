@@ -12,7 +12,6 @@ from typing import TYPE_CHECKING, Any
 from framework.config import get_hive_config, get_preferred_model
 from framework.credentials.validation import (
     ensure_credential_key_env as _ensure_credential_key_env,
-    validate_agent_credentials,
 )
 from framework.graph import Goal
 from framework.graph.edge import (
@@ -25,6 +24,7 @@ from framework.graph.edge import (
 from framework.graph.executor import ExecutionResult
 from framework.graph.node import NodeSpec
 from framework.llm.provider import LLMProvider, Tool
+from framework.runner.preload_validation import run_preload_validation
 from framework.runner.tool_registry import ToolRegistry
 from framework.runtime.agent_runtime import AgentRuntime, AgentRuntimeConfig, create_agent_runtime
 from framework.runtime.execution_stream import EntryPointSpec
@@ -679,9 +679,13 @@ class AgentRunner:
         self._agent_runtime: AgentRuntime | None = None
         self._uses_async_entry_points = self.graph.has_async_entry_points()
 
-        # Validate credentials before spawning MCP servers.
+        # Pre-load validation: structural checks + credentials.
         # Fails fast with actionable guidance — no MCP noise on screen.
-        self._validate_credentials()
+        run_preload_validation(
+            self.graph,
+            interactive=self._interactive,
+            skip_credential_validation=self.skip_credential_validation,
+        )
 
         # Auto-discover tools from tools.py
         tools_path = agent_path / "tools.py"
@@ -697,54 +701,6 @@ class AgentRunner:
         mcp_config_path = agent_path / "mcp_servers.json"
         if mcp_config_path.exists():
             self._load_mcp_servers_from_config(mcp_config_path)
-
-    def _validate_credentials(self) -> None:
-        """Check that required credentials are available before spawning MCP servers.
-
-        If ``interactive`` is True and stdin is a TTY, automatically launches
-        the interactive credential setup flow so the user can fix the issue
-        in-place.  Re-validates after setup succeeds.
-
-        When ``interactive`` is False (e.g. TUI callers), the CredentialError
-        propagates immediately so the caller can handle it with its own UI.
-        """
-        if self.skip_credential_validation:
-            return
-
-        if not self._interactive:
-            # Let the CredentialError propagate — caller handles UI.
-            validate_agent_credentials(self.graph.nodes)
-            return
-
-        import sys
-
-        from framework.credentials.models import CredentialError
-
-        try:
-            validate_agent_credentials(self.graph.nodes)
-            return  # All good
-        except CredentialError as e:
-            if not sys.stdin.isatty():
-                raise
-
-            # Interactive: show the error then enter credential setup
-            print(f"\n{e}", file=sys.stderr)
-
-            from framework.credentials.validation import build_setup_session_from_error
-
-            session = build_setup_session_from_error(e, nodes=self.graph.nodes)
-            if not session.missing:
-                raise
-
-            result = session.run_interactive()
-            if not result.success:
-                raise CredentialError(
-                    "Credential setup incomplete. "
-                    "Run again after configuring the required credentials."
-                ) from None
-
-            # Re-validate after setup
-            validate_agent_credentials(self.graph.nodes)
 
     @staticmethod
     def _import_agent_module(agent_path: Path):
