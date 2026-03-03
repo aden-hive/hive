@@ -1,4 +1,3 @@
-cat > power_bi_tool.py << 'EOF'
 """
 Power BI Tool - Dataset Refresh and Report Export
 
@@ -244,4 +243,3 @@ def register_tools(
             return {"error": "Request timed out"}
         except httpx.RequestError as e:
             return {"error": f"Network error: {e}"}
-EOF
