@@ -1178,6 +1178,42 @@ class AgentRuntime:
         """Get the registration for a specific graph (or None)."""
         return self._graphs.get(graph_id)
 
+    def cancel_all_tasks(self, loop: asyncio.AbstractEventLoop) -> bool:
+        """Cancel all running execution tasks across all graphs.
+
+        Schedules the cancellation on *loop* (the agent event loop) so
+        that ``_execution_tasks`` is only read from the thread that owns
+        it, avoiding cross-thread dict access.  Safe to call from any
+        thread (e.g. the Textual UI thread).
+
+        Blocks the caller for up to 5 seconds waiting for the result.
+        For async callers, use :meth:`cancel_all_tasks_async` instead.
+        """
+        future = asyncio.run_coroutine_threadsafe(self.cancel_all_tasks_async(), loop)
+        try:
+            return future.result(timeout=5)
+        except Exception:
+            logger.warning("cancel_all_tasks: timed out or failed")
+            return False
+
+    async def cancel_all_tasks_async(self) -> bool:
+        """Cancel all running execution tasks (runs on the agent loop).
+
+        Iterates ``_execution_tasks`` and calls ``task.cancel()`` directly.
+        Must be awaited on the agent event loop so dict access is
+        thread-safe.  Returns True if at least one task was cancelled.
+        """
+        cancelled = False
+        for gid in self.list_graphs():
+            reg = self.get_graph_registration(gid)
+            if reg:
+                for stream in reg.streams.values():
+                    for task in list(stream._execution_tasks.values()):
+                        if task and not task.done():
+                            task.cancel()
+                            cancelled = True
+        return cancelled
+
     def _get_primary_session_state(
         self,
         exclude_entry_point: str,
