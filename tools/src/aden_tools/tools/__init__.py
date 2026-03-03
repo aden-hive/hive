@@ -81,6 +81,7 @@ from .web_search_tool import register_tools as register_web_search
 
 # Web and PDF tools
 from .wikipedia_tool import register_tools as register_wikipedia
+from .youtube_tool import register_tools as register_youtube
 
 
 def register_all_tools(
@@ -160,6 +161,9 @@ def register_all_tools(
 
     # Postgres tool
     register_postgres(mcp, credentials=credentials)
+
+    # YouTube tool
+    register_youtube(mcp, credentials=credentials)
 
     # Return the list of all registered tool names
     return list(mcp._tool_manager._tools.keys())
