@@ -9,7 +9,7 @@ import type { GraphNode } from "@/components/AgentGraph";
 export const TAB_STORAGE_KEY = "hive:workspace-tabs";
 
 export interface PersistedTabState {
-  tabs: Array<{ id: string; agentType: string; label: string; backendSessionId?: string }>;
+  tabs: Array<{ id: string; agentType: string; tabKey?: string; label: string; backendSessionId?: string }>;
   activeSessionByAgent: Record<string, string>;
   activeWorker: string;
   sessions?: Record<string, { messages: ChatMessage[]; graphNodes: GraphNode[] }>;

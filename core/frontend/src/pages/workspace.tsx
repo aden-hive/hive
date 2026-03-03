@@ -20,6 +20,13 @@ import { ApiError } from "@/api/client";
 
 const makeId = () => Math.random().toString(36).slice(2, 9);
 
+/**
+ * Strip the instance suffix added when multiple tabs share the same agentType.
+ * e.g. "exports/deep_research::abc123" → "exports/deep_research"
+ * First-instance keys (no "::") are returned unchanged.
+ */
+const baseAgentType = (key: string): string => key.split("::")[0];
+
 /** Format seconds into a compact countdown string. */
 function formatCountdown(totalSecs: number): string {
   const h = Math.floor(totalSecs / 3600);
@@ -55,6 +62,10 @@ function TimerCountdown({ initialSeconds }: { initialSeconds: number }) {
 interface Session {
   id: string;
   agentType: string;
+  /** The key used in sessionsByAgent / agentStates for this specific tab instance.
+   * Equals agentType for the first tab; equals "agentType::frontendSessionId" for
+   * additional tabs opened for the same agent so each gets its own isolated slot. */
+  tabKey?: string;
   label: string;
   messages: ChatMessage[];
   graphNodes: GraphNode[];
@@ -291,10 +302,14 @@ export default function Workspace() {
 
     if (persisted) {
       for (const tab of persisted.tabs) {
-        if (!initial[tab.agentType]) initial[tab.agentType] = [];
+        // tabKey is the actual key used in sessionsByAgent (may contain "::" suffix).
+        // Fall back to agentType for tabs persisted before this field was added.
+        const tabKey = tab.tabKey || tab.agentType;
+        if (!initial[tabKey]) initial[tabKey] = [];
         const session = createSession(tab.agentType, tab.label);
         session.id = tab.id;
         session.backendSessionId = tab.backendSessionId;
+        session.tabKey = tab.tabKey; // restore so future persistence uses correct key
         // Restore messages and graph from localStorage (up to 50 messages).
         // If the backend session is still alive, loadAgentForType may
         // append additional messages fetched from the server.
@@ -303,7 +318,7 @@ export default function Workspace() {
           session.messages = cached.messages || [];
           session.graphNodes = cached.graphNodes || [];
         }
-        initial[tab.agentType].push(session);
+        initial[tabKey].push(session);
       }
     }
 
@@ -403,11 +418,14 @@ export default function Workspace() {
     const sessions: Record<string, { messages: ChatMessage[]; graphNodes: GraphNode[] }> = {};
     for (const agentSessions of Object.values(sessionsByAgent)) {
       for (const s of agentSessions) {
+        const tKey = s.tabKey || s.agentType;
         tabs.push({
           id: s.id,
           agentType: s.agentType,
+          tabKey: s.tabKey,
           label: s.label,
-          backendSessionId: s.backendSessionId || agentStates[s.agentType]?.sessionId || undefined,
+          // agentStates is keyed by tabKey (unique per tab), not by base agentType
+          backendSessionId: s.backendSessionId || agentStates[tKey]?.sessionId || undefined,
         });
         sessions[s.id] = { messages: s.messages, graphNodes: s.graphNodes };
       }
@@ -473,7 +491,10 @@ export default function Workspace() {
   // --- Agent loading: loadAgentForType ---
   const loadingRef = useRef(new Set<string>());
   const loadAgentForType = useCallback(async (agentType: string) => {
-    if (agentType === "new-agent") {
+    // agentType may be a unique composite key ("exports/foo::sessionId") for additional
+    // tabs — extract the real agent path for selector checks and API calls.
+    const agentPath = baseAgentType(agentType);
+    if (agentPath === "new-agent") {
       // Create a queen-only session (no worker) for agent building
       updateAgentState(agentType, { loading: true, error: null, ready: false, sessionId: null });
       try {
@@ -616,7 +637,7 @@ export default function Workspace() {
         }
 
         try {
-          liveSession = await sessionsApi.create(agentType);
+          liveSession = await sessionsApi.create(agentPath);
         } catch (loadErr: unknown) {
           // 424 = credentials required — open the credentials modal
           if (loadErr instanceof ApiError && loadErr.status === 424) {
@@ -662,7 +683,7 @@ export default function Workspace() {
       // At this point liveSession is guaranteed set — if both reconnect and create
       // failed, the throw inside the catch exits the outer try block.
       const session = liveSession!;
-      const displayName = formatAgentDisplayName(session.worker_name || agentType);
+      const displayName = formatAgentDisplayName(session.worker_name || agentPath);
       updateAgentState(agentType, { sessionId: session.session_id, displayName });
 
       // Update the session label
@@ -1471,13 +1492,13 @@ export default function Workspace() {
         case "worker_loaded": {
           const workerName = event.data?.worker_name as string | undefined;
           const agentPathFromEvent = event.data?.agent_path as string | undefined;
-          const displayName = formatAgentDisplayName(workerName || agentType);
+          const displayName = formatAgentDisplayName(workerName || baseAgentType(agentType));
 
           // Invalidate cached credential requirements so the modal fetches
           // fresh data the next time it opens (the new agent may have
           // different credential needs than the previous one).
           clearCredentialCache(agentPathFromEvent);
-          clearCredentialCache(agentType);
+          clearCredentialCache(baseAgentType(agentType));
 
           // Update agent state: new display name, reset graph so topology refetch triggers
           updateAgentState(agentType, {
@@ -1534,7 +1555,7 @@ export default function Workspace() {
   const activeSession = currentSessions.find(s => s.id === activeSessionId) || currentSessions[0];
 
   const currentGraph = activeSession
-    ? { nodes: activeSession.graphNodes, title: activeAgentState?.displayName || formatAgentDisplayName(activeWorker) }
+    ? { nodes: activeSession.graphNodes, title: activeAgentState?.displayName || formatAgentDisplayName(baseAgentType(activeWorker)) }
     : { nodes: [] as GraphNode[], title: "" };
 
   // Build a flat list of all agent-type tabs for the tab bar
@@ -1736,22 +1757,35 @@ export default function Workspace() {
 
   // Create a new session for any agent type (used by NewTabPopover)
   const addAgentSession = useCallback((agentType: string, agentLabel?: string) => {
-    const sessions = sessionsByAgent[agentType] || [];
-    const newIndex = sessions.length + 1;
-    const existingCreds = sessions.length > 0 ? sessions[0].credentials : undefined;
+    // Count all existing open tabs for this base agent type (first tab uses agentType
+    // as key; subsequent tabs use "agentType::frontendSessionId" as unique keys).
+    const existingTabCount = Object.keys(sessionsByAgent).filter(
+      k => baseAgentType(k) === agentType && (sessionsByAgent[k] || []).length > 0,
+    ).length;
+
+    const newIndex = existingTabCount + 1;
+    const existingCreds = sessionsByAgent[agentType]?.[0]?.credentials;
     const displayLabel = agentLabel || formatAgentDisplayName(agentType);
     const label = newIndex === 1 ? displayLabel : `${displayLabel} #${newIndex}`;
     const newSession = createSession(agentType, label, existingCreds);
 
+    // First tab keeps agentType as its key (backward-compatible with all existing
+    // logic).  Additional tabs get a unique key so each has its own isolated
+    // agentStates slot, its own backend session, and its own tab-bar entry.
+    const tabKey = existingTabCount === 0 ? agentType : `${agentType}::${newSession.id}`;
+    if (tabKey !== agentType) {
+      newSession.tabKey = tabKey;
+    }
+
     setSessionsByAgent(prev => ({
       ...prev,
-      [agentType]: [...(prev[agentType] || []), newSession],
+      [tabKey]: [newSession],
     }));
-    setActiveSessionByAgent(prev => ({ ...prev, [agentType]: newSession.id }));
-    setActiveWorker(agentType);
+    setActiveSessionByAgent(prev => ({ ...prev, [tabKey]: newSession.id }));
+    setActiveWorker(tabKey);
   }, [sessionsByAgent]);
 
-  const activeWorkerLabel = activeAgentState?.displayName || formatAgentDisplayName(activeWorker);
+  const activeWorkerLabel = activeAgentState?.displayName || formatAgentDisplayName(baseAgentType(activeWorker));
 
 
   return (
