@@ -81,6 +81,7 @@ from .llm import LLM_CREDENTIALS
 from .news import NEWS_CREDENTIALS
 from .postgres import POSTGRES_CREDENTIALS
 from .razorpay import RAZORPAY_CREDENTIALS
+from .redis import REDIS_CREDENTIALS
 from .search import SEARCH_CREDENTIALS
 from .serpapi import SERPAPI_CREDENTIALS
 from .shell_config import (
@@ -117,9 +118,10 @@ CREDENTIAL_SPECS = {
     **BIGQUERY_CREDENTIALS,
     **CALCOM_CREDENTIALS,
     **STRIPE_CREDENTIALS,
-    **BREVO_CREDENTIALS,
-    **POSTGRES_CREDENTIALS,
-}
+    **BREVO_CREDENTIALS**,
+    **POSTGRES_CREDENTIALS**,
+    **REDIS_CREDENTIALS**,
+    }
 
 __all__ = [
     # Core classes
@@ -168,4 +170,5 @@ __all__ = [
     "STRIPE_CREDENTIALS",
     "BREVO_CREDENTIALS",
     "POSTGRES_CREDENTIALS",
+    "REDIS_CREDENTIALS",
 ]
