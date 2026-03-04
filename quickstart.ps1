@@ -1049,28 +1049,68 @@ switch ($num) {
         $providerName       = $ProviderMenuNames[$provIdx] -replace ' - .*', ''  # strip description
         $signupUrl          = $ProviderMenuUrls[$provIdx]
 
-        # Check if key is already set
-        $existingKey = [System.Environment]::GetEnvironmentVariable($SelectedEnvVar, "User")
-        if (-not $existingKey) { $existingKey = [System.Environment]::GetEnvironmentVariable($SelectedEnvVar, "Process") }
-        if (-not $existingKey) {
-            Write-Host ""
-            Write-Host "Get your API key from: " -NoNewline
-            Write-Color -Text $signupUrl -Color Cyan
-            Write-Host ""
-            $apiKey = Read-Host "Paste your $providerName API key (or press Enter to skip)"
+        # Prompt for key (allow replacement if already set) with verification + retry
+        while ($true) {
+            $existingKey = [System.Environment]::GetEnvironmentVariable($SelectedEnvVar, "User")
+            if (-not $existingKey) { $existingKey = [System.Environment]::GetEnvironmentVariable($SelectedEnvVar, "Process") }
+
+            if ($existingKey) {
+                $masked = $existingKey.Substring(0, [Math]::Min(4, $existingKey.Length)) + "..." + $existingKey.Substring([Math]::Max(0, $existingKey.Length - 4))
+                Write-Host ""
+                Write-Color -Text "  $([char]0x2B22) Current key: $masked" -Color Green
+                $apiKey = Read-Host "  Press Enter to keep, or paste a new key to replace"
+            } else {
+                Write-Host ""
+                Write-Host "Get your API key from: " -NoNewline
+                Write-Color -Text $signupUrl -Color Cyan
+                Write-Host ""
+                $apiKey = Read-Host "Paste your $providerName API key (or press Enter to skip)"
+            }
 
             if ($apiKey) {
                 [System.Environment]::SetEnvironmentVariable($SelectedEnvVar, $apiKey, "User")
                 Set-Item -Path "Env:\$SelectedEnvVar" -Value $apiKey
                 Write-Host ""
                 Write-Ok "API key saved as User environment variable: $SelectedEnvVar"
-                Write-Color -Text "  (Persisted for all future sessions)" -Color DarkGray
-            } else {
+
+                # Health check the new key
+                Write-Host "  Verifying API key... " -NoNewline
+                try {
+                    $hcResult = & uv run python (Join-Path $ScriptDir "scripts/check_llm_key.py") $SelectedProviderId $apiKey 2>$null
+                    $hcJson = $hcResult | ConvertFrom-Json
+                    if ($hcJson.valid -eq $true) {
+                        Write-Color -Text "ok" -Color Green
+                        break
+                    } elseif ($hcJson.valid -eq $false) {
+                        Write-Color -Text "failed" -Color Red
+                        Write-Warn $hcJson.message
+                        # Undo the save so user can retry cleanly
+                        [System.Environment]::SetEnvironmentVariable($SelectedEnvVar, $null, "User")
+                        Remove-Item -Path "Env:\$SelectedEnvVar" -ErrorAction SilentlyContinue
+                        Write-Host ""
+                        Read-Host "  Press Enter to try again"
+                        # loop back to key prompt
+                    } else {
+                        Write-Color -Text "--" -Color Yellow
+                        Write-Color -Text "  Could not verify key (network issue). The key has been saved." -Color DarkGray
+                        break
+                    }
+                } catch {
+                    Write-Color -Text "--" -Color Yellow
+                    Write-Color -Text "  Could not verify key (network issue). The key has been saved." -Color DarkGray
+                    break
+                }
+            } elseif (-not $existingKey) {
+                # No existing key and user skipped
                 Write-Host ""
                 Write-Warn "Skipped. Set the environment variable manually when ready:"
                 Write-Host "  [System.Environment]::SetEnvironmentVariable('$SelectedEnvVar', 'your-key', 'User')"
                 $SelectedEnvVar     = ""
                 $SelectedProviderId = ""
+                break
+            } else {
+                # User pressed Enter with existing key — keep it
+                break
             }
         }
     }
@@ -1086,26 +1126,67 @@ switch ($num) {
     }
 }
 
-# For ZAI subscription: prompt for API key if not already set
+# For ZAI subscription: prompt for API key (allow replacement if already set) with verification + retry
 if ($SubscriptionMode -eq "zai_code") {
-    $existingZai = [System.Environment]::GetEnvironmentVariable("ZAI_API_KEY", "User")
-    if (-not $existingZai) { $existingZai = $env:ZAI_API_KEY }
-    if (-not $existingZai) {
-        Write-Host ""
-        $apiKey = Read-Host "Paste your ZAI API key (or press Enter to skip)"
+    while ($true) {
+        $existingZai = [System.Environment]::GetEnvironmentVariable("ZAI_API_KEY", "User")
+        if (-not $existingZai) { $existingZai = $env:ZAI_API_KEY }
+
+        if ($existingZai) {
+            $masked = $existingZai.Substring(0, [Math]::Min(4, $existingZai.Length)) + "..." + $existingZai.Substring([Math]::Max(0, $existingZai.Length - 4))
+            Write-Host ""
+            Write-Color -Text "  $([char]0x2B22) Current ZAI key: $masked" -Color Green
+            $apiKey = Read-Host "  Press Enter to keep, or paste a new key to replace"
+        } else {
+            Write-Host ""
+            $apiKey = Read-Host "Paste your ZAI API key (or press Enter to skip)"
+        }
 
         if ($apiKey) {
             [System.Environment]::SetEnvironmentVariable("ZAI_API_KEY", $apiKey, "User")
             $env:ZAI_API_KEY = $apiKey
             Write-Host ""
             Write-Ok "ZAI API key saved as User environment variable"
-        } else {
+
+            # Health check the new key
+            Write-Host "  Verifying ZAI API key... " -NoNewline
+            try {
+                $hcResult = & uv run python (Join-Path $ScriptDir "scripts/check_llm_key.py") "zai" $apiKey "https://api.z.ai/api/coding/paas/v4" 2>$null
+                $hcJson = $hcResult | ConvertFrom-Json
+                if ($hcJson.valid -eq $true) {
+                    Write-Color -Text "ok" -Color Green
+                    break
+                } elseif ($hcJson.valid -eq $false) {
+                    Write-Color -Text "failed" -Color Red
+                    Write-Warn $hcJson.message
+                    # Undo the save so user can retry cleanly
+                    [System.Environment]::SetEnvironmentVariable("ZAI_API_KEY", $null, "User")
+                    Remove-Item -Path "Env:\ZAI_API_KEY" -ErrorAction SilentlyContinue
+                    Write-Host ""
+                    Read-Host "  Press Enter to try again"
+                    # loop back to key prompt
+                } else {
+                    Write-Color -Text "--" -Color Yellow
+                    Write-Color -Text "  Could not verify key (network issue). The key has been saved." -Color DarkGray
+                    break
+                }
+            } catch {
+                Write-Color -Text "--" -Color Yellow
+                Write-Color -Text "  Could not verify key (network issue). The key has been saved." -Color DarkGray
+                break
+            }
+        } elseif (-not $existingZai) {
+            # No existing key and user skipped
             Write-Host ""
             Write-Warn "Skipped. Add your ZAI API key later:"
             Write-Color -Text "  [System.Environment]::SetEnvironmentVariable('ZAI_API_KEY', 'your-key', 'User')" -Color Cyan
             $SelectedEnvVar     = ""
             $SelectedProviderId = ""
             $SubscriptionMode   = ""
+            break
+        } else {
+            # User pressed Enter with existing key — keep it
+            break
         }
     }
 }
