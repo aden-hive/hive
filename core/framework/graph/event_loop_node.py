@@ -14,9 +14,11 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Literal, Protocol, runtime_checkable
 
@@ -30,13 +32,51 @@ from framework.llm.stream_events import (
     ToolCallEvent,
 )
 from framework.runtime.event_bus import EventBus
+from framework.runtime.llm_debug_logger import log_llm_turn
 
 logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
+# Escalation receiver (temporary routing target for subagent → user input)
+# ---------------------------------------------------------------------------
+
+
+class _EscalationReceiver:
+    """Temporary receiver registered in node_registry for subagent escalation routing.
+
+    When a subagent calls ``report_to_parent(wait_for_response=True)``, the callback
+    creates one of these, registers it under a unique escalation ID in the executor's
+    ``node_registry``, and awaits ``wait()``.  The TUI / runner calls
+    ``inject_input(escalation_id, content)`` which the ``ExecutionStream`` routes here
+    via ``inject_event()`` — matching the same ``hasattr(node, "inject_event")`` check
+    used for regular ``EventLoopNode`` instances.
+    """
+
+    def __init__(self) -> None:
+        self._event = asyncio.Event()
+        self._response: str | None = None
+
+    async def inject_event(self, content: str, *, is_client_input: bool = False) -> None:
+        """Called by ExecutionStream.inject_input() when the user responds."""
+        self._response = content
+        self._event.set()
+
+    async def wait(self) -> str | None:
+        """Block until inject_event() delivers the user's response."""
+        await self._event.wait()
+        return self._response
+
+
+# ---------------------------------------------------------------------------
 # Judge protocol (simple 3-action interface for event loop evaluation)
 # ---------------------------------------------------------------------------
+
+
+class TurnCancelled(Exception):
+    """Raised when a turn is cancelled mid-stream."""
+
+    pass
 
 
 @dataclass
@@ -58,6 +98,43 @@ class JudgeProtocol(Protocol):
     async def evaluate(self, context: dict[str, Any]) -> JudgeVerdict: ...
 
 
+class SubagentJudge:
+    """Judge for subagent execution.
+
+    Accepts immediately when all required output keys are filled,
+    regardless of whether real tool calls were also made in the same turn.
+    On RETRY, reminds the subagent of its specific task with progressive
+    urgency based on remaining iterations.
+    """
+
+    def __init__(self, task: str, max_iterations: int = 10):
+        self._task = task
+        self._max_iterations = max_iterations
+
+    async def evaluate(self, context: dict[str, Any]) -> JudgeVerdict:
+        missing = context.get("missing_keys", [])
+        if not missing:
+            return JudgeVerdict(action="ACCEPT")
+
+        iteration = context.get("iteration", 0)
+        remaining = self._max_iterations - iteration - 1
+
+        if remaining <= 3:
+            urgency = (
+                f"URGENT: Only {remaining} iterations left. "
+                f"Stop all other work and call set_output NOW for: {missing}"
+            )
+        elif remaining <= self._max_iterations // 2:
+            urgency = (
+                f"WARNING: {remaining} iterations remaining. "
+                f"You must call set_output for: {missing}"
+            )
+        else:
+            urgency = f"Missing output keys: {missing}. Use set_output to provide them."
+
+        return JudgeVerdict(action="RETRY", feedback=f"Your task: {self._task}\n{urgency}")
+
+
 # ---------------------------------------------------------------------------
 # Configuration
 # ---------------------------------------------------------------------------
@@ -68,7 +145,7 @@ class LoopConfig:
     """Configuration for the event loop."""
 
     max_iterations: int = 50
-    max_tool_calls_per_turn: int = 10
+    max_tool_calls_per_turn: int = 30
     judge_every_n_turns: int = 1
     stall_detection_threshold: int = 3
     max_history_tokens: int = 32_000
@@ -85,8 +162,31 @@ class LoopConfig:
     # written to a file and the truncated message includes the filename so
     # the agent can retrieve it with load_data().  If *spillover_dir* is
     # ``None`` the result is simply truncated with an explanatory note.
-    max_tool_result_chars: int = 3_000
+    max_tool_result_chars: int = 30_000
     spillover_dir: str | None = None  # Path string; created on first use
+
+    # --- Stream retry (transient error recovery within EventLoopNode) ---
+    # When _run_single_turn() raises a transient error (network, rate limit,
+    # server error), retry up to this many times with exponential backoff
+    # before re-raising.  Set to 0 to disable.
+    max_stream_retries: int = 3
+    stream_retry_backoff_base: float = 2.0
+    stream_retry_max_delay: float = 60.0  # cap per-retry sleep
+
+    # --- Tool doom loop detection ---
+    # Detect when the LLM calls the same tool(s) with identical args for
+    # N consecutive turns.  For client-facing nodes, blocks for user input.
+    # For non-client-facing nodes, injects a warning into the conversation.
+    tool_doom_loop_threshold: int = 3
+
+    # --- Client-facing auto-block grace period ---
+    # When a client-facing node produces text-only turns (no tools, no
+    # set_output), the judge is skipped for this many consecutive auto-block
+    # turns.  After the grace period, the judge runs to apply RETRY pressure
+    # on models stuck in a clarification loop.  Explicit ask_user() calls
+    # always skip the judge regardless of this setting.
+    cf_grace_turns: int = 1
+    tool_doom_loop_enabled: bool = True
 
 
 # ---------------------------------------------------------------------------
@@ -187,10 +287,20 @@ class EventLoopNode(NodeProtocol):
         self._config = config or LoopConfig()
         self._tool_executor = tool_executor
         self._conversation_store = conversation_store
-        self._injection_queue: asyncio.Queue[str] = asyncio.Queue()
+        self._injection_queue: asyncio.Queue[tuple[str, bool]] = asyncio.Queue()
         # Client-facing input blocking state
         self._input_ready = asyncio.Event()
+        self._awaiting_input = False
         self._shutdown = False
+        self._stream_task: asyncio.Task | None = None
+        # Track which nodes already have an action plan emitted (skip on revisit)
+        self._action_plan_emitted: set[str] = set()
+        # Monotonic counter for spillover file naming (web_search_1.txt, etc.)
+        self._spill_counter: int = 0
+        # Subagent mark_complete: when True, _evaluate returns ACCEPT immediately
+        self._mark_complete_flag = False
+        # Counter for subagent instances (1, 2, 3, ...)
+        self._subagent_instance_counter: dict[str, int] = {}
 
     def validate_input(self, ctx: NodeContext) -> list[str]:
         """Validate hard requirements only.
@@ -213,11 +323,16 @@ class EventLoopNode(NodeProtocol):
         start_time = time.time()
         total_input_tokens = 0
         total_output_tokens = 0
-        stream_id = ctx.node_id
+        stream_id = ctx.stream_id or ctx.node_id
         node_id = ctx.node_id
+        execution_id = ctx.execution_id or ""
 
         # Verdict counters for runtime logging
         _accept_count = _retry_count = _escalate_count = _continue_count = 0
+
+        # Client-facing auto-block grace: consecutive text-only turns without
+        # any real tool call or set_output.  Resets on progress.
+        _cf_text_only_streak = 0
 
         # 1. Guard: LLM required
         if ctx.llm is None:
@@ -259,12 +374,73 @@ class EventLoopNode(NodeProtocol):
             )
             accumulator = OutputAccumulator(store=self._conversation_store)
             start_iteration = 0
+            _restored_recent_responses: list[str] = []
+            _restored_tool_fingerprints: list[list[tuple[str, str]]] = []
         else:
             # Try crash-recovery restore from store, then fall back to fresh.
-            conversation, accumulator, start_iteration = await self._restore(ctx)
-            if conversation is None:
+            restored = await self._restore(ctx)
+            if restored is not None:
+                conversation = restored.conversation
+                accumulator = restored.accumulator
+                start_iteration = restored.start_iteration
+                _restored_recent_responses = restored.recent_responses
+                _restored_tool_fingerprints = restored.recent_tool_fingerprints
+
+                # Refresh the system prompt with full 3-layer composition.
+                # The stored prompt may be stale after code changes or when
+                # runtime-injected context (e.g. worker identity) has changed.
+                # On resume, we rebuild identity + narrative + focus so the LLM
+                # understands the session history, not just the node directive.
+                from framework.graph.prompt_composer import compose_system_prompt
+
+                _current_prompt = compose_system_prompt(
+                    identity_prompt=ctx.identity_prompt or None,
+                    focus_prompt=ctx.node_spec.system_prompt,
+                    narrative=ctx.narrative or None,
+                    accounts_prompt=ctx.accounts_prompt or None,
+                )
+                if conversation.system_prompt != _current_prompt:
+                    conversation.update_system_prompt(_current_prompt)
+                    logger.info("Refreshed system prompt for restored conversation")
+            else:
+                _restored_recent_responses = []
+                _restored_tool_fingerprints = []
+
                 # Fresh conversation: either isolated mode or first node in continuous mode.
-                system_prompt = ctx.node_spec.system_prompt or ""
+                from framework.graph.prompt_composer import _with_datetime
+
+                system_prompt = _with_datetime(ctx.node_spec.system_prompt or "")
+                # Prepend GCU browser best-practices prompt for gcu nodes
+                if ctx.node_spec.node_type == "gcu":
+                    from framework.graph.gcu import GCU_BROWSER_SYSTEM_PROMPT
+
+                    system_prompt = f"{GCU_BROWSER_SYSTEM_PROMPT}\n\n{system_prompt}"
+                # Append connected accounts info if available
+                if ctx.accounts_prompt:
+                    system_prompt = f"{system_prompt}\n\n{ctx.accounts_prompt}"
+
+                # Inject agent working memory (adapt.md).
+                # If it doesn't exist yet, seed it with available context.
+                if self._config.spillover_dir:
+                    _adapt_path = Path(self._config.spillover_dir) / "adapt.md"
+                    if not _adapt_path.exists() and ctx.accounts_prompt:
+                        _adapt_path.parent.mkdir(parents=True, exist_ok=True)
+                        _adapt_path.write_text(
+                            f"## Identity\n{ctx.accounts_prompt}\n",
+                            encoding="utf-8",
+                        )
+                    if _adapt_path.exists():
+                        _adapt_text = _adapt_path.read_text(encoding="utf-8").strip()
+                        if _adapt_text:
+                            system_prompt = (
+                                f"{system_prompt}\n\n"
+                                f"--- Your Memory ---\n{_adapt_text}\n--- End Memory ---\n\n"
+                                'Maintain your memory by calling save_data("adapt.md", ...) '
+                                'or edit_data("adapt.md", ...) as you work.\n'
+                                "IMMEDIATELY save: user rules about which account/identity to use, "
+                                "behavioral constraints, and preferences. "
+                                "Also record session history, decisions, and working notes."
+                            )
 
                 conversation = NodeConversation(
                     system_prompt=system_prompt,
@@ -283,13 +459,30 @@ class EventLoopNode(NodeProtocol):
                 if initial_message:
                     await conversation.add_user_message(initial_message)
 
-        # 3. Build tool list: node tools + synthetic set_output + ask_user tools
+        # 2b. Restore spill counter from existing files (resume safety)
+        self._restore_spill_counter()
+
+        # 3. Build tool list: node tools + synthetic set_output + ask_user + delegate tools
         tools = list(ctx.available_tools)
         set_output_tool = self._build_set_output_tool(ctx.node_spec.output_keys)
         if set_output_tool:
             tools.append(set_output_tool)
-        if ctx.node_spec.client_facing:
-            tools.append(self._build_ask_user_tool())
+        if ctx.node_spec.client_facing and not ctx.event_triggered:
+            if stream_id != "queen":
+                tools.append(self._build_ask_user_tool())
+
+        # Add delegate_to_sub_agent tool if:
+        # - Node has sub_agents defined
+        # - We are NOT in subagent mode (prevents nested delegation)
+        if not ctx.is_subagent_mode:
+            sub_agents = getattr(ctx.node_spec, "sub_agents", [])
+            delegate_tool = self._build_delegate_tool(sub_agents, ctx.node_registry)
+            if delegate_tool:
+                tools.append(delegate_tool)
+
+        # Add report_to_parent tool for sub-agents with a report callback
+        if ctx.is_subagent_mode and ctx.report_callback is not None:
+            tools.append(self._build_report_to_parent_tool())
 
         logger.info(
             "[%s] Tools available (%d): %s | client_facing=%s | judge=%s",
@@ -301,11 +494,24 @@ class EventLoopNode(NodeProtocol):
         )
 
         # 4. Publish loop started
-        await self._publish_loop_started(stream_id, node_id)
+        await self._publish_loop_started(stream_id, node_id, execution_id)
 
-        # 5. Stall detection state
-        recent_responses: list[str] = []
-        user_interaction_count = 0  # tracks how many times this node blocked for user input
+        # 4b. Fire-and-forget action plan generation (once per node per lifetime)
+        # Skip for queen/judge — action plans are only meaningful for worker nodes.
+        if (
+            start_iteration == 0
+            and ctx.llm
+            and self._event_bus
+            and node_id not in self._action_plan_emitted
+            and stream_id not in ("queen", "judge")
+        ):
+            self._action_plan_emitted.add(node_id)
+            asyncio.create_task(self._generate_action_plan(ctx, stream_id, node_id, execution_id))
+
+        # 5. Stall / doom loop detection state (restored from cursor if resuming)
+        recent_responses: list[str] = _restored_recent_responses
+        recent_tool_fingerprints: list[list[tuple[str, str]]] = _restored_tool_fingerprints
+        _consecutive_empty_turns: int = 0
 
         # 6. Main loop
         for iteration in range(start_iteration, self._config.max_iterations):
@@ -343,86 +549,202 @@ class EventLoopNode(NodeProtocol):
             await self._drain_injection_queue(conversation)
 
             # 6c. Publish iteration event
-            await self._publish_iteration(stream_id, node_id, iteration)
+            await self._publish_iteration(stream_id, node_id, iteration, execution_id)
 
             # 6d. Pre-turn compaction check (tiered)
             if conversation.needs_compaction():
                 await self._compact_tiered(ctx, conversation, accumulator)
 
-            # 6e. Run single LLM turn
+            # 6e. Run single LLM turn (with transient error retry)
             logger.info(
                 "[%s] iter=%d: running LLM turn (msgs=%d)",
                 node_id,
                 iteration,
                 len(conversation.messages),
             )
-            try:
-                (
-                    assistant_text,
-                    real_tool_results,
-                    outputs_set,
-                    turn_tokens,
-                    logged_tool_calls,
-                    user_input_requested,
-                ) = await self._run_single_turn(ctx, conversation, tools, iteration, accumulator)
-                logger.info(
-                    "[%s] iter=%d: LLM done — text=%d chars, real_tools=%d, "
-                    "outputs_set=%s, tokens=%s, accumulator=%s",
-                    node_id,
-                    iteration,
-                    len(assistant_text),
-                    len(real_tool_results),
-                    outputs_set or "[]",
-                    turn_tokens,
-                    {
-                        k: ("set" if v is not None else "None")
-                        for k, v in accumulator.to_dict().items()
-                    },
-                )
-                total_input_tokens += turn_tokens.get("input", 0)
-                total_output_tokens += turn_tokens.get("output", 0)
-            except Exception as e:
-                # LLM call crashed - log partial step with error
-                import traceback
-
-                iter_latency_ms = int((time.time() - iter_start) * 1000)
-                latency_ms = int((time.time() - start_time) * 1000)
-                error_msg = f"LLM call failed: {e}"
-                stack_trace = traceback.format_exc()
-
-                if ctx.runtime_logger:
-                    ctx.runtime_logger.log_step(
-                        node_id=node_id,
-                        node_type="event_loop",
-                        step_index=iteration,
-                        error=error_msg,
-                        stacktrace=stack_trace,
-                        is_partial=True,
-                        input_tokens=0,
-                        output_tokens=0,
-                        latency_ms=iter_latency_ms,
+            _stream_retry_count = 0
+            _turn_cancelled = False
+            while True:
+                try:
+                    (
+                        assistant_text,
+                        real_tool_results,
+                        outputs_set,
+                        turn_tokens,
+                        logged_tool_calls,
+                        user_input_requested,
+                        ask_user_prompt,
+                    ) = await self._run_single_turn(
+                        ctx, conversation, tools, iteration, accumulator
                     )
-                    ctx.runtime_logger.log_node_complete(
-                        node_id=node_id,
-                        node_name=ctx.node_spec.name,
-                        node_type="event_loop",
-                        success=False,
-                        error=error_msg,
-                        stacktrace=stack_trace,
-                        total_steps=iteration + 1,
-                        tokens_used=total_input_tokens + total_output_tokens,
-                        input_tokens=total_input_tokens,
-                        output_tokens=total_output_tokens,
-                        latency_ms=latency_ms,
-                        exit_status="failure",
-                        accept_count=_accept_count,
-                        retry_count=_retry_count,
-                        escalate_count=_escalate_count,
-                        continue_count=_continue_count,
+                    logger.info(
+                        "[%s] iter=%d: LLM done — text=%d chars, real_tools=%d, "
+                        "outputs_set=%s, tokens=%s, accumulator=%s",
+                        node_id,
+                        iteration,
+                        len(assistant_text),
+                        len(real_tool_results),
+                        outputs_set or "[]",
+                        turn_tokens,
+                        {
+                            k: ("set" if v is not None else "None")
+                            for k, v in accumulator.to_dict().items()
+                        },
                     )
+                    total_input_tokens += turn_tokens.get("input", 0)
+                    total_output_tokens += turn_tokens.get("output", 0)
+                    await self._publish_llm_turn_complete(
+                        stream_id,
+                        node_id,
+                        stop_reason=turn_tokens.get("stop_reason", ""),
+                        model=turn_tokens.get("model", ""),
+                        input_tokens=turn_tokens.get("input", 0),
+                        output_tokens=turn_tokens.get("output", 0),
+                        execution_id=execution_id,
+                        iteration=iteration,
+                    )
+                    log_llm_turn(
+                        node_id=node_id,
+                        stream_id=stream_id,
+                        execution_id=execution_id,
+                        iteration=iteration,
+                        assistant_text=assistant_text,
+                        tool_calls=logged_tool_calls,
+                        tool_results=real_tool_results,
+                        token_counts=turn_tokens,
+                    )
+                    break  # success — exit retry loop
 
-                # Re-raise to maintain existing error handling
-                raise
+                except TurnCancelled:
+                    _turn_cancelled = True
+                    break
+
+                except Exception as e:
+                    # Retry transient errors with exponential backoff
+                    if (
+                        self._is_transient_error(e)
+                        and _stream_retry_count < self._config.max_stream_retries
+                    ):
+                        _stream_retry_count += 1
+                        delay = min(
+                            self._config.stream_retry_backoff_base
+                            * (2 ** (_stream_retry_count - 1)),
+                            self._config.stream_retry_max_delay,
+                        )
+                        logger.warning(
+                            "[%s] iter=%d: transient error (%s), retrying in %.1fs (%d/%d): %s",
+                            node_id,
+                            iteration,
+                            type(e).__name__,
+                            delay,
+                            _stream_retry_count,
+                            self._config.max_stream_retries,
+                            str(e)[:200],
+                        )
+                        if self._event_bus:
+                            await self._event_bus.emit_node_retry(
+                                stream_id=stream_id,
+                                node_id=node_id,
+                                retry_count=_stream_retry_count,
+                                max_retries=self._config.max_stream_retries,
+                                error=str(e)[:500],
+                                execution_id=execution_id,
+                            )
+
+                        # For malformed tool call errors, inject feedback into
+                        # the conversation before retrying.  Retrying with the
+                        # same messages is futile — the LLM will reproduce the
+                        # same truncated JSON.  The nudge tells it to shorten
+                        # its arguments.
+                        error_str = str(e).lower()
+                        if "failed to parse tool call" in error_str:
+                            await conversation.add_user_message(
+                                "[System: Your previous tool call had malformed "
+                                "JSON arguments (likely truncated). Keep your "
+                                "tool call arguments shorter and simpler. Do NOT "
+                                "repeat the same long argument — summarize or "
+                                "split into multiple calls.]"
+                            )
+
+                        await asyncio.sleep(delay)
+                        continue  # retry same iteration
+
+                    # Non-transient or retries exhausted.
+                    # For client-facing nodes, surface the error and wait
+                    # for user input instead of killing the loop.  The user
+                    # can retry or adjust the request.
+                    if ctx.node_spec.client_facing:
+                        error_msg = f"LLM call failed: {e}"
+                        logger.error(
+                            "[%s] iter=%d: %s — waiting for user input",
+                            node_id,
+                            iteration,
+                            error_msg,
+                        )
+                        if self._event_bus:
+                            await self._event_bus.emit_node_retry(
+                                stream_id=stream_id,
+                                node_id=node_id,
+                                retry_count=_stream_retry_count,
+                                max_retries=self._config.max_stream_retries,
+                                error=str(e)[:500],
+                                execution_id=execution_id,
+                            )
+                        # Inject the error as an assistant message so the
+                        # user sees it, then block for their next message.
+                        await conversation.add_assistant_message(
+                            f"[Error: {error_msg}. Please try again.]"
+                        )
+                        await self._await_user_input(ctx, prompt="")
+                        break  # exit retry loop, continue outer iteration
+
+                    # Non-client-facing: crash as before
+                    import traceback
+
+                    iter_latency_ms = int((time.time() - iter_start) * 1000)
+                    latency_ms = int((time.time() - start_time) * 1000)
+                    error_msg = f"LLM call failed: {e}"
+                    stack_trace = traceback.format_exc()
+
+                    if ctx.runtime_logger:
+                        ctx.runtime_logger.log_step(
+                            node_id=node_id,
+                            node_type="event_loop",
+                            step_index=iteration,
+                            error=error_msg,
+                            stacktrace=stack_trace,
+                            is_partial=True,
+                            input_tokens=0,
+                            output_tokens=0,
+                            latency_ms=iter_latency_ms,
+                        )
+                        ctx.runtime_logger.log_node_complete(
+                            node_id=node_id,
+                            node_name=ctx.node_spec.name,
+                            node_type="event_loop",
+                            success=False,
+                            error=error_msg,
+                            stacktrace=stack_trace,
+                            total_steps=iteration + 1,
+                            tokens_used=total_input_tokens + total_output_tokens,
+                            input_tokens=total_input_tokens,
+                            output_tokens=total_output_tokens,
+                            latency_ms=latency_ms,
+                            exit_status="failure",
+                            accept_count=_accept_count,
+                            retry_count=_retry_count,
+                            escalate_count=_escalate_count,
+                            continue_count=_continue_count,
+                        )
+
+                    # Re-raise to maintain existing error handling
+                    raise
+
+            if _turn_cancelled:
+                logger.info("[%s] iter=%d: turn cancelled by user", node_id, iteration)
+                if ctx.node_spec.client_facing and not ctx.event_triggered:
+                    await self._await_user_input(ctx, prompt="")
+                continue  # back to top of for-iteration loop
 
             # 6e'. Feed actual API token count back for accurate estimation
             turn_input = turn_tokens.get("input", 0)
@@ -432,6 +754,10 @@ class EventLoopNode(NodeProtocol):
             # 6e''. Post-turn compaction check (catches tool-result bloat)
             if conversation.needs_compaction():
                 await self._compact_tiered(ctx, conversation, accumulator)
+
+            # Reset auto-block grace streak when real work happens
+            if real_tool_results or outputs_set:
+                _cf_text_only_streak = 0
 
             # 6e'''. Empty response guard — if the LLM returned nothing
             # (no text, no real tools, no set_output) and all required
@@ -454,7 +780,9 @@ class EventLoopNode(NodeProtocol):
                         node_id,
                         iteration,
                     )
-                    await self._publish_loop_completed(stream_id, node_id, iteration + 1)
+                    await self._publish_loop_completed(
+                        stream_id, node_id, iteration + 1, execution_id
+                    )
                     latency_ms = int((time.time() - start_time) * 1000)
                     return NodeResult(
                         success=True,
@@ -463,13 +791,64 @@ class EventLoopNode(NodeProtocol):
                         latency_ms=latency_ms,
                         conversation=conversation if _is_continuous else None,
                     )
+                else:
+                    # Ghost empty stream: LLM returned nothing and outputs
+                    # are still missing.  The conversation hasn't changed, so
+                    # repeating the same call will produce the same empty
+                    # result.  Inject a nudge to break the cycle.
+                    _consecutive_empty_turns += 1
+                    logger.warning(
+                        "[%s] iter=%d: empty response with missing outputs %s (consecutive=%d)",
+                        node_id,
+                        iteration,
+                        missing,
+                        _consecutive_empty_turns,
+                    )
+                    if _consecutive_empty_turns >= self._config.stall_detection_threshold:
+                        # Persistent ghost stream — fail the node.
+                        error_msg = (
+                            f"Ghost empty stream: {_consecutive_empty_turns} "
+                            f"consecutive empty responses with missing "
+                            f"outputs {missing}"
+                        )
+                        latency_ms = int((time.time() - start_time) * 1000)
+                        if ctx.runtime_logger:
+                            ctx.runtime_logger.log_node_complete(
+                                node_id=node_id,
+                                node_name=ctx.node_spec.name,
+                                node_type="event_loop",
+                                success=False,
+                                error=error_msg,
+                                total_steps=iteration + 1,
+                                tokens_used=total_input_tokens + total_output_tokens,
+                                input_tokens=total_input_tokens,
+                                output_tokens=total_output_tokens,
+                                latency_ms=latency_ms,
+                                exit_status="ghost_stream",
+                                accept_count=_accept_count,
+                                retry_count=_retry_count,
+                                escalate_count=_escalate_count,
+                                continue_count=_continue_count,
+                            )
+                        raise RuntimeError(error_msg)
+                    # First nudge — inject a system message to break the
+                    # empty-response cycle.
+                    await conversation.add_user_message(
+                        "[System: Your response was empty. You have required "
+                        f"outputs that are not yet set: {missing}. Review "
+                        "your task and call the appropriate tools to make "
+                        "progress.]"
+                    )
+                    continue
+            else:
+                _consecutive_empty_turns = 0
 
             # 6f. Stall detection
             recent_responses.append(assistant_text)
             if len(recent_responses) > self._config.stall_detection_threshold:
                 recent_responses.pop(0)
             if self._is_stalled(recent_responses):
-                await self._publish_stalled(stream_id, node_id)
+                await self._publish_stalled(stream_id, node_id, execution_id)
                 latency_ms = int((time.time() - start_time) * 1000)
                 _continue_count += 1
                 if ctx.runtime_logger:
@@ -515,34 +894,149 @@ class EventLoopNode(NodeProtocol):
                     conversation=conversation if _is_continuous else None,
                 )
 
-            # 6g. Write cursor checkpoint
-            await self._write_cursor(ctx, conversation, accumulator, iteration)
+            # 6f'. Tool doom loop detection
+            # Use logged_tool_calls (persists across inner iterations) and
+            # filter to real MCP tools (exclude set_output, ask_user).
+            # NOTE: errored tool calls ARE included — a tool that keeps
+            # failing with the same args is the canonical doom loop case
+            # (e.g. a tool repeatedly hitting the same error).
+            mcp_tool_calls = [
+                tc
+                for tc in logged_tool_calls
+                if tc.get("tool_name") not in ("set_output", "ask_user")
+            ]
+            if mcp_tool_calls:
+                fps = self._fingerprint_tool_calls(mcp_tool_calls)
+                recent_tool_fingerprints.append(fps)
+                threshold = self._config.tool_doom_loop_threshold
+                if len(recent_tool_fingerprints) > threshold:
+                    recent_tool_fingerprints.pop(0)
+                is_doom, doom_desc = self._is_tool_doom_loop(
+                    recent_tool_fingerprints,
+                )
+                if is_doom:
+                    logger.warning("[%s] %s", node_id, doom_desc)
+                    if self._event_bus:
+                        await self._event_bus.emit_tool_doom_loop(
+                            stream_id=stream_id,
+                            node_id=node_id,
+                            description=doom_desc,
+                            execution_id=execution_id,
+                        )
+                    warning_msg = (
+                        f"[SYSTEM] {doom_desc}. You are repeating the "
+                        "same tool calls with identical arguments. "
+                        "Try a different approach or different arguments."
+                    )
+                    if ctx.node_spec.client_facing and not ctx.event_triggered:
+                        await conversation.add_user_message(warning_msg)
+                        await self._await_user_input(ctx, prompt=doom_desc)
+                        recent_tool_fingerprints.clear()
+                        recent_responses.clear()
+                    else:
+                        await conversation.add_user_message(warning_msg)
+                        recent_tool_fingerprints.clear()
+            else:
+                # Text-only turn breaks the doom loop chain
+                recent_tool_fingerprints.clear()
 
-            # 6h. Client-facing input blocking
+            # 6g. Write cursor checkpoint (includes stall/doom state for resume)
+            await self._write_cursor(
+                ctx,
+                conversation,
+                accumulator,
+                iteration,
+                recent_responses=recent_responses,
+                recent_tool_fingerprints=recent_tool_fingerprints,
+            )
+
+            # 6h'. Client-facing input blocking
             #
             # Two triggers:
-            # (a) Explicit ask_user() — always blocks, then falls through
-            #     to judge evaluation (6i).
-            # (b) Auto-block — a text-only turn (no real tools, no
-            #     set_output) from a client-facing node is addressed to the
-            #     user.  Block for their response, then *skip* judge so the
-            #     next LLM turn can process the reply without confusing
-            #     "missing outputs" feedback.
+            # (a) Explicit ask_user() — blocks, then skips judge (6i).
+            #     The LLM intentionally asked a question; judging before the
+            #     user answers would inject confusing "missing outputs"
+            #     feedback.  Works for all client-facing nodes.
+            # (b) Auto-block (queen only) — a text-only turn (no real
+            #     tools, no set_output) from the queen node.  Blocks for
+            #     the user's response, then falls through to judge so
+            #     models stuck in a clarification loop get RETRY feedback.
+            #     Workers are autonomous and don't auto-block — they use
+            #     ask_user() explicitly when they need input.
             #
             # Turns that include tool calls or set_output are *work*, not
             # conversation — they flow through without blocking.
             _cf_block = False
             _cf_auto = False
-            if ctx.node_spec.client_facing:
+            _cf_prompt = ""
+            if ctx.node_spec.client_facing and not ctx.event_triggered:
                 if user_input_requested:
                     _cf_block = True
-                elif assistant_text and not real_tool_results and not outputs_set:
+                    _cf_prompt = ask_user_prompt
+                elif (
+                    stream_id == "queen"
+                    and assistant_text
+                    and not real_tool_results
+                    and not outputs_set
+                ):
+                    # Auto-block: only for the queen (conversational node).
+                    # Workers are autonomous — they block only on explicit
+                    # ask_user().  Text-only turns from workers are narration,
+                    # not questions addressed to the user.
                     _cf_block = True
                     _cf_auto = True
 
             if _cf_block:
+                # Auto-block grace: when required outputs are still
+                # missing and we're within the grace period, skip
+                # blocking and continue to the next LLM turn so the
+                # judge can apply RETRY pressure on lazy models.
+                # Without this, _await_user_input() would block
+                # forever since no inject_event is coming.
+                #
+                # When no outputs are missing (e.g. queen monitoring
+                # with output_keys=[]), text-only is legitimate
+                # conversation and should always block.
+                if _cf_auto:
+                    _auto_missing = (
+                        self._get_missing_output_keys(
+                            accumulator,
+                            ctx.node_spec.output_keys,
+                            ctx.node_spec.nullable_output_keys,
+                        )
+                        if accumulator is not None
+                        else True
+                    )
+                    if _auto_missing:
+                        _cf_text_only_streak += 1
+                        if _cf_text_only_streak <= self._config.cf_grace_turns:
+                            _continue_count += 1
+                            if ctx.runtime_logger:
+                                iter_latency_ms = int((time.time() - iter_start) * 1000)
+                                ctx.runtime_logger.log_step(
+                                    node_id=node_id,
+                                    node_type="event_loop",
+                                    step_index=iteration,
+                                    verdict="CONTINUE",
+                                    verdict_feedback=(
+                                        "Auto-block grace"
+                                        f" ({_cf_text_only_streak}"
+                                        f"/{self._config.cf_grace_turns})"
+                                    ),
+                                    tool_calls=logged_tool_calls,
+                                    llm_text=assistant_text,
+                                    input_tokens=turn_tokens.get("input", 0),
+                                    output_tokens=turn_tokens.get("output", 0),
+                                    latency_ms=iter_latency_ms,
+                                )
+                            continue
+                        # Beyond grace — block below, then fall
+                        # through to judge
+
                 if self._shutdown:
-                    await self._publish_loop_completed(stream_id, node_id, iteration + 1)
+                    await self._publish_loop_completed(
+                        stream_id, node_id, iteration + 1, execution_id
+                    )
                     latency_ms = int((time.time() - start_time) * 1000)
                     _continue_count += 1
                     if ctx.runtime_logger:
@@ -589,10 +1083,14 @@ class EventLoopNode(NodeProtocol):
                     iteration,
                     _cf_auto,
                 )
-                got_input = await self._await_user_input(ctx)
+                got_input = await self._await_user_input(
+                    ctx, prompt=_cf_prompt, skip_emit=user_input_requested
+                )
                 logger.info("[%s] iter=%d: unblocked, got_input=%s", node_id, iteration, got_input)
                 if not got_input:
-                    await self._publish_loop_completed(stream_id, node_id, iteration + 1)
+                    await self._publish_loop_completed(
+                        stream_id, node_id, iteration + 1, execution_id
+                    )
                     latency_ms = int((time.time() - start_time) * 1000)
                     _continue_count += 1
                     if ctx.runtime_logger:
@@ -633,35 +1131,51 @@ class EventLoopNode(NodeProtocol):
                         conversation=conversation if _is_continuous else None,
                     )
 
-                user_interaction_count += 1
                 recent_responses.clear()
 
-                if _cf_auto:
-                    # Auto-block: skip judge — let the LLM process the
-                    # user's response on the next turn without confusing
-                    # "missing outputs" feedback injected between the
-                    # assistant's question and the user's answer.
-                    _continue_count += 1
-                    if ctx.runtime_logger:
-                        iter_latency_ms = int((time.time() - iter_start) * 1000)
-                        ctx.runtime_logger.log_step(
-                            node_id=node_id,
-                            node_type="event_loop",
-                            step_index=iteration,
-                            verdict="CONTINUE",
-                            verdict_feedback="Auto-blocked for user input (pre-interaction)",
-                            tool_calls=logged_tool_calls,
-                            llm_text=assistant_text,
-                            input_tokens=turn_tokens.get("input", 0),
-                            output_tokens=turn_tokens.get("output", 0),
-                            latency_ms=iter_latency_ms,
+                # -- Judge-skip decision after client-facing blocking --
+                #
+                # Explicit ask_user: skip judge while the agent is
+                # still gathering information from the user.  BUT if
+                # all required outputs have already been set, don't
+                # skip -- fall through to the judge so it can accept.
+                if not _cf_auto:
+                    _missing = (
+                        self._get_missing_output_keys(
+                            accumulator,
+                            ctx.node_spec.output_keys,
+                            ctx.node_spec.nullable_output_keys,
                         )
-                    continue
-                # Explicit ask_user: fall through to judge evaluation (6i)
+                        if accumulator is not None
+                        else True
+                    )
+                    _outputs_complete = not _missing
+                    if not _outputs_complete:
+                        _cf_text_only_streak = 0
+                        _continue_count += 1
+                        if ctx.runtime_logger:
+                            iter_latency_ms = int((time.time() - iter_start) * 1000)
+                            ctx.runtime_logger.log_step(
+                                node_id=node_id,
+                                node_type="event_loop",
+                                step_index=iteration,
+                                verdict="CONTINUE",
+                                verdict_feedback=("Blocked for ask_user input (skip judge)"),
+                                tool_calls=logged_tool_calls,
+                                llm_text=assistant_text,
+                                input_tokens=turn_tokens.get("input", 0),
+                                output_tokens=turn_tokens.get("output", 0),
+                                latency_ms=iter_latency_ms,
+                            )
+                        continue
+                    # All outputs set -- fall through to judge
+
+                # Auto-block beyond grace -- fall through to judge (6i)
 
             # 6i. Judge evaluation
             should_judge = (
-                (iteration + 1) % self._config.judge_every_n_turns == 0
+                ctx.is_subagent_mode  # Always evaluate subagents
+                or (iteration + 1) % self._config.judge_every_n_turns == 0
                 or not real_tool_results  # no real tool calls = natural stop
             )
 
@@ -712,6 +1226,7 @@ class EventLoopNode(NodeProtocol):
                 feedback=fb_preview,
                 judge_type=judge_type,
                 iteration=iteration,
+                execution_id=execution_id,
             )
 
             if verdict.action == "ACCEPT":
@@ -719,9 +1234,10 @@ class EventLoopNode(NodeProtocol):
                 missing = self._get_missing_output_keys(
                     accumulator, ctx.node_spec.output_keys, ctx.node_spec.nullable_output_keys
                 )
-                if missing and self._judge is not None:
+                if missing and self._judge is not None and not self._mark_complete_flag:
                     hint = (
-                        f"Missing required output keys: {missing}. Use set_output to provide them."
+                        f"Task incomplete. Required outputs not yet produced: {missing}. "
+                        f"Follow your system prompt instructions to complete the work."
                     )
                     logger.info(
                         "[%s] iter=%d: ACCEPT but missing keys %s",
@@ -753,7 +1269,7 @@ class EventLoopNode(NodeProtocol):
                 for key, value in accumulator.to_dict().items():
                     ctx.memory.write(key, value, validate=False)
 
-                await self._publish_loop_completed(stream_id, node_id, iteration + 1)
+                await self._publish_loop_completed(stream_id, node_id, iteration + 1, execution_id)
                 latency_ms = int((time.time() - start_time) * 1000)
                 _accept_count += 1
                 if ctx.runtime_logger:
@@ -796,7 +1312,7 @@ class EventLoopNode(NodeProtocol):
 
             elif verdict.action == "ESCALATE":
                 # Exit point 6: Judge ESCALATE — log step + log_node_complete
-                await self._publish_loop_completed(stream_id, node_id, iteration + 1)
+                await self._publish_loop_completed(stream_id, node_id, iteration + 1, execution_id)
                 latency_ms = int((time.time() - start_time) * 1000)
                 _escalate_count += 1
                 if ctx.runtime_logger:
@@ -860,7 +1376,9 @@ class EventLoopNode(NodeProtocol):
                 continue
 
         # 7. Max iterations exhausted
-        await self._publish_loop_completed(stream_id, node_id, self._config.max_iterations)
+        await self._publish_loop_completed(
+            stream_id, node_id, self._config.max_iterations, execution_id
+        )
         latency_ms = int((time.time() - start_time) * 1000)
         if ctx.runtime_logger:
             ctx.runtime_logger.log_node_complete(
@@ -889,14 +1407,19 @@ class EventLoopNode(NodeProtocol):
             conversation=conversation if _is_continuous else None,
         )
 
-    async def inject_event(self, content: str) -> None:
-        """Inject an external event into the running loop.
+    async def inject_event(self, content: str, *, is_client_input: bool = False) -> None:
+        """Inject an external event or user input into the running loop.
 
         The content becomes a user message prepended to the next iteration.
         Thread-safe via asyncio.Queue.
         Also unblocks _await_user_input() if the node is waiting.
+
+        Args:
+            content: The message text.
+            is_client_input: True when the message originates from a real
+                human user (e.g. /chat endpoint), False for external events.
         """
-        await self._injection_queue.put(content)
+        await self._injection_queue.put((content, is_client_input))
         self._input_ready.set()
 
     def signal_shutdown(self) -> None:
@@ -908,7 +1431,19 @@ class EventLoopNode(NodeProtocol):
         self._shutdown = True
         self._input_ready.set()
 
-    async def _await_user_input(self, ctx: NodeContext) -> bool:
+    def cancel_current_turn(self) -> None:
+        """Cancel the current LLM streaming turn instantly.
+
+        Unlike signal_shutdown() which permanently stops the event loop,
+        this only kills the in-progress HTTP stream via task.cancel().
+        The queen stays alive for the next user message.
+        """
+        if self._stream_task and not self._stream_task.done():
+            self._stream_task.cancel()
+
+    async def _await_user_input(
+        self, ctx: NodeContext, prompt: str = "", *, skip_emit: bool = False
+    ) -> bool:
         """Block until user input arrives or shutdown is signaled.
 
         Called in two situations:
@@ -917,22 +1452,36 @@ class EventLoopNode(NodeProtocol):
           from a client-facing node — ensures the user sees and responds
           before the judge runs.
 
+        Args:
+            skip_emit: If True, skip emitting client_input_requested
+                (already emitted earlier, e.g. during ask_user detection).
+
         Returns True if input arrived, False if shutdown was signaled.
         """
+        # If messages arrived while the LLM was processing, skip blocking
+        # entirely — the next _drain_injection_queue() will pick them up.
+        if not self._injection_queue.empty():
+            return True
+
         # Clear BEFORE emitting so that synchronous handlers (e.g. the
         # headless stdin handler) can call inject_event() during the emit
         # and the signal won't be lost.  TUI handlers return immediately
         # without injecting, so the wait still blocks until the user types.
         self._input_ready.clear()
 
-        if self._event_bus:
+        if self._event_bus and not skip_emit:
             await self._event_bus.emit_client_input_requested(
-                stream_id=ctx.node_id,
+                stream_id=ctx.stream_id or ctx.node_id,
                 node_id=ctx.node_id,
-                prompt="",
+                prompt=prompt,
+                execution_id=ctx.execution_id or "",
             )
 
-        await self._input_ready.wait()
+        self._awaiting_input = True
+        try:
+            await self._input_ready.wait()
+        finally:
+            self._awaiting_input = False
         return not self._shutdown
 
     # -------------------------------------------------------------------
@@ -946,11 +1495,11 @@ class EventLoopNode(NodeProtocol):
         tools: list[Tool],
         iteration: int,
         accumulator: OutputAccumulator,
-    ) -> tuple[str, list[dict], list[str], dict[str, int], list[dict], bool]:
+    ) -> tuple[str, list[dict], list[str], dict[str, int], list[dict], bool, str]:
         """Run a single LLM turn with streaming and tool execution.
 
         Returns (assistant_text, real_tool_results, outputs_set, token_counts, logged_tool_calls,
-        user_input_requested).
+        user_input_requested, ask_user_prompt).
 
         ``real_tool_results`` contains only results from actual tools (web_search,
         etc.), NOT from the synthetic ``set_output`` or ``ask_user`` tools.
@@ -964,14 +1513,16 @@ class EventLoopNode(NodeProtocol):
         ``real_tool_results`` which resets each inner iteration, this list grows
         across the entire turn.
         """
-        stream_id = ctx.node_id
+        stream_id = ctx.stream_id or ctx.node_id
         node_id = ctx.node_id
+        execution_id = ctx.execution_id or ""
         token_counts: dict[str, int] = {"input": 0, "output": 0}
         tool_call_count = 0
         final_text = ""
         # Track output keys set via set_output across all inner iterations
         outputs_set_this_turn: list[str] = []
         user_input_requested = False
+        ask_user_prompt = ""
         # Accumulate ALL tool calls across inner iterations for L3 logging.
         # Unlike real_tool_results (reset each inner iteration), this persists.
         logged_tool_calls: list[dict] = []
@@ -1005,38 +1556,84 @@ class EventLoopNode(NodeProtocol):
 
             accumulated_text = ""
             tool_calls: list[ToolCallEvent] = []
+            _stream_error: StreamErrorEvent | None = None
 
-            # Stream LLM response
-            async for event in ctx.llm.stream(
-                messages=messages,
-                system=conversation.system_prompt,
-                tools=tools if tools else None,
-                max_tokens=ctx.max_tokens,
-            ):
-                if isinstance(event, TextDeltaEvent):
-                    accumulated_text = event.snapshot
-                    await self._publish_text_delta(
-                        stream_id, node_id, event.content, event.snapshot, ctx
-                    )
+            # Stream LLM response in a child task so cancel_current_turn()
+            # can kill it instantly without terminating the queen's main loop.
+            # Capture loop-scoped variables as defaults to satisfy B023.
+            async def _do_stream(
+                _msgs: list = messages,  # noqa: B006
+                _tc: list[ToolCallEvent] = tool_calls,  # noqa: B006
+            ) -> None:
+                nonlocal accumulated_text, _stream_error
+                async for event in ctx.llm.stream(
+                    messages=_msgs,
+                    system=conversation.system_prompt,
+                    tools=tools if tools else None,
+                    max_tokens=ctx.max_tokens,
+                ):
+                    if isinstance(event, TextDeltaEvent):
+                        accumulated_text = event.snapshot
+                        await self._publish_text_delta(
+                            stream_id,
+                            node_id,
+                            event.content,
+                            event.snapshot,
+                            ctx,
+                            execution_id,
+                            iteration=iteration,
+                        )
 
-                elif isinstance(event, ToolCallEvent):
-                    tool_calls.append(event)
+                    elif isinstance(event, ToolCallEvent):
+                        _tc.append(event)
 
-                elif isinstance(event, FinishEvent):
-                    token_counts["input"] += event.input_tokens
-                    token_counts["output"] += event.output_tokens
+                    elif isinstance(event, FinishEvent):
+                        token_counts["input"] += event.input_tokens
+                        token_counts["output"] += event.output_tokens
+                        token_counts["stop_reason"] = event.stop_reason
+                        token_counts["model"] = event.model
 
-                elif isinstance(event, StreamErrorEvent):
-                    if not event.recoverable:
-                        raise RuntimeError(f"Stream error: {event.error}")
-                    logger.warning(f"Recoverable stream error: {event.error}")
+                    elif isinstance(event, StreamErrorEvent):
+                        if not event.recoverable:
+                            raise RuntimeError(f"Stream error: {event.error}")
+                        _stream_error = event
+                        logger.warning("Recoverable stream error: %s", event.error)
+
+            self._stream_task = asyncio.create_task(_do_stream())
+            try:
+                await self._stream_task
+            except asyncio.CancelledError:
+                if accumulated_text:
+                    await conversation.add_assistant_message(content=accumulated_text)
+                # Distinguish cancel_current_turn() (cancels the child
+                # _stream_task) from stop_worker (cancels the parent
+                # execution task).  When the parent itself is cancelled,
+                # cancelling() > 0 — propagate so the executor can save
+                # state.  When only the child was cancelled, convert to
+                # TurnCancelled so the event loop continues.
+                task = asyncio.current_task()
+                if task and task.cancelling() > 0:
+                    raise
+                raise TurnCancelled() from None
+            finally:
+                self._stream_task = None
+
+            # If a recoverable stream error produced an empty response,
+            # raise so the outer transient-error retry can handle it
+            # with proper backoff instead of burning judge iterations.
+            if _stream_error and not accumulated_text and not tool_calls:
+                raise ConnectionError(
+                    f"Stream failed with recoverable error: {_stream_error.error}"
+                )
 
             final_text = accumulated_text
             logger.info(
-                "[%s] LLM response: text=%r tool_calls=%s",
+                "[%s] LLM response: text=%r tool_calls=%s stop=%s model=%s",
                 node_id,
                 accumulated_text[:300] if accumulated_text else "(empty)",
                 [tc.tool_name for tc in tool_calls] if tool_calls else "[]",
+                token_counts.get("stop_reason", "?"),
+                token_counts.get("model", "?"),
             )
 
             # Record assistant message (write-through via conversation store)
@@ -1053,10 +1650,15 @@ class EventLoopNode(NodeProtocol):
                     }
                     for tc in tool_calls
                 ]
-            await conversation.add_assistant_message(
-                content=accumulated_text,
-                tool_calls=tc_dicts,
-            )
+            # Skip storing empty turns — no content, no tool calls.
+            # An empty assistant message (e.g. Codex returning nothing after
+            # a tool result) confuses some models on the next turn and causes
+            # cascading empty-stream failures.
+            if accumulated_text or tc_dicts:
+                await conversation.add_assistant_message(
+                    content=accumulated_text,
+                    tool_calls=tc_dicts,
+                )
 
             # If no tool calls, turn is complete
             if not tool_calls:
@@ -1067,6 +1669,7 @@ class EventLoopNode(NodeProtocol):
                     token_counts,
                     logged_tool_calls,
                     user_input_requested,
+                    ask_user_prompt,
                 )
 
             # Execute tool calls — framework tools (set_output, ask_user)
@@ -1079,9 +1682,13 @@ class EventLoopNode(NodeProtocol):
             )
 
             # Phase 1: triage — handle framework tools immediately,
-            # queue real tools for parallel execution.
+            # queue real tools and subagents for parallel execution.
             results_by_id: dict[str, ToolResult] = {}
+            timing_by_id: dict[
+                str, dict[str, Any]
+            ] = {}  # tool_use_id -> {start_timestamp, duration_s}
             pending_real: list[ToolCallEvent] = []
+            pending_subagent: list[ToolCallEvent] = []
 
             for tc in tool_calls:
                 tool_call_count += 1
@@ -1091,7 +1698,12 @@ class EventLoopNode(NodeProtocol):
                 executed_in_batch += 1
 
                 await self._publish_tool_started(
-                    stream_id, node_id, tc.tool_use_id, tc.tool_name, tc.tool_input
+                    stream_id,
+                    node_id,
+                    tc.tool_use_id,
+                    tc.tool_name,
+                    tc.tool_input,
+                    execution_id,
                 )
                 logger.info(
                     "[%s] tool_call: %s(%s)",
@@ -1102,6 +1714,8 @@ class EventLoopNode(NodeProtocol):
 
                 if tc.tool_name == "set_output":
                     # --- Framework-level set_output handling ---
+                    _tc_start = time.time()
+                    _tc_ts = datetime.now(UTC).isoformat()
                     result = self._handle_set_output(tc.tool_input, ctx.node_spec.output_keys)
                     result = ToolResult(
                         tool_use_id=tc.tool_use_id,
@@ -1122,8 +1736,9 @@ class EventLoopNode(NodeProtocol):
                                 pass
                         key = tc.tool_input.get("key", "")
                         await accumulator.set(key, value)
+                        self._record_learning(key, value)
                         outputs_set_this_turn.append(key)
-                        await self._publish_output_key_set(stream_id, node_id, key)
+                        await self._publish_output_key_set(stream_id, node_id, key, execution_id)
                     logged_tool_calls.append(
                         {
                             "tool_use_id": tc.tool_use_id,
@@ -1131,6 +1746,8 @@ class EventLoopNode(NodeProtocol):
                             "tool_input": tc.tool_input,
                             "content": result.content,
                             "is_error": result.is_error,
+                            "start_timestamp": _tc_ts,
+                            "duration_s": round(time.time() - _tc_start, 3),
                         }
                     )
                     results_by_id[tc.tool_use_id] = result
@@ -1138,9 +1755,68 @@ class EventLoopNode(NodeProtocol):
                 elif tc.tool_name == "ask_user":
                     # --- Framework-level ask_user handling ---
                     user_input_requested = True
+                    ask_user_prompt = tc.tool_input.get("question", "")
+                    # Emit immediately so the frontend transitions to
+                    # "awaiting input" without waiting for post-turn
+                    # processing (compaction, stall check, cursor write).
+                    if self._event_bus and ctx.node_spec.client_facing:
+                        await self._event_bus.emit_client_input_requested(
+                            stream_id=stream_id,
+                            node_id=node_id,
+                            prompt=ask_user_prompt,
+                            execution_id=execution_id,
+                        )
                     result = ToolResult(
                         tool_use_id=tc.tool_use_id,
                         content="Waiting for user input...",
+                        is_error=False,
+                    )
+                    results_by_id[tc.tool_use_id] = result
+
+                elif tc.tool_name == "delegate_to_sub_agent":
+                    # --- Framework-level subagent delegation ---
+                    # Queue for parallel execution in Phase 2
+                    logger.info(
+                        "🔄 LLM requesting subagent delegation: agent_id='%s', task='%s'",
+                        tc.tool_input.get("agent_id", "?"),
+                        (tc.tool_input.get("task", "")[:100] + "...")
+                        if len(tc.tool_input.get("task", "")) > 100
+                        else tc.tool_input.get("task", ""),
+                    )
+                    pending_subagent.append(tc)
+
+                elif tc.tool_name == "report_to_parent":
+                    # --- Report from sub-agent to parent (optionally blocking) ---
+                    msg = tc.tool_input.get("message", "")
+                    data = tc.tool_input.get("data")
+                    wait = tc.tool_input.get("wait_for_response", False)
+                    mark_complete = tc.tool_input.get("mark_complete", False)
+                    response = None
+
+                    if ctx.report_callback:
+                        try:
+                            response = await ctx.report_callback(
+                                msg,
+                                data,
+                                wait_for_response=wait,
+                            )
+                        except Exception:
+                            logger.warning(
+                                "[%s] report_to_parent callback failed (swallowed)",
+                                node_id,
+                                exc_info=True,
+                            )
+
+                    if mark_complete:
+                        self._mark_complete_flag = True
+                        logger.info(
+                            "[%s] mark_complete=True — subagent will accept on this iteration",
+                            node_id,
+                        )
+
+                    result = ToolResult(
+                        tool_use_id=tc.tool_use_id,
+                        content=response if (wait and response) else "Report sent to parent.",
                         is_error=False,
                     )
                     results_by_id[tc.tool_use_id] = result
@@ -1166,13 +1842,43 @@ class EventLoopNode(NodeProtocol):
                     else:
                         pending_real.append(tc)
 
-            # Phase 2: execute real tools in parallel.
+            # Phase 2a: execute real tools in parallel.
             if pending_real:
-                raw_results = await asyncio.gather(
-                    *(self._execute_tool(tc) for tc in pending_real),
+
+                async def _timed_execute(
+                    _tc: ToolCallEvent,
+                ) -> tuple[ToolResult | BaseException, str, float]:
+                    """Execute a tool and return (result, start_iso, duration_s)."""
+                    _s = time.time()
+                    _iso = datetime.now(UTC).isoformat()
+                    try:
+                        _r = await self._execute_tool(_tc)
+                    except BaseException as _exc:
+                        _r = _exc
+                    _dur = round(time.time() - _s, 3)
+                    return _r, _iso, _dur
+
+                timed_results = await asyncio.gather(
+                    *(_timed_execute(tc) for tc in pending_real),
                     return_exceptions=True,
                 )
-                for tc, raw in zip(pending_real, raw_results, strict=True):
+                # gather(return_exceptions=True) captures CancelledError
+                # as a return value instead of propagating it.  Re-raise
+                # so stop_worker actually stops the execution.
+                for entry in timed_results:
+                    if isinstance(entry, asyncio.CancelledError):
+                        raise entry
+                for tc, entry in zip(pending_real, timed_results, strict=True):
+                    if isinstance(entry, BaseException):
+                        raw = entry
+                        _start_iso = datetime.now(UTC).isoformat()
+                        _dur_s = 0
+                    else:
+                        raw, _start_iso, _dur_s = entry
+                    timing_by_id[tc.tool_use_id] = {
+                        "start_timestamp": _start_iso,
+                        "duration_s": _dur_s,
+                    }
                     if isinstance(raw, BaseException):
                         result = ToolResult(
                             tool_use_id=tc.tool_use_id,
@@ -1183,6 +1889,72 @@ class EventLoopNode(NodeProtocol):
                         result = raw
                     results_by_id[tc.tool_use_id] = self._truncate_tool_result(result, tc.tool_name)
 
+            # Phase 2b: execute subagent delegations in parallel.
+            if pending_subagent:
+
+                async def _timed_subagent(
+                    _ctx: NodeContext,
+                    _tc: ToolCallEvent,
+                ) -> tuple[ToolResult | BaseException, str, float]:
+                    _s = time.time()
+                    _iso = datetime.now(UTC).isoformat()
+                    try:
+                        _r = await self._execute_subagent(
+                            _ctx,
+                            _tc.tool_input.get("agent_id", ""),
+                            _tc.tool_input.get("task", ""),
+                        )
+                    except BaseException as _exc:
+                        _r = _exc
+                    _dur = round(time.time() - _s, 3)
+                    return _r, _iso, _dur
+
+                subagent_timed = await asyncio.gather(
+                    *(_timed_subagent(ctx, tc) for tc in pending_subagent),
+                    return_exceptions=True,
+                )
+                for tc, entry in zip(pending_subagent, subagent_timed, strict=True):
+                    if isinstance(entry, BaseException):
+                        raw = entry
+                        _start_iso = datetime.now(UTC).isoformat()
+                        _dur_s = 0
+                    else:
+                        raw, _start_iso, _dur_s = entry
+                    _sa_timing = {
+                        "start_timestamp": _start_iso,
+                        "duration_s": _dur_s,
+                    }
+                    if isinstance(raw, BaseException):
+                        result = ToolResult(
+                            tool_use_id=tc.tool_use_id,
+                            content=json.dumps(
+                                {
+                                    "message": f"Sub-agent execution raised: {raw}",
+                                    "data": None,
+                                    "metadata": {"success": False, "error": str(raw)},
+                                }
+                            ),
+                            is_error=True,
+                        )
+                    else:
+                        # Attach the tool_use_id to the result
+                        result = ToolResult(
+                            tool_use_id=tc.tool_use_id,
+                            content=raw.content,
+                            is_error=raw.is_error,
+                        )
+                    results_by_id[tc.tool_use_id] = result
+                    logged_tool_calls.append(
+                        {
+                            "tool_use_id": tc.tool_use_id,
+                            "tool_name": "delegate_to_sub_agent",
+                            "tool_input": tc.tool_input,
+                            "content": result.content,
+                            "is_error": result.is_error,
+                            **_sa_timing,
+                        }
+                    )
+
             # Phase 3: record results into conversation in original order,
             # build logged/real lists, and publish completed events.
             for tc in tool_calls[:executed_in_batch]:
@@ -1190,14 +1962,20 @@ class EventLoopNode(NodeProtocol):
                 if result is None:
                     continue  # shouldn't happen
 
-                # Build log entries for real tools
-                if tc.tool_name not in ("set_output", "ask_user"):
+                # Build log entries for real tools (exclude synthetic tools)
+                if tc.tool_name not in (
+                    "set_output",
+                    "ask_user",
+                    "delegate_to_sub_agent",
+                    "report_to_parent",
+                ):
                     tool_entry = {
                         "tool_use_id": tc.tool_use_id,
                         "tool_name": tc.tool_name,
                         "tool_input": tc.tool_input,
                         "content": result.content,
                         "is_error": result.is_error,
+                        **timing_by_id.get(tc.tool_use_id, {}),
                     }
                     real_tool_results.append(tool_entry)
                     logged_tool_calls.append(tool_entry)
@@ -1214,6 +1992,7 @@ class EventLoopNode(NodeProtocol):
                     tc.tool_name,
                     result.content,
                     result.is_error,
+                    execution_id,
                 )
 
             # If the limit was hit, add error results for every remaining
@@ -1275,6 +2054,7 @@ class EventLoopNode(NodeProtocol):
                     token_counts,
                     logged_tool_calls,
                     user_input_requested,
+                    ask_user_prompt,
                 )
 
             # --- Mid-turn pruning: prevent context blowup within a single turn ---
@@ -1301,6 +2081,7 @@ class EventLoopNode(NodeProtocol):
                     token_counts,
                     logged_tool_calls,
                     user_input_requested,
+                    ask_user_prompt,
                 )
 
             # Tool calls processed -- loop back to stream with updated conversation
@@ -1360,6 +2141,117 @@ class EventLoopNode(NodeProtocol):
                     },
                 },
                 "required": ["key", "value"],
+            },
+        )
+
+    def _build_delegate_tool(
+        self, sub_agents: list[str], node_registry: dict[str, Any]
+    ) -> Tool | None:
+        """Build the synthetic delegate_to_sub_agent tool for subagent invocation.
+
+        Args:
+            sub_agents: List of node IDs that can be invoked as subagents.
+            node_registry: Map of node_id -> NodeSpec for looking up subagent descriptions.
+
+        Returns:
+            Tool definition if sub_agents is non-empty, None otherwise.
+        """
+        if not sub_agents:
+            return None
+
+        agent_descriptions = []
+        for agent_id in sub_agents:
+            spec = node_registry.get(agent_id)
+            if spec:
+                desc = getattr(spec, "description", "(no description)")
+                agent_descriptions.append(f"- {agent_id}: {desc}")
+            else:
+                agent_descriptions.append(f"- {agent_id}: (not found in registry)")
+
+        return Tool(
+            name="delegate_to_sub_agent",
+            description=(
+                "Delegate a task to a specialized sub-agent. The sub-agent runs "
+                "autonomously with read-only access to current memory and returns "
+                "its result. Use this to parallelize work or leverage specialized capabilities.\n\n"
+                "Available sub-agents:\n" + "\n".join(agent_descriptions)
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "agent_id": {
+                        "type": "string",
+                        "description": f"The sub-agent to invoke. Must be one of: {sub_agents}",
+                        "enum": sub_agents,
+                    },
+                    "task": {
+                        "type": "string",
+                        "description": (
+                            "The task description for the sub-agent to execute. "
+                            "Be specific about what you want the sub-agent to do and "
+                            "what information to return."
+                        ),
+                    },
+                },
+                "required": ["agent_id", "task"],
+            },
+        )
+
+    def _build_report_to_parent_tool(self) -> Tool:
+        """Build the synthetic report_to_parent tool for sub-agent progress reports.
+
+        Sub-agents call this to send one-way progress updates, partial findings,
+        or status reports to the parent node (and external observers via event bus)
+        without blocking execution.
+
+        When ``wait_for_response`` is True, the sub-agent blocks until the parent
+        relays the user's response — used for escalation (e.g. login pages, CAPTCHAs).
+
+        When ``mark_complete`` is True, the sub-agent terminates immediately after
+        sending the report — no need to call set_output for each output key.
+        """
+        return Tool(
+            name="report_to_parent",
+            description=(
+                "Send a report to the parent agent. By default this is fire-and-forget: "
+                "the parent receives the report but does not respond. "
+                "Set wait_for_response=true to BLOCK until the user replies — use this "
+                "when you need human intervention (e.g. login pages, CAPTCHAs, "
+                "authentication walls). The user's response is returned as the tool result. "
+                "Set mark_complete=true to finish your task and terminate immediately "
+                "after sending the report — use this when your findings are in the "
+                "message/data fields and you don't need to call set_output."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "message": {
+                        "type": "string",
+                        "description": "A human-readable status or progress message.",
+                    },
+                    "data": {
+                        "type": "object",
+                        "description": "Optional structured data to include with the report.",
+                    },
+                    "wait_for_response": {
+                        "type": "boolean",
+                        "description": (
+                            "If true, block execution until the user responds. "
+                            "Use for escalation scenarios requiring human intervention."
+                        ),
+                        "default": False,
+                    },
+                    "mark_complete": {
+                        "type": "boolean",
+                        "description": (
+                            "If true, terminate the sub-agent immediately after sending "
+                            "this report. The report message and data are delivered to the "
+                            "parent as the final result. No set_output calls are needed."
+                        ),
+                        "default": False,
+                    },
+                },
+                "required": ["message"],
             },
         )
 
@@ -1427,6 +2319,10 @@ class EventLoopNode(NodeProtocol):
         iteration: int,
     ) -> JudgeVerdict:
         """Evaluate the current state using judge or implicit logic."""
+        # Short-circuit: subagent called report_to_parent(mark_complete=True)
+        if self._mark_complete_flag:
+            return JudgeVerdict(action="ACCEPT")
+
         if self._judge is not None:
             context = {
                 "assistant_text": assistant_text,
@@ -1467,6 +2363,23 @@ class EventLoopNode(NodeProtocol):
                         ),
                     )
 
+                # Client-facing nodes with no output keys are meant for
+                # continuous interaction — they should not auto-accept.
+                # Only exit via shutdown, max_iterations, or max_node_visits.
+                # Inject tool-use pressure so models stuck in a
+                # "narrate-instead-of-act" loop get corrective feedback.
+                if not output_keys and ctx.node_spec.client_facing:
+                    return JudgeVerdict(
+                        action="RETRY",
+                        feedback=(
+                            "STOP describing what you will do. "
+                            "You have FULL access to all tools — file creation, "
+                            "shell commands, MCP tools — and you CAN call them "
+                            "directly in your response. Respond ONLY with tool "
+                            "calls, no prose. Execute the task now."
+                        ),
+                    )
+
                 # Level 2: conversation-aware quality check (if success_criteria set)
                 if ctx.node_spec.success_criteria and ctx.llm:
                     from framework.graph.conversation_judge import evaluate_phase_completion
@@ -1491,7 +2404,8 @@ class EventLoopNode(NodeProtocol):
                 return JudgeVerdict(
                     action="RETRY",
                     feedback=(
-                        f"Missing output keys: {missing}. Use set_output tool to provide them."
+                        f"Task incomplete. Required outputs not yet produced: {missing}. "
+                        f"Follow your system prompt instructions to complete the work."
                     ),
                 )
 
@@ -1626,6 +2540,105 @@ class EventLoopNode(NodeProtocol):
             return False
         return all(r == recent_responses[0] for r in recent_responses)
 
+    @staticmethod
+    def _is_transient_error(exc: BaseException) -> bool:
+        """Classify whether an exception is transient (retryable) vs permanent.
+
+        Transient: network errors, rate limits, server errors, timeouts.
+        Permanent: auth errors, bad requests, context window exceeded.
+        """
+        try:
+            from litellm.exceptions import (
+                APIConnectionError,
+                BadGatewayError,
+                InternalServerError,
+                RateLimitError,
+                ServiceUnavailableError,
+            )
+
+            transient_types: tuple[type[BaseException], ...] = (
+                RateLimitError,
+                APIConnectionError,
+                InternalServerError,
+                BadGatewayError,
+                ServiceUnavailableError,
+                TimeoutError,
+                ConnectionError,
+                OSError,
+            )
+        except ImportError:
+            transient_types = (TimeoutError, ConnectionError, OSError)
+
+        if isinstance(exc, transient_types):
+            return True
+
+        # RuntimeError from StreamErrorEvent with "Stream error:" prefix
+        if isinstance(exc, RuntimeError):
+            error_str = str(exc).lower()
+            transient_keywords = [
+                "rate limit",
+                "429",
+                "timeout",
+                "connection",
+                "internal server",
+                "502",
+                "503",
+                "504",
+                "service unavailable",
+                "bad gateway",
+                "overloaded",
+                "failed to parse tool call",
+            ]
+            return any(kw in error_str for kw in transient_keywords)
+
+        return False
+
+    @staticmethod
+    def _fingerprint_tool_calls(
+        tool_results: list[dict],
+    ) -> list[tuple[str, str]]:
+        """Create deterministic fingerprints for a turn's tool calls.
+
+        Each fingerprint is (tool_name, canonical_args_json).  Order-sensitive
+        so [search("a"), fetch("b")] != [fetch("b"), search("a")].
+        """
+        fingerprints = []
+        for tr in tool_results:
+            name = tr.get("tool_name", "")
+            args = tr.get("tool_input", {})
+            try:
+                canonical = json.dumps(args, sort_keys=True, default=str)
+            except (TypeError, ValueError):
+                canonical = str(args)
+            fingerprints.append((name, canonical))
+        return fingerprints
+
+    def _is_tool_doom_loop(
+        self,
+        recent_tool_fingerprints: list[list[tuple[str, str]]],
+    ) -> tuple[bool, str]:
+        """Detect doom loop: N consecutive turns with identical tool calls.
+
+        Returns (is_doom_loop, description).
+        """
+        if not self._config.tool_doom_loop_enabled:
+            return False, ""
+        threshold = self._config.tool_doom_loop_threshold
+        if len(recent_tool_fingerprints) < threshold:
+            return False, ""
+        # All entries must be non-empty and identical
+        first = recent_tool_fingerprints[0]
+        if not first:
+            return False, ""
+        if all(fp == first for fp in recent_tool_fingerprints):
+            tool_names = [name for name, _ in first]
+            desc = (
+                f"Doom loop detected: {threshold} consecutive identical "
+                f"tool calls ({', '.join(tool_names)})"
+            )
+            return True, desc
+        return False, ""
+
     async def _execute_tool(self, tc: ToolCallEvent) -> ToolResult:
         """Execute a tool call, handling both sync and async executors."""
         if self._tool_executor is None:
@@ -1640,39 +2653,113 @@ class EventLoopNode(NodeProtocol):
             result = await result
         return result
 
+    def _record_learning(self, key: str, value: Any) -> None:
+        """Append a set_output value to adapt.md as a learning entry.
+
+        Called at set_output time — the moment knowledge is produced — so that
+        adapt.md accumulates the agent's outputs across the session.  Since
+        adapt.md is injected into the system prompt, these persist through
+        any compaction.
+        """
+        if not self._config.spillover_dir:
+            return
+        try:
+            adapt_path = Path(self._config.spillover_dir) / "adapt.md"
+            content = adapt_path.read_text(encoding="utf-8") if adapt_path.exists() else ""
+
+            if "## Outputs" not in content:
+                content += "\n\n## Outputs\n"
+
+            # Truncate long values for memory (full value is in shared memory)
+            v_str = str(value)
+            if len(v_str) > 500:
+                v_str = v_str[:500] + "…"
+
+            entry = f"- {key}: {v_str}\n"
+
+            # Replace existing entry for same key (update, not duplicate)
+            lines = content.splitlines(keepends=True)
+            replaced = False
+            for i, line in enumerate(lines):
+                if line.startswith(f"- {key}:"):
+                    lines[i] = entry
+                    replaced = True
+                    break
+            if replaced:
+                content = "".join(lines)
+            else:
+                content += entry
+
+            adapt_path.write_text(content, encoding="utf-8")
+        except Exception as e:
+            logger.warning("Failed to record learning for key=%s: %s", key, e)
+
+    def _next_spill_filename(self, tool_name: str) -> str:
+        """Return a short, monotonic filename for a tool result spill."""
+        self._spill_counter += 1
+        # Shorten common tool name prefixes to save tokens
+        short = tool_name.removeprefix("tool_").removeprefix("mcp_")
+        return f"{short}_{self._spill_counter}.txt"
+
+    def _restore_spill_counter(self) -> None:
+        """Scan spillover_dir for existing spill files and restore the counter."""
+        spill_dir = self._config.spillover_dir
+        if not spill_dir:
+            return
+        spill_path = Path(spill_dir)
+        if not spill_path.is_dir():
+            return
+        max_n = 0
+        for f in spill_path.iterdir():
+            if not f.is_file():
+                continue
+            m = re.search(r"_(\d+)\.txt$", f.name)
+            if m:
+                max_n = max(max_n, int(m.group(1)))
+        if max_n > self._spill_counter:
+            self._spill_counter = max_n
+            logger.info("Restored spill counter to %d from existing files", max_n)
+
     def _truncate_tool_result(
         self,
         result: ToolResult,
         tool_name: str,
     ) -> ToolResult:
-        """Truncate a large tool result to keep the conversation context small.
+        """Persist tool result to file and optionally truncate for context.
 
-        If *spillover_dir* is configured and the result exceeds
-        *max_tool_result_chars*, the full content is written to a file and
-        the in-context result is replaced with a preview + filename reference.
-        Without *spillover_dir*, large results are truncated with a note.
+        When *spillover_dir* is configured, EVERY non-error tool result is
+        saved to a file (short filename like ``web_search_1.txt``).  A
+        ``[Saved to '...']`` annotation is appended so the reference
+        survives pruning and compaction.
 
-        Small results (and errors) pass through unchanged.
+        - Small results (≤ limit): full content kept + file annotation
+        - Large results (> limit): preview + file reference
+        - Errors: pass through unchanged
+        - load_data results: truncate with pagination hint (no re-spill)
         """
         limit = self._config.max_tool_result_chars
-        if limit <= 0 or result.is_error or len(result.content) <= limit:
+
+        # Errors always pass through unchanged
+        if result.is_error:
             return result
 
-        # load_data is the designated mechanism for reading spilled files.
-        # Don't re-spill (circular), but DO truncate with a pagination hint.
+        # load_data reads FROM spilled files — never re-spill (circular).
+        # Just truncate with a pagination hint if the result is too large.
         if tool_name == "load_data":
+            if limit <= 0 or len(result.content) <= limit:
+                return result  # Small load_data result — pass through as-is
+            # Large load_data result — truncate with pagination hint
             preview_chars = max(limit - 300, limit // 2)
             preview = result.content[:preview_chars]
             truncated = (
-                f"[load_data result: {len(result.content)} chars — "
-                f"too large for context. Use offset_bytes and limit_bytes parameters "
-                f"to read smaller chunks, e.g. "
-                f"load_data(filename=..., offset_bytes=0, limit_bytes=5000).]\n\n"
+                f"[{tool_name} result: {len(result.content)} chars — "
+                f"too large for context. Use offset/limit parameters "
+                f"to read smaller chunks.]\n\n"
                 f"Preview:\n{preview}…"
             )
             logger.info(
-                "load_data result truncated: %d → %d chars "
-                "(use offset_bytes/limit_bytes to paginate)",
+                "%s result truncated: %d → %d chars (use offset/limit to paginate)",
+                tool_name,
                 len(result.content),
                 len(truncated),
             )
@@ -1682,21 +2769,14 @@ class EventLoopNode(NodeProtocol):
                 is_error=False,
             )
 
-        # Determine a preview size — leave room for the metadata wrapper
-        preview_chars = max(limit - 300, limit // 2)
-        preview = result.content[:preview_chars]
-
         spill_dir = self._config.spillover_dir
         if spill_dir:
             spill_path = Path(spill_dir)
             spill_path.mkdir(parents=True, exist_ok=True)
-            # Use tool_use_id for uniqueness, sanitise for filesystem
-            safe_id = result.tool_use_id.replace("/", "_")[:60]
-            filename = f"tool_{tool_name}_{safe_id}.txt"
+            filename = self._next_spill_filename(tool_name)
 
             # Pretty-print JSON content so load_data's line-based
-            # pagination works correctly.  Compact JSON (no newlines)
-            # would produce a single line that defeats pagination.
+            # pagination works correctly.
             write_content = result.content
             try:
                 parsed = json.loads(result.content)
@@ -1706,20 +2786,43 @@ class EventLoopNode(NodeProtocol):
 
             (spill_path / filename).write_text(write_content, encoding="utf-8")
 
-            truncated = (
-                f"[Result from {tool_name}: {len(result.content)} chars — "
-                f"too large for context, saved to '{filename}'. "
-                f"Use load_data(filename='{filename}') "
-                f"to read the full result.]\n\n"
-                f"Preview:\n{preview}…"
+            if limit > 0 and len(result.content) > limit:
+                # Large result: preview + file reference
+                preview_chars = max(limit - 300, limit // 2)
+                preview = result.content[:preview_chars]
+                content = (
+                    f"[Result from {tool_name}: {len(result.content)} chars — "
+                    f"too large for context, saved to '{filename}'. "
+                    f"Use load_data(filename='{filename}') "
+                    f"to read the full result.]\n\n"
+                    f"Preview:\n{preview}…"
+                )
+                logger.info(
+                    "Tool result spilled to file: %s (%d chars → %s)",
+                    tool_name,
+                    len(result.content),
+                    filename,
+                )
+            else:
+                # Small result: keep full content + annotation
+                content = f"{result.content}\n\n[Saved to '{filename}']"
+                logger.info(
+                    "Tool result saved to file: %s (%d chars → %s)",
+                    tool_name,
+                    len(result.content),
+                    filename,
+                )
+
+            return ToolResult(
+                tool_use_id=result.tool_use_id,
+                content=content,
+                is_error=False,
             )
-            logger.info(
-                "Tool result spilled to file: %s (%d chars → %s)",
-                tool_name,
-                len(result.content),
-                filename,
-            )
-        else:
+
+        # No spillover_dir — truncate in-place if needed
+        if limit > 0 and len(result.content) > limit:
+            preview_chars = max(limit - 300, limit // 2)
+            preview = result.content[:preview_chars]
             truncated = (
                 f"[Result from {tool_name}: {len(result.content)} chars — "
                 f"truncated to fit context budget. Only the first "
@@ -1731,12 +2834,13 @@ class EventLoopNode(NodeProtocol):
                 len(result.content),
                 len(truncated),
             )
+            return ToolResult(
+                tool_use_id=result.tool_use_id,
+                content=truncated,
+                is_error=False,
+            )
 
-        return ToolResult(
-            tool_use_id=result.tool_use_id,
-            content=truncated,
-            is_error=False,
-        )
+        return result
 
     async def _compact_tiered(
         self,
@@ -1789,7 +2893,7 @@ class EventLoopNode(NodeProtocol):
                     await self._event_bus.publish(
                         AgentEvent(
                             type=EventType.CONTEXT_COMPACTED,
-                            stream_id=ctx.node_id,
+                            stream_id=ctx.stream_id or ctx.node_id,
                             node_id=ctx.node_id,
                             data={
                                 "level": "prune_only",
@@ -1805,18 +2909,44 @@ class EventLoopNode(NodeProtocol):
 
         if ratio >= 1.2:
             level = "emergency"
+            keep = 1
             logger.warning("Emergency compaction triggered (usage %.0f%%)", ratio * 100)
-            summary = self._build_emergency_summary(ctx, accumulator, conversation)
-            await conversation.compact(summary, keep_recent=1, phase_graduated=_phase_grad)
         elif ratio >= 1.0:
             level = "aggressive"
+            keep = 2
             logger.info("Aggressive compaction triggered (usage %.0f%%)", ratio * 100)
-            summary = await self._generate_compaction_summary(ctx, conversation)
-            await conversation.compact(summary, keep_recent=2, phase_graduated=_phase_grad)
         else:
             level = "normal"
-            summary = await self._generate_compaction_summary(ctx, conversation)
-            await conversation.compact(summary, keep_recent=4, phase_graduated=_phase_grad)
+            keep = 4
+
+        spill_dir = self._config.spillover_dir
+        if spill_dir:
+            # Structure-preserving: save freeform text to file, keep tool messages
+            await conversation.compact_preserving_structure(
+                spillover_dir=spill_dir,
+                keep_recent=keep,
+                phase_graduated=_phase_grad,
+            )
+            # Circuit breaker: if structure-preserving compaction barely helped
+            # (still over budget), fall back to destructive compact() which
+            # replaces everything with a summary.
+            mid_ratio = conversation.usage_ratio()
+            if mid_ratio >= 0.9 * ratio:
+                logger.warning(
+                    "Structure-preserving compaction ineffective "
+                    "(%.0f%% -> %.0f%%), falling back to summary compaction",
+                    ratio * 100,
+                    mid_ratio * 100,
+                )
+                summary = self._build_emergency_summary(ctx, accumulator, conversation)
+                await conversation.compact(summary, keep_recent=keep, phase_graduated=_phase_grad)
+        else:
+            # Fallback: LLM-based summary (no spillover dir available)
+            if level == "emergency":
+                summary = self._build_emergency_summary(ctx, accumulator, conversation)
+            else:
+                summary = await self._generate_compaction_summary(ctx, conversation)
+            await conversation.compact(summary, keep_recent=keep, phase_graduated=_phase_grad)
 
         new_ratio = conversation.usage_ratio()
         logger.info(
@@ -1845,7 +2975,7 @@ class EventLoopNode(NodeProtocol):
             await self._event_bus.publish(
                 AgentEvent(
                     type=EventType.CONTEXT_COMPACTED,
-                    stream_id=ctx.node_id,
+                    stream_id=ctx.stream_id or ctx.node_id,
                     node_id=ctx.node_id,
                     data={
                         "level": level,
@@ -1868,7 +2998,11 @@ class EventLoopNode(NodeProtocol):
         )
         prompt = (
             "Summarize this conversation so far in 2-3 sentences, "
-            "preserving key decisions and results:\n\n"
+            "preserving key decisions and results.\n\n"
+            "IMPORTANT: Always preserve any user-stated rules, constraints, "
+            "or preferences — especially which account/identity to use, "
+            "formatting preferences, and behavioral instructions. "
+            "These MUST appear verbatim or near-verbatim in your summary.\n\n"
             f"{messages_text}"
         )
         if tool_history:
@@ -1882,10 +3016,12 @@ class EventLoopNode(NodeProtocol):
         # internal thinking. 500 leaves nothing for the actual summary.
         summary_budget = max(1024, self._config.max_history_tokens // 10)
         try:
-            response = ctx.llm.complete(
+            response = await ctx.llm.acomplete(
                 messages=[{"role": "user", "content": prompt}],
                 system=(
-                    "Summarize conversations concisely. Always preserve the tool history section."
+                    "Summarize conversations concisely. Always preserve the tool "
+                    "history section. Always preserve user-stated rules, constraints, "
+                    "and account/identity preferences verbatim."
                 ),
                 max_tokens=summary_budget,
             )
@@ -1957,25 +3093,46 @@ class EventLoopNode(NodeProtocol):
 
         # 5. Spillover files — list actual files so the LLM can load
         # them immediately instead of having to call list_data_files first.
+        # Inline adapt.md (agent memory) directly — it contains user rules
+        # and identity preferences that must survive emergency compaction.
         if self._config.spillover_dir:
             try:
                 from pathlib import Path
 
                 data_dir = Path(self._config.spillover_dir)
                 if data_dir.is_dir():
-                    files = sorted(f.name for f in data_dir.iterdir() if f.is_file())
-                    if files:
-                        file_list = "\n".join(f"  - {f}" for f in files[:30])
+                    # Inline adapt.md content directly
+                    adapt_path = data_dir / "adapt.md"
+                    if adapt_path.is_file():
+                        adapt_text = adapt_path.read_text(encoding="utf-8").strip()
+                        if adapt_text:
+                            parts.append(f"AGENT MEMORY (adapt.md):\n{adapt_text}")
+
+                    all_files = sorted(
+                        f.name for f in data_dir.iterdir() if f.is_file() and f.name != "adapt.md"
+                    )
+                    # Separate conversation history files from regular data files
+                    conv_files = [f for f in all_files if re.match(r"conversation_\d+\.md$", f)]
+                    data_files = [f for f in all_files if f not in conv_files]
+
+                    if conv_files:
+                        conv_list = "\n".join(f"  - {f}" for f in conv_files)
+                        parts.append(
+                            "CONVERSATION HISTORY (freeform messages saved during compaction — "
+                            "use load_data to review earlier dialogue):\n" + conv_list
+                        )
+                    if data_files:
+                        file_list = "\n".join(f"  - {f}" for f in data_files[:30])
                         parts.append("DATA FILES (use load_data to read):\n" + file_list)
-                    else:
+                    if not all_files:
                         parts.append(
                             "NOTE: Large tool results may have been saved to files. "
-                            "Use list_data_files() to check."
+                            "Use list_directory to check the data directory."
                         )
             except Exception:
                 parts.append(
                     "NOTE: Large tool results were saved to files. "
-                    "Use load_data(filename='<filename>') to read them."
+                    "Use read_file(path='<path>') to read them."
                 )
 
         # 6. Tool call history (prevent re-calling tools)
@@ -1994,29 +3151,69 @@ class EventLoopNode(NodeProtocol):
     # Persistence: restore, cursor, injection, pause
     # -------------------------------------------------------------------
 
+    @dataclass
+    class _RestoredState:
+        """State recovered from a previous checkpoint."""
+
+        conversation: NodeConversation
+        accumulator: OutputAccumulator
+        start_iteration: int
+        recent_responses: list[str]
+        recent_tool_fingerprints: list[list[tuple[str, str]]]
+
     async def _restore(
         self,
         ctx: NodeContext,
-    ) -> tuple[NodeConversation | None, OutputAccumulator | None, int]:
-        """Attempt to restore from a previous checkpoint."""
-        if self._conversation_store is None:
-            return None, None, 0
+    ) -> _RestoredState | None:
+        """Attempt to restore from a previous checkpoint.
 
-        conversation = await NodeConversation.restore(self._conversation_store)
+        Returns a ``_RestoredState`` with conversation, accumulator, iteration
+        counter, and stall/doom-loop detection state — everything needed to
+        resume exactly where execution stopped.
+        """
+        if self._conversation_store is None:
+            return None
+
+        # In isolated mode, filter parts by phase_id so the node only sees
+        # its own messages in the shared flat conversation store.  In
+        # continuous mode (or when _restore is called for timer-resume)
+        # load all parts — the full conversation threads across nodes.
+        _is_continuous = getattr(ctx, "continuous_mode", False)
+        phase_filter = None if _is_continuous else ctx.node_id
+        conversation = await NodeConversation.restore(
+            self._conversation_store,
+            phase_id=phase_filter,
+        )
         if conversation is None:
-            return None, None, 0
+            return None
 
         accumulator = await OutputAccumulator.restore(self._conversation_store)
 
         cursor = await self._conversation_store.read_cursor()
         start_iteration = cursor.get("iteration", 0) + 1 if cursor else 0
 
+        # Restore stall/doom-loop detection state
+        recent_responses: list[str] = cursor.get("recent_responses", []) if cursor else []
+        raw_fps = cursor.get("recent_tool_fingerprints", []) if cursor else []
+        recent_tool_fingerprints: list[list[tuple[str, str]]] = [
+            [tuple(pair) for pair in fps]  # type: ignore[misc]
+            for fps in raw_fps
+        ]
+
         logger.info(
             f"Restored event loop: iteration={start_iteration}, "
             f"messages={conversation.message_count}, "
-            f"outputs={list(accumulator.values.keys())}"
+            f"outputs={list(accumulator.values.keys())}, "
+            f"stall_window={len(recent_responses)}, "
+            f"doom_window={len(recent_tool_fingerprints)}"
         )
-        return conversation, accumulator, start_iteration
+        return EventLoopNode._RestoredState(
+            conversation=conversation,
+            accumulator=accumulator,
+            start_iteration=start_iteration,
+            recent_responses=recent_responses,
+            recent_tool_fingerprints=recent_tool_fingerprints,
+        )
 
     async def _write_cursor(
         self,
@@ -2024,8 +3221,15 @@ class EventLoopNode(NodeProtocol):
         conversation: NodeConversation,
         accumulator: OutputAccumulator,
         iteration: int,
+        *,
+        recent_responses: list[str] | None = None,
+        recent_tool_fingerprints: list[list[tuple[str, str]]] | None = None,
     ) -> None:
-        """Write checkpoint cursor for crash recovery."""
+        """Write checkpoint cursor for crash recovery.
+
+        Persists iteration counter, accumulator outputs, and stall/doom-loop
+        detection state so that resume picks up exactly where execution stopped.
+        """
         if self._conversation_store:
             cursor = await self._conversation_store.read_cursor() or {}
             cursor.update(
@@ -2036,6 +3240,14 @@ class EventLoopNode(NodeProtocol):
                     "outputs": accumulator.to_dict(),
                 }
             )
+            # Persist stall/doom-loop detection state for reliable resume
+            if recent_responses is not None:
+                cursor["recent_responses"] = recent_responses
+            if recent_tool_fingerprints is not None:
+                # Convert list[list[tuple]] → list[list[list]] for JSON
+                cursor["recent_tool_fingerprints"] = [
+                    [list(pair) for pair in fps] for fps in recent_tool_fingerprints
+                ]
             await self._conversation_store.write_cursor(cursor)
 
     async def _drain_injection_queue(self, conversation: NodeConversation) -> int:
@@ -2043,12 +3255,17 @@ class EventLoopNode(NodeProtocol):
         count = 0
         while not self._injection_queue.empty():
             try:
-                content = self._injection_queue.get_nowait()
+                content, is_client_input = self._injection_queue.get_nowait()
                 logger.info(
-                    "[drain] injected message: %s",
+                    "[drain] injected message (client_input=%s): %s",
+                    is_client_input,
                     content[:200] if content else "(empty)",
                 )
-                await conversation.add_user_message(f"[External event]: {content}")
+                # Real user input is stored as-is; external events get a prefix
+                if is_client_input:
+                    await conversation.add_user_message(content, is_client_input=True)
+                else:
+                    await conversation.add_user_message(f"[External event]: {content}")
                 count += 1
             except asyncio.QueueEmpty:
                 break
@@ -2090,36 +3307,116 @@ class EventLoopNode(NodeProtocol):
     # EventBus publishing helpers
     # -------------------------------------------------------------------
 
-    async def _publish_loop_started(self, stream_id: str, node_id: str) -> None:
+    async def _publish_loop_started(
+        self, stream_id: str, node_id: str, execution_id: str = ""
+    ) -> None:
         if self._event_bus:
             await self._event_bus.emit_node_loop_started(
                 stream_id=stream_id,
                 node_id=node_id,
                 max_iterations=self._config.max_iterations,
+                execution_id=execution_id,
             )
 
-    async def _publish_iteration(self, stream_id: str, node_id: str, iteration: int) -> None:
+    async def _generate_action_plan(
+        self,
+        ctx: NodeContext,
+        stream_id: str,
+        node_id: str,
+        execution_id: str,
+    ) -> None:
+        """Generate a brief action plan via LLM and emit it as an SSE event.
+
+        Runs as a fire-and-forget task so it never blocks the main loop.
+        """
+        try:
+            system_prompt = ctx.node_spec.system_prompt or ""
+            # Trim to keep the prompt small
+            prompt_summary = system_prompt[:500]
+            if len(system_prompt) > 500:
+                prompt_summary += "..."
+
+            tool_names = [t.name for t in ctx.available_tools]
+            output_keys = ctx.node_spec.output_keys or []
+
+            prompt = (
+                f'You are about to work on a task as node "{node_id}".\n\n'
+                f"System prompt:\n{prompt_summary}\n\n"
+                f"Tools available: {tool_names}\n"
+                f"Required outputs: {output_keys}\n\n"
+                f"Write a brief action plan (2-5 bullet points) describing "
+                f"what you will do to complete this task. Be specific and concise.\n"
+                f"Return ONLY the plan text, no preamble."
+            )
+
+            response = await ctx.llm.acomplete(
+                messages=[{"role": "user", "content": prompt}],
+                max_tokens=1024,
+            )
+
+            plan = response.content.strip()
+            if plan and self._event_bus:
+                await self._event_bus.emit_node_action_plan(
+                    stream_id=stream_id,
+                    node_id=node_id,
+                    plan=plan,
+                    execution_id=execution_id,
+                )
+        except Exception as e:
+            logger.warning("Action plan generation failed for node '%s': %s", node_id, e)
+
+    async def _publish_iteration(
+        self, stream_id: str, node_id: str, iteration: int, execution_id: str = ""
+    ) -> None:
         if self._event_bus:
             await self._event_bus.emit_node_loop_iteration(
                 stream_id=stream_id,
                 node_id=node_id,
                 iteration=iteration,
+                execution_id=execution_id,
             )
 
-    async def _publish_loop_completed(self, stream_id: str, node_id: str, iterations: int) -> None:
+    async def _publish_llm_turn_complete(
+        self,
+        stream_id: str,
+        node_id: str,
+        stop_reason: str,
+        model: str,
+        input_tokens: int,
+        output_tokens: int,
+        execution_id: str = "",
+        iteration: int | None = None,
+    ) -> None:
+        if self._event_bus:
+            await self._event_bus.emit_llm_turn_complete(
+                stream_id=stream_id,
+                node_id=node_id,
+                stop_reason=stop_reason,
+                model=model,
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
+                execution_id=execution_id,
+                iteration=iteration,
+            )
+
+    async def _publish_loop_completed(
+        self, stream_id: str, node_id: str, iterations: int, execution_id: str = ""
+    ) -> None:
         if self._event_bus:
             await self._event_bus.emit_node_loop_completed(
                 stream_id=stream_id,
                 node_id=node_id,
                 iterations=iterations,
+                execution_id=execution_id,
             )
 
-    async def _publish_stalled(self, stream_id: str, node_id: str) -> None:
+    async def _publish_stalled(self, stream_id: str, node_id: str, execution_id: str = "") -> None:
         if self._event_bus:
             await self._event_bus.emit_node_stalled(
                 stream_id=stream_id,
                 node_id=node_id,
                 reason="Consecutive identical responses detected",
+                execution_id=execution_id,
             )
 
     async def _publish_text_delta(
@@ -2129,6 +3426,8 @@ class EventLoopNode(NodeProtocol):
         content: str,
         snapshot: str,
         ctx: NodeContext,
+        execution_id: str = "",
+        iteration: int | None = None,
     ) -> None:
         if self._event_bus:
             if ctx.node_spec.client_facing:
@@ -2137,6 +3436,8 @@ class EventLoopNode(NodeProtocol):
                     node_id=node_id,
                     content=content,
                     snapshot=snapshot,
+                    execution_id=execution_id,
+                    iteration=iteration,
                 )
             else:
                 await self._event_bus.emit_llm_text_delta(
@@ -2144,6 +3445,7 @@ class EventLoopNode(NodeProtocol):
                     node_id=node_id,
                     content=content,
                     snapshot=snapshot,
+                    execution_id=execution_id,
                 )
 
     async def _publish_tool_started(
@@ -2153,6 +3455,7 @@ class EventLoopNode(NodeProtocol):
         tool_use_id: str,
         tool_name: str,
         tool_input: dict,
+        execution_id: str = "",
     ) -> None:
         if self._event_bus:
             await self._event_bus.emit_tool_call_started(
@@ -2161,6 +3464,7 @@ class EventLoopNode(NodeProtocol):
                 tool_use_id=tool_use_id,
                 tool_name=tool_name,
                 tool_input=tool_input,
+                execution_id=execution_id,
             )
 
     async def _publish_tool_completed(
@@ -2171,6 +3475,7 @@ class EventLoopNode(NodeProtocol):
         tool_name: str,
         result: str,
         is_error: bool,
+        execution_id: str = "",
     ) -> None:
         if self._event_bus:
             await self._event_bus.emit_tool_call_completed(
@@ -2180,6 +3485,7 @@ class EventLoopNode(NodeProtocol):
                 tool_name=tool_name,
                 result=result,
                 is_error=is_error,
+                execution_id=execution_id,
             )
 
     async def _publish_judge_verdict(
@@ -2190,6 +3496,7 @@ class EventLoopNode(NodeProtocol):
         feedback: str = "",
         judge_type: str = "implicit",
         iteration: int = 0,
+        execution_id: str = "",
     ) -> None:
         if self._event_bus:
             await self._event_bus.emit_judge_verdict(
@@ -2199,6 +3506,7 @@ class EventLoopNode(NodeProtocol):
                 feedback=feedback,
                 judge_type=judge_type,
                 iteration=iteration,
+                execution_id=execution_id,
             )
 
     async def _publish_output_key_set(
@@ -2206,10 +3514,625 @@ class EventLoopNode(NodeProtocol):
         stream_id: str,
         node_id: str,
         key: str,
+        execution_id: str = "",
     ) -> None:
         if self._event_bus:
             await self._event_bus.emit_output_key_set(
-                stream_id=stream_id,
-                node_id=node_id,
-                key=key,
+                stream_id=stream_id, node_id=node_id, key=key, execution_id=execution_id
+            )
+
+    # -------------------------------------------------------------------
+    # Subagent Execution
+    # -------------------------------------------------------------------
+
+    async def _execute_subagent(
+        self,
+        ctx: NodeContext,
+        agent_id: str,
+        task: str,
+    ) -> ToolResult:
+        """Execute a subagent and return the result as a ToolResult.
+
+        The subagent:
+        - Gets a fresh conversation with just the task
+        - Has read-only access to the parent's readable memory
+        - Cannot delegate to its own subagents (prevents recursion)
+        - Returns its output in structured JSON format
+
+        Args:
+            ctx: Parent node's context (for memory, tools, LLM access).
+            agent_id: The node ID of the subagent to invoke.
+            task: The task description to give the subagent.
+
+        Returns:
+            ToolResult with structured JSON output containing:
+            - message: Human-readable summary
+            - data: Subagent's output (free-form JSON)
+            - metadata: Execution metadata (success, tokens, latency)
+        """
+        from framework.graph.node import NodeContext, SharedMemory
+
+        # Log subagent invocation start
+        logger.info(
+            "\n" + "=" * 60 + "\n"
+            "🤖 SUBAGENT INVOCATION\n"
+            "=" * 60 + "\n"
+            "Parent Node: %s\n"
+            "Subagent ID: %s\n"
+            "Task: %s\n" + "=" * 60,
+            ctx.node_id,
+            agent_id,
+            task[:500] + "..." if len(task) > 500 else task,
+        )
+
+        # 1. Validate agent exists in registry
+        if agent_id not in ctx.node_registry:
+            return ToolResult(
+                tool_use_id="",
+                content=json.dumps(
+                    {
+                        "message": f"Sub-agent '{agent_id}' not found in registry",
+                        "data": None,
+                        "metadata": {"agent_id": agent_id, "success": False, "error": "not_found"},
+                    }
+                ),
+                is_error=True,
+            )
+
+        subagent_spec = ctx.node_registry[agent_id]
+
+        # 2. Create read-only memory snapshot
+        # Subagent can read everything the parent can read, but write nothing
+        parent_data = ctx.memory.read_all()
+        subagent_memory = SharedMemory()
+        for key, value in parent_data.items():
+            subagent_memory.write(key, value, validate=False)
+
+        # Scope to read-only: subagent can read all, write none
+        scoped_memory = subagent_memory.with_permissions(
+            read_keys=list(parent_data.keys()),
+            write_keys=[],  # Read-only!
+        )
+
+        # 2b. Set up report callback (one-way channel to parent / event bus)
+        subagent_reports: list[dict] = []
+
+        async def _report_callback(
+            message: str,
+            data: dict | None = None,
+            *,
+            wait_for_response: bool = False,
+        ) -> str | None:
+            subagent_reports.append({"message": message, "data": data, "timestamp": time.time()})
+            if self._event_bus:
+                await self._event_bus.emit_subagent_report(
+                    stream_id=ctx.node_id,
+                    node_id=f"{ctx.node_id}:subagent:{agent_id}",
+                    subagent_id=agent_id,
+                    message=message,
+                    data=data,
+                    execution_id=ctx.execution_id,
+                )
+
+            if not wait_for_response:
+                return None
+
+            if not self._event_bus:
+                logger.warning(
+                    "Subagent '%s' requested user response but no event_bus available",
+                    agent_id,
+                )
+                return None
+
+            # Create isolated receiver and register for input routing
+            import uuid
+
+            escalation_id = f"{ctx.node_id}:escalation:{uuid.uuid4().hex[:8]}"
+            receiver = _EscalationReceiver()
+            registry = ctx.shared_node_registry
+
+            registry[escalation_id] = receiver
+            try:
+                # Stream message to user (parent's node_id so TUI shows parent talking)
+                await self._event_bus.emit_client_output_delta(
+                    stream_id=ctx.node_id,
+                    node_id=ctx.node_id,
+                    content=message,
+                    snapshot=message,
+                    execution_id=ctx.execution_id,
+                )
+                # Request input (escalation_id for routing response back)
+                await self._event_bus.emit_client_input_requested(
+                    stream_id=ctx.node_id,
+                    node_id=escalation_id,
+                    prompt=message,
+                    execution_id=ctx.execution_id,
+                )
+                # Block until user responds
+                return await receiver.wait()
+            finally:
+                registry.pop(escalation_id, None)
+
+        # 3. Filter tools for subagent
+        # Use the full tool catalog (ctx.all_tools) so subagents can access tools
+        # that aren't in the parent node's filtered set (e.g. browser tools for a
+        # GCU subagent when the parent only has web_scrape/save_data).
+        # Falls back to ctx.available_tools if all_tools is empty (e.g. in tests).
+        subagent_tool_names = set(subagent_spec.tools or [])
+        tool_source = ctx.all_tools if ctx.all_tools else ctx.available_tools
+
+        subagent_tools = [
+            t
+            for t in tool_source
+            if t.name in subagent_tool_names and t.name != "delegate_to_sub_agent"
+        ]
+
+        missing = subagent_tool_names - {t.name for t in subagent_tools}
+        if missing:
+            logger.warning(
+                "Subagent '%s' requested tools not found in catalog: %s",
+                agent_id,
+                sorted(missing),
+            )
+
+        logger.info(
+            "📦 Subagent '%s' configuration:\n"
+            "   - System prompt: %s\n"
+            "   - Tools available (%d): %s\n"
+            "   - Memory keys inherited: %s",
+            agent_id,
+            (subagent_spec.system_prompt[:200] + "...")
+            if subagent_spec.system_prompt and len(subagent_spec.system_prompt) > 200
+            else subagent_spec.system_prompt,
+            len(subagent_tools),
+            [t.name for t in subagent_tools],
+            list(parent_data.keys()),
+        )
+
+        # 4. Build subagent context
+        max_iter = min(self._config.max_iterations, 10)
+        subagent_ctx = NodeContext(
+            runtime=ctx.runtime,
+            node_id=f"{ctx.node_id}:subagent:{agent_id}",
+            node_spec=subagent_spec,
+            memory=scoped_memory,
+            input_data={"task": task, **parent_data},
+            llm=ctx.llm,
+            available_tools=subagent_tools,
+            goal_context=(
+                f"Your specific task: {task}\n\n"
+                f"COMPLETION REQUIREMENTS:\n"
+                f"When your task is done, you MUST call set_output() "
+                f"for each required key: {subagent_spec.output_keys}\n"
+                f"Alternatively, call report_to_parent(mark_complete=true) "
+                f"with your findings in message/data.\n"
+                f"You have a maximum of {max_iter} turns to complete this task."
+            ),
+            goal=ctx.goal,
+            max_tokens=ctx.max_tokens,
+            runtime_logger=ctx.runtime_logger,
+            is_subagent_mode=True,  # Prevents nested delegation
+            report_callback=_report_callback,
+            node_registry={},  # Empty - no nested subagents
+            shared_node_registry=ctx.shared_node_registry,  # For escalation routing
+        )
+
+        # 5. Create and execute subagent EventLoopNode
+        # Derive a conversation store for the subagent from the parent's store.
+        # Each invocation gets a unique path so that repeated delegate calls
+        # (e.g. one per profile) don't restore a stale completed conversation.
+        self._subagent_instance_counter.setdefault(agent_id, 0)
+        self._subagent_instance_counter[agent_id] += 1
+        subagent_instance = str(self._subagent_instance_counter[agent_id])
+
+        subagent_conv_store = None
+        if self._conversation_store is not None:
+            from framework.storage.conversation_store import FileConversationStore
+
+            parent_base = getattr(self._conversation_store, "_base", None)
+            if parent_base is not None:
+                # Store subagent conversations parallel to the parent node,
+                # not nested inside it.  e.g. conversations/{node}:subagent:{agent_id}:{instance}/
+                conversations_dir = parent_base.parent  # e.g. conversations/
+                subagent_dir_name = f"{agent_id}-{subagent_instance}"
+                subagent_store_path = conversations_dir / subagent_dir_name
+                subagent_conv_store = FileConversationStore(base_path=subagent_store_path)
+
+        # Derive a subagent-scoped spillover dir so large tool results
+        # (e.g. browser_snapshot) get written to disk instead of being
+        # silently truncated.  Each instance gets its own directory to
+        # avoid file collisions between concurrent subagents.
+        subagent_spillover = None
+        if self._config.spillover_dir:
+            subagent_spillover = str(
+                Path(self._config.spillover_dir) / agent_id / subagent_instance
+            )
+
+        subagent_node = EventLoopNode(
+            event_bus=None,  # Subagents don't emit events to parent's bus
+            judge=SubagentJudge(task=task, max_iterations=max_iter),
+            config=LoopConfig(
+                max_iterations=max_iter,  # Tighter budget
+                max_tool_calls_per_turn=self._config.max_tool_calls_per_turn,
+                tool_call_overflow_margin=self._config.tool_call_overflow_margin,
+                max_history_tokens=self._config.max_history_tokens,
+                stall_detection_threshold=self._config.stall_detection_threshold,
+                max_tool_result_chars=self._config.max_tool_result_chars,
+                spillover_dir=subagent_spillover,
+            ),
+            tool_executor=self._tool_executor,
+            conversation_store=subagent_conv_store,
+        )
+
+        try:
+            logger.info("🚀 Starting subagent '%s' execution...", agent_id)
+            start_time = time.time()
+            result = await subagent_node.execute(subagent_ctx)
+            latency_ms = int((time.time() - start_time) * 1000)
+
+            logger.info(
+                "\n" + "-" * 60 + "\n"
+                "✅ SUBAGENT '%s' COMPLETED\n"
+                "-" * 60 + "\n"
+                "Success: %s\n"
+                "Latency: %dms\n"
+                "Tokens used: %s\n"
+                "Output keys: %s\n" + "-" * 60,
+                agent_id,
+                result.success,
+                latency_ms,
+                result.tokens_used,
+                list(result.output.keys()) if result.output else [],
+            )
+
+            result_json = {
+                "message": (
+                    f"Sub-agent '{agent_id}' completed successfully"
+                    if result.success
+                    else f"Sub-agent '{agent_id}' failed: {result.error}"
+                ),
+                "data": result.output,
+                "reports": subagent_reports if subagent_reports else None,
+                "metadata": {
+                    "agent_id": agent_id,
+                    "success": result.success,
+                    "tokens_used": result.tokens_used,
+                    "latency_ms": latency_ms,
+                    "report_count": len(subagent_reports),
+                },
+            }
+
+            return ToolResult(
+                tool_use_id="",
+                content=json.dumps(result_json, indent=2, default=str),
+                is_error=not result.success,
+            )
+
+        except Exception as e:
+            logger.exception(
+                "\n" + "!" * 60 + "\n❌ SUBAGENT '%s' FAILED\nError: %s\n" + "!" * 60,
+                agent_id,
+                str(e),
+            )
+            result_json = {
+                "message": f"Sub-agent '{agent_id}' raised exception: {e}",
+                "data": None,
+                "metadata": {
+                    "agent_id": agent_id,
+                    "success": False,
+                    "error": str(e),
+                },
+            }
+            return ToolResult(
+                tool_use_id="",
+                content=json.dumps(result_json, indent=2),
+                is_error=True,
+            )
+
+    # -------------------------------------------------------------------
+    # Subagent Execution
+    # -------------------------------------------------------------------
+
+    async def _execute_subagent(
+        self,
+        ctx: NodeContext,
+        agent_id: str,
+        task: str,
+    ) -> ToolResult:
+        """Execute a subagent and return the result as a ToolResult.
+
+        The subagent:
+        - Gets a fresh conversation with just the task
+        - Has read-only access to the parent's readable memory
+        - Cannot delegate to its own subagents (prevents recursion)
+        - Returns its output in structured JSON format
+
+        Args:
+            ctx: Parent node's context (for memory, tools, LLM access).
+            agent_id: The node ID of the subagent to invoke.
+            task: The task description to give the subagent.
+
+        Returns:
+            ToolResult with structured JSON output containing:
+            - message: Human-readable summary
+            - data: Subagent's output (free-form JSON)
+            - metadata: Execution metadata (success, tokens, latency)
+        """
+        from framework.graph.node import NodeContext, SharedMemory
+
+        # Log subagent invocation start
+        logger.info(
+            "\n" + "=" * 60 + "\n"
+            "🤖 SUBAGENT INVOCATION\n"
+            "=" * 60 + "\n"
+            "Parent Node: %s\n"
+            "Subagent ID: %s\n"
+            "Task: %s\n" + "=" * 60,
+            ctx.node_id,
+            agent_id,
+            task[:500] + "..." if len(task) > 500 else task,
+        )
+
+        # 1. Validate agent exists in registry
+        if agent_id not in ctx.node_registry:
+            return ToolResult(
+                tool_use_id="",
+                content=json.dumps(
+                    {
+                        "message": f"Sub-agent '{agent_id}' not found in registry",
+                        "data": None,
+                        "metadata": {"agent_id": agent_id, "success": False, "error": "not_found"},
+                    }
+                ),
+                is_error=True,
+            )
+
+        subagent_spec = ctx.node_registry[agent_id]
+
+        # 2. Create read-only memory snapshot
+        # Subagent can read everything the parent can read, but write nothing
+        parent_data = ctx.memory.read_all()
+        subagent_memory = SharedMemory()
+        for key, value in parent_data.items():
+            subagent_memory.write(key, value, validate=False)
+
+        # Scope to read-only: subagent can read all, write none
+        scoped_memory = subagent_memory.with_permissions(
+            read_keys=list(parent_data.keys()),
+            write_keys=[],  # Read-only!
+        )
+
+        # 2b. Set up report callback (one-way channel to parent / event bus)
+        subagent_reports: list[dict] = []
+
+        async def _report_callback(
+            message: str,
+            data: dict | None = None,
+            *,
+            wait_for_response: bool = False,
+        ) -> str | None:
+            subagent_reports.append({"message": message, "data": data, "timestamp": time.time()})
+            if self._event_bus:
+                await self._event_bus.emit_subagent_report(
+                    stream_id=ctx.node_id,
+                    node_id=f"{ctx.node_id}:subagent:{agent_id}",
+                    subagent_id=agent_id,
+                    message=message,
+                    data=data,
+                    execution_id=ctx.execution_id,
+                )
+
+            if not wait_for_response:
+                return None
+
+            if not self._event_bus:
+                logger.warning(
+                    "Subagent '%s' requested user response but no event_bus available",
+                    agent_id,
+                )
+                return None
+
+            # Create isolated receiver and register for input routing
+            import uuid
+
+            escalation_id = f"{ctx.node_id}:escalation:{uuid.uuid4().hex[:8]}"
+            receiver = _EscalationReceiver()
+            registry = ctx.shared_node_registry
+
+            registry[escalation_id] = receiver
+            try:
+                # Stream message to user (parent's node_id so TUI shows parent talking)
+                await self._event_bus.emit_client_output_delta(
+                    stream_id=ctx.node_id,
+                    node_id=ctx.node_id,
+                    content=message,
+                    snapshot=message,
+                    execution_id=ctx.execution_id,
+                )
+                # Request input (escalation_id for routing response back)
+                await self._event_bus.emit_client_input_requested(
+                    stream_id=ctx.node_id,
+                    node_id=escalation_id,
+                    prompt=message,
+                    execution_id=ctx.execution_id,
+                )
+                # Block until user responds
+                return await receiver.wait()
+            finally:
+                registry.pop(escalation_id, None)
+
+        # 3. Filter tools for subagent
+        # Use the full tool catalog (ctx.all_tools) so subagents can access tools
+        # that aren't in the parent node's filtered set (e.g. browser tools for a
+        # GCU subagent when the parent only has web_scrape/save_data).
+        # Falls back to ctx.available_tools if all_tools is empty (e.g. in tests).
+        subagent_tool_names = set(subagent_spec.tools or [])
+        tool_source = ctx.all_tools if ctx.all_tools else ctx.available_tools
+
+        subagent_tools = [
+            t
+            for t in tool_source
+            if t.name in subagent_tool_names and t.name != "delegate_to_sub_agent"
+        ]
+
+        missing = subagent_tool_names - {t.name for t in subagent_tools}
+        if missing:
+            logger.warning(
+                "Subagent '%s' requested tools not found in catalog: %s",
+                agent_id,
+                sorted(missing),
+            )
+
+        logger.info(
+            "📦 Subagent '%s' configuration:\n"
+            "   - System prompt: %s\n"
+            "   - Tools available (%d): %s\n"
+            "   - Memory keys inherited: %s",
+            agent_id,
+            (subagent_spec.system_prompt[:200] + "...")
+            if subagent_spec.system_prompt and len(subagent_spec.system_prompt) > 200
+            else subagent_spec.system_prompt,
+            len(subagent_tools),
+            [t.name for t in subagent_tools],
+            list(parent_data.keys()),
+        )
+
+        # 4. Build subagent context
+        max_iter = min(self._config.max_iterations, 10)
+        subagent_ctx = NodeContext(
+            runtime=ctx.runtime,
+            node_id=f"{ctx.node_id}:subagent:{agent_id}",
+            node_spec=subagent_spec,
+            memory=scoped_memory,
+            input_data={"task": task, **parent_data},
+            llm=ctx.llm,
+            available_tools=subagent_tools,
+            goal_context=(
+                f"Your specific task: {task}\n\n"
+                f"COMPLETION REQUIREMENTS:\n"
+                f"When your task is done, you MUST call set_output() "
+                f"for each required key: {subagent_spec.output_keys}\n"
+                f"Alternatively, call report_to_parent(mark_complete=true) "
+                f"with your findings in message/data.\n"
+                f"You have a maximum of {max_iter} turns to complete this task."
+            ),
+            goal=ctx.goal,
+            max_tokens=ctx.max_tokens,
+            runtime_logger=ctx.runtime_logger,
+            is_subagent_mode=True,  # Prevents nested delegation
+            report_callback=_report_callback,
+            node_registry={},  # Empty - no nested subagents
+            shared_node_registry=ctx.shared_node_registry,  # For escalation routing
+        )
+
+        # 5. Create and execute subagent EventLoopNode
+        # Derive a conversation store for the subagent from the parent's store.
+        # Each invocation gets a unique path so that repeated delegate calls
+        # (e.g. one per profile) don't restore a stale completed conversation.
+        self._subagent_instance_counter.setdefault(agent_id, 0)
+        self._subagent_instance_counter[agent_id] += 1
+        subagent_instance = str(self._subagent_instance_counter[agent_id])
+
+        subagent_conv_store = None
+        if self._conversation_store is not None:
+            from framework.storage.conversation_store import FileConversationStore
+
+            parent_base = getattr(self._conversation_store, "_base", None)
+            if parent_base is not None:
+                # Store subagent conversations parallel to the parent node,
+                # not nested inside it.  e.g. conversations/{node}:subagent:{agent_id}:{instance}/
+                conversations_dir = parent_base.parent  # e.g. conversations/
+                subagent_dir_name = f"{agent_id}-{subagent_instance}"
+                subagent_store_path = conversations_dir / subagent_dir_name
+                subagent_conv_store = FileConversationStore(base_path=subagent_store_path)
+
+        # Derive a subagent-scoped spillover dir so large tool results
+        # (e.g. browser_snapshot) get written to disk instead of being
+        # silently truncated.  Each instance gets its own directory to
+        # avoid file collisions between concurrent subagents.
+        subagent_spillover = None
+        if self._config.spillover_dir:
+            subagent_spillover = str(
+                Path(self._config.spillover_dir) / agent_id / subagent_instance
+            )
+
+        subagent_node = EventLoopNode(
+            event_bus=None,  # Subagents don't emit events to parent's bus
+            judge=SubagentJudge(task=task, max_iterations=max_iter),
+            config=LoopConfig(
+                max_iterations=max_iter,  # Tighter budget
+                max_tool_calls_per_turn=self._config.max_tool_calls_per_turn,
+                tool_call_overflow_margin=self._config.tool_call_overflow_margin,
+                max_history_tokens=self._config.max_history_tokens,
+                stall_detection_threshold=self._config.stall_detection_threshold,
+                max_tool_result_chars=self._config.max_tool_result_chars,
+                spillover_dir=subagent_spillover,
+            ),
+            tool_executor=self._tool_executor,
+            conversation_store=subagent_conv_store,
+        )
+
+        try:
+            logger.info("🚀 Starting subagent '%s' execution...", agent_id)
+            start_time = time.time()
+            result = await subagent_node.execute(subagent_ctx)
+            latency_ms = int((time.time() - start_time) * 1000)
+
+            logger.info(
+                "\n" + "-" * 60 + "\n"
+                "✅ SUBAGENT '%s' COMPLETED\n"
+                "-" * 60 + "\n"
+                "Success: %s\n"
+                "Latency: %dms\n"
+                "Tokens used: %s\n"
+                "Output keys: %s\n" + "-" * 60,
+                agent_id,
+                result.success,
+                latency_ms,
+                result.tokens_used,
+                list(result.output.keys()) if result.output else [],
+            )
+
+            result_json = {
+                "message": (
+                    f"Sub-agent '{agent_id}' completed successfully"
+                    if result.success
+                    else f"Sub-agent '{agent_id}' failed: {result.error}"
+                ),
+                "data": result.output,
+                "reports": subagent_reports if subagent_reports else None,
+                "metadata": {
+                    "agent_id": agent_id,
+                    "success": result.success,
+                    "tokens_used": result.tokens_used,
+                    "latency_ms": latency_ms,
+                    "report_count": len(subagent_reports),
+                },
+            }
+
+            return ToolResult(
+                tool_use_id="",
+                content=json.dumps(result_json, indent=2, default=str),
+                is_error=not result.success,
+            )
+
+        except Exception as e:
+            logger.exception(
+                "\n" + "!" * 60 + "\n❌ SUBAGENT '%s' FAILED\nError: %s\n" + "!" * 60,
+                agent_id,
+                str(e),
+            )
+            result_json = {
+                "message": f"Sub-agent '{agent_id}' raised exception: {e}",
+                "data": None,
+                "metadata": {
+                    "agent_id": agent_id,
+                    "success": False,
+                    "error": str(e),
+                },
+            }
+            return ToolResult(
+                tool_use_id="",
+                content=json.dumps(result_json, indent=2),
+                is_error=True,
             )

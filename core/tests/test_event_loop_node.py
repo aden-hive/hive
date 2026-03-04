@@ -68,9 +68,6 @@ class MockStreamingLLM(LLMProvider):
     def complete(self, messages, system="", **kwargs) -> LLMResponse:
         return LLMResponse(content="Summary of conversation.", model="mock", stop_reason="stop")
 
-    def complete_with_tools(self, messages, system, tools, tool_executor, **kwargs) -> LLMResponse:
-        return LLMResponse(content="", model="mock", stop_reason="stop")
-
 
 # ---------------------------------------------------------------------------
 # Helper: build a simple text-only scenario
@@ -114,7 +111,7 @@ def tool_call_scenario(
 @pytest.fixture
 def runtime():
     rt = MagicMock(spec=Runtime)
-    rt.start_run = MagicMock(return_value="run_1")
+    rt.start_run = MagicMock(return_value="session_20250101_000000_eventlp01")
     rt.decide = MagicMock(return_value="dec_1")
     rt.record_outcome = MagicMock()
     rt.end_run = MagicMock()
@@ -705,6 +702,259 @@ class TestClientFacingBlocking:
 
 
 # ===========================================================================
+# Client-facing: _cf_expecting_work state machine
+#
+# After user responds, text-only turns with missing required outputs should
+# go through judge (RETRY) instead of auto-blocking.  This prevents weak
+# models from stalling when they output "Understood" without calling tools.
+# ===========================================================================
+
+
+class TestClientFacingExpectingWork:
+    """Tests for _cf_expecting_work state machine in client-facing nodes."""
+
+    @pytest.mark.asyncio
+    async def test_text_after_user_input_goes_to_judge(self, runtime, memory):
+        """After user responds, text-only with missing outputs gets judged (not auto-blocked).
+
+        Simulates: findings-review asks user, user says "generate report",
+        Codex replies "Understood" without tools -> judge should RETRY.
+        """
+        spec = NodeSpec(
+            id="findings",
+            name="Findings Review",
+            description="review findings",
+            node_type="event_loop",
+            output_keys=["decision"],
+            client_facing=True,
+        )
+        llm = MockStreamingLLM(
+            scenarios=[
+                # Turn 0: ask user what to do
+                tool_call_scenario(
+                    "ask_user",
+                    {"question": "Continue or generate report?"},
+                    tool_use_id="ask_1",
+                ),
+                # Turn 1: after user responds, LLM outputs text-only (lazy)
+                text_scenario("Understood, generating the report."),
+                # Turn 2: after judge RETRY, LLM sets output
+                tool_call_scenario(
+                    "set_output",
+                    {"key": "decision", "value": "generate"},
+                ),
+                # Turn 3: accept
+                text_scenario("Done."),
+            ]
+        )
+        node = EventLoopNode(config=LoopConfig(max_iterations=10))
+        ctx = build_ctx(runtime, spec, memory, llm)
+
+        async def user_responds():
+            await asyncio.sleep(0.05)
+            await node.inject_event("Generate the report")
+
+        task = asyncio.create_task(user_responds())
+        result = await node.execute(ctx)
+        await task
+
+        assert result.success is True
+        assert result.output["decision"] == "generate"
+        # LLM should have been called at least 3 times (ask_user, text-only retried, set_output)
+        assert llm._call_index >= 3
+
+    @pytest.mark.asyncio
+    async def test_auto_block_without_missing_outputs(self, runtime, memory):
+        """Text-only with no missing outputs should still auto-block (queen monitoring).
+
+        Simulates: queen node with no required outputs outputs "monitoring..."
+        -> should auto-block and wait for event, not spin in judge loop.
+        """
+        spec = NodeSpec(
+            id="queen",
+            name="Queen",
+            description="orchestrator",
+            node_type="event_loop",
+            output_keys=[],
+            client_facing=True,
+        )
+        llm = MockStreamingLLM(
+            scenarios=[
+                # Turn 0: ask user for domain
+                tool_call_scenario(
+                    "ask_user",
+                    {"question": "What domain?"},
+                    tool_use_id="ask_1",
+                ),
+                # Turn 1: after user input, outputs monitoring text
+                # No missing required outputs -> should auto-block
+                text_scenario("Monitoring workers..."),
+            ]
+        )
+        node = EventLoopNode(config=LoopConfig(max_iterations=10))
+        ctx = build_ctx(runtime, spec, memory, llm)
+
+        async def user_then_shutdown():
+            await asyncio.sleep(0.05)
+            await node.inject_event("furwise.app")
+            # Node should auto-block on "Monitoring..." text.
+            # Give it time to reach the block, then shutdown.
+            await asyncio.sleep(0.1)
+            node.signal_shutdown()
+
+        task = asyncio.create_task(user_then_shutdown())
+        result = await node.execute(ctx)
+        await task
+
+        assert result.success is True
+        # LLM called exactly 2 times: ask_user + monitoring text.
+        # If auto-block was skipped, judge would loop and call LLM more times.
+        assert llm._call_index == 2
+
+    @pytest.mark.asyncio
+    async def test_tool_calls_reset_expecting_work(self, runtime, memory):
+        """After LLM calls tools, next text-only turn should auto-block again.
+
+        Simulates: user gives input -> LLM calls tools (work) -> LLM presents
+        results as text -> should auto-block (presenting, not lazy).
+        """
+        spec = NodeSpec(
+            id="report",
+            name="Report",
+            description="generate report",
+            node_type="event_loop",
+            output_keys=["status"],
+            client_facing=True,
+        )
+
+        def my_executor(tool_use: ToolUse) -> ToolResult:
+            return ToolResult(tool_use_id=tool_use.id, content="saved", is_error=False)
+
+        llm = MockStreamingLLM(
+            scenarios=[
+                # Turn 0: ask user
+                tool_call_scenario(
+                    "ask_user",
+                    {"question": "Ready?"},
+                    tool_use_id="ask_1",
+                ),
+                # Turn 1: after user responds, LLM does work (tool call)
+                tool_call_scenario(
+                    "save_data",
+                    {"content": "report.html"},
+                    tool_use_id="tool_1",
+                ),
+                # Turn 2: LLM presents results as text (no tools)
+                # Tool calls reset _cf_expecting_work -> should auto-block
+                text_scenario("Here is your report. Need changes?"),
+                # Turn 3: after user responds, set output
+                tool_call_scenario(
+                    "set_output",
+                    {"key": "status", "value": "complete"},
+                ),
+                # Turn 4: done
+                text_scenario("All done."),
+            ]
+        )
+        node = EventLoopNode(
+            tool_executor=my_executor,
+            config=LoopConfig(max_iterations=10),
+        )
+        ctx = build_ctx(
+            runtime,
+            spec,
+            memory,
+            llm,
+            tools=[Tool(name="save_data", description="save", parameters={})],
+        )
+
+        async def interactions():
+            await asyncio.sleep(0.05)
+            await node.inject_event("Yes, go ahead")
+            # After tool calls + text presentation, node should auto-block again.
+            # Inject second user response.
+            await asyncio.sleep(0.2)
+            await node.inject_event("Looks good")
+
+        task = asyncio.create_task(interactions())
+        result = await node.execute(ctx)
+        await task
+
+        assert result.success is True
+        assert result.output["status"] == "complete"
+
+    @pytest.mark.asyncio
+    async def test_judge_retry_enables_expecting_work(self, runtime, memory):
+        """After judge RETRY, text-only with missing outputs goes to judge again.
+
+        Simulates: LLM calls save_data but forgets set_output -> judge RETRY ->
+        LLM outputs text -> should go to judge (not auto-block).
+        """
+        spec = NodeSpec(
+            id="report",
+            name="Report",
+            description="generate report",
+            node_type="event_loop",
+            output_keys=["status"],
+            client_facing=True,
+        )
+
+        def my_executor(tool_use: ToolUse) -> ToolResult:
+            return ToolResult(tool_use_id=tool_use.id, content="saved", is_error=False)
+
+        llm = MockStreamingLLM(
+            scenarios=[
+                # Turn 0: ask user
+                tool_call_scenario(
+                    "ask_user",
+                    {"question": "Generate?"},
+                    tool_use_id="ask_1",
+                ),
+                # Turn 1: LLM calls tool but doesn't set output
+                tool_call_scenario(
+                    "save_data",
+                    {"content": "report"},
+                    tool_use_id="tool_1",
+                ),
+                # Turn 2: judge RETRY (missing "status"). LLM outputs text.
+                # _cf_expecting_work should be True from RETRY -> goes to judge
+                text_scenario("Report generated successfully."),
+                # Turn 3: after second RETRY, LLM finally sets output
+                tool_call_scenario(
+                    "set_output",
+                    {"key": "status", "value": "done"},
+                ),
+                # Turn 4: accept
+                text_scenario("Complete."),
+            ]
+        )
+        node = EventLoopNode(
+            tool_executor=my_executor,
+            config=LoopConfig(max_iterations=10),
+        )
+        ctx = build_ctx(
+            runtime,
+            spec,
+            memory,
+            llm,
+            tools=[Tool(name="save_data", description="save", parameters={})],
+        )
+
+        async def user_responds():
+            await asyncio.sleep(0.05)
+            await node.inject_event("Yes")
+
+        task = asyncio.create_task(user_responds())
+        result = await node.execute(ctx)
+        await task
+
+        assert result.success is True
+        assert result.output["status"] == "done"
+        # LLM called at least 4 times: ask_user, save_data, text(retried), set_output
+        assert llm._call_index >= 4
+
+
+# ===========================================================================
 # Tool execution
 # ===========================================================================
 
@@ -996,3 +1246,784 @@ class TestOutputAccumulator:
         assert acc.get("key1") == "val1"
         assert acc.get("key2") == "val2"
         assert acc.has_all_keys(["key1", "key2"]) is True
+
+
+# ===========================================================================
+# Transient error retry (ITEM 2)
+# ===========================================================================
+
+
+class ErrorThenSuccessLLM(LLMProvider):
+    """LLM that raises on the first N calls, then succeeds.
+
+    Used to test the retry-with-backoff wrapper around _run_single_turn().
+    """
+
+    def __init__(self, error: Exception, fail_count: int, success_scenario: list):
+        self.error = error
+        self.fail_count = fail_count
+        self.success_scenario = success_scenario
+        self._call_index = 0
+
+    async def stream(self, messages, system="", tools=None, max_tokens=4096):
+        call_num = self._call_index
+        self._call_index += 1
+        if call_num < self.fail_count:
+            raise self.error
+        for event in self.success_scenario:
+            yield event
+
+    def complete(self, messages, system="", **kwargs) -> LLMResponse:
+        return LLMResponse(content="ok", model="mock", stop_reason="stop")
+
+
+class TestTransientErrorRetry:
+    """Test retry-with-backoff for transient LLM errors in EventLoopNode."""
+
+    @pytest.mark.asyncio
+    async def test_transient_error_retries_then_succeeds(self, runtime, node_spec, memory):
+        """A transient error on the first try should retry and succeed."""
+        node_spec.output_keys = []
+        llm = ErrorThenSuccessLLM(
+            error=ConnectionError("connection reset"),
+            fail_count=1,
+            success_scenario=text_scenario("success"),
+        )
+        ctx = build_ctx(runtime, node_spec, memory, llm)
+        node = EventLoopNode(
+            config=LoopConfig(
+                max_iterations=5,
+                max_stream_retries=3,
+                stream_retry_backoff_base=0.01,  # fast for tests
+            ),
+        )
+        result = await node.execute(ctx)
+        assert result.success is True
+        assert llm._call_index == 2  # 1 failure + 1 success
+
+    @pytest.mark.asyncio
+    async def test_permanent_error_no_retry(self, runtime, node_spec, memory):
+        """A permanent error (ValueError) should NOT be retried."""
+        node_spec.output_keys = []
+        llm = ErrorThenSuccessLLM(
+            error=ValueError("bad request: invalid model"),
+            fail_count=1,
+            success_scenario=text_scenario("success"),
+        )
+        ctx = build_ctx(runtime, node_spec, memory, llm)
+        node = EventLoopNode(
+            config=LoopConfig(
+                max_iterations=5,
+                max_stream_retries=3,
+                stream_retry_backoff_base=0.01,
+            ),
+        )
+        with pytest.raises(ValueError, match="bad request"):
+            await node.execute(ctx)
+        assert llm._call_index == 1  # only tried once
+
+    @pytest.mark.asyncio
+    async def test_transient_error_exhausts_retries(self, runtime, node_spec, memory):
+        """Transient errors that exhaust retries should raise."""
+        node_spec.output_keys = []
+        llm = ErrorThenSuccessLLM(
+            error=TimeoutError("request timed out"),
+            fail_count=100,  # always fails
+            success_scenario=text_scenario("unreachable"),
+        )
+        ctx = build_ctx(runtime, node_spec, memory, llm)
+        node = EventLoopNode(
+            config=LoopConfig(
+                max_iterations=5,
+                max_stream_retries=2,
+                stream_retry_backoff_base=0.01,
+            ),
+        )
+        with pytest.raises(TimeoutError, match="request timed out"):
+            await node.execute(ctx)
+        assert llm._call_index == 3  # 1 initial + 2 retries
+
+    @pytest.mark.asyncio
+    async def test_stream_error_event_retried_as_runtime_error(self, runtime, node_spec, memory):
+        """StreamErrorEvent(recoverable=False) raises RuntimeError caught by retry."""
+        node_spec.output_keys = []
+
+        # Scenario: non-recoverable StreamErrorEvent with transient keywords
+        error_scenario = [
+            StreamErrorEvent(
+                error="Stream error: 503 service unavailable",
+                recoverable=False,
+            )
+        ]
+        success_scenario = text_scenario("recovered")
+
+        call_index = 0
+
+        class StreamErrorThenSuccessLLM(LLMProvider):
+            async def stream(self, messages, system="", tools=None, max_tokens=4096):
+                nonlocal call_index
+                idx = call_index
+                call_index += 1
+                if idx == 0:
+                    for event in error_scenario:
+                        yield event
+                else:
+                    for event in success_scenario:
+                        yield event
+
+            def complete(self, messages, system="", **kwargs):
+                return LLMResponse(
+                    content="ok",
+                    model="mock",
+                    stop_reason="stop",
+                )
+
+        llm = StreamErrorThenSuccessLLM()
+        ctx = build_ctx(runtime, node_spec, memory, llm)
+        node = EventLoopNode(
+            config=LoopConfig(
+                max_iterations=5,
+                max_stream_retries=3,
+                stream_retry_backoff_base=0.01,
+            ),
+        )
+        result = await node.execute(ctx)
+        assert result.success is True
+        assert call_index == 2
+
+    @pytest.mark.asyncio
+    async def test_retry_emits_event_bus_event(self, runtime, node_spec, memory):
+        """Retry should emit NODE_RETRY event on the event bus."""
+        node_spec.output_keys = []
+        llm = ErrorThenSuccessLLM(
+            error=ConnectionError("network down"),
+            fail_count=1,
+            success_scenario=text_scenario("ok"),
+        )
+        bus = EventBus()
+        retry_events = []
+        bus.subscribe(
+            event_types=[EventType.NODE_RETRY],
+            handler=lambda e: retry_events.append(e),
+        )
+
+        ctx = build_ctx(runtime, node_spec, memory, llm)
+        node = EventLoopNode(
+            event_bus=bus,
+            config=LoopConfig(
+                max_iterations=5,
+                max_stream_retries=3,
+                stream_retry_backoff_base=0.01,
+            ),
+        )
+        result = await node.execute(ctx)
+        assert result.success is True
+        assert len(retry_events) == 1
+        assert retry_events[0].data["retry_count"] == 1
+
+    @pytest.mark.asyncio
+    async def test_recoverable_stream_error_retried_not_silent(self, runtime, node_spec, memory):
+        """Recoverable StreamErrorEvent with empty response should raise ConnectionError.
+
+        Previously, recoverable stream errors were silently swallowed,
+        producing empty responses that the judge retried — creating an
+        infinite loop of 50+ empty-response iterations.  Now they raise
+        ConnectionError so the outer transient-error retry handles them
+        with proper backoff.
+        """
+        node_spec.output_keys = ["result"]
+
+        call_index = 0
+
+        class RecoverableErrorThenSuccessLLM(LLMProvider):
+            async def stream(self, messages, system="", tools=None, max_tokens=4096):
+                nonlocal call_index
+                idx = call_index
+                call_index += 1
+                if idx == 0:
+                    # Recoverable error with no content
+                    yield StreamErrorEvent(
+                        error="503 service unavailable",
+                        recoverable=True,
+                    )
+                elif idx == 1:
+                    # Success: set output
+                    for event in tool_call_scenario(
+                        "set_output", {"key": "result", "value": "done"}
+                    ):
+                        yield event
+                else:
+                    # Subsequent calls: text-only (no more tool calls)
+                    for event in text_scenario("done"):
+                        yield event
+
+            def complete(self, messages, system="", **kwargs):
+                return LLMResponse(content="ok", model="mock", stop_reason="stop")
+
+        llm = RecoverableErrorThenSuccessLLM()
+        ctx = build_ctx(runtime, node_spec, memory, llm)
+        node = EventLoopNode(
+            config=LoopConfig(
+                max_iterations=5,
+                max_stream_retries=3,
+                stream_retry_backoff_base=0.01,
+            ),
+        )
+        result = await node.execute(ctx)
+        assert result.success is True
+        assert result.output.get("result") == "done"
+        # call 0: recoverable error → ConnectionError raised → outer retry
+        # call 1: set_output tool call succeeds
+        # call 2: inner tool loop re-invokes LLM after tool result → text "done"
+        assert call_index == 3
+
+
+class TestIsTransientError:
+    """Unit tests for _is_transient_error() classification."""
+
+    def test_timeout_error(self):
+        assert EventLoopNode._is_transient_error(TimeoutError("timed out")) is True
+
+    def test_connection_error(self):
+        assert EventLoopNode._is_transient_error(ConnectionError("reset")) is True
+
+    def test_os_error(self):
+        assert EventLoopNode._is_transient_error(OSError("network unreachable")) is True
+
+    def test_value_error_not_transient(self):
+        assert EventLoopNode._is_transient_error(ValueError("bad input")) is False
+
+    def test_type_error_not_transient(self):
+        assert EventLoopNode._is_transient_error(TypeError("wrong type")) is False
+
+    def test_runtime_error_with_transient_keywords(self):
+        check = EventLoopNode._is_transient_error
+        assert check(RuntimeError("Stream error: 429 rate limit")) is True
+        assert check(RuntimeError("Stream error: 503")) is True
+        assert check(RuntimeError("Stream error: connection reset")) is True
+        assert check(RuntimeError("Stream error: timeout exceeded")) is True
+
+    def test_runtime_error_without_transient_keywords(self):
+        assert EventLoopNode._is_transient_error(RuntimeError("authentication failed")) is False
+        assert EventLoopNode._is_transient_error(RuntimeError("invalid JSON in response")) is False
+
+
+# ===========================================================================
+# Tool doom loop detection (ITEM 1)
+# ===========================================================================
+
+
+class TestFingerprintToolCalls:
+    """Unit tests for _fingerprint_tool_calls()."""
+
+    def test_basic_fingerprint(self):
+        results = [
+            {"tool_name": "search", "tool_input": {"q": "hello"}},
+        ]
+        fps = EventLoopNode._fingerprint_tool_calls(results)
+        assert len(fps) == 1
+        assert fps[0][0] == "search"
+        # Args should be JSON with sort_keys
+        assert fps[0][1] == '{"q": "hello"}'
+
+    def test_order_sensitive(self):
+        r1 = [
+            {"tool_name": "search", "tool_input": {"q": "a"}},
+            {"tool_name": "fetch", "tool_input": {"url": "b"}},
+        ]
+        r2 = [
+            {"tool_name": "fetch", "tool_input": {"url": "b"}},
+            {"tool_name": "search", "tool_input": {"q": "a"}},
+        ]
+        assert EventLoopNode._fingerprint_tool_calls(r1) != (
+            EventLoopNode._fingerprint_tool_calls(r2)
+        )
+
+    def test_sort_keys_deterministic(self):
+        r1 = [{"tool_name": "t", "tool_input": {"b": 2, "a": 1}}]
+        r2 = [{"tool_name": "t", "tool_input": {"a": 1, "b": 2}}]
+        assert EventLoopNode._fingerprint_tool_calls(r1) == EventLoopNode._fingerprint_tool_calls(
+            r2
+        )
+
+
+class TestIsToolDoomLoop:
+    """Unit tests for _is_tool_doom_loop()."""
+
+    def test_below_threshold(self):
+        node = EventLoopNode(config=LoopConfig(tool_doom_loop_threshold=3))
+        fp = [("search", '{"q": "hello"}')]
+        is_doom, _ = node._is_tool_doom_loop([fp, fp])
+        assert is_doom is False
+
+    def test_at_threshold_identical(self):
+        node = EventLoopNode(config=LoopConfig(tool_doom_loop_threshold=3))
+        fp = [("search", '{"q": "hello"}')]
+        is_doom, desc = node._is_tool_doom_loop([fp, fp, fp])
+        assert is_doom is True
+        assert "search" in desc
+
+    def test_different_args_no_doom(self):
+        node = EventLoopNode(config=LoopConfig(tool_doom_loop_threshold=3))
+        fp1 = [("search", '{"q": "a"}')]
+        fp2 = [("search", '{"q": "b"}')]
+        fp3 = [("search", '{"q": "c"}')]
+        is_doom, _ = node._is_tool_doom_loop([fp1, fp2, fp3])
+        assert is_doom is False
+
+    def test_disabled_via_config(self):
+        node = EventLoopNode(
+            config=LoopConfig(tool_doom_loop_enabled=False),
+        )
+        fp = [("search", '{"q": "hello"}')]
+        is_doom, _ = node._is_tool_doom_loop([fp, fp, fp])
+        assert is_doom is False
+
+    def test_empty_fingerprints_no_doom(self):
+        node = EventLoopNode(config=LoopConfig(tool_doom_loop_threshold=3))
+        is_doom, _ = node._is_tool_doom_loop([[], [], []])
+        assert is_doom is False
+
+
+class ToolRepeatLLM(LLMProvider):
+    """LLM that produces identical tool calls across outer iterations.
+
+    Alternates: even calls → tool call, odd calls → text (exits inner loop).
+    This ensures each outer iteration = 2 LLM calls with 1 tool executed.
+    After tool_turns outer iterations, always returns text.
+    """
+
+    def __init__(
+        self,
+        tool_name: str,
+        tool_input: dict,
+        tool_turns: int,
+        final_text: str = "done",
+    ):
+        self.tool_name = tool_name
+        self.tool_input = tool_input
+        self.tool_turns = tool_turns
+        self.final_text = final_text
+        self._call_index = 0
+
+    async def stream(self, messages, system="", tools=None, max_tokens=4096):
+        idx = self._call_index
+        self._call_index += 1
+        # Which outer iteration we're in (2 calls per iteration)
+        outer_iter = idx // 2
+        is_tool_call = (idx % 2 == 0) and outer_iter < self.tool_turns
+        if is_tool_call:
+            yield ToolCallEvent(
+                tool_use_id=f"call_{outer_iter}",
+                tool_name=self.tool_name,
+                tool_input=self.tool_input,
+            )
+            yield FinishEvent(
+                stop_reason="tool_calls",
+                input_tokens=10,
+                output_tokens=5,
+                model="mock",
+            )
+        else:
+            # Unique text per call to avoid stall detection
+            text = f"{self.final_text} (call {idx})"
+            yield TextDeltaEvent(content=text, snapshot=text)
+            yield FinishEvent(
+                stop_reason="stop",
+                input_tokens=10,
+                output_tokens=5,
+                model="mock",
+            )
+
+    def complete(self, messages, system="", **kwargs) -> LLMResponse:
+        return LLMResponse(
+            content="ok",
+            model="mock",
+            stop_reason="stop",
+        )
+
+
+class TestToolDoomLoopIntegration:
+    """Integration tests for doom loop detection in execute().
+
+    Uses ToolRepeatLLM: returns tool calls for first N calls, then text.
+    Each outer iteration = 2 LLM calls (tool call + text exit for inner loop).
+    logged_tool_calls accumulates across inner iterations.
+    """
+
+    @pytest.mark.asyncio
+    async def test_doom_loop_injects_warning(
+        self,
+        runtime,
+        node_spec,
+        memory,
+    ):
+        """3 identical tool call turns should inject a warning."""
+        node_spec.output_keys = []
+        judge = AsyncMock(spec=JudgeProtocol)
+        eval_count = 0
+
+        async def judge_eval(*args, **kwargs):
+            nonlocal eval_count
+            eval_count += 1
+            if eval_count >= 4:
+                return JudgeVerdict(action="ACCEPT")
+            return JudgeVerdict(action="RETRY")
+
+        judge.evaluate = judge_eval
+
+        # 3 tool calls (6 LLM calls: tool+text each), then 1 text
+        llm = ToolRepeatLLM("search", {"q": "hello"}, tool_turns=3)
+
+        def tool_exec(tool_use: ToolUse) -> ToolResult:
+            return ToolResult(
+                tool_use_id=tool_use.id,
+                content="result",
+                is_error=False,
+            )
+
+        ctx = build_ctx(
+            runtime,
+            node_spec,
+            memory,
+            llm,
+            tools=[Tool(name="search", description="s", parameters={})],
+        )
+        node = EventLoopNode(
+            judge=judge,
+            tool_executor=tool_exec,
+            config=LoopConfig(
+                max_iterations=10,
+                tool_doom_loop_threshold=3,
+            ),
+        )
+        result = await node.execute(ctx)
+        assert result.success is True
+
+    @pytest.mark.asyncio
+    async def test_doom_loop_emits_event(
+        self,
+        runtime,
+        node_spec,
+        memory,
+    ):
+        """Doom loop should emit NODE_TOOL_DOOM_LOOP event."""
+        node_spec.output_keys = []
+        judge = AsyncMock(spec=JudgeProtocol)
+        eval_count = 0
+
+        async def judge_eval(*args, **kwargs):
+            nonlocal eval_count
+            eval_count += 1
+            if eval_count >= 4:
+                return JudgeVerdict(action="ACCEPT")
+            return JudgeVerdict(action="RETRY")
+
+        judge.evaluate = judge_eval
+
+        llm = ToolRepeatLLM("search", {"q": "hello"}, tool_turns=3)
+        bus = EventBus()
+        doom_events: list = []
+        bus.subscribe(
+            event_types=[EventType.NODE_TOOL_DOOM_LOOP],
+            handler=lambda e: doom_events.append(e),
+        )
+
+        def tool_exec(tool_use: ToolUse) -> ToolResult:
+            return ToolResult(
+                tool_use_id=tool_use.id,
+                content="result",
+                is_error=False,
+            )
+
+        ctx = build_ctx(
+            runtime,
+            node_spec,
+            memory,
+            llm,
+            tools=[Tool(name="search", description="s", parameters={})],
+        )
+        node = EventLoopNode(
+            judge=judge,
+            tool_executor=tool_exec,
+            event_bus=bus,
+            config=LoopConfig(
+                max_iterations=10,
+                tool_doom_loop_threshold=3,
+            ),
+        )
+        result = await node.execute(ctx)
+        assert result.success is True
+        assert len(doom_events) == 1
+        assert "search" in doom_events[0].data["description"]
+
+    @pytest.mark.asyncio
+    async def test_doom_loop_disabled(
+        self,
+        runtime,
+        node_spec,
+        memory,
+    ):
+        """Disabled doom loop should not trigger with identical calls."""
+        node_spec.output_keys = []
+        judge = AsyncMock(spec=JudgeProtocol)
+        eval_count = 0
+
+        async def judge_eval(*args, **kwargs):
+            nonlocal eval_count
+            eval_count += 1
+            if eval_count >= 4:
+                return JudgeVerdict(action="ACCEPT")
+            return JudgeVerdict(action="RETRY")
+
+        judge.evaluate = judge_eval
+
+        llm = ToolRepeatLLM("search", {"q": "hello"}, tool_turns=4)
+
+        def tool_exec(tool_use: ToolUse) -> ToolResult:
+            return ToolResult(
+                tool_use_id=tool_use.id,
+                content="result",
+                is_error=False,
+            )
+
+        ctx = build_ctx(
+            runtime,
+            node_spec,
+            memory,
+            llm,
+            tools=[Tool(name="search", description="s", parameters={})],
+        )
+        node = EventLoopNode(
+            judge=judge,
+            tool_executor=tool_exec,
+            config=LoopConfig(
+                max_iterations=10,
+                tool_doom_loop_enabled=False,
+            ),
+        )
+        result = await node.execute(ctx)
+        assert result.success is True
+
+    @pytest.mark.asyncio
+    async def test_different_args_no_doom_loop(
+        self,
+        runtime,
+        node_spec,
+        memory,
+    ):
+        """Different tool args each turn should NOT trigger doom loop."""
+        node_spec.output_keys = []
+        judge = AsyncMock(spec=JudgeProtocol)
+        eval_count = 0
+
+        async def judge_eval(*args, **kwargs):
+            nonlocal eval_count
+            eval_count += 1
+            if eval_count >= 4:
+                return JudgeVerdict(action="ACCEPT")
+            return JudgeVerdict(action="RETRY")
+
+        judge.evaluate = judge_eval
+
+        # LLM that returns different args each call
+        call_idx = 0
+
+        class DiffArgsLLM(LLMProvider):
+            async def stream(self, messages, **kwargs):
+                nonlocal call_idx
+                idx = call_idx
+                call_idx += 1
+                if idx < 3:
+                    yield ToolCallEvent(
+                        tool_use_id=f"c{idx}",
+                        tool_name="search",
+                        tool_input={"q": f"query_{idx}"},
+                    )
+                    yield FinishEvent(
+                        stop_reason="tool_calls",
+                        input_tokens=10,
+                        output_tokens=5,
+                        model="mock",
+                    )
+                else:
+                    text = f"done (call {idx})"
+                    yield TextDeltaEvent(
+                        content=text,
+                        snapshot=text,
+                    )
+                    yield FinishEvent(
+                        stop_reason="stop",
+                        input_tokens=10,
+                        output_tokens=5,
+                        model="mock",
+                    )
+
+            def complete(self, messages, **kwargs):
+                return LLMResponse(
+                    content="ok",
+                    model="mock",
+                    stop_reason="stop",
+                )
+
+        llm = DiffArgsLLM()
+
+        def tool_exec(tool_use: ToolUse) -> ToolResult:
+            return ToolResult(
+                tool_use_id=tool_use.id,
+                content="result",
+                is_error=False,
+            )
+
+        ctx = build_ctx(
+            runtime,
+            node_spec,
+            memory,
+            llm,
+            tools=[Tool(name="search", description="s", parameters={})],
+        )
+        node = EventLoopNode(
+            judge=judge,
+            tool_executor=tool_exec,
+            config=LoopConfig(
+                max_iterations=10,
+                tool_doom_loop_threshold=3,
+            ),
+        )
+        result = await node.execute(ctx)
+        assert result.success is True
+
+    @pytest.mark.asyncio
+    async def test_doom_loop_detects_repeated_failing_tool(
+        self,
+        runtime,
+        node_spec,
+        memory,
+    ):
+        """A tool that keeps failing with is_error=True should trigger doom loop.
+
+        Regression test: previously, errored tool calls were excluded from
+        doom loop fingerprinting (``not tc.get("is_error")``), so a tool like
+        a tool failing with the same error every turn
+        would never be detected.
+        """
+        node_spec.output_keys = []
+        judge = AsyncMock(spec=JudgeProtocol)
+        eval_count = 0
+
+        async def judge_eval(*args, **kwargs):
+            nonlocal eval_count
+            eval_count += 1
+            if eval_count >= 5:
+                return JudgeVerdict(action="ACCEPT")
+            return JudgeVerdict(action="RETRY")
+
+        judge.evaluate = judge_eval
+
+        # 4 turns of the same failing tool call, then text
+        llm = ToolRepeatLLM("failing_tool", {}, tool_turns=4)
+        bus = EventBus()
+        doom_events: list = []
+        bus.subscribe(
+            event_types=[EventType.NODE_TOOL_DOOM_LOOP],
+            handler=lambda e: doom_events.append(e),
+        )
+
+        def tool_exec(tool_use: ToolUse) -> ToolResult:
+            return ToolResult(
+                tool_use_id=tool_use.id,
+                content="Error: accessibility tree unavailable",
+                is_error=True,
+            )
+
+        ctx = build_ctx(
+            runtime,
+            node_spec,
+            memory,
+            llm,
+            tools=[Tool(name="failing_tool", description="s", parameters={})],
+        )
+        node = EventLoopNode(
+            judge=judge,
+            tool_executor=tool_exec,
+            event_bus=bus,
+            config=LoopConfig(
+                max_iterations=10,
+                tool_doom_loop_threshold=3,
+            ),
+        )
+        result = await node.execute(ctx)
+        assert result.success is True
+        # Doom loop MUST fire for repeatedly-failing tool calls
+        assert len(doom_events) >= 1
+        assert "failing_tool" in doom_events[0].data["description"]
+
+
+# ===========================================================================
+# execution_id plumbing
+# ===========================================================================
+
+
+class TestExecutionId:
+    """Tests for execution_id on NodeContext and its wiring through the framework."""
+
+    def test_node_context_accepts_execution_id(self, runtime, node_spec, memory):
+        """NodeContext stores execution_id when constructed with one."""
+        ctx = NodeContext(
+            runtime=runtime,
+            node_id=node_spec.id,
+            node_spec=node_spec,
+            memory=memory,
+            execution_id="exec_abc",
+        )
+        assert ctx.execution_id == "exec_abc"
+
+    def test_node_context_execution_id_defaults_to_empty(self, runtime, node_spec, memory):
+        """build_ctx without execution_id gives ctx.execution_id == ''."""
+        llm = MockStreamingLLM()
+        ctx = build_ctx(runtime, node_spec, memory, llm)
+        assert ctx.execution_id == ""
+
+    def test_stream_runtime_adapter_exposes_execution_id(self):
+        """StreamRuntimeAdapter.execution_id returns the value passed at construction."""
+        from framework.runtime.stream_runtime import StreamRuntimeAdapter
+
+        mock_stream_runtime = MagicMock()
+        adapter = StreamRuntimeAdapter(stream_runtime=mock_stream_runtime, execution_id="exec_456")
+        assert adapter.execution_id == "exec_456"
+
+    def test_build_context_passes_execution_id_from_adapter(self):
+        """_build_context picks up execution_id from a StreamRuntimeAdapter runtime."""
+        from framework.graph.executor import GraphExecutor
+        from framework.graph.goal import Goal
+
+        runtime = MagicMock()
+        runtime.execution_id = "exec_123"
+        executor = GraphExecutor(runtime=runtime)
+
+        goal = Goal(id="g1", name="test", description="test", success_criteria=[])
+        node_spec = NodeSpec(
+            id="n1", name="n1", description="test", node_type="event_loop", output_keys=["r"]
+        )
+        ctx = executor._build_context(
+            node_spec=node_spec, memory=SharedMemory(), goal=goal, input_data={}
+        )
+        assert ctx.execution_id == "exec_123"
+
+    def test_build_context_defaults_execution_id_for_plain_runtime(self):
+        """Plain Runtime.execution_id returns '' by default."""
+        from framework.graph.executor import GraphExecutor
+        from framework.graph.goal import Goal
+
+        runtime = MagicMock(spec=Runtime)
+        runtime.execution_id = ""
+        executor = GraphExecutor(runtime=runtime)
+
+        goal = Goal(id="g1", name="test", description="test", success_criteria=[])
+        node_spec = NodeSpec(
+            id="n1", name="n1", description="test", node_type="event_loop", output_keys=["r"]
+        )
+        ctx = executor._build_context(
+            node_spec=node_spec, memory=SharedMemory(), goal=goal, input_data={}
+        )
+        assert ctx.execution_id == ""

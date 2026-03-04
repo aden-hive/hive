@@ -103,31 +103,20 @@ Add a processing node to the agent graph.
 - `node_id` (string, required): Unique node identifier
 - `name` (string, required): Human-readable name
 - `description` (string, required): What this node does
-- `node_type` (string, required): One of: `llm_generate`, `llm_tool_use`, `router`, `function`
+- `node_type` (string, required): Must be `event_loop` (the only valid type)
 - `input_keys` (string, required): JSON array of input variable names
 - `output_keys` (string, required): JSON array of output variable names
-- `system_prompt` (string, optional): System prompt for LLM nodes
-- `tools` (string, optional): JSON array of tool names for tool_use nodes
-- `routes` (string, optional): JSON object of route mappings for router nodes
+- `system_prompt` (string, optional): System prompt for the LLM
+- `tools` (string, optional): JSON array of tool names
+- `client_facing` (boolean, optional): Set to true for human-in-the-loop interaction
 
-**Node Types:**
+**Node Type:**
 
-1. **llm_generate**: Uses LLM to generate output from inputs
-   - Requires: `system_prompt`
-   - Tools: Not used
-
-2. **llm_tool_use**: Uses LLM with tools to accomplish tasks
-   - Requires: `system_prompt`, `tools`
-   - Tools: Array of tool names (e.g., `["web_search", "web_fetch"]`)
-
-3. **router**: LLM-powered routing to different paths
-   - Requires: `system_prompt`, `routes`
-   - Routes: Object mapping route names to target node IDs
-   - Example: `{"pass": "success_node", "fail": "retry_node"}`
-
-4. **function**: Executes a pre-defined function
-   - System prompt describes the function behavior
-   - No LLM calls, pure computation
+**event_loop**: LLM-powered node with self-correction loop
+- Requires: `system_prompt`
+- Optional: `tools` (array of tool names, e.g., `["web_search", "web_fetch"]`)
+- Optional: `client_facing` (set to true for HITL / user interaction)
+- Supports: iterative refinement, judge-based evaluation, tool use, streaming
 
 **Example:**
 ```json
@@ -135,7 +124,7 @@ Add a processing node to the agent graph.
   "node_id": "search_sources",
   "name": "Search Sources",
   "description": "Searches for relevant sources on the topic",
-  "node_type": "llm_tool_use",
+  "node_type": "event_loop",
   "input_keys": "[\"topic\", \"search_queries\"]",
   "output_keys": "[\"sources\", \"source_count\"]",
   "system_prompt": "Search for sources using the provided queries...",
@@ -198,7 +187,7 @@ Export the validated graph as an agent specification.
 
 **What it does:**
 1. Validates the graph
-2. Auto-generates missing edges from router routes
+2. Validates edge connectivity
 3. Writes files to disk:
    - `exports/{agent-name}/agent.json` - Full agent specification
    - `exports/{agent-name}/README.md` - Auto-generated documentation
@@ -252,47 +241,6 @@ Test the complete agent graph with sample inputs.
 
 ---
 
-### Evaluation Rules
-
-#### `add_evaluation_rule`
-Add a rule for the HybridJudge to evaluate node outputs.
-
-**Parameters:**
-- `rule_id` (string, required): Unique rule identifier
-- `description` (string, required): What this rule checks
-- `condition` (string, required): Python expression to evaluate
-- `action` (string, required): Action to take: `accept`, `retry`, `escalate`
-- `priority` (integer, optional): Rule priority (default: 0)
-- `feedback_template` (string, optional): Feedback message template
-
-**Condition Examples:**
-- `'result.get("success") == True'` - Check for success flag
-- `'result.get("error_type") == "timeout"'` - Check error type
-- `'len(result.get("data", [])) > 0'` - Check for non-empty data
-
-**Example:**
-```json
-{
-  "rule_id": "timeout_retry",
-  "description": "Retry on timeout errors",
-  "condition": "result.get('error_type') == 'timeout'",
-  "action": "retry",
-  "priority": 10,
-  "feedback_template": "Timeout occurred, retrying..."
-}
-```
-
-#### `list_evaluation_rules`
-List all configured evaluation rules.
-
-#### `remove_evaluation_rule`
-Remove an evaluation rule.
-
-**Parameters:**
-- `rule_id` (string, required): Rule to remove
-
----
-
 ## Example Workflow
 
 Here's a complete workflow for building a research agent:
@@ -320,7 +268,7 @@ add_node(
     node_id="planner",
     name="Research Planner",
     description="Creates research strategy",
-    node_type="llm_generate",
+    node_type="event_loop",
     input_keys='["topic"]',
     output_keys='["strategy", "queries"]',
     system_prompt="Analyze topic and create research plan..."
@@ -330,7 +278,7 @@ add_node(
     node_id="searcher",
     name="Search Sources",
     description="Find relevant sources",
-    node_type="llm_tool_use",
+    node_type="event_loop",
     input_keys='["queries"]',
     output_keys='["sources"]',
     system_prompt="Search for sources...",
@@ -359,10 +307,9 @@ The exported agent will be saved to `exports/research-agent/`.
 
 1. **Start with the goal**: Define clear success criteria before building nodes
 2. **Test nodes individually**: Use `test_node` to verify each node works
-3. **Use router nodes for branching**: Don't create edges manually for routers - define routes and they'll be auto-generated
-4. **Add evaluation rules**: Help the judge evaluate outputs deterministically
-5. **Validate early, validate often**: Run `validate_graph` after adding nodes/edges
-6. **Check exports**: Review the generated README.md to verify your agent structure
+3. **Use conditional edges for branching**: Define condition_expr on edges for decision points
+4. **Validate early, validate often**: Run `validate_graph` after adding nodes/edges
+5. **Check exports**: Review the generated README.md to verify your agent structure
 
 ---
 

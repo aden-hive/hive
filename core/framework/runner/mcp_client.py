@@ -183,8 +183,11 @@ class MCPClient:
                         from mcp import ClientSession
                         from mcp.client.stdio import stdio_client
 
-                        # Create persistent stdio client context
-                        self._stdio_context = stdio_client(server_params)
+                        # Create persistent stdio client context.
+                        # Redirect server stderr to devnull to prevent raw
+                        # output from leaking behind the TUI.
+                        devnull = open(os.devnull, "w")  # noqa: SIM115
+                        self._stdio_context = stdio_client(server_params, errlog=devnull)
                         (
                             self._read_stream,
                             self._write_stream,

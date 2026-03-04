@@ -1,6 +1,6 @@
 [project]
 name = "framework"
-version = "0.4.2"
+version = "0.5.1"
 description = "Goal-driven agent runtime with Builder-friendly observability"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -12,15 +12,18 @@ dependencies = [
   "mcp>=1.0.0",
   "fastmcp>=2.0.0",
   "textual>=1.0.0",
-  "pytest>=8.0",
-  "pytest-asyncio>=0.23",
-  "pytest-xdist>=3.0",
   "tools",
 ]
 
 [project.optional-dependencies]
 tui = ["textual>=0.75.0"]
 webhook = ["aiohttp>=3.9.0"]
+server = ["aiohttp>=3.9.0"]
+testing = [
+  "pytest>=8.0",
+  "pytest-asyncio>=0.23",
+  "pytest-xdist>=3.0",
+]
 
 [project.scripts]
 hive = "framework.cli:main"
@@ -62,4 +65,10 @@ lint.isort.section-order = [
 ]
 
 [dependency-groups]
-dev = ["ty>=0.0.13", "ruff>=0.14.14"]
+dev = [
+  "ty>=0.0.13",
+  "ruff>=0.14.14",
+  "pytest>=8.0",
+  "pytest-asyncio>=0.23",
+  "pytest-xdist>=3.0",
+  ]

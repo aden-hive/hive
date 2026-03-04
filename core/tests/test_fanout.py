@@ -116,7 +116,7 @@ def _make_fanout_graph(
             id="source",
             name="Source",
             description="entry",
-            node_type="function",
+            node_type="event_loop",
             output_keys=["data"],
         )
 
@@ -164,10 +164,10 @@ def _make_fanout_graph(
 async def test_fanout_triggers_on_multiple_success_edges(runtime, goal):
     """Fan-out should activate when a node has >1 ON_SUCCESS outgoing edges."""
     b1 = NodeSpec(
-        id="b1", name="B1", description="branch 1", node_type="function", output_keys=["b1_out"]
+        id="b1", name="B1", description="branch 1", node_type="event_loop", output_keys=["b1_out"]
     )
     b2 = NodeSpec(
-        id="b2", name="B2", description="branch 2", node_type="function", output_keys=["b2_out"]
+        id="b2", name="B2", description="branch 2", node_type="event_loop", output_keys=["b2_out"]
     )
 
     graph = _make_fanout_graph([b1, b2])
@@ -195,10 +195,10 @@ async def test_branches_execute_concurrently(runtime, goal):
     """All fan-out branches should be launched via asyncio.gather (concurrent)."""
     order = []
     b1 = NodeSpec(
-        id="b1", name="B1", description="branch 1", node_type="function", output_keys=["b1_done"]
+        id="b1", name="B1", description="branch 1", node_type="event_loop", output_keys=["b1_done"]
     )
     b2 = NodeSpec(
-        id="b2", name="B2", description="branch 2", node_type="function", output_keys=["b2_done"]
+        id="b2", name="B2", description="branch 2", node_type="event_loop", output_keys=["b2_done"]
     )
 
     graph = _make_fanout_graph([b1, b2])
@@ -223,13 +223,17 @@ async def test_branches_execute_concurrently(runtime, goal):
 async def test_convergence_at_fan_in_node(runtime, goal):
     """After fan-out branches complete, execution should continue at convergence node."""
     b1 = NodeSpec(
-        id="b1", name="B1", description="branch 1", node_type="function", output_keys=["b1_out"]
+        id="b1", name="B1", description="branch 1", node_type="event_loop", output_keys=["b1_out"]
     )
     b2 = NodeSpec(
-        id="b2", name="B2", description="branch 2", node_type="function", output_keys=["b2_out"]
+        id="b2", name="B2", description="branch 2", node_type="event_loop", output_keys=["b2_out"]
     )
     merge = NodeSpec(
-        id="merge", name="Merge", description="fan-in", node_type="function", output_keys=["merged"]
+        id="merge",
+        name="Merge",
+        description="fan-in",
+        node_type="event_loop",
+        output_keys=["merged"],
     )
 
     graph = _make_fanout_graph([b1, b2], fan_in_node=merge)
@@ -255,13 +259,13 @@ async def test_convergence_at_fan_in_node(runtime, goal):
 async def test_fail_all_strategy_raises_on_branch_failure(runtime, goal):
     """fail_all should raise RuntimeError if any branch fails."""
     b1 = NodeSpec(
-        id="b1", name="B1", description="ok branch", node_type="function", output_keys=["b1_out"]
+        id="b1", name="B1", description="ok branch", node_type="event_loop", output_keys=["b1_out"]
     )
     b2 = NodeSpec(
         id="b2",
         name="B2",
         description="bad branch",
-        node_type="function",
+        node_type="event_loop",
         output_keys=["b2_out"],
         max_retries=1,
     )
@@ -290,13 +294,13 @@ async def test_fail_all_strategy_raises_on_branch_failure(runtime, goal):
 async def test_continue_others_strategy_allows_partial_success(runtime, goal):
     """continue_others should let successful branches complete even if one fails."""
     b1 = NodeSpec(
-        id="b1", name="B1", description="ok", node_type="function", output_keys=["b1_out"]
+        id="b1", name="B1", description="ok", node_type="event_loop", output_keys=["b1_out"]
     )
     b2 = NodeSpec(
         id="b2",
         name="B2",
         description="fail",
-        node_type="function",
+        node_type="event_loop",
         output_keys=["b2_out"],
         max_retries=1,
     )
@@ -325,13 +329,13 @@ async def test_continue_others_strategy_allows_partial_success(runtime, goal):
 async def test_wait_all_strategy_collects_all_results(runtime, goal):
     """wait_all should wait for all branches before proceeding."""
     b1 = NodeSpec(
-        id="b1", name="B1", description="ok", node_type="function", output_keys=["b1_out"]
+        id="b1", name="B1", description="ok", node_type="event_loop", output_keys=["b1_out"]
     )
     b2 = NodeSpec(
         id="b2",
         name="B2",
         description="fail",
-        node_type="function",
+        node_type="event_loop",
         output_keys=["b2_out"],
         max_retries=1,
     )
@@ -365,12 +369,12 @@ async def test_per_branch_retry(runtime, goal):
         id="b1",
         name="B1",
         description="flaky",
-        node_type="function",
+        node_type="event_loop",
         output_keys=["b1_out"],
         max_retries=5,
     )
     b2 = NodeSpec(
-        id="b2", name="B2", description="solid", node_type="function", output_keys=["b2_out"]
+        id="b2", name="B2", description="solid", node_type="event_loop", output_keys=["b2_out"]
     )
 
     graph = _make_fanout_graph([b1, b2])
@@ -394,13 +398,13 @@ async def test_per_branch_retry(runtime, goal):
 async def test_single_edge_no_parallel_overhead(runtime, goal):
     """A single outgoing edge should follow normal sequential path, not fan-out."""
     n1 = NodeSpec(
-        id="n1", name="N1", description="entry", node_type="function", output_keys=["out1"]
+        id="n1", name="N1", description="entry", node_type="event_loop", output_keys=["out1"]
     )
     n2 = NodeSpec(
         id="n2",
         name="N2",
         description="next",
-        node_type="function",
+        node_type="event_loop",
         input_keys=["out1"],
         output_keys=["out2"],
     )
@@ -432,8 +436,8 @@ async def test_single_edge_no_parallel_overhead(runtime, goal):
 
 def test_detect_fan_out_nodes():
     """GraphSpec.detect_fan_out_nodes should identify fan-out topology."""
-    b1 = NodeSpec(id="b1", name="B1", description="b", node_type="function", output_keys=["x"])
-    b2 = NodeSpec(id="b2", name="B2", description="b", node_type="function", output_keys=["y"])
+    b1 = NodeSpec(id="b1", name="B1", description="b", node_type="event_loop", output_keys=["x"])
+    b2 = NodeSpec(id="b2", name="B2", description="b", node_type="event_loop", output_keys=["y"])
     graph = _make_fanout_graph([b1, b2])
 
     fan_outs = graph.detect_fan_out_nodes()
@@ -447,10 +451,10 @@ def test_detect_fan_out_nodes():
 
 def test_detect_fan_in_nodes():
     """GraphSpec.detect_fan_in_nodes should identify convergence topology."""
-    b1 = NodeSpec(id="b1", name="B1", description="b", node_type="function", output_keys=["x"])
-    b2 = NodeSpec(id="b2", name="B2", description="b", node_type="function", output_keys=["y"])
+    b1 = NodeSpec(id="b1", name="B1", description="b", node_type="event_loop", output_keys=["x"])
+    b2 = NodeSpec(id="b2", name="B2", description="b", node_type="event_loop", output_keys=["y"])
     merge = NodeSpec(
-        id="merge", name="Merge", description="m", node_type="function", output_keys=["z"]
+        id="merge", name="Merge", description="m", node_type="event_loop", output_keys=["z"]
     )
     graph = _make_fanout_graph([b1, b2], fan_in_node=merge)
 
@@ -467,10 +471,10 @@ def test_detect_fan_in_nodes():
 async def test_parallel_disabled_uses_sequential(runtime, goal):
     """When enable_parallel_execution=False, multi-edge should follow first match only."""
     b1 = NodeSpec(
-        id="b1", name="B1", description="b1", node_type="function", output_keys=["b1_out"]
+        id="b1", name="B1", description="b1", node_type="event_loop", output_keys=["b1_out"]
     )
     b2 = NodeSpec(
-        id="b2", name="B2", description="b2", node_type="function", output_keys=["b2_out"]
+        id="b2", name="B2", description="b2", node_type="event_loop", output_keys=["b2_out"]
     )
 
     graph = _make_fanout_graph([b1, b2])

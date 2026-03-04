@@ -1,8 +1,10 @@
 """LLM Provider abstraction for pluggable LLM backends."""
 
+import asyncio
 from abc import ABC, abstractmethod
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
+from functools import partial
 from typing import Any
 
 
@@ -88,29 +90,35 @@ class LLMProvider(ABC):
         """
         pass
 
-    @abstractmethod
-    def complete_with_tools(
+    async def acomplete(
         self,
         messages: list[dict[str, Any]],
-        system: str,
-        tools: list[Tool],
-        tool_executor: Callable[["ToolUse"], "ToolResult"],
-        max_iterations: int = 10,
-    ) -> LLMResponse:
-        """
-        Run a tool-use loop until the LLM produces a final response.
+        system: str = "",
+        tools: list["Tool"] | None = None,
+        max_tokens: int = 1024,
+        response_format: dict[str, Any] | None = None,
+        json_mode: bool = False,
+        max_retries: int | None = None,
+    ) -> "LLMResponse":
+        """Async version of complete(). Non-blocking on the event loop.
 
-        Args:
-            messages: Initial conversation
-            system: System prompt
-            tools: Available tools
-            tool_executor: Function to execute tools: (ToolUse) -> ToolResult
-            max_iterations: Max tool calls before stopping
-
-        Returns:
-            Final LLMResponse after tool use completes
+        Default implementation offloads the sync complete() to a thread pool.
+        Subclasses SHOULD override for native async I/O.
         """
-        pass
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(
+            None,
+            partial(
+                self.complete,
+                messages=messages,
+                system=system,
+                tools=tools,
+                max_tokens=max_tokens,
+                response_format=response_format,
+                json_mode=json_mode,
+                max_retries=max_retries,
+            ),
+        )
 
     async def stream(
         self,
@@ -135,7 +143,7 @@ class LLMProvider(ABC):
             TextEndEvent,
         )
 
-        response = self.complete(
+        response = await self.acomplete(
             messages=messages,
             system=system,
             tools=tools,

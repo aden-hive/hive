@@ -46,6 +46,7 @@ coverage/
 
 # TypeScript
 *.tsbuildinfo
+vite.config.d.ts
 
 # Python
 __pycache__/
@@ -69,6 +70,7 @@ exports/*
 .agent-builder-sessions/*
 
 .claude/settings.local.json
+.claude/skills/ship-it/
 
 .venv
 

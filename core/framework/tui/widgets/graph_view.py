@@ -8,6 +8,7 @@ arrows drawn on the right margin that visually point back up to earlier nodes.
 from __future__ import annotations
 
 import re
+import time
 
 from textual.app import ComposeResult
 from textual.containers import Vertical
@@ -51,11 +52,25 @@ class GraphOverview(Vertical):
     def __init__(self, runtime: AgentRuntime):
         super().__init__()
         self.runtime = runtime
+        self._override_graph = None  # Set by switch_graph() for secondary graphs
         self.active_node: str | None = None
         self.execution_path: list[str] = []
         # Per-node status strings shown next to the node in the graph display.
         # e.g. {"planner": "thinking...", "searcher": "web_search..."}
         self._node_status: dict[str, str] = {}
+
+    @property
+    def _graph(self):
+        """The graph currently being displayed (may be a secondary graph)."""
+        return self._override_graph or self.runtime.graph
+
+    def switch_graph(self, graph) -> None:
+        """Switch to displaying a different graph and refresh."""
+        self._override_graph = graph
+        self.active_node = None
+        self.execution_path = []
+        self._node_status = {}
+        self._display_graph()
 
     def compose(self) -> ComposeResult:
         # Use RichLog for formatted output
@@ -64,6 +79,9 @@ class GraphOverview(Vertical):
     def on_mount(self) -> None:
         """Display initial graph structure."""
         self._display_graph()
+        # Refresh every 1s so timer countdowns stay current
+        if self.runtime._timer_next_fire is not None:
+            self.set_interval(1.0, self._display_graph)
 
     # ------------------------------------------------------------------
     # Graph analysis helpers
@@ -71,7 +89,7 @@ class GraphOverview(Vertical):
 
     def _topo_order(self) -> list[str]:
         """BFS from entry_node following edges."""
-        graph = self.runtime.graph
+        graph = self._graph
         visited: list[str] = []
         seen: set[str] = set()
         queue = [graph.entry_node]
@@ -98,7 +116,7 @@ class GraphOverview(Vertical):
         order_idx = {nid: i for i, nid in enumerate(ordered)}
         back_edges: list[dict] = []
         for node_id in ordered:
-            for edge in self.runtime.graph.get_outgoing_edges(node_id):
+            for edge in self._graph.get_outgoing_edges(node_id):
                 target_idx = order_idx.get(edge.target, -1)
                 source_idx = order_idx.get(node_id, -1)
                 if target_idx != -1 and target_idx <= source_idx:
@@ -125,7 +143,7 @@ class GraphOverview(Vertical):
 
     def _render_node_line(self, node_id: str) -> str:
         """Render a single node with status symbol and optional status text."""
-        graph = self.runtime.graph
+        graph = self._graph
         is_terminal = node_id in (graph.terminal_nodes or [])
         is_active = node_id == self.active_node
         is_done = node_id in self.execution_path and not is_active
@@ -156,7 +174,7 @@ class GraphOverview(Vertical):
         Back-edges are excluded here — they are drawn by the return-channel
         overlay in Pass 2.
         """
-        all_edges = self.runtime.graph.get_outgoing_edges(node_id)
+        all_edges = self._graph.get_outgoing_edges(node_id)
         if not all_edges:
             return []
 
@@ -395,7 +413,7 @@ class GraphOverview(Vertical):
         display = self.query_one("#graph-display", RichLog)
         display.clear()
 
-        graph = self.runtime.graph
+        graph = self._graph
         display.write(f"[bold cyan]Agent Graph:[/bold cyan] {graph.id}\n")
 
         ordered = self._topo_order()
@@ -430,6 +448,70 @@ class GraphOverview(Vertical):
             display.write("")
             display.write(f"[dim]Path:[/dim] {' → '.join(self.execution_path[-5:])}")
 
+        # Event sources section
+        self._render_event_sources(display)
+
+    # ------------------------------------------------------------------
+    # Event sources display
+    # ------------------------------------------------------------------
+
+    def _render_event_sources(self, display: RichLog) -> None:
+        """Render event source info (webhooks, timers) below the graph."""
+        entry_points = self.runtime.get_entry_points()
+
+        # Filter to non-manual entry points (webhooks, timers, events)
+        event_sources = [ep for ep in entry_points if ep.trigger_type not in ("manual",)]
+        if not event_sources:
+            return
+
+        display.write("")
+        display.write("[bold cyan]Event Sources[/bold cyan]")
+
+        config = self.runtime._config
+
+        for ep in event_sources:
+            if ep.trigger_type == "timer":
+                cron_expr = ep.trigger_config.get("cron")
+                interval = ep.trigger_config.get("interval_minutes", "?")
+                schedule_label = f"cron: {cron_expr}" if cron_expr else f"every {interval} min"
+                display.write(f"  [green]⏱[/green]  {ep.name} [dim]→ {ep.entry_node}[/dim]")
+                # Show schedule + next fire countdown
+                next_fire = self.runtime._timer_next_fire.get(ep.id)
+                if next_fire is not None:
+                    remaining = max(0, next_fire - time.monotonic())
+                    hours, rem = divmod(int(remaining), 3600)
+                    mins, secs = divmod(rem, 60)
+                    if hours > 0:
+                        countdown = f"{hours}h {mins:02d}m {secs:02d}s"
+                    else:
+                        countdown = f"{mins}m {secs:02d}s"
+                    display.write(f"     [dim]{schedule_label} — next in {countdown}[/dim]")
+                else:
+                    display.write(f"     [dim]{schedule_label}[/dim]")
+
+            elif ep.trigger_type in ("event", "webhook"):
+                display.write(f"  [yellow]⚡[/yellow] {ep.name} [dim]→ {ep.entry_node}[/dim]")
+                # Show webhook endpoint if configured
+                route = None
+                for r in config.webhook_routes:
+                    src = r.get("source_id", "")
+                    if src and src in ep.id:
+                        route = r
+                        break
+                if not route and config.webhook_routes:
+                    # Fall back to first route
+                    route = config.webhook_routes[0]
+
+                if route:
+                    host = config.webhook_host
+                    port = config.webhook_port
+                    path = route.get("path", "/webhook")
+                    display.write(f"     [dim]{host}:{port}{path}[/dim]")
+                else:
+                    event_types = ep.trigger_config.get("event_types", [])
+                    if event_types:
+                        display.write(f"     [dim]events: {', '.join(event_types)}[/dim]")
+
     # ------------------------------------------------------------------
     # Public API (called by app.py)
     # ------------------------------------------------------------------
@@ -447,7 +529,7 @@ class GraphOverview(Vertical):
             self._node_status.clear()
             self.execution_path.clear()
             entry_node = event.data.get("entry_node") or (
-                self.runtime.graph.entry_node if self.runtime else None
+                self._graph.entry_node if self.runtime else None
             )
             if entry_node:
                 self.update_active_node(entry_node)

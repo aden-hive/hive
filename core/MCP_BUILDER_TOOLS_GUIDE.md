@@ -82,7 +82,7 @@ Register an MCP server as a tool source for your agent.
     "example_tool"
   ],
   "total_mcp_servers": 1,
-  "note": "MCP server 'tools' registered with 6 tools. These tools can now be used in llm_tool_use nodes."
+  "note": "MCP server 'tools' registered with 6 tools. These tools can now be used in event_loop nodes."
 }
 ```
 
@@ -149,7 +149,7 @@ List tools available from registered MCP servers.
     ]
   },
   "total_tools": 6,
-  "note": "Use these tool names in the 'tools' parameter when adding llm_tool_use nodes"
+  "note": "Use these tool names in the 'tools' parameter when adding event_loop nodes"
 }
 ```
 
@@ -246,7 +246,7 @@ Here's a complete workflow for building an agent with MCP tools:
     "node_id": "web-searcher",
     "name": "Web Search",
     "description": "Search the web for information",
-    "node_type": "llm_tool_use",
+    "node_type": "event_loop",
     "input_keys": "[\"query\"]",
     "output_keys": "[\"search_results\"]",
     "system_prompt": "Search for {query} using the web_search tool",

@@ -42,6 +42,14 @@ For Vault integration:
     from core.framework.credentials.vault import HashiCorpVaultStorage
 """
 
+from .key_storage import (
+    delete_aden_api_key,
+    generate_and_save_credential_key,
+    load_aden_api_key,
+    load_credential_key,
+    save_aden_api_key,
+    save_credential_key,
+)
 from .models import (
     CredentialDecryptionError,
     CredentialError,
@@ -59,6 +67,13 @@ from .provider import (
     CredentialProvider,
     StaticProvider,
 )
+from .setup import (
+    CredentialSetupSession,
+    MissingCredential,
+    SetupResult,
+    load_agent_nodes,
+    run_credential_setup_cli,
+)
 from .storage import (
     CompositeStorage,
     CredentialStorage,
@@ -68,7 +83,12 @@ from .storage import (
 )
 from .store import CredentialStore
 from .template import TemplateResolver
-from .validation import ensure_credential_key_env, validate_agent_credentials
+from .validation import (
+    CredentialStatus,
+    CredentialValidationResult,
+    ensure_credential_key_env,
+    validate_agent_credentials,
+)
 
 # Aden sync components (lazy import to avoid httpx dependency when not needed)
 # Usage: from core.framework.credentials.aden import AdenSyncProvider
@@ -84,6 +104,14 @@ try:
     _ADEN_AVAILABLE = True
 except ImportError:
     _ADEN_AVAILABLE = False
+
+# Local credential registry (named API key accounts with identity metadata)
+try:
+    from .local import LocalAccountInfo, LocalCredentialRegistry
+
+    _LOCAL_AVAILABLE = True
+except ImportError:
+    _LOCAL_AVAILABLE = False
 
 __all__ = [
     # Main store
@@ -112,15 +140,34 @@ __all__ = [
     "CredentialRefreshError",
     "CredentialValidationError",
     "CredentialDecryptionError",
+    # Key storage (bootstrap credentials)
+    "load_credential_key",
+    "save_credential_key",
+    "generate_and_save_credential_key",
+    "load_aden_api_key",
+    "save_aden_api_key",
+    "delete_aden_api_key",
     # Validation
     "ensure_credential_key_env",
     "validate_agent_credentials",
+    "CredentialStatus",
+    "CredentialValidationResult",
+    # Interactive setup
+    "CredentialSetupSession",
+    "MissingCredential",
+    "SetupResult",
+    "load_agent_nodes",
+    "run_credential_setup_cli",
     # Aden sync (optional - requires httpx)
     "AdenSyncProvider",
     "AdenCredentialClient",
     "AdenClientConfig",
     "AdenCachedStorage",
+    # Local credential registry (optional - requires cryptography)
+    "LocalCredentialRegistry",
+    "LocalAccountInfo",
 ]
 
 # Track Aden availability for runtime checks
 ADEN_AVAILABLE = _ADEN_AVAILABLE
+LOCAL_AVAILABLE = _LOCAL_AVAILABLE

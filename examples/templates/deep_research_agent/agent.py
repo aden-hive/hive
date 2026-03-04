@@ -195,12 +195,12 @@ class DeepResearchAgent:
             max_tokens=self.config.max_tokens,
             loop_config={
                 "max_iterations": 100,
-                "max_tool_calls_per_turn": 20,
+                "max_tool_calls_per_turn": 30,
                 "max_history_tokens": 32000,
             },
         )
 
-    def _setup(self) -> GraphExecutor:
+    def _setup(self, mock_mode: bool = False) -> None:
         """Set up the executor with all components."""
         from pathlib import Path
 
