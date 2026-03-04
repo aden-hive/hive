@@ -651,7 +651,13 @@ export default function Workspace() {
       // failed, the throw inside the catch exits the outer try block.
       const session = liveSession!;
       const displayName = formatAgentDisplayName(session.worker_name || agentType);
-      updateAgentState(agentType, { sessionId: session.session_id, displayName });
+      const initialMode = session.queen_mode || (session.has_worker ? "staging" : "building");
+      updateAgentState(agentType, {
+        sessionId: session.session_id,
+        displayName,
+        queenMode: initialMode,
+        queenBuilding: initialMode === "building",
+      });
 
       // Update the session label
       setSessionsByAgent((prev) => {

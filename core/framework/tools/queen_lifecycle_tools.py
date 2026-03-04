@@ -1013,12 +1013,19 @@ def register_queen_lifecycle_tools(
                 if mode_state is not None:
                     await mode_state.switch_to_staging()
 
+                worker_name = info.name if info else updated_session.worker_id
                 return json.dumps(
                     {
                         "status": "loaded",
                         "mode": "staging",
+                        "message": (
+                            f"Successfully loaded '{worker_name}'. "
+                            "You are now in STAGING mode. "
+                            "Call run_agent_with_input(task) to start the worker, "
+                            "or stop_worker_and_edit() to go back to building."
+                        ),
                         "worker_id": updated_session.worker_id,
-                        "worker_name": info.name if info else updated_session.worker_id,
+                        "worker_name": worker_name,
                         "goal": info.goal_name if info else "",
                         "node_count": info.node_count if info else 0,
                     }
