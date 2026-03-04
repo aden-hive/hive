@@ -351,9 +351,14 @@ class TestRuntimeLogger:
         )
 
         # Verify the file exists and has one line
-        jsonl_path = tmp_path / "logs" / "sessions" / run_id / "logs" / "tool_logs.jsonl"
+        jsonl_path = (
+            tmp_path / "logs" / "sessions" / run_id / "logs" / "tool_logs.jsonl"
+        )
         assert jsonl_path.exists()
-        lines = [line for line in jsonl_path.read_text(encoding="utf-8").strip().split("\n") if line]
+        lines = [
+            line for line in jsonl_path.read_text(encoding="utf-8")
+            .strip().split("\n") if line
+        ]
         assert len(lines) == 1
 
         data = json.loads(lines[0])
