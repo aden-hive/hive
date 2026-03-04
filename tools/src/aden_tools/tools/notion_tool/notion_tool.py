@@ -212,7 +212,9 @@ def register_tools(
         Args:
             parent_database_id: ID of the parent database (required)
             title: Page title (required)
-            properties_json: Additional properties as JSON string e.g. '{"Status": {"select": {"name": "Done"}}}' (optional)
+            properties_json: Additional properties as JSON string
+                e.g. '{"Status": {"select": {"name": "Done"}}}'
+                (optional)
             content: Plain text content for the page body (optional)
 
         Returns:

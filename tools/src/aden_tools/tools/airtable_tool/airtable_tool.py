@@ -159,7 +159,8 @@ def register_tools(mcp: FastMCP, credentials: Any = None) -> None:
         Args:
             base_id: The Airtable base ID (starts with 'app').
             table_name: Table name or ID.
-            records: JSON array of objects with "fields" key, e.g. '[{"fields": {"Name": "Alice"}}]'.
+            records: JSON array of objects with "fields" key,
+                e.g. '[{"fields": {"Name": "Alice"}}]'.
             typecast: If true, auto-convert values to appropriate field types.
         """
         hdrs = _get_headers()
@@ -212,7 +213,8 @@ def register_tools(mcp: FastMCP, credentials: Any = None) -> None:
         Args:
             base_id: The Airtable base ID (starts with 'app').
             table_name: Table name or ID.
-            records: JSON array of objects with "id" and "fields" keys, e.g. '[{"id": "recXXX", "fields": {"Status": "Done"}}]'.
+            records: JSON array of objects with "id" and "fields" keys,
+                e.g. '[{"id": "recXXX", "fields": {"Status": "Done"}}]'.
             typecast: If true, auto-convert values to appropriate field types.
         """
         hdrs = _get_headers()

@@ -87,7 +87,8 @@ def register_tools(mcp: FastMCP, credentials: Any = None) -> None:
         """List PagerDuty incidents with optional filters.
 
         Args:
-            status: Filter by status: 'triggered', 'acknowledged', 'resolved'. Comma-separated for multiple.
+            status: Filter by status: 'triggered', 'acknowledged',
+                'resolved'. Comma-separated for multiple.
             since: Start of date range (ISO 8601, e.g. '2024-01-01T00:00:00Z').
             until: End of date range (ISO 8601).
             service_id: Filter by service ID.

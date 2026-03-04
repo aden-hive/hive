@@ -138,7 +138,8 @@ def register_tools(
             start: Pagination offset (default 0)
 
         Returns:
-            Dict with deals list (id, title, value, currency, status, person_name, org_name, stage_id)
+            Dict with deals list (id, title, value, currency,
+                status, person_name, org_name, stage_id)
         """
         token = _get_token(credentials)
         if not token:

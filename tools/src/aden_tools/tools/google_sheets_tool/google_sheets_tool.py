@@ -130,7 +130,8 @@ def register_tools(
         Args:
             spreadsheet_id: The spreadsheet ID from the URL (required)
             range: A1 notation range e.g. "Sheet1!A1:D10" or "Sheet1" (required)
-            value_render: How values are rendered: FORMATTED_VALUE, UNFORMATTED_VALUE, FORMULA (default FORMATTED_VALUE)
+            value_render: How values are rendered: FORMATTED_VALUE,
+                UNFORMATTED_VALUE, or FORMULA (default FORMATTED_VALUE)
 
         Returns:
             Dict with cell values as 2D array, range info, and row/column counts

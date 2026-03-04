@@ -295,7 +295,8 @@ def register_tools(
                 api_key = credentials.get("attio")
                 if api_key is not None and not isinstance(api_key, str):
                     raise TypeError(
-                        f"Expected string from credentials.get('attio'), got {type(api_key).__name__}"
+                        "Expected string from credentials.get('attio'), "
+                        f"got {type(api_key).__name__}"
                     )
                 if api_key is not None:
                     return api_key

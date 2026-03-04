@@ -69,7 +69,8 @@ def register_tools(mcp: FastMCP, credentials: Any = None) -> None:
         """Query QuickBooks entities using the query API.
 
         Args:
-            entity: Entity type to query (e.g. 'Customer', 'Invoice', 'Item', 'Vendor', 'Bill', 'Payment').
+            entity: Entity type to query (e.g. 'Customer', 'Invoice',
+                'Item', 'Vendor', 'Bill', 'Payment').
             where: Optional WHERE clause (e.g. "Active = true AND DisplayName LIKE 'ABC%'").
             order_by: Optional ORDER BY clause (e.g. "DisplayName ASC").
             max_results: Maximum results to return (default 100, max 1000).
@@ -175,7 +176,9 @@ def register_tools(mcp: FastMCP, credentials: Any = None) -> None:
 
         Args:
             customer_id: Customer ID to invoice.
-            line_items: JSON array of line items. Each item: {"description": "...", "amount": 100.00, "item_id": "1"}.
+            line_items: JSON array of line items. Each item:
+                {"description": "...", "amount": 100.00,
+                "item_id": "1"}.
         """
         cfg = _get_config()
         if isinstance(cfg, dict):

@@ -102,7 +102,7 @@ class TestLinearClient:
         }
         mock_post.return_value = mock_response
 
-        result = self.client._execute_query(
+        _result = self.client._execute_query(
             "query Issue($id: String!) { issue(id: $id) { id title } }",
             {"id": "issue-123"},
         )

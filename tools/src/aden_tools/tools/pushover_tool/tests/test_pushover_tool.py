@@ -34,7 +34,7 @@ class TestPushoverClient:
     @patch("aden_tools.tools.pushover_tool.pushover_tool.httpx.post")
     def test_send_notification_emergency_priority(self, mock_post):
         mock_post.return_value = self._mock_response()
-        result = self.client.send_notification("Emergency!", priority=2)
+        _result = self.client.send_notification("Emergency!", priority=2)
         call_kwargs = mock_post.call_args[1]["data"]
         assert call_kwargs["retry"] == 30
         assert call_kwargs["expire"] == 3600
@@ -86,7 +86,7 @@ class TestPushoverClient:
     @patch("aden_tools.tools.pushover_tool.pushover_tool.httpx.post")
     def test_validate_user_with_device(self, mock_post):
         mock_post.return_value = self._mock_response(json_data={"status": 1, "devices": ["iphone"]})
-        result = self.client.validate_user(device="iphone")
+        _result = self.client.validate_user(device="iphone")
         call_kwargs = mock_post.call_args[1]["data"]
         assert call_kwargs["device"] == "iphone"
 

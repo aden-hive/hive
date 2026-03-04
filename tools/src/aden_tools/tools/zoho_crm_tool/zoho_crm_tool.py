@@ -241,7 +241,9 @@ def register_tools(
             return {"error": "module is required"}
         if not (criteria or email or phone or word):
             return {
-                "error": "At least one search parameter is required (criteria, email, phone, or word)"
+                "error": (
+                    "At least one search parameter is required (criteria, email, phone, or word)"
+                )
             }
 
         params: dict[str, Any] = {

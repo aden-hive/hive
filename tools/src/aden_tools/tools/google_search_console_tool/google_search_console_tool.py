@@ -181,7 +181,8 @@ def register_tools(
             site_url: Site URL (e.g. "https://example.com")
 
         Returns:
-            Dict with sitemaps list (path, lastSubmitted, isPending, isSitemapsIndex, warnings, errors)
+            Dict with sitemaps list
+                (path, lastSubmitted, isPending, isSitemapsIndex, warnings, errors)
         """
         token = _get_token(credentials)
         if not token:

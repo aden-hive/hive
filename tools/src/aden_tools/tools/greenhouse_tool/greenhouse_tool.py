@@ -64,7 +64,9 @@ def _get(path: str, token: str, params: dict[str, Any] | None = None) -> dict[st
 def _auth_error() -> dict[str, Any]:
     return {
         "error": "GREENHOUSE_API_TOKEN not set",
-        "help": "Get your API key from Greenhouse: Configure > Dev Center > API Credential Management",
+        "help": (
+            "Get your API key from Greenhouse: Configure > Dev Center > API Credential Management"
+        ),
     }
 
 

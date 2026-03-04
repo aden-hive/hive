@@ -232,11 +232,11 @@ def register_tools(mcp: FastMCP, credentials: Any = None) -> None:
             "count": len(logs),
             "logs": [
                 {
-                    "id": l.get("id"),
-                    "level": l.get("level"),
-                    "message": l.get("message"),
-                    "created_at": l.get("created_at"),
+                    "id": item.get("id"),
+                    "level": item.get("level"),
+                    "message": item.get("message"),
+                    "created_at": item.get("created_at"),
                 }
-                for l in logs
+                for item in logs
             ],
         }

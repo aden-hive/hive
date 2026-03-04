@@ -75,7 +75,10 @@ def _post(host: str, endpoint: str, token: str, body: dict | None = None) -> dic
 def _auth_error() -> dict[str, Any]:
     return {
         "error": "DATABRICKS_TOKEN or DATABRICKS_HOST not set",
-        "help": "Set DATABRICKS_HOST=https://your-workspace.cloud.databricks.com and DATABRICKS_TOKEN=dapi...",
+        "help": (
+            "Set DATABRICKS_HOST=https://your-workspace.cloud.databricks.com"
+            " and DATABRICKS_TOKEN=dapi..."
+        ),
     }
 
 

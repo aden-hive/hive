@@ -141,8 +141,11 @@ def register_tools(
         Send a WhatsApp message via Twilio.
 
         Args:
-            to: Recipient phone in E.164 format e.g. "+14155552671" (required, whatsapp: prefix added automatically)
-            from_number: Sender Twilio WhatsApp number in E.164 format (required, whatsapp: prefix added automatically)
+            to: Recipient phone in E.164 format e.g. "+14155552671"
+                (required, whatsapp: prefix added automatically)
+            from_number: Sender Twilio WhatsApp number in E.164
+                format (required, whatsapp: prefix added
+                automatically)
             body: Message text (required)
 
         Returns:

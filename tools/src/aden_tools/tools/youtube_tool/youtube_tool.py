@@ -46,7 +46,11 @@ def _request(
                 reason = errors[0].get("reason", "")
             if reason == "quotaExceeded":
                 return {
-                    "error": "YouTube API quota exceeded. Try again tomorrow or request a quota increase."
+                    "error": (
+                        "YouTube API quota exceeded."
+                        " Try again tomorrow or"
+                        " request a quota increase."
+                    )
                 }
             return {"error": f"Forbidden: {reason or resp.text}"}
         if resp.status_code != 200:
@@ -112,7 +116,9 @@ def register_tools(
             video_type: Filter by type - episode, movie, or empty for any
 
         Returns:
-            Dict with query, results list (title, videoId, channelTitle, publishedAt, description, thumbnail), and total_results count
+            Dict with query, results list (title, videoId,
+                channelTitle, publishedAt, description,
+                thumbnail), and total_results count
         """
         api_key = _get_api_key(credentials)
         if not api_key:
@@ -299,7 +305,8 @@ def register_tools(
             order: Sort order - date, viewCount, rating, relevance (default date)
 
         Returns:
-            Dict with channel_id and videos list (videoId, title, publishedAt, description, thumbnail)
+            Dict with channel_id and videos list (videoId, title,
+                publishedAt, description, thumbnail)
         """
         api_key = _get_api_key(credentials)
         if not api_key:

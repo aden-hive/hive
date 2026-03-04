@@ -141,7 +141,9 @@ def register_tools(
         query_upper = query.strip().upper()
         if not query_upper.startswith("SELECT") and not query_upper.startswith("WITH"):
             return {
-                "error": "Only SELECT queries are allowed. Use mssql_execute_update for modifications."
+                "error": (
+                    "Only SELECT queries are allowed. Use mssql_execute_update for modifications."
+                )
             }
 
         connection, error = _create_connection()
@@ -414,7 +416,9 @@ def register_tools(
                             i.type_desc AS INDEX_TYPE,
                             COL_NAME(ic.object_id, ic.column_id) AS COLUMN_NAME
                         FROM sys.indexes i
-                        JOIN sys.index_columns ic ON i.object_id = ic.object_id AND i.index_id = ic.index_id
+                        JOIN sys.index_columns ic
+                            ON i.object_id = ic.object_id
+                            AND i.index_id = ic.index_id
                         WHERE i.object_id = OBJECT_ID(?)
                         ORDER BY i.name, ic.key_ordinal
                     """,

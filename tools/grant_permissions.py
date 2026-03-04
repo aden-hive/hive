@@ -83,7 +83,7 @@ def grant_permissions():
                     CREATE LOGIN sa WITH PASSWORD = '{PASSWORD}'
                 END
                 """)
-            except:
+            except Exception:
                 pass
 
             # Switch to AdenTestDB and grant permissions
@@ -98,7 +98,7 @@ def grant_permissions():
                 END
                 """)
                 print("[OK] Created database user")
-            except:
+            except Exception:
                 pass
 
             # Grant permissions

@@ -255,7 +255,7 @@ def register_tools(
         if priority:
             fields["priority"] = {"name": priority}
         if labels:
-            fields["labels"] = [l.strip() for l in labels.split(",") if l.strip()]
+            fields["labels"] = [item.strip() for item in labels.split(",") if item.strip()]
 
         url = f"{_base_url(domain)}/issue"
         data = _request("post", url, email, token, json={"fields": fields})

@@ -289,7 +289,8 @@ def register_tools(mcp: FastMCP, credentials: Any = None) -> None:
         Args:
             database: Database name.
             collection: Collection name.
-            pipeline: JSON array of pipeline stages (e.g. '[{"$match": {"status": "active"}}, {"$group": {"_id": "$type", "count": {"$sum": 1}}}]').
+            pipeline: JSON array of pipeline stages
+                (e.g. '[{"$match": {"status": "active"}}]').
         """
         cfg = _get_config()
         if isinstance(cfg, dict):

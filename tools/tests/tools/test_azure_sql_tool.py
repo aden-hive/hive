@@ -38,7 +38,10 @@ class TestAzureSQLListServers:
         data = {
             "value": [
                 {
-                    "id": "/subscriptions/sub-123/resourceGroups/rg/providers/Microsoft.Sql/servers/myserver",
+                    "id": (
+                        "/subscriptions/sub-123/resourceGroups/rg"
+                        "/providers/Microsoft.Sql/servers/myserver"
+                    ),
                     "name": "myserver",
                     "location": "eastus",
                     "properties": {
@@ -72,7 +75,9 @@ class TestAzureSQLGetServer:
 
     def test_successful_get(self, tool_fns):
         data = {
-            "id": "/subscriptions/sub-123/resourceGroups/rg/providers/Microsoft.Sql/servers/myserver",
+            "id": (
+                "/subscriptions/sub-123/resourceGroups/rg/providers/Microsoft.Sql/servers/myserver"
+            ),
             "name": "myserver",
             "location": "eastus",
             "properties": {

@@ -45,7 +45,10 @@ def register_tools(
             from youtube_transcript_api import YouTubeTranscriptApi
         except ImportError:
             return {
-                "error": "youtube-transcript-api package not installed. Run: pip install youtube-transcript-api"
+                "error": (
+                    "youtube-transcript-api package not installed."
+                    " Run: pip install youtube-transcript-api"
+                )
             }
 
         try:
@@ -88,7 +91,10 @@ def register_tools(
             from youtube_transcript_api import YouTubeTranscriptApi
         except ImportError:
             return {
-                "error": "youtube-transcript-api package not installed. Run: pip install youtube-transcript-api"
+                "error": (
+                    "youtube-transcript-api package not installed."
+                    " Run: pip install youtube-transcript-api"
+                )
             }
 
         try:
