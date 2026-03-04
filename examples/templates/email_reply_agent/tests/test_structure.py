@@ -1,7 +1,5 @@
 """Structural tests for Email Reply Agent."""
 
-import pytest
-
 
 class TestAgentStructure:
     """Test agent graph structure."""
@@ -30,7 +28,10 @@ class TestAgentStructure:
         assert len(confirm_edges) == 2
         edge_conditions = {e.condition_expr for e in confirm_edges}
         assert "restart == True" in edge_conditions
-        assert "batch_complete == True" in edge_conditions
+        assert (
+            "batch_complete == True and send_started == True and send_count >= 1 and sent_message_ids is not None and len(sent_message_ids) >= 1"
+            in edge_conditions
+        )
 
     def test_entry_points(self, agent_module):
         """Entry points configured."""

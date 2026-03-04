@@ -36,6 +36,23 @@ from framework.runtime.llm_debug_logger import log_llm_turn
 
 logger = logging.getLogger(__name__)
 
+# Pattern for detecting context-window-exceeded errors across LLM providers.
+_CONTEXT_TOO_LARGE_RE = re.compile(
+    r"context.{0,20}(length|window|limit|size)|"
+    r"too.{0,10}(long|large|many.{0,10}tokens)|"
+    r"(exceed|exceeds|exceeded).{0,30}(limit|window|context|tokens)|"
+    r"maximum.{0,20}token|prompt.{0,20}too.{0,10}long",
+    re.IGNORECASE,
+)
+
+
+def _is_context_too_large_error(exc: BaseException) -> bool:
+    """Detect whether an exception indicates the LLM input was too large."""
+    cls = type(exc).__name__
+    if "ContextWindow" in cls:
+        return True
+    return bool(_CONTEXT_TOO_LARGE_RE.search(str(exc)))
+
 
 # ---------------------------------------------------------------------------
 # Escalation receiver (temporary routing target for subagent → user input)
@@ -459,6 +476,15 @@ class EventLoopNode(NodeProtocol):
                 if initial_message:
                     await conversation.add_user_message(initial_message)
 
+        # 2a. Guard: ensure at least one non-system message exists.
+        # A restored conversation may have 0 messages if phase_id filtering
+        # removes them all, or if a prior run stored metadata without messages
+        # (e.g. subagent that failed before the first LLM call).
+        if conversation.message_count == 0:
+            initial_message = self._build_initial_message(ctx)
+            if initial_message:
+                await conversation.add_user_message(initial_message)
+
         # 2b. Restore spill counter from existing files (resume safety)
         self._restore_spill_counter()
 
@@ -468,8 +494,7 @@ class EventLoopNode(NodeProtocol):
         if set_output_tool:
             tools.append(set_output_tool)
         if ctx.node_spec.client_facing and not ctx.event_triggered:
-            if stream_id != "queen":
-                tools.append(self._build_ask_user_tool())
+            tools.append(self._build_ask_user_tool())
 
         # Add delegate_to_sub_agent tool if:
         # - Node has sub_agents defined
@@ -548,12 +573,25 @@ class EventLoopNode(NodeProtocol):
             # 6b. Drain injection queue
             await self._drain_injection_queue(conversation)
 
+            # 6b2. Dynamic tool refresh (mode switching)
+            if ctx.dynamic_tools_provider is not None:
+                _synthetic_names = {
+                    "set_output",
+                    "ask_user",
+                    "delegate_to_sub_agent",
+                    "report_to_parent",
+                }
+                synthetic = [t for t in tools if t.name in _synthetic_names]
+                tools.clear()
+                tools.extend(ctx.dynamic_tools_provider())
+                tools.extend(synthetic)
+
             # 6c. Publish iteration event
             await self._publish_iteration(stream_id, node_id, iteration, execution_id)
 
             # 6d. Pre-turn compaction check (tiered)
             if conversation.needs_compaction():
-                await self._compact_tiered(ctx, conversation, accumulator)
+                await self._compact(ctx, conversation, accumulator)
 
             # 6e. Run single LLM turn (with transient error retry)
             logger.info(
@@ -574,6 +612,7 @@ class EventLoopNode(NodeProtocol):
                         logged_tool_calls,
                         user_input_requested,
                         ask_user_prompt,
+                        ask_user_options,
                     ) = await self._run_single_turn(
                         ctx, conversation, tools, iteration, accumulator
                     )
@@ -753,7 +792,7 @@ class EventLoopNode(NodeProtocol):
 
             # 6e''. Post-turn compaction check (catches tool-result bloat)
             if conversation.needs_compaction():
-                await self._compact_tiered(ctx, conversation, accumulator)
+                await self._compact(ctx, conversation, accumulator)
 
             # Reset auto-block grace streak when real work happens
             if real_tool_results or outputs_set:
@@ -774,7 +813,13 @@ class EventLoopNode(NodeProtocol):
                 missing = self._get_missing_output_keys(
                     accumulator, ctx.node_spec.output_keys, ctx.node_spec.nullable_output_keys
                 )
-                if not missing:
+                # Only accept on empty response if the node actually has
+                # output_keys that are all satisfied.  Nodes with NO
+                # output_keys (e.g. the forever-alive queen) should never
+                # be terminated by a ghost empty stream — "missing" is
+                # trivially empty when there are no required outputs.
+                has_real_outputs = bool(ctx.node_spec.output_keys)
+                if not missing and has_real_outputs:
                     logger.info(
                         "[%s] iter=%d: empty response but all outputs set — accepting",
                         node_id,
@@ -791,7 +836,7 @@ class EventLoopNode(NodeProtocol):
                         latency_ms=latency_ms,
                         conversation=conversation if _is_continuous else None,
                     )
-                else:
+                elif missing:
                     # Ghost empty stream: LLM returned nothing and outputs
                     # are still missing.  The conversation hasn't changed, so
                     # repeating the same call will produce the same empty
@@ -839,6 +884,35 @@ class EventLoopNode(NodeProtocol):
                         "your task and call the appropriate tools to make "
                         "progress.]"
                     )
+                    continue
+                else:
+                    # No output_keys and empty response — forever-alive node
+                    # got a ghost empty stream.  Nudge like the missing-outputs
+                    # path but without failing (no outputs to demand).
+                    _consecutive_empty_turns += 1
+                    logger.warning(
+                        "[%s] iter=%d: empty response on node with no output_keys (consecutive=%d)",
+                        node_id,
+                        iteration,
+                        _consecutive_empty_turns,
+                    )
+                    if _consecutive_empty_turns >= self._config.stall_detection_threshold:
+                        # Persistent ghost — but since this is a forever-alive
+                        # node, block for user input instead of crashing.
+                        logger.warning(
+                            "[%s] iter=%d: %d consecutive empty responses, blocking for user input",
+                            node_id,
+                            iteration,
+                            _consecutive_empty_turns,
+                        )
+                        await self._await_user_input(ctx, prompt="")
+                        _consecutive_empty_turns = 0
+                    else:
+                        await conversation.add_user_message(
+                            "[System: Your response was empty. Review the "
+                            "conversation and respond to the user or take "
+                            "action with your tools.]"
+                        )
                     continue
             else:
                 _consecutive_empty_turns = 0
@@ -973,16 +1047,12 @@ class EventLoopNode(NodeProtocol):
                 if user_input_requested:
                     _cf_block = True
                     _cf_prompt = ask_user_prompt
-                elif (
-                    stream_id == "queen"
-                    and assistant_text
-                    and not real_tool_results
-                    and not outputs_set
-                ):
+                elif stream_id == "queen" and not real_tool_results and not outputs_set:
                     # Auto-block: only for the queen (conversational node).
                     # Workers are autonomous — they block only on explicit
-                    # ask_user().  Text-only turns from workers are narration,
-                    # not questions addressed to the user.
+                    # ask_user().  Turns without tool calls or set_output
+                    # (including empty ghost streams) are not work — block
+                    # and wait for user input.
                     _cf_block = True
                     _cf_auto = True
 
@@ -1084,7 +1154,7 @@ class EventLoopNode(NodeProtocol):
                     _cf_auto,
                 )
                 got_input = await self._await_user_input(
-                    ctx, prompt=_cf_prompt, skip_emit=user_input_requested
+                    ctx, prompt=_cf_prompt, options=ask_user_options
                 )
                 logger.info("[%s] iter=%d: unblocked, got_input=%s", node_id, iteration, got_input)
                 if not got_input:
@@ -1412,12 +1482,17 @@ class EventLoopNode(NodeProtocol):
 
         The content becomes a user message prepended to the next iteration.
         Thread-safe via asyncio.Queue.
-        Also unblocks _await_user_input() if the node is waiting.
+        Always unblocks _await_user_input() so the node processes the
+        message promptly — both real user input and external events
+        (e.g. worker ask_user forwarded via queenContext) need to wake
+        the node.
 
         Args:
             content: The message text.
             is_client_input: True when the message originates from a real
-                human user (e.g. /chat endpoint), False for external events.
+                human user (e.g. /chat endpoint), False for external events
+                (e.g. worker question forwarded by the frontend).  Controls
+                message formatting in _drain_injection_queue, not wake behavior.
         """
         await self._injection_queue.put((content, is_client_input))
         self._input_ready.set()
@@ -1442,7 +1517,11 @@ class EventLoopNode(NodeProtocol):
             self._stream_task.cancel()
 
     async def _await_user_input(
-        self, ctx: NodeContext, prompt: str = "", *, skip_emit: bool = False
+        self,
+        ctx: NodeContext,
+        prompt: str = "",
+        *,
+        options: list[str] | None = None,
     ) -> bool:
         """Block until user input arrives or shutdown is signaled.
 
@@ -1453,8 +1532,9 @@ class EventLoopNode(NodeProtocol):
           before the judge runs.
 
         Args:
-            skip_emit: If True, skip emitting client_input_requested
-                (already emitted earlier, e.g. during ask_user detection).
+            options: Optional predefined choices for the user (from ask_user).
+                Passed through to the CLIENT_INPUT_REQUESTED event so the
+                frontend can render a QuestionWidget with buttons.
 
         Returns True if input arrived, False if shutdown was signaled.
         """
@@ -1469,12 +1549,13 @@ class EventLoopNode(NodeProtocol):
         # without injecting, so the wait still blocks until the user types.
         self._input_ready.clear()
 
-        if self._event_bus and not skip_emit:
+        if self._event_bus:
             await self._event_bus.emit_client_input_requested(
                 stream_id=ctx.stream_id or ctx.node_id,
                 node_id=ctx.node_id,
                 prompt=prompt,
                 execution_id=ctx.execution_id or "",
+                options=options,
             )
 
         self._awaiting_input = True
@@ -1495,11 +1576,11 @@ class EventLoopNode(NodeProtocol):
         tools: list[Tool],
         iteration: int,
         accumulator: OutputAccumulator,
-    ) -> tuple[str, list[dict], list[str], dict[str, int], list[dict], bool, str]:
+    ) -> tuple[str, list[dict], list[str], dict[str, int], list[dict], bool, str, list[str] | None]:
         """Run a single LLM turn with streaming and tool execution.
 
         Returns (assistant_text, real_tool_results, outputs_set, token_counts, logged_tool_calls,
-        user_input_requested, ask_user_prompt).
+        user_input_requested, ask_user_prompt, ask_user_options).
 
         ``real_tool_results`` contains only results from actual tools (web_search,
         etc.), NOT from the synthetic ``set_output`` or ``ask_user`` tools.
@@ -1523,6 +1604,7 @@ class EventLoopNode(NodeProtocol):
         outputs_set_this_turn: list[str] = []
         user_input_requested = False
         ask_user_prompt = ""
+        ask_user_options: list[str] | None = None
         # Accumulate ALL tool calls across inner iterations for L3 logging.
         # Unlike real_tool_results (reset each inner iteration), this persists.
         logged_tool_calls: list[dict] = []
@@ -1536,7 +1618,7 @@ class EventLoopNode(NodeProtocol):
                     "Pre-send guard: context at %.0f%% of budget, compacting",
                     conversation.usage_ratio() * 100,
                 )
-                await self._compact_tiered(ctx, conversation, accumulator)
+                await self._compact(ctx, conversation, accumulator)
 
             messages = conversation.to_llm_messages()
 
@@ -1670,6 +1752,7 @@ class EventLoopNode(NodeProtocol):
                     logged_tool_calls,
                     user_input_requested,
                     ask_user_prompt,
+                    ask_user_options,
                 )
 
             # Execute tool calls — framework tools (set_output, ask_user)
@@ -1756,16 +1839,56 @@ class EventLoopNode(NodeProtocol):
                     # --- Framework-level ask_user handling ---
                     user_input_requested = True
                     ask_user_prompt = tc.tool_input.get("question", "")
-                    # Emit immediately so the frontend transitions to
-                    # "awaiting input" without waiting for post-turn
-                    # processing (compaction, stall check, cursor write).
-                    if self._event_bus and ctx.node_spec.client_facing:
-                        await self._event_bus.emit_client_input_requested(
-                            stream_id=stream_id,
-                            node_id=node_id,
-                            prompt=ask_user_prompt,
-                            execution_id=execution_id,
+                    raw_options = tc.tool_input.get("options", None)
+                    # Defensive: ensure options is a list of strings.
+                    # Smaller models sometimes send a string instead of
+                    # an array — try to recover gracefully.
+                    ask_user_options: list[str] | None = None
+                    if isinstance(raw_options, list):
+                        ask_user_options = [str(o) for o in raw_options if o]
+                    elif isinstance(raw_options, str) and raw_options.strip():
+                        # Try JSON parse first (e.g. '["a","b"]')
+                        try:
+                            parsed = json.loads(raw_options)
+                            if isinstance(parsed, list):
+                                ask_user_options = [str(o) for o in parsed if o]
+                        except (json.JSONDecodeError, TypeError):
+                            pass
+                    if ask_user_options is not None and len(ask_user_options) < 2:
+                        ask_user_options = None  # fall back to free-text input
+
+                    # Workers MUST provide at least 2 options — no free-text
+                    # questions allowed.  Only the queen may omit options.
+                    if ask_user_options is None and stream_id != "queen":
+                        result = ToolResult(
+                            tool_use_id=tc.tool_use_id,
+                            content=(
+                                "ERROR: options are required. Provide at least "
+                                "2 predefined choices in the 'options' array. "
+                                'Example: {"question": "...", "options": '
+                                '["Yes", "No"]}'
+                            ),
+                            is_error=True,
                         )
+                        results_by_id[tc.tool_use_id] = result
+                        user_input_requested = False
+                        continue
+
+                    # Free-form ask_user (no options): stream the question
+                    # text as a chat message so the user can see it.  When
+                    # options are present the QuestionWidget shows the
+                    # question, but without options nothing renders it.
+                    if ask_user_options is None and ask_user_prompt and ctx.node_spec.client_facing:
+                        await self._publish_text_delta(
+                            stream_id,
+                            node_id,
+                            content=ask_user_prompt,
+                            snapshot=ask_user_prompt,
+                            ctx=ctx,
+                            execution_id=execution_id,
+                            iteration=iteration,
+                        )
+
                     result = ToolResult(
                         tool_use_id=tc.tool_use_id,
                         content="Waiting for user input...",
@@ -1895,6 +2018,7 @@ class EventLoopNode(NodeProtocol):
                 async def _timed_subagent(
                     _ctx: NodeContext,
                     _tc: ToolCallEvent,
+                    _acc: OutputAccumulator = accumulator,
                 ) -> tuple[ToolResult | BaseException, str, float]:
                     _s = time.time()
                     _iso = datetime.now(UTC).isoformat()
@@ -1903,6 +2027,7 @@ class EventLoopNode(NodeProtocol):
                             _ctx,
                             _tc.tool_input.get("agent_id", ""),
                             _tc.tool_input.get("task", ""),
+                            accumulator=_acc,
                         )
                     except BaseException as _exc:
                         _r = _exc
@@ -2055,6 +2180,7 @@ class EventLoopNode(NodeProtocol):
                     logged_tool_calls,
                     user_input_requested,
                     ask_user_prompt,
+                    ask_user_options,
                 )
 
             # --- Mid-turn pruning: prevent context blowup within a single turn ---
@@ -2082,6 +2208,7 @@ class EventLoopNode(NodeProtocol):
                     logged_tool_calls,
                     user_input_requested,
                     ask_user_prompt,
+                    ask_user_options,
                 )
 
             # Tool calls processed -- loop back to stream with updated conversation
@@ -2100,20 +2227,48 @@ class EventLoopNode(NodeProtocol):
         return Tool(
             name="ask_user",
             description=(
-                "Call this tool when you need to wait for the user's response. "
-                "Use it after greeting the user, asking a question, or requesting "
-                "approval. Do NOT call it when you are just providing a status "
-                "update or summary that doesn't require a response."
+                "You MUST call this tool whenever you need the user's response. "
+                "Always call it after greeting the user, asking a question, or "
+                "requesting approval. Do NOT call it for status updates or "
+                "summaries that don't require a response. "
+                "Always include 2-3 predefined options. The UI automatically "
+                "appends an 'Other' free-text input after your options, so NEVER "
+                "include catch-all options like 'Custom idea', 'Something else', "
+                "'Other', or 'None of the above' — the UI handles that. "
+                "When the question primarily needs a typed answer but you must "
+                "include options, make one option signal that typing is expected "
+                "(e.g. 'I\\'ll type my response'). This helps users discover the "
+                "free-text input. "
+                "The ONLY exception: omit options when the question demands a "
+                "free-form answer the user must type out (e.g. 'Describe your "
+                "agent idea', 'Paste the error message'). "
+                'Example: {"question": "What would you like to do?", "options": '
+                '["Build a new agent", "Modify existing agent", "Run tests"]} '
+                "Free-form example: "
+                '{"question": "Describe the agent you want to build."}'
             ),
             parameters={
                 "type": "object",
                 "properties": {
                     "question": {
                         "type": "string",
-                        "description": "Optional: the question or prompt shown to the user.",
+                        "description": "The question or prompt shown to the user.",
+                    },
+                    "options": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": (
+                            "2-3 specific predefined choices. Include in most cases. "
+                            'Example: ["Option A", "Option B", "Option C"]. '
+                            "The UI always appends an 'Other' free-text input, so "
+                            "do NOT include catch-alls like 'Custom idea' or 'Other'. "
+                            "Omit ONLY when the user must type a free-form answer."
+                        ),
+                        "minItems": 2,
+                        "maxItems": 3,
                     },
                 },
-                "required": [],
+                "required": ["question"],
             },
         )
 
@@ -2423,78 +2578,11 @@ class EventLoopNode(NodeProtocol):
     ) -> str:
         """Build a compact tool call history from the conversation.
 
-        Used in compaction summaries to prevent the LLM from re-calling
-        tools it already called. Extracts:
-        - Tool call details: name, count, and *inputs* for key tools
-          (search queries, scrape URLs, loaded filenames)
-        - Files saved via save_data
-        - Outputs set via set_output
-        - Errors encountered
+        Delegates to :func:`extract_tool_call_history` in conversation.py.
         """
-        # Per-tool: list of input summaries (one per call)
-        tool_calls_detail: dict[str, list[str]] = {}
-        files_saved: list[str] = []
-        outputs_set: list[str] = []
-        errors: list[str] = []
+        from framework.graph.conversation import extract_tool_call_history
 
-        # Tool-specific input extractors: return a short summary string
-        def _summarize_input(name: str, args: dict) -> str:
-            if name == "web_search":
-                return args.get("query", "")
-            if name == "web_scrape":
-                return args.get("url", "")
-            if name == "load_data":
-                return args.get("filename", "")
-            if name == "save_data":
-                return args.get("filename", "")
-            return ""
-
-        for msg in conversation.messages:
-            if msg.role == "assistant" and msg.tool_calls:
-                for tc in msg.tool_calls:
-                    func = tc.get("function", {})
-                    name = func.get("name", "unknown")
-                    try:
-                        args = json.loads(func.get("arguments", "{}"))
-                    except (json.JSONDecodeError, TypeError):
-                        args = {}
-
-                    summary = _summarize_input(name, args)
-                    tool_calls_detail.setdefault(name, []).append(summary)
-
-                    if name == "save_data" and args.get("filename"):
-                        files_saved.append(args["filename"])
-                    if name == "set_output" and args.get("key"):
-                        outputs_set.append(args["key"])
-
-            if msg.role == "tool" and msg.is_error:
-                preview = msg.content[:120].replace("\n", " ")
-                errors.append(preview)
-
-        parts: list[str] = []
-        if tool_calls_detail:
-            lines: list[str] = []
-            for name, inputs in list(tool_calls_detail.items())[:max_entries]:
-                count = len(inputs)
-                # Include input details for tools where inputs matter
-                non_empty = [s for s in inputs if s]
-                if non_empty:
-                    detail_lines = [f"    - {s[:120]}" for s in non_empty[:8]]
-                    lines.append(f"  {name} ({count}x):\n" + "\n".join(detail_lines))
-                else:
-                    lines.append(f"  {name} ({count}x)")
-            parts.append("TOOLS ALREADY CALLED:\n" + "\n".join(lines))
-        if files_saved:
-            unique = list(dict.fromkeys(files_saved))
-            parts.append("FILES SAVED: " + ", ".join(unique))
-        if outputs_set:
-            unique = list(dict.fromkeys(outputs_set))
-            parts.append("OUTPUTS SET: " + ", ".join(unique))
-        if errors:
-            parts.append(
-                "ERRORS (do NOT retry these):\n" + "\n".join(f"  - {e}" for e in errors[:10])
-            )
-        return "\n\n".join(parts)
+        return extract_tool_call_history(conversation.messages, max_entries=max_entries)
 
     def _build_initial_message(self, ctx: NodeContext) -> str:
         """Build the initial user message from input data and memory.
@@ -2665,6 +2753,7 @@ class EventLoopNode(NodeProtocol):
             return
         try:
             adapt_path = Path(self._config.spillover_dir) / "adapt.md"
+            adapt_path.parent.mkdir(parents=True, exist_ok=True)
             content = adapt_path.read_text(encoding="utf-8") if adapt_path.exists() else ""
 
             if "## Outputs" not in content:
@@ -2842,128 +2931,302 @@ class EventLoopNode(NodeProtocol):
 
         return result
 
-    async def _compact_tiered(
+    # --- Compaction -----------------------------------------------------------
+
+    # Threshold above which LLM compaction is invoked (structural handles 80-95%).
+    _LLM_COMPACT_THRESHOLD = 0.95
+    # Max chars of formatted messages before proactively splitting for LLM.
+    _LLM_COMPACT_CHAR_LIMIT = 240_000
+    # Max recursion depth for binary-search splitting.
+    _LLM_COMPACT_MAX_DEPTH = 10
+
+    async def _compact(
         self,
         ctx: NodeContext,
         conversation: NodeConversation,
         accumulator: OutputAccumulator | None = None,
     ) -> None:
-        """Run compaction with aggressiveness scaled to usage level.
+        """Compact conversation history to stay within token budget.
 
-        | Usage          | Strategy                                    |
-        |----------------|---------------------------------------------|
-        | 80-100%        | Normal: LLM summary, keep 4 recent messages |
-        | 100-120%       | Aggressive: LLM summary, keep 2 recent      |
-        | >= 120%        | Emergency: static summary, keep 1 recent     |
+        1. Prune old tool results (always, free).
+        2. Structure-preserving compaction at >=80% (standard, then aggressive).
+        3. LLM compaction at >95% with recursive binary-search splitting.
+        4. Emergency deterministic summary only if LLM failed or unavailable.
         """
-        ratio = conversation.usage_ratio()
+        ratio_before = conversation.usage_ratio()
+        phase_grad = getattr(ctx, "continuous_mode", False)
 
-        # --- Tier 0: Prune old tool results (zero-cost, no LLM call) ---
+        # --- Step 1: Prune old tool results (free, no LLM) ---
         protect = max(2000, self._config.max_history_tokens // 12)
         pruned = await conversation.prune_old_tool_results(
             protect_tokens=protect,
             min_prune_tokens=max(1000, protect // 3),
         )
         if pruned > 0:
-            new_ratio = conversation.usage_ratio()
             logger.info(
                 "Pruned %d old tool results: %.0f%% -> %.0f%%",
                 pruned,
-                ratio * 100,
-                new_ratio * 100,
+                ratio_before * 100,
+                conversation.usage_ratio() * 100,
             )
-            if not conversation.needs_compaction():
-                # Pruning freed enough — skip full compaction entirely
-                prune_before = round(ratio * 100)
-                prune_after = round(new_ratio * 100)
-                if ctx.runtime_logger:
-                    ctx.runtime_logger.log_step(
-                        node_id=ctx.node_id,
-                        node_type="event_loop",
-                        step_index=-1,
-                        llm_text=f"Context pruned (tool results): "
-                        f"{prune_before}% \u2192 {prune_after}%",
-                        verdict="COMPACTION",
-                        verdict_feedback=f"level=prune_only "
-                        f"before={prune_before}% after={prune_after}%",
-                    )
-                if self._event_bus:
-                    from framework.runtime.event_bus import AgentEvent, EventType
+        if not conversation.needs_compaction():
+            await self._log_compaction(ctx, conversation, ratio_before)
+            return
 
-                    await self._event_bus.publish(
-                        AgentEvent(
-                            type=EventType.CONTEXT_COMPACTED,
-                            stream_id=ctx.stream_id or ctx.node_id,
-                            node_id=ctx.node_id,
-                            data={
-                                "level": "prune_only",
-                                "usage_before": prune_before,
-                                "usage_after": prune_after,
-                            },
-                        )
-                    )
-                return
-            ratio = new_ratio
-
-        _phase_grad = getattr(ctx, "continuous_mode", False)
-
-        if ratio >= 1.2:
-            level = "emergency"
-            keep = 1
-            logger.warning("Emergency compaction triggered (usage %.0f%%)", ratio * 100)
-        elif ratio >= 1.0:
-            level = "aggressive"
-            keep = 2
-            logger.info("Aggressive compaction triggered (usage %.0f%%)", ratio * 100)
-        else:
-            level = "normal"
-            keep = 4
-
+        # --- Step 2: Structure-preserving compaction (>=80%) ---
         spill_dir = self._config.spillover_dir
         if spill_dir:
-            # Structure-preserving: save freeform text to file, keep tool messages
+            pre_structural = conversation.usage_ratio()
             await conversation.compact_preserving_structure(
                 spillover_dir=spill_dir,
-                keep_recent=keep,
-                phase_graduated=_phase_grad,
+                keep_recent=4,
+                phase_graduated=phase_grad,
             )
-            # Circuit breaker: if structure-preserving compaction barely helped
-            # (still over budget), fall back to destructive compact() which
-            # replaces everything with a summary.
-            mid_ratio = conversation.usage_ratio()
-            if mid_ratio >= 0.9 * ratio:
-                logger.warning(
-                    "Structure-preserving compaction ineffective "
-                    "(%.0f%% -> %.0f%%), falling back to summary compaction",
-                    ratio * 100,
-                    mid_ratio * 100,
+            if conversation.usage_ratio() >= 0.9 * pre_structural:
+                logger.info(
+                    "Standard structural compaction ineffective "
+                    "(%.0f%% -> %.0f%%), trying aggressive",
+                    pre_structural * 100,
+                    conversation.usage_ratio() * 100,
                 )
-                summary = self._build_emergency_summary(ctx, accumulator, conversation)
-                await conversation.compact(summary, keep_recent=keep, phase_graduated=_phase_grad)
-        else:
-            # Fallback: LLM-based summary (no spillover dir available)
-            if level == "emergency":
-                summary = self._build_emergency_summary(ctx, accumulator, conversation)
-            else:
-                summary = await self._generate_compaction_summary(ctx, conversation)
-            await conversation.compact(summary, keep_recent=keep, phase_graduated=_phase_grad)
+                await conversation.compact_preserving_structure(
+                    spillover_dir=spill_dir,
+                    keep_recent=4,
+                    phase_graduated=phase_grad,
+                    aggressive=True,
+                )
+        if not conversation.needs_compaction():
+            await self._log_compaction(ctx, conversation, ratio_before)
+            return
 
-        new_ratio = conversation.usage_ratio()
-        logger.info(
-            "Compaction complete (%s): %.0f%% -> %.0f%%",
-            level,
-            ratio * 100,
-            new_ratio * 100,
+        # --- Step 3: LLM compaction at >95% (recursive binary-search) ---
+        if conversation.usage_ratio() > self._LLM_COMPACT_THRESHOLD and ctx.llm is not None:
+            logger.info(
+                "LLM compaction triggered (%.0f%% usage)",
+                conversation.usage_ratio() * 100,
+            )
+            try:
+                summary = await self._llm_compact(
+                    ctx,
+                    list(conversation.messages),
+                    accumulator,
+                )
+                await conversation.compact(
+                    summary,
+                    keep_recent=2,
+                    phase_graduated=phase_grad,
+                )
+            except Exception as e:
+                logger.warning("LLM compaction failed: %s", e)
+
+        if not conversation.needs_compaction():
+            await self._log_compaction(ctx, conversation, ratio_before)
+            return
+
+        # --- Step 4: Emergency deterministic summary (LLM failed/unavailable) ---
+        logger.warning(
+            "Emergency compaction (%.0f%% usage)",
+            conversation.usage_ratio() * 100,
+        )
+        summary = self._build_emergency_summary(ctx, accumulator, conversation)
+        await conversation.compact(
+            summary,
+            keep_recent=1,
+            phase_graduated=phase_grad,
+        )
+        await self._log_compaction(ctx, conversation, ratio_before)
+
+    # --- LLM compaction with binary-search splitting ----------------------
+
+    async def _llm_compact(
+        self,
+        ctx: NodeContext,
+        messages: list,
+        accumulator: OutputAccumulator | None = None,
+        _depth: int = 0,
+    ) -> str:
+        """Summarise *messages* with LLM, splitting recursively if too large.
+
+        If the formatted text exceeds ``_LLM_COMPACT_CHAR_LIMIT`` or the LLM
+        rejects the call with a context-length error, the messages are split
+        in half and each half is summarised independently.  Tool history is
+        appended once at the top-level call (``_depth == 0``).
+        """
+        from framework.graph.conversation import extract_tool_call_history
+
+        if _depth > self._LLM_COMPACT_MAX_DEPTH:
+            raise RuntimeError(f"LLM compaction recursion limit ({self._LLM_COMPACT_MAX_DEPTH})")
+
+        formatted = self._format_messages_for_summary(messages)
+
+        # Proactive split: avoid wasting an API call on oversized input
+        if len(formatted) > self._LLM_COMPACT_CHAR_LIMIT and len(messages) > 1:
+            summary = await self._llm_compact_split(
+                ctx,
+                messages,
+                accumulator,
+                _depth,
+            )
+        else:
+            prompt = self._build_llm_compaction_prompt(
+                ctx,
+                accumulator,
+                formatted,
+            )
+            summary_budget = max(1024, self._config.max_history_tokens // 2)
+            try:
+                response = await ctx.llm.acomplete(
+                    messages=[{"role": "user", "content": prompt}],
+                    system=(
+                        "You are a conversation compactor for an AI agent. "
+                        "Write a detailed summary that allows the agent to "
+                        "continue its work. Preserve user-stated rules, "
+                        "constraints, and account/identity preferences verbatim."
+                    ),
+                    max_tokens=summary_budget,
+                )
+                summary = response.content
+            except Exception as e:
+                if _is_context_too_large_error(e) and len(messages) > 1:
+                    logger.info(
+                        "LLM context too large (depth=%d, msgs=%d) — splitting",
+                        _depth,
+                        len(messages),
+                    )
+                    summary = await self._llm_compact_split(
+                        ctx,
+                        messages,
+                        accumulator,
+                        _depth,
+                    )
+                else:
+                    raise
+
+        # Append tool history at top level only
+        if _depth == 0:
+            tool_history = extract_tool_call_history(messages)
+            if tool_history and "TOOLS ALREADY CALLED" not in summary:
+                summary += "\n\n" + tool_history
+
+        return summary
+
+    async def _llm_compact_split(
+        self,
+        ctx: NodeContext,
+        messages: list,
+        accumulator: OutputAccumulator | None,
+        _depth: int,
+    ) -> str:
+        """Split messages in half and summarise each half independently."""
+        mid = max(1, len(messages) // 2)
+        s1 = await self._llm_compact(ctx, messages[:mid], None, _depth + 1)
+        s2 = await self._llm_compact(
+            ctx,
+            messages[mid:],
+            accumulator,
+            _depth + 1,
+        )
+        return s1 + "\n\n" + s2
+
+    # --- Compaction helpers ------------------------------------------------
+
+    @staticmethod
+    def _format_messages_for_summary(messages: list) -> str:
+        """Format messages as text for LLM summarisation."""
+        lines: list[str] = []
+        for m in messages:
+            if m.role == "tool":
+                content = m.content[:500]
+                if len(m.content) > 500:
+                    content += "..."
+                lines.append(f"[tool result]: {content}")
+            elif m.role == "assistant" and m.tool_calls:
+                names = [tc.get("function", {}).get("name", "?") for tc in m.tool_calls]
+                text = m.content[:200] if m.content else ""
+                lines.append(f"[assistant (calls: {', '.join(names)})]: {text}")
+            else:
+                lines.append(f"[{m.role}]: {m.content}")
+        return "\n\n".join(lines)
+
+    def _build_llm_compaction_prompt(
+        self,
+        ctx: NodeContext,
+        accumulator: OutputAccumulator | None,
+        formatted_messages: str,
+    ) -> str:
+        """Build prompt for LLM compaction targeting 50% of token budget."""
+        spec = ctx.node_spec
+        ctx_lines = [f"NODE: {spec.name} (id={spec.id})"]
+        if spec.description:
+            ctx_lines.append(f"PURPOSE: {spec.description}")
+        if spec.success_criteria:
+            ctx_lines.append(f"SUCCESS CRITERIA: {spec.success_criteria}")
+
+        if accumulator:
+            acc = accumulator.to_dict()
+            done = {k: v for k, v in acc.items() if v is not None}
+            todo = [k for k, v in acc.items() if v is None]
+            if done:
+                ctx_lines.append(
+                    "OUTPUTS ALREADY SET:\n"
+                    + "\n".join(f"  {k}: {str(v)[:150]}" for k, v in done.items())
+                )
+            if todo:
+                ctx_lines.append(f"OUTPUTS STILL NEEDED: {', '.join(todo)}")
+        elif spec.output_keys:
+            ctx_lines.append(f"OUTPUTS STILL NEEDED: {', '.join(spec.output_keys)}")
+
+        target_tokens = self._config.max_history_tokens // 2
+        target_chars = target_tokens * 4
+        node_ctx = "\n".join(ctx_lines)
+
+        return (
+            "You are compacting an AI agent's conversation history. "
+            "The agent is still working and needs to continue.\n\n"
+            f"AGENT CONTEXT:\n{node_ctx}\n\n"
+            f"CONVERSATION MESSAGES:\n{formatted_messages}\n\n"
+            "INSTRUCTIONS:\n"
+            f"Write a summary of approximately {target_chars} characters "
+            f"(~{target_tokens} tokens).\n"
+            "1. Preserve ALL user-stated rules, constraints, and preferences "
+            "verbatim.\n"
+            "2. Preserve key decisions made and results obtained.\n"
+            "3. Preserve in-progress work state so the agent can continue.\n"
+            "4. Be detailed enough that the agent can resume without "
+            "re-doing work.\n"
         )
 
-        # Log compaction to session logs (tool_logs.jsonl)
-        before_pct = round(ratio * 100)
-        after_pct = round(new_ratio * 100)
+    async def _log_compaction(
+        self,
+        ctx: NodeContext,
+        conversation: NodeConversation,
+        ratio_before: float,
+    ) -> None:
+        """Log compaction result to runtime logger and event bus."""
+        ratio_after = conversation.usage_ratio()
+        before_pct = round(ratio_before * 100)
+        after_pct = round(ratio_after * 100)
+
+        # Determine label from what happened
+        if after_pct >= before_pct - 1:
+            level = "prune_only"
+        elif ratio_after <= 0.6:
+            level = "llm"
+        else:
+            level = "structural"
+
+        logger.info(
+            "Compaction complete (%s): %d%% -> %d%%",
+            level,
+            before_pct,
+            after_pct,
+        )
+
         if ctx.runtime_logger:
             ctx.runtime_logger.log_step(
                 node_id=ctx.node_id,
                 node_type="event_loop",
-                step_index=-1,  # Not a regular LLM step
+                step_index=-1,
                 llm_text=f"Context compacted ({level}): {before_pct}% \u2192 {after_pct}%",
                 verdict="COMPACTION",
                 verdict_feedback=f"level={level} before={before_pct}% after={after_pct}%",
@@ -2979,62 +3242,11 @@ class EventLoopNode(NodeProtocol):
                     node_id=ctx.node_id,
                     data={
                         "level": level,
-                        "usage_before": round(ratio * 100),
-                        "usage_after": round(new_ratio * 100),
+                        "usage_before": before_pct,
+                        "usage_after": after_pct,
                     },
                 )
             )
-
-    async def _generate_compaction_summary(
-        self,
-        ctx: NodeContext,
-        conversation: NodeConversation,
-    ) -> str:
-        """Use LLM to generate a conversation summary for compaction."""
-        tool_history = self._extract_tool_call_history(conversation)
-
-        messages_text = "\n".join(
-            f"[{m.role}]: {m.content[:200]}" for m in conversation.messages[-10:]
-        )
-        prompt = (
-            "Summarize this conversation so far in 2-3 sentences, "
-            "preserving key decisions and results.\n\n"
-            "IMPORTANT: Always preserve any user-stated rules, constraints, "
-            "or preferences — especially which account/identity to use, "
-            "formatting preferences, and behavioral instructions. "
-            "These MUST appear verbatim or near-verbatim in your summary.\n\n"
-            f"{messages_text}"
-        )
-        if tool_history:
-            prompt += (
-                "\n\nINCLUDE this tool history verbatim in your summary "
-                "(the agent needs it to avoid re-calling tools):\n\n"
-                f"{tool_history}"
-            )
-
-        # Dynamic budget: reasoning models (o1, gpt-5-mini) spend max_tokens on
-        # internal thinking. 500 leaves nothing for the actual summary.
-        summary_budget = max(1024, self._config.max_history_tokens // 10)
-        try:
-            response = await ctx.llm.acomplete(
-                messages=[{"role": "user", "content": prompt}],
-                system=(
-                    "Summarize conversations concisely. Always preserve the tool "
-                    "history section. Always preserve user-stated rules, constraints, "
-                    "and account/identity preferences verbatim."
-                ),
-                max_tokens=summary_budget,
-            )
-            summary = response.content
-            # Ensure tool history is present even if LLM dropped it
-            if tool_history and "TOOLS ALREADY CALLED" not in summary:
-                summary += "\n\n" + tool_history
-            return summary
-        except Exception as e:
-            logger.warning(f"Compaction summary generation failed: {e}")
-            if tool_history:
-                return f"Previous conversation context (summary unavailable).\n\n{tool_history}"
-            return "Previous conversation context (summary unavailable)."
 
     def _build_emergency_summary(
         self,
@@ -3530,6 +3742,8 @@ class EventLoopNode(NodeProtocol):
         ctx: NodeContext,
         agent_id: str,
         task: str,
+        *,
+        accumulator: OutputAccumulator | None = None,
     ) -> ToolResult:
         """Execute a subagent and return the result as a ToolResult.
 
@@ -3543,6 +3757,9 @@ class EventLoopNode(NodeProtocol):
             ctx: Parent node's context (for memory, tools, LLM access).
             agent_id: The node ID of the subagent to invoke.
             task: The task description to give the subagent.
+            accumulator: Parent's OutputAccumulator — provides outputs that
+                have been set via ``set_output`` but not yet written to
+                shared memory (which only happens after the node completes).
 
         Returns:
             ToolResult with structured JSON output containing:
@@ -3582,15 +3799,28 @@ class EventLoopNode(NodeProtocol):
         subagent_spec = ctx.node_registry[agent_id]
 
         # 2. Create read-only memory snapshot
-        # Subagent can read everything the parent can read, but write nothing
+        # Start with everything the parent can read from shared memory.
         parent_data = ctx.memory.read_all()
+
+        # Merge in-flight outputs from the parent's accumulator.
+        # set_output() writes to the accumulator but shared memory is only
+        # updated after the parent node completes — so the subagent would
+        # otherwise miss any keys the parent set before delegating.
+        if accumulator:
+            for key, value in accumulator.to_dict().items():
+                if key not in parent_data:
+                    parent_data[key] = value
+
         subagent_memory = SharedMemory()
         for key, value in parent_data.items():
             subagent_memory.write(key, value, validate=False)
 
-        # Scope to read-only: subagent can read all, write none
+        # Allow reads for parent data AND the subagent's declared input_keys
+        # (input_keys may reference keys that exist but weren't in read_all,
+        # or keys that were just written by the accumulator).
+        read_keys = set(parent_data.keys()) | set(subagent_spec.input_keys or [])
         scoped_memory = subagent_memory.with_permissions(
-            read_keys=list(parent_data.keys()),
+            read_keys=list(read_keys),
             write_keys=[],  # Read-only!
         )
 
@@ -3838,6 +4068,8 @@ class EventLoopNode(NodeProtocol):
         ctx: NodeContext,
         agent_id: str,
         task: str,
+        *,
+        accumulator: OutputAccumulator | None = None,
     ) -> ToolResult:
         """Execute a subagent and return the result as a ToolResult.
 
@@ -3851,6 +4083,9 @@ class EventLoopNode(NodeProtocol):
             ctx: Parent node's context (for memory, tools, LLM access).
             agent_id: The node ID of the subagent to invoke.
             task: The task description to give the subagent.
+            accumulator: Parent's OutputAccumulator — provides outputs that
+                have been set via ``set_output`` but not yet written to
+                shared memory (which only happens after the node completes).
 
         Returns:
             ToolResult with structured JSON output containing:
@@ -3890,15 +4125,28 @@ class EventLoopNode(NodeProtocol):
         subagent_spec = ctx.node_registry[agent_id]
 
         # 2. Create read-only memory snapshot
-        # Subagent can read everything the parent can read, but write nothing
+        # Start with everything the parent can read from shared memory.
         parent_data = ctx.memory.read_all()
+
+        # Merge in-flight outputs from the parent's accumulator.
+        # set_output() writes to the accumulator but shared memory is only
+        # updated after the parent node completes — so the subagent would
+        # otherwise miss any keys the parent set before delegating.
+        if accumulator:
+            for key, value in accumulator.to_dict().items():
+                if key not in parent_data:
+                    parent_data[key] = value
+
         subagent_memory = SharedMemory()
         for key, value in parent_data.items():
             subagent_memory.write(key, value, validate=False)
 
-        # Scope to read-only: subagent can read all, write none
+        # Allow reads for parent data AND the subagent's declared input_keys
+        # (input_keys may reference keys that exist but weren't in read_all,
+        # or keys that were just written by the accumulator).
+        read_keys = set(parent_data.keys()) | set(subagent_spec.input_keys or [])
         scoped_memory = subagent_memory.with_permissions(
-            read_keys=list(parent_data.keys()),
+            read_keys=list(read_keys),
             write_keys=[],  # Read-only!
         )
 
