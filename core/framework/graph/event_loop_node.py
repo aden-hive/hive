@@ -2202,6 +2202,8 @@ class EventLoopNode(NodeProtocol):
                     user_input_requested,
                     ask_user_prompt,
                     ask_user_options,
+                    final_system_prompt,
+                    final_messages,
                 )
 
             # --- Mid-turn pruning: prevent context blowup within a single turn ---
@@ -2230,6 +2232,8 @@ class EventLoopNode(NodeProtocol):
                     user_input_requested,
                     ask_user_prompt,
                     ask_user_options,
+                    final_system_prompt,
+                    final_messages,
                 )
 
             # Tool calls processed -- loop back to stream with updated conversation
