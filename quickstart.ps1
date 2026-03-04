@@ -130,8 +130,8 @@ function Test-DefenderExclusions {
     
     # Normalize and filter null/empty values
     $safePrefixes = $safePrefixes | Where-Object { $_ } | ForEach-Object {
-        [System.IO.Path]::GetFullPath($_)
-    }
+        try { [System.IO.Path]::GetFullPath($_) } catch { $null }
+    } | Where-Object { $_ }
     
     try {
         # Check if Defender cmdlets are available (may not exist on older Windows)
@@ -157,15 +157,20 @@ function Test-DefenderExclusions {
         $existing = $prefs.ExclusionPath
         if (-not $existing) { $existing = @() }
         
-        # Normalize existing paths for comparison
+        # Normalize existing paths for comparison (some may contain wildcards
+        # or env vars that GetFullPath rejects — skip those gracefully)
         $existing = $existing | Where-Object { $_ } | ForEach-Object {
-            [System.IO.Path]::GetFullPath($_)
+            try { [System.IO.Path]::GetFullPath($_) } catch { $_ }
         }
         
         # Normalize paths and find missing exclusions
         $missing = @()
         foreach ($path in $Paths) {
-            $normalized = [System.IO.Path]::GetFullPath($path)
+            try {
+                $normalized = [System.IO.Path]::GetFullPath($path)
+            } catch {
+                continue  # Skip paths with unsupported format
+            }
             
             # Security: Ensure path is within safe boundaries
             $isSafe = $false
@@ -250,7 +255,11 @@ function Add-DefenderExclusions {
     
     foreach ($path in $Paths) {
         try {
-            $normalized = [System.IO.Path]::GetFullPath($path)
+            try {
+                $normalized = [System.IO.Path]::GetFullPath($path)
+            } catch {
+                $normalized = $path  # Use raw path if normalization fails
+            }
             Add-MpPreference -ExclusionPath $normalized -ErrorAction Stop
             $added += $normalized
         } catch {
