@@ -183,11 +183,12 @@ class GraphExecutor:
         self.tool_provider_map = tool_provider_map
         self.dynamic_tools_provider = dynamic_tools_provider
 
-        # Initialize output cleaner
+        # Initialize output cleaner — uses its own dedicated fast model (CEREBRAS_API_KEY),
+        # never the main agent LLM. Passing the main LLM here would cause expensive
+        # Anthropic calls for output cleaning whenever ANTHROPIC_API_KEY is set.
         self.cleansing_config = cleansing_config or CleansingConfig()
         self.output_cleaner = OutputCleaner(
             config=self.cleansing_config,
-            llm_provider=llm,
         )
 
         # Parallel execution settings

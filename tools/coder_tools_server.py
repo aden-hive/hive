@@ -132,7 +132,12 @@ def _snapshot_git(*args: str) -> str:
     """Run a git command with the snapshot GIT_DIR and PROJECT_ROOT worktree."""
     cmd = ["git", "--git-dir", SNAPSHOT_DIR, "--work-tree", PROJECT_ROOT, *args]
     result = subprocess.run(
-        cmd, capture_output=True, text=True, timeout=30, stdin=subprocess.DEVNULL
+        cmd,
+        capture_output=True,
+        text=True,
+        timeout=30,
+        encoding="utf-8",
+        stdin=subprocess.DEVNULL
     )
     return result.stdout.strip()
 
@@ -148,6 +153,7 @@ def _ensure_snapshot_repo():
             capture_output=True,
             timeout=10,
             stdin=subprocess.DEVNULL,
+            encoding="utf-8",
         )
         _snapshot_git("config", "core.autocrlf", "false")
 
@@ -229,6 +235,7 @@ def run_command(command: str, cwd: str = "", timeout: int = 120) -> str:
             text=True,
             timeout=timeout,
             stdin=subprocess.DEVNULL,
+            encoding="utf-8",
             env={
                 **os.environ,
                 "PYTHONPATH": os.pathsep.join(
@@ -309,6 +316,7 @@ def undo_changes(path: str = "") -> str:
                 text=True,
                 timeout=10,
                 stdin=subprocess.DEVNULL,
+                encoding="utf-8",
             )
             return f"Restored: {path}"
         else:
@@ -1114,6 +1122,7 @@ def run_agent_tests(
             timeout=120,
             env=env,
             stdin=subprocess.DEVNULL,
+            encoding="utf-8",
         )
     except subprocess.TimeoutExpired:
         return json.dumps(

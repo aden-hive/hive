@@ -40,6 +40,7 @@ def open_browser(url: str) -> tuple[bool, str]:
                 ["open", url],
                 check=True,
                 capture_output=True,
+                encoding="utf-8",
             )
             return True, "Opened in browser"
 
@@ -50,6 +51,7 @@ def open_browser(url: str) -> tuple[bool, str]:
                     ["xdg-open", url],
                     check=True,
                     capture_output=True,
+                    encoding="utf-8",
                 )
                 return True, "Opened in browser"
             except FileNotFoundError:

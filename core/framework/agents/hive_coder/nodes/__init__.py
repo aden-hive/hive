@@ -7,11 +7,11 @@ from framework.graph import NodeSpec
 # Load reference docs at import time so they're always in the system prompt.
 # No voluntary read_file() calls needed — the LLM gets everything upfront.
 _ref_dir = Path(__file__).parent.parent / "reference"
-_framework_guide = (_ref_dir / "framework_guide.md").read_text()
-_file_templates = (_ref_dir / "file_templates.md").read_text()
-_anti_patterns = (_ref_dir / "anti_patterns.md").read_text()
+_framework_guide = (_ref_dir / "framework_guide.md").read_text(encoding="utf-8")
+_file_templates = (_ref_dir / "file_templates.md").read_text(encoding="utf-8")
+_anti_patterns = (_ref_dir / "anti_patterns.md").read_text(encoding="utf-8")
 _gcu_guide_path = _ref_dir / "gcu_guide.md"
-_gcu_guide = _gcu_guide_path.read_text() if _gcu_guide_path.exists() else ""
+_gcu_guide = _gcu_guide_path.read_text(encoding="utf-8") if _gcu_guide_path.exists() else ""
 
 
 def _is_gcu_enabled() -> bool:

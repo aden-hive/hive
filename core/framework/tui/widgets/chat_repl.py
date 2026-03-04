@@ -488,7 +488,7 @@ class ChatRepl(Vertical):
                 if not state_file.exists():
                     continue
 
-                with open(state_file) as f:
+                with open(state_file, encoding="utf-8") as f:
                     state = json.load(f)
 
                 status = state.get("status", "").lower()
@@ -547,7 +547,7 @@ class ChatRepl(Vertical):
 
             # Read session state
             try:
-                with open(state_file) as f:
+                with open(state_file, encoding="utf-8") as f:
                     state = json.load(f)
 
                 # Track this session for /resume <number> lookup
@@ -599,7 +599,7 @@ class ChatRepl(Vertical):
         try:
             import json
 
-            with open(state_file) as f:
+            with open(state_file, encoding="utf-8") as f:
                 state = json.load(f)
 
             # Basic info
@@ -640,7 +640,7 @@ class ChatRepl(Vertical):
                     # Load and show checkpoints
                     for i, cp_file in enumerate(checkpoint_files[-5:], 1):  # Last 5
                         try:
-                            with open(cp_file) as f:
+                            with open(cp_file, encoding="utf-8") as f:
                                 cp_data = json.load(f)
 
                             cp_id = cp_data.get("checkpoint_id", cp_file.stem)
@@ -687,7 +687,7 @@ class ChatRepl(Vertical):
 
             import json
 
-            with open(state_file) as f:
+            with open(state_file, encoding="utf-8") as f:
                 state = json.load(f)
 
             # Resume from session state (not checkpoint)
@@ -1102,7 +1102,7 @@ class ChatRepl(Vertical):
                     continue
 
                 try:
-                    with open(state_file) as f:
+                    with open(state_file, encoding="utf-8") as f:
                         state = json.load(f)
 
                     status = state.get("status", "").lower()

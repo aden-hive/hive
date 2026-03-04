@@ -660,7 +660,7 @@ class GraphBuilder:
         # Generate Python code
         code = self._generate_code(graph)
 
-        Path(path).write_text(code)
+        Path(path).write_text(code, encoding="utf-8")
         self.session.phase = BuildPhase.EXPORTED
         self._save_session()
 
@@ -754,7 +754,7 @@ class GraphBuilder:
         """Save session to disk."""
         self.session.updated_at = datetime.now()
         path = self.storage_path / f"{self.session.id}.json"
-        path.write_text(self.session.model_dump_json(indent=2))
+        path.write_text(self.session.model_dump_json(indent=2), encoding="utf-8")
 
     def _load_session(self, session_id: str) -> BuildSession:
         """Load session from disk."""

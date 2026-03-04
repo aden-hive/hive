@@ -514,7 +514,12 @@ def register_file_tools(
             cmd.append(resolved)
 
             rg_result = subprocess.run(
-                cmd, capture_output=True, text=True, timeout=30, stdin=subprocess.DEVNULL
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=30,
+                encoding="utf-8",
+                stdin=subprocess.DEVNULL
             )
             if rg_result.returncode <= 1:
                 output = rg_result.stdout.strip()

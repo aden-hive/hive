@@ -10,7 +10,7 @@ def _load_preferred_model() -> str:
     config_path = Path.home() / ".hive" / "configuration.json"
     if config_path.exists():
         try:
-            with open(config_path) as f:
+            with open(config_path, encoding="utf-8") as f:
                 config = json.load(f)
             llm = config.get("llm", {})
             if llm.get("provider") and llm.get("model"):
