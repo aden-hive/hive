@@ -162,7 +162,7 @@ def _load_session(session_id: str) -> BuildSession:
     if not session_file.exists():
         raise ValueError(f"Session '{session_id}' not found")
 
-    with open(session_file) as f:
+    with open(session_file, encoding="utf-8") as f:
         data = json.load(f)
 
     return BuildSession.from_dict(data)
@@ -174,7 +174,7 @@ def _load_active_session() -> BuildSession | None:
         return None
 
     try:
-        with open(ACTIVE_SESSION_FILE) as f:
+        with open(ACTIVE_SESSION_FILE, encoding="utf-8") as f:
             session_id = f.read().strip()
 
         if session_id:
@@ -228,7 +228,7 @@ def list_sessions() -> str:
     if SESSIONS_DIR.exists():
         for session_file in SESSIONS_DIR.glob("*.json"):
             try:
-                with open(session_file) as f:
+                with open(session_file, encoding="utf-8") as f:
                     data = json.load(f)
                     sessions.append(
                         {
@@ -248,7 +248,7 @@ def list_sessions() -> str:
     active_id = None
     if ACTIVE_SESSION_FILE.exists():
         try:
-            with open(ACTIVE_SESSION_FILE) as f:
+            with open(ACTIVE_SESSION_FILE, encoding="utf-8") as f:
                 active_id = f.read().strip()
         except Exception:
             pass
@@ -310,7 +310,7 @@ def delete_session(session_id: Annotated[str, "ID of the session to delete"]) ->
             _session = None
 
         if ACTIVE_SESSION_FILE.exists():
-            with open(ACTIVE_SESSION_FILE) as f:
+            with open(ACTIVE_SESSION_FILE, encoding="utf-8") as f:
                 active_id = f.read().strip()
                 if active_id == session_id:
                     ACTIVE_SESSION_FILE.unlink()

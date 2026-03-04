@@ -517,7 +517,7 @@ def cmd_run(args: argparse.Namespace) -> int:
             return 1
     elif args.input_file:
         try:
-            with open(args.input_file) as f:
+            with open(args.input_file, encoding="utf-8") as f:
                 context = json.load(f)
         except (FileNotFoundError, json.JSONDecodeError) as e:
             print(f"Error reading input file: {e}", file=sys.stderr)
@@ -659,7 +659,7 @@ def cmd_run(args: argparse.Namespace) -> int:
 
     # Output results
     if args.output:
-        with open(args.output, "w") as f:
+        with open(args.output, "w", encoding="utf-8") as f:
             json.dump(output, f, indent=2, default=str)
         if not args.quiet:
             print(f"Results written to {args.output}")
@@ -1517,7 +1517,7 @@ def _extract_python_agent_metadata(agent_path: Path) -> tuple[str, str]:
         return fallback_name, fallback_desc
 
     try:
-        with open(config_path) as f:
+        with open(config_path, encoding="utf-8") as f:
             tree = ast.parse(f.read())
 
         # Find AgentMetadata class definition
