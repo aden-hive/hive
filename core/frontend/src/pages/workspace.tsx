@@ -1457,6 +1457,8 @@ export default function Workspace() {
           updateAgentState(agentType, {
             queenMode: newMode,
             queenBuilding: newMode === "building",
+            // Sync workerRunState so the RunButton reflects the mode
+            workerRunState: newMode === "running" ? "running" : "idle",
           });
           break;
         }
@@ -1803,6 +1805,7 @@ export default function Workspace() {
               onPause={handlePause}
               runState={activeAgentState?.workerRunState ?? "idle"}
               building={activeAgentState?.queenBuilding ?? false}
+              queenMode={activeAgentState?.queenMode ?? "building"}
             />
           </div>
         </div>

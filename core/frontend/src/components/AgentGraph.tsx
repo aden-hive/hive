@@ -278,7 +278,7 @@ export default function AgentGraph({ nodes, title: _title, onNodeClick, onRun, o
               </span>
             )}
           </div>
-          <RunButton runState={runState} disabled={nodes.length === 0} onRun={handleRun} onPause={onPause ?? (() => {})} btnRef={runBtnRef} />
+          <RunButton runState={runState} disabled={nodes.length === 0 || queenMode === "building"} onRun={handleRun} onPause={onPause ?? (() => {})} btnRef={runBtnRef} />
         </div>
         <div className="flex-1 flex items-center justify-center px-5">
           {building ? (
