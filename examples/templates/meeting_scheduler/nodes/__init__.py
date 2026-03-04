@@ -12,7 +12,11 @@ intake_node = NodeSpec(
     max_node_visits=0,
     input_keys=["attendee_email", "meeting_duration_minutes"],
     output_keys=["attendee_email", "meeting_duration_minutes", "meeting_title"],
-    nullable_output_keys=["attendee_email", "meeting_duration_minutes", "meeting_title"],
+    nullable_output_keys=[
+        "attendee_email",
+        "meeting_duration_minutes",
+        "meeting_title",
+    ],
     success_criteria="User has provided attendee email, meeting duration, and title.",
     system_prompt="""\
 You are a meeting scheduler assistant.
@@ -37,7 +41,13 @@ schedule_node = NodeSpec(
     node_type="event_loop",
     max_node_visits=0,
     input_keys=["attendee_email", "meeting_duration_minutes", "meeting_title"],
-    output_keys=["meeting_time", "booking_confirmed", "spreadsheet_recorded", "email_sent", "meet_link"],
+    output_keys=[
+        "meeting_time",
+        "booking_confirmed",
+        "spreadsheet_recorded",
+        "email_sent",
+        "meet_link",
+    ],
     nullable_output_keys=[],
     success_criteria="Meeting time found, Google Meet created, Google Sheet 'Meeting Scheduler' updated with date/time/attendee/title/meet_link, and confirmation email sent.",
     system_prompt="""\

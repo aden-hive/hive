@@ -251,9 +251,7 @@ class EmailReplyAgent:
                 errors.append(f"Terminal node '{t}' not found")
         for ep_id, nid in self.entry_points.items():
             if nid not in node_ids:
-                errors.append(
-                    f"Entry point '{ep_id}' references unknown node '{nid}'"
-                )
+                errors.append(f"Entry point '{ep_id}' references unknown node '{nid}'")
         return {"valid": len(errors) == 0, "errors": errors, "warnings": warnings}
 
 

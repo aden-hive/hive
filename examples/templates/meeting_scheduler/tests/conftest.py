@@ -18,6 +18,7 @@ AGENT_PATH = str(Path(__file__).resolve().parents[1])
 def agent_module():
     """Import the agent package for structural validation."""
     import importlib
+
     return importlib.import_module(Path(AGENT_PATH).name)
 
 
@@ -26,6 +27,7 @@ def runner_loaded():
     """Load the agent through AgentRunner (structural only, no LLM needed)."""
     from framework.runner.runner import AgentRunner
     from framework.credentials.models import CredentialError
+
     try:
         return AgentRunner.load(AGENT_PATH)
     except CredentialError:

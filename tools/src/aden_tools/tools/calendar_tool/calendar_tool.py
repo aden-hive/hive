@@ -756,11 +756,13 @@ def register_tools(
             # Skip all-day events (date-only strings) for time-based availability
             if _DATE_ONLY_RE.match(start_str) or _DATE_ONLY_RE.match(end_str):
                 continue
-            intervals.append((
-                _parse_event_dt(start_str),
-                _parse_event_dt(end_str),
-                ev.get("summary", "(No title)"),
-            ))
+            intervals.append(
+                (
+                    _parse_event_dt(start_str),
+                    _parse_event_dt(end_str),
+                    ev.get("summary", "(No title)"),
+                )
+            )
 
         intervals.sort(key=lambda x: x[0])
 
@@ -779,21 +781,25 @@ def register_tools(
                 else:
                     # No overlap — flush current block
                     if len(cur_names) > 1:
-                        conflicts.append({
-                            "events": cur_names,
-                            "overlap_start": cur_start.isoformat(),
-                            "overlap_end": cur_end.isoformat(),
-                        })
+                        conflicts.append(
+                            {
+                                "events": cur_names,
+                                "overlap_start": cur_start.isoformat(),
+                                "overlap_end": cur_end.isoformat(),
+                            }
+                        )
                     busy.append({"start": cur_start.isoformat(), "end": cur_end.isoformat()})
                     cur_start, cur_end = iv_start, iv_end
                     cur_names = [iv_name]
             # Flush last block
             if len(cur_names) > 1:
-                conflicts.append({
-                    "events": cur_names,
-                    "overlap_start": cur_start.isoformat(),
-                    "overlap_end": cur_end.isoformat(),
-                })
+                conflicts.append(
+                    {
+                        "events": cur_names,
+                        "overlap_start": cur_start.isoformat(),
+                        "overlap_end": cur_end.isoformat(),
+                    }
+                )
             busy.append({"start": cur_start.isoformat(), "end": cur_end.isoformat()})
 
         # Compute free slots as gaps between busy blocks within the window
@@ -882,13 +888,15 @@ def register_tools(
                 for item in result.get("items", []):
                     start = item.get("start", {})
                     end = item.get("end", {})
-                    events.append({
-                        "summary": item.get("summary", "(No title)"),
-                        "start": start.get("dateTime") or start.get("date"),
-                        "end": end.get("dateTime") or end.get("date"),
-                        "status": item.get("status", "confirmed"),
-                        "transparency": item.get("transparency", "opaque"),
-                    })
+                    events.append(
+                        {
+                            "summary": item.get("summary", "(No title)"),
+                            "start": start.get("dateTime") or start.get("date"),
+                            "end": end.get("dateTime") or end.get("date"),
+                            "status": item.get("status", "confirmed"),
+                            "transparency": item.get("transparency", "opaque"),
+                        }
+                    )
 
                 # Compute busy/free/conflicts
                 window_start = _parse_event_dt(time_min)

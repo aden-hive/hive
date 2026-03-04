@@ -2,8 +2,16 @@
 
 import pytest
 from meeting_scheduler import (
-    default_agent, goal, nodes, edges, entry_node, entry_points,
-    terminal_nodes, conversation_mode, identity_prompt, loop_config
+    default_agent,
+    goal,
+    nodes,
+    edges,
+    entry_node,
+    entry_points,
+    terminal_nodes,
+    conversation_mode,
+    identity_prompt,
+    loop_config,
 )
 
 
@@ -30,7 +38,12 @@ class TestNodeStructure:
         assert nodes[0].client_facing is True
 
     def test_schedule_has_required_tools(self):
-        required = {"calendar_check_availability", "calendar_create_event", "google_sheets_append_values", "send_email"}
+        required = {
+            "calendar_check_availability",
+            "calendar_create_event",
+            "google_sheets_append_values",
+            "send_email",
+        }
         actual = set(nodes[1].tools)
         assert required.issubset(actual)
 
