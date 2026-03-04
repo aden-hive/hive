@@ -134,6 +134,35 @@ async def handle_chat(request: web.Request) -> web.Response:
     return web.json_response({"error": "Queen not available"}, status=503)
 
 
+async def handle_queen_context(request: web.Request) -> web.Response:
+    """POST /api/sessions/{session_id}/queen-context — queue context for the queen.
+
+    Unlike /chat, this does NOT trigger an LLM response. The message is
+    queued in the queen's injection queue and will be drained on her next
+    natural iteration (prefixed with [External event]:).
+
+    Body: {"message": "..."}
+    """
+    session, err = resolve_session(request)
+    if err:
+        return err
+
+    body = await request.json()
+    message = body.get("message", "")
+
+    if not message:
+        return web.json_response({"error": "message is required"}, status=400)
+
+    queen_executor = session.queen_executor
+    if queen_executor is not None:
+        node = queen_executor.node_registry.get("queen")
+        if node is not None and hasattr(node, "inject_event"):
+            await node.inject_event(message, is_client_input=False)
+            return web.json_response({"status": "queued", "delivered": True})
+
+    return web.json_response({"error": "Queen not available"}, status=503)
+
+
 async def handle_worker_input(request: web.Request) -> web.Response:
     """POST /api/sessions/{session_id}/worker-input — send input to waiting worker node.
 
@@ -385,6 +414,7 @@ def register_routes(app: web.Application) -> None:
     app.router.add_post("/api/sessions/{session_id}/trigger", handle_trigger)
     app.router.add_post("/api/sessions/{session_id}/inject", handle_inject)
     app.router.add_post("/api/sessions/{session_id}/chat", handle_chat)
+    app.router.add_post("/api/sessions/{session_id}/queen-context", handle_queen_context)
     app.router.add_post("/api/sessions/{session_id}/worker-input", handle_worker_input)
     app.router.add_post("/api/sessions/{session_id}/pause", handle_stop)
     app.router.add_post("/api/sessions/{session_id}/resume", handle_resume)
