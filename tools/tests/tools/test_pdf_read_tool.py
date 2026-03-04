@@ -28,7 +28,7 @@ class TestPdfReadTool:
     def test_read_pdf_invalid_extension(self, pdf_read_fn, tmp_path: Path):
         """Reading non-PDF file returns error."""
         txt_file = tmp_path / "test.txt"
-        txt_file.write_text("not a pdf")
+        txt_file.write_text("not a pdf", encoding="utf-8")
 
         result = pdf_read_fn(file_path=str(txt_file))
 

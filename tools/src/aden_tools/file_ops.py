@@ -501,7 +501,13 @@ def register_file_tools(
                 cmd.extend(["--glob", include])
             cmd.append(resolved)
 
-            rg_result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+            rg_result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=30,
+                encoding="utf-8",
+            )
             if rg_result.returncode <= 1:
                 output = rg_result.stdout.strip()
                 if not output:

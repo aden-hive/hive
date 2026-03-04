@@ -517,7 +517,7 @@ def cmd_run(args: argparse.Namespace) -> int:
             return 1
     elif args.input_file:
         try:
-            with open(args.input_file) as f:
+            with open(args.input_file, encoding="utf-8") as f:
                 context = json.load(f)
         except (FileNotFoundError, json.JSONDecodeError) as e:
             print(f"Error reading input file: {e}", file=sys.stderr)
@@ -659,7 +659,7 @@ def cmd_run(args: argparse.Namespace) -> int:
 
     # Output results
     if args.output:
-        with open(args.output, "w") as f:
+        with open(args.output, "w", encoding="utf-8") as f:
             json.dump(output, f, indent=2, default=str)
         if not args.quiet:
             print(f"Results written to {args.output}")
@@ -1517,7 +1517,7 @@ def _extract_python_agent_metadata(agent_path: Path) -> tuple[str, str]:
         return fallback_name, fallback_desc
 
     try:
-        with open(config_path) as f:
+        with open(config_path, encoding="utf-8") as f:
             tree = ast.parse(f.read())
 
         # Find AgentMetadata class definition
@@ -1932,10 +1932,18 @@ def _open_browser(url: str) -> None:
 
     try:
         if sys.platform == "darwin":
-            subprocess.Popen(["open", url], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            subprocess.Popen(
+                ["open", url],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                encoding="utf-8",
+            )
         elif sys.platform == "linux":
             subprocess.Popen(
-                ["xdg-open", url], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+                ["xdg-open", url],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                encoding="utf-8",
             )
     except Exception:
         pass  # Best-effort — don't crash if browser can't open
@@ -1980,12 +1988,14 @@ def _build_frontend() -> bool:
         # Ensure deps are installed
         subprocess.run(
             ["npm", "install", "--no-fund", "--no-audit"],
+            encoding="utf-8",
             cwd=frontend_dir,
             check=True,
             capture_output=True,
         )
         subprocess.run(
             ["npm", "run", "build"],
+            encoding="utf-8",
             cwd=frontend_dir,
             check=True,
             capture_output=True,
