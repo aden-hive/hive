@@ -201,10 +201,10 @@ const MessageBubble = memo(function MessageBubble({ msg, queenMode }: { msg: Cha
           >
             {isQueen
               ? queenMode === "running"
-                ? "Queen (running mode)"
+                ? "running mode"
                 : queenMode === "staging"
-                  ? "Queen (staging mode)"
-                  : "Queen (building mode)"
+                  ? "staging mode)"
+                  : "building mode"
               : "Worker"}
           </span>
         </div>
