@@ -72,7 +72,7 @@ goal = Goal(
 | id | str | required | kebab-case identifier |
 | name | str | required | Display name |
 | description | str | required | What the node does |
-| node_type | str | required | Always `"event_loop"` |
+| node_type | str | required | `"event_loop"` or `"gcu"` (browser automation — see GCU Guide appendix) |
 | input_keys | list[str] | required | Memory keys this node reads |
 | output_keys | list[str] | required | Memory keys this node writes via set_output |
 | system_prompt | str | "" | LLM instructions |
@@ -131,13 +131,19 @@ downstream node only sees the serialized summary string.
 - A "report" node that presents analysis → merge into the client-facing node
 - A "confirm" or "schedule" node that doesn't call any external service → remove
 
-**Typical agent structure (3 nodes):**
+**Typical agent structure (2 nodes):**
 ```
-intake (client-facing) ←→ process (autonomous) ←→ review (client-facing)
+process (autonomous) ←→ review (client-facing)
 ```
-Or for simpler agents, just 2 nodes:
+The queen owns intake — she gathers requirements from the user, then
+passes structured input via `run_agent_with_input(task)`. When building
+the agent, design the entry node's `input_keys` to match what the queen
+will provide at run time. Worker agents should NOT have a client-facing
+intake node. Client-facing nodes are for mid-execution review/approval only.
+
+For simpler agents, just 1 autonomous node:
 ```
-interact (client-facing) → process (autonomous) → interact (loop)
+process (autonomous) — loops back to itself
 ```
 
 ### nullable_output_keys
@@ -397,7 +403,7 @@ from .agent import (
 ### Reference Agent
 
 See `exports/gmail_inbox_guardian/agent.py` for a complete example with:
-- Primary client-facing intake node (user configures rules)
+- Primary client-facing node (user configures rules)
 - Timer-based scheduled inbox checks (every 20 min)
 - Webhook-triggered email event handling
 - Shared isolation for memory access across streams
@@ -413,16 +419,18 @@ See `exports/gmail_inbox_guardian/agent.py` for a complete example with:
 ## Tool Discovery
 
 Do NOT rely on a static tool list — it will be outdated. Always use
-`discover_mcp_tools()` to get the current tool catalog from the
-hive-tools MCP server. This returns full schemas including parameter
-names, types, and descriptions.
+`list_agent_tools()` to discover available tools, grouped by category.
 
 ```
-discover_mcp_tools()                          # default: hive-tools
-discover_mcp_tools("exports/my_agent/mcp_servers.json")  # specific agent
+list_agent_tools()                            # names + descriptions, all groups
+list_agent_tools(output_schema="full")        # include input_schema
+list_agent_tools(group="gmail")               # only gmail_* tools
+list_agent_tools("exports/my_agent/mcp_servers.json")  # specific agent's tools
 ```
 
-Common tool categories (verify via discover_mcp_tools):
+After building, validate tools exist: `validate_agent_tools("exports/{name}")`
+
+Common tool categories (verify via list_agent_tools):
 - **Web**: search, scrape, PDF
 - **Data**: save/load/append/list data files, serve to user
 - **File**: view, write, replace, diff, list, grep

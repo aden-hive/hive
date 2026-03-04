@@ -751,7 +751,7 @@ async def _run_pipeline(websocket, topic: str):
         judge=None,  # implicit judge: accept when output_keys filled
         config=LoopConfig(
             max_iterations=20,
-            max_tool_calls_per_turn=10,
+            max_tool_calls_per_turn=30,
             max_history_tokens=32_000,
         ),
         conversation_store=store_a,
@@ -849,7 +849,7 @@ async def _run_pipeline(websocket, topic: str):
         judge=None,  # implicit judge
         config=LoopConfig(
             max_iterations=10,
-            max_tool_calls_per_turn=5,
+            max_tool_calls_per_turn=30,
             max_history_tokens=32_000,
         ),
         conversation_store=store_b,

@@ -24,7 +24,7 @@
 
 9. **Invalid `loop_config` keys** — Only three valid keys: `max_iterations` (int), `max_tool_calls_per_turn` (int), `max_history_tokens` (int). Keys like `"strategy"`, `"mode"`, `"timeout"` are NOT valid and are silently ignored or cause errors.
 
-10. **Fabricating tools that don't exist** — Never guess tool names. Always verify via `discover_mcp_tools()`. Common hallucinations: `csv_read`, `csv_write`, `csv_append`, `file_upload`, `database_query`. If a required tool doesn't exist, redesign the agent to use tools that DO exist (e.g., `save_data`/`load_data` for data persistence).
+10. **Fabricating tools that don't exist** — Never guess tool names. Always verify via `list_agent_tools()` before designing and `validate_agent_tools()` after building. Common hallucinations: `csv_read`, `csv_write`, `csv_append`, `file_upload`, `database_query`, `bulk_fetch_emails`. If a required tool doesn't exist, redesign the agent to use tools that DO exist (e.g., `save_data`/`load_data` for data persistence).
 
 ## Design Errors
 
@@ -48,11 +48,11 @@ profile_setup → daily_intake → update_tracker → analyze_progress → gener
 ```
 `analyze_progress` has no tools. `schedule_reminders` just sets one boolean. `report` just presents analysis. `update_tracker` and `generate_plan` are sequential autonomous work.
 
-**Good example** (3 nodes):
+**Good example** (2 nodes):
 ```
-intake (client-facing) → process (autonomous: track + analyze + plan) → intake (loop back)
+process (autonomous: track + analyze + plan) → review (client-facing) → process (loop back)
 ```
-One client-facing node handles ALL user interaction (setup, logging, reports). One autonomous node handles ALL backend work (CSV update, analysis, plan generation) with tools and context preserved.
+The queen handles intake (gathering requirements from the user) and passes the task via `run_agent_with_input(task)`. One autonomous node handles ALL backend work (CSV update, analysis, plan generation) with tools and context preserved. One client-facing node handles review/approval when needed.
 
 12. **Adding framework gating for LLM behavior** — Don't add output rollback, premature rejection, or interaction protocol injection. Fix with better prompts or custom judges.
 
@@ -80,7 +80,7 @@ One client-facing node handles ALL user interaction (setup, logging, reports). O
 - Validate graph structure (nodes, edges, entry points)
 - Verify node specs (tools, prompts, client-facing flag)
 - Check goal/constraints/success criteria definitions
-- Test that `AgentRunner.load()` + `_setup()` succeeds (skip if no API key)
+- Test that `AgentRunner.load()` succeeds (structural, no API key needed)
 
 **What NOT to do:**
 ```python
@@ -105,3 +105,9 @@ def test_research_routes_back_to_interact(self):
 23. **Forgetting sys.path setup in conftest.py** — Tests need `exports/` and `core/` on sys.path.
 
 24. **Not using auto_responder for client-facing nodes** — Tests with client-facing nodes hang without an auto-responder that injects input. But note: even WITH auto_responder, forever-alive agents still hang because the graph never terminates. Auto-responder only helps for agents with terminal nodes.
+
+25. **Manually wiring browser tools on event_loop nodes** — If the agent needs browser automation, use `node_type="gcu"` which auto-includes all browser tools and prepends best-practices guidance. Do NOT manually list browser tool names on event_loop nodes — they may not exist in the MCP server or may be incomplete. See the GCU Guide appendix.
+
+26. **Using GCU nodes as regular graph nodes** — GCU nodes (`node_type="gcu"`) are exclusively subagents. They must ONLY appear in a parent node's `sub_agents=["gcu-node-id"]` list and be invoked via `delegate_to_sub_agent()`. They must NEVER be connected via edges, used as entry nodes, or used as terminal nodes. If a GCU node appears as an edge source or target, the graph will fail pre-load validation.
+
+27. **Adding a client-facing intake node to worker agents** — The queen owns intake. She defines the entry node's `input_keys` at build time and fills them via `run_agent_with_input(task)` at run time. Worker agents should start with an autonomous processing node, NOT a client-facing intake node that asks the user for requirements. Client-facing nodes in workers are for mid-execution review/approval only.

@@ -2,10 +2,10 @@
 
 import json
 import re
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncIterator
 from typing import Any
 
-from framework.llm.provider import LLMProvider, LLMResponse, Tool, ToolResult, ToolUse
+from framework.llm.provider import LLMProvider, LLMResponse, Tool
 from framework.llm.stream_events import (
     FinishEvent,
     StreamEvent,
@@ -146,43 +146,6 @@ class MockLLMProvider(LLMProvider):
             stop_reason="mock_complete",
         )
 
-    def complete_with_tools(
-        self,
-        messages: list[dict[str, Any]],
-        system: str,
-        tools: list[Tool],
-        tool_executor: Callable[[ToolUse], ToolResult],
-        max_iterations: int = 10,
-    ) -> LLMResponse:
-        """
-        Generate a mock completion without tool use.
-
-        In mock mode, we skip tool execution and return a final response immediately.
-
-        Args:
-            messages: Initial conversation (ignored in mock mode)
-            system: System prompt (used to extract expected output keys)
-            tools: Available tools (ignored in mock mode)
-            tool_executor: Tool executor function (ignored in mock mode)
-            max_iterations: Max iterations (ignored in mock mode)
-
-        Returns:
-            LLMResponse with mock content
-        """
-        # In mock mode, we don't execute tools - just return a final response
-        # Try to generate JSON if the system prompt suggests structured output
-        json_mode = "json" in system.lower() or "output_keys" in system.lower()
-
-        content = self._generate_mock_response(system=system, json_mode=json_mode)
-
-        return LLMResponse(
-            content=content,
-            model=self.model,
-            input_tokens=0,
-            output_tokens=0,
-            stop_reason="mock_complete",
-        )
-
     async def acomplete(
         self,
         messages: list[dict[str, Any]],
@@ -202,23 +165,6 @@ class MockLLMProvider(LLMProvider):
             response_format=response_format,
             json_mode=json_mode,
             max_retries=max_retries,
-        )
-
-    async def acomplete_with_tools(
-        self,
-        messages: list[dict[str, Any]],
-        system: str,
-        tools: list[Tool],
-        tool_executor: Callable[[ToolUse], ToolResult],
-        max_iterations: int = 10,
-    ) -> LLMResponse:
-        """Async mock tool-use completion (no I/O, returns immediately)."""
-        return self.complete_with_tools(
-            messages=messages,
-            system=system,
-            tools=tools,
-            tool_executor=tool_executor,
-            max_iterations=max_iterations,
         )
 
     async def stream(

@@ -85,7 +85,7 @@ class CredentialStoreAdapter:
 
     # --- Existing CredentialManager API ---
 
-    def get(self, name: str) -> str | None:
+    def get(self, name: str, account: str | None = None) -> str | None:
         """
         Get a credential value by logical name.
 
@@ -94,6 +94,10 @@ class CredentialStoreAdapter:
 
         Args:
             name: Logical credential name (e.g., "brave_search")
+            account: Optional alias for per-call routing to a specific named local
+                account (e.g. "work"). When provided, looks up the named account
+                from LocalCredentialRegistry before falling through to the store.
+                This mirrors the ``account=`` routing available for Aden credentials.
 
         Returns:
             The credential value, or None if not set
@@ -103,6 +107,16 @@ class CredentialStoreAdapter:
         """
         if name not in self._specs:
             raise KeyError(f"Unknown credential '{name}'. Available: {list(self._specs.keys())}")
+
+        if account is not None:
+            try:
+                from framework.credentials.local.registry import LocalCredentialRegistry
+
+                key = LocalCredentialRegistry.default().get_key(name, account)
+                if key is not None:
+                    return key
+            except Exception:
+                pass  # Fall through to standard store lookup
 
         return self._store.get(name)
 
@@ -279,18 +293,42 @@ class CredentialStoreAdapter:
     def get_all_account_info(self) -> list[dict]:
         """Collect all accounts across all configured providers.
 
-        Deduplicates by provider name to avoid listing the same provider's
-        accounts twice when multiple specs map to the same provider.
+        Includes both Aden OAuth accounts and named local API key accounts.
+        Deduplicates by (provider, alias) to avoid listing the same account
+        twice when it appears in both stores.
         """
         accounts: list[dict] = []
-        seen: set[str] = set()
+        seen_specs: set[str] = set()
+        seen_accounts: set[tuple[str, str]] = set()
+
         for name, spec in self._specs.items():
             provider = spec.credential_id or name
-            if provider in seen or not self.is_available(name):
+            if provider in seen_specs or not self.is_available(name):
                 continue
-            seen.add(provider)
-            accounts.extend(self._store.list_accounts(provider))
+            seen_specs.add(provider)
+            for acct in self._store.list_accounts(provider):
+                key = (acct.get("provider", ""), acct.get("alias", ""))
+                if key not in seen_accounts:
+                    seen_accounts.add(key)
+                    accounts.append(acct)
+
+        # Include named local API key accounts
+        for acct in self.list_local_accounts():
+            key = (acct.get("provider", ""), acct.get("alias", ""))
+            if key not in seen_accounts:
+                seen_accounts.add(key)
+                accounts.append(acct)
+
         return accounts
+
+    def get_tool_provider_map(self) -> dict[str, str]:
+        """Map tool names to provider names for account routing.
+
+        Returns:
+            Dict mapping tool_name -> provider_name
+            (e.g. {"gmail_list_messages": "google", "slack_send_message": "slack"})
+        """
+        return dict(self._tool_to_cred)
 
     def get_by_alias(self, provider_name: str, alias: str) -> str | None:
         """Resolve a specific account's token by alias."""
@@ -300,6 +338,58 @@ class CredentialStoreAdapter:
     def get_by_identity(self, provider_name: str, label: str) -> str | None:
         """Alias for get_by_alias (backward compat)."""
         return self.get_by_alias(provider_name, label)
+
+    # --- Local credential registry ---
+
+    def list_local_accounts(self, credential_id: str | None = None) -> list[dict]:
+        """
+        List named local API key accounts from LocalCredentialRegistry.
+
+        Args:
+            credential_id: If given, filter to this credential type only.
+
+        Returns:
+            List of account dicts (same shape as Aden account dicts, source='local').
+        """
+        try:
+            from framework.credentials.local.registry import LocalCredentialRegistry
+
+            registry = LocalCredentialRegistry.default()
+            return [info.to_account_dict() for info in registry.list_accounts(credential_id)]
+        except Exception:
+            return []
+
+    def activate_local_account(self, credential_id: str, alias: str) -> bool:
+        """
+        Inject a named local account's API key into the environment for this session.
+
+        This enables session-level routing: select an account → inject its key as
+        the env var that tools already read. No tool signature changes required.
+
+        Args:
+            credential_id: Logical credential name (e.g. "brave_search").
+            alias: Account alias (e.g. "work").
+
+        Returns:
+            True if the key was found and injected, False otherwise.
+        """
+        import os
+
+        try:
+            from framework.credentials.local.registry import LocalCredentialRegistry
+
+            key = LocalCredentialRegistry.default().get_key(credential_id, alias)
+            if key is None:
+                return False
+
+            spec = self._specs.get(credential_id)
+            if spec is None:
+                return False
+
+            os.environ[spec.env_var] = key
+            return True
+        except Exception:
+            return False
 
     @property
     def store(self) -> CredentialStore:

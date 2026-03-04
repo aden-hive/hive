@@ -481,7 +481,18 @@ class TestSpecCompleteness:
     def test_credential_group_default_empty(self):
         """Specs without a group have empty credential_group."""
         for name, spec in CREDENTIAL_SPECS.items():
-            if name not in ("google_search", "google_cse", "razorpay", "razorpay_secret"):
+            if name not in (
+                "google_search",
+                "google_cse",
+                "razorpay",
+                "razorpay_secret",
+                "google_analytics",
+                "bigquery",
+                "aws_access_key",
+                "aws_secret_key",
+                "redshift_access_key",
+                "redshift_secret_key",
+            ):
                 assert spec.credential_group == "", (
                     f"Credential '{name}' has unexpected credential_group='{spec.credential_group}'"
                 )
