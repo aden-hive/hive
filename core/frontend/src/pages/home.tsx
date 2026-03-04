@@ -40,7 +40,7 @@ const promptHints = [
 export default function Home() {
   const navigate = useNavigate();
   const [inputValue, setInputValue] = useState("");
-  const textareaRef = useRef<HTMLInputElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
   const [showAgents, setShowAgents] = useState(false);
   const [agents, setAgents] = useState<DiscoverEntry[]>([]);
   const [loading, setLoading] = useState(false);
@@ -106,13 +106,24 @@ export default function Home() {
           {/* Chat input */}
           <form onSubmit={handleSubmit} className="mb-6">
             <div className="relative border border-border/60 rounded-xl bg-card/50 hover:border-primary/30 focus-within:border-primary/40 transition-colors shadow-sm">
-              <input
+              <textarea
                 ref={textareaRef}
-                type="text"
+                rows={1}
                 value={inputValue}
-                onChange={(e) => setInputValue(e.target.value)}
+                onChange={(e) => {
+                  setInputValue(e.target.value);
+                  const ta = e.target;
+                  ta.style.height = "auto";
+                  ta.style.height = `${Math.min(ta.scrollHeight, 160)}px`;
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && !e.shiftKey) {
+                    e.preventDefault();
+                    handleSubmit(e);
+                  }
+                }}
                 placeholder="Describe a task for the hive..."
-                className="w-full bg-transparent px-5 py-4 pr-12 text-sm text-foreground placeholder:text-muted-foreground/60 focus:outline-none rounded-xl"
+                className="w-full bg-transparent px-5 py-4 pr-12 text-sm text-foreground placeholder:text-muted-foreground/60 focus:outline-none rounded-xl resize-none overflow-y-auto"
               />
               <div className="absolute right-3 bottom-2.5">
                 <button

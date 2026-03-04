@@ -21,7 +21,7 @@ Do NOT use GCU for:
 - Same underlying `EventLoopNode` class — no new imports needed
 - `tools=[]` is correct — tools are auto-populated at runtime
 
-## GCU Architecture Pattern
+## GCU Architecture Pattern  
 
 GCU nodes are **subagents** — invoked via `delegate_to_sub_agent()`, not connected via edges.
 

@@ -475,7 +475,10 @@ class AdenTUI(App):
         from framework.graph.executor import GraphExecutor
         from framework.runner.tool_registry import ToolRegistry
         from framework.runtime.core import Runtime
-        from framework.tools.queen_lifecycle_tools import register_queen_lifecycle_tools
+        from framework.tools.queen_lifecycle_tools import (
+            QueenModeState,
+            register_queen_lifecycle_tools,
+        )
         from framework.tools.worker_monitoring_tools import register_worker_monitoring_tools
 
         log = logging.getLogger("tui.queen")
@@ -536,12 +539,16 @@ class AdenTUI(App):
                 except Exception:
                     log.warning("Queen: MCP config failed to load", exc_info=True)
 
+            # Worker is already loaded in TUI path → start in staging mode.
+            mode_state = QueenModeState(mode="staging", event_bus=event_bus)
+
             register_queen_lifecycle_tools(
                 queen_registry,
                 worker_runtime=self.runtime,
                 event_bus=event_bus,
                 storage_path=storage_path,
                 session_id=session_id,
+                mode_state=mode_state,
             )
             register_worker_monitoring_tools(
                 queen_registry,
@@ -552,6 +559,20 @@ class AdenTUI(App):
             )
             queen_tools = list(queen_registry.get_tools().values())
             queen_tool_executor = queen_registry.get_executor()
+
+            # Partition tools into mode-specific sets
+            from framework.agents.hive_coder.nodes import (
+                _QUEEN_BUILDING_TOOLS,
+                _QUEEN_RUNNING_TOOLS,
+                _QUEEN_STAGING_TOOLS,
+            )
+
+            building_names = set(_QUEEN_BUILDING_TOOLS)
+            staging_names = set(_QUEEN_STAGING_TOOLS)
+            running_names = set(_QUEEN_RUNNING_TOOLS)
+            mode_state.building_tools = [t for t in queen_tools if t.name in building_names]
+            mode_state.staging_tools = [t for t in queen_tools if t.name in staging_names]
+            mode_state.running_tools = [t for t in queen_tools if t.name in running_names]
 
             # Build worker profile for queen's system prompt.
             from framework.tools.queen_lifecycle_tools import build_worker_profile
@@ -593,12 +614,23 @@ class AdenTUI(App):
                         stream_id="queen",
                         storage_path=queen_dir,
                         loop_config=queen_graph.loop_config,
+                        dynamic_tools_provider=mode_state.get_current_tools,
                     )
                     self._queen_executor = executor
+
+                    # Wire inject_notification so mode switches notify the queen LLM
+                    async def _inject_mode_notification(content: str) -> None:
+                        node = executor.node_registry.get("queen")
+                        if node is not None and hasattr(node, "inject_event"):
+                            await node.inject_event(content)
+
+                    mode_state.inject_notification = _inject_mode_notification
+
                     log.info(
-                        "Queen starting with %d tools: %s",
-                        len(queen_tools),
-                        [t.name for t in queen_tools],
+                        "Queen starting in %s mode with %d tools: %s",
+                        mode_state.mode,
+                        len(mode_state.get_current_tools()),
+                        [t.name for t in mode_state.get_current_tools()],
                     )
                     # The queen's event_loop node runs forever (continuous mode).
                     # It blocks on _await_user_input() after each LLM turn,
@@ -1611,46 +1643,20 @@ class AdenTUI(App):
         self.notify(f"Logs {mode}", severity="information", timeout=2)
 
     def action_pause_execution(self) -> None:
-        """Immediately pause execution by cancelling task (bound to Ctrl+Z)."""
+        """Immediately pause execution by cancelling all running tasks (bound to Ctrl+Z)."""
         if self.chat_repl is None or self.runtime is None:
             return
         try:
-            if not self.chat_repl._current_exec_id:
+            if self.runtime.cancel_all_tasks(self.chat_repl._agent_loop):
+                self.chat_repl._current_exec_id = None
                 self.notify(
-                    "No active execution to pause",
+                    "All executions stopped",
                     severity="information",
                     timeout=3,
                 )
-                return
-
-            task_cancelled = False
-            all_streams = []
-            active_reg = self.runtime.get_graph_registration(self.runtime.active_graph_id)
-            if active_reg:
-                all_streams.extend(active_reg.streams.values())
-            for gid in self.runtime.list_graphs():
-                if gid == self.runtime.active_graph_id:
-                    continue
-                reg = self.runtime.get_graph_registration(gid)
-                if reg:
-                    all_streams.extend(reg.streams.values())
-
-            for stream in all_streams:
-                exec_id = self.chat_repl._current_exec_id
-                task = stream._execution_tasks.get(exec_id)
-                if task and not task.done():
-                    task.cancel()
-                    task_cancelled = True
-                    self.notify(
-                        "Execution paused - state saved",
-                        severity="information",
-                        timeout=3,
-                    )
-                    break
-
-            if not task_cancelled:
+            else:
                 self.notify(
-                    "Execution already completed",
+                    "No active executions",
                     severity="information",
                     timeout=2,
                 )

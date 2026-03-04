@@ -12,6 +12,8 @@ export interface LiveSession {
   loaded_at: number;
   uptime_seconds: number;
   intro_message?: string;
+  /** Queen operating mode — "building", "staging", or "running" */
+  queen_mode?: "building" | "staging" | "running";
   /** Present in 409 conflict responses when worker is still loading */
   loading?: boolean;
 }
@@ -271,6 +273,7 @@ export type EventTypeName =
   | "escalation_requested"
   | "worker_loaded"
   | "credentials_required"
+  | "queen_mode_changed"
   | "subagent_report";
 
 export interface AgentEvent {
