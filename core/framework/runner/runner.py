@@ -3,6 +3,7 @@
 import json
 import logging
 import os
+import sys
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC
@@ -869,9 +870,22 @@ class AgentRunner:
         if not agent_json_path.exists():
             raise FileNotFoundError(f"No agent.py or agent.json found in {agent_path}")
 
-        with open(agent_json_path) as f:
-            graph, goal = load_agent_export(f.read())
+        if not agent_json_path.is_file():
+             print("Error: agent.json is not a file")
+             sys.exit(1)
+        content = agent_json_path.read_text().strip()
+        
+        if not content:
+            print("Error: agent.json is empty")
+            sys.exit(1)
 
+        try:
+            graph, goal = load_agent_export(content)
+        except json.JSONDecodeError:
+             print("Error: agent.json contains invalid JSON")
+             sys.exit(1)
+
+        
         return cls(
             agent_path=agent_path,
             graph=graph,
