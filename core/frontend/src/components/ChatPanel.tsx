@@ -144,75 +144,6 @@ function ToolActivityRow({ content }: { content: string }) {
   );
 }
 
-/** Inline reply box that appears below a worker's input request in the chat thread. */
-function WorkerInputReply({ onSubmit, disabled }: { onSubmit: (text: string) => void; disabled?: boolean }) {
-  const [value, setValue] = useState("");
-  const [sent, setSent] = useState(false);
-  const inputRef = useRef<HTMLTextAreaElement>(null);
-
-  useEffect(() => {
-    if (!disabled && !sent) inputRef.current?.focus();
-  }, [disabled, sent]);
-
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!value.trim() || sent) return;
-    onSubmit(value.trim());
-    setSent(true);
-  };
-
-  if (sent) {
-    return (
-      <div className="ml-10 flex items-center gap-1.5 text-[11px] text-muted-foreground py-1">
-        <Check className="w-3 h-3 text-emerald-500" />
-        <span>Response sent</span>
-      </div>
-    );
-  }
-
-  return (
-    <form onSubmit={handleSubmit} className="ml-10 mt-1">
-      <div
-        className="flex items-center gap-2 rounded-xl px-3 py-2 border transition-colors"
-        style={{
-          backgroundColor: `${workerColor}08`,
-          borderColor: `${workerColor}30`,
-        }}
-      >
-        <Reply className="w-3.5 h-3.5 flex-shrink-0" style={{ color: workerColor }} />
-        <textarea
-          ref={inputRef}
-          rows={1}
-          value={value}
-          onChange={(e) => {
-            setValue(e.target.value);
-            const ta = e.target;
-            ta.style.height = "auto";
-            ta.style.height = `${Math.min(ta.scrollHeight, 120)}px`;
-          }}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" && !e.shiftKey) {
-              e.preventDefault();
-              handleSubmit(e);
-            }
-          }}
-          placeholder="Reply to worker..."
-          disabled={disabled}
-          className="flex-1 bg-transparent text-sm text-foreground outline-none placeholder:text-muted-foreground disabled:opacity-50 resize-none overflow-y-auto"
-        />
-        <button
-          type="submit"
-          disabled={!value.trim() || disabled}
-          className="p-1.5 rounded-lg transition-opacity disabled:opacity-30 hover:opacity-90"
-          style={{ backgroundColor: workerColor, color: "white" }}
-        >
-          <Send className="w-3.5 h-3.5" />
-        </button>
-      </div>
-    </form>
-  );
-}
-
 const MessageBubble = memo(function MessageBubble({ msg, queenMode }: { msg: ChatMessage; queenMode?: "building" | "staging" | "running" }) {
   const isUser = msg.type === "user";
   const isQueen = msg.role === "queen";
@@ -357,9 +288,6 @@ export default function ChatPanel({ messages, onSend, isWaiting, isWorkerWaiting
         {threadMessages.map((msg) => (
           <div key={msg.id}>
             <MessageBubble msg={msg} queenMode={queenMode} />
-            {idx === lastWorkerMsgIdx && onWorkerReply && (
-              <WorkerInputReply onSubmit={onWorkerReply} />
-            )}
           </div>
         ))}
 
