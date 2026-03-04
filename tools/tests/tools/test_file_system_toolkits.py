@@ -429,7 +429,8 @@ class TestReplaceFileContentTool:
 
         assert result["success"] is True
         assert result["occurrences_replaced"] == 2
-        assert test_file.read_text(encoding="utf-8") == "Line 1\nDONE: fix this\nLine 3\nDONE: add tests\n"
+        expected = "Line 1\nDONE: fix this\nLine 3\nDONE: add tests\n"
+        assert test_file.read_text(encoding="utf-8") == expected
 
 
 class TestGrepSearchTool:

@@ -48,7 +48,7 @@ def runtime_logs_dir(tmp_path: Path) -> Path:
                 "execution_quality": "clean",
             }
         ),
-        encoding="utf-8"
+        encoding="utf-8",
     )
     _write_jsonl(
         run1_dir / "details.jsonl",
@@ -145,7 +145,7 @@ def runtime_logs_dir(tmp_path: Path) -> Path:
                 "execution_quality": "failed",
             }
         ),
-        encoding="utf-8"
+        encoding="utf-8",
     )
     _write_jsonl(
         run2_dir / "details.jsonl",

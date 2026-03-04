@@ -49,7 +49,10 @@ def session_dir(tmp_path: Path) -> Path:
 def basic_csv(session_dir: Path) -> Path:
     """Create a basic CSV file for testing."""
     csv_file = session_dir / "basic.csv"
-    csv_file.write_text("name,age,city\nAlice,30,NYC\nBob,25,LA\nCharlie,35,Chicago\n", encoding="utf-8")
+    csv_file.write_text(
+        "name,age,city\nAlice,30,NYC\nBob,25,LA\nCharlie,35,Chicago\n",
+        encoding="utf-8",
+    )
     return csv_file
 
 
@@ -318,7 +321,7 @@ class TestCsvRead:
         csv_file = session_dir / "quoted.csv"
         csv_file.write_text(
             'name,address,note\n"Smith, John","123 Main St, Apt 4","Hello, world"\n',
-            encoding="utf-8"
+            encoding="utf-8",
         )
 
         with patch("aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR", str(tmp_path)):
@@ -709,7 +712,7 @@ class TestCsvSql:
             "3,Coffee Mug,Kitchen,15,200\n"
             "4,Headphones,Electronics,299,75\n"
             "5,Water Bottle,Kitchen,25,150\n",
-            encoding="utf-8"
+            encoding="utf-8",
         )
         return csv_file
 
