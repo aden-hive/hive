@@ -45,7 +45,9 @@ def _request(
             if errors:
                 reason = errors[0].get("reason", "")
             if reason == "quotaExceeded":
-                return {"error": "YouTube API quota exceeded. Try again tomorrow or request a quota increase."}
+                return {
+                    "error": "YouTube API quota exceeded. Try again tomorrow or request a quota increase."
+                }
             return {"error": f"Forbidden: {reason or resp.text}"}
         if resp.status_code != 200:
             return {"error": f"YouTube API error {resp.status_code}: {resp.text[:500]}"}
@@ -145,15 +147,17 @@ def register_tools(
         results = []
         for item in data.get("items", []):
             snippet = item.get("snippet", {})
-            results.append({
-                "videoId": item.get("id", {}).get("videoId", ""),
-                "title": snippet.get("title", ""),
-                "channelTitle": snippet.get("channelTitle", ""),
-                "channelId": snippet.get("channelId", ""),
-                "publishedAt": snippet.get("publishedAt", ""),
-                "description": snippet.get("description", ""),
-                "thumbnail": snippet.get("thumbnails", {}).get("medium", {}).get("url", ""),
-            })
+            results.append(
+                {
+                    "videoId": item.get("id", {}).get("videoId", ""),
+                    "title": snippet.get("title", ""),
+                    "channelTitle": snippet.get("channelTitle", ""),
+                    "channelId": snippet.get("channelId", ""),
+                    "publishedAt": snippet.get("publishedAt", ""),
+                    "description": snippet.get("description", ""),
+                    "thumbnail": snippet.get("thumbnails", {}).get("medium", {}).get("url", ""),
+                }
+            )
         return {
             "query": query,
             "results": results,
@@ -199,22 +203,24 @@ def register_tools(
             snippet = item.get("snippet", {})
             stats = item.get("statistics", {})
             content = item.get("contentDetails", {})
-            videos.append({
-                "videoId": item.get("id", ""),
-                "title": snippet.get("title", ""),
-                "description": snippet.get("description", ""),
-                "channelTitle": snippet.get("channelTitle", ""),
-                "channelId": snippet.get("channelId", ""),
-                "publishedAt": snippet.get("publishedAt", ""),
-                "tags": snippet.get("tags", []),
-                "categoryId": snippet.get("categoryId", ""),
-                "duration": _parse_duration(content.get("duration", "")),
-                "duration_raw": content.get("duration", ""),
-                "viewCount": int(stats.get("viewCount", 0)),
-                "likeCount": int(stats.get("likeCount", 0)),
-                "commentCount": int(stats.get("commentCount", 0)),
-                "thumbnail": snippet.get("thumbnails", {}).get("high", {}).get("url", ""),
-            })
+            videos.append(
+                {
+                    "videoId": item.get("id", ""),
+                    "title": snippet.get("title", ""),
+                    "description": snippet.get("description", ""),
+                    "channelTitle": snippet.get("channelTitle", ""),
+                    "channelId": snippet.get("channelId", ""),
+                    "publishedAt": snippet.get("publishedAt", ""),
+                    "tags": snippet.get("tags", []),
+                    "categoryId": snippet.get("categoryId", ""),
+                    "duration": _parse_duration(content.get("duration", "")),
+                    "duration_raw": content.get("duration", ""),
+                    "viewCount": int(stats.get("viewCount", 0)),
+                    "likeCount": int(stats.get("likeCount", 0)),
+                    "commentCount": int(stats.get("commentCount", 0)),
+                    "thumbnail": snippet.get("thumbnails", {}).get("high", {}).get("url", ""),
+                }
+            )
         return {"videos": videos}
 
     @mcp.tool()
@@ -273,7 +279,9 @@ def register_tools(
             "videoCount": int(stats.get("videoCount", 0)),
             "viewCount": int(stats.get("viewCount", 0)),
             "thumbnail": snippet.get("thumbnails", {}).get("high", {}).get("url", ""),
-            "uploadsPlaylistId": item.get("contentDetails", {}).get("relatedPlaylists", {}).get("uploads", ""),
+            "uploadsPlaylistId": item.get("contentDetails", {})
+            .get("relatedPlaylists", {})
+            .get("uploads", ""),
         }
 
     @mcp.tool()
@@ -320,13 +328,15 @@ def register_tools(
         videos = []
         for item in data.get("items", []):
             snippet = item.get("snippet", {})
-            videos.append({
-                "videoId": item.get("id", {}).get("videoId", ""),
-                "title": snippet.get("title", ""),
-                "publishedAt": snippet.get("publishedAt", ""),
-                "description": snippet.get("description", ""),
-                "thumbnail": snippet.get("thumbnails", {}).get("medium", {}).get("url", ""),
-            })
+            videos.append(
+                {
+                    "videoId": item.get("id", {}).get("videoId", ""),
+                    "title": snippet.get("title", ""),
+                    "publishedAt": snippet.get("publishedAt", ""),
+                    "description": snippet.get("description", ""),
+                    "thumbnail": snippet.get("thumbnails", {}).get("medium", {}).get("url", ""),
+                }
+            )
         return {"channel_id": channel_id, "videos": videos}
 
     @mcp.tool()
@@ -387,13 +397,15 @@ def register_tools(
         items = []
         for item in items_data.get("items", []):
             snippet = item.get("snippet", {})
-            items.append({
-                "videoId": snippet.get("resourceId", {}).get("videoId", ""),
-                "title": snippet.get("title", ""),
-                "position": snippet.get("position", 0),
-                "channelTitle": snippet.get("videoOwnerChannelTitle", ""),
-                "thumbnail": snippet.get("thumbnails", {}).get("medium", {}).get("url", ""),
-            })
+            items.append(
+                {
+                    "videoId": snippet.get("resourceId", {}).get("videoId", ""),
+                    "title": snippet.get("title", ""),
+                    "position": snippet.get("position", 0),
+                    "channelTitle": snippet.get("videoOwnerChannelTitle", ""),
+                    "thumbnail": snippet.get("thumbnails", {}).get("medium", {}).get("url", ""),
+                }
+            )
 
         return {
             "playlistId": playlist_id,
@@ -448,12 +460,14 @@ def register_tools(
         results = []
         for item in data.get("items", []):
             snippet = item.get("snippet", {})
-            results.append({
-                "channelId": item.get("id", {}).get("channelId", ""),
-                "title": snippet.get("title", ""),
-                "description": snippet.get("description", ""),
-                "thumbnail": snippet.get("thumbnails", {}).get("medium", {}).get("url", ""),
-            })
+            results.append(
+                {
+                    "channelId": item.get("id", {}).get("channelId", ""),
+                    "title": snippet.get("title", ""),
+                    "description": snippet.get("description", ""),
+                    "thumbnail": snippet.get("thumbnails", {}).get("medium", {}).get("url", ""),
+                }
+            )
         return {"query": query, "results": results}
 
     @mcp.tool()
@@ -500,13 +514,15 @@ def register_tools(
         comments = []
         for item in data.get("items", []):
             top = item.get("snippet", {}).get("topLevelComment", {}).get("snippet", {})
-            comments.append({
-                "author": top.get("authorDisplayName", ""),
-                "text": top.get("textDisplay", ""),
-                "likeCount": top.get("likeCount", 0),
-                "publishedAt": top.get("publishedAt", ""),
-                "replyCount": item.get("snippet", {}).get("totalReplyCount", 0),
-            })
+            comments.append(
+                {
+                    "author": top.get("authorDisplayName", ""),
+                    "text": top.get("textDisplay", ""),
+                    "likeCount": top.get("likeCount", 0),
+                    "publishedAt": top.get("publishedAt", ""),
+                    "replyCount": item.get("snippet", {}).get("totalReplyCount", 0),
+                }
+            )
         return {"video_id": video_id, "comments": comments}
 
     @mcp.tool()
@@ -539,8 +555,10 @@ def register_tools(
 
         categories = []
         for item in data.get("items", []):
-            categories.append({
-                "id": item.get("id", ""),
-                "title": item.get("snippet", {}).get("title", ""),
-            })
+            categories.append(
+                {
+                    "id": item.get("id", ""),
+                    "title": item.get("snippet", {}).get("title", ""),
+                }
+            )
         return {"region_code": region_code, "categories": categories}

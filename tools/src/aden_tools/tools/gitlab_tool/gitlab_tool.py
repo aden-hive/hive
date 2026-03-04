@@ -34,7 +34,9 @@ def _get_credentials(credentials: CredentialStoreAdapter | None) -> tuple[str | 
     return url, token
 
 
-def _get(base_url: str, path: str, token: str, params: dict[str, Any] | None = None) -> dict[str, Any] | list:
+def _get(
+    base_url: str, path: str, token: str, params: dict[str, Any] | None = None
+) -> dict[str, Any] | list:
     """Make an authenticated GET to the GitLab API."""
     try:
         resp = httpx.get(
@@ -60,7 +62,9 @@ def _get(base_url: str, path: str, token: str, params: dict[str, Any] | None = N
         return {"error": f"GitLab request failed: {e!s}"}
 
 
-def _post(base_url: str, path: str, token: str, json: dict[str, Any] | None = None) -> dict[str, Any] | list:
+def _post(
+    base_url: str, path: str, token: str, json: dict[str, Any] | None = None
+) -> dict[str, Any] | list:
     """Make an authenticated POST to the GitLab API."""
     try:
         resp = httpx.post(
@@ -135,18 +139,20 @@ def register_tools(
             return data
 
         projects = []
-        for p in (data if isinstance(data, list) else []):
-            projects.append({
-                "id": p.get("id"),
-                "name": p.get("name", ""),
-                "path_with_namespace": p.get("path_with_namespace", ""),
-                "description": (p.get("description") or "")[:200],
-                "visibility": p.get("visibility", ""),
-                "default_branch": p.get("default_branch", ""),
-                "web_url": p.get("web_url", ""),
-                "star_count": p.get("star_count", 0),
-                "last_activity_at": p.get("last_activity_at", ""),
-            })
+        for p in data if isinstance(data, list) else []:
+            projects.append(
+                {
+                    "id": p.get("id"),
+                    "name": p.get("name", ""),
+                    "path_with_namespace": p.get("path_with_namespace", ""),
+                    "description": (p.get("description") or "")[:200],
+                    "visibility": p.get("visibility", ""),
+                    "default_branch": p.get("default_branch", ""),
+                    "web_url": p.get("web_url", ""),
+                    "star_count": p.get("star_count", 0),
+                    "last_activity_at": p.get("last_activity_at", ""),
+                }
+            )
         return {"projects": projects, "count": len(projects)}
 
     @mcp.tool()
@@ -233,19 +239,21 @@ def register_tools(
             return data
 
         issues = []
-        for i in (data if isinstance(data, list) else []):
+        for i in data if isinstance(data, list) else []:
             assignees = [a.get("username", "") for a in i.get("assignees", [])]
-            issues.append({
-                "iid": i.get("iid"),
-                "title": i.get("title", ""),
-                "state": i.get("state", ""),
-                "labels": i.get("labels", []),
-                "assignees": assignees,
-                "author": (i.get("author") or {}).get("username", ""),
-                "created_at": i.get("created_at", ""),
-                "updated_at": i.get("updated_at", ""),
-                "web_url": i.get("web_url", ""),
-            })
+            issues.append(
+                {
+                    "iid": i.get("iid"),
+                    "title": i.get("title", ""),
+                    "state": i.get("state", ""),
+                    "labels": i.get("labels", []),
+                    "assignees": assignees,
+                    "author": (i.get("author") or {}).get("username", ""),
+                    "created_at": i.get("created_at", ""),
+                    "updated_at": i.get("updated_at", ""),
+                    "web_url": i.get("web_url", ""),
+                }
+            )
         return {"issues": issues, "count": len(issues)}
 
     @mcp.tool()
@@ -375,16 +383,18 @@ def register_tools(
             return data
 
         mrs = []
-        for mr in (data if isinstance(data, list) else []):
-            mrs.append({
-                "iid": mr.get("iid"),
-                "title": mr.get("title", ""),
-                "state": mr.get("state", ""),
-                "source_branch": mr.get("source_branch", ""),
-                "target_branch": mr.get("target_branch", ""),
-                "author": (mr.get("author") or {}).get("username", ""),
-                "web_url": mr.get("web_url", ""),
-                "created_at": mr.get("created_at", ""),
-                "updated_at": mr.get("updated_at", ""),
-            })
+        for mr in data if isinstance(data, list) else []:
+            mrs.append(
+                {
+                    "iid": mr.get("iid"),
+                    "title": mr.get("title", ""),
+                    "state": mr.get("state", ""),
+                    "source_branch": mr.get("source_branch", ""),
+                    "target_branch": mr.get("target_branch", ""),
+                    "author": (mr.get("author") or {}).get("username", ""),
+                    "web_url": mr.get("web_url", ""),
+                    "created_at": mr.get("created_at", ""),
+                    "updated_at": mr.get("updated_at", ""),
+                }
+            )
         return {"merge_requests": mrs, "count": len(mrs)}

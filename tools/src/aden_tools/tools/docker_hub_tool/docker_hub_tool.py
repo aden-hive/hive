@@ -35,7 +35,9 @@ def _headers(token: str) -> dict[str, str]:
 
 def _get(endpoint: str, token: str, params: dict | None = None) -> dict[str, Any]:
     try:
-        resp = httpx.get(f"{HUB_API}/{endpoint}", headers=_headers(token), params=params, timeout=30.0)
+        resp = httpx.get(
+            f"{HUB_API}/{endpoint}", headers=_headers(token), params=params, timeout=30.0
+        )
         if resp.status_code == 401:
             return {"error": "Unauthorized. Check your DOCKER_HUB_TOKEN."}
         if resp.status_code == 404:
@@ -91,14 +93,16 @@ def register_tools(
 
         results = []
         for r in data.get("results", []):
-            results.append({
-                "repo_name": r.get("repo_name", ""),
-                "short_description": r.get("short_description", ""),
-                "star_count": r.get("star_count", 0),
-                "is_official": r.get("is_official", False),
-                "is_automated": r.get("is_automated", False),
-                "pull_count": r.get("pull_count", 0),
-            })
+            results.append(
+                {
+                    "repo_name": r.get("repo_name", ""),
+                    "short_description": r.get("short_description", ""),
+                    "star_count": r.get("star_count", 0),
+                    "is_official": r.get("is_official", False),
+                    "is_automated": r.get("is_automated", False),
+                    "pull_count": r.get("pull_count", 0),
+                }
+            )
         return {"query": query, "results": results}
 
     @mcp.tool()
@@ -133,15 +137,17 @@ def register_tools(
 
         repos = []
         for r in data.get("results", []):
-            repos.append({
-                "name": r.get("name", ""),
-                "namespace": r.get("namespace", ""),
-                "description": r.get("description", ""),
-                "star_count": r.get("star_count", 0),
-                "pull_count": r.get("pull_count", 0),
-                "last_updated": r.get("last_updated", ""),
-                "is_private": r.get("is_private", False),
-            })
+            repos.append(
+                {
+                    "name": r.get("name", ""),
+                    "namespace": r.get("namespace", ""),
+                    "description": r.get("description", ""),
+                    "star_count": r.get("star_count", 0),
+                    "pull_count": r.get("pull_count", 0),
+                    "last_updated": r.get("last_updated", ""),
+                    "is_private": r.get("is_private", False),
+                }
+            )
         return {"namespace": namespace, "repos": repos}
 
     @mcp.tool()
@@ -166,7 +172,11 @@ def register_tools(
             return {"error": "repository is required"}
 
         max_results = max(1, min(max_results, 100))
-        data = _get(f"repositories/{repository}/tags", token, {"page_size": max_results, "ordering": "-last_updated"})
+        data = _get(
+            f"repositories/{repository}/tags",
+            token,
+            {"page_size": max_results, "ordering": "-last_updated"},
+        )
         if "error" in data:
             return data
 
@@ -174,12 +184,14 @@ def register_tools(
         for t in data.get("results", []):
             images = t.get("images", [])
             digest = images[0].get("digest", "") if images else ""
-            tags.append({
-                "name": t.get("name", ""),
-                "full_size": t.get("full_size", 0),
-                "last_updated": t.get("last_updated", ""),
-                "digest": digest,
-            })
+            tags.append(
+                {
+                    "name": t.get("name", ""),
+                    "full_size": t.get("full_size", 0),
+                    "last_updated": t.get("last_updated", ""),
+                    "digest": digest,
+                }
+            )
         return {"repository": repository, "tags": tags}
 
     @mcp.tool()

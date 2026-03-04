@@ -42,7 +42,9 @@ def _get(path: str, api_key: str, params: dict[str, Any] | None = None) -> dict[
         if resp.status_code == 400:
             return {"error": f"Bad request: {resp.text[:500]}"}
         if resp.status_code == 403:
-            return {"error": "Forbidden. The spreadsheet may not be public or the API key is invalid."}
+            return {
+                "error": "Forbidden. The spreadsheet may not be public or the API key is invalid."
+            }
         if resp.status_code == 404:
             return {"error": "Spreadsheet not found."}
         if resp.status_code != 200:
@@ -99,13 +101,15 @@ def register_tools(
         for s in data.get("sheets", []):
             sp = s.get("properties", {})
             grid = sp.get("gridProperties", {})
-            sheets.append({
-                "title": sp.get("title", ""),
-                "sheet_id": sp.get("sheetId"),
-                "index": sp.get("index", 0),
-                "row_count": grid.get("rowCount", 0),
-                "column_count": grid.get("columnCount", 0),
-            })
+            sheets.append(
+                {
+                    "title": sp.get("title", ""),
+                    "sheet_id": sp.get("sheetId"),
+                    "index": sp.get("index", 0),
+                    "row_count": grid.get("rowCount", 0),
+                    "column_count": grid.get("columnCount", 0),
+                }
+            )
 
         return {
             "spreadsheet_id": data.get("spreadsheetId", ""),
@@ -190,9 +194,11 @@ def register_tools(
         results = []
         for vr in data.get("valueRanges", []):
             values = vr.get("values", [])
-            results.append({
-                "range": vr.get("range", ""),
-                "values": values,
-                "row_count": len(values),
-            })
+            results.append(
+                {
+                    "range": vr.get("range", ""),
+                    "values": values,
+                    "row_count": len(values),
+                }
+            )
         return {"ranges": results, "count": len(results)}

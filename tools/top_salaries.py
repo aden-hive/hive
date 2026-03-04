@@ -21,6 +21,7 @@ DATABASE = os.getenv("MSSQL_DATABASE", "AdenTestDB")
 USERNAME = os.getenv("MSSQL_USERNAME")
 PASSWORD = os.getenv("MSSQL_PASSWORD")
 
+
 def main():
     connection = None
 
@@ -81,6 +82,7 @@ def main():
     finally:
         if connection:
             connection.close()
+
 
 if __name__ == "__main__":
     main()

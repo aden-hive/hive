@@ -34,7 +34,9 @@ def _headers(token: str) -> dict[str, str]:
 
 def _get(endpoint: str, token: str, params: dict | None = None) -> dict[str, Any]:
     try:
-        resp = httpx.get(f"{ASANA_API}/{endpoint}", headers=_headers(token), params=params, timeout=30.0)
+        resp = httpx.get(
+            f"{ASANA_API}/{endpoint}", headers=_headers(token), params=params, timeout=30.0
+        )
         if resp.status_code == 401:
             return {"error": "Unauthorized. Check your ASANA_ACCESS_TOKEN."}
         if resp.status_code == 403:
@@ -52,7 +54,12 @@ def _get(endpoint: str, token: str, params: dict | None = None) -> dict[str, Any
 
 def _post(endpoint: str, token: str, body: dict | None = None) -> dict[str, Any]:
     try:
-        resp = httpx.post(f"{ASANA_API}/{endpoint}", headers=_headers(token), json={"data": body or {}}, timeout=30.0)
+        resp = httpx.post(
+            f"{ASANA_API}/{endpoint}",
+            headers=_headers(token),
+            json={"data": body or {}},
+            timeout=30.0,
+        )
         if resp.status_code == 401:
             return {"error": "Unauthorized. Check your ASANA_ACCESS_TOKEN."}
         if resp.status_code not in (200, 201):
@@ -130,12 +137,14 @@ def register_tools(
 
         projects = []
         for p in data.get("data", []):
-            projects.append({
-                "gid": p.get("gid", ""),
-                "name": p.get("name", ""),
-                "color": p.get("color", ""),
-                "archived": p.get("archived", False),
-            })
+            projects.append(
+                {
+                    "gid": p.get("gid", ""),
+                    "name": p.get("name", ""),
+                    "color": p.get("color", ""),
+                    "archived": p.get("archived", False),
+                }
+            )
         return {"projects": projects}
 
     @mcp.tool()
@@ -180,13 +189,15 @@ def register_tools(
         tasks = []
         for t in data.get("data", []):
             assignee_obj = t.get("assignee") or {}
-            tasks.append({
-                "gid": t.get("gid", ""),
-                "name": t.get("name", ""),
-                "completed": t.get("completed", False),
-                "due_on": t.get("due_on", ""),
-                "assignee_name": assignee_obj.get("name", ""),
-            })
+            tasks.append(
+                {
+                    "gid": t.get("gid", ""),
+                    "name": t.get("name", ""),
+                    "completed": t.get("completed", False),
+                    "due_on": t.get("due_on", ""),
+                    "assignee_name": assignee_obj.get("name", ""),
+                }
+            )
         return {"tasks": tasks, "count": len(tasks)}
 
     @mcp.tool()
@@ -206,7 +217,9 @@ def register_tools(
         if not task_gid:
             return {"error": "task_gid is required"}
 
-        params = {"opt_fields": "name,notes,completed,due_on,assignee.name,projects.name,tags.name,created_at,modified_at"}
+        params = {
+            "opt_fields": "name,notes,completed,due_on,assignee.name,projects.name,tags.name,created_at,modified_at"
+        }
         data = _get(f"tasks/{task_gid}", token, params)
         if "error" in data:
             return data
@@ -306,10 +319,12 @@ def register_tools(
 
         tasks = []
         for t in data.get("data", []):
-            tasks.append({
-                "gid": t.get("gid", ""),
-                "name": t.get("name", ""),
-                "completed": t.get("completed", False),
-                "due_on": t.get("due_on", ""),
-            })
+            tasks.append(
+                {
+                    "gid": t.get("gid", ""),
+                    "name": t.get("name", ""),
+                    "completed": t.get("completed", False),
+                    "due_on": t.get("due_on", ""),
+                }
+            )
         return {"query": query, "tasks": tasks}

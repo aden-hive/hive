@@ -61,7 +61,10 @@ class TestS3ListBuckets:
     def test_successful_list(self, tool_fns):
         with (
             patch.dict("os.environ", ENV),
-            patch("aden_tools.tools.aws_s3_tool.aws_s3_tool.httpx.get", return_value=_mock_resp(LIST_BUCKETS_XML)),
+            patch(
+                "aden_tools.tools.aws_s3_tool.aws_s3_tool.httpx.get",
+                return_value=_mock_resp(LIST_BUCKETS_XML),
+            ),
         ):
             result = tool_fns["s3_list_buckets"]()
 
@@ -78,7 +81,10 @@ class TestS3ListObjects:
     def test_successful_list(self, tool_fns):
         with (
             patch.dict("os.environ", ENV),
-            patch("aden_tools.tools.aws_s3_tool.aws_s3_tool.httpx.get", return_value=_mock_resp(LIST_OBJECTS_XML)),
+            patch(
+                "aden_tools.tools.aws_s3_tool.aws_s3_tool.httpx.get",
+                return_value=_mock_resp(LIST_OBJECTS_XML),
+            ),
         ):
             result = tool_fns["s3_list_objects"](bucket="my-bucket")
 
@@ -97,7 +103,12 @@ class TestS3GetObject:
     def test_successful_get_text(self, tool_fns):
         resp = _mock_resp(
             "Hello, world!",
-            headers={"content-type": "text/plain", "content-length": "13", "etag": '"abc"', "last-modified": "Wed, 15 Jan 2024"},
+            headers={
+                "content-type": "text/plain",
+                "content-length": "13",
+                "etag": '"abc"',
+                "last-modified": "Wed, 15 Jan 2024",
+            },
         )
         with (
             patch.dict("os.environ", ENV),
@@ -121,7 +132,9 @@ class TestS3PutObject:
             patch.dict("os.environ", ENV),
             patch("aden_tools.tools.aws_s3_tool.aws_s3_tool.httpx.put", return_value=resp),
         ):
-            result = tool_fns["s3_put_object"](bucket="my-bucket", key="new-file.txt", content="Hello!")
+            result = tool_fns["s3_put_object"](
+                bucket="my-bucket", key="new-file.txt", content="Hello!"
+            )
 
         assert result["result"] == "uploaded"
         assert result["key"] == "new-file.txt"

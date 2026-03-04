@@ -87,19 +87,21 @@ def _extract_posts(listing: dict) -> list[dict[str, Any]]:
         if child.get("kind") != "t3":
             continue
         d = child.get("data", {})
-        posts.append({
-            "id": d.get("id", ""),
-            "title": d.get("title", ""),
-            "author": d.get("author", ""),
-            "subreddit": d.get("subreddit", ""),
-            "score": d.get("score", 0),
-            "num_comments": d.get("num_comments", 0),
-            "url": d.get("url", ""),
-            "permalink": d.get("permalink", ""),
-            "selftext": (d.get("selftext", "") or "")[:500],
-            "created_utc": d.get("created_utc", 0),
-            "is_self": d.get("is_self", False),
-        })
+        posts.append(
+            {
+                "id": d.get("id", ""),
+                "title": d.get("title", ""),
+                "author": d.get("author", ""),
+                "subreddit": d.get("subreddit", ""),
+                "score": d.get("score", 0),
+                "num_comments": d.get("num_comments", 0),
+                "url": d.get("url", ""),
+                "permalink": d.get("permalink", ""),
+                "selftext": (d.get("selftext", "") or "")[:500],
+                "created_utc": d.get("created_utc", 0),
+                "is_self": d.get("is_self", False),
+            }
+        )
     return posts
 
 
@@ -260,13 +262,15 @@ def register_tools(
             if child.get("kind") != "t1":
                 continue
             cd = child.get("data", {})
-            comments.append({
-                "id": cd.get("id", ""),
-                "author": cd.get("author", ""),
-                "body": (cd.get("body", "") or "")[:500],
-                "score": cd.get("score", 0),
-                "created_utc": cd.get("created_utc", 0),
-            })
+            comments.append(
+                {
+                    "id": cd.get("id", ""),
+                    "author": cd.get("author", ""),
+                    "body": (cd.get("body", "") or "")[:500],
+                    "score": cd.get("score", 0),
+                    "created_utc": cd.get("created_utc", 0),
+                }
+            )
 
         return {"post": post, "comments": comments, "comment_count": len(comments)}
 

@@ -25,7 +25,10 @@ def _get_config() -> tuple[str, str, str] | dict:
     secret_key = os.getenv("AWS_SECRET_ACCESS_KEY", "")
     region = os.getenv("AWS_REGION", "us-east-1")
     if not access_key or not secret_key:
-        return {"error": "AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY are required", "help": "Set AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY environment variables"}
+        return {
+            "error": "AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY are required",
+            "help": "Set AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY environment variables",
+        }
     return access_key, secret_key, region
 
 
@@ -62,22 +65,16 @@ def _api_call(
         "x-amz-target": f"RedshiftData.{action}",
     }
     signed_headers_str = ";".join(sorted(headers_to_sign.keys()))
-    canonical_headers = "".join(
-        f"{k}:{v}\n" for k, v in sorted(headers_to_sign.items())
-    )
+    canonical_headers = "".join(f"{k}:{v}\n" for k, v in sorted(headers_to_sign.items()))
 
-    canonical_request = (
-        f"POST\n/\n\n{canonical_headers}\n{signed_headers_str}\n{payload_hash}"
-    )
+    canonical_request = f"POST\n/\n\n{canonical_headers}\n{signed_headers_str}\n{payload_hash}"
     credential_scope = f"{datestamp}/{region}/{SERVICE}/aws4_request"
     string_to_sign = (
         f"AWS4-HMAC-SHA256\n{amz_date}\n{credential_scope}\n"
         + hashlib.sha256(canonical_request.encode("utf-8")).hexdigest()
     )
     signing_key = _get_signing_key(secret_key, datestamp, region)
-    signature = hmac.new(
-        signing_key, string_to_sign.encode("utf-8"), hashlib.sha256
-    ).hexdigest()
+    signature = hmac.new(signing_key, string_to_sign.encode("utf-8"), hashlib.sha256).hexdigest()
 
     auth_header = (
         f"AWS4-HMAC-SHA256 Credential={access_key}/{credential_scope}, "
@@ -172,9 +169,7 @@ def register_tools(mcp: FastMCP, credentials: Any = None) -> None:
         if not statement_id:
             return {"error": "statement_id is required"}
 
-        data = _api_call(
-            "DescribeStatement", {"Id": statement_id}, access_key, secret_key, region
-        )
+        data = _api_call("DescribeStatement", {"Id": statement_id}, access_key, secret_key, region)
         if "error" in data:
             return data
 
@@ -202,9 +197,7 @@ def register_tools(mcp: FastMCP, credentials: Any = None) -> None:
         if not statement_id:
             return {"error": "statement_id is required"}
 
-        data = _api_call(
-            "GetStatementResult", {"Id": statement_id}, access_key, secret_key, region
-        )
+        data = _api_call("GetStatementResult", {"Id": statement_id}, access_key, secret_key, region)
         if "error" in data:
             return data
 

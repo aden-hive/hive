@@ -60,11 +60,13 @@ def register_tools(mcp: FastMCP) -> None:
             results = list(ddgs.text(**kwargs))
             items = []
             for r in results:
-                items.append({
-                    "title": r.get("title", ""),
-                    "url": r.get("href", ""),
-                    "snippet": r.get("body", ""),
-                })
+                items.append(
+                    {
+                        "title": r.get("title", ""),
+                        "url": r.get("href", ""),
+                        "snippet": r.get("body", ""),
+                    }
+                )
             return {"query": query, "results": items, "count": len(items)}
         except Exception as e:
             return {"error": f"DuckDuckGo search failed: {e!s}"}
@@ -106,13 +108,15 @@ def register_tools(mcp: FastMCP) -> None:
             results = list(ddgs.news(**kwargs))
             items = []
             for r in results:
-                items.append({
-                    "title": r.get("title", ""),
-                    "url": r.get("url", ""),
-                    "source": r.get("source", ""),
-                    "date": r.get("date", ""),
-                    "snippet": r.get("body", ""),
-                })
+                items.append(
+                    {
+                        "title": r.get("title", ""),
+                        "url": r.get("url", ""),
+                        "source": r.get("source", ""),
+                        "date": r.get("date", ""),
+                        "snippet": r.get("body", ""),
+                    }
+                )
             return {"query": query, "results": items, "count": len(items)}
         except Exception as e:
             return {"error": f"DuckDuckGo news search failed: {e!s}"}
@@ -157,14 +161,16 @@ def register_tools(mcp: FastMCP) -> None:
             results = list(ddgs.images(**kwargs))
             items = []
             for r in results:
-                items.append({
-                    "title": r.get("title", ""),
-                    "image_url": r.get("image", ""),
-                    "thumbnail_url": r.get("thumbnail", ""),
-                    "source": r.get("source", ""),
-                    "width": r.get("width", 0),
-                    "height": r.get("height", 0),
-                })
+                items.append(
+                    {
+                        "title": r.get("title", ""),
+                        "image_url": r.get("image", ""),
+                        "thumbnail_url": r.get("thumbnail", ""),
+                        "source": r.get("source", ""),
+                        "width": r.get("width", 0),
+                        "height": r.get("height", 0),
+                    }
+                )
             return {"query": query, "results": items, "count": len(items)}
         except Exception as e:
             return {"error": f"DuckDuckGo image search failed: {e!s}"}

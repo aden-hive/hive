@@ -120,7 +120,10 @@ def register_tools(
 
         url = f"{_base_url(sid)}/Messages.json"
         data = _request(
-            "post", url, sid, token,
+            "post",
+            url,
+            sid,
+            token,
             data={"To": to, "From": from_number, "Body": body},
         )
         if "error" in data:
@@ -156,7 +159,10 @@ def register_tools(
 
         url = f"{_base_url(sid)}/Messages.json"
         data = _request(
-            "post", url, sid, token,
+            "post",
+            url,
+            sid,
+            token,
             data={"To": wa_to, "From": wa_from, "Body": body},
         )
         if "error" in data:

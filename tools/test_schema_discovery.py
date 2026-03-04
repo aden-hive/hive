@@ -59,7 +59,8 @@ def list_all_tables(cursor):
 def get_table_schema(cursor, table_name):
     """Get detailed schema for a specific table."""
     # Get columns with primary key information
-    cursor.execute("""
+    cursor.execute(
+        """
         SELECT
             c.COLUMN_NAME,
             c.DATA_TYPE,
@@ -79,7 +80,10 @@ def get_table_schema(cursor, table_name):
         ) pk ON c.COLUMN_NAME = pk.COLUMN_NAME
         WHERE c.TABLE_NAME = ?
         ORDER BY c.ORDINAL_POSITION
-    """, table_name, table_name)
+    """,
+        table_name,
+        table_name,
+    )
 
     columns = []
     for row in cursor.fetchall():
@@ -94,15 +98,18 @@ def get_table_schema(cursor, table_name):
             else:
                 col_type += f"({row[3]})"
 
-        columns.append({
-            "name": row[0],
-            "type": col_type,
-            "nullable": row[5] == "YES",
-            "primary_key": bool(row[6]),
-        })
+        columns.append(
+            {
+                "name": row[0],
+                "type": col_type,
+                "nullable": row[5] == "YES",
+                "primary_key": bool(row[6]),
+            }
+        )
 
     # Get foreign keys
-    cursor.execute("""
+    cursor.execute(
+        """
         SELECT
             kcu.COLUMN_NAME,
             ccu.TABLE_NAME AS REFERENCED_TABLE,
@@ -113,21 +120,21 @@ def get_table_schema(cursor, table_name):
         JOIN INFORMATION_SCHEMA.CONSTRAINT_COLUMN_USAGE ccu
             ON rc.UNIQUE_CONSTRAINT_NAME = ccu.CONSTRAINT_NAME
         WHERE kcu.TABLE_NAME = ?
-    """, table_name)
+    """,
+        table_name,
+    )
 
     foreign_keys = []
     for row in cursor.fetchall():
-        foreign_keys.append({
-            "column": row[0],
-            "references_table": row[1],
-            "references_column": row[2],
-        })
+        foreign_keys.append(
+            {
+                "column": row[0],
+                "references_table": row[1],
+                "references_column": row[2],
+            }
+        )
 
-    return {
-        "table": table_name,
-        "columns": columns,
-        "foreign_keys": foreign_keys
-    }
+    return {"table": table_name, "columns": columns, "foreign_keys": foreign_keys}
 
 
 def print_table_schema(schema, is_last=False):
@@ -198,7 +205,7 @@ def main():
 
         for i, table in enumerate(tables):
             schema = get_table_schema(cursor, table)
-            is_last = (i == len(tables) - 1)
+            is_last = i == len(tables) - 1
             print_table_schema(schema, is_last)
 
         # Summary

@@ -21,7 +21,9 @@ if TYPE_CHECKING:
     from aden_tools.credentials import CredentialStoreAdapter
 
 
-def _get_credentials(credentials: CredentialStoreAdapter | None) -> tuple[str | None, str | None, str | None]:
+def _get_credentials(
+    credentials: CredentialStoreAdapter | None,
+) -> tuple[str | None, str | None, str | None]:
     """Return (domain, email, api_token)."""
     if credentials is not None:
         domain = credentials.get("jira_domain")
@@ -44,9 +46,7 @@ def _auth_header(email: str, token: str) -> str:
     return f"Basic {encoded}"
 
 
-def _request(
-    method: str, url: str, email: str, token: str, **kwargs: Any
-) -> dict[str, Any]:
+def _request(method: str, url: str, email: str, token: str, **kwargs: Any) -> dict[str, Any]:
     """Make a request to the Jira API."""
     headers = kwargs.pop("headers", {})
     headers["Authorization"] = _auth_header(email, token)
@@ -159,14 +159,16 @@ def register_tools(
             assignee = f.get("assignee") or {}
             priority = f.get("priority") or {}
             issuetype = f.get("issuetype") or {}
-            issues.append({
-                "key": issue.get("key", ""),
-                "summary": f.get("summary", ""),
-                "status": status.get("name", ""),
-                "assignee": assignee.get("displayName", ""),
-                "priority": priority.get("name", ""),
-                "issuetype": issuetype.get("name", ""),
-            })
+            issues.append(
+                {
+                    "key": issue.get("key", ""),
+                    "summary": f.get("summary", ""),
+                    "status": status.get("name", ""),
+                    "assignee": assignee.get("displayName", ""),
+                    "priority": priority.get("name", ""),
+                    "issuetype": issuetype.get("name", ""),
+                }
+            )
         return {"issues": issues, "count": len(issues)}
 
     @mcp.tool()
@@ -299,12 +301,14 @@ def register_tools(
 
         projects = []
         for p in data.get("values", []):
-            projects.append({
-                "key": p.get("key", ""),
-                "name": p.get("name", ""),
-                "id": p.get("id", ""),
-                "project_type": p.get("projectTypeKey", ""),
-            })
+            projects.append(
+                {
+                    "key": p.get("key", ""),
+                    "name": p.get("name", ""),
+                    "id": p.get("id", ""),
+                    "project_type": p.get("projectTypeKey", ""),
+                }
+            )
         return {"projects": projects, "count": len(projects)}
 
     @mcp.tool()

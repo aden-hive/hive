@@ -35,7 +35,9 @@ def _headers(token: str) -> dict[str, str]:
 
 def _get(endpoint: str, token: str, params: dict | None = None) -> dict[str, Any]:
     try:
-        resp = httpx.get(f"{APIFY_API}/{endpoint}", headers=_headers(token), params=params, timeout=30.0)
+        resp = httpx.get(
+            f"{APIFY_API}/{endpoint}", headers=_headers(token), params=params, timeout=30.0
+        )
         if resp.status_code == 401:
             return {"error": "Unauthorized. Check your APIFY_API_TOKEN."}
         if resp.status_code == 404:
@@ -51,7 +53,9 @@ def _get(endpoint: str, token: str, params: dict | None = None) -> dict[str, Any
 
 def _post(endpoint: str, token: str, body: dict | None = None) -> dict[str, Any]:
     try:
-        resp = httpx.post(f"{APIFY_API}/{endpoint}", headers=_headers(token), json=body or {}, timeout=60.0)
+        resp = httpx.post(
+            f"{APIFY_API}/{endpoint}", headers=_headers(token), json=body or {}, timeout=60.0
+        )
         if resp.status_code == 401:
             return {"error": "Unauthorized. Check your APIFY_API_TOKEN."}
         if resp.status_code not in (200, 201):
@@ -252,13 +256,15 @@ def register_tools(
         actors = []
         for a in data.get("data", {}).get("items", []):
             stats = a.get("stats", {})
-            actors.append({
-                "id": a.get("id", ""),
-                "name": a.get("name", ""),
-                "title": a.get("title", ""),
-                "description": (a.get("description", "") or "")[:200],
-                "total_runs": stats.get("totalRuns", 0),
-            })
+            actors.append(
+                {
+                    "id": a.get("id", ""),
+                    "name": a.get("name", ""),
+                    "title": a.get("title", ""),
+                    "description": (a.get("description", "") or "")[:200],
+                    "total_runs": stats.get("totalRuns", 0),
+                }
+            )
         return {"actors": actors, "count": len(actors)}
 
     @mcp.tool()
@@ -290,14 +296,16 @@ def register_tools(
 
         runs = []
         for r in data.get("data", {}).get("items", []):
-            runs.append({
-                "run_id": r.get("id", ""),
-                "actor_id": r.get("actId", ""),
-                "status": r.get("status", ""),
-                "started_at": r.get("startedAt", ""),
-                "finished_at": r.get("finishedAt", ""),
-                "dataset_id": r.get("defaultDatasetId", ""),
-            })
+            runs.append(
+                {
+                    "run_id": r.get("id", ""),
+                    "actor_id": r.get("actId", ""),
+                    "status": r.get("status", ""),
+                    "started_at": r.get("startedAt", ""),
+                    "finished_at": r.get("finishedAt", ""),
+                    "dataset_id": r.get("defaultDatasetId", ""),
+                }
+            )
         return {"runs": runs, "count": len(runs)}
 
     @mcp.tool()

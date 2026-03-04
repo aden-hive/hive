@@ -1,4 +1,5 @@
 """Tests for Pushover tool."""
+
 from unittest.mock import MagicMock, patch
 
 from aden_tools.tools.pushover_tool.pushover_tool import (
@@ -84,9 +85,7 @@ class TestPushoverClient:
 
     @patch("aden_tools.tools.pushover_tool.pushover_tool.httpx.post")
     def test_validate_user_with_device(self, mock_post):
-        mock_post.return_value = self._mock_response(
-            json_data={"status": 1, "devices": ["iphone"]}
-        )
+        mock_post.return_value = self._mock_response(json_data={"status": 1, "devices": ["iphone"]})
         result = self.client.validate_user(device="iphone")
         call_kwargs = mock_post.call_args[1]["data"]
         assert call_kwargs["device"] == "iphone"
@@ -103,6 +102,7 @@ class TestRegisterTools:
             def decorator(func):
                 self.tools[func.__name__] = func
                 return func
+
             return decorator
 
         self.mcp.tool = tool_decorator
@@ -127,9 +127,7 @@ class TestRegisterTools:
         {"PUSHOVER_API_TOKEN": "test_token", "PUSHOVER_USER_KEY": "test_user"},
     )
     def test_pushover_send_notification_invalid_priority(self):
-        result = self.tools["pushover_send_notification"](
-            message="Hello!", priority=99
-        )
+        result = self.tools["pushover_send_notification"](message="Hello!", priority=99)
         assert "error" in result
         assert "priority" in result["error"]
 

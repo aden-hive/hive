@@ -47,7 +47,10 @@ class TestCloudinaryUpload:
         }
         with (
             patch.dict("os.environ", ENV),
-            patch("aden_tools.tools.cloudinary_tool.cloudinary_tool.httpx.post", return_value=mock_resp),
+            patch(
+                "aden_tools.tools.cloudinary_tool.cloudinary_tool.httpx.post",
+                return_value=mock_resp,
+            ),
         ):
             result = tool_fns["cloudinary_upload"](file_url="https://example.com/img.jpg")
 
@@ -80,7 +83,9 @@ class TestCloudinaryListResources:
         }
         with (
             patch.dict("os.environ", ENV),
-            patch("aden_tools.tools.cloudinary_tool.cloudinary_tool.httpx.get", return_value=mock_resp),
+            patch(
+                "aden_tools.tools.cloudinary_tool.cloudinary_tool.httpx.get", return_value=mock_resp
+            ),
         ):
             result = tool_fns["cloudinary_list_resources"]()
 
@@ -111,7 +116,9 @@ class TestCloudinaryGetResource:
         }
         with (
             patch.dict("os.environ", ENV),
-            patch("aden_tools.tools.cloudinary_tool.cloudinary_tool.httpx.get", return_value=mock_resp),
+            patch(
+                "aden_tools.tools.cloudinary_tool.cloudinary_tool.httpx.get", return_value=mock_resp
+            ),
         ):
             result = tool_fns["cloudinary_get_resource"](public_id="sample1")
 
@@ -131,7 +138,10 @@ class TestCloudinaryDeleteResource:
         mock_resp.json.return_value = {"result": "ok"}
         with (
             patch.dict("os.environ", ENV),
-            patch("aden_tools.tools.cloudinary_tool.cloudinary_tool.httpx.post", return_value=mock_resp),
+            patch(
+                "aden_tools.tools.cloudinary_tool.cloudinary_tool.httpx.post",
+                return_value=mock_resp,
+            ),
         ):
             result = tool_fns["cloudinary_delete_resource"](public_id="sample1")
 
@@ -163,7 +173,10 @@ class TestCloudinarySearch:
         }
         with (
             patch.dict("os.environ", ENV),
-            patch("aden_tools.tools.cloudinary_tool.cloudinary_tool.httpx.post", return_value=mock_resp),
+            patch(
+                "aden_tools.tools.cloudinary_tool.cloudinary_tool.httpx.post",
+                return_value=mock_resp,
+            ),
         ):
             result = tool_fns["cloudinary_search"](expression="resource_type:image AND tags=nature")
 

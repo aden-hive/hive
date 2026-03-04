@@ -19,16 +19,17 @@ def _get_config() -> tuple[str, dict] | dict:
     account = os.getenv("SNOWFLAKE_ACCOUNT", "").strip()
     token = os.getenv("SNOWFLAKE_TOKEN", "").strip()
     if not account or not token:
-        return {"error": "SNOWFLAKE_ACCOUNT and SNOWFLAKE_TOKEN are required", "help": "Set SNOWFLAKE_ACCOUNT and SNOWFLAKE_TOKEN environment variables"}
+        return {
+            "error": "SNOWFLAKE_ACCOUNT and SNOWFLAKE_TOKEN are required",
+            "help": "Set SNOWFLAKE_ACCOUNT and SNOWFLAKE_TOKEN environment variables",
+        }
     base_url = f"https://{account}.snowflakecomputing.com/api/v2/statements"
     headers = {
         "Authorization": f"Bearer {token}",
         "Content-Type": "application/json",
         "Accept": "application/json",
         "User-Agent": "aden-tools/1.0",
-        "X-Snowflake-Authorization-Token-Type": os.getenv(
-            "SNOWFLAKE_TOKEN_TYPE", "OAUTH"
-        ),
+        "X-Snowflake-Authorization-Token-Type": os.getenv("SNOWFLAKE_TOKEN_TYPE", "OAUTH"),
     }
     return base_url, headers
 
@@ -148,9 +149,7 @@ def register_tools(mcp: FastMCP, credentials: Any = None) -> None:
         if not statement_handle:
             return {"error": "statement_handle is required"}
 
-        resp = httpx.post(
-            f"{base_url}/{statement_handle}/cancel", headers=headers, timeout=30
-        )
+        resp = httpx.post(f"{base_url}/{statement_handle}/cancel", headers=headers, timeout=30)
         if resp.status_code == 200:
             return {"result": "cancelled", "statement_handle": statement_handle}
         return {"error": f"HTTP {resp.status_code}: {resp.text[:500]}"}

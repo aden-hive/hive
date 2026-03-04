@@ -61,7 +61,10 @@ def register_tools(mcp: FastMCP, credentials: Any = None) -> None:
         """
         headers = _get_headers()
         if not headers:
-            return {"error": "POWERBI_ACCESS_TOKEN is required", "help": "Set POWERBI_ACCESS_TOKEN environment variable"}
+            return {
+                "error": "POWERBI_ACCESS_TOKEN is required",
+                "help": "Set POWERBI_ACCESS_TOKEN environment variable",
+            }
 
         params: dict[str, Any] = {"$top": top, "$skip": skip}
         if search:
@@ -94,7 +97,10 @@ def register_tools(mcp: FastMCP, credentials: Any = None) -> None:
         """
         headers = _get_headers()
         if not headers:
-            return {"error": "POWERBI_ACCESS_TOKEN is required", "help": "Set POWERBI_ACCESS_TOKEN environment variable"}
+            return {
+                "error": "POWERBI_ACCESS_TOKEN is required",
+                "help": "Set POWERBI_ACCESS_TOKEN environment variable",
+            }
         if not workspace_id:
             return {"error": "workspace_id is required"}
 
@@ -128,7 +134,10 @@ def register_tools(mcp: FastMCP, credentials: Any = None) -> None:
         """
         headers = _get_headers()
         if not headers:
-            return {"error": "POWERBI_ACCESS_TOKEN is required", "help": "Set POWERBI_ACCESS_TOKEN environment variable"}
+            return {
+                "error": "POWERBI_ACCESS_TOKEN is required",
+                "help": "Set POWERBI_ACCESS_TOKEN environment variable",
+            }
         if not workspace_id:
             return {"error": "workspace_id is required"}
 
@@ -167,7 +176,10 @@ def register_tools(mcp: FastMCP, credentials: Any = None) -> None:
         """
         headers = _get_headers()
         if not headers:
-            return {"error": "POWERBI_ACCESS_TOKEN is required", "help": "Set POWERBI_ACCESS_TOKEN environment variable"}
+            return {
+                "error": "POWERBI_ACCESS_TOKEN is required",
+                "help": "Set POWERBI_ACCESS_TOKEN environment variable",
+            }
         if not workspace_id or not dataset_id:
             return {"error": "workspace_id and dataset_id are required"}
 
@@ -194,7 +206,10 @@ def register_tools(mcp: FastMCP, credentials: Any = None) -> None:
         """
         headers = _get_headers()
         if not headers:
-            return {"error": "POWERBI_ACCESS_TOKEN is required", "help": "Set POWERBI_ACCESS_TOKEN environment variable"}
+            return {
+                "error": "POWERBI_ACCESS_TOKEN is required",
+                "help": "Set POWERBI_ACCESS_TOKEN environment variable",
+            }
         if not workspace_id or not dataset_id:
             return {"error": "workspace_id and dataset_id are required"}
 

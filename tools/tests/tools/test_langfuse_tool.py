@@ -54,7 +54,10 @@ class TestLangfuseListTraces:
         }
         with (
             patch.dict("os.environ", ENV),
-            patch("aden_tools.tools.langfuse_tool.langfuse_tool.httpx.get", return_value=_mock_resp(data)),
+            patch(
+                "aden_tools.tools.langfuse_tool.langfuse_tool.httpx.get",
+                return_value=_mock_resp(data),
+            ),
         ):
             result = tool_fns["langfuse_list_traces"]()
 
@@ -106,7 +109,10 @@ class TestLangfuseGetTrace:
         }
         with (
             patch.dict("os.environ", ENV),
-            patch("aden_tools.tools.langfuse_tool.langfuse_tool.httpx.get", return_value=_mock_resp(data)),
+            patch(
+                "aden_tools.tools.langfuse_tool.langfuse_tool.httpx.get",
+                return_value=_mock_resp(data),
+            ),
         ):
             result = tool_fns["langfuse_get_trace"](trace_id="trace-abc123")
 
@@ -136,7 +142,10 @@ class TestLangfuseListScores:
         }
         with (
             patch.dict("os.environ", ENV),
-            patch("aden_tools.tools.langfuse_tool.langfuse_tool.httpx.get", return_value=_mock_resp(data)),
+            patch(
+                "aden_tools.tools.langfuse_tool.langfuse_tool.httpx.get",
+                return_value=_mock_resp(data),
+            ),
         ):
             result = tool_fns["langfuse_list_scores"]()
 
@@ -155,7 +164,10 @@ class TestLangfuseCreateScore:
         data = {"id": "score-new-123"}
         with (
             patch.dict("os.environ", ENV),
-            patch("aden_tools.tools.langfuse_tool.langfuse_tool.httpx.post", return_value=_mock_resp(data)),
+            patch(
+                "aden_tools.tools.langfuse_tool.langfuse_tool.httpx.post",
+                return_value=_mock_resp(data),
+            ),
         ):
             result = tool_fns["langfuse_create_score"](
                 trace_id="trace-abc123",
@@ -184,7 +196,10 @@ class TestLangfuseListPrompts:
         }
         with (
             patch.dict("os.environ", ENV),
-            patch("aden_tools.tools.langfuse_tool.langfuse_tool.httpx.get", return_value=_mock_resp(data)),
+            patch(
+                "aden_tools.tools.langfuse_tool.langfuse_tool.httpx.get",
+                return_value=_mock_resp(data),
+            ),
         ):
             result = tool_fns["langfuse_list_prompts"]()
 
@@ -214,7 +229,10 @@ class TestLangfuseGetPrompt:
         }
         with (
             patch.dict("os.environ", ENV),
-            patch("aden_tools.tools.langfuse_tool.langfuse_tool.httpx.get", return_value=_mock_resp(data)),
+            patch(
+                "aden_tools.tools.langfuse_tool.langfuse_tool.httpx.get",
+                return_value=_mock_resp(data),
+            ),
         ):
             result = tool_fns["langfuse_get_prompt"](prompt_name="movie-critic")
 

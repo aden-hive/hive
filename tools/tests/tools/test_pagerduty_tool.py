@@ -51,7 +51,10 @@ class TestPagerdutyListIncidents:
         data = {"incidents": [INCIDENT_DATA], "more": False}
         with (
             patch.dict("os.environ", ENV),
-            patch("aden_tools.tools.pagerduty_tool.pagerduty_tool.httpx.get", return_value=_mock_resp(data)),
+            patch(
+                "aden_tools.tools.pagerduty_tool.pagerduty_tool.httpx.get",
+                return_value=_mock_resp(data),
+            ),
         ):
             result = tool_fns["pagerduty_list_incidents"]()
 
@@ -72,7 +75,10 @@ class TestPagerdutyGetIncident:
         data = {"incident": inc}
         with (
             patch.dict("os.environ", ENV),
-            patch("aden_tools.tools.pagerduty_tool.pagerduty_tool.httpx.get", return_value=_mock_resp(data)),
+            patch(
+                "aden_tools.tools.pagerduty_tool.pagerduty_tool.httpx.get",
+                return_value=_mock_resp(data),
+            ),
         ):
             result = tool_fns["pagerduty_get_incident"](incident_id="PT4KHLK")
 
@@ -90,9 +96,14 @@ class TestPagerdutyCreateIncident:
         data = {"incident": INCIDENT_DATA}
         with (
             patch.dict("os.environ", ENV),
-            patch("aden_tools.tools.pagerduty_tool.pagerduty_tool.httpx.post", return_value=_mock_resp(data, 201)),
+            patch(
+                "aden_tools.tools.pagerduty_tool.pagerduty_tool.httpx.post",
+                return_value=_mock_resp(data, 201),
+            ),
         ):
-            result = tool_fns["pagerduty_create_incident"](title="Server is on fire", service_id="PWIXJZS")
+            result = tool_fns["pagerduty_create_incident"](
+                title="Server is on fire", service_id="PWIXJZS"
+            )
 
         assert result["result"] == "created"
         assert result["id"] == "PT4KHLK"
@@ -110,9 +121,14 @@ class TestPagerdutyUpdateIncident:
         data = {"incident": ack}
         with (
             patch.dict("os.environ", ENV),
-            patch("aden_tools.tools.pagerduty_tool.pagerduty_tool.httpx.put", return_value=_mock_resp(data)),
+            patch(
+                "aden_tools.tools.pagerduty_tool.pagerduty_tool.httpx.put",
+                return_value=_mock_resp(data),
+            ),
         ):
-            result = tool_fns["pagerduty_update_incident"](incident_id="PT4KHLK", status="acknowledged")
+            result = tool_fns["pagerduty_update_incident"](
+                incident_id="PT4KHLK", status="acknowledged"
+            )
 
         assert result["status"] == "acknowledged"
 
@@ -139,7 +155,10 @@ class TestPagerdutyListServices:
         }
         with (
             patch.dict("os.environ", ENV),
-            patch("aden_tools.tools.pagerduty_tool.pagerduty_tool.httpx.get", return_value=_mock_resp(data)),
+            patch(
+                "aden_tools.tools.pagerduty_tool.pagerduty_tool.httpx.get",
+                return_value=_mock_resp(data),
+            ),
         ):
             result = tool_fns["pagerduty_list_services"]()
 

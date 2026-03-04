@@ -41,7 +41,9 @@ def _get_env() -> str:
     return os.getenv("PLAID_ENV", DEFAULT_ENV)
 
 
-def _post(path: str, client_id: str, secret: str, body: dict[str, Any] | None = None) -> dict[str, Any]:
+def _post(
+    path: str, client_id: str, secret: str, body: dict[str, Any] | None = None
+) -> dict[str, Any]:
     """Make a POST request to the Plaid API."""
     env = _get_env()
     base = BASE_URLS.get(env, BASE_URLS["sandbox"])
@@ -101,17 +103,19 @@ def register_tools(
         accounts = []
         for a in data.get("accounts", []):
             bal = a.get("balances") or {}
-            accounts.append({
-                "account_id": a.get("account_id", ""),
-                "name": a.get("name", ""),
-                "official_name": a.get("official_name", ""),
-                "type": a.get("type", ""),
-                "subtype": a.get("subtype", ""),
-                "mask": a.get("mask", ""),
-                "available_balance": bal.get("available"),
-                "current_balance": bal.get("current"),
-                "currency": bal.get("iso_currency_code", ""),
-            })
+            accounts.append(
+                {
+                    "account_id": a.get("account_id", ""),
+                    "name": a.get("name", ""),
+                    "official_name": a.get("official_name", ""),
+                    "type": a.get("type", ""),
+                    "subtype": a.get("subtype", ""),
+                    "mask": a.get("mask", ""),
+                    "available_balance": bal.get("available"),
+                    "current_balance": bal.get("current"),
+                    "currency": bal.get("iso_currency_code", ""),
+                }
+            )
         return {"accounts": accounts, "count": len(accounts)}
 
     @mcp.tool()
@@ -138,15 +142,17 @@ def register_tools(
         accounts = []
         for a in data.get("accounts", []):
             bal = a.get("balances") or {}
-            accounts.append({
-                "account_id": a.get("account_id", ""),
-                "name": a.get("name", ""),
-                "type": a.get("type", ""),
-                "available": bal.get("available"),
-                "current": bal.get("current"),
-                "limit": bal.get("limit"),
-                "currency": bal.get("iso_currency_code", ""),
-            })
+            accounts.append(
+                {
+                    "account_id": a.get("account_id", ""),
+                    "name": a.get("name", ""),
+                    "type": a.get("type", ""),
+                    "available": bal.get("available"),
+                    "current": bal.get("current"),
+                    "limit": bal.get("limit"),
+                    "currency": bal.get("iso_currency_code", ""),
+                }
+            )
         return {"accounts": accounts}
 
     @mcp.tool()
@@ -250,17 +256,19 @@ def register_tools(
 
         txns = []
         for t in data.get("transactions", []):
-            txns.append({
-                "transaction_id": t.get("transaction_id", ""),
-                "account_id": t.get("account_id", ""),
-                "amount": t.get("amount", 0),
-                "date": t.get("date", ""),
-                "name": t.get("name", ""),
-                "merchant_name": t.get("merchant_name", ""),
-                "category": t.get("category", []),
-                "pending": t.get("pending", False),
-                "currency": t.get("iso_currency_code", ""),
-            })
+            txns.append(
+                {
+                    "transaction_id": t.get("transaction_id", ""),
+                    "account_id": t.get("account_id", ""),
+                    "amount": t.get("amount", 0),
+                    "date": t.get("date", ""),
+                    "name": t.get("name", ""),
+                    "merchant_name": t.get("merchant_name", ""),
+                    "category": t.get("category", []),
+                    "pending": t.get("pending", False),
+                    "currency": t.get("iso_currency_code", ""),
+                }
+            )
 
         return {
             "transactions": txns,
@@ -347,12 +355,14 @@ def register_tools(
 
         institutions = []
         for inst in data.get("institutions", []):
-            institutions.append({
-                "institution_id": inst.get("institution_id", ""),
-                "name": inst.get("name", ""),
-                "products": inst.get("products", []),
-                "country_codes": inst.get("country_codes", []),
-                "url": inst.get("url", ""),
-                "oauth": inst.get("oauth", False),
-            })
+            institutions.append(
+                {
+                    "institution_id": inst.get("institution_id", ""),
+                    "name": inst.get("name", ""),
+                    "products": inst.get("products", []),
+                    "country_codes": inst.get("country_codes", []),
+                    "url": inst.get("url", ""),
+                    "oauth": inst.get("oauth", False),
+                }
+            )
         return {"institutions": institutions, "count": len(institutions)}

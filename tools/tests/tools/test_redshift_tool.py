@@ -57,7 +57,10 @@ class TestRedshiftExecuteSQL:
         }
         with (
             patch.dict("os.environ", ENV),
-            patch("aden_tools.tools.redshift_tool.redshift_tool.httpx.post", return_value=_mock_resp(data)),
+            patch(
+                "aden_tools.tools.redshift_tool.redshift_tool.httpx.post",
+                return_value=_mock_resp(data),
+            ),
         ):
             result = tool_fns["redshift_execute_sql"](
                 sql="SELECT * FROM users", database="dev", cluster_identifier="my-cluster"
@@ -85,7 +88,10 @@ class TestRedshiftDescribeStatement:
         }
         with (
             patch.dict("os.environ", ENV),
-            patch("aden_tools.tools.redshift_tool.redshift_tool.httpx.post", return_value=_mock_resp(data)),
+            patch(
+                "aden_tools.tools.redshift_tool.redshift_tool.httpx.post",
+                return_value=_mock_resp(data),
+            ),
         ):
             result = tool_fns["redshift_describe_statement"](statement_id="stmt-abc123")
 
@@ -114,7 +120,10 @@ class TestRedshiftGetResults:
         }
         with (
             patch.dict("os.environ", ENV),
-            patch("aden_tools.tools.redshift_tool.redshift_tool.httpx.post", return_value=_mock_resp(data)),
+            patch(
+                "aden_tools.tools.redshift_tool.redshift_tool.httpx.post",
+                return_value=_mock_resp(data),
+            ),
         ):
             result = tool_fns["redshift_get_results"](statement_id="stmt-abc123")
 
@@ -133,7 +142,10 @@ class TestRedshiftListDatabases:
         data = {"Databases": ["dev", "staging", "analytics"], "NextToken": ""}
         with (
             patch.dict("os.environ", ENV),
-            patch("aden_tools.tools.redshift_tool.redshift_tool.httpx.post", return_value=_mock_resp(data)),
+            patch(
+                "aden_tools.tools.redshift_tool.redshift_tool.httpx.post",
+                return_value=_mock_resp(data),
+            ),
         ):
             result = tool_fns["redshift_list_databases"](cluster_identifier="my-cluster")
 
@@ -157,7 +169,10 @@ class TestRedshiftListTables:
         }
         with (
             patch.dict("os.environ", ENV),
-            patch("aden_tools.tools.redshift_tool.redshift_tool.httpx.post", return_value=_mock_resp(data)),
+            patch(
+                "aden_tools.tools.redshift_tool.redshift_tool.httpx.post",
+                return_value=_mock_resp(data),
+            ),
         ):
             result = tool_fns["redshift_list_tables"](
                 database="dev", cluster_identifier="my-cluster"

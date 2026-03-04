@@ -49,7 +49,10 @@ class TestMongodbFind:
         data = {"documents": [{"_id": "1", "name": "Alice"}, {"_id": "2", "name": "Bob"}]}
         with (
             patch.dict("os.environ", ENV),
-            patch("aden_tools.tools.mongodb_tool.mongodb_tool.httpx.post", return_value=_mock_resp(data)),
+            patch(
+                "aden_tools.tools.mongodb_tool.mongodb_tool.httpx.post",
+                return_value=_mock_resp(data),
+            ),
         ):
             result = tool_fns["mongodb_find"](database="mydb", collection="users")
 
@@ -62,9 +65,14 @@ class TestMongodbFindOne:
         data = {"document": {"_id": "1", "name": "Alice", "age": 30}}
         with (
             patch.dict("os.environ", ENV),
-            patch("aden_tools.tools.mongodb_tool.mongodb_tool.httpx.post", return_value=_mock_resp(data)),
+            patch(
+                "aden_tools.tools.mongodb_tool.mongodb_tool.httpx.post",
+                return_value=_mock_resp(data),
+            ),
         ):
-            result = tool_fns["mongodb_find_one"](database="mydb", collection="users", filter='{"name": "Alice"}')
+            result = tool_fns["mongodb_find_one"](
+                database="mydb", collection="users", filter='{"name": "Alice"}'
+            )
 
         assert result["name"] == "Alice"
         assert result["age"] == 30
@@ -73,9 +81,14 @@ class TestMongodbFindOne:
         data = {"document": None}
         with (
             patch.dict("os.environ", ENV),
-            patch("aden_tools.tools.mongodb_tool.mongodb_tool.httpx.post", return_value=_mock_resp(data)),
+            patch(
+                "aden_tools.tools.mongodb_tool.mongodb_tool.httpx.post",
+                return_value=_mock_resp(data),
+            ),
         ):
-            result = tool_fns["mongodb_find_one"](database="mydb", collection="users", filter='{"name": "Nobody"}')
+            result = tool_fns["mongodb_find_one"](
+                database="mydb", collection="users", filter='{"name": "Nobody"}'
+            )
 
         assert "error" in result
 
@@ -90,7 +103,10 @@ class TestMongodbInsertOne:
         data = {"insertedId": "abc123"}
         with (
             patch.dict("os.environ", ENV),
-            patch("aden_tools.tools.mongodb_tool.mongodb_tool.httpx.post", return_value=_mock_resp(data)),
+            patch(
+                "aden_tools.tools.mongodb_tool.mongodb_tool.httpx.post",
+                return_value=_mock_resp(data),
+            ),
         ):
             result = tool_fns["mongodb_insert_one"](
                 database="mydb", collection="users", document='{"name": "Alice", "age": 30}'
@@ -103,14 +119,19 @@ class TestMongodbInsertOne:
 class TestMongodbUpdateOne:
     def test_missing_params(self, tool_fns):
         with patch.dict("os.environ", ENV):
-            result = tool_fns["mongodb_update_one"](database="db", collection="col", filter="", update="")
+            result = tool_fns["mongodb_update_one"](
+                database="db", collection="col", filter="", update=""
+            )
         assert "error" in result
 
     def test_successful_update(self, tool_fns):
         data = {"matchedCount": 1, "modifiedCount": 1}
         with (
             patch.dict("os.environ", ENV),
-            patch("aden_tools.tools.mongodb_tool.mongodb_tool.httpx.post", return_value=_mock_resp(data)),
+            patch(
+                "aden_tools.tools.mongodb_tool.mongodb_tool.httpx.post",
+                return_value=_mock_resp(data),
+            ),
         ):
             result = tool_fns["mongodb_update_one"](
                 database="mydb",
@@ -133,7 +154,10 @@ class TestMongodbDeleteOne:
         data = {"deletedCount": 1}
         with (
             patch.dict("os.environ", ENV),
-            patch("aden_tools.tools.mongodb_tool.mongodb_tool.httpx.post", return_value=_mock_resp(data)),
+            patch(
+                "aden_tools.tools.mongodb_tool.mongodb_tool.httpx.post",
+                return_value=_mock_resp(data),
+            ),
         ):
             result = tool_fns["mongodb_delete_one"](
                 database="mydb", collection="users", filter='{"name": "Alice"}'
@@ -150,14 +174,19 @@ class TestMongodbAggregate:
 
     def test_invalid_pipeline(self, tool_fns):
         with patch.dict("os.environ", ENV):
-            result = tool_fns["mongodb_aggregate"](database="db", collection="col", pipeline='{"not": "array"}')
+            result = tool_fns["mongodb_aggregate"](
+                database="db", collection="col", pipeline='{"not": "array"}'
+            )
         assert "error" in result
 
     def test_successful_aggregate(self, tool_fns):
         data = {"documents": [{"_id": "active", "count": 5}, {"_id": "inactive", "count": 2}]}
         with (
             patch.dict("os.environ", ENV),
-            patch("aden_tools.tools.mongodb_tool.mongodb_tool.httpx.post", return_value=_mock_resp(data)),
+            patch(
+                "aden_tools.tools.mongodb_tool.mongodb_tool.httpx.post",
+                return_value=_mock_resp(data),
+            ),
         ):
             result = tool_fns["mongodb_aggregate"](
                 database="mydb",

@@ -54,7 +54,10 @@ class TestZendeskListTickets:
         data = {"tickets": [TICKET_DATA]}
         with (
             patch.dict("os.environ", ENV),
-            patch("aden_tools.tools.zendesk_tool.zendesk_tool.httpx.get", return_value=_mock_resp(data)),
+            patch(
+                "aden_tools.tools.zendesk_tool.zendesk_tool.httpx.get",
+                return_value=_mock_resp(data),
+            ),
         ):
             result = tool_fns["zendesk_list_tickets"]()
 
@@ -72,7 +75,10 @@ class TestZendeskGetTicket:
         data = {"ticket": TICKET_DATA}
         with (
             patch.dict("os.environ", ENV),
-            patch("aden_tools.tools.zendesk_tool.zendesk_tool.httpx.get", return_value=_mock_resp(data)),
+            patch(
+                "aden_tools.tools.zendesk_tool.zendesk_tool.httpx.get",
+                return_value=_mock_resp(data),
+            ),
         ):
             result = tool_fns["zendesk_get_ticket"](ticket_id=123)
 
@@ -90,7 +96,10 @@ class TestZendeskCreateTicket:
         data = {"ticket": {"id": 456, "subject": "New ticket", "status": "new"}}
         with (
             patch.dict("os.environ", ENV),
-            patch("aden_tools.tools.zendesk_tool.zendesk_tool.httpx.post", return_value=_mock_resp(data, 201)),
+            patch(
+                "aden_tools.tools.zendesk_tool.zendesk_tool.httpx.post",
+                return_value=_mock_resp(data, 201),
+            ),
         ):
             result = tool_fns["zendesk_create_ticket"](subject="New ticket", body="Help needed")
 
@@ -110,7 +119,10 @@ class TestZendeskUpdateTicket:
         data = {"ticket": updated}
         with (
             patch.dict("os.environ", ENV),
-            patch("aden_tools.tools.zendesk_tool.zendesk_tool.httpx.put", return_value=_mock_resp(data)),
+            patch(
+                "aden_tools.tools.zendesk_tool.zendesk_tool.httpx.put",
+                return_value=_mock_resp(data),
+            ),
         ):
             result = tool_fns["zendesk_update_ticket"](ticket_id=123, status="pending")
 
@@ -125,12 +137,17 @@ class TestZendeskSearchTickets:
 
     def test_successful_search(self, tool_fns):
         data = {
-            "results": [{"id": 123, "subject": "Printer issue", "status": "open", "priority": "high"}],
+            "results": [
+                {"id": 123, "subject": "Printer issue", "status": "open", "priority": "high"}
+            ],
             "count": 1,
         }
         with (
             patch.dict("os.environ", ENV),
-            patch("aden_tools.tools.zendesk_tool.zendesk_tool.httpx.get", return_value=_mock_resp(data)),
+            patch(
+                "aden_tools.tools.zendesk_tool.zendesk_tool.httpx.get",
+                return_value=_mock_resp(data),
+            ),
         ):
             result = tool_fns["zendesk_search_tickets"](query="status:open priority:high")
 

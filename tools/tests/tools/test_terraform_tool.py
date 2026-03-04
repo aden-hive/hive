@@ -63,7 +63,10 @@ class TestTerraformListWorkspaces:
         }
         with (
             patch.dict("os.environ", ENV),
-            patch("aden_tools.tools.terraform_tool.terraform_tool.httpx.get", return_value=_mock_resp(data)),
+            patch(
+                "aden_tools.tools.terraform_tool.terraform_tool.httpx.get",
+                return_value=_mock_resp(data),
+            ),
         ):
             result = tool_fns["terraform_list_workspaces"](organization="my-org")
 
@@ -101,7 +104,10 @@ class TestTerraformGetWorkspace:
         }
         with (
             patch.dict("os.environ", ENV),
-            patch("aden_tools.tools.terraform_tool.terraform_tool.httpx.get", return_value=_mock_resp(data)),
+            patch(
+                "aden_tools.tools.terraform_tool.terraform_tool.httpx.get",
+                return_value=_mock_resp(data),
+            ),
         ):
             result = tool_fns["terraform_get_workspace"](workspace_id="ws-abc123")
 
@@ -144,7 +150,10 @@ class TestTerraformListRuns:
         }
         with (
             patch.dict("os.environ", ENV),
-            patch("aden_tools.tools.terraform_tool.terraform_tool.httpx.get", return_value=_mock_resp(data)),
+            patch(
+                "aden_tools.tools.terraform_tool.terraform_tool.httpx.get",
+                return_value=_mock_resp(data),
+            ),
         ):
             result = tool_fns["terraform_list_runs"](workspace_id="ws-abc123")
 
@@ -181,7 +190,10 @@ class TestTerraformGetRun:
         }
         with (
             patch.dict("os.environ", ENV),
-            patch("aden_tools.tools.terraform_tool.terraform_tool.httpx.get", return_value=_mock_resp(data)),
+            patch(
+                "aden_tools.tools.terraform_tool.terraform_tool.httpx.get",
+                return_value=_mock_resp(data),
+            ),
         ):
             result = tool_fns["terraform_get_run"](run_id="run-xyz789")
 
@@ -215,7 +227,10 @@ class TestTerraformCreateRun:
         }
         with (
             patch.dict("os.environ", ENV),
-            patch("aden_tools.tools.terraform_tool.terraform_tool.httpx.post", return_value=_mock_resp(data)),
+            patch(
+                "aden_tools.tools.terraform_tool.terraform_tool.httpx.post",
+                return_value=_mock_resp(data),
+            ),
         ):
             result = tool_fns["terraform_create_run"](
                 workspace_id="ws-abc123",

@@ -61,9 +61,7 @@ class TestPushoverSend:
                 "request": "req-2",
                 "receipt": "rcpt-1",
             }
-            result = tool_fns["pushover_send"](
-                user_key="ukey", message="URGENT", priority=2
-            )
+            result = tool_fns["pushover_send"](user_key="ukey", message="URGENT", priority=2)
 
         assert result["receipt"] == "rcpt-1"
 

@@ -21,7 +21,9 @@ if TYPE_CHECKING:
     from aden_tools.credentials import CredentialStoreAdapter
 
 
-def _get_credentials(credentials: CredentialStoreAdapter | None) -> tuple[str | None, str | None, str | None]:
+def _get_credentials(
+    credentials: CredentialStoreAdapter | None,
+) -> tuple[str | None, str | None, str | None]:
     """Return (subdomain, email, api_token)."""
     if credentials is not None:
         subdomain = credentials.get("zendesk_subdomain")
@@ -44,9 +46,7 @@ def _auth_header(email: str, token: str) -> str:
     return f"Basic {encoded}"
 
 
-def _request(
-    method: str, url: str, email: str, token: str, **kwargs: Any
-) -> dict[str, Any]:
+def _request(method: str, url: str, email: str, token: str, **kwargs: Any) -> dict[str, Any]:
     """Make a request to the Zendesk API."""
     headers = kwargs.pop("headers", {})
     headers["Authorization"] = _auth_header(email, token)
@@ -286,10 +286,12 @@ def register_tools(
 
         results = []
         for r in data.get("results", []):
-            results.append({
-                "id": r.get("id"),
-                "subject": r.get("subject", ""),
-                "status": r.get("status", ""),
-                "priority": r.get("priority", ""),
-            })
+            results.append(
+                {
+                    "id": r.get("id"),
+                    "subject": r.get("subject", ""),
+                    "status": r.get("status", ""),
+                    "priority": r.get("priority", ""),
+                }
+            )
         return {"results": results, "count": data.get("count", len(results))}

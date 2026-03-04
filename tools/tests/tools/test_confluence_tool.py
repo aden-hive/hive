@@ -33,12 +33,20 @@ class TestConfluenceListSpaces:
         mock_resp.content = b"{}"
         mock_resp.json.return_value = {
             "results": [
-                {"id": "123", "key": "DEV", "name": "Development", "type": "global", "status": "current"}
+                {
+                    "id": "123",
+                    "key": "DEV",
+                    "name": "Development",
+                    "type": "global",
+                    "status": "current",
+                }
             ]
         }
         with (
             patch.dict("os.environ", ENV),
-            patch("aden_tools.tools.confluence_tool.confluence_tool.httpx.get", return_value=mock_resp),
+            patch(
+                "aden_tools.tools.confluence_tool.confluence_tool.httpx.get", return_value=mock_resp
+            ),
         ):
             result = tool_fns["confluence_list_spaces"]()
 
@@ -54,14 +62,20 @@ class TestConfluenceListPages:
         mock_resp.json.return_value = {
             "results": [
                 {
-                    "id": "page-1", "title": "Getting Started", "spaceId": "123",
-                    "status": "current", "version": {"number": 3}, "createdAt": "2024-01-01T00:00:00Z",
+                    "id": "page-1",
+                    "title": "Getting Started",
+                    "spaceId": "123",
+                    "status": "current",
+                    "version": {"number": 3},
+                    "createdAt": "2024-01-01T00:00:00Z",
                 }
             ]
         }
         with (
             patch.dict("os.environ", ENV),
-            patch("aden_tools.tools.confluence_tool.confluence_tool.httpx.get", return_value=mock_resp),
+            patch(
+                "aden_tools.tools.confluence_tool.confluence_tool.httpx.get", return_value=mock_resp
+            ),
         ):
             result = tool_fns["confluence_list_pages"](space_id="123")
 
@@ -80,14 +94,19 @@ class TestConfluenceGetPage:
         mock_resp.status_code = 200
         mock_resp.content = b"{}"
         mock_resp.json.return_value = {
-            "id": "page-1", "title": "Getting Started", "spaceId": "123",
-            "status": "current", "version": {"number": 3},
+            "id": "page-1",
+            "title": "Getting Started",
+            "spaceId": "123",
+            "status": "current",
+            "version": {"number": 3},
             "body": {"storage": {"value": "<p>Hello</p>"}},
             "createdAt": "2024-01-01T00:00:00Z",
         }
         with (
             patch.dict("os.environ", ENV),
-            patch("aden_tools.tools.confluence_tool.confluence_tool.httpx.get", return_value=mock_resp),
+            patch(
+                "aden_tools.tools.confluence_tool.confluence_tool.httpx.get", return_value=mock_resp
+            ),
         ):
             result = tool_fns["confluence_get_page"](page_id="page-1")
 
@@ -108,7 +127,10 @@ class TestConfluenceCreatePage:
         mock_resp.json.return_value = {"id": "page-new", "title": "New Page"}
         with (
             patch.dict("os.environ", ENV),
-            patch("aden_tools.tools.confluence_tool.confluence_tool.httpx.post", return_value=mock_resp),
+            patch(
+                "aden_tools.tools.confluence_tool.confluence_tool.httpx.post",
+                return_value=mock_resp,
+            ),
         ):
             result = tool_fns["confluence_create_page"](
                 space_id="123", title="New Page", body="<p>Content</p>"
@@ -139,7 +161,9 @@ class TestConfluenceSearch:
         }
         with (
             patch.dict("os.environ", ENV),
-            patch("aden_tools.tools.confluence_tool.confluence_tool.httpx.get", return_value=mock_resp),
+            patch(
+                "aden_tools.tools.confluence_tool.confluence_tool.httpx.get", return_value=mock_resp
+            ),
         ):
             result = tool_fns["confluence_search"](query="deployment")
 

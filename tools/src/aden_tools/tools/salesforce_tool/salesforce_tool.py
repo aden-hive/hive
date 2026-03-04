@@ -162,16 +162,11 @@ def register_tools(
             return {"error": "object_type and record_id are required"}
 
         try:
-            url = (
-                f"{instance_url}/services/data/{API_VERSION}"
-                f"/sobjects/{object_type}/{record_id}"
-            )
+            url = f"{instance_url}/services/data/{API_VERSION}/sobjects/{object_type}/{record_id}"
             params = {}
             if fields:
                 params["fields"] = fields
-            resp = httpx.get(
-                url, headers=_headers(token), params=params, timeout=30.0
-            )
+            resp = httpx.get(url, headers=_headers(token), params=params, timeout=30.0)
             return _handle_response(resp)
         except httpx.TimeoutException:
             return {"error": "Request timed out"}
@@ -204,13 +199,8 @@ def register_tools(
             return {"error": "fields dict is required"}
 
         try:
-            url = (
-                f"{instance_url}/services/data/{API_VERSION}"
-                f"/sobjects/{object_type}"
-            )
-            resp = httpx.post(
-                url, headers=_headers(token), json=fields, timeout=30.0
-            )
+            url = f"{instance_url}/services/data/{API_VERSION}/sobjects/{object_type}"
+            resp = httpx.post(url, headers=_headers(token), json=fields, timeout=30.0)
             return _handle_response(resp)
         except httpx.TimeoutException:
             return {"error": "Request timed out"}
@@ -245,13 +235,8 @@ def register_tools(
             return {"error": "fields dict is required"}
 
         try:
-            url = (
-                f"{instance_url}/services/data/{API_VERSION}"
-                f"/sobjects/{object_type}/{record_id}"
-            )
-            resp = httpx.patch(
-                url, headers=_headers(token), json=fields, timeout=30.0
-            )
+            url = f"{instance_url}/services/data/{API_VERSION}/sobjects/{object_type}/{record_id}"
+            resp = httpx.patch(url, headers=_headers(token), json=fields, timeout=30.0)
             return _handle_response(resp)
         except httpx.TimeoutException:
             return {"error": "Request timed out"}
@@ -280,10 +265,7 @@ def register_tools(
             return {"error": "object_type is required"}
 
         try:
-            url = (
-                f"{instance_url}/services/data/{API_VERSION}"
-                f"/sobjects/{object_type}/describe"
-            )
+            url = f"{instance_url}/services/data/{API_VERSION}/sobjects/{object_type}/describe"
             resp = httpx.get(url, headers=_headers(token), timeout=30.0)
             result = _handle_response(resp)
             if "error" in result:
@@ -296,14 +278,11 @@ def register_tools(
                     "name": f.get("name"),
                     "label": f.get("label"),
                     "type": f.get("type"),
-                    "required": not f.get("nillable", True)
-                    and f.get("createable", False),
+                    "required": not f.get("nillable", True) and f.get("createable", False),
                 }
                 if f.get("picklistValues"):
                     entry["picklist_values"] = [
-                        pv["value"]
-                        for pv in f["picklistValues"]
-                        if pv.get("active")
+                        pv["value"] for pv in f["picklistValues"] if pv.get("active")
                     ]
                 fields_summary.append(entry)
 

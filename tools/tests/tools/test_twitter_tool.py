@@ -53,14 +53,15 @@ class TestTwitterSearchTweets:
                     },
                 }
             ],
-            "includes": {
-                "users": [{"id": "456", "name": "Test User", "username": "testuser"}]
-            },
+            "includes": {"users": [{"id": "456", "name": "Test User", "username": "testuser"}]},
             "meta": {"result_count": 1},
         }
         with (
             patch.dict("os.environ", ENV),
-            patch("aden_tools.tools.twitter_tool.twitter_tool.httpx.get", return_value=_mock_resp(data)),
+            patch(
+                "aden_tools.tools.twitter_tool.twitter_tool.httpx.get",
+                return_value=_mock_resp(data),
+            ),
         ):
             result = tool_fns["twitter_search_tweets"](query="hello")
 
@@ -95,7 +96,10 @@ class TestTwitterGetUser:
         }
         with (
             patch.dict("os.environ", ENV),
-            patch("aden_tools.tools.twitter_tool.twitter_tool.httpx.get", return_value=_mock_resp(data)),
+            patch(
+                "aden_tools.tools.twitter_tool.twitter_tool.httpx.get",
+                return_value=_mock_resp(data),
+            ),
         ):
             result = tool_fns["twitter_get_user"](username="testuser")
 
@@ -129,7 +133,10 @@ class TestTwitterGetUserTweets:
         }
         with (
             patch.dict("os.environ", ENV),
-            patch("aden_tools.tools.twitter_tool.twitter_tool.httpx.get", return_value=_mock_resp(data)),
+            patch(
+                "aden_tools.tools.twitter_tool.twitter_tool.httpx.get",
+                return_value=_mock_resp(data),
+            ),
         ):
             result = tool_fns["twitter_get_user_tweets"](user_id="456")
 
@@ -158,13 +165,14 @@ class TestTwitterGetTweet:
                     "impression_count": 20,
                 },
             },
-            "includes": {
-                "users": [{"name": "Author", "username": "author"}]
-            },
+            "includes": {"users": [{"name": "Author", "username": "author"}]},
         }
         with (
             patch.dict("os.environ", ENV),
-            patch("aden_tools.tools.twitter_tool.twitter_tool.httpx.get", return_value=_mock_resp(data)),
+            patch(
+                "aden_tools.tools.twitter_tool.twitter_tool.httpx.get",
+                return_value=_mock_resp(data),
+            ),
         ):
             result = tool_fns["twitter_get_tweet"](tweet_id="123")
 

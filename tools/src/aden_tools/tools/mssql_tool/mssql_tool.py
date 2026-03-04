@@ -73,19 +73,19 @@ def register_tools(
             if params["username"] and params["password"]:
                 # SQL Server Authentication
                 connection_string = (
-                    f'DRIVER={{ODBC Driver 17 for SQL Server}};'
-                    f'SERVER={params["server"]};'
-                    f'DATABASE={params["database"]};'
-                    f'UID={params["username"]};'
-                    f'PWD={params["password"]};'
+                    f"DRIVER={{ODBC Driver 17 for SQL Server}};"
+                    f"SERVER={params['server']};"
+                    f"DATABASE={params['database']};"
+                    f"UID={params['username']};"
+                    f"PWD={params['password']};"
                 )
             else:
                 # Windows Authentication
                 connection_string = (
-                    f'DRIVER={{ODBC Driver 17 for SQL Server}};'
-                    f'SERVER={params["server"]};'
-                    f'DATABASE={params["database"]};'
-                    f'Trusted_Connection=yes;'
+                    f"DRIVER={{ODBC Driver 17 for SQL Server}};"
+                    f"SERVER={params['server']};"
+                    f"DATABASE={params['database']};"
+                    f"Trusted_Connection=yes;"
                 )
 
             connection = pyodbc.connect(connection_string, timeout=10)
@@ -215,14 +215,14 @@ def register_tools(
         if not any(query_upper.startswith(kw) for kw in allowed_keywords):
             return {
                 "error": f"Only {', '.join(allowed_keywords)} queries are allowed. "
-                         "Use mssql_execute_query for SELECT."
+                "Use mssql_execute_query for SELECT."
             }
 
         # Safety check for DELETE without WHERE
         if query_upper.startswith("DELETE") and "WHERE" not in query_upper:
             return {
                 "error": "DELETE without WHERE clause is not allowed for safety. "
-                         "Add a WHERE clause or use DELETE FROM table WHERE 1=1 if intentional."
+                "Add a WHERE clause or use DELETE FROM table WHERE 1=1 if intentional."
             }
 
         connection, error = _create_connection()
@@ -320,17 +320,21 @@ def register_tools(
             else:
                 # Get detailed table schema
                 # Check if table exists
-                cursor.execute("""
+                cursor.execute(
+                    """
                     SELECT COUNT(*)
                     FROM INFORMATION_SCHEMA.TABLES
                     WHERE TABLE_NAME = ?
-                """, table_name)
+                """,
+                    table_name,
+                )
 
                 if cursor.fetchone()[0] == 0:
                     return {"error": f"Table '{table_name}' not found"}
 
                 # Get columns
-                cursor.execute("""
+                cursor.execute(
+                    """
                     SELECT
                         c.COLUMN_NAME,
                         c.DATA_TYPE,
@@ -348,7 +352,10 @@ def register_tools(
                     ) pk ON c.COLUMN_NAME = pk.COLUMN_NAME
                     WHERE c.TABLE_NAME = ?
                     ORDER BY c.ORDINAL_POSITION
-                """, table_name, table_name)
+                """,
+                    table_name,
+                    table_name,
+                )
 
                 columns = []
                 for row in cursor.fetchall():
@@ -356,15 +363,18 @@ def register_tools(
                     if row[2]:  # Add length for varchar/nvarchar
                         col_type += f"({row[2]})"
 
-                    columns.append({
-                        "name": row[0],
-                        "type": col_type,
-                        "nullable": row[3] == "YES",
-                        "primary_key": bool(row[4]),
-                    })
+                    columns.append(
+                        {
+                            "name": row[0],
+                            "type": col_type,
+                            "nullable": row[3] == "YES",
+                            "primary_key": bool(row[4]),
+                        }
+                    )
 
                 # Get foreign keys
-                cursor.execute("""
+                cursor.execute(
+                    """
                     SELECT
                         kcu.COLUMN_NAME,
                         ccu.TABLE_NAME AS REFERENCED_TABLE,
@@ -375,14 +385,18 @@ def register_tools(
                     JOIN INFORMATION_SCHEMA.CONSTRAINT_COLUMN_USAGE ccu
                         ON rc.UNIQUE_CONSTRAINT_NAME = ccu.CONSTRAINT_NAME
                     WHERE kcu.TABLE_NAME = ?
-                """, table_name)
+                """,
+                    table_name,
+                )
 
                 foreign_keys = []
                 for row in cursor.fetchall():
-                    foreign_keys.append({
-                        "column": row[0],
-                        "references": f"{row[1]}({row[2]})",
-                    })
+                    foreign_keys.append(
+                        {
+                            "column": row[0],
+                            "references": f"{row[1]}({row[2]})",
+                        }
+                    )
 
                 result = {
                     "table": table_name,
@@ -393,7 +407,8 @@ def register_tools(
 
                 # Optionally include indexes
                 if include_indexes:
-                    cursor.execute("""
+                    cursor.execute(
+                        """
                         SELECT
                             i.name AS INDEX_NAME,
                             i.type_desc AS INDEX_TYPE,
@@ -402,7 +417,9 @@ def register_tools(
                         JOIN sys.index_columns ic ON i.object_id = ic.object_id AND i.index_id = ic.index_id
                         WHERE i.object_id = OBJECT_ID(?)
                         ORDER BY i.name, ic.key_ordinal
-                    """, table_name)
+                    """,
+                        table_name,
+                    )
 
                     indexes = {}
                     for row in cursor.fetchall():
@@ -489,10 +506,12 @@ def register_tools(
                             row_dict[column] = value
                         rows.append(row_dict)
 
-                    result_sets.append({
-                        "columns": columns,
-                        "rows": rows,
-                    })
+                    result_sets.append(
+                        {
+                            "columns": columns,
+                            "rows": rows,
+                        }
+                    )
 
                 if not cursor.nextset():
                     break

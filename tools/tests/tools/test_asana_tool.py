@@ -156,7 +156,12 @@ class TestAsanaSearchTasks:
     def test_successful_search(self, tool_fns):
         mock_resp = {
             "data": [
-                {"gid": "task-1", "name": "Design homepage", "completed": False, "due_on": "2024-06-15"}
+                {
+                    "gid": "task-1",
+                    "name": "Design homepage",
+                    "completed": False,
+                    "due_on": "2024-06-15",
+                }
             ]
         }
         with (

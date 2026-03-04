@@ -79,7 +79,9 @@ def main():
 
         cursor.execute(payroll_query)
 
-        print(f"\n{'Department':<25} {'Employees':<12} {'Total Salary Cost':<20} {'Avg Salary':<15}")
+        print(
+            f"\n{'Department':<25} {'Employees':<12} {'Total Salary Cost':<20} {'Avg Salary':<15}"
+        )
         print("-" * 80)
 
         total_company_payroll = 0
@@ -176,7 +178,11 @@ def main():
         print("=" * 80)
         print(f"✓ Total Employees: {total_employees}")
         print(f"✓ Total Company Payroll: ${total_company_payroll:,.2f}")
-        print(f"✓ Average Employee Salary: ${total_company_payroll / total_employees:,.2f}" if total_employees > 0 else "N/A")
+        print(
+            f"✓ Average Employee Salary: ${total_company_payroll / total_employees:,.2f}"
+            if total_employees > 0
+            else "N/A"
+        )
         print("=" * 80)
         print("\nPayroll analysis completed successfully!")
 

@@ -22,7 +22,10 @@ def _get_config() -> tuple[str, str] | dict:
     token = os.getenv("QUICKBOOKS_ACCESS_TOKEN", "")
     realm_id = os.getenv("QUICKBOOKS_REALM_ID", "")
     if not token or not realm_id:
-        return {"error": "QUICKBOOKS_ACCESS_TOKEN and QUICKBOOKS_REALM_ID are required", "help": "Set QUICKBOOKS_ACCESS_TOKEN and QUICKBOOKS_REALM_ID environment variables"}
+        return {
+            "error": "QUICKBOOKS_ACCESS_TOKEN and QUICKBOOKS_REALM_ID are required",
+            "help": "Set QUICKBOOKS_ACCESS_TOKEN and QUICKBOOKS_REALM_ID environment variables",
+        }
 
     use_sandbox = os.getenv("QUICKBOOKS_SANDBOX", "").lower() in ("1", "true")
     base = SANDBOX_URL if use_sandbox else PROD_URL
@@ -245,6 +248,8 @@ def register_tools(mcp: FastMCP, credentials: Any = None) -> None:
             "company_name": info.get("CompanyName"),
             "legal_name": info.get("LegalName"),
             "country": info.get("Country"),
-            "email": info.get("Email", {}).get("Address") if isinstance(info.get("Email"), dict) else None,
+            "email": info.get("Email", {}).get("Address")
+            if isinstance(info.get("Email"), dict)
+            else None,
             "fiscal_year_start": info.get("FiscalYearStartMonth"),
         }

@@ -89,7 +89,9 @@ def main():
             # Highlight the department with the highest average
             if avg_salary == highest_avg:
                 # Use special formatting for the highest
-                print(f"{'>>> ' + str(idx):<6} {department:<25} {avg_salary_str:<20} {emp_count:<12} ⭐ HIGHEST")
+                print(
+                    f"{'>>> ' + str(idx):<6} {department:<25} {avg_salary_str:<20} {emp_count:<12} ⭐ HIGHEST"
+                )
             else:
                 print(f"{idx:<6} {department:<25} {avg_salary_str:<20} {emp_count:<12}")
 

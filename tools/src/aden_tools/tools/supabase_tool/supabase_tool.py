@@ -393,7 +393,10 @@ def register_tools(
                 response_data = resp.text
 
             if resp.status_code >= 400:
-                return {"error": f"Edge function error {resp.status_code}", "response": response_data}
+                return {
+                    "error": f"Edge function error {resp.status_code}",
+                    "response": response_data,
+                }
             return {"status_code": resp.status_code, "response": response_data}
         except httpx.TimeoutException:
             return {"error": "Edge function invocation timed out"}

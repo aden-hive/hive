@@ -29,7 +29,9 @@ def _get_token(credentials: CredentialStoreAdapter | None) -> str | None:
     return os.getenv("HUGGINGFACE_TOKEN")
 
 
-def _get(path: str, token: str | None, params: dict[str, Any] | None = None) -> dict[str, Any] | list:
+def _get(
+    path: str, token: str | None, params: dict[str, Any] | None = None
+) -> dict[str, Any] | list:
     """Make a GET request to the HuggingFace Hub API."""
     headers: dict[str, str] = {}
     if token:
@@ -106,15 +108,17 @@ def register_tools(
 
         models = []
         for m in data if isinstance(data, list) else []:
-            models.append({
-                "id": m.get("id", ""),
-                "author": m.get("author", ""),
-                "downloads": m.get("downloads", 0),
-                "likes": m.get("likes", 0),
-                "pipeline_tag": m.get("pipeline_tag", ""),
-                "tags": m.get("tags", [])[:10],
-                "last_modified": m.get("lastModified", ""),
-            })
+            models.append(
+                {
+                    "id": m.get("id", ""),
+                    "author": m.get("author", ""),
+                    "downloads": m.get("downloads", 0),
+                    "likes": m.get("likes", 0),
+                    "pipeline_tag": m.get("pipeline_tag", ""),
+                    "tags": m.get("tags", [])[:10],
+                    "last_modified": m.get("lastModified", ""),
+                }
+            )
         return {"models": models, "count": len(models)}
 
     @mcp.tool()
@@ -193,14 +197,16 @@ def register_tools(
 
         datasets = []
         for d in data if isinstance(data, list) else []:
-            datasets.append({
-                "id": d.get("id", ""),
-                "author": d.get("author", ""),
-                "downloads": d.get("downloads", 0),
-                "likes": d.get("likes", 0),
-                "tags": d.get("tags", [])[:10],
-                "last_modified": d.get("lastModified", ""),
-            })
+            datasets.append(
+                {
+                    "id": d.get("id", ""),
+                    "author": d.get("author", ""),
+                    "downloads": d.get("downloads", 0),
+                    "likes": d.get("likes", 0),
+                    "tags": d.get("tags", [])[:10],
+                    "last_modified": d.get("lastModified", ""),
+                }
+            )
         return {"datasets": datasets, "count": len(datasets)}
 
     @mcp.tool()
@@ -276,14 +282,16 @@ def register_tools(
 
         spaces = []
         for s in data if isinstance(data, list) else []:
-            spaces.append({
-                "id": s.get("id", ""),
-                "author": s.get("author", ""),
-                "likes": s.get("likes", 0),
-                "sdk": s.get("sdk", ""),
-                "tags": s.get("tags", [])[:10],
-                "last_modified": s.get("lastModified", ""),
-            })
+            spaces.append(
+                {
+                    "id": s.get("id", ""),
+                    "author": s.get("author", ""),
+                    "likes": s.get("likes", 0),
+                    "sdk": s.get("sdk", ""),
+                    "tags": s.get("tags", [])[:10],
+                    "last_modified": s.get("lastModified", ""),
+                }
+            )
         return {"spaces": spaces, "count": len(spaces)}
 
     @mcp.tool()
@@ -304,8 +312,7 @@ def register_tools(
 
         u = data if isinstance(data, dict) else {}
         orgs = [
-            {"name": o.get("name", ""), "role": o.get("roleInOrg", "")}
-            for o in u.get("orgs", [])
+            {"name": o.get("name", ""), "role": o.get("roleInOrg", "")} for o in u.get("orgs", [])
         ]
         return {
             "name": u.get("name", ""),

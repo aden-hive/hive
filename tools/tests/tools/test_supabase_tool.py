@@ -75,9 +75,7 @@ class TestSupabaseInsert:
         ):
             mock_post.return_value.status_code = 201
             mock_post.return_value.json.return_value = [{"id": 1, "name": "Alice"}]
-            result = tool_fns["supabase_insert"](
-                table="users", rows='{"name": "Alice"}'
-            )
+            result = tool_fns["supabase_insert"](table="users", rows='{"name": "Alice"}')
 
         assert result["table"] == "users"
         assert len(result["inserted"]) == 1

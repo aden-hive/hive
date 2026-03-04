@@ -23,7 +23,10 @@ def _get_config() -> tuple[str, str, str] | dict:
     api_key = os.getenv("MONGODB_API_KEY", "")
     data_source = os.getenv("MONGODB_DATA_SOURCE", "")
     if not url or not api_key:
-        return {"error": "MONGODB_DATA_API_URL and MONGODB_API_KEY are required", "help": "Set MONGODB_DATA_API_URL and MONGODB_API_KEY environment variables"}
+        return {
+            "error": "MONGODB_DATA_API_URL and MONGODB_API_KEY are required",
+            "help": "Set MONGODB_DATA_API_URL and MONGODB_API_KEY environment variables",
+        }
     return url, api_key, data_source
 
 

@@ -48,7 +48,10 @@ class TestCalendlyGetCurrentUser:
         }
         with (
             patch.dict("os.environ", ENV),
-            patch("aden_tools.tools.calendly_tool.calendly_tool.httpx.get", return_value=_mock_resp(data)),
+            patch(
+                "aden_tools.tools.calendly_tool.calendly_tool.httpx.get",
+                return_value=_mock_resp(data),
+            ),
         ):
             result = tool_fns["calendly_get_current_user"]()
 
@@ -81,7 +84,10 @@ class TestCalendlyListEventTypes:
         }
         with (
             patch.dict("os.environ", ENV),
-            patch("aden_tools.tools.calendly_tool.calendly_tool.httpx.get", return_value=_mock_resp(data)),
+            patch(
+                "aden_tools.tools.calendly_tool.calendly_tool.httpx.get",
+                return_value=_mock_resp(data),
+            ),
         ):
             result = tool_fns["calendly_list_event_types"](user_uri=USER_URI)
 
@@ -114,7 +120,10 @@ class TestCalendlyListScheduledEvents:
         }
         with (
             patch.dict("os.environ", ENV),
-            patch("aden_tools.tools.calendly_tool.calendly_tool.httpx.get", return_value=_mock_resp(data)),
+            patch(
+                "aden_tools.tools.calendly_tool.calendly_tool.httpx.get",
+                return_value=_mock_resp(data),
+            ),
         ):
             result = tool_fns["calendly_list_scheduled_events"](user_uri=USER_URI)
 
@@ -146,7 +155,10 @@ class TestCalendlyGetScheduledEvent:
         }
         with (
             patch.dict("os.environ", ENV),
-            patch("aden_tools.tools.calendly_tool.calendly_tool.httpx.get", return_value=_mock_resp(data)),
+            patch(
+                "aden_tools.tools.calendly_tool.calendly_tool.httpx.get",
+                return_value=_mock_resp(data),
+            ),
         ):
             result = tool_fns["calendly_get_scheduled_event"](event_uri=EVENT_URI)
 
@@ -169,9 +181,7 @@ class TestCalendlyListInvitees:
                     "email": "jane@example.com",
                     "status": "active",
                     "timezone": "America/Chicago",
-                    "questions_and_answers": [
-                        {"question": "Topic?", "answer": "Product demo"}
-                    ],
+                    "questions_and_answers": [{"question": "Topic?", "answer": "Product demo"}],
                     "created_at": "2024-03-10T12:00:00.000000Z",
                 }
             ],
@@ -179,7 +189,10 @@ class TestCalendlyListInvitees:
         }
         with (
             patch.dict("os.environ", ENV),
-            patch("aden_tools.tools.calendly_tool.calendly_tool.httpx.get", return_value=_mock_resp(data)),
+            patch(
+                "aden_tools.tools.calendly_tool.calendly_tool.httpx.get",
+                return_value=_mock_resp(data),
+            ),
         ):
             result = tool_fns["calendly_list_invitees"](event_uri=EVENT_URI)
 

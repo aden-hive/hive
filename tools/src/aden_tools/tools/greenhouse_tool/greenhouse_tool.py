@@ -107,16 +107,18 @@ def register_tools(
             return data
 
         jobs = []
-        for j in (data if isinstance(data, list) else []):
-            jobs.append({
-                "id": j.get("id"),
-                "name": j.get("name", ""),
-                "status": j.get("status", ""),
-                "departments": [d.get("name", "") for d in j.get("departments", [])],
-                "offices": [o.get("name", "") for o in j.get("offices", [])],
-                "created_at": j.get("created_at", ""),
-                "updated_at": j.get("updated_at", ""),
-            })
+        for j in data if isinstance(data, list) else []:
+            jobs.append(
+                {
+                    "id": j.get("id"),
+                    "name": j.get("name", ""),
+                    "status": j.get("status", ""),
+                    "departments": [d.get("name", "") for d in j.get("departments", [])],
+                    "offices": [o.get("name", "") for o in j.get("offices", [])],
+                    "created_at": j.get("created_at", ""),
+                    "updated_at": j.get("updated_at", ""),
+                }
+            )
         return {"jobs": jobs, "count": len(jobs)}
 
     @mcp.tool()
@@ -150,8 +152,7 @@ def register_tools(
             "departments": [d.get("name", "") for d in data.get("departments", [])],
             "offices": [o.get("name", "") for o in data.get("offices", [])],
             "openings": [
-                {"id": o.get("id"), "status": o.get("status", "")}
-                for o in data.get("openings", [])
+                {"id": o.get("id"), "status": o.get("status", "")} for o in data.get("openings", [])
             ],
             "created_at": data.get("created_at", ""),
             "updated_at": data.get("updated_at", ""),
@@ -195,17 +196,19 @@ def register_tools(
             return data
 
         candidates = []
-        for c in (data if isinstance(data, list) else []):
-            candidates.append({
-                "id": c.get("id"),
-                "first_name": c.get("first_name", ""),
-                "last_name": c.get("last_name", ""),
-                "company": c.get("company", ""),
-                "title": c.get("title", ""),
-                "tags": c.get("tags", []),
-                "application_ids": c.get("application_ids", []),
-                "created_at": c.get("created_at", ""),
-            })
+        for c in data if isinstance(data, list) else []:
+            candidates.append(
+                {
+                    "id": c.get("id"),
+                    "first_name": c.get("first_name", ""),
+                    "last_name": c.get("last_name", ""),
+                    "company": c.get("company", ""),
+                    "title": c.get("title", ""),
+                    "tags": c.get("tags", []),
+                    "application_ids": c.get("application_ids", []),
+                    "created_at": c.get("created_at", ""),
+                }
+            )
         return {"candidates": candidates, "count": len(candidates)}
 
     @mcp.tool()
@@ -285,18 +288,20 @@ def register_tools(
             return data
 
         apps = []
-        for a in (data if isinstance(data, list) else []):
+        for a in data if isinstance(data, list) else []:
             stage = a.get("current_stage") or {}
             jobs = [j.get("name", "") for j in a.get("jobs", [])]
-            apps.append({
-                "id": a.get("id"),
-                "candidate_id": a.get("candidate_id"),
-                "status": a.get("status", ""),
-                "current_stage": stage.get("name", ""),
-                "jobs": jobs,
-                "applied_at": a.get("applied_at", ""),
-                "last_activity_at": a.get("last_activity_at", ""),
-            })
+            apps.append(
+                {
+                    "id": a.get("id"),
+                    "candidate_id": a.get("candidate_id"),
+                    "status": a.get("status", ""),
+                    "current_stage": stage.get("name", ""),
+                    "jobs": jobs,
+                    "applied_at": a.get("applied_at", ""),
+                    "last_activity_at": a.get("last_activity_at", ""),
+                }
+            )
         return {"applications": apps, "count": len(apps)}
 
     @mcp.tool()

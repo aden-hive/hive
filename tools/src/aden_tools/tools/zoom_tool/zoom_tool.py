@@ -34,8 +34,7 @@ def _get_token(
         return {
             "error": "Zoom credentials not configured",
             "help": (
-                "Set ZOOM_ACCESS_TOKEN environment variable "
-                "or configure via credential store"
+                "Set ZOOM_ACCESS_TOKEN environment variable or configure via credential store"
             ),
         }
     return token

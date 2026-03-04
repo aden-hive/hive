@@ -43,7 +43,9 @@ def _get(endpoint: str, token: str, params: dict[str, Any] | None = None) -> dic
         if resp.status_code == 401:
             return {"error": "Unauthorized. Access token may be expired or invalid."}
         if resp.status_code == 403:
-            return {"error": f"Forbidden. Missing required permission scope. Details: {resp.text[:300]}"}
+            return {
+                "error": f"Forbidden. Missing required permission scope. Details: {resp.text[:300]}"
+            }
         if resp.status_code != 200:
             return {"error": f"Microsoft Graph API error {resp.status_code}: {resp.text[:500]}"}
         return resp.json()
@@ -61,7 +63,9 @@ def _post(endpoint: str, token: str, json_body: dict[str, Any]) -> dict[str, Any
         if resp.status_code == 401:
             return {"error": "Unauthorized. Access token may be expired or invalid."}
         if resp.status_code == 403:
-            return {"error": f"Forbidden. Missing required permission scope. Details: {resp.text[:300]}"}
+            return {
+                "error": f"Forbidden. Missing required permission scope. Details: {resp.text[:300]}"
+            }
         if resp.status_code not in (200, 201, 202):
             return {"error": f"Microsoft Graph API error {resp.status_code}: {resp.text[:500]}"}
         if resp.status_code == 202:
@@ -132,16 +136,18 @@ def register_tools(
         messages = []
         for msg in data.get("value", []):
             from_addr = msg.get("from", {}).get("emailAddress", {})
-            messages.append({
-                "id": msg.get("id", ""),
-                "subject": msg.get("subject", ""),
-                "from_name": from_addr.get("name", ""),
-                "from_email": from_addr.get("address", ""),
-                "receivedDateTime": msg.get("receivedDateTime", ""),
-                "isRead": msg.get("isRead", False),
-                "hasAttachments": msg.get("hasAttachments", False),
-                "bodyPreview": msg.get("bodyPreview", ""),
-            })
+            messages.append(
+                {
+                    "id": msg.get("id", ""),
+                    "subject": msg.get("subject", ""),
+                    "from_name": from_addr.get("name", ""),
+                    "from_email": from_addr.get("address", ""),
+                    "receivedDateTime": msg.get("receivedDateTime", ""),
+                    "isRead": msg.get("isRead", False),
+                    "hasAttachments": msg.get("hasAttachments", False),
+                    "bodyPreview": msg.get("bodyPreview", ""),
+                }
+            )
         return {"folder": folder, "messages": messages}
 
     @mcp.tool()
@@ -170,7 +176,10 @@ def register_tools(
 
         from_addr = data.get("from", {}).get("emailAddress", {})
         to_list = [
-            {"name": r.get("emailAddress", {}).get("name", ""), "email": r.get("emailAddress", {}).get("address", "")}
+            {
+                "name": r.get("emailAddress", {}).get("name", ""),
+                "email": r.get("emailAddress", {}).get("address", ""),
+            }
             for r in data.get("toRecipients", [])
         ]
         return {
@@ -227,7 +236,9 @@ def register_tools(
         }
         if cc:
             message["ccRecipients"] = [
-                {"emailAddress": {"address": addr.strip()}} for addr in cc.split(",") if addr.strip()
+                {"emailAddress": {"address": addr.strip()}}
+                for addr in cc.split(",")
+                if addr.strip()
             ]
 
         payload = {"message": message, "saveToSentItems": save_to_sent}
@@ -256,11 +267,13 @@ def register_tools(
 
         teams = []
         for team in data.get("value", []):
-            teams.append({
-                "id": team.get("id", ""),
-                "displayName": team.get("displayName", ""),
-                "description": team.get("description", ""),
-            })
+            teams.append(
+                {
+                    "id": team.get("id", ""),
+                    "displayName": team.get("displayName", ""),
+                    "description": team.get("description", ""),
+                }
+            )
         return {"teams": teams}
 
     @mcp.tool()
@@ -288,12 +301,14 @@ def register_tools(
 
         channels = []
         for ch in data.get("value", []):
-            channels.append({
-                "id": ch.get("id", ""),
-                "displayName": ch.get("displayName", ""),
-                "description": ch.get("description", ""),
-                "membershipType": ch.get("membershipType", ""),
-            })
+            channels.append(
+                {
+                    "id": ch.get("id", ""),
+                    "displayName": ch.get("displayName", ""),
+                    "description": ch.get("description", ""),
+                    "membershipType": ch.get("membershipType", ""),
+                }
+            )
         return {"team_id": team_id, "channels": channels}
 
     @mcp.tool()
@@ -363,13 +378,15 @@ def register_tools(
         messages = []
         for msg in data.get("value", []):
             from_info = msg.get("from", {}).get("user", {})
-            messages.append({
-                "id": msg.get("id", ""),
-                "from_name": from_info.get("displayName", ""),
-                "body": msg.get("body", {}).get("content", ""),
-                "contentType": msg.get("body", {}).get("contentType", ""),
-                "createdDateTime": msg.get("createdDateTime", ""),
-            })
+            messages.append(
+                {
+                    "id": msg.get("id", ""),
+                    "from_name": from_info.get("displayName", ""),
+                    "body": msg.get("body", {}).get("content", ""),
+                    "contentType": msg.get("body", {}).get("contentType", ""),
+                    "createdDateTime": msg.get("createdDateTime", ""),
+                }
+            )
         return {"team_id": team_id, "channel_id": channel_id, "messages": messages}
 
     # ── OneDrive ────────────────────────────────────────────────
@@ -403,15 +420,17 @@ def register_tools(
 
         files = []
         for item in data.get("value", []):
-            files.append({
-                "id": item.get("id", ""),
-                "name": item.get("name", ""),
-                "size": item.get("size", 0),
-                "lastModifiedDateTime": item.get("lastModifiedDateTime", ""),
-                "webUrl": item.get("webUrl", ""),
-                "mimeType": item.get("file", {}).get("mimeType", ""),
-                "path": item.get("parentReference", {}).get("path", ""),
-            })
+            files.append(
+                {
+                    "id": item.get("id", ""),
+                    "name": item.get("name", ""),
+                    "size": item.get("size", 0),
+                    "lastModifiedDateTime": item.get("lastModifiedDateTime", ""),
+                    "webUrl": item.get("webUrl", ""),
+                    "mimeType": item.get("file", {}).get("mimeType", ""),
+                    "path": item.get("parentReference", {}).get("path", ""),
+                }
+            )
         return {"query": query, "files": files}
 
     @mcp.tool()
@@ -446,14 +465,16 @@ def register_tools(
         items = []
         for item in data.get("value", []):
             item_type = "folder" if "folder" in item else "file"
-            items.append({
-                "id": item.get("id", ""),
-                "name": item.get("name", ""),
-                "size": item.get("size", 0),
-                "type": item_type,
-                "lastModifiedDateTime": item.get("lastModifiedDateTime", ""),
-                "webUrl": item.get("webUrl", ""),
-            })
+            items.append(
+                {
+                    "id": item.get("id", ""),
+                    "name": item.get("name", ""),
+                    "size": item.get("size", 0),
+                    "type": item_type,
+                    "lastModifiedDateTime": item.get("lastModifiedDateTime", ""),
+                    "webUrl": item.get("webUrl", ""),
+                }
+            )
         return {"path": folder_path or "/", "items": items}
 
     @mcp.tool()

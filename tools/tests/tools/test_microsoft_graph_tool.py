@@ -39,7 +39,9 @@ class TestOutlookListMessages:
         }
         with (
             patch.dict("os.environ", {"MICROSOFT_GRAPH_ACCESS_TOKEN": "test-token"}),
-            patch("aden_tools.tools.microsoft_graph_tool.microsoft_graph_tool.httpx.get") as mock_get,
+            patch(
+                "aden_tools.tools.microsoft_graph_tool.microsoft_graph_tool.httpx.get"
+            ) as mock_get,
         ):
             mock_get.return_value.status_code = 200
             mock_get.return_value.json.return_value = mock_response
@@ -72,7 +74,9 @@ class TestOutlookGetMessage:
         }
         with (
             patch.dict("os.environ", {"MICROSOFT_GRAPH_ACCESS_TOKEN": "test-token"}),
-            patch("aden_tools.tools.microsoft_graph_tool.microsoft_graph_tool.httpx.get") as mock_get,
+            patch(
+                "aden_tools.tools.microsoft_graph_tool.microsoft_graph_tool.httpx.get"
+            ) as mock_get,
         ):
             mock_get.return_value.status_code = 200
             mock_get.return_value.json.return_value = mock_response
@@ -92,7 +96,9 @@ class TestOutlookSendMail:
     def test_successful_send(self, tool_fns):
         with (
             patch.dict("os.environ", {"MICROSOFT_GRAPH_ACCESS_TOKEN": "test-token"}),
-            patch("aden_tools.tools.microsoft_graph_tool.microsoft_graph_tool.httpx.post") as mock_post,
+            patch(
+                "aden_tools.tools.microsoft_graph_tool.microsoft_graph_tool.httpx.post"
+            ) as mock_post,
         ):
             mock_post.return_value.status_code = 202
             mock_post.return_value.json.return_value = {}
@@ -108,13 +114,13 @@ class TestOutlookSendMail:
 class TestTeamsListTeams:
     def test_successful_list(self, tool_fns):
         mock_response = {
-            "value": [
-                {"id": "team-1", "displayName": "Engineering", "description": "Dev team"}
-            ]
+            "value": [{"id": "team-1", "displayName": "Engineering", "description": "Dev team"}]
         }
         with (
             patch.dict("os.environ", {"MICROSOFT_GRAPH_ACCESS_TOKEN": "test-token"}),
-            patch("aden_tools.tools.microsoft_graph_tool.microsoft_graph_tool.httpx.get") as mock_get,
+            patch(
+                "aden_tools.tools.microsoft_graph_tool.microsoft_graph_tool.httpx.get"
+            ) as mock_get,
         ):
             mock_get.return_value.status_code = 200
             mock_get.return_value.json.return_value = mock_response
@@ -143,7 +149,9 @@ class TestTeamsListChannels:
         }
         with (
             patch.dict("os.environ", {"MICROSOFT_GRAPH_ACCESS_TOKEN": "test-token"}),
-            patch("aden_tools.tools.microsoft_graph_tool.microsoft_graph_tool.httpx.get") as mock_get,
+            patch(
+                "aden_tools.tools.microsoft_graph_tool.microsoft_graph_tool.httpx.get"
+            ) as mock_get,
         ):
             mock_get.return_value.status_code = 200
             mock_get.return_value.json.return_value = mock_response
@@ -156,15 +164,15 @@ class TestTeamsListChannels:
 class TestTeamsSendChannelMessage:
     def test_missing_fields(self, tool_fns):
         with patch.dict("os.environ", {"MICROSOFT_GRAPH_ACCESS_TOKEN": "test-token"}):
-            result = tool_fns["teams_send_channel_message"](
-                team_id="", channel_id="", message=""
-            )
+            result = tool_fns["teams_send_channel_message"](team_id="", channel_id="", message="")
         assert "error" in result
 
     def test_successful_send(self, tool_fns):
         with (
             patch.dict("os.environ", {"MICROSOFT_GRAPH_ACCESS_TOKEN": "test-token"}),
-            patch("aden_tools.tools.microsoft_graph_tool.microsoft_graph_tool.httpx.post") as mock_post,
+            patch(
+                "aden_tools.tools.microsoft_graph_tool.microsoft_graph_tool.httpx.post"
+            ) as mock_post,
         ):
             mock_post.return_value.status_code = 201
             mock_post.return_value.json.return_value = {"id": "msg-123"}
@@ -199,7 +207,9 @@ class TestOneDriveSearchFiles:
         }
         with (
             patch.dict("os.environ", {"MICROSOFT_GRAPH_ACCESS_TOKEN": "test-token"}),
-            patch("aden_tools.tools.microsoft_graph_tool.microsoft_graph_tool.httpx.get") as mock_get,
+            patch(
+                "aden_tools.tools.microsoft_graph_tool.microsoft_graph_tool.httpx.get"
+            ) as mock_get,
         ):
             mock_get.return_value.status_code = 200
             mock_get.return_value.json.return_value = mock_response
@@ -219,7 +229,9 @@ class TestOneDriveUploadFile:
     def test_successful_upload(self, tool_fns):
         with (
             patch.dict("os.environ", {"MICROSOFT_GRAPH_ACCESS_TOKEN": "test-token"}),
-            patch("aden_tools.tools.microsoft_graph_tool.microsoft_graph_tool.httpx.put") as mock_put,
+            patch(
+                "aden_tools.tools.microsoft_graph_tool.microsoft_graph_tool.httpx.put"
+            ) as mock_put,
         ):
             mock_put.return_value.status_code = 201
             mock_put.return_value.json.return_value = {

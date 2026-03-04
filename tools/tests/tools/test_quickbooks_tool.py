@@ -51,7 +51,10 @@ class TestQuickbooksQuery:
         }
         with (
             patch.dict("os.environ", ENV),
-            patch("aden_tools.tools.quickbooks_tool.quickbooks_tool.httpx.get", return_value=_mock_resp(data)),
+            patch(
+                "aden_tools.tools.quickbooks_tool.quickbooks_tool.httpx.get",
+                return_value=_mock_resp(data),
+            ),
         ):
             result = tool_fns["quickbooks_query"](entity="Customer")
 
@@ -76,7 +79,10 @@ class TestQuickbooksGetEntity:
         }
         with (
             patch.dict("os.environ", ENV),
-            patch("aden_tools.tools.quickbooks_tool.quickbooks_tool.httpx.get", return_value=_mock_resp(data)),
+            patch(
+                "aden_tools.tools.quickbooks_tool.quickbooks_tool.httpx.get",
+                return_value=_mock_resp(data),
+            ),
         ):
             result = tool_fns["quickbooks_get_entity"](entity="Customer", entity_id="1")
 
@@ -100,9 +106,14 @@ class TestQuickbooksCreateCustomer:
         }
         with (
             patch.dict("os.environ", ENV),
-            patch("aden_tools.tools.quickbooks_tool.quickbooks_tool.httpx.post", return_value=_mock_resp(data)),
+            patch(
+                "aden_tools.tools.quickbooks_tool.quickbooks_tool.httpx.post",
+                return_value=_mock_resp(data),
+            ),
         ):
-            result = tool_fns["quickbooks_create_customer"](display_name="New Customer", email="new@example.com")
+            result = tool_fns["quickbooks_create_customer"](
+                display_name="New Customer", email="new@example.com"
+            )
 
         assert result["result"] == "created"
         assert result["id"] == "59"
@@ -131,7 +142,10 @@ class TestQuickbooksCreateInvoice:
         }
         with (
             patch.dict("os.environ", ENV),
-            patch("aden_tools.tools.quickbooks_tool.quickbooks_tool.httpx.post", return_value=_mock_resp(data)),
+            patch(
+                "aden_tools.tools.quickbooks_tool.quickbooks_tool.httpx.post",
+                return_value=_mock_resp(data),
+            ),
         ):
             result = tool_fns["quickbooks_create_invoice"](
                 customer_id="1",
@@ -161,7 +175,10 @@ class TestQuickbooksGetCompanyInfo:
         }
         with (
             patch.dict("os.environ", ENV),
-            patch("aden_tools.tools.quickbooks_tool.quickbooks_tool.httpx.get", return_value=_mock_resp(data)),
+            patch(
+                "aden_tools.tools.quickbooks_tool.quickbooks_tool.httpx.get",
+                return_value=_mock_resp(data),
+            ),
         ):
             result = tool_fns["quickbooks_get_company_info"]()
 

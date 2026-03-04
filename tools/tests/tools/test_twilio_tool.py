@@ -54,9 +54,13 @@ class TestTwilioSendSms:
         }
         with (
             patch.dict("os.environ", ENV),
-            patch("aden_tools.tools.twilio_tool.twilio_tool.httpx.post", return_value=_mock_resp(msg)),
+            patch(
+                "aden_tools.tools.twilio_tool.twilio_tool.httpx.post", return_value=_mock_resp(msg)
+            ),
         ):
-            result = tool_fns["twilio_send_sms"](to="+14155552671", from_number="+15017122661", body="Hello!")
+            result = tool_fns["twilio_send_sms"](
+                to="+14155552671", from_number="+15017122661", body="Hello!"
+            )
 
         assert result["sid"] == "SM123"
         assert result["status"] == "queued"
@@ -78,9 +82,13 @@ class TestTwilioSendWhatsapp:
         }
         with (
             patch.dict("os.environ", ENV),
-            patch("aden_tools.tools.twilio_tool.twilio_tool.httpx.post", return_value=_mock_resp(msg)),
+            patch(
+                "aden_tools.tools.twilio_tool.twilio_tool.httpx.post", return_value=_mock_resp(msg)
+            ),
         ):
-            result = tool_fns["twilio_send_whatsapp"](to="+14155552671", from_number="+14155238886", body="WhatsApp msg")
+            result = tool_fns["twilio_send_whatsapp"](
+                to="+14155552671", from_number="+14155238886", body="WhatsApp msg"
+            )
 
         assert result["sid"] == "SM456"
 
@@ -110,7 +118,10 @@ class TestTwilioListMessages:
         }
         with (
             patch.dict("os.environ", ENV),
-            patch("aden_tools.tools.twilio_tool.twilio_tool.httpx.get", return_value=_mock_resp(data, 200)),
+            patch(
+                "aden_tools.tools.twilio_tool.twilio_tool.httpx.get",
+                return_value=_mock_resp(data, 200),
+            ),
         ):
             result = tool_fns["twilio_list_messages"]()
 
@@ -139,7 +150,10 @@ class TestTwilioGetMessage:
         }
         with (
             patch.dict("os.environ", ENV),
-            patch("aden_tools.tools.twilio_tool.twilio_tool.httpx.get", return_value=_mock_resp(msg, 200)),
+            patch(
+                "aden_tools.tools.twilio_tool.twilio_tool.httpx.get",
+                return_value=_mock_resp(msg, 200),
+            ),
         ):
             result = tool_fns["twilio_get_message"](message_sid="SM123")
 

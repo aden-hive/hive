@@ -51,9 +51,13 @@ def _get(endpoint: str, token: str, base: str = GSC_API) -> dict[str, Any]:
         return {"error": f"Request failed: {e!s}"}
 
 
-def _post(endpoint: str, token: str, body: dict | None = None, base: str = GSC_API) -> dict[str, Any]:
+def _post(
+    endpoint: str, token: str, body: dict | None = None, base: str = GSC_API
+) -> dict[str, Any]:
     try:
-        resp = httpx.post(f"{base}/{endpoint}", headers=_headers(token), json=body or {}, timeout=30.0)
+        resp = httpx.post(
+            f"{base}/{endpoint}", headers=_headers(token), json=body or {}, timeout=30.0
+        )
         if resp.status_code == 401:
             return {"error": "Unauthorized. Check your GOOGLE_SEARCH_CONSOLE_TOKEN."}
         if resp.status_code == 403:
@@ -77,6 +81,7 @@ def _auth_error() -> dict[str, Any]:
 def _encode_site(site_url: str) -> str:
     """URL-encode the site URL for API paths."""
     import urllib.parse
+
     return urllib.parse.quote(site_url, safe="")
 
 
@@ -130,13 +135,15 @@ def register_tools(
 
         rows = []
         for r in data.get("rows", []):
-            rows.append({
-                "keys": r.get("keys", []),
-                "clicks": r.get("clicks", 0),
-                "impressions": r.get("impressions", 0),
-                "ctr": round(r.get("ctr", 0), 4),
-                "position": round(r.get("position", 0), 1),
-            })
+            rows.append(
+                {
+                    "keys": r.get("keys", []),
+                    "clicks": r.get("clicks", 0),
+                    "impressions": r.get("impressions", 0),
+                    "ctr": round(r.get("ctr", 0), 4),
+                    "position": round(r.get("position", 0), 1),
+                }
+            )
         return {"site_url": site_url, "rows": rows, "count": len(rows)}
 
     @mcp.tool()
@@ -157,10 +164,12 @@ def register_tools(
 
         sites = []
         for s in data.get("siteEntry", []):
-            sites.append({
-                "site_url": s.get("siteUrl", ""),
-                "permission_level": s.get("permissionLevel", ""),
-            })
+            sites.append(
+                {
+                    "site_url": s.get("siteUrl", ""),
+                    "permission_level": s.get("permissionLevel", ""),
+                }
+            )
         return {"sites": sites}
 
     @mcp.tool()
@@ -187,14 +196,16 @@ def register_tools(
 
         sitemaps = []
         for s in data.get("sitemap", []):
-            sitemaps.append({
-                "path": s.get("path", ""),
-                "last_submitted": s.get("lastSubmitted", ""),
-                "is_pending": s.get("isPending", False),
-                "is_index": s.get("isSitemapsIndex", False),
-                "warnings": s.get("warnings", 0),
-                "errors": s.get("errors", 0),
-            })
+            sitemaps.append(
+                {
+                    "path": s.get("path", ""),
+                    "last_submitted": s.get("lastSubmitted", ""),
+                    "is_pending": s.get("isPending", False),
+                    "is_index": s.get("isSitemapsIndex", False),
+                    "warnings": s.get("warnings", 0),
+                    "errors": s.get("errors", 0),
+                }
+            )
         return {"site_url": site_url, "sitemaps": sitemaps}
 
     @mcp.tool()

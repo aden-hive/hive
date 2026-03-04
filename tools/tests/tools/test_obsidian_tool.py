@@ -50,7 +50,10 @@ class TestObsidianReadNote:
         }
         with (
             patch.dict("os.environ", ENV),
-            patch("aden_tools.tools.obsidian_tool.obsidian_tool.httpx.get", return_value=_mock_resp(data)),
+            patch(
+                "aden_tools.tools.obsidian_tool.obsidian_tool.httpx.get",
+                return_value=_mock_resp(data),
+            ),
         ):
             result = tool_fns["obsidian_read_note"](path="Notes/meeting.md")
 
@@ -111,14 +114,23 @@ class TestObsidianSearch:
                 "filename": "Daily/2025-03-01.md",
                 "score": 0.85,
                 "matches": [
-                    {"match": {"start": 45, "end": 52}, "context": "...attended the team meeting to discuss..."},
-                    {"match": {"start": 120, "end": 127}, "context": "...follow-up meeting scheduled for..."},
+                    {
+                        "match": {"start": 45, "end": 52},
+                        "context": "...attended the team meeting to discuss...",
+                    },
+                    {
+                        "match": {"start": 120, "end": 127},
+                        "context": "...follow-up meeting scheduled for...",
+                    },
                 ],
             }
         ]
         with (
             patch.dict("os.environ", ENV),
-            patch("aden_tools.tools.obsidian_tool.obsidian_tool.httpx.post", return_value=_mock_resp(data)),
+            patch(
+                "aden_tools.tools.obsidian_tool.obsidian_tool.httpx.post",
+                return_value=_mock_resp(data),
+            ),
         ):
             result = tool_fns["obsidian_search"](query="meeting")
 
@@ -132,7 +144,10 @@ class TestObsidianListFiles:
         data = ["Daily/", "Projects/", "README.md", "Templates/"]
         with (
             patch.dict("os.environ", ENV),
-            patch("aden_tools.tools.obsidian_tool.obsidian_tool.httpx.get", return_value=_mock_resp(data)),
+            patch(
+                "aden_tools.tools.obsidian_tool.obsidian_tool.httpx.get",
+                return_value=_mock_resp(data),
+            ),
         ):
             result = tool_fns["obsidian_list_files"]()
 
@@ -151,7 +166,10 @@ class TestObsidianGetActive:
         }
         with (
             patch.dict("os.environ", ENV),
-            patch("aden_tools.tools.obsidian_tool.obsidian_tool.httpx.get", return_value=_mock_resp(data)),
+            patch(
+                "aden_tools.tools.obsidian_tool.obsidian_tool.httpx.get",
+                return_value=_mock_resp(data),
+            ),
         ):
             result = tool_fns["obsidian_get_active"]()
 

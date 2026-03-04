@@ -46,7 +46,10 @@ class TestPowerBIListWorkspaces:
         }
         with (
             patch.dict("os.environ", ENV),
-            patch("aden_tools.tools.powerbi_tool.powerbi_tool.httpx.get", return_value=_mock_resp(data)),
+            patch(
+                "aden_tools.tools.powerbi_tool.powerbi_tool.httpx.get",
+                return_value=_mock_resp(data),
+            ),
         ):
             result = tool_fns["powerbi_list_workspaces"]()
 
@@ -77,7 +80,10 @@ class TestPowerBIListDatasets:
         }
         with (
             patch.dict("os.environ", ENV),
-            patch("aden_tools.tools.powerbi_tool.powerbi_tool.httpx.get", return_value=_mock_resp(data)),
+            patch(
+                "aden_tools.tools.powerbi_tool.powerbi_tool.httpx.get",
+                return_value=_mock_resp(data),
+            ),
         ):
             result = tool_fns["powerbi_list_datasets"](workspace_id="ws-123")
 
@@ -107,7 +113,10 @@ class TestPowerBIListReports:
         }
         with (
             patch.dict("os.environ", ENV),
-            patch("aden_tools.tools.powerbi_tool.powerbi_tool.httpx.get", return_value=_mock_resp(data)),
+            patch(
+                "aden_tools.tools.powerbi_tool.powerbi_tool.httpx.get",
+                return_value=_mock_resp(data),
+            ),
         ):
             result = tool_fns["powerbi_list_reports"](workspace_id="ws-123")
 
@@ -128,9 +137,7 @@ class TestPowerBIRefreshDataset:
             patch.dict("os.environ", ENV),
             patch("aden_tools.tools.powerbi_tool.powerbi_tool.httpx.post", return_value=resp),
         ):
-            result = tool_fns["powerbi_refresh_dataset"](
-                workspace_id="ws-123", dataset_id="ds-456"
-            )
+            result = tool_fns["powerbi_refresh_dataset"](workspace_id="ws-123", dataset_id="ds-456")
 
         assert result["result"] == "accepted"
 
@@ -155,7 +162,10 @@ class TestPowerBIGetRefreshHistory:
         }
         with (
             patch.dict("os.environ", ENV),
-            patch("aden_tools.tools.powerbi_tool.powerbi_tool.httpx.get", return_value=_mock_resp(data)),
+            patch(
+                "aden_tools.tools.powerbi_tool.powerbi_tool.httpx.get",
+                return_value=_mock_resp(data),
+            ),
         ):
             result = tool_fns["powerbi_get_refresh_history"](
                 workspace_id="ws-123", dataset_id="ds-456"

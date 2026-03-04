@@ -39,7 +39,10 @@ class TestHuggingFaceSearchModels:
         ]
         with (
             patch.dict("os.environ", ENV),
-            patch("aden_tools.tools.huggingface_tool.huggingface_tool.httpx.get", return_value=mock_resp),
+            patch(
+                "aden_tools.tools.huggingface_tool.huggingface_tool.httpx.get",
+                return_value=mock_resp,
+            ),
         ):
             result = tool_fns["huggingface_search_models"](query="llama")
 
@@ -70,7 +73,10 @@ class TestHuggingFaceGetModel:
         }
         with (
             patch.dict("os.environ", ENV),
-            patch("aden_tools.tools.huggingface_tool.huggingface_tool.httpx.get", return_value=mock_resp),
+            patch(
+                "aden_tools.tools.huggingface_tool.huggingface_tool.httpx.get",
+                return_value=mock_resp,
+            ),
         ):
             result = tool_fns["huggingface_get_model"](model_id="meta-llama/Llama-3-8B")
 
@@ -94,7 +100,10 @@ class TestHuggingFaceSearchDatasets:
         ]
         with (
             patch.dict("os.environ", ENV),
-            patch("aden_tools.tools.huggingface_tool.huggingface_tool.httpx.get", return_value=mock_resp),
+            patch(
+                "aden_tools.tools.huggingface_tool.huggingface_tool.httpx.get",
+                return_value=mock_resp,
+            ),
         ):
             result = tool_fns["huggingface_search_datasets"](query="squad")
 
@@ -123,7 +132,10 @@ class TestHuggingFaceGetDataset:
         }
         with (
             patch.dict("os.environ", ENV),
-            patch("aden_tools.tools.huggingface_tool.huggingface_tool.httpx.get", return_value=mock_resp),
+            patch(
+                "aden_tools.tools.huggingface_tool.huggingface_tool.httpx.get",
+                return_value=mock_resp,
+            ),
         ):
             result = tool_fns["huggingface_get_dataset"](dataset_id="openai/gsm8k")
 
@@ -146,7 +158,10 @@ class TestHuggingFaceSearchSpaces:
         ]
         with (
             patch.dict("os.environ", ENV),
-            patch("aden_tools.tools.huggingface_tool.huggingface_tool.httpx.get", return_value=mock_resp),
+            patch(
+                "aden_tools.tools.huggingface_tool.huggingface_tool.httpx.get",
+                return_value=mock_resp,
+            ),
         ):
             result = tool_fns["huggingface_search_spaces"](query="chatbot")
 
@@ -173,7 +188,10 @@ class TestHuggingFaceWhoami:
         }
         with (
             patch.dict("os.environ", ENV),
-            patch("aden_tools.tools.huggingface_tool.huggingface_tool.httpx.get", return_value=mock_resp),
+            patch(
+                "aden_tools.tools.huggingface_tool.huggingface_tool.httpx.get",
+                return_value=mock_resp,
+            ),
         ):
             result = tool_fns["huggingface_whoami"]()
 

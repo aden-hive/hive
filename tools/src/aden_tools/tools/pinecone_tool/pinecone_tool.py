@@ -119,15 +119,17 @@ def register_tools(
 
         indexes = []
         for idx in data.get("indexes", []):
-            indexes.append({
-                "name": idx.get("name", ""),
-                "dimension": idx.get("dimension", 0),
-                "metric": idx.get("metric", ""),
-                "host": idx.get("host", ""),
-                "vector_type": idx.get("vector_type", "dense"),
-                "state": (idx.get("status") or {}).get("state", ""),
-                "ready": (idx.get("status") or {}).get("ready", False),
-            })
+            indexes.append(
+                {
+                    "name": idx.get("name", ""),
+                    "dimension": idx.get("dimension", 0),
+                    "metric": idx.get("metric", ""),
+                    "host": idx.get("host", ""),
+                    "vector_type": idx.get("vector_type", "dense"),
+                    "state": (idx.get("status") or {}).get("state", ""),
+                    "ready": (idx.get("status") or {}).get("ready", False),
+                }
+            )
         return {"indexes": indexes, "count": len(indexes)}
 
     @mcp.tool()

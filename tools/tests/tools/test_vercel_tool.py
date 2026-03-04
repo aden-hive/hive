@@ -111,9 +111,7 @@ class TestVercelListProjectDomains:
 
     def test_successful_list(self, tool_fns):
         mock_resp = {
-            "domains": [
-                {"name": "example.com", "redirect": "", "gitBranch": "", "verified": True}
-            ]
+            "domains": [{"name": "example.com", "redirect": "", "gitBranch": "", "verified": True}]
         }
         with (
             patch.dict("os.environ", ENV),

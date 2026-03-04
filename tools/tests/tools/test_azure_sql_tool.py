@@ -52,7 +52,10 @@ class TestAzureSQLListServers:
         }
         with (
             patch.dict("os.environ", ENV),
-            patch("aden_tools.tools.azure_sql_tool.azure_sql_tool.httpx.get", return_value=_mock_resp(data)),
+            patch(
+                "aden_tools.tools.azure_sql_tool.azure_sql_tool.httpx.get",
+                return_value=_mock_resp(data),
+            ),
         ):
             result = tool_fns["azure_sql_list_servers"]()
 
@@ -81,7 +84,10 @@ class TestAzureSQLGetServer:
         }
         with (
             patch.dict("os.environ", ENV),
-            patch("aden_tools.tools.azure_sql_tool.azure_sql_tool.httpx.get", return_value=_mock_resp(data)),
+            patch(
+                "aden_tools.tools.azure_sql_tool.azure_sql_tool.httpx.get",
+                return_value=_mock_resp(data),
+            ),
         ):
             result = tool_fns["azure_sql_get_server"](resource_group="rg", server_name="myserver")
 
@@ -116,9 +122,14 @@ class TestAzureSQLListDatabases:
         }
         with (
             patch.dict("os.environ", ENV),
-            patch("aden_tools.tools.azure_sql_tool.azure_sql_tool.httpx.get", return_value=_mock_resp(data)),
+            patch(
+                "aden_tools.tools.azure_sql_tool.azure_sql_tool.httpx.get",
+                return_value=_mock_resp(data),
+            ),
         ):
-            result = tool_fns["azure_sql_list_databases"](resource_group="rg", server_name="myserver")
+            result = tool_fns["azure_sql_list_databases"](
+                resource_group="rg", server_name="myserver"
+            )
 
         assert result["count"] == 1
         assert result["databases"][0]["name"] == "mydb"
@@ -129,7 +140,9 @@ class TestAzureSQLListDatabases:
 class TestAzureSQLGetDatabase:
     def test_missing_params(self, tool_fns):
         with patch.dict("os.environ", ENV):
-            result = tool_fns["azure_sql_get_database"](resource_group="", server_name="", database_name="")
+            result = tool_fns["azure_sql_get_database"](
+                resource_group="", server_name="", database_name=""
+            )
         assert "error" in result
 
     def test_successful_get(self, tool_fns):
@@ -148,7 +161,10 @@ class TestAzureSQLGetDatabase:
         }
         with (
             patch.dict("os.environ", ENV),
-            patch("aden_tools.tools.azure_sql_tool.azure_sql_tool.httpx.get", return_value=_mock_resp(data)),
+            patch(
+                "aden_tools.tools.azure_sql_tool.azure_sql_tool.httpx.get",
+                return_value=_mock_resp(data),
+            ),
         ):
             result = tool_fns["azure_sql_get_database"](
                 resource_group="rg", server_name="myserver", database_name="mydb"
@@ -179,9 +195,14 @@ class TestAzureSQLListFirewallRules:
         }
         with (
             patch.dict("os.environ", ENV),
-            patch("aden_tools.tools.azure_sql_tool.azure_sql_tool.httpx.get", return_value=_mock_resp(data)),
+            patch(
+                "aden_tools.tools.azure_sql_tool.azure_sql_tool.httpx.get",
+                return_value=_mock_resp(data),
+            ),
         ):
-            result = tool_fns["azure_sql_list_firewall_rules"](resource_group="rg", server_name="myserver")
+            result = tool_fns["azure_sql_list_firewall_rules"](
+                resource_group="rg", server_name="myserver"
+            )
 
         assert result["count"] == 1
         assert result["firewall_rules"][0]["name"] == "AllowAll"

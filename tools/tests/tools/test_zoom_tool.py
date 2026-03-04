@@ -87,7 +87,19 @@ class TestZoomListMeetings:
         data = {
             "total_records": 50,
             "next_page_token": "token123",
-            "meetings": [{"id": 1, "uuid": "a", "topic": "M1", "type": 2, "start_time": "", "duration": 30, "timezone": "", "join_url": "", "created_at": ""}],
+            "meetings": [
+                {
+                    "id": 1,
+                    "uuid": "a",
+                    "topic": "M1",
+                    "type": 2,
+                    "start_time": "",
+                    "duration": 30,
+                    "timezone": "",
+                    "join_url": "",
+                    "created_at": "",
+                }
+            ],
         }
         with (
             patch.dict("os.environ", ENV),
@@ -158,7 +170,10 @@ class TestZoomCreateMeeting:
         }
         with (
             patch.dict("os.environ", ENV),
-            patch("aden_tools.tools.zoom_tool.zoom_tool.httpx.post", return_value=_mock_resp(data, 201)),
+            patch(
+                "aden_tools.tools.zoom_tool.zoom_tool.httpx.post",
+                return_value=_mock_resp(data, 201),
+            ),
         ):
             result = tool_fns["zoom_create_meeting"](
                 topic="New Meeting",
@@ -222,9 +237,7 @@ class TestZoomListRecordings:
             patch.dict("os.environ", ENV),
             patch("aden_tools.tools.zoom_tool.zoom_tool.httpx.get", return_value=_mock_resp(data)),
         ):
-            result = tool_fns["zoom_list_recordings"](
-                from_date="2025-01-01", to_date="2025-01-31"
-            )
+            result = tool_fns["zoom_list_recordings"](from_date="2025-01-01", to_date="2025-01-31")
 
         assert result["total_records"] == 1
         assert result["recordings"][0]["recording_count"] == 2

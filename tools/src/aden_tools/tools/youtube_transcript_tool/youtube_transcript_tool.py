@@ -44,7 +44,9 @@ def register_tools(
         try:
             from youtube_transcript_api import YouTubeTranscriptApi
         except ImportError:
-            return {"error": "youtube-transcript-api package not installed. Run: pip install youtube-transcript-api"}
+            return {
+                "error": "youtube-transcript-api package not installed. Run: pip install youtube-transcript-api"
+            }
 
         try:
             ytt_api = YouTubeTranscriptApi()
@@ -85,19 +87,23 @@ def register_tools(
         try:
             from youtube_transcript_api import YouTubeTranscriptApi
         except ImportError:
-            return {"error": "youtube-transcript-api package not installed. Run: pip install youtube-transcript-api"}
+            return {
+                "error": "youtube-transcript-api package not installed. Run: pip install youtube-transcript-api"
+            }
 
         try:
             ytt_api = YouTubeTranscriptApi()
             transcript_list = ytt_api.list(video_id)
             transcripts = []
             for t in transcript_list:
-                transcripts.append({
-                    "language": t.language,
-                    "language_code": t.language_code,
-                    "is_generated": t.is_generated,
-                    "is_translatable": t.is_translatable,
-                })
+                transcripts.append(
+                    {
+                        "language": t.language,
+                        "language_code": t.language_code,
+                        "is_generated": t.is_generated,
+                        "is_translatable": t.is_translatable,
+                    }
+                )
             return {
                 "video_id": video_id,
                 "transcripts": transcripts,

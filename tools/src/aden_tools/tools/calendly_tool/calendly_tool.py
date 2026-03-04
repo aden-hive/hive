@@ -46,7 +46,10 @@ def register_tools(mcp: FastMCP, credentials: Any = None) -> None:
         """
         headers = _get_headers()
         if headers is None:
-            return {"error": "CALENDLY_PAT is required", "help": "Set CALENDLY_PAT environment variable"}
+            return {
+                "error": "CALENDLY_PAT is required",
+                "help": "Set CALENDLY_PAT environment variable",
+            }
 
         data = _get("/users/me", headers)
         if "error" in data:
@@ -77,7 +80,10 @@ def register_tools(mcp: FastMCP, credentials: Any = None) -> None:
         """
         headers = _get_headers()
         if headers is None:
-            return {"error": "CALENDLY_PAT is required", "help": "Set CALENDLY_PAT environment variable"}
+            return {
+                "error": "CALENDLY_PAT is required",
+                "help": "Set CALENDLY_PAT environment variable",
+            }
         if not user_uri:
             return {"error": "user_uri is required"}
 
@@ -129,7 +135,10 @@ def register_tools(mcp: FastMCP, credentials: Any = None) -> None:
         """
         headers = _get_headers()
         if headers is None:
-            return {"error": "CALENDLY_PAT is required", "help": "Set CALENDLY_PAT environment variable"}
+            return {
+                "error": "CALENDLY_PAT is required",
+                "help": "Set CALENDLY_PAT environment variable",
+            }
         if not user_uri:
             return {"error": "user_uri is required"}
 
@@ -175,7 +184,10 @@ def register_tools(mcp: FastMCP, credentials: Any = None) -> None:
         """
         headers = _get_headers()
         if headers is None:
-            return {"error": "CALENDLY_PAT is required", "help": "Set CALENDLY_PAT environment variable"}
+            return {
+                "error": "CALENDLY_PAT is required",
+                "help": "Set CALENDLY_PAT environment variable",
+            }
         if not event_uri:
             return {"error": "event_uri is required"}
 
@@ -213,7 +225,10 @@ def register_tools(mcp: FastMCP, credentials: Any = None) -> None:
         """
         headers = _get_headers()
         if headers is None:
-            return {"error": "CALENDLY_PAT is required", "help": "Set CALENDLY_PAT environment variable"}
+            return {
+                "error": "CALENDLY_PAT is required",
+                "help": "Set CALENDLY_PAT environment variable",
+            }
         if not event_uri:
             return {"error": "event_uri is required"}
 

@@ -53,7 +53,10 @@ class TestSheetsGetSpreadsheet:
         }
         with (
             patch.dict("os.environ", ENV),
-            patch("aden_tools.tools.google_sheets_tool.google_sheets_tool.httpx.get", return_value=_mock_resp(data)),
+            patch(
+                "aden_tools.tools.google_sheets_tool.google_sheets_tool.httpx.get",
+                return_value=_mock_resp(data),
+            ),
         ):
             result = tool_fns["sheets_get_spreadsheet"](spreadsheet_id="abc123")
 
@@ -85,7 +88,10 @@ class TestSheetsReadRange:
         }
         with (
             patch.dict("os.environ", ENV),
-            patch("aden_tools.tools.google_sheets_tool.google_sheets_tool.httpx.get", return_value=_mock_resp(data)),
+            patch(
+                "aden_tools.tools.google_sheets_tool.google_sheets_tool.httpx.get",
+                return_value=_mock_resp(data),
+            ),
         ):
             result = tool_fns["sheets_read_range"](spreadsheet_id="abc123", range="Sheet1!A1:B3")
 
@@ -109,9 +115,14 @@ class TestSheetsBatchRead:
         }
         with (
             patch.dict("os.environ", ENV),
-            patch("aden_tools.tools.google_sheets_tool.google_sheets_tool.httpx.get", return_value=_mock_resp(data)),
+            patch(
+                "aden_tools.tools.google_sheets_tool.google_sheets_tool.httpx.get",
+                return_value=_mock_resp(data),
+            ),
         ):
-            result = tool_fns["sheets_batch_read"](spreadsheet_id="abc123", ranges="Sheet1!A1:B2,Sheet2!A1:A2")
+            result = tool_fns["sheets_batch_read"](
+                spreadsheet_id="abc123", ranges="Sheet1!A1:B2,Sheet2!A1:A2"
+            )
 
         assert result["count"] == 2
         assert result["ranges"][0]["row_count"] == 2

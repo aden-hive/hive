@@ -52,7 +52,10 @@ class TestShopifyListOrders:
         }
         with (
             patch.dict("os.environ", ENV),
-            patch("aden_tools.tools.shopify_tool.shopify_tool.httpx.get", return_value=_mock_resp(data)),
+            patch(
+                "aden_tools.tools.shopify_tool.shopify_tool.httpx.get",
+                return_value=_mock_resp(data),
+            ),
         ):
             result = tool_fns["shopify_list_orders"]()
 
@@ -106,7 +109,10 @@ class TestShopifyGetOrder:
         }
         with (
             patch.dict("os.environ", ENV),
-            patch("aden_tools.tools.shopify_tool.shopify_tool.httpx.get", return_value=_mock_resp(data)),
+            patch(
+                "aden_tools.tools.shopify_tool.shopify_tool.httpx.get",
+                return_value=_mock_resp(data),
+            ),
         ):
             result = tool_fns["shopify_get_order"](order_id="450789469")
 
@@ -134,7 +140,10 @@ class TestShopifyListProducts:
         }
         with (
             patch.dict("os.environ", ENV),
-            patch("aden_tools.tools.shopify_tool.shopify_tool.httpx.get", return_value=_mock_resp(data)),
+            patch(
+                "aden_tools.tools.shopify_tool.shopify_tool.httpx.get",
+                return_value=_mock_resp(data),
+            ),
         ):
             result = tool_fns["shopify_list_products"]()
 
@@ -175,12 +184,17 @@ class TestShopifyGetProduct:
                     }
                 ],
                 "options": [{"name": "Size"}, {"name": "Color"}],
-                "images": [{"id": 850703190, "src": "https://cdn.shopify.com/test.jpg", "position": 1}],
+                "images": [
+                    {"id": 850703190, "src": "https://cdn.shopify.com/test.jpg", "position": 1}
+                ],
             }
         }
         with (
             patch.dict("os.environ", ENV),
-            patch("aden_tools.tools.shopify_tool.shopify_tool.httpx.get", return_value=_mock_resp(data)),
+            patch(
+                "aden_tools.tools.shopify_tool.shopify_tool.httpx.get",
+                return_value=_mock_resp(data),
+            ),
         ):
             result = tool_fns["shopify_get_product"](product_id="632910392")
 
@@ -210,7 +224,10 @@ class TestShopifyListCustomers:
         }
         with (
             patch.dict("os.environ", ENV),
-            patch("aden_tools.tools.shopify_tool.shopify_tool.httpx.get", return_value=_mock_resp(data)),
+            patch(
+                "aden_tools.tools.shopify_tool.shopify_tool.httpx.get",
+                return_value=_mock_resp(data),
+            ),
         ):
             result = tool_fns["shopify_list_customers"]()
 
@@ -243,7 +260,10 @@ class TestShopifySearchCustomers:
         }
         with (
             patch.dict("os.environ", ENV),
-            patch("aden_tools.tools.shopify_tool.shopify_tool.httpx.get", return_value=_mock_resp(data)),
+            patch(
+                "aden_tools.tools.shopify_tool.shopify_tool.httpx.get",
+                return_value=_mock_resp(data),
+            ),
         ):
             result = tool_fns["shopify_search_customers"](query="email:bob@example.com")
 

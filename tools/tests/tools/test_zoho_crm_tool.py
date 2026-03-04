@@ -152,9 +152,7 @@ class TestZohoCrmAddNote:
         assert "error" in result
 
     def test_successful_add(self, tool_fns):
-        mock_resp = {
-            "data": [{"status": "success", "details": {"id": "note-1"}}]
-        }
+        mock_resp = {"data": [{"status": "success", "details": {"id": "note-1"}}]}
         with (
             patch.dict("os.environ", ENV),
             patch("aden_tools.tools.zoho_crm_tool.zoho_crm_tool.httpx.post") as mock_post,

@@ -79,9 +79,7 @@ class TestBrevoSendEmail:
             mock_response = MagicMock()
             mock_response.status_code = 201
             mock_response.content = b'{"messageId": "<abc123@smtp-relay.brevo.com>"}'
-            mock_response.json.return_value = {
-                "messageId": "<abc123@smtp-relay.brevo.com>"
-            }
+            mock_response.json.return_value = {"messageId": "<abc123@smtp-relay.brevo.com>"}
             mock_post.return_value = mock_response
 
             result = fn(
@@ -105,9 +103,7 @@ class TestBrevoSendEmail:
             mock_response = MagicMock()
             mock_response.status_code = 201
             mock_response.content = b'{"messageId": "<abc123@smtp-relay.brevo.com>"}'
-            mock_response.json.return_value = {
-                "messageId": "<abc123@smtp-relay.brevo.com>"
-            }
+            mock_response.json.return_value = {"messageId": "<abc123@smtp-relay.brevo.com>"}
             mock_post.return_value = mock_response
 
             fn(
@@ -201,6 +197,7 @@ class TestBrevoSendEmail:
     def test_send_email_timeout(self, get_tool_fn, monkeypatch):
         """Timeout returns error."""
         import httpx
+
         monkeypatch.setenv("BREVO_API_KEY", "test-api-key")
         fn = get_tool_fn("brevo_send_email")
 
@@ -284,6 +281,7 @@ class TestBrevoSendSMS:
     def test_send_sms_timeout(self, get_tool_fn, monkeypatch):
         """Timeout returns error."""
         import httpx
+
         monkeypatch.setenv("BREVO_API_KEY", "test-api-key")
         fn = get_tool_fn("brevo_send_sms")
 
@@ -364,6 +362,7 @@ class TestBrevoCreateContact:
     def test_create_contact_timeout(self, get_tool_fn, monkeypatch):
         """Timeout returns error."""
         import httpx
+
         monkeypatch.setenv("BREVO_API_KEY", "test-api-key")
         fn = get_tool_fn("brevo_create_contact")
 
@@ -447,6 +446,7 @@ class TestBrevoGetContact:
     def test_get_contact_timeout(self, get_tool_fn, monkeypatch):
         """Timeout returns error."""
         import httpx
+
         monkeypatch.setenv("BREVO_API_KEY", "test-api-key")
         fn = get_tool_fn("brevo_get_contact")
 
@@ -524,6 +524,7 @@ class TestBrevoUpdateContact:
     def test_update_contact_timeout(self, get_tool_fn, monkeypatch):
         """Timeout returns error."""
         import httpx
+
         monkeypatch.setenv("BREVO_API_KEY", "test-api-key")
         fn = get_tool_fn("brevo_update_contact")
 
@@ -556,9 +557,7 @@ class TestBrevoGetEmailStats:
                 "email": "user@example.com",
                 "subject": "Hello",
                 "date": "2024-01-15T10:30:00Z",
-                "events": [
-                    {"name": "delivered", "time": "2024-01-15T10:30:05Z"}
-                ],
+                "events": [{"name": "delivered", "time": "2024-01-15T10:30:05Z"}],
             }
             mock_get.return_value = mock_response
 
@@ -599,6 +598,7 @@ class TestBrevoGetEmailStats:
     def test_get_email_stats_timeout(self, get_tool_fn, monkeypatch):
         """Timeout returns error."""
         import httpx
+
         monkeypatch.setenv("BREVO_API_KEY", "test-api-key")
         fn = get_tool_fn("brevo_get_email_stats")
 

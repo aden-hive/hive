@@ -50,7 +50,10 @@ class TestSalesforceSOQLQuery:
         }
         with (
             patch.dict("os.environ", ENV),
-            patch("aden_tools.tools.salesforce_tool.salesforce_tool.httpx.get", return_value=_mock_resp(data)),
+            patch(
+                "aden_tools.tools.salesforce_tool.salesforce_tool.httpx.get",
+                return_value=_mock_resp(data),
+            ),
         ):
             result = tool_fns["salesforce_soql_query"](query="SELECT Id, Name FROM Lead")
 
@@ -67,7 +70,10 @@ class TestSalesforceSOQLQuery:
         }
         with (
             patch.dict("os.environ", ENV),
-            patch("aden_tools.tools.salesforce_tool.salesforce_tool.httpx.get", return_value=_mock_resp(data)),
+            patch(
+                "aden_tools.tools.salesforce_tool.salesforce_tool.httpx.get",
+                return_value=_mock_resp(data),
+            ),
         ):
             result = tool_fns["salesforce_soql_query"](query="SELECT Id FROM Lead")
 
@@ -91,9 +97,14 @@ class TestSalesforceGetRecord:
         }
         with (
             patch.dict("os.environ", ENV),
-            patch("aden_tools.tools.salesforce_tool.salesforce_tool.httpx.get", return_value=_mock_resp(data)),
+            patch(
+                "aden_tools.tools.salesforce_tool.salesforce_tool.httpx.get",
+                return_value=_mock_resp(data),
+            ),
         ):
-            result = tool_fns["salesforce_get_record"](object_type="Contact", record_id="003xx000001")
+            result = tool_fns["salesforce_get_record"](
+                object_type="Contact", record_id="003xx000001"
+            )
 
         assert result["Id"] == "003xx000001"
         assert result["Email"] == "jane@example.com"
@@ -109,7 +120,10 @@ class TestSalesforceCreateRecord:
         data = {"id": "00Qxx000001", "success": True, "errors": []}
         with (
             patch.dict("os.environ", ENV),
-            patch("aden_tools.tools.salesforce_tool.salesforce_tool.httpx.post", return_value=_mock_resp(data, 201)),
+            patch(
+                "aden_tools.tools.salesforce_tool.salesforce_tool.httpx.post",
+                return_value=_mock_resp(data, 201),
+            ),
         ):
             result = tool_fns["salesforce_create_record"](
                 object_type="Lead",
@@ -126,7 +140,9 @@ class TestSalesforceUpdateRecord:
         resp.status_code = 204
         with (
             patch.dict("os.environ", ENV),
-            patch("aden_tools.tools.salesforce_tool.salesforce_tool.httpx.patch", return_value=resp),
+            patch(
+                "aden_tools.tools.salesforce_tool.salesforce_tool.httpx.patch", return_value=resp
+            ),
         ):
             result = tool_fns["salesforce_update_record"](
                 object_type="Lead",
@@ -169,7 +185,10 @@ class TestSalesforceDescribeObject:
         }
         with (
             patch.dict("os.environ", ENV),
-            patch("aden_tools.tools.salesforce_tool.salesforce_tool.httpx.get", return_value=_mock_resp(data)),
+            patch(
+                "aden_tools.tools.salesforce_tool.salesforce_tool.httpx.get",
+                return_value=_mock_resp(data),
+            ),
         ):
             result = tool_fns["salesforce_describe_object"](object_type="Lead")
 
@@ -182,13 +201,30 @@ class TestSalesforceListObjects:
     def test_successful_list(self, tool_fns):
         data = {
             "sobjects": [
-                {"name": "Lead", "label": "Lead", "keyPrefix": "00Q", "queryable": True, "createable": True, "custom": False},
-                {"name": "Account", "label": "Account", "keyPrefix": "001", "queryable": True, "createable": True, "custom": False},
+                {
+                    "name": "Lead",
+                    "label": "Lead",
+                    "keyPrefix": "00Q",
+                    "queryable": True,
+                    "createable": True,
+                    "custom": False,
+                },
+                {
+                    "name": "Account",
+                    "label": "Account",
+                    "keyPrefix": "001",
+                    "queryable": True,
+                    "createable": True,
+                    "custom": False,
+                },
             ]
         }
         with (
             patch.dict("os.environ", ENV),
-            patch("aden_tools.tools.salesforce_tool.salesforce_tool.httpx.get", return_value=_mock_resp(data)),
+            patch(
+                "aden_tools.tools.salesforce_tool.salesforce_tool.httpx.get",
+                return_value=_mock_resp(data),
+            ),
         ):
             result = tool_fns["salesforce_list_objects"]()
 

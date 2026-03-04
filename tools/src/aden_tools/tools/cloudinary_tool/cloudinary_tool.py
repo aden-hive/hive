@@ -22,7 +22,9 @@ if TYPE_CHECKING:
     from aden_tools.credentials import CredentialStoreAdapter
 
 
-def _get_credentials(credentials: CredentialStoreAdapter | None) -> tuple[str | None, str | None, str | None]:
+def _get_credentials(
+    credentials: CredentialStoreAdapter | None,
+) -> tuple[str | None, str | None, str | None]:
     """Return (cloud_name, api_key, api_secret)."""
     if credentials is not None:
         cloud = credentials.get("cloudinary_cloud_name")
@@ -45,9 +47,7 @@ def _auth_header(api_key: str, api_secret: str) -> str:
     return f"Basic {encoded}"
 
 
-def _request(
-    method: str, url: str, api_key: str, api_secret: str, **kwargs: Any
-) -> dict[str, Any]:
+def _request(method: str, url: str, api_key: str, api_secret: str, **kwargs: Any) -> dict[str, Any]:
     """Make a request to the Cloudinary API."""
     headers = kwargs.pop("headers", {})
     headers["Authorization"] = _auth_header(api_key, api_secret)
@@ -165,15 +165,17 @@ def register_tools(
 
         resources = []
         for r in data.get("resources", []):
-            resources.append({
-                "public_id": r.get("public_id", ""),
-                "secure_url": r.get("secure_url", ""),
-                "format": r.get("format", ""),
-                "bytes": r.get("bytes", 0),
-                "width": r.get("width"),
-                "height": r.get("height"),
-                "created_at": r.get("created_at", ""),
-            })
+            resources.append(
+                {
+                    "public_id": r.get("public_id", ""),
+                    "secure_url": r.get("secure_url", ""),
+                    "format": r.get("format", ""),
+                    "bytes": r.get("bytes", 0),
+                    "width": r.get("width"),
+                    "height": r.get("height"),
+                    "created_at": r.get("created_at", ""),
+                }
+            )
         return {"resources": resources, "count": len(resources)}
 
     @mcp.tool()
@@ -269,20 +271,24 @@ def register_tools(
             "expression": expression,
             "max_results": max(1, min(max_results, 500)),
         }
-        data = _request("post", url, key, secret, json=body, headers={"Content-Type": "application/json"})
+        data = _request(
+            "post", url, key, secret, json=body, headers={"Content-Type": "application/json"}
+        )
         if "error" in data:
             return data
 
         resources = []
         for r in data.get("resources", []):
-            resources.append({
-                "public_id": r.get("public_id", ""),
-                "secure_url": r.get("secure_url", ""),
-                "format": r.get("format", ""),
-                "resource_type": r.get("resource_type", ""),
-                "bytes": r.get("bytes", 0),
-                "created_at": r.get("created_at", ""),
-            })
+            resources.append(
+                {
+                    "public_id": r.get("public_id", ""),
+                    "secure_url": r.get("secure_url", ""),
+                    "format": r.get("format", ""),
+                    "resource_type": r.get("resource_type", ""),
+                    "bytes": r.get("bytes", 0),
+                    "created_at": r.get("created_at", ""),
+                }
+            )
         return {
             "resources": resources,
             "total_count": data.get("total_count", 0),

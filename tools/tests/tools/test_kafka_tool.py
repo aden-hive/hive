@@ -53,7 +53,9 @@ class TestKafkaListTopics:
         }
         with (
             patch.dict("os.environ", ENV),
-            patch("aden_tools.tools.kafka_tool.kafka_tool.httpx.get", return_value=_mock_resp(data)),
+            patch(
+                "aden_tools.tools.kafka_tool.kafka_tool.httpx.get", return_value=_mock_resp(data)
+            ),
         ):
             result = tool_fns["kafka_list_topics"]()
 
@@ -78,7 +80,9 @@ class TestKafkaGetTopic:
         }
         with (
             patch.dict("os.environ", ENV),
-            patch("aden_tools.tools.kafka_tool.kafka_tool.httpx.get", return_value=_mock_resp(data)),
+            patch(
+                "aden_tools.tools.kafka_tool.kafka_tool.httpx.get", return_value=_mock_resp(data)
+            ),
         ):
             result = tool_fns["kafka_get_topic"](topic_name="orders")
 
@@ -100,7 +104,9 @@ class TestKafkaCreateTopic:
         }
         with (
             patch.dict("os.environ", ENV),
-            patch("aden_tools.tools.kafka_tool.kafka_tool.httpx.post", return_value=_mock_resp(data)),
+            patch(
+                "aden_tools.tools.kafka_tool.kafka_tool.httpx.post", return_value=_mock_resp(data)
+            ),
         ):
             result = tool_fns["kafka_create_topic"](topic_name="new-topic", partitions_count=3)
 
@@ -123,7 +129,9 @@ class TestKafkaProduceMessage:
         }
         with (
             patch.dict("os.environ", ENV),
-            patch("aden_tools.tools.kafka_tool.kafka_tool.httpx.post", return_value=_mock_resp(data)),
+            patch(
+                "aden_tools.tools.kafka_tool.kafka_tool.httpx.post", return_value=_mock_resp(data)
+            ),
         ):
             result = tool_fns["kafka_produce_message"](
                 topic_name="orders", value='{"order_id": 123}', key="order-123"
@@ -147,7 +155,9 @@ class TestKafkaListConsumerGroups:
         }
         with (
             patch.dict("os.environ", ENV),
-            patch("aden_tools.tools.kafka_tool.kafka_tool.httpx.get", return_value=_mock_resp(data)),
+            patch(
+                "aden_tools.tools.kafka_tool.kafka_tool.httpx.get", return_value=_mock_resp(data)
+            ),
         ):
             result = tool_fns["kafka_list_consumer_groups"]()
 
@@ -173,7 +183,9 @@ class TestKafkaGetConsumerGroupLag:
         }
         with (
             patch.dict("os.environ", ENV),
-            patch("aden_tools.tools.kafka_tool.kafka_tool.httpx.get", return_value=_mock_resp(data)),
+            patch(
+                "aden_tools.tools.kafka_tool.kafka_tool.httpx.get", return_value=_mock_resp(data)
+            ),
         ):
             result = tool_fns["kafka_get_consumer_group_lag"](consumer_group_id="my-group")
 

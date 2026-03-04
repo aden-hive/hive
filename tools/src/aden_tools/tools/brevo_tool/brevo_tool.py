@@ -189,9 +189,7 @@ def register_tools(
         if credentials is not None:
             key = credentials.get("brevo")
             if key is not None and not isinstance(key, str):
-                raise TypeError(
-                    f"Expected string from credentials, got {type(key).__name__}"
-                )
+                raise TypeError(f"Expected string from credentials, got {type(key).__name__}")
             return key
         return os.getenv("BREVO_API_KEY")
 

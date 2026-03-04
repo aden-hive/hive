@@ -75,7 +75,12 @@ class TestPlaidGetBalance:
                     "account_id": "acc-1",
                     "name": "Savings",
                     "type": "depository",
-                    "balances": {"available": 5000, "current": 5000, "limit": None, "iso_currency_code": "USD"},
+                    "balances": {
+                        "available": 5000,
+                        "current": 5000,
+                        "limit": None,
+                        "iso_currency_code": "USD",
+                    },
                 }
             ],
         }
@@ -130,9 +135,7 @@ class TestPlaidSyncTransactions:
 class TestPlaidGetTransactions:
     def test_missing_params(self, tool_fns):
         with patch.dict("os.environ", ENV):
-            result = tool_fns["plaid_get_transactions"](
-                access_token="", start_date="", end_date=""
-            )
+            result = tool_fns["plaid_get_transactions"](access_token="", start_date="", end_date="")
         assert "error" in result
 
     def test_successful_get(self, tool_fns):

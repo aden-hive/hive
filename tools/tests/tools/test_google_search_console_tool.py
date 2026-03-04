@@ -27,9 +27,7 @@ class TestGscSearchAnalytics:
 
     def test_missing_params(self, tool_fns):
         with patch.dict("os.environ", ENV):
-            result = tool_fns["gsc_search_analytics"](
-                site_url="", start_date="", end_date=""
-            )
+            result = tool_fns["gsc_search_analytics"](site_url="", start_date="", end_date="")
         assert "error" in result
 
     def test_successful_query(self, tool_fns):
@@ -46,7 +44,9 @@ class TestGscSearchAnalytics:
         }
         with (
             patch.dict("os.environ", ENV),
-            patch("aden_tools.tools.google_search_console_tool.google_search_console_tool.httpx.post") as mock_post,
+            patch(
+                "aden_tools.tools.google_search_console_tool.google_search_console_tool.httpx.post"
+            ) as mock_post,
         ):
             mock_post.return_value.status_code = 200
             mock_post.return_value.json.return_value = mock_resp
@@ -61,13 +61,13 @@ class TestGscSearchAnalytics:
 class TestGscListSites:
     def test_successful_list(self, tool_fns):
         mock_resp = {
-            "siteEntry": [
-                {"siteUrl": "https://example.com", "permissionLevel": "siteOwner"}
-            ]
+            "siteEntry": [{"siteUrl": "https://example.com", "permissionLevel": "siteOwner"}]
         }
         with (
             patch.dict("os.environ", ENV),
-            patch("aden_tools.tools.google_search_console_tool.google_search_console_tool.httpx.get") as mock_get,
+            patch(
+                "aden_tools.tools.google_search_console_tool.google_search_console_tool.httpx.get"
+            ) as mock_get,
         ):
             mock_get.return_value.status_code = 200
             mock_get.return_value.json.return_value = mock_resp
@@ -98,7 +98,9 @@ class TestGscListSitemaps:
         }
         with (
             patch.dict("os.environ", ENV),
-            patch("aden_tools.tools.google_search_console_tool.google_search_console_tool.httpx.get") as mock_get,
+            patch(
+                "aden_tools.tools.google_search_console_tool.google_search_console_tool.httpx.get"
+            ) as mock_get,
         ):
             mock_get.return_value.status_code = 200
             mock_get.return_value.json.return_value = mock_resp
@@ -131,7 +133,9 @@ class TestGscInspectUrl:
         }
         with (
             patch.dict("os.environ", ENV),
-            patch("aden_tools.tools.google_search_console_tool.google_search_console_tool.httpx.post") as mock_post,
+            patch(
+                "aden_tools.tools.google_search_console_tool.google_search_console_tool.httpx.post"
+            ) as mock_post,
         ):
             mock_post.return_value.status_code = 200
             mock_post.return_value.json.return_value = mock_resp
@@ -153,7 +157,9 @@ class TestGscSubmitSitemap:
     def test_successful_submit(self, tool_fns):
         with (
             patch.dict("os.environ", ENV),
-            patch("aden_tools.tools.google_search_console_tool.google_search_console_tool.httpx.put") as mock_put,
+            patch(
+                "aden_tools.tools.google_search_console_tool.google_search_console_tool.httpx.put"
+            ) as mock_put,
         ):
             mock_put.return_value.status_code = 204
             result = tool_fns["gsc_submit_sitemap"](

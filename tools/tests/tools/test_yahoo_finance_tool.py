@@ -70,6 +70,7 @@ class TestYahooFinanceHistory:
 
         # Create a mock DataFrame
         import pandas as pd
+
         mock_df = pd.DataFrame(
             {
                 "Open": [174.0, 175.0],

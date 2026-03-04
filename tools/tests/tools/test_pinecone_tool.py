@@ -68,7 +68,9 @@ class TestPineconeCreateIndex:
         }
         with (
             patch.dict("os.environ", ENV),
-            patch("aden_tools.tools.pinecone_tool.pinecone_tool.httpx.post", return_value=mock_resp),
+            patch(
+                "aden_tools.tools.pinecone_tool.pinecone_tool.httpx.post", return_value=mock_resp
+            ),
         ):
             result = tool_fns["pinecone_create_index"](name="new-idx", dimension=768)
 
@@ -118,7 +120,9 @@ class TestPineconeDeleteIndex:
         mock_resp.content = b""
         with (
             patch.dict("os.environ", ENV),
-            patch("aden_tools.tools.pinecone_tool.pinecone_tool.httpx.delete", return_value=mock_resp),
+            patch(
+                "aden_tools.tools.pinecone_tool.pinecone_tool.httpx.delete", return_value=mock_resp
+            ),
         ):
             result = tool_fns["pinecone_delete_index"](index_name="old-index")
 
@@ -138,7 +142,9 @@ class TestPineconeUpsertVectors:
         mock_resp.json.return_value = {"upsertedCount": 2}
         with (
             patch.dict("os.environ", ENV),
-            patch("aden_tools.tools.pinecone_tool.pinecone_tool.httpx.post", return_value=mock_resp),
+            patch(
+                "aden_tools.tools.pinecone_tool.pinecone_tool.httpx.post", return_value=mock_resp
+            ),
         ):
             result = tool_fns["pinecone_upsert_vectors"](
                 index_host="my-index-abc.svc.pinecone.io",
@@ -170,7 +176,9 @@ class TestPineconeQueryVectors:
         }
         with (
             patch.dict("os.environ", ENV),
-            patch("aden_tools.tools.pinecone_tool.pinecone_tool.httpx.post", return_value=mock_resp),
+            patch(
+                "aden_tools.tools.pinecone_tool.pinecone_tool.httpx.post", return_value=mock_resp
+            ),
         ):
             result = tool_fns["pinecone_query_vectors"](
                 index_host="my-index-abc.svc.pinecone.io",
@@ -223,7 +231,9 @@ class TestPineconeDeleteVectors:
         mock_resp.json.return_value = {}
         with (
             patch.dict("os.environ", ENV),
-            patch("aden_tools.tools.pinecone_tool.pinecone_tool.httpx.post", return_value=mock_resp),
+            patch(
+                "aden_tools.tools.pinecone_tool.pinecone_tool.httpx.post", return_value=mock_resp
+            ),
         ):
             result = tool_fns["pinecone_delete_vectors"](
                 index_host="my-index-abc.svc.pinecone.io",
@@ -255,7 +265,9 @@ class TestPineconeIndexStats:
         }
         with (
             patch.dict("os.environ", ENV),
-            patch("aden_tools.tools.pinecone_tool.pinecone_tool.httpx.post", return_value=mock_resp),
+            patch(
+                "aden_tools.tools.pinecone_tool.pinecone_tool.httpx.post", return_value=mock_resp
+            ),
         ):
             result = tool_fns["pinecone_index_stats"](
                 index_host="my-index-abc.svc.pinecone.io",

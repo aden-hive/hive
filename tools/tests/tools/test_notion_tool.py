@@ -52,7 +52,9 @@ class TestNotionSearch:
         }
         with (
             patch.dict("os.environ", ENV),
-            patch("aden_tools.tools.notion_tool.notion_tool.httpx.post", return_value=_mock_resp(data)),
+            patch(
+                "aden_tools.tools.notion_tool.notion_tool.httpx.post", return_value=_mock_resp(data)
+            ),
         ):
             result = tool_fns["notion_search"](query="My Page")
 
@@ -86,7 +88,9 @@ class TestNotionGetPage:
         }
         with (
             patch.dict("os.environ", ENV),
-            patch("aden_tools.tools.notion_tool.notion_tool.httpx.get", return_value=_mock_resp(data)),
+            patch(
+                "aden_tools.tools.notion_tool.notion_tool.httpx.get", return_value=_mock_resp(data)
+            ),
         ):
             result = tool_fns["notion_get_page"](page_id="page-1")
 
@@ -104,7 +108,10 @@ class TestNotionCreatePage:
         data = {"id": "new-page", "url": "https://notion.so/new-page"}
         with (
             patch.dict("os.environ", ENV),
-            patch("aden_tools.tools.notion_tool.notion_tool.httpx.post", return_value=_mock_resp(data, 201)),
+            patch(
+                "aden_tools.tools.notion_tool.notion_tool.httpx.post",
+                return_value=_mock_resp(data, 201),
+            ),
         ):
             result = tool_fns["notion_create_page"](parent_database_id="db-1", title="New Page")
 
@@ -138,7 +145,9 @@ class TestNotionQueryDatabase:
         }
         with (
             patch.dict("os.environ", ENV),
-            patch("aden_tools.tools.notion_tool.notion_tool.httpx.post", return_value=_mock_resp(data)),
+            patch(
+                "aden_tools.tools.notion_tool.notion_tool.httpx.post", return_value=_mock_resp(data)
+            ),
         ):
             result = tool_fns["notion_query_database"](database_id="db-1")
 
@@ -166,7 +175,9 @@ class TestNotionGetDatabase:
         }
         with (
             patch.dict("os.environ", ENV),
-            patch("aden_tools.tools.notion_tool.notion_tool.httpx.get", return_value=_mock_resp(data)),
+            patch(
+                "aden_tools.tools.notion_tool.notion_tool.httpx.get", return_value=_mock_resp(data)
+            ),
         ):
             result = tool_fns["notion_get_database"](database_id="db-1")
 

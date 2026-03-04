@@ -21,7 +21,10 @@ def _get_config() -> tuple[dict, str] | dict:
     token = os.getenv("AZURE_SQL_ACCESS_TOKEN", "")
     sub_id = os.getenv("AZURE_SUBSCRIPTION_ID", "")
     if not token or not sub_id:
-        return {"error": "AZURE_SQL_ACCESS_TOKEN and AZURE_SUBSCRIPTION_ID are required", "help": "Set AZURE_SQL_ACCESS_TOKEN and AZURE_SUBSCRIPTION_ID environment variables"}
+        return {
+            "error": "AZURE_SQL_ACCESS_TOKEN and AZURE_SUBSCRIPTION_ID are required",
+            "help": "Set AZURE_SQL_ACCESS_TOKEN and AZURE_SUBSCRIPTION_ID environment variables",
+        }
     headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
     return headers, sub_id
 
@@ -149,9 +152,7 @@ def register_tools(mcp: FastMCP, credentials: Any = None) -> None:
         }
 
     @mcp.tool()
-    def azure_sql_get_database(
-        resource_group: str, server_name: str, database_name: str
-    ) -> dict:
+    def azure_sql_get_database(resource_group: str, server_name: str, database_name: str) -> dict:
         """Get details of a specific Azure SQL database.
 
         Args:
@@ -174,9 +175,7 @@ def register_tools(mcp: FastMCP, credentials: Any = None) -> None:
         return _extract_database(data)
 
     @mcp.tool()
-    def azure_sql_list_firewall_rules(
-        resource_group: str, server_name: str
-    ) -> dict:
+    def azure_sql_list_firewall_rules(resource_group: str, server_name: str) -> dict:
         """List firewall rules for an Azure SQL server.
 
         Args:

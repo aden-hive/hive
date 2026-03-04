@@ -157,17 +157,19 @@ def register_tools(
 
         deals = []
         for d in data.get("data") or []:
-            deals.append({
-                "id": d.get("id"),
-                "title": d.get("title", ""),
-                "value": d.get("value", 0),
-                "currency": d.get("currency", ""),
-                "status": d.get("status", ""),
-                "person_name": (d.get("person_id") or {}).get("name", ""),
-                "org_name": (d.get("org_id") or {}).get("name", ""),
-                "stage_id": d.get("stage_id"),
-                "add_time": d.get("add_time", ""),
-            })
+            deals.append(
+                {
+                    "id": d.get("id"),
+                    "title": d.get("title", ""),
+                    "value": d.get("value", 0),
+                    "currency": d.get("currency", ""),
+                    "status": d.get("status", ""),
+                    "person_name": (d.get("person_id") or {}).get("name", ""),
+                    "org_name": (d.get("org_id") or {}).get("name", ""),
+                    "stage_id": d.get("stage_id"),
+                    "add_time": d.get("add_time", ""),
+                }
+            )
         return {"deals": deals, "count": len(deals)}
 
     @mcp.tool()
@@ -293,14 +295,16 @@ def register_tools(
         for p in data.get("data") or []:
             emails = p.get("email", [])
             phones = p.get("phone", [])
-            persons.append({
-                "id": p.get("id"),
-                "name": p.get("name", ""),
-                "email": emails[0].get("value", "") if emails else "",
-                "phone": phones[0].get("value", "") if phones else "",
-                "org_name": (p.get("org_id") or {}).get("name", ""),
-                "open_deals_count": p.get("open_deals_count", 0),
-            })
+            persons.append(
+                {
+                    "id": p.get("id"),
+                    "name": p.get("name", ""),
+                    "email": emails[0].get("value", "") if emails else "",
+                    "phone": phones[0].get("value", "") if phones else "",
+                    "org_name": (p.get("org_id") or {}).get("name", ""),
+                    "open_deals_count": p.get("open_deals_count", 0),
+                }
+            )
         return {"persons": persons, "count": len(persons)}
 
     @mcp.tool()
@@ -336,13 +340,15 @@ def register_tools(
             p = item.get("item", {})
             emails = p.get("emails", [])
             phones = p.get("phones", [])
-            results.append({
-                "id": p.get("id"),
-                "name": p.get("name", ""),
-                "email": emails[0] if emails else "",
-                "phone": phones[0] if phones else "",
-                "org_name": (p.get("organization") or {}).get("name", ""),
-            })
+            results.append(
+                {
+                    "id": p.get("id"),
+                    "name": p.get("name", ""),
+                    "email": emails[0] if emails else "",
+                    "phone": phones[0] if phones else "",
+                    "org_name": (p.get("organization") or {}).get("name", ""),
+                }
+            )
         return {"query": query, "results": results}
 
     # ── Organizations ────────────────────────────────────────────
@@ -375,13 +381,15 @@ def register_tools(
 
         orgs = []
         for o in data.get("data") or []:
-            orgs.append({
-                "id": o.get("id"),
-                "name": o.get("name", ""),
-                "address": o.get("address", ""),
-                "open_deals_count": o.get("open_deals_count", 0),
-                "people_count": o.get("people_count", 0),
-            })
+            orgs.append(
+                {
+                    "id": o.get("id"),
+                    "name": o.get("name", ""),
+                    "address": o.get("address", ""),
+                    "open_deals_count": o.get("open_deals_count", 0),
+                    "people_count": o.get("people_count", 0),
+                }
+            )
         return {"organizations": orgs, "count": len(orgs)}
 
     # ── Activities ───────────────────────────────────────────────
@@ -426,18 +434,20 @@ def register_tools(
 
         activities = []
         for a in data.get("data") or []:
-            activities.append({
-                "id": a.get("id"),
-                "subject": a.get("subject", ""),
-                "type": a.get("type", ""),
-                "done": a.get("done", False),
-                "due_date": a.get("due_date", ""),
-                "due_time": a.get("due_time", ""),
-                "deal_title": a.get("deal_title", ""),
-                "person_name": a.get("person_name", ""),
-                "org_name": a.get("org_name", ""),
-                "note": a.get("note", "")[:200] if a.get("note") else "",
-            })
+            activities.append(
+                {
+                    "id": a.get("id"),
+                    "subject": a.get("subject", ""),
+                    "type": a.get("type", ""),
+                    "done": a.get("done", False),
+                    "due_date": a.get("due_date", ""),
+                    "due_time": a.get("due_time", ""),
+                    "deal_title": a.get("deal_title", ""),
+                    "person_name": a.get("person_name", ""),
+                    "org_name": a.get("org_name", ""),
+                    "note": a.get("note", "")[:200] if a.get("note") else "",
+                }
+            )
         return {"activities": activities, "count": len(activities)}
 
     # ── Pipelines ────────────────────────────────────────────────
@@ -462,13 +472,15 @@ def register_tools(
 
         pipelines = []
         for p in data.get("data") or []:
-            pipelines.append({
-                "id": p.get("id"),
-                "name": p.get("name", ""),
-                "active": p.get("active", False),
-                "deal_probability": p.get("deal_probability", False),
-                "order_nr": p.get("order_nr", 0),
-            })
+            pipelines.append(
+                {
+                    "id": p.get("id"),
+                    "name": p.get("name", ""),
+                    "active": p.get("active", False),
+                    "deal_probability": p.get("deal_probability", False),
+                    "order_nr": p.get("order_nr", 0),
+                }
+            )
         return {"pipelines": pipelines}
 
     @mcp.tool()
@@ -498,13 +510,15 @@ def register_tools(
 
         stages = []
         for s in data.get("data") or []:
-            stages.append({
-                "id": s.get("id"),
-                "name": s.get("name", ""),
-                "pipeline_id": s.get("pipeline_id"),
-                "order_nr": s.get("order_nr", 0),
-                "active_flag": s.get("active_flag", True),
-            })
+            stages.append(
+                {
+                    "id": s.get("id"),
+                    "name": s.get("name", ""),
+                    "pipeline_id": s.get("pipeline_id"),
+                    "order_nr": s.get("order_nr", 0),
+                    "active_flag": s.get("active_flag", True),
+                }
+            )
         return {"stages": stages}
 
     # ── Notes ────────────────────────────────────────────────────

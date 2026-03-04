@@ -26,7 +26,10 @@ def _get_config() -> tuple[str, str, str] | dict:
     secret_key = os.getenv("AWS_SECRET_ACCESS_KEY", "")
     region = os.getenv("AWS_REGION", "us-east-1")
     if not access_key or not secret_key:
-        return {"error": "AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY are required", "help": "Set AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY environment variables"}
+        return {
+            "error": "AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY are required",
+            "help": "Set AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY environment variables",
+        }
     return access_key, secret_key, region
 
 
@@ -72,9 +75,7 @@ def _sign_request(
 
     # Canonical headers
     signed_header_names = sorted(headers.keys())
-    canonical_headers = "".join(
-        f"{k}:{headers[k].strip()}\n" for k in signed_header_names
-    )
+    canonical_headers = "".join(f"{k}:{headers[k].strip()}\n" for k in signed_header_names)
     signed_headers = ";".join(signed_header_names)
 
     canonical_request = (
@@ -131,7 +132,7 @@ def _parse_xml(text: str, ns: str = "") -> ET.Element:
     if ns:
         for elem in root.iter():
             if elem.tag.startswith(f"{{{ns}}}"):
-                elem.tag = elem.tag[len(f"{{{ns}}}"):]
+                elem.tag = elem.tag[len(f"{{{ns}}}") :]
     return root
 
 
@@ -158,10 +159,12 @@ def register_tools(mcp: FastMCP, credentials: Any = None) -> None:
         for b in root.findall(".//Bucket"):
             name_el = b.find("Name")
             date_el = b.find("CreationDate")
-            buckets.append({
-                "name": name_el.text if name_el is not None else None,
-                "creation_date": date_el.text if date_el is not None else None,
-            })
+            buckets.append(
+                {
+                    "name": name_el.text if name_el is not None else None,
+                    "creation_date": date_el.text if date_el is not None else None,
+                }
+            )
         return {"count": len(buckets), "buckets": buckets}
 
     @mcp.tool()
@@ -202,11 +205,13 @@ def register_tools(mcp: FastMCP, credentials: Any = None) -> None:
             key_el = c.find("Key")
             size_el = c.find("Size")
             modified_el = c.find("LastModified")
-            objects.append({
-                "key": key_el.text if key_el is not None else None,
-                "size": int(size_el.text) if size_el is not None else 0,
-                "last_modified": modified_el.text if modified_el is not None else None,
-            })
+            objects.append(
+                {
+                    "key": key_el.text if key_el is not None else None,
+                    "size": int(size_el.text) if size_el is not None else 0,
+                    "last_modified": modified_el.text if modified_el is not None else None,
+                }
+            )
         prefixes = []
         for cp in root.findall("CommonPrefixes"):
             p_el = cp.find("Prefix")
@@ -297,7 +302,9 @@ def register_tools(mcp: FastMCP, credentials: Any = None) -> None:
         body = content.encode("utf-8")
         extra = {"content-type": content_type}
 
-        resp = _s3_request("PUT", bucket, key, access_key, secret_key, region, body=body, extra_headers=extra)
+        resp = _s3_request(
+            "PUT", bucket, key, access_key, secret_key, region, body=body, extra_headers=extra
+        )
         if resp.status_code >= 400:
             return {"error": f"HTTP {resp.status_code}: {resp.text[:500]}"}
 

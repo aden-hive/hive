@@ -38,9 +38,7 @@ def _headers(token: str) -> dict[str, str]:
     }
 
 
-def _request(
-    method: str, path: str, token: str, **kwargs: Any
-) -> dict[str, Any]:
+def _request(method: str, path: str, token: str, **kwargs: Any) -> dict[str, Any]:
     """Make a request to the Notion API."""
     try:
         resp = getattr(httpx, method)(
@@ -130,14 +128,16 @@ def register_tools(
             elif obj_type == "database":
                 title_parts = item.get("title", [])
                 title = "".join(p.get("text", {}).get("content", "") for p in title_parts)
-            results.append({
-                "id": item.get("id", ""),
-                "object": obj_type,
-                "title": title,
-                "url": item.get("url", ""),
-                "created_time": item.get("created_time", ""),
-                "last_edited_time": item.get("last_edited_time", ""),
-            })
+            results.append(
+                {
+                    "id": item.get("id", ""),
+                    "object": obj_type,
+                    "title": title,
+                    "url": item.get("url", ""),
+                    "created_time": item.get("created_time", ""),
+                    "last_edited_time": item.get("last_edited_time", ""),
+                }
+            )
         return {"results": results, "count": len(results), "has_more": data.get("has_more", False)}
 
     @mcp.tool()
@@ -245,9 +245,7 @@ def register_tools(
                 {
                     "object": "block",
                     "type": "paragraph",
-                    "paragraph": {
-                        "rich_text": [{"type": "text", "text": {"content": content}}]
-                    },
+                    "paragraph": {"rich_text": [{"type": "text", "text": {"content": content}}]},
                 }
             ]
 
@@ -303,13 +301,15 @@ def register_tools(
         pages = []
         for item in data.get("results", []):
             title = _extract_title(item.get("properties", {}))
-            pages.append({
-                "id": item.get("id", ""),
-                "title": title,
-                "url": item.get("url", ""),
-                "created_time": item.get("created_time", ""),
-                "last_edited_time": item.get("last_edited_time", ""),
-            })
+            pages.append(
+                {
+                    "id": item.get("id", ""),
+                    "title": title,
+                    "url": item.get("url", ""),
+                    "created_time": item.get("created_time", ""),
+                    "last_edited_time": item.get("last_edited_time", ""),
+                }
+            )
         return {"pages": pages, "count": len(pages), "has_more": data.get("has_more", False)}
 
     @mcp.tool()

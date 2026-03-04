@@ -63,7 +63,17 @@ class TestN8nListWorkflows:
 
     def test_pagination(self, tool_fns):
         data = {
-            "data": [{"id": "wf1", "name": "WF1", "active": True, "createdAt": "", "updatedAt": "", "tags": [], "nodes": []}],
+            "data": [
+                {
+                    "id": "wf1",
+                    "name": "WF1",
+                    "active": True,
+                    "createdAt": "",
+                    "updatedAt": "",
+                    "tags": [],
+                    "nodes": [],
+                }
+            ],
             "nextCursor": "cursor123",
         }
         with (

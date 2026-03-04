@@ -50,7 +50,10 @@ class TestSnowflakeExecuteSQL:
         }
         with (
             patch.dict("os.environ", ENV),
-            patch("aden_tools.tools.snowflake_tool.snowflake_tool.httpx.post", return_value=_mock_resp(data)),
+            patch(
+                "aden_tools.tools.snowflake_tool.snowflake_tool.httpx.post",
+                return_value=_mock_resp(data),
+            ),
         ):
             result = tool_fns["snowflake_execute_sql"](statement="SELECT * FROM users")
 
@@ -66,7 +69,10 @@ class TestSnowflakeExecuteSQL:
         }
         with (
             patch.dict("os.environ", ENV),
-            patch("aden_tools.tools.snowflake_tool.snowflake_tool.httpx.post", return_value=_mock_resp(data, 202)),
+            patch(
+                "aden_tools.tools.snowflake_tool.snowflake_tool.httpx.post",
+                return_value=_mock_resp(data, 202),
+            ),
         ):
             result = tool_fns["snowflake_execute_sql"](statement="SELECT * FROM big_table")
 
@@ -91,7 +97,10 @@ class TestSnowflakeGetStatementStatus:
         }
         with (
             patch.dict("os.environ", ENV),
-            patch("aden_tools.tools.snowflake_tool.snowflake_tool.httpx.get", return_value=_mock_resp(data)),
+            patch(
+                "aden_tools.tools.snowflake_tool.snowflake_tool.httpx.get",
+                return_value=_mock_resp(data),
+            ),
         ):
             result = tool_fns["snowflake_get_statement_status"](statement_handle="handle-123")
 
@@ -105,7 +114,10 @@ class TestSnowflakeGetStatementStatus:
         }
         with (
             patch.dict("os.environ", ENV),
-            patch("aden_tools.tools.snowflake_tool.snowflake_tool.httpx.get", return_value=_mock_resp(data, 202)),
+            patch(
+                "aden_tools.tools.snowflake_tool.snowflake_tool.httpx.get",
+                return_value=_mock_resp(data, 202),
+            ),
         ):
             result = tool_fns["snowflake_get_statement_status"](statement_handle="handle-456")
 
@@ -118,7 +130,10 @@ class TestSnowflakeGetStatementStatus:
         }
         with (
             patch.dict("os.environ", ENV),
-            patch("aden_tools.tools.snowflake_tool.snowflake_tool.httpx.get", return_value=_mock_resp(data, 422)),
+            patch(
+                "aden_tools.tools.snowflake_tool.snowflake_tool.httpx.get",
+                return_value=_mock_resp(data, 422),
+            ),
         ):
             result = tool_fns["snowflake_get_statement_status"](statement_handle="handle-789")
 
@@ -136,7 +151,10 @@ class TestSnowflakeCancelStatement:
         data = {"statementHandle": "handle-123"}
         with (
             patch.dict("os.environ", ENV),
-            patch("aden_tools.tools.snowflake_tool.snowflake_tool.httpx.post", return_value=_mock_resp(data)),
+            patch(
+                "aden_tools.tools.snowflake_tool.snowflake_tool.httpx.post",
+                return_value=_mock_resp(data),
+            ),
         ):
             result = tool_fns["snowflake_cancel_statement"](statement_handle="handle-123")
 

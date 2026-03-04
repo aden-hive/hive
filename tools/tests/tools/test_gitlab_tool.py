@@ -47,7 +47,10 @@ class TestGitlabListProjects:
         ]
         with (
             patch.dict("os.environ", ENV),
-            patch("aden_tools.tools.gitlab_tool.gitlab_tool.httpx.get", return_value=_mock_resp(projects)),
+            patch(
+                "aden_tools.tools.gitlab_tool.gitlab_tool.httpx.get",
+                return_value=_mock_resp(projects),
+            ),
         ):
             result = tool_fns["gitlab_list_projects"]()
 
@@ -79,7 +82,10 @@ class TestGitlabGetProject:
         }
         with (
             patch.dict("os.environ", ENV),
-            patch("aden_tools.tools.gitlab_tool.gitlab_tool.httpx.get", return_value=_mock_resp(project)),
+            patch(
+                "aden_tools.tools.gitlab_tool.gitlab_tool.httpx.get",
+                return_value=_mock_resp(project),
+            ),
         ):
             result = tool_fns["gitlab_get_project"](project_id="1")
 
@@ -109,7 +115,10 @@ class TestGitlabListIssues:
         ]
         with (
             patch.dict("os.environ", ENV),
-            patch("aden_tools.tools.gitlab_tool.gitlab_tool.httpx.get", return_value=_mock_resp(issues)),
+            patch(
+                "aden_tools.tools.gitlab_tool.gitlab_tool.httpx.get",
+                return_value=_mock_resp(issues),
+            ),
         ):
             result = tool_fns["gitlab_list_issues"](project_id="1")
 
@@ -141,7 +150,9 @@ class TestGitlabGetIssue:
         }
         with (
             patch.dict("os.environ", ENV),
-            patch("aden_tools.tools.gitlab_tool.gitlab_tool.httpx.get", return_value=_mock_resp(issue)),
+            patch(
+                "aden_tools.tools.gitlab_tool.gitlab_tool.httpx.get", return_value=_mock_resp(issue)
+            ),
         ):
             result = tool_fns["gitlab_get_issue"](project_id="1", issue_iid=1)
 
@@ -156,10 +167,17 @@ class TestGitlabCreateIssue:
         assert "error" in result
 
     def test_successful_create(self, tool_fns):
-        issue = {"iid": 2, "title": "New issue", "web_url": "https://gitlab.com/user/project/-/issues/2"}
+        issue = {
+            "iid": 2,
+            "title": "New issue",
+            "web_url": "https://gitlab.com/user/project/-/issues/2",
+        }
         with (
             patch.dict("os.environ", ENV),
-            patch("aden_tools.tools.gitlab_tool.gitlab_tool.httpx.post", return_value=_mock_resp(issue, 201)),
+            patch(
+                "aden_tools.tools.gitlab_tool.gitlab_tool.httpx.post",
+                return_value=_mock_resp(issue, 201),
+            ),
         ):
             result = tool_fns["gitlab_create_issue"](project_id="1", title="New issue")
 
@@ -189,7 +207,9 @@ class TestGitlabListMergeRequests:
         ]
         with (
             patch.dict("os.environ", ENV),
-            patch("aden_tools.tools.gitlab_tool.gitlab_tool.httpx.get", return_value=_mock_resp(mrs)),
+            patch(
+                "aden_tools.tools.gitlab_tool.gitlab_tool.httpx.get", return_value=_mock_resp(mrs)
+            ),
         ):
             result = tool_fns["gitlab_list_merge_requests"](project_id="1")
 

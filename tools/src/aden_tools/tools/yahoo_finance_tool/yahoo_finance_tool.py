@@ -21,6 +21,7 @@ from fastmcp import FastMCP
 def _get_ticker(symbol: str) -> Any:
     """Lazily import yfinance and create a Ticker object."""
     import yfinance as yf
+
     return yf.Ticker(symbol)
 
 
@@ -96,14 +97,16 @@ def register_tools(mcp: FastMCP) -> None:
 
             data = []
             for idx, row in hist.iterrows():
-                data.append({
-                    "date": str(idx.date()) if hasattr(idx, "date") else str(idx),
-                    "open": round(row.get("Open", 0), 2),
-                    "high": round(row.get("High", 0), 2),
-                    "low": round(row.get("Low", 0), 2),
-                    "close": round(row.get("Close", 0), 2),
-                    "volume": int(row.get("Volume", 0)),
-                })
+                data.append(
+                    {
+                        "date": str(idx.date()) if hasattr(idx, "date") else str(idx),
+                        "open": round(row.get("Open", 0), 2),
+                        "high": round(row.get("High", 0), 2),
+                        "low": round(row.get("Low", 0), 2),
+                        "close": round(row.get("Close", 0), 2),
+                        "volume": int(row.get("Volume", 0)),
+                    }
+                )
             return {"symbol": symbol.upper(), "period": period, "interval": interval, "data": data}
         except Exception as e:
             return {"error": f"Failed to fetch history for {symbol}: {e!s}"}
@@ -136,7 +139,9 @@ def register_tools(mcp: FastMCP) -> None:
             elif statement == "cashflow":
                 df = ticker.cashflow
             else:
-                return {"error": f"Invalid statement type: {statement}. Use: income, balance, cashflow"}
+                return {
+                    "error": f"Invalid statement type: {statement}. Use: income, balance, cashflow"
+                }
 
             if df is None or df.empty:
                 return {"error": f"No {statement} statement data for '{symbol}'"}
@@ -147,7 +152,9 @@ def register_tools(mcp: FastMCP) -> None:
                 period_data = {}
                 for idx, val in df[col].items():
                     if val is not None and str(val) != "nan":
-                        period_data[str(idx)] = float(val) if isinstance(val, (int, float)) else str(val)
+                        period_data[str(idx)] = (
+                            float(val) if isinstance(val, (int, float)) else str(val)
+                        )
                 result[str(col.date()) if hasattr(col, "date") else str(col)] = period_data
 
             return {"symbol": symbol.upper(), "statement": statement, "data": result}
@@ -210,17 +217,20 @@ def register_tools(mcp: FastMCP) -> None:
 
         try:
             import yfinance as yf
+
             search = yf.Search(query)
             quotes = search.quotes if hasattr(search, "quotes") else []
 
             results = []
             for q in quotes[:20]:
-                results.append({
-                    "symbol": q.get("symbol", ""),
-                    "name": q.get("shortname", q.get("longname", "")),
-                    "exchange": q.get("exchange", ""),
-                    "type": q.get("quoteType", ""),
-                })
+                results.append(
+                    {
+                        "symbol": q.get("symbol", ""),
+                        "name": q.get("shortname", q.get("longname", "")),
+                        "exchange": q.get("exchange", ""),
+                        "type": q.get("quoteType", ""),
+                    }
+                )
             return {"query": query, "results": results}
         except Exception as e:
             return {"error": f"Search failed: {e!s}"}

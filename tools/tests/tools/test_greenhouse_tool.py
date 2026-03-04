@@ -45,7 +45,10 @@ class TestGreenhouseListJobs:
         ]
         with (
             patch.dict("os.environ", ENV),
-            patch("aden_tools.tools.greenhouse_tool.greenhouse_tool.httpx.get", return_value=_mock_resp(jobs)),
+            patch(
+                "aden_tools.tools.greenhouse_tool.greenhouse_tool.httpx.get",
+                return_value=_mock_resp(jobs),
+            ),
         ):
             result = tool_fns["greenhouse_list_jobs"]()
 
@@ -75,7 +78,10 @@ class TestGreenhouseGetJob:
         }
         with (
             patch.dict("os.environ", ENV),
-            patch("aden_tools.tools.greenhouse_tool.greenhouse_tool.httpx.get", return_value=_mock_resp(job)),
+            patch(
+                "aden_tools.tools.greenhouse_tool.greenhouse_tool.httpx.get",
+                return_value=_mock_resp(job),
+            ),
         ):
             result = tool_fns["greenhouse_get_job"](job_id=1)
 
@@ -104,7 +110,10 @@ class TestGreenhouseListCandidates:
         ]
         with (
             patch.dict("os.environ", ENV),
-            patch("aden_tools.tools.greenhouse_tool.greenhouse_tool.httpx.get", return_value=_mock_resp(candidates)),
+            patch(
+                "aden_tools.tools.greenhouse_tool.greenhouse_tool.httpx.get",
+                return_value=_mock_resp(candidates),
+            ),
         ):
             result = tool_fns["greenhouse_list_candidates"]()
 
@@ -134,7 +143,10 @@ class TestGreenhouseGetCandidate:
         }
         with (
             patch.dict("os.environ", ENV),
-            patch("aden_tools.tools.greenhouse_tool.greenhouse_tool.httpx.get", return_value=_mock_resp(candidate)),
+            patch(
+                "aden_tools.tools.greenhouse_tool.greenhouse_tool.httpx.get",
+                return_value=_mock_resp(candidate),
+            ),
         ):
             result = tool_fns["greenhouse_get_candidate"](candidate_id=100)
 
@@ -162,7 +174,10 @@ class TestGreenhouseListApplications:
         ]
         with (
             patch.dict("os.environ", ENV),
-            patch("aden_tools.tools.greenhouse_tool.greenhouse_tool.httpx.get", return_value=_mock_resp(apps)),
+            patch(
+                "aden_tools.tools.greenhouse_tool.greenhouse_tool.httpx.get",
+                return_value=_mock_resp(apps),
+            ),
         ):
             result = tool_fns["greenhouse_list_applications"]()
 
@@ -191,7 +206,10 @@ class TestGreenhouseGetApplication:
         }
         with (
             patch.dict("os.environ", ENV),
-            patch("aden_tools.tools.greenhouse_tool.greenhouse_tool.httpx.get", return_value=_mock_resp(app)),
+            patch(
+                "aden_tools.tools.greenhouse_tool.greenhouse_tool.httpx.get",
+                return_value=_mock_resp(app),
+            ),
         ):
             result = tool_fns["greenhouse_get_application"](application_id=200)
 

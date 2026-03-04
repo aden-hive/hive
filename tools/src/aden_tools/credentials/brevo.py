@@ -2,6 +2,7 @@
 Brevo tool credentials.
 Contains credentials for Brevo email and SMS integration.
 """
+
 from .base import CredentialSpec
 
 BREVO_CREDENTIALS = {

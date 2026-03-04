@@ -112,10 +112,17 @@ class TestJiraCreateIssue:
         assert "error" in result
 
     def test_successful_create(self, tool_fns):
-        data = {"key": "TEST-2", "id": "10002", "self": "https://test.atlassian.net/rest/api/3/issue/10002"}
+        data = {
+            "key": "TEST-2",
+            "id": "10002",
+            "self": "https://test.atlassian.net/rest/api/3/issue/10002",
+        }
         with (
             patch.dict("os.environ", ENV),
-            patch("aden_tools.tools.jira_tool.jira_tool.httpx.post", return_value=_mock_resp(data, 201)),
+            patch(
+                "aden_tools.tools.jira_tool.jira_tool.httpx.post",
+                return_value=_mock_resp(data, 201),
+            ),
         ):
             result = tool_fns["jira_create_issue"](project_key="TEST", summary="New task")
 
@@ -188,7 +195,10 @@ class TestJiraAddComment:
         }
         with (
             patch.dict("os.environ", ENV),
-            patch("aden_tools.tools.jira_tool.jira_tool.httpx.post", return_value=_mock_resp(data, 201)),
+            patch(
+                "aden_tools.tools.jira_tool.jira_tool.httpx.post",
+                return_value=_mock_resp(data, 201),
+            ),
         ):
             result = tool_fns["jira_add_comment"](issue_key="TEST-1", body="Great work!")
 

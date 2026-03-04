@@ -22,7 +22,9 @@ if TYPE_CHECKING:
     from aden_tools.credentials import CredentialStoreAdapter
 
 
-def _get_credentials(credentials: CredentialStoreAdapter | None) -> tuple[str | None, str | None, str | None]:
+def _get_credentials(
+    credentials: CredentialStoreAdapter | None,
+) -> tuple[str | None, str | None, str | None]:
     """Return (domain, email, api_token)."""
     if credentials is not None:
         domain = credentials.get("confluence_domain")
@@ -47,9 +49,7 @@ def _auth_header(email: str, token: str) -> str:
     return f"Basic {encoded}"
 
 
-def _request(
-    method: str, url: str, email: str, token: str, **kwargs: Any
-) -> dict[str, Any]:
+def _request(method: str, url: str, email: str, token: str, **kwargs: Any) -> dict[str, Any]:
     """Make a request to the Confluence API."""
     headers = {
         "Authorization": _auth_header(email, token),
@@ -113,13 +113,15 @@ def register_tools(
 
         spaces = []
         for s in data.get("results", []):
-            spaces.append({
-                "id": s.get("id", ""),
-                "key": s.get("key", ""),
-                "name": s.get("name", ""),
-                "type": s.get("type", ""),
-                "status": s.get("status", ""),
-            })
+            spaces.append(
+                {
+                    "id": s.get("id", ""),
+                    "key": s.get("key", ""),
+                    "name": s.get("name", ""),
+                    "type": s.get("type", ""),
+                    "status": s.get("status", ""),
+                }
+            )
         return {"spaces": spaces, "count": len(spaces)}
 
     @mcp.tool()
@@ -159,14 +161,16 @@ def register_tools(
         pages = []
         for p in data.get("results", []):
             ver = p.get("version") or {}
-            pages.append({
-                "id": p.get("id", ""),
-                "title": p.get("title", ""),
-                "space_id": p.get("spaceId", ""),
-                "status": p.get("status", ""),
-                "version": ver.get("number", 0),
-                "created_at": p.get("createdAt", ""),
-            })
+            pages.append(
+                {
+                    "id": p.get("id", ""),
+                    "title": p.get("title", ""),
+                    "space_id": p.get("spaceId", ""),
+                    "status": p.get("status", ""),
+                    "version": ver.get("number", 0),
+                    "created_at": p.get("createdAt", ""),
+                }
+            )
         return {"pages": pages, "count": len(pages)}
 
     @mcp.tool()
@@ -294,10 +298,16 @@ def register_tools(
         cql = " AND ".join(cql_parts) + " ORDER BY lastModified desc"
 
         url = f"{_base_url(domain)}/wiki/rest/api/search"
-        data = _request("get", url, email, token, params={
-            "cql": cql,
-            "limit": max(1, min(limit, 50)),
-        })
+        data = _request(
+            "get",
+            url,
+            email,
+            token,
+            params={
+                "cql": cql,
+                "limit": max(1, min(limit, 50)),
+            },
+        )
         if "error" in data:
             return data
 
@@ -305,12 +315,14 @@ def register_tools(
         for r in data.get("results", []):
             content = r.get("content") or {}
             space = content.get("space") or {}
-            results.append({
-                "title": r.get("title", ""),
-                "excerpt": (r.get("excerpt", "") or "")[:300],
-                "page_id": content.get("id", ""),
-                "space_key": space.get("key", ""),
-                "space_name": space.get("name", ""),
-                "last_modified": r.get("lastModified", ""),
-            })
+            results.append(
+                {
+                    "title": r.get("title", ""),
+                    "excerpt": (r.get("excerpt", "") or "")[:300],
+                    "page_id": content.get("id", ""),
+                    "space_key": space.get("key", ""),
+                    "space_name": space.get("name", ""),
+                    "last_modified": r.get("lastModified", ""),
+                }
+            )
         return {"results": results, "count": len(results)}

@@ -37,7 +37,9 @@ def _headers(token: str) -> dict[str, str]:
 
 def _get(endpoint: str, token: str, params: dict | None = None) -> dict[str, Any]:
     try:
-        resp = httpx.get(f"{VERCEL_API}/{endpoint}", headers=_headers(token), params=params, timeout=30.0)
+        resp = httpx.get(
+            f"{VERCEL_API}/{endpoint}", headers=_headers(token), params=params, timeout=30.0
+        )
         if resp.status_code == 401:
             return {"error": "Unauthorized. Check your VERCEL_TOKEN."}
         if resp.status_code == 403:
@@ -53,7 +55,9 @@ def _get(endpoint: str, token: str, params: dict | None = None) -> dict[str, Any
 
 def _post(endpoint: str, token: str, body: dict | None = None) -> dict[str, Any]:
     try:
-        resp = httpx.post(f"{VERCEL_API}/{endpoint}", headers=_headers(token), json=body or {}, timeout=30.0)
+        resp = httpx.post(
+            f"{VERCEL_API}/{endpoint}", headers=_headers(token), json=body or {}, timeout=30.0
+        )
         if resp.status_code == 401:
             return {"error": "Unauthorized. Check your VERCEL_TOKEN."}
         if resp.status_code not in (200, 201):
@@ -76,7 +80,10 @@ def _delete(endpoint: str, token: str) -> dict[str, Any]:
 
 
 def _auth_error() -> dict[str, Any]:
-    return {"error": "VERCEL_TOKEN not set", "help": "Get a token at https://vercel.com/account/tokens"}
+    return {
+        "error": "VERCEL_TOKEN not set",
+        "help": "Get a token at https://vercel.com/account/tokens",
+    }
 
 
 def register_tools(
@@ -118,14 +125,16 @@ def register_tools(
 
         deployments = []
         for d in data.get("deployments", []):
-            deployments.append({
-                "uid": d.get("uid", ""),
-                "name": d.get("name", ""),
-                "url": d.get("url", ""),
-                "state": d.get("state", ""),
-                "created": d.get("created", 0),
-                "target": d.get("target", ""),
-            })
+            deployments.append(
+                {
+                    "uid": d.get("uid", ""),
+                    "name": d.get("name", ""),
+                    "url": d.get("url", ""),
+                    "state": d.get("state", ""),
+                    "created": d.get("created", 0),
+                    "target": d.get("target", ""),
+                }
+            )
         return {"deployments": deployments}
 
     @mcp.tool()
@@ -186,13 +195,15 @@ def register_tools(
         for p in data.get("projects", []):
             latest = p.get("latestDeployments", [{}])
             latest_url = latest[0].get("url", "") if latest else ""
-            projects.append({
-                "id": p.get("id", ""),
-                "name": p.get("name", ""),
-                "framework": p.get("framework", ""),
-                "updatedAt": p.get("updatedAt", 0),
-                "latestDeploymentUrl": latest_url,
-            })
+            projects.append(
+                {
+                    "id": p.get("id", ""),
+                    "name": p.get("name", ""),
+                    "framework": p.get("framework", ""),
+                    "updatedAt": p.get("updatedAt", 0),
+                    "latestDeploymentUrl": latest_url,
+                }
+            )
         return {"projects": projects}
 
     @mcp.tool()
@@ -249,12 +260,14 @@ def register_tools(
 
         domains = []
         for d in data.get("domains", []):
-            domains.append({
-                "name": d.get("name", ""),
-                "redirect": d.get("redirect", ""),
-                "gitBranch": d.get("gitBranch", ""),
-                "verified": d.get("verified", False),
-            })
+            domains.append(
+                {
+                    "name": d.get("name", ""),
+                    "redirect": d.get("redirect", ""),
+                    "gitBranch": d.get("gitBranch", ""),
+                    "verified": d.get("verified", False),
+                }
+            )
         return {"project_id": project_id, "domains": domains}
 
     # ── Environment Variables ───────────────────────────────────
@@ -282,12 +295,14 @@ def register_tools(
 
         env_vars = []
         for e in data.get("envs", []):
-            env_vars.append({
-                "id": e.get("id", ""),
-                "key": e.get("key", ""),
-                "target": e.get("target", []),
-                "type": e.get("type", ""),
-            })
+            env_vars.append(
+                {
+                    "id": e.get("id", ""),
+                    "key": e.get("key", ""),
+                    "target": e.get("target", []),
+                    "type": e.get("type", ""),
+                }
+            )
         return {"project_id": project_id, "env_vars": env_vars}
 
     @mcp.tool()

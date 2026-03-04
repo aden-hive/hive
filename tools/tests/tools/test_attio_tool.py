@@ -121,9 +121,7 @@ class TestAttioClient:
         mock_request.return_value = mock_response
 
         params = {"matching_attribute": "email_addresses"}
-        result = self.client._request(
-            "PUT", "/objects/people/records", json_body={}, params=params
-        )
+        result = self.client._request("PUT", "/objects/people/records", json_body={}, params=params)
 
         call_kwargs = mock_request.call_args.kwargs
         assert call_kwargs["params"] == params
@@ -210,7 +208,10 @@ class TestAttioClient:
         mock_response = MagicMock()
         mock_response.status_code = 200
         mock_response.json.return_value = {
-            "data": {"id": {"record_id": "rec-123"}, "values": {"name": [{"first_name": "Updated"}]}}
+            "data": {
+                "id": {"record_id": "rec-123"},
+                "values": {"name": [{"first_name": "Updated"}]},
+            }
         }
         mock_request.return_value = mock_response
 
@@ -223,9 +224,7 @@ class TestAttioClient:
     def test_assert_record(self, mock_request):
         mock_response = MagicMock()
         mock_response.status_code = 200
-        mock_response.json.return_value = {
-            "data": {"id": {"record_id": "rec-upserted"}}
-        }
+        mock_response.json.return_value = {"data": {"id": {"record_id": "rec-upserted"}}}
         mock_request.return_value = mock_response
 
         values = {"email_addresses": [{"email_address": "test@example.com"}]}
@@ -241,9 +240,7 @@ class TestAttioClient:
     def test_list_lists(self, mock_request):
         mock_response = MagicMock()
         mock_response.status_code = 200
-        mock_response.json.return_value = {
-            "data": [{"id": "list-1", "name": "Sales Pipeline"}]
-        }
+        mock_response.json.return_value = {"data": [{"id": "list-1", "name": "Sales Pipeline"}]}
         mock_request.return_value = mock_response
 
         result = self.client.list_lists()
@@ -255,9 +252,7 @@ class TestAttioClient:
     def test_get_entries(self, mock_request):
         mock_response = MagicMock()
         mock_response.status_code = 200
-        mock_response.json.return_value = {
-            "data": [{"id": "entry-1"}, {"id": "entry-2"}]
-        }
+        mock_response.json.return_value = {"data": [{"id": "entry-1"}, {"id": "entry-2"}]}
         mock_request.return_value = mock_response
 
         result = self.client.get_entries("list-1")
@@ -332,9 +327,7 @@ class TestAttioClient:
     def test_list_tasks(self, mock_request):
         mock_response = MagicMock()
         mock_response.status_code = 200
-        mock_response.json.return_value = {
-            "data": [{"id": "task-1"}, {"id": "task-2"}]
-        }
+        mock_response.json.return_value = {"data": [{"id": "task-1"}, {"id": "task-2"}]}
         mock_request.return_value = mock_response
 
         result = self.client.list_tasks()
@@ -346,9 +339,7 @@ class TestAttioClient:
     def test_get_task(self, mock_request):
         mock_response = MagicMock()
         mock_response.status_code = 200
-        mock_response.json.return_value = {
-            "data": {"id": "task-1", "content": "Call back"}
-        }
+        mock_response.json.return_value = {"data": {"id": "task-1", "content": "Call back"}}
         mock_request.return_value = mock_response
 
         result = self.client.get_task("task-1")

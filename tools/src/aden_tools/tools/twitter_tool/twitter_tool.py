@@ -68,7 +68,10 @@ def register_tools(mcp: FastMCP, credentials: Any = None) -> None:
         """
         headers = _get_headers()
         if headers is None:
-            return {"error": "X_BEARER_TOKEN is required", "help": "Set X_BEARER_TOKEN environment variable"}
+            return {
+                "error": "X_BEARER_TOKEN is required",
+                "help": "Set X_BEARER_TOKEN environment variable",
+            }
         if not query:
             return {"error": "query is required"}
 
@@ -114,7 +117,10 @@ def register_tools(mcp: FastMCP, credentials: Any = None) -> None:
         """
         headers = _get_headers()
         if headers is None:
-            return {"error": "X_BEARER_TOKEN is required", "help": "Set X_BEARER_TOKEN environment variable"}
+            return {
+                "error": "X_BEARER_TOKEN is required",
+                "help": "Set X_BEARER_TOKEN environment variable",
+            }
         if not username:
             return {"error": "username is required"}
 
@@ -155,7 +161,10 @@ def register_tools(mcp: FastMCP, credentials: Any = None) -> None:
         """
         headers = _get_headers()
         if headers is None:
-            return {"error": "X_BEARER_TOKEN is required", "help": "Set X_BEARER_TOKEN environment variable"}
+            return {
+                "error": "X_BEARER_TOKEN is required",
+                "help": "Set X_BEARER_TOKEN environment variable",
+            }
         if not user_id:
             return {"error": "user_id is required"}
 
@@ -187,7 +196,10 @@ def register_tools(mcp: FastMCP, credentials: Any = None) -> None:
         """
         headers = _get_headers()
         if headers is None:
-            return {"error": "X_BEARER_TOKEN is required", "help": "Set X_BEARER_TOKEN environment variable"}
+            return {
+                "error": "X_BEARER_TOKEN is required",
+                "help": "Set X_BEARER_TOKEN environment variable",
+            }
         if not tweet_id:
             return {"error": "tweet_id is required"}
 
