@@ -198,6 +198,21 @@ wheels = [
 ]
 
 [[package]]
+name = "asana"
+version = "5.2.2"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "certifi" },
+    { name = "python-dateutil" },
+    { name = "six" },
+    { name = "urllib3" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/db/59/af14efdd03d332c33d4a77aed8f1f7151e3de5c2441e4bea3b1c6dbcc9d7/asana-5.2.2.tar.gz", hash = "sha256:d280ce2e8edf0355ccf21e548d887617ca8c926e1cb41309b8a173ca3181632c", size = 126424, upload-time = "2025-09-24T21:31:04.055Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/26/5e/337125441af40aba86b087dee3dbe829413b6e42eac74defae2076926dbe/asana-5.2.2-py3-none-any.whl", hash = "sha256:1c8d15949a6cb9aa12363a5b7cfc6c0544cb3ae77290dd2e3255c0ec70668458", size = 203161, upload-time = "2025-09-24T21:31:02.401Z" },
+]
+
+[[package]]
 name = "async-timeout"
 version = "5.0.1"
 source = { registry = "https://pypi.org/simple" }
@@ -826,9 +841,6 @@ dependencies = [
     { name = "litellm" },
     { name = "mcp" },
     { name = "pydantic" },
-    { name = "pytest" },
-    { name = "pytest-asyncio" },
-    { name = "pytest-xdist" },
     { name = "textual" },
     { name = "tools" },
 ]
@@ -836,6 +848,11 @@ dependencies = [
 [package.optional-dependencies]
 server = [
     { name = "aiohttp" },
+]
+testing = [
+    { name = "pytest" },
+    { name = "pytest-asyncio" },
+    { name = "pytest-xdist" },
 ]
 tui = [
     { name = "textual" },
@@ -846,6 +863,9 @@ webhook = [
 
 [package.dev-dependencies]
 dev = [
+    { name = "pytest" },
+    { name = "pytest-asyncio" },
+    { name = "pytest-xdist" },
     { name = "ruff" },
     { name = "ty" },
 ]
@@ -860,17 +880,20 @@ requires-dist = [
     { name = "litellm", specifier = ">=1.81.0" },
     { name = "mcp", specifier = ">=1.0.0" },
     { name = "pydantic", specifier = ">=2.0" },
-    { name = "pytest", specifier = ">=8.0" },
-    { name = "pytest-asyncio", specifier = ">=0.23" },
-    { name = "pytest-xdist", specifier = ">=3.0" },
+    { name = "pytest", marker = "extra == 'testing'", specifier = ">=8.0" },
+    { name = "pytest-asyncio", marker = "extra == 'testing'", specifier = ">=0.23" },
+    { name = "pytest-xdist", marker = "extra == 'testing'", specifier = ">=3.0" },
     { name = "textual", specifier = ">=1.0.0" },
     { name = "textual", marker = "extra == 'tui'", specifier = ">=0.75.0" },
     { name = "tools", editable = "tools" },
 ]
-provides-extras = ["tui", "webhook", "server"]
+provides-extras = ["tui", "webhook", "server", "testing"]
 
 [package.metadata.requires-dev]
 dev = [
+    { name = "pytest", specifier = ">=8.0" },
+    { name = "pytest-asyncio", specifier = ">=0.23" },
+    { name = "pytest-xdist", specifier = ">=3.0" },
     { name = "ruff", specifier = ">=0.14.14" },
     { name = "ty", specifier = ">=0.0.13" },
 ]
@@ -3514,6 +3537,7 @@ version = "0.1.0"
 source = { editable = "tools" }
 dependencies = [
     { name = "arxiv" },
+    { name = "asana" },
     { name = "beautifulsoup4" },
     { name = "diff-match-patch" },
     { name = "dnspython" },
@@ -3581,6 +3605,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "arxiv", specifier = ">=2.1.0" },
+    { name = "asana", specifier = ">=3.2.0" },
     { name = "beautifulsoup4", specifier = ">=4.12.0" },
     { name = "databricks-mcp", marker = "extra == 'all'", specifier = ">=0.1.0" },
     { name = "databricks-mcp", marker = "extra == 'databricks'", specifier = ">=0.1.0" },
