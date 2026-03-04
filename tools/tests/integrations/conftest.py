@@ -26,6 +26,11 @@ KNOWN_PHANTOM_TOOLS: set[str] = {"google_search"}
 # (meta-tools), not for external API auth. They don't need CredentialSpecs.
 CREDENTIAL_STORE_META_MODULES: set[str] = {"account_info_tool"}
 
+# Community-contributed tool variants that are not registered in the central
+# __init__.py and therefore don't need CredentialSpecs. The project has its
+# own registered equivalents (e.g., powerbi_tool, twitter_tool).
+UNREGISTERED_COMMUNITY_MODULES: set[str] = {"mssql_tool"}
+
 # --- Tool Module Discovery ---
 
 TOOLS_SRC = Path(__file__).resolve().parent.parent.parent / "src" / "aden_tools" / "tools"

@@ -747,7 +747,7 @@ class TestToolRegistration:
 
         mcp = FastMCP("test-ga-registration")
 
-        result = register_all_tools(mcp, credentials=None)
+        result = register_all_tools(mcp, credentials=None, include_unverified=True)
 
         for tool_name in [
             "ga_run_report",
