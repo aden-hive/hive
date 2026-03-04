@@ -190,6 +190,85 @@ def register_commands(subparsers: argparse._SubParsersAction) -> None:
     shell_parser.set_defaults(func=cmd_shell)
 
     # tui command (interactive agent dashboard)
+
+    # replay command
+    replay_parser = subparsers.add_parser(
+        "replay",
+        help="Re-execute a session with frozen LLM/tool responses",
+        description=(
+            "Replay a previous session using cached LLM responses and tool results "
+            "from the original run. Useful for root-cause analysis of failed sessions "
+            "and counterfactual testing (e.g. 'what if this node had succeeded?')."
+        ),
+    )
+    replay_parser.add_argument(
+        "agent_path",
+        type=str,
+        help="Path to agent folder",
+    )
+    replay_parser.add_argument(
+        "session_id",
+        type=str,
+        help="Session ID to replay (source session)",
+    )
+    replay_parser.add_argument(
+        "--from-node",
+        type=str,
+        default=None,
+        metavar="NODE",
+        help=(
+            "Start replay from this node ID using a checkpoint memory snapshot "
+            "(default: run from the agent entry_point)"
+        ),
+    )
+    replay_parser.add_argument(
+        "--freeze-llm",
+        action="store_true",
+        default=True,
+        help="Use cached LLM responses (default: True)",
+    )
+    replay_parser.add_argument(
+        "--no-freeze-llm",
+        dest="freeze_llm",
+        action="store_false",
+        help="Call the live LLM instead of using cached responses",
+    )
+    replay_parser.add_argument(
+        "--freeze-tools",
+        action="store_true",
+        default=True,
+        help="Use cached tool results (default: True)",
+    )
+    replay_parser.add_argument(
+        "--no-freeze-tools",
+        dest="freeze_tools",
+        action="store_false",
+        help="Execute tools live instead of using cached results",
+    )
+    replay_parser.add_argument(
+        "--input-override",
+        action="append",
+        default=[],
+        metavar="KEY=VALUE",
+        help=(
+            "Override an input field (can be repeated). "
+            "Example: --input-override user_query='new question'"
+        ),
+    )
+    replay_parser.add_argument(
+        "--output",
+        choices=["text", "json"],
+        default="text",
+        help="Output format for the diff report (default: text)",
+    )
+    replay_parser.add_argument(
+        "--verbose",
+        "-v",
+        action="store_true",
+        help="Show full node outputs in the diff table",
+    )
+    replay_parser.set_defaults(func=cmd_replay)
+
     # setup-credentials command
     setup_creds_parser = subparsers.add_parser(
         "setup-credentials",
@@ -1508,6 +1587,279 @@ def _interactive_multi(agents_dir: Path) -> int:
 
     orchestrator.cleanup()
     return 0
+
+
+def cmd_sessions_list(args: argparse.Namespace) -> int:
+    """List agent sessions."""
+    print("⚠ Sessions list command not yet implemented")
+    print("This will be available once checkpoint infrastructure is complete.")
+    print(f"\nAgent: {args.agent_path}")
+    print(f"Status filter: {args.status}")
+    print(f"Has checkpoints: {args.has_checkpoints}")
+    return 1
+
+
+def cmd_sessions_show(args: argparse.Namespace) -> int:
+    """Show detailed session information."""
+    print("⚠ Session show command not yet implemented")
+    print("This will be available once checkpoint infrastructure is complete.")
+    print(f"\nAgent: {args.agent_path}")
+    print(f"Session: {args.session_id}")
+    return 1
+
+
+def cmd_sessions_checkpoints(args: argparse.Namespace) -> int:
+    """List checkpoints for a session."""
+    print("⚠ Session checkpoints command not yet implemented")
+    print("This will be available once checkpoint infrastructure is complete.")
+    print(f"\nAgent: {args.agent_path}")
+    print(f"Session: {args.session_id}")
+    return 1
+
+
+def cmd_pause(args: argparse.Namespace) -> int:
+    """Pause a running session."""
+    print("⚠ Pause command not yet implemented")
+    print("This will be available once executor pause integration is complete.")
+    print(f"\nAgent: {args.agent_path}")
+    print(f"Session: {args.session_id}")
+    return 1
+
+
+def cmd_resume(args: argparse.Namespace) -> int:
+    """Resume a session from checkpoint."""
+    print("⚠ Resume command not yet implemented")
+    print("This will be available once checkpoint resume integration is complete.")
+    print(f"\nAgent: {args.agent_path}")
+    print(f"Session: {args.session_id}")
+    if args.checkpoint:
+        print(f"Checkpoint: {args.checkpoint}")
+    if args.tui:
+        print("Mode: TUI")
+    return 1
+
+
+def cmd_replay(args: argparse.Namespace) -> int:
+    """Replay a session with frozen LLM/tool responses for root-cause analysis."""
+    from framework.runner import AgentRunner
+    from framework.schemas.replay import NodeReplayDiff, ReplayConfig, ReplayResult
+    from framework.runtime.runtime_log_store import RuntimeLogStore
+    from framework.storage.session_store import SessionStore
+
+    # --- Parse --input-override KEY=VALUE pairs ---
+    input_overrides: dict = {}
+    for override in getattr(args, "input_override", []):
+        if "=" not in override:
+            print(
+                f"Error: --input-override '{override}' must be in KEY=VALUE format.",
+                file=sys.stderr,
+            )
+            return 2
+        key, _, raw_value = override.partition("=")
+        # Attempt JSON parse so numbers/bools/dicts work; fall back to string
+        try:
+            input_overrides[key.strip()] = json.loads(raw_value)
+        except json.JSONDecodeError:
+            input_overrides[key.strip()] = raw_value
+
+    # --- Build ReplayConfig ---
+    replay_config = ReplayConfig(
+        source_session_id=args.session_id,
+        from_node=getattr(args, "from_node", None),
+        freeze_llm=args.freeze_llm,
+        freeze_tools=args.freeze_tools,
+        input_overrides=input_overrides,
+    )
+
+    # --- Load agent ---
+    try:
+        runner = AgentRunner.load(args.agent_path, skip_credential_validation=True)
+    except Exception as e:
+        print(f"Error loading agent: {e}", file=sys.stderr)
+        return 2
+
+    # --- Validate source session exists ---
+    storage_path = runner._storage_path
+    session_store = SessionStore(storage_path)
+
+    source_state = asyncio.run(session_store.read_state(args.session_id))
+    if source_state is None:
+        print(
+            f"Error: session '{args.session_id}' not found for agent at '{args.agent_path}'.",
+            file=sys.stderr,
+        )
+        return 2
+
+    # --- Run replay ---
+    import time
+
+    started_at = time.time()
+    try:
+        result, replay_session_id = asyncio.run(runner.run_replay(replay_config))
+    except Exception as e:
+        print(f"Error during replay: {e}", file=sys.stderr)
+        return 1
+    duration_ms = int((time.time() - started_at) * 1000)
+
+    # --- Load L2 node details for comparison ---
+    log_store = RuntimeLogStore(storage_path / "sessions")
+
+    async def _load_details():
+        src = await log_store.load_details(args.session_id)
+        rpl = await log_store.load_details(replay_session_id)
+        return src, rpl
+
+    source_details_log, replay_details_log = asyncio.run(_load_details())
+    source_details = source_details_log.nodes if source_details_log else []
+    replay_details = replay_details_log.nodes if replay_details_log else []
+
+    # --- Load replay session state ---
+    replay_state = asyncio.run(session_store.read_state(replay_session_id))
+
+    # --- Build NodeReplayDiff list ---
+    source_node_map = {nd.node_id: nd for nd in source_details}
+    replay_node_map = {nd.node_id: nd for nd in replay_details}
+
+    node_diffs: list[NodeReplayDiff] = []
+    diverged_nodes: list[str] = []
+    original_path = source_state.progress.path or []
+
+    for node_id in original_path:
+        src_nd = source_node_map.get(node_id)
+        rpl_nd = replay_node_map.get(node_id)
+
+        orig_exit = src_nd.exit_status if src_nd else ""
+        rply_exit = rpl_nd.exit_status if rpl_nd else ""
+        orig_success = src_nd.success if src_nd else False
+        rply_success = rpl_nd.success if rpl_nd else False
+        orig_error = src_nd.error if src_nd else None
+        rply_error = rpl_nd.error if rpl_nd else None
+
+        diverged = (
+            orig_exit != rply_exit
+            or orig_success != rply_success
+            or bool(orig_error) != bool(rply_error)
+        )
+
+        divergence_reason: str | None = None
+        if diverged:
+            if orig_success != rply_success:
+                divergence_reason = (
+                    f"success: {orig_success} → {rply_success}"
+                )
+            elif orig_exit != rply_exit:
+                divergence_reason = f"exit_status: '{orig_exit}' → '{rply_exit}'"
+            elif bool(orig_error) != bool(rply_error):
+                divergence_reason = (
+                    f"error presence: {'yes' if orig_error else 'no'} → "
+                    f"{'yes' if rply_error else 'no'}"
+                )
+            diverged_nodes.append(node_id)
+
+        node_diffs.append(
+            NodeReplayDiff(
+                node_id=node_id,
+                diverged=diverged,
+                original_exit_status=orig_exit,
+                replay_exit_status=rply_exit,
+                divergence_reason=divergence_reason,
+            )
+        )
+
+    # --- Build improvement_hypothesis ---
+    from framework.runtime.replay_runtime import build_improvement_hypothesis
+
+    from_node_orig_status = ""
+    from_node_rply_status = ""
+    if replay_config.from_node:
+        src_fn = source_node_map.get(replay_config.from_node)
+        rpl_fn = replay_node_map.get(replay_config.from_node)
+        from_node_orig_status = src_fn.exit_status if src_fn else ""
+        from_node_rply_status = rpl_fn.exit_status if rpl_fn else ""
+
+    hypothesis = build_improvement_hypothesis(
+        source_success=bool(source_state.result.success),
+        replay_success=result.success,
+        diverged_nodes=diverged_nodes,
+        from_node=replay_config.from_node,
+        from_node_original_status=from_node_orig_status,
+        from_node_replay_status=from_node_rply_status,
+        total_misses=0,  # interceptor not accessible here; cache miss count in logs
+    )
+
+    replay_result = ReplayResult(
+        source_session_id=args.session_id,
+        replay_session_id=replay_session_id,
+        config=replay_config,
+        overall_success=result.success,
+        original_success=bool(source_state.result.success),
+        node_diffs=node_diffs,
+        diverged_nodes=diverged_nodes,
+        improvement_hypothesis=hypothesis,
+        started_at=source_state.timestamps.started_at,
+        duration_ms=duration_ms,
+    )
+
+    # --- Output ---
+    if args.output == "json":
+        print(replay_result.model_dump_json(indent=2))
+        return 0 if result.success else 1
+
+    # Text output
+    print()
+    print("=" * 70)
+    print(f"  REPLAY REPORT")
+    print("=" * 70)
+    print(f"  Source session : {args.session_id}")
+    print(f"  Replay session : {replay_session_id}")
+    print(
+        f"  Original result: {'✓ SUCCESS' if replay_result.original_success else '✗ FAILED'}"
+    )
+    print(
+        f"  Replay  result : {'✓ SUCCESS' if replay_result.overall_success else '✗ FAILED'}"
+    )
+    print(f"  Duration       : {duration_ms}ms")
+    print(f"  Freeze LLM     : {replay_config.freeze_llm}")
+    print(f"  Freeze tools   : {replay_config.freeze_tools}")
+    if replay_config.from_node:
+        print(f"  From node      : {replay_config.from_node}")
+    print()
+
+    # Node diff table
+    col_node = 30
+    col_orig = 12
+    col_rply = 12
+    col_div = 8
+    header = (
+        f"{'NODE':<{col_node}} {'ORIGINAL':<{col_orig}} {'REPLAY':<{col_rply}} DIVERGED"
+    )
+    print(header)
+    print("-" * len(header))
+    for diff in replay_result.node_diffs:
+        marker = "⚠" if diff.diverged else " "
+        orig_status = diff.original_exit_status or ("ok" if not diff.diverged else "?")
+        rply_status = diff.replay_exit_status or ("ok" if not diff.diverged else "?")
+        print(
+            f"{marker} {diff.node_id:<{col_node - 2}} "
+            f"{orig_status:<{col_orig}} "
+            f"{rply_status:<{col_rply}} "
+            f"{'YES' if diff.diverged else 'no'}"
+        )
+        if diff.diverged and diff.divergence_reason and getattr(args, "verbose", False):
+            print(f"    └─ {diff.divergence_reason}")
+    print()
+
+    if replay_result.diverged_nodes:
+        print(f"  Diverged nodes ({len(replay_result.diverged_nodes)}): "
+              f"{', '.join(replay_result.diverged_nodes)}")
+    else:
+        print("  No divergence detected.")
+    print()
+    print(f"  Hypothesis: {replay_result.improvement_hypothesis}")
+    print("=" * 70)
+    print()
+
+    return 0 if result.success else 1
 
 
 def cmd_setup_credentials(args: argparse.Namespace) -> int:
