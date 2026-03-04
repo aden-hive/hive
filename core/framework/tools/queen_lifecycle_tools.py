@@ -497,14 +497,14 @@ def register_queen_lifecycle_tools(
     )
     tools_registered += 1
 
-    # --- reload_agent ---------------------------------------------------------
+    # --- stop_worker (Running → Staging) -------------------------------------
 
-    async def reload_agent() -> str:
-        """Stop the worker and return to staging mode for a fresh run.
+    async def stop_worker_to_staging() -> str:
+        """Stop the running worker and switch to staging mode.
 
-        Use this when the worker has finished (or you want to restart it)
-        with new input.  Unlike stop_worker_and_edit, this keeps the agent
-        loaded and stays in staging — no code-editing tools are restored.
+        After stopping, ask the user whether they want to:
+        1. Re-run the agent with new input → call run_agent_with_input(task)
+        2. Edit the agent code → call stop_worker_and_edit() to go to building mode
         """
         stop_result = await stop_worker()
 
@@ -516,21 +516,21 @@ def register_queen_lifecycle_tools(
         result["mode"] = "staging"
         result["message"] = (
             "Worker stopped. You are now in staging mode. "
-            "Call run_agent_with_input(task) to run again with new input, "
-            "or stop_worker_and_edit() if code changes are needed."
+            "Ask the user: would they like to re-run with new input, "
+            "or edit the agent code?"
         )
         return json.dumps(result)
 
-    _reload_tool = Tool(
-        name="reload_agent",
+    _stop_worker_tool = Tool(
+        name="stop_worker",
         description=(
-            "Stop the running worker and return to staging mode. "
-            "Use this when the user wants to re-run the agent with different input "
-            "without making code changes. The agent stays loaded and ready."
+            "Stop the running worker and switch to staging mode. "
+            "After stopping, ask the user whether they want to re-run "
+            "with new input or edit the agent code."
         ),
         parameters={"type": "object", "properties": {}},
     )
-    registry.register("reload_agent", _reload_tool, lambda inputs: reload_agent())
+    registry.register("stop_worker", _stop_worker_tool, lambda inputs: stop_worker_to_staging())
     tools_registered += 1
 
     # --- get_worker_status ----------------------------------------------------

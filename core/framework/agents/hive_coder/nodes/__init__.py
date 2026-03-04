@@ -94,7 +94,7 @@ _QUEEN_RUNNING_TOOLS = [
     # Credentials
     "list_credentials",
     # Worker lifecycle
-    "reload_agent",
+    "stop_worker",
     "stop_worker_and_edit",
     "get_worker_status",
     "inject_worker_message",
@@ -633,18 +633,18 @@ The worker is running. You have monitoring and lifecycle tools:
 - inject_worker_message(content) — Send a message to the running worker
 - get_worker_health_summary() — Read the latest health data
 - notify_operator(ticket_id, analysis, urgency) — Alert the user (use sparingly)
-- reload_agent() — Stop the worker and return to STAGING mode (ready for new input)
+- stop_worker() — Stop the worker and return to STAGING mode, then ask the user what to do next
 - stop_worker_and_edit() — Stop the worker and switch back to BUILDING mode
 
 In RUNNING mode you do NOT have write tools or agent construction tools. \
 If you need to modify the agent, call stop_worker_and_edit() to switch back \
-to BUILDING mode. If the user wants to re-run with different input, call \
-reload_agent() to return to STAGING mode.
+to BUILDING mode. To stop the worker and ask the user what to do next, call \
+stop_worker() to return to STAGING mode.
 
 ### Mode transitions
 - load_built_agent(path) → switches to STAGING mode
 - run_agent_with_input(task) → starts worker, switches to RUNNING mode
-- reload_agent() → stops worker, switches to STAGING mode (re-run with new input)
+- stop_worker() → stops worker, switches to STAGING mode (ask user: re-run or edit?)
 - stop_worker_and_edit() → stops worker (if running), switches to BUILDING mode
 """
 
