@@ -68,6 +68,8 @@ _STAGE_MAP: dict[str, str] = {
 # Telegram chat_id auto-fetch helper
 # ---------------------------------------------------------------------------
 
+_telegram_chat_id_cache: str | None = None
+
 
 def _auto_fetch_telegram_chat_id() -> str:
     """
@@ -76,14 +78,24 @@ def _auto_fetch_telegram_chat_id() -> str:
     This is a bootstrapping/discovery call — there is no MCP tool that exposes
     getUpdates, and users have no practical way to find their chat_id otherwise.
     Returns empty string if Telegram is not configured.
+
+    The result is cached in a module-level variable after the first successful
+    fetch so subsequent calls within the same process do not make extra HTTP
+    requests.
     """
+    global _telegram_chat_id_cache
+    if _telegram_chat_id_cache is not None:
+        return _telegram_chat_id_cache
+
     chat_id = os.getenv("TELEGRAM_CHAT_ID", "").strip()
     if chat_id:
-        return chat_id
+        _telegram_chat_id_cache = chat_id
+        return _telegram_chat_id_cache
 
     token = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
     if not token:
-        return ""
+        _telegram_chat_id_cache = ""
+        return _telegram_chat_id_cache
 
     try:
         resp = httpx.get(
@@ -104,14 +116,16 @@ def _auto_fetch_telegram_chat_id() -> str:
                         print(
                             f'   Tip: export TELEGRAM_CHAT_ID="{found}" to skip auto-fetch\n'
                         )
-                        return found
+                        _telegram_chat_id_cache = found
+                        return _telegram_chat_id_cache
         print(
             "\n⚠️  No Telegram updates found — send any message to your bot first, then retry.\n"
         )
     except Exception as exc:
         print(f"\n⚠️  Could not auto-fetch Telegram chat_id: {exc}\n")
 
-    return ""
+    _telegram_chat_id_cache = ""
+    return _telegram_chat_id_cache
 
 
 # ---------------------------------------------------------------------------
@@ -137,11 +151,9 @@ def _scan_pipeline(cycle: int, deals: list | None = None) -> dict:
         deals: List of HubSpot deal objects assembled by the LLM.
 
     Returns:
-        next_cycle         — incremented cycle number
-        deals_scanned      — number of open deals processed
-        overdue_invoices   — always 0 (not tracked via HubSpot deals API)
-        support_escalations — always 0 (not tracked via HubSpot deals API)
-        status             — "ok" or "no_deals"
+        next_cycle    — incremented cycle number
+        deals_scanned — number of open deals processed
+        status        — "ok" or "no_deals"
     """
     try:
         cycle_num = int(float(cycle or 0))
@@ -161,8 +173,6 @@ def _scan_pipeline(cycle: int, deals: list | None = None) -> dict:
         return {
             "next_cycle": next_cycle,
             "deals_scanned": 0,
-            "overdue_invoices": 0,
-            "support_escalations": 0,
             "status": "no_deals",
         }
 
@@ -225,8 +235,6 @@ def _scan_pipeline(cycle: int, deals: list | None = None) -> dict:
     return {
         "next_cycle": next_cycle,
         "deals_scanned": len(normalised),
-        "overdue_invoices": 0,
-        "support_escalations": 0,
         "status": "ok",
     }
 

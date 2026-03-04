@@ -1,7 +1,7 @@
 """Node definitions for HubSpot Revenue Leak Detector Agent.
 
 Data flow between nodes (via context memory):
-  monitor  → sets: cycle, deals_scanned, overdue_invoices, support_escalations
+  monitor  → sets: cycle, deals_scanned
              also stores deals in _deals_cache_var contextvar (session-isolated)
   analyze  → reads: cycle
              sets: cycle, leak_count, severity, total_at_risk, halt
@@ -25,7 +25,7 @@ monitor_node = NodeSpec(
     client_facing=False,
     max_node_visits=0,
     input_keys=["cycle"],
-    output_keys=["cycle", "deals_scanned", "overdue_invoices", "support_escalations"],
+    output_keys=["cycle", "deals_scanned"],
     tools=[
         "hubspot_search_deals",
         "hubspot_search_contacts",
@@ -74,10 +74,8 @@ STEP 3 — Store results:
 
 STEP 4 — Set outputs:
   Call set_output for each key (all values as strings):
-    "cycle"               → next_cycle returned by scan_pipeline
-    "deals_scanned"       → deals_scanned returned by scan_pipeline
-    "overdue_invoices"    → "0"
-    "support_escalations" → "0"
+    "cycle"         → next_cycle returned by scan_pipeline
+    "deals_scanned" → deals_scanned returned by scan_pipeline
 
 Stop immediately after all set_output calls. Do NOT call scan_pipeline more than once.
 """,
@@ -93,7 +91,7 @@ analyze_node = NodeSpec(
     node_type="event_loop",
     client_facing=False,
     max_node_visits=0,
-    input_keys=["cycle", "deals_scanned", "overdue_invoices", "support_escalations"],
+    input_keys=["cycle", "deals_scanned"],
     output_keys=["cycle", "leak_count", "severity", "total_at_risk", "halt"],
     tools=["detect_revenue_leaks"],
     system_prompt="""\

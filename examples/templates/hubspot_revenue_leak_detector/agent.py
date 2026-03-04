@@ -28,17 +28,6 @@ from framework.runtime.execution_stream import EntryPointSpec
 from .config import default_config, metadata, VERSION
 from .nodes import monitor_node, analyze_node, notify_node, followup_node
 
-# This agent requires Resend for follow-up emails.
-# The global CredentialSpec has required=False (optional for other agents),
-# so we override it here at module load time so AgentRunner / TUI enforces it.
-try:
-    from aden_tools.credentials import CREDENTIAL_SPECS as _CRED_SPECS
-
-    if "resend" in _CRED_SPECS:
-        _CRED_SPECS["resend"].required = True
-except ImportError:
-    pass
-
 # ---- Goal ----
 goal = Goal(
     id="hubspot-revenue-leak-detector",
