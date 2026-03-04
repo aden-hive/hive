@@ -16,6 +16,7 @@ def register_tools(mcp: FastMCP) -> None:
         agent_id: str,
         session_id: str,
         append: bool = False,
+        force_overwrite: bool = False,
     ) -> dict:
         """
         Purpose
@@ -41,12 +42,16 @@ def register_tools(mcp: FastMCP) -> None:
             agent_id: The ID of the agent
             session_id: The ID of the current session
             append: Whether to append to the file instead of overwriting (default: False)
+            force_overwrite: Whether to allow overwriting an existing file when not
+                appending (default: False)
 
         Returns:
             Dict with success status and path, or error dict
         """
         try:
             secure_path = get_secure_path(path, workspace_id, agent_id, session_id)
+            if not append and not force_overwrite and os.path.exists(secure_path):
+                return {"error": "File exists. Set force_overwrite=True to replace."}
             os.makedirs(os.path.dirname(secure_path), exist_ok=True)
             mode = "a" if append else "w"
             with open(secure_path, mode, encoding="utf-8") as f:
