@@ -1,6 +1,5 @@
 """Structural tests for Meeting Scheduler."""
 
-import pytest
 from meeting_scheduler import (
     default_agent,
     goal,
@@ -10,7 +9,6 @@ from meeting_scheduler import (
     entry_points,
     terminal_nodes,
     conversation_mode,
-    identity_prompt,
     loop_config,
 )
 

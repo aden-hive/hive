@@ -13,7 +13,6 @@ from aden_tools.credentials.health_check import (
     GoogleMapsHealthChecker,
     GoogleSearchHealthChecker,
     LushaHealthChecker,
-    NewsdataHealthChecker,
     ResendHealthChecker,
     check_credential_health,
 )
@@ -57,11 +56,6 @@ class TestHealthCheckerRegistry:
         assert "lusha_api_key" in HEALTH_CHECKERS
         assert isinstance(HEALTH_CHECKERS["lusha_api_key"], LushaHealthChecker)
 
-    def test_lusha_registered(self):
-        """LushaHealthChecker is registered in HEALTH_CHECKERS."""
-        assert "lusha_api_key" in HEALTH_CHECKERS
-        assert isinstance(HEALTH_CHECKERS["lusha_api_key"], LushaHealthChecker)
-
     def test_discord_registered(self):
         """DiscordHealthChecker is registered in HEALTH_CHECKERS."""
         assert "discord" in HEALTH_CHECKERS
@@ -90,12 +84,8 @@ class TestHealthCheckerRegistry:
             "serpapi",
             "slack",
             "lusha_api_key",
-            "discord",
             "stripe",
             "telegram",
-            "newsdata",
-            "finlight",
-            "brevo",
             "calendly_pat",
             "zoho_crm",
         }

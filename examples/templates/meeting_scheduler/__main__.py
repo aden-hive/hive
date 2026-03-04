@@ -1,6 +1,9 @@
 """CLI entry point for Meeting Scheduler."""
 
-import asyncio, json, logging, sys
+import asyncio
+import json
+import logging
+import sys
 import click
 from .agent import default_agent, MeetingScheduler
 
