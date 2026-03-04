@@ -781,7 +781,9 @@ SUBSCRIPTION_MODE=""    # "claude_code" | "codex" | "zai_code" | ""
 
 # ── Credential detection (silent — just set flags) ───────────
 CLAUDE_CRED_DETECTED=false
-if [ -f "$HOME/.claude/.credentials.json" ]; then
+if command -v security &>/dev/null && security find-generic-password -s "Claude Code-credentials" &>/dev/null 2>&1; then
+    CLAUDE_CRED_DETECTED=true
+elif [ -f "$HOME/.claude/.credentials.json" ]; then
     CLAUDE_CRED_DETECTED=true
 fi
 
