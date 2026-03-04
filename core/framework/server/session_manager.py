@@ -426,8 +426,8 @@ class SessionManager:
         # Mode state for building/running mode switching
         from framework.tools.queen_lifecycle_tools import QueenModeState, register_queen_lifecycle_tools
 
-        # Start in staging if a worker is already loaded, building otherwise.
-        initial_mode = "staging" if session.worker_runtime is not None else "building"
+        # Start in staging when the caller provided an agent, building otherwise.
+        initial_mode = "staging" if worker_identity else "building"
         mode_state = QueenModeState(mode=initial_mode, event_bus=session.event_bus)
 
         # Always register lifecycle tools — they check session.worker_runtime
