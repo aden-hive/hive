@@ -133,7 +133,11 @@ class SessionManager:
         # Start queen immediately (queen-only, no worker tools yet)
         await self._start_queen(session, worker_identity=None, initial_prompt=initial_prompt)
 
-        logger.info("Session '%s' created (queen-only, resume_from=%s)", session.id, queen_resume_from)
+        logger.info(
+            "Session '%s' created (queen-only, resume_from=%s)",
+            session.id,
+            queen_resume_from,
+        )
         return session
 
     async def create_session_with_worker(
@@ -933,7 +937,8 @@ class SessionManager:
                                 continue
                     # Filter to client-facing messages only
                     client_msgs = [
-                        p for p in all_parts
+                        p
+                        for p in all_parts
                         if not p.get("is_transition_marker")
                         and p.get("role") != "tool"
                         and not (p.get("role") == "assistant" and p.get("tool_calls"))
@@ -946,7 +951,8 @@ class SessionManager:
                         if isinstance(content, list):
                             # Anthropic-style content blocks
                             content = " ".join(
-                                b.get("text", "") for b in content
+                                b.get("text", "")
+                                for b in content
                                 if isinstance(b, dict) and b.get("type") == "text"
                             )
                         if content and msg.get("role") == "assistant":
@@ -955,17 +961,19 @@ class SessionManager:
                 except OSError:
                     pass
 
-            results.append({
-                "session_id": d.name,
-                "cold": True,   # caller overrides for live sessions
-                "live": False,
-                "has_messages": convs_dir.exists() and message_count > 0,
-                "created_at": created_at,
-                "agent_name": agent_name,
-                "agent_path": agent_path,
-                "last_message": last_message,
-                "message_count": message_count,
-            })
+            results.append(
+                {
+                    "session_id": d.name,
+                    "cold": True,  # caller overrides for live sessions
+                    "live": False,
+                    "has_messages": convs_dir.exists() and message_count > 0,
+                    "created_at": created_at,
+                    "agent_name": agent_name,
+                    "agent_path": agent_path,
+                    "last_message": last_message,
+                    "message_count": message_count,
+                }
+            )
 
         return results
 
