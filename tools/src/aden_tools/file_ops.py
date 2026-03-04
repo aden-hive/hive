@@ -590,9 +590,7 @@ def register_file_tools(
                                 if compiled.search(stripped):
                                     if hashline:
                                         h = compute_line_hash(stripped)
-                                        matches.append(
-                                            f"{display_path}:{i}:{h}|{stripped}"
-                                        )
+                                        matches.append(f"{display_path}:{i}:{h}|{stripped}")
                                     else:
                                         matches.append(
                                             f"{display_path}:{i}:{stripped[:MAX_LINE_LENGTH]}"
@@ -700,8 +698,11 @@ def register_file_tools(
                     new_content = op["content"]
                     new_lines = [new_content] if new_content else []
                     new_lines = maybe_strip(
-                        new_lines, strip_content_prefixes, "prefix_strip",
-                        auto_cleanup, cleanup_actions,
+                        new_lines,
+                        strip_content_prefixes,
+                        "prefix_strip",
+                        auto_cleanup,
+                        cleanup_actions,
                     )
                     splices.append((idx, idx, new_lines, i))
 
@@ -731,13 +732,18 @@ def register_file_tools(
                     new_content = op["content"]
                     new_lines = new_content.splitlines() if new_content else []
                     new_lines = maybe_strip(
-                        new_lines, strip_content_prefixes, "prefix_strip",
-                        auto_cleanup, cleanup_actions,
+                        new_lines,
+                        strip_content_prefixes,
+                        "prefix_strip",
+                        auto_cleanup,
+                        cleanup_actions,
                     )
                     new_lines = maybe_strip(
                         new_lines,
                         lambda nl, s=start_num, e=end_num: strip_boundary_echo(lines, s, e, nl),
-                        "boundary_echo_strip", auto_cleanup, cleanup_actions,
+                        "boundary_echo_strip",
+                        auto_cleanup,
+                        cleanup_actions,
                     )
                     splices.append((start_num - 1, end_num - 1, new_lines, i))
 
@@ -755,13 +761,18 @@ def register_file_tools(
                         return f"Error: Edit #{i + 1} (insert_after): content is empty"
                     new_lines = new_content.splitlines()
                     new_lines = maybe_strip(
-                        new_lines, strip_content_prefixes, "prefix_strip",
-                        auto_cleanup, cleanup_actions,
+                        new_lines,
+                        strip_content_prefixes,
+                        "prefix_strip",
+                        auto_cleanup,
+                        cleanup_actions,
                     )
                     new_lines = maybe_strip(
                         new_lines,
                         lambda nl, _idx=idx: strip_insert_echo(lines[_idx], nl),
-                        "insert_echo_strip", auto_cleanup, cleanup_actions,
+                        "insert_echo_strip",
+                        auto_cleanup,
+                        cleanup_actions,
                     )
                     splices.append((idx + 1, idx, new_lines, i))
 
@@ -779,13 +790,18 @@ def register_file_tools(
                         return f"Error: Edit #{i + 1} (insert_before): content is empty"
                     new_lines = new_content.splitlines()
                     new_lines = maybe_strip(
-                        new_lines, strip_content_prefixes, "prefix_strip",
-                        auto_cleanup, cleanup_actions,
+                        new_lines,
+                        strip_content_prefixes,
+                        "prefix_strip",
+                        auto_cleanup,
+                        cleanup_actions,
                     )
                     new_lines = maybe_strip(
                         new_lines,
                         lambda nl, _idx=idx: strip_insert_echo(lines[_idx], nl, position="last"),
-                        "insert_echo_strip", auto_cleanup, cleanup_actions,
+                        "insert_echo_strip",
+                        auto_cleanup,
+                        cleanup_actions,
                     )
                     splices.append((idx, idx - 1, new_lines, i))
 
@@ -817,8 +833,11 @@ def register_file_tools(
                         return f"Error: Edit #{i + 1} (append): content must not be empty"
                     new_lines = new_content.splitlines()
                     new_lines = maybe_strip(
-                        new_lines, strip_content_prefixes, "prefix_strip",
-                        auto_cleanup, cleanup_actions,
+                        new_lines,
+                        strip_content_prefixes,
+                        "prefix_strip",
+                        auto_cleanup,
+                        cleanup_actions,
                     )
                     insert_point = len(lines)
                     splices.append((insert_point, insert_point - 1, new_lines, i))
@@ -859,9 +878,7 @@ def register_file_tools(
         # 5. Apply splices bottom-up
         changes_made = 0
         working = list(lines)
-        for start, end, new_lines, _ in sorted(
-            splices, key=lambda s: (s[0], s[3]), reverse=True
-        ):
+        for start, end, new_lines, _ in sorted(splices, key=lambda s: (s[0], s[3]), reverse=True):
             if start > end:
                 changes_made += 1
                 for k, nl in enumerate(new_lines):

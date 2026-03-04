@@ -206,12 +206,16 @@ class TestHashlineEditReplaceLines:
         f = tmp_path / "f.txt"
         f.write_text("aaa\nbbb\nccc\nddd\n")
 
-        edits = json.dumps([{
-            "op": "replace_lines",
-            "start_anchor": _anchor(2, "bbb"),
-            "end_anchor": _anchor(3, "ccc"),
-            "content": "XXX\nYYY\nZZZ",
-        }])
+        edits = json.dumps(
+            [
+                {
+                    "op": "replace_lines",
+                    "start_anchor": _anchor(2, "bbb"),
+                    "end_anchor": _anchor(3, "ccc"),
+                    "content": "XXX\nYYY\nZZZ",
+                }
+            ]
+        )
         result = hashline_edit(path="f.txt", edits=edits)
         assert "Applied 1 edit" in result
         assert f.read_text() == "aaa\nXXX\nYYY\nZZZ\nddd\n"
@@ -224,11 +228,15 @@ class TestHashlineEditInsert:
         f = tmp_path / "f.txt"
         f.write_text("aaa\nbbb\nccc\n")
 
-        edits = json.dumps([{
-            "op": "insert_after",
-            "anchor": _anchor(1, "aaa"),
-            "content": "NEW",
-        }])
+        edits = json.dumps(
+            [
+                {
+                    "op": "insert_after",
+                    "anchor": _anchor(1, "aaa"),
+                    "content": "NEW",
+                }
+            ]
+        )
         result = hashline_edit(path="f.txt", edits=edits)
         assert "Applied 1 edit" in result
         assert f.read_text() == "aaa\nNEW\nbbb\nccc\n"
@@ -239,11 +247,15 @@ class TestHashlineEditInsert:
         f = tmp_path / "f.txt"
         f.write_text("aaa\nbbb\nccc\n")
 
-        edits = json.dumps([{
-            "op": "insert_before",
-            "anchor": _anchor(2, "bbb"),
-            "content": "NEW",
-        }])
+        edits = json.dumps(
+            [
+                {
+                    "op": "insert_before",
+                    "anchor": _anchor(2, "bbb"),
+                    "content": "NEW",
+                }
+            ]
+        )
         result = hashline_edit(path="f.txt", edits=edits)
         assert "Applied 1 edit" in result
         assert f.read_text() == "aaa\nNEW\nbbb\nccc\n"
@@ -256,11 +268,15 @@ class TestHashlineEditReplace:
         f = tmp_path / "f.txt"
         f.write_text("aaa\nbbb\nccc\n")
 
-        edits = json.dumps([{
-            "op": "replace",
-            "old_content": "bbb",
-            "new_content": "BBB",
-        }])
+        edits = json.dumps(
+            [
+                {
+                    "op": "replace",
+                    "old_content": "bbb",
+                    "new_content": "BBB",
+                }
+            ]
+        )
         result = hashline_edit(path="f.txt", edits=edits)
         assert "Applied 1 edit" in result
         assert f.read_text() == "aaa\nBBB\nccc\n"
@@ -271,11 +287,15 @@ class TestHashlineEditReplace:
         f = tmp_path / "f.txt"
         f.write_text("aaa\nbbb\nccc\n")
 
-        edits = json.dumps([{
-            "op": "replace",
-            "old_content": "zzz",
-            "new_content": "ZZZ",
-        }])
+        edits = json.dumps(
+            [
+                {
+                    "op": "replace",
+                    "old_content": "zzz",
+                    "new_content": "ZZZ",
+                }
+            ]
+        )
         result = hashline_edit(path="f.txt", edits=edits)
         assert "Error" in result
         assert "not found" in result
@@ -301,15 +321,17 @@ class TestHashlineEditOverlap:
         f = tmp_path / "f.txt"
         f.write_text("aaa\nbbb\nccc\nddd\n")
 
-        edits = json.dumps([
-            {"op": "set_line", "anchor": _anchor(2, "bbb"), "content": "BBB"},
-            {
-                "op": "replace_lines",
-                "start_anchor": _anchor(1, "aaa"),
-                "end_anchor": _anchor(3, "ccc"),
-                "content": "XXX",
-            },
-        ])
+        edits = json.dumps(
+            [
+                {"op": "set_line", "anchor": _anchor(2, "bbb"), "content": "BBB"},
+                {
+                    "op": "replace_lines",
+                    "start_anchor": _anchor(1, "aaa"),
+                    "end_anchor": _anchor(3, "ccc"),
+                    "content": "XXX",
+                },
+            ]
+        )
         result = hashline_edit(path="f.txt", edits=edits)
         assert "Error" in result
         assert "Overlapping" in result
@@ -325,12 +347,16 @@ class TestHashlineEditAutoCleanup:
         h_bbb = compute_line_hash("bbb")
         h_ccc = compute_line_hash("ccc")
         # LLM echoes hashline prefixes in replace_lines content
-        edits = json.dumps([{
-            "op": "replace_lines",
-            "start_anchor": _anchor(2, "bbb"),
-            "end_anchor": _anchor(3, "ccc"),
-            "content": f"2:{h_bbb}|BBB\n3:{h_ccc}|CCC",
-        }])
+        edits = json.dumps(
+            [
+                {
+                    "op": "replace_lines",
+                    "start_anchor": _anchor(2, "bbb"),
+                    "end_anchor": _anchor(3, "ccc"),
+                    "content": f"2:{h_bbb}|BBB\n3:{h_ccc}|CCC",
+                }
+            ]
+        )
         result = hashline_edit(path="f.txt", edits=edits)
         assert "Applied 1 edit" in result
         # Should have stripped the prefixes
@@ -345,11 +371,15 @@ class TestHashlineEditAutoCleanup:
 
         h = compute_line_hash("bbb")
         raw_content = f"2:{h}|BBB"
-        edits = json.dumps([{
-            "op": "set_line",
-            "anchor": _anchor(2, "bbb"),
-            "content": raw_content,
-        }])
+        edits = json.dumps(
+            [
+                {
+                    "op": "set_line",
+                    "anchor": _anchor(2, "bbb"),
+                    "content": raw_content,
+                }
+            ]
+        )
         result = hashline_edit(path="f.txt", edits=edits, auto_cleanup=False)
         assert "Applied 1 edit" in result
         assert f.read_text() == f"aaa\n{raw_content}\nccc\n"
