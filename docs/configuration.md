@@ -176,6 +176,7 @@ Add to `.vscode/settings.json`:
 3. **Use real provider keys in non-production environments** - validate configuration with low-risk inputs before production rollout
 4. **Credential isolation** - Each tool validates its own credentials at runtime
 
+
 ## Troubleshooting
 
 ### "ModuleNotFoundError: No module named 'framework'"

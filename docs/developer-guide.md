@@ -97,7 +97,7 @@ Get API keys:
 ### Install Claude Code Skills
 
 ```bash
-# Install building-agents and testing-agent skills
+# Install building-agents and testing-agents skills
 ./quickstart.sh
 ```
 

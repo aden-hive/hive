@@ -2,7 +2,7 @@
 
 ## Summary
 
-Gives local API key credentials (Brave Search, GitHub, Exa, Stripe, etc.) the same feature set as Aden OAuth credentials: named aliases, identity metadata, status tracking, CRUD management, and full visibility in the credential tester.
+Give local API key credentials (Brave Search, GitHub, Exa, Stripe, etc.) the same feature set as Aden OAuth credentials: named aliases, identity metadata, status tracking, CRUD management, and full visibility in the credential tester.
 
 Fixes a bug where credentials configured with the existing `store_credential` MCP tool were invisible in the credential tester account picker.
 

@@ -58,6 +58,10 @@ class BuildSession:
     """Build session with persistence support."""
 
     def __init__(self, name: str, session_id: str | None = None):
+        # Validate session_id if provided
+        if session_id:
+            _safe_path_segment(session_id)
+            
         self.id = session_id or f"build_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
         self.name = name
         self.goal: Goal | None = None
@@ -134,6 +138,40 @@ class BuildSession:
 _session: BuildSession | None = None
 
 
+def _safe_path_segment(value: str) -> str:
+    """Validate a path parameter is a safe filesystem name.
+    
+    Prevents path traversal by rejecting strings with separators or '..'.
+    """
+    if not value:
+        raise ValueError("Path segment cannot be empty")
+    if "/" in value or "\\" in value or ".." in value:
+        raise ValueError(f"Invalid path segment '{value}': path separators or '..' not allowed")
+    return value
+
+
+def _safe_export_path(agent_path: str) -> Path:
+    """Validate and normalize agent_path for export/import.
+    
+    Ensures the path is relative and stays within the 'exports/' directory.
+    """
+    if not agent_path:
+        raise ValueError("agent_path is required")
+        
+    # Remove any leading slashes to prevent absolute path escapes
+    clean_path = agent_path.lstrip("/").lstrip("\\")
+    
+    # Resolve relative to project root / exports
+    exports_root = _PROJECT_ROOT / "exports"
+    full_path = (exports_root / clean_path).resolve()
+    
+    # Check if the resolved path is still within exports_root
+    if not str(full_path).startswith(str(exports_root)):
+        raise ValueError(f"Invalid agent path '{agent_path}': must stay within 'exports/'")
+        
+    return full_path
+
+
 def _ensure_sessions_dir():
     """Ensure sessions directory exists."""
     SESSIONS_DIR.mkdir(exist_ok=True)
@@ -143,22 +181,26 @@ def _save_session(session: BuildSession):
     """Save session to disk."""
     _ensure_sessions_dir()
 
+    # Validate session ID
+    safe_id = _safe_path_segment(session.id)
+
     # Update last modified
     session.last_modified = datetime.now().isoformat()
 
     # Save session file
-    session_file = SESSIONS_DIR / f"{session.id}.json"
+    session_file = SESSIONS_DIR / f"{safe_id}.json"
     with atomic_write(session_file) as f:
         json.dump(session.to_dict(), f, indent=2, default=str)
 
     # Update active session pointer
     with atomic_write(ACTIVE_SESSION_FILE) as f:
-        f.write(session.id)
+        f.write(safe_id)
 
 
 def _load_session(session_id: str) -> BuildSession:
     """Load session from disk."""
-    session_file = SESSIONS_DIR / f"{session_id}.json"
+    safe_id = _safe_path_segment(session_id)
+    session_file = SESSIONS_DIR / f"{safe_id}.json"
     if not session_file.exists():
         raise ValueError(f"Session '{session_id}' not found")
 
@@ -178,6 +220,7 @@ def _load_active_session() -> BuildSession | None:
             session_id = f.read().strip()
 
         if session_id:
+            # session_id in the pointer file should already be safe
             return _load_session(session_id)
     except Exception as e:
         logging.warning("Failed to load active session: %s", e)
@@ -269,11 +312,13 @@ def load_session_by_id(session_id: Annotated[str, "ID of the session to load"]) 
     global _session
 
     try:
-        _session = _load_session(session_id)
+        # Validate session_id
+        safe_id = _safe_path_segment(session_id)
+        _session = _load_session(safe_id)
 
         # Update active session pointer
         with atomic_write(ACTIVE_SESSION_FILE) as f:
-            f.write(session_id)
+            f.write(safe_id)
 
         return json.dumps(
             {
@@ -297,29 +342,32 @@ def delete_session(session_id: Annotated[str, "ID of the session to delete"]) ->
     """Delete a saved agent building session."""
     global _session
 
-    session_file = SESSIONS_DIR / f"{session_id}.json"
-    if not session_file.exists():
-        return json.dumps({"success": False, "error": f"Session '{session_id}' not found"})
-
     try:
+        # Validate session_id
+        safe_id = _safe_path_segment(session_id)
+        
+        session_file = SESSIONS_DIR / f"{safe_id}.json"
+        if not session_file.exists():
+            return json.dumps({"success": False, "error": f"Session '{safe_id}' not found"})
+
         # Remove session file
         session_file.unlink()
 
         # Clear active session if it was the deleted one
-        if _session and _session.id == session_id:
+        if _session and _session.id == safe_id:
             _session = None
 
         if ACTIVE_SESSION_FILE.exists():
             with open(ACTIVE_SESSION_FILE) as f:
                 active_id = f.read().strip()
-                if active_id == session_id:
+                if active_id == safe_id:
                     ACTIVE_SESSION_FILE.unlink()
 
         return json.dumps(
             {
                 "success": True,
-                "deleted_session_id": session_id,
-                "message": f"Session '{session_id}' deleted successfully",
+                "deleted_session_id": safe_id,
+                "message": f"Session '{safe_id}' deleted successfully",
             }
         )
     except Exception as e:
@@ -1665,9 +1713,15 @@ def export_graph() -> str:
     if not validation["valid"]:
         return json.dumps({"success": False, "errors": validation["errors"]})
 
+    # Validate session name for filesystem safety
+    try:
+        safe_name = _safe_path_segment(session.name)
+    except ValueError as e:
+        return json.dumps({"success": False, "error": f"Invalid session name: {e}"})
+
     entry_node = validation["entry_node"]
     terminal_nodes = validation["terminal_nodes"]
-
+    # ... (rest of function until file writing)
     # Extract pause/resume configuration from validation
     pause_nodes = validation.get("pause_nodes", [])
     resume_entry_points = validation.get("resume_entry_points", [])
@@ -1753,7 +1807,7 @@ def export_graph() -> str:
 
     # Build GraphSpec
     graph_spec = {
-        "id": f"{session.name}-graph",
+        "id": f"{safe_name}-graph",
         "goal_id": session.goal.id,
         "version": "1.0.0",
         "entry_node": entry_node,
@@ -1780,7 +1834,7 @@ def export_graph() -> str:
     # Build export data
     export_data = {
         "agent": {
-            "id": session.name,
+            "id": safe_name,
             "name": session.goal.name,
             "version": "1.0.0",
             "description": session.goal.description,
@@ -1812,9 +1866,12 @@ def export_graph() -> str:
             session.mcp_servers.append(dict(GCU_MCP_SERVER_CONFIG))
 
     # === WRITE FILES TO DISK ===
-    # Create exports directory
-    exports_dir = Path("exports") / session.name
-    exports_dir.mkdir(parents=True, exist_ok=True)
+    # Use _safe_export_path to ensure files stay within exports/
+    try:
+        exports_dir = _safe_export_path(safe_name)
+        exports_dir.mkdir(parents=True, exist_ok=True)
+    except ValueError as e:
+        return json.dumps({"success": False, "error": str(e)})
 
     # Write agent.json
     agent_json_path = exports_dir / "agent.json"
@@ -1896,14 +1953,22 @@ def import_from_export(
     """
     session = get_session()
 
-    path = Path(agent_json_path)
-    if not path.exists():
-        return json.dumps({"success": False, "error": f"File not found: {agent_json_path}"})
-
     try:
+        # Use _safe_export_path to prevent reading files outside exports/
+        # (assuming we want to restrict imports to the exports/ directory)
+        # Note: if users want to import from anywhere, we'd need a different check
+        path = _safe_export_path(agent_json_path)
+        
+        if not path.exists():
+            return json.dumps({"success": False, "error": f"File not found: {agent_json_path}"})
+
         data = json.loads(path.read_text(encoding="utf-8"))
+    except ValueError as e:
+        return json.dumps({"success": False, "error": f"Invalid path: {e}"})
     except json.JSONDecodeError as e:
         return json.dumps({"success": False, "error": f"Invalid JSON: {e}"})
+    except Exception as e:
+        return json.dumps({"success": False, "error": f"Failed to read file: {e}"})
 
     try:
         # Parse goal (same pattern as BuildSession.from_dict lines 88-99)
