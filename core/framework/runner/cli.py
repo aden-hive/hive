@@ -470,7 +470,9 @@ def _prompt_before_start(agent_path: str, runner, model: str | None = None):
     while True:
         print()
         try:
-            choice = input("Press Enter to start agent, or 'u' to update credentials: ").strip()
+            choice = input(
+                "Press Enter to start agent, or 'u' to update credentials: "
+            ).strip()
         except (EOFError, KeyboardInterrupt):
             print()
             return None
@@ -609,7 +611,9 @@ def cmd_run(args: argparse.Namespace) -> int:
         resume_session = getattr(args, "resume_session", None)
         checkpoint = getattr(args, "checkpoint", None)
         if resume_session:
-            session_state = _load_resume_state(args.agent_path, resume_session, checkpoint)
+            session_state = _load_resume_state(
+                args.agent_path, resume_session, checkpoint
+            )
             if session_state is None:
                 print(
                     f"Error: Could not load session state for {resume_session}",
@@ -626,7 +630,9 @@ def cmd_run(args: argparse.Namespace) -> int:
                 print()
 
         # Auto-inject user_id if the agent expects it but it's not provided
-        entry_input_keys = runner.graph.nodes[0].input_keys if runner.graph.nodes else []
+        entry_input_keys = (
+            runner.graph.nodes[0].input_keys if runner.graph.nodes else []
+        )
         if "user_id" in entry_input_keys and context.get("user_id") is None:
             import os
 
@@ -678,7 +684,13 @@ def cmd_run(args: argparse.Namespace) -> int:
             if result.success:
                 print("\n--- Results ---")
                 # Show only meaningful output keys (skip internal/intermediate values)
-                meaningful_keys = ["final_response", "response", "result", "answer", "output"]
+                meaningful_keys = [
+                    "final_response",
+                    "response",
+                    "result",
+                    "answer",
+                    "output",
+                ]
 
                 # Try to find the most relevant output
                 shown = False
@@ -732,7 +744,7 @@ def cmd_info(args: argparse.Namespace) -> int:
     except CredentialError as e:
         print(f"\n{e}", file=sys.stderr)
         return 1
-    except FileNotFoundError as e:
+    except (FileNotFoundError, ValueError) as e:
         print(f"Error: {e}", file=sys.stderr)
         return 1
 
@@ -766,8 +778,16 @@ def cmd_info(args: argparse.Namespace) -> int:
         print()
         print(f"Nodes ({info.node_count}):")
         for node in info.nodes:
-            inputs = f" [in: {', '.join(node['input_keys'])}]" if node.get("input_keys") else ""
-            outputs = f" [out: {', '.join(node['output_keys'])}]" if node.get("output_keys") else ""
+            inputs = (
+                f" [in: {', '.join(node['input_keys'])}]"
+                if node.get("input_keys")
+                else ""
+            )
+            outputs = (
+                f" [out: {', '.join(node['output_keys'])}]"
+                if node.get("output_keys")
+                else ""
+            )
             print(f"  - {node['id']}: {node['name']}{inputs}{outputs}")
         print()
         print(f"Success Criteria ({len(info.success_criteria)}):")
@@ -783,7 +803,9 @@ def cmd_info(args: argparse.Namespace) -> int:
             status = "✓" if runner._tool_registry.has_tool(tool) else "✗"
             print(f"  {status} {tool}")
         print()
-        print(f"Tools Module: {'✓ tools.py found' if info.has_tools_module else '✗ no tools.py'}")
+        print(
+            f"Tools Module: {'✓ tools.py found' if info.has_tools_module else '✗ no tools.py'}"
+        )
 
     runner.cleanup()
     return 0
@@ -799,7 +821,7 @@ def cmd_validate(args: argparse.Namespace) -> int:
     except CredentialError as e:
         print(f"\n{e}", file=sys.stderr)
         return 1
-    except FileNotFoundError as e:
+    except (FileNotFoundError, ValueError) as e:
         print(f"Error: {e}", file=sys.stderr)
         return 1
 
@@ -821,7 +843,9 @@ def cmd_validate(args: argparse.Namespace) -> int:
         print("\nMissing tool implementations:")
         for tool in validation.missing_tools:
             print(f"  - {tool}")
-        print("\nTo fix: Create tools.py in the agent folder or register tools programmatically")
+        print(
+            "\nTo fix: Create tools.py in the agent folder or register tools programmatically"
+        )
 
     runner.cleanup()
     return 0 if validation.valid else 1
@@ -847,9 +871,11 @@ def cmd_list(args: argparse.Namespace) -> int:
                     {
                         "path": str(path),
                         "name": info.name,
-                        "description": info.description[:60] + "..."
-                        if len(info.description) > 60
-                        else info.description,
+                        "description": (
+                            info.description[:60] + "..."
+                            if len(info.description) > 60
+                            else info.description
+                        ),
                         "nodes": info.node_count,
                         "tools": len(info.required_tools),
                     }
@@ -1030,7 +1056,9 @@ def _interactive_approval(request):
             choice = input("Your choice (a/r/s/x): ").strip().lower()
         except (EOFError, KeyboardInterrupt):
             print("\nAborting...")
-            return ApprovalResult(decision=ApprovalDecision.ABORT, reason="User interrupted")
+            return ApprovalResult(
+                decision=ApprovalDecision.ABORT, reason="User interrupted"
+            )
 
         if choice == "a":
             print("✓ Approved")
@@ -1041,7 +1069,9 @@ def _interactive_approval(request):
             return ApprovalResult(decision=ApprovalDecision.REJECT, reason=reason)
         elif choice == "s":
             print("✗ Rejected (skipping dependent steps)")
-            return ApprovalResult(decision=ApprovalDecision.REJECT, reason="User skipped")
+            return ApprovalResult(
+                decision=ApprovalDecision.REJECT, reason="User skipped"
+            )
         elif choice == "x":
             reason = input("Reason (optional): ").strip() or "Aborted by user"
             print(f"⛔ Aborted: {reason}")
@@ -1051,7 +1081,10 @@ def _interactive_approval(request):
 
 
 def _format_natural_language_to_json(
-    user_input: str, input_keys: list[str], agent_description: str, session_context: dict = None
+    user_input: str,
+    input_keys: list[str],
+    agent_description: str,
+    session_context: dict = None,
 ) -> dict:
     """Use Haiku to convert natural language input to JSON based on agent's input schema."""
     import os
@@ -1206,9 +1239,15 @@ def cmd_shell(args: argparse.Namespace) -> int:
         if user_input == "/nodes":
             print("\nAgent nodes:")
             for node in info.nodes:
-                inputs = f" [in: {', '.join(node['input_keys'])}]" if node.get("input_keys") else ""
+                inputs = (
+                    f" [in: {', '.join(node['input_keys'])}]"
+                    if node.get("input_keys")
+                    else ""
+                )
                 outputs = (
-                    f" [out: {', '.join(node['output_keys'])}]" if node.get("output_keys") else ""
+                    f" [out: {', '.join(node['output_keys'])}]"
+                    if node.get("output_keys")
+                    else ""
                 )
                 print(f"  {node['id']}: {node['name']}{inputs}{outputs}")
                 print(f"    {node['description']}")
@@ -1258,7 +1297,9 @@ def cmd_shell(args: argparse.Namespace) -> int:
             # The executor will restore all session memory automatically
             # The resume node expects fresh input, not merged session context
             run_context = {"input": user_input}  # Pass raw user input for resume nodes
-            print(f"\n🔄 Resuming from paused state: {agent_session_state.get('paused_at')}")
+            print(
+                f"\n🔄 Resuming from paused state: {agent_session_state.get('paused_at')}"
+            )
             print(f"User's answer: {user_input}")
         else:
             # STARTING FRESH: Merge new input with accumulated session memory
@@ -1290,7 +1331,13 @@ def cmd_shell(args: argparse.Namespace) -> int:
 
         # Show clean output - prioritize meaningful keys
         if result.output:
-            meaningful_keys = ["final_response", "response", "result", "answer", "output"]
+            meaningful_keys = [
+                "final_response",
+                "response",
+                "result",
+                "answer",
+                "output",
+            ]
             shown = False
 
             for key in meaningful_keys:
@@ -1528,7 +1575,9 @@ def _extract_python_agent_metadata(agent_path: Path) -> tuple[str, str]:
 
                 # Extract default values from class body
                 for item in node.body:
-                    if isinstance(item, ast.AnnAssign) and isinstance(item.target, ast.Name):
+                    if isinstance(item, ast.AnnAssign) and isinstance(
+                        item.target, ast.Name
+                    ):
                         field_name = item.target.id
                         if item.value:
                             # Handle simple string constants
@@ -1657,7 +1706,9 @@ def _select_agent(agents_dir: Path) -> str | None:
 
         # Show page header with indicator
         if total_pages > 1:
-            print(f"\nAvailable agents in {agents_dir} (Page {page + 1}/{total_pages}):\n")
+            print(
+                f"\nAvailable agents in {agents_dir} (Page {page + 1}/{total_pages}):\n"
+            )
         else:
             print(f"\nAvailable agents in {agents_dir}:\n")
 
@@ -1683,7 +1734,11 @@ def _select_agent(agents_dir: Path) -> str | None:
             print()
 
         # Show prompt
-        print("Select agent (number), use arrows to navigate, or q to quit: ", end="", flush=True)
+        print(
+            "Select agent (number), use arrows to navigate, or q to quit: ",
+            end="",
+            flush=True,
+        )
 
         try:
             key = _read_key()
@@ -1932,7 +1987,9 @@ def _open_browser(url: str) -> None:
 
     try:
         if sys.platform == "darwin":
-            subprocess.Popen(["open", url], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            subprocess.Popen(
+                ["open", url], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+            )
         elif sys.platform == "linux":
             subprocess.Popen(
                 ["xdg-open", url], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
@@ -2025,7 +2082,9 @@ def cmd_serve(args: argparse.Namespace) -> int:
         # Preload agents specified via --agent
         for agent_path in args.agent:
             try:
-                session = await manager.create_session_with_worker(agent_path, model=model)
+                session = await manager.create_session_with_worker(
+                    agent_path, model=model
+                )
                 info = session.worker_info
                 name = info.name if info else session.worker_id
                 print(f"Loaded agent: {session.worker_id} ({name})")
@@ -2043,7 +2102,9 @@ def cmd_serve(args: argparse.Namespace) -> int:
             Path("frontend/dist"),
             Path("core/frontend/dist"),
         ]
-        has_frontend = any((c / "index.html").exists() for c in dist_candidates if c.is_dir())
+        has_frontend = any(
+            (c / "index.html").exists() for c in dist_candidates if c.is_dir()
+        )
         dashboard_url = f"http://{args.host}:{args.port}"
 
         print()
@@ -2051,7 +2112,9 @@ def cmd_serve(args: argparse.Namespace) -> int:
         if has_frontend:
             print(f"Dashboard: {dashboard_url}")
         print(f"Health: {dashboard_url}/api/health")
-        print(f"Agents loaded: {sum(1 for s in manager.list_sessions() if s.worker_runtime)}")
+        print(
+            f"Agents loaded: {sum(1 for s in manager.list_sessions() if s.worker_runtime)}"
+        )
         print()
         print("Press Ctrl+C to stop")
 
