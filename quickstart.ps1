@@ -783,6 +783,17 @@ function Get-ModelSelection {
         return @{ Model = $choices[0].Id; MaxTokens = $choices[0].MaxTokens }
     }
 
+    # Find default index from previous model (if same provider)
+    $defaultIdx = "1"
+    if ($PrevModel -and $PrevProvider -eq $ProviderId) {
+        for ($j = 0; $j -lt $choices.Count; $j++) {
+            if ($choices[$j].Id -eq $PrevModel) {
+                $defaultIdx = [string]($j + 1)
+                break
+            }
+        }
+    }
+
     Write-Host ""
     Write-Color -Text "Select a model:" -Color White
     Write-Host ""
@@ -794,8 +805,8 @@ function Get-ModelSelection {
     Write-Host ""
 
     while ($true) {
-        $raw = Read-Host "Enter choice [1]"
-        if ([string]::IsNullOrWhiteSpace($raw)) { $raw = "1" }
+        $raw = Read-Host "Enter choice [$defaultIdx]"
+        if ([string]::IsNullOrWhiteSpace($raw)) { $raw = $defaultIdx }
         if ($raw -match '^\d+$') {
             $num = [int]$raw
             if ($num -ge 1 -and $num -le $choices.Count) {
@@ -851,6 +862,60 @@ $ProviderMenuUrls     = @(
     "https://cloud.cerebras.ai/"
 )
 
+# ── Read previous configuration (if any) ──────────────────────
+$PrevProvider = ""
+$PrevModel = ""
+$PrevEnvVar = ""
+$PrevSubMode = ""
+if (Test-Path $HiveConfigFile) {
+    try {
+        $prevConfig = Get-Content -Path $HiveConfigFile -Raw | ConvertFrom-Json
+        $prevLlm = $prevConfig.llm
+        if ($prevLlm) {
+            $PrevProvider = if ($prevLlm.provider) { $prevLlm.provider } else { "" }
+            $PrevModel = if ($prevLlm.model) { $prevLlm.model } else { "" }
+            $PrevEnvVar = if ($prevLlm.api_key_env_var) { $prevLlm.api_key_env_var } else { "" }
+            if ($prevLlm.use_claude_code_subscription) { $PrevSubMode = "claude_code" }
+            elseif ($prevLlm.use_codex_subscription) { $PrevSubMode = "codex" }
+            elseif ($prevLlm.api_base -and $prevLlm.api_base -like "*api.z.ai*") { $PrevSubMode = "zai_code" }
+        }
+    } catch { }
+}
+
+# Compute default menu number (only if credential is still valid)
+$DefaultChoice = ""
+if ($PrevSubMode -or $PrevProvider) {
+    $prevCredValid = $false
+    switch ($PrevSubMode) {
+        "claude_code" { if ($ClaudeCredDetected) { $prevCredValid = $true } }
+        "zai_code"    { if ($ZaiCredDetected)    { $prevCredValid = $true } }
+        "codex"       { if ($CodexCredDetected)  { $prevCredValid = $true } }
+        default {
+            if ($PrevEnvVar) {
+                $envVal = [System.Environment]::GetEnvironmentVariable($PrevEnvVar, "Process")
+                if (-not $envVal) { $envVal = [System.Environment]::GetEnvironmentVariable($PrevEnvVar, "User") }
+                if ($envVal) { $prevCredValid = $true }
+            }
+        }
+    }
+    if ($prevCredValid) {
+        switch ($PrevSubMode) {
+            "claude_code" { $DefaultChoice = "1" }
+            "zai_code"    { $DefaultChoice = "2" }
+            "codex"       { $DefaultChoice = "3" }
+        }
+        if (-not $DefaultChoice) {
+            switch ($PrevProvider) {
+                "anthropic" { $DefaultChoice = "4" }
+                "openai"    { $DefaultChoice = "5" }
+                "gemini"    { $DefaultChoice = "6" }
+                "groq"      { $DefaultChoice = "7" }
+                "cerebras"  { $DefaultChoice = "8" }
+            }
+        }
+    }
+}
+
 # ── Show unified provider selection menu ─────────────────────
 Write-Color -Text "Select your default LLM provider:" -Color White
 Write-Host ""
@@ -896,8 +961,18 @@ Write-Color -Text "9" -Color Cyan -NoNewline
 Write-Host ") Skip for now"
 Write-Host ""
 
+if ($DefaultChoice) {
+    Write-Color -Text "  Previously configured: $PrevProvider/$PrevModel. Press Enter to keep." -Color DarkGray
+    Write-Host ""
+}
+
 while ($true) {
-    $raw = Read-Host "Enter choice (1-9)"
+    if ($DefaultChoice) {
+        $raw = Read-Host "Enter choice (1-9) [$DefaultChoice]"
+        if ([string]::IsNullOrWhiteSpace($raw)) { $raw = $DefaultChoice }
+    } else {
+        $raw = Read-Host "Enter choice (1-9)"
+    }
     if ($raw -match '^\d+$') {
         $num = [int]$raw
         if ($num -ge 1 -and $num -le 9) { break }

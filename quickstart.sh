@@ -687,6 +687,19 @@ prompt_model_selection() {
     echo -e "${BOLD}Select a model:${NC}"
     echo ""
 
+    # Find default index from previous model (if same provider)
+    local default_idx=""
+    if [ -n "$PREV_MODEL" ] && [ "$provider_id" = "$PREV_PROVIDER" ]; then
+        local j=0
+        while [ $j -lt "$count" ]; do
+            if [ "$(get_model_choice_id "$provider_id" "$j")" = "$PREV_MODEL" ]; then
+                default_idx=$((j + 1))
+                break
+            fi
+            j=$((j + 1))
+        done
+    fi
+
     local i=0
     while [ $i -lt "$count" ]; do
         local label
@@ -701,7 +714,12 @@ prompt_model_selection() {
 
     local choice
     while true; do
-        read -r -p "Enter choice (1-$count): " choice || true
+        if [ -n "$default_idx" ]; then
+            read -r -p "Enter choice (1-$count) [$default_idx]: " choice || true
+            choice="${choice:-$default_idx}"
+        else
+            read -r -p "Enter choice (1-$count): " choice || true
+        fi
         if [[ "$choice" =~ ^[0-9]+$ ]] && [ "$choice" -ge 1 ] && [ "$choice" -le "$count" ]; then
             local idx=$((choice - 1))
             SELECTED_MODEL="$(get_model_choice_id "$provider_id" "$idx")"
@@ -816,6 +834,65 @@ else
     done
 fi
 
+# ── Read previous configuration (if any) ──────────────────────
+PREV_PROVIDER=""
+PREV_MODEL=""
+PREV_ENV_VAR=""
+PREV_SUB_MODE=""
+if [ -f "$HIVE_CONFIG_FILE" ]; then
+    eval "$($PYTHON_CMD -c "
+import json, sys
+try:
+    with open('$HIVE_CONFIG_FILE') as f:
+        c = json.load(f)
+    llm = c.get('llm', {})
+    print(f'PREV_PROVIDER={llm.get(\"provider\", \"\")}')
+    print(f'PREV_MODEL={llm.get(\"model\", \"\")}')
+    print(f'PREV_ENV_VAR={llm.get(\"api_key_env_var\", \"\")}')
+    sub = ''
+    if llm.get('use_claude_code_subscription'): sub = 'claude_code'
+    elif llm.get('use_codex_subscription'): sub = 'codex'
+    elif 'api.z.ai' in llm.get('api_base', ''): sub = 'zai_code'
+    print(f'PREV_SUB_MODE={sub}')
+except Exception:
+    pass
+" 2>/dev/null)" || true
+fi
+
+# Compute default menu number from previous config (only if credential is still valid)
+DEFAULT_CHOICE=""
+if [ -n "$PREV_SUB_MODE" ] || [ -n "$PREV_PROVIDER" ]; then
+    PREV_CRED_VALID=false
+    case "$PREV_SUB_MODE" in
+        claude_code) [ "$CLAUDE_CRED_DETECTED" = true ] && PREV_CRED_VALID=true ;;
+        zai_code)    [ "$ZAI_CRED_DETECTED" = true ] && PREV_CRED_VALID=true ;;
+        codex)       [ "$CODEX_CRED_DETECTED" = true ] && PREV_CRED_VALID=true ;;
+        *)
+            # API key provider — check if the env var is set
+            if [ -n "$PREV_ENV_VAR" ] && [ -n "${!PREV_ENV_VAR}" ]; then
+                PREV_CRED_VALID=true
+            fi
+            ;;
+    esac
+
+    if [ "$PREV_CRED_VALID" = true ]; then
+        case "$PREV_SUB_MODE" in
+            claude_code) DEFAULT_CHOICE=1 ;;
+            zai_code)    DEFAULT_CHOICE=2 ;;
+            codex)       DEFAULT_CHOICE=3 ;;
+        esac
+        if [ -z "$DEFAULT_CHOICE" ]; then
+            case "$PREV_PROVIDER" in
+                anthropic) DEFAULT_CHOICE=4 ;;
+                openai)    DEFAULT_CHOICE=5 ;;
+                gemini)    DEFAULT_CHOICE=6 ;;
+                groq)      DEFAULT_CHOICE=7 ;;
+                cerebras)  DEFAULT_CHOICE=8 ;;
+            esac
+        fi
+    fi
+fi
+
 # ── Show unified provider selection menu ─────────────────────
 echo -e "${BOLD}Select your default LLM provider:${NC}"
 echo ""
@@ -860,8 +937,18 @@ done
 echo -e "  ${CYAN}9)${NC} Skip for now"
 echo ""
 
+if [ -n "$DEFAULT_CHOICE" ]; then
+    echo -e "  ${DIM}Previously configured: ${PREV_PROVIDER}/${PREV_MODEL}. Press Enter to keep.${NC}"
+    echo ""
+fi
+
 while true; do
-    read -r -p "Enter choice (1-9): " choice || true
+    if [ -n "$DEFAULT_CHOICE" ]; then
+        read -r -p "Enter choice (1-9) [$DEFAULT_CHOICE]: " choice || true
+        choice="${choice:-$DEFAULT_CHOICE}"
+    else
+        read -r -p "Enter choice (1-9): " choice || true
+    fi
     if [[ "$choice" =~ ^[0-9]+$ ]] && [ "$choice" -ge 1 ] && [ "$choice" -le 9 ]; then
         break
     fi
