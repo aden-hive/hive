@@ -97,7 +97,8 @@ class BuildSession:
                 name=goal_data["name"],
                 description=goal_data["description"],
                 success_criteria=[
-                    SuccessCriterion(**sc) for sc in goal_data.get("success_criteria", [])
+                    SuccessCriterion(**sc)
+                    for sc in goal_data.get("success_criteria", [])
                 ],
                 constraints=[Constraint(**c) for c in goal_data.get("constraints", [])],
             )
@@ -118,7 +119,9 @@ class BuildSession:
                     "conditional": EdgeCondition.CONDITIONAL,
                     "llm_decide": EdgeCondition.LLM_DECIDE,
                 }
-                e["condition"] = condition_map.get(condition_str, EdgeCondition.ON_SUCCESS)
+                e["condition"] = condition_map.get(
+                    condition_str, EdgeCondition.ON_SUCCESS
+                )
             session.edges.append(EdgeSpec(**e))
 
         # Restore MCP servers
@@ -162,7 +165,7 @@ def _load_session(session_id: str) -> BuildSession:
     if not session_file.exists():
         raise ValueError(f"Session '{session_id}' not found")
 
-    with open(session_file) as f:
+    with open(session_file, encoding="utf-8") as f:
         data = json.load(f)
 
     return BuildSession.from_dict(data)
@@ -174,7 +177,7 @@ def _load_active_session() -> BuildSession | None:
         return None
 
     try:
-        with open(ACTIVE_SESSION_FILE) as f:
+        with open(ACTIVE_SESSION_FILE, encoding="utf-8") as f:
             session_id = f.read().strip()
 
         if session_id:
@@ -228,7 +231,7 @@ def list_sessions() -> str:
     if SESSIONS_DIR.exists():
         for session_file in SESSIONS_DIR.glob("*.json"):
             try:
-                with open(session_file) as f:
+                with open(session_file, encoding="utf-8") as f:
                     data = json.load(f)
                     sessions.append(
                         {
@@ -248,14 +251,16 @@ def list_sessions() -> str:
     active_id = None
     if ACTIVE_SESSION_FILE.exists():
         try:
-            with open(ACTIVE_SESSION_FILE) as f:
+            with open(ACTIVE_SESSION_FILE, encoding="utf-8") as f:
                 active_id = f.read().strip()
         except Exception:
             pass
 
     return json.dumps(
         {
-            "sessions": sorted(sessions, key=lambda s: s["last_modified"], reverse=True),
+            "sessions": sorted(
+                sessions, key=lambda s: s["last_modified"], reverse=True
+            ),
             "total": len(sessions),
             "active_session_id": active_id,
         },
@@ -299,7 +304,9 @@ def delete_session(session_id: Annotated[str, "ID of the session to delete"]) ->
 
     session_file = SESSIONS_DIR / f"{session_id}.json"
     if not session_file.exists():
-        return json.dumps({"success": False, "error": f"Session '{session_id}' not found"})
+        return json.dumps(
+            {"success": False, "error": f"Session '{session_id}' not found"}
+        )
 
     try:
         # Remove session file
@@ -310,7 +317,7 @@ def delete_session(session_id: Annotated[str, "ID of the session to delete"]) ->
             _session = None
 
         if ACTIVE_SESSION_FILE.exists():
-            with open(ACTIVE_SESSION_FILE) as f:
+            with open(ACTIVE_SESSION_FILE, encoding="utf-8") as f:
                 active_id = f.read().strip()
                 if active_id == session_id:
                     ACTIVE_SESSION_FILE.unlink()
@@ -332,10 +339,12 @@ def set_goal(
     name: Annotated[str, "Human-readable name"],
     description: Annotated[str, "What the agent should accomplish"],
     success_criteria: Annotated[
-        str, "JSON array of success criteria objects with id, description, metric, target, weight"
+        str,
+        "JSON array of success criteria objects with id, description, metric, target, weight",
     ],
     constraints: Annotated[
-        str, "JSON array of constraint objects with id, description, constraint_type, category"
+        str,
+        "JSON array of constraint objects with id, description, constraint_type, category",
     ] = "[]",
 ) -> str:
     """Define the goal for the agent. Goals define what success looks like."""
@@ -387,7 +396,9 @@ def set_goal(
             if "id" not in sc:
                 errors.append(f"success_criteria[{i}] missing required field 'id'")
             if "description" not in sc:
-                errors.append(f"success_criteria[{i}] missing required field 'description'")
+                errors.append(
+                    f"success_criteria[{i}] missing required field 'description'"
+                )
 
     for i, c in enumerate(constraint_list):
         if not isinstance(c, dict):
@@ -518,7 +529,9 @@ def _validate_tool_credentials(tools_list: list[str]) -> dict | None:
         if cred_errors:
             return {
                 "valid": False,
-                "errors": [f"Missing credentials for tools: {[e['env_var'] for e in cred_errors]}"],
+                "errors": [
+                    f"Missing credentials for tools: {[e['env_var'] for e in cred_errors]}"
+                ],
                 "missing_credentials": cred_errors,
                 "action_required": "Store credentials via store_credential and retry",
                 "example": f"Add to .env:\n{cred_errors[0]['env_var']}=your_key_here",
@@ -617,7 +630,8 @@ def add_node(
         "Nodes that do autonomous work (research, data processing, API calls) MUST be False.",
     ] = False,
     nullable_output_keys: Annotated[
-        str, "JSON array of output keys that may remain unset (for mutually exclusive outputs)"
+        str,
+        "JSON array of output keys that may remain unset (for mutually exclusive outputs)",
     ] = "[]",
     max_node_visits: Annotated[
         int,
@@ -650,7 +664,9 @@ def add_node(
 
     # Check for duplicate
     if any(n.id == node_id for n in session.nodes):
-        return json.dumps({"valid": False, "errors": [f"Node '{node_id}' already exists"]})
+        return json.dumps(
+            {"valid": False, "errors": [f"Node '{node_id}' already exists"]}
+        )
 
     node = NodeSpec(
         id=node_id,
@@ -680,7 +696,9 @@ def add_node(
 
     # Reject removed node types
     if node_type in ("function", "llm_tool_use", "llm_generate"):
-        errors.append(f"Node type '{node_type}' is no longer supported. Use 'event_loop' instead.")
+        errors.append(
+            f"Node type '{node_type}' is no longer supported. Use 'event_loop' instead."
+        )
 
     if node_type == "router" and not routes_dict:
         errors.append(f"Router node '{node_id}' must specify routes")
@@ -714,7 +732,9 @@ def add_node(
 
     # nullable_output_keys must be a subset of output_keys
     if nullable_output_keys_list:
-        invalid_nullable = [k for k in nullable_output_keys_list if k not in output_keys_list]
+        invalid_nullable = [
+            k for k in nullable_output_keys_list if k not in output_keys_list
+        ]
         if invalid_nullable:
             errors.append(
                 f"nullable_output_keys {invalid_nullable} must be a subset of "
@@ -772,7 +792,9 @@ def add_edge(
 
     # Check for duplicate
     if any(e.id == edge_id for e in session.edges):
-        return json.dumps({"valid": False, "errors": [f"Edge '{edge_id}' already exists"]})
+        return json.dumps(
+            {"valid": False, "errors": [f"Edge '{edge_id}' already exists"]}
+        )
 
     # Map condition string to enum
     condition_map = {
@@ -865,14 +887,18 @@ def update_node(
     output_keys: Annotated[str, "Updated JSON array of output keys"] = "",
     system_prompt: Annotated[str, "Updated instructions for LLM nodes"] = "",
     tools: Annotated[str, "Updated JSON array of tool names"] = "",
-    routes: Annotated[str, "Updated JSON object mapping conditions to target node IDs"] = "",
+    routes: Annotated[
+        str, "Updated JSON object mapping conditions to target node IDs"
+    ] = "",
     client_facing: Annotated[
         str, "Updated client-facing flag ('true'/'false', empty=no change)"
     ] = "",
     nullable_output_keys: Annotated[
         str, "Updated JSON array of nullable output keys (empty=no change)"
     ] = "",
-    max_node_visits: Annotated[int, "Updated max node visits per graph run. 0=no change"] = 0,
+    max_node_visits: Annotated[
+        int, "Updated max node visits per graph run. 0=no change"
+    ] = 0,
 ) -> str:
     """Update an existing node in the agent graph. Only provided fields will be updated."""
     session = get_session()
@@ -954,7 +980,9 @@ def update_node(
 
     # nullable_output_keys must be a subset of output_keys
     if node.nullable_output_keys:
-        invalid_nullable = [k for k in node.nullable_output_keys if k not in node.output_keys]
+        invalid_nullable = [
+            k for k in node.nullable_output_keys if k not in node.output_keys
+        ]
         if invalid_nullable:
             errors.append(
                 f"nullable_output_keys {invalid_nullable} must be a subset of "
@@ -1017,8 +1045,12 @@ def delete_node(
     removed_node = session.nodes.pop(node_idx)
 
     # Remove all edges connected to this node
-    removed_edges = [e.id for e in session.edges if e.source == node_id or e.target == node_id]
-    session.edges = [e for e in session.edges if not (e.source == node_id or e.target == node_id)]
+    removed_edges = [
+        e.id for e in session.edges if e.source == node_id or e.target == node_id
+    ]
+    session.edges = [
+        e for e in session.edges if not (e.source == node_id or e.target == node_id)
+    ]
 
     _save_session(session)  # Auto-save
 
@@ -1151,7 +1183,9 @@ def validate_graph() -> str:
             # For pause/resume agents, nodes might be reachable only from resume entry points
             if is_pause_resume_agent:
                 # Filter out resume entry points from unreachable list
-                unreachable_non_resume = [n for n in unreachable if n not in resume_entry_points]
+                unreachable_non_resume = [
+                    n for n in unreachable if n not in resume_entry_points
+                ]
                 if unreachable_non_resume:
                     warnings.append(
                         f"Nodes unreachable from primary entry "
@@ -1181,7 +1215,9 @@ def validate_graph() -> str:
             forward_dependencies[edge.target].append(edge.source)
 
     # Build output map (node_id -> keys it produces)
-    node_outputs: dict[str, set[str]] = {node.id: set(node.output_keys) for node in session.nodes}
+    node_outputs: dict[str, set[str]] = {
+        node.id: set(node.output_keys) for node in session.nodes
+    }
 
     # Compute available context for each node (what keys it can read)
     # Using topological order on the forward-edge DAG
@@ -1285,7 +1321,13 @@ def validate_graph() -> str:
                 )
         else:
             # Check if this is a common external input key for resume nodes
-            external_input_keys = ["input", "user_response", "user_input", "answer", "answers"]
+            external_input_keys = [
+                "input",
+                "user_response",
+                "user_input",
+                "answer",
+                "answers",
+            ]
             unproduced_external = [k for k in missing if k in external_input_keys]
 
             if is_resume_entry and unproduced_external:
@@ -1303,7 +1345,9 @@ def validate_graph() -> str:
                     # Still need to check other keys
                     suggestions = []
                     for key in other_missing:
-                        producers = [n.id for n in session.nodes if key in n.output_keys]
+                        producers = [
+                            n.id for n in session.nodes if key in n.output_keys
+                        ]
                         if producers:
                             suggestions.append(
                                 f"'{key}' is produced by {producers} - ensure edge exists"
@@ -1346,7 +1390,9 @@ def validate_graph() -> str:
     # Detect fan-out: multiple ON_SUCCESS edges from same source
     outgoing_success: dict[str, list[str]] = defaultdict(list)
     for edge in session.edges:
-        cond = edge.condition.value if hasattr(edge.condition, "value") else edge.condition
+        cond = (
+            edge.condition.value if hasattr(edge.condition, "value") else edge.condition
+        )
         if cond == "on_success":
             outgoing_success[edge.source].append(edge.target)
 
@@ -1354,7 +1400,9 @@ def validate_graph() -> str:
         if len(targets) > 1:
             # Client-facing fan-out: cannot target multiple client_facing nodes
             cf_targets = [
-                t for t in targets if any(n.id == t and n.client_facing for n in session.nodes)
+                t
+                for t in targets
+                if any(n.id == t and n.client_facing for n in session.nodes)
             ]
             if len(cf_targets) > 1:
                 errors.append(
@@ -1398,7 +1446,9 @@ def validate_graph() -> str:
     # nullable_output_keys must be subset of output_keys
     for node in session.nodes:
         if node.nullable_output_keys:
-            invalid = [k for k in node.nullable_output_keys if k not in node.output_keys]
+            invalid = [
+                k for k in node.nullable_output_keys if k not in node.output_keys
+            ]
             if invalid:
                 errors.append(
                     f"Node '{node.id}': nullable_output_keys {invalid} "
@@ -1434,9 +1484,11 @@ def validate_graph() -> str:
             "pause_nodes": pause_nodes,
             "resume_entry_points": resume_entry_points,
             "all_entry_points": entry_candidates,
-            "context_flow": {node_id: list(keys) for node_id, keys in available_context.items()}
-            if available_context
-            else None,
+            "context_flow": (
+                {node_id: list(keys) for node_id, keys in available_context.items()}
+                if available_context
+                else None
+            ),
             "event_loop_nodes": event_loop_nodes,
             "client_facing_nodes": client_facing_nodes,
             "feedback_edges": feedback_edges,
@@ -1493,7 +1545,9 @@ def _generate_readme(session: BuildSession, export_data: dict, all_tools: set) -
         if node.client_facing:
             node_info.append("   - Client-facing: Yes (blocks for user input)")
         if node.nullable_output_keys:
-            node_info.append(f"   - Nullable outputs: `{', '.join(node.nullable_output_keys)}`")
+            node_info.append(
+                f"   - Nullable outputs: `{', '.join(node.nullable_output_keys)}`"
+            )
         if node.max_node_visits > 1:
             node_info.append(f"   - Max visits: {node.max_node_visits}")
         nodes_section.append("\n".join(node_info))
@@ -1502,7 +1556,9 @@ def _generate_readme(session: BuildSession, export_data: dict, all_tools: set) -
     criteria_section = []
     for criterion in goal.success_criteria:
         crit_dict = (
-            criterion.model_dump() if hasattr(criterion, "model_dump") else criterion.__dict__
+            criterion.model_dump()
+            if hasattr(criterion, "model_dump")
+            else criterion.__dict__
         )
         criteria_section.append(
             f"**{crit_dict.get('description', 'N/A')}** (weight {crit_dict.get('weight', 1.0)})\n"
@@ -1514,7 +1570,9 @@ def _generate_readme(session: BuildSession, export_data: dict, all_tools: set) -
     constraints_section = []
     for constraint in goal.constraints:
         const_dict = (
-            constraint.model_dump() if hasattr(constraint, "model_dump") else constraint.__dict__
+            constraint.model_dump()
+            if hasattr(constraint, "model_dump")
+            else constraint.__dict__
         )
         desc = const_dict.get("description", "N/A")
         ctype = const_dict.get("constraint_type", "hard")
@@ -1548,7 +1606,9 @@ def _generate_readme(session: BuildSession, export_data: dict, all_tools: set) -
 """
 
     for edge in edges:
-        cond = edge.condition.value if hasattr(edge.condition, "value") else edge.condition
+        cond = (
+            edge.condition.value if hasattr(edge.condition, "value") else edge.condition
+        )
         priority_note = f", priority={edge.priority}" if edge.priority != 0 else ""
         feedback_note = " **[FEEDBACK]**" if edge.priority < 0 else ""
         readme += (
@@ -1623,7 +1683,9 @@ print(result.status)
 The agent's entry node `{export_data["graph"]["entry_node"]}` requires:
 """
 
-    entry_node_obj = next((n for n in nodes if n.id == export_data["graph"]["entry_node"]), None)
+    entry_node_obj = next(
+        (n for n in nodes if n.id == export_data["graph"]["entry_node"]), None
+    )
     if entry_node_obj:
         for input_key in entry_node_obj.input_keys:
             readme += f"- `{input_key}` (required)\n"
@@ -1688,7 +1750,9 @@ def export_graph() -> str:
 
             # Find resume nodes that read the outputs of this pause node
             for resume_node_id in resume_entry_points:
-                resume_node = next((n for n in session.nodes if n.id == resume_node_id), None)
+                resume_node = next(
+                    (n for n in session.nodes if n.id == resume_node_id), None
+                )
                 if not resume_node:
                     continue
 
@@ -1700,7 +1764,9 @@ def export_graph() -> str:
 
         # Strategy 2: Fallback - pair sequentially if no match found
         unmatched_pause = [p for p in pause_nodes if p not in pause_to_resume]
-        unmatched_resume = [r for r in resume_entry_points if r not in pause_to_resume.values()]
+        unmatched_resume = [
+            r for r in resume_entry_points if r not in pause_to_resume.values()
+        ]
         for pause_id, resume_id in zip(unmatched_pause, unmatched_resume, strict=False):
             pause_to_resume[pause_id] = resume_id
 
@@ -1729,7 +1795,8 @@ def export_graph() -> str:
             for route_name, target_node in node.routes.items():
                 # Check if edge already exists
                 edge_exists = any(
-                    e["source"] == node.id and e["target"] == target_node for e in edges_list
+                    e["source"] == node.id and e["target"] == target_node
+                    for e in edges_list
                 )
                 if not edge_exists:
                     # Auto-generate edge from router route
@@ -1799,7 +1866,11 @@ def export_graph() -> str:
     if hasattr(session.goal, "success_criteria"):
         enriched_criteria = []
         for criterion in session.goal.success_criteria:
-            crit_dict = criterion.model_dump() if hasattr(criterion, "model_dump") else criterion
+            crit_dict = (
+                criterion.model_dump()
+                if hasattr(criterion, "model_dump")
+                else criterion
+            )
             enriched_criteria.append(crit_dict)
         export_data["goal"]["success_criteria"] = enriched_criteria
 
@@ -1898,7 +1969,9 @@ def import_from_export(
 
     path = Path(agent_json_path)
     if not path.exists():
-        return json.dumps({"success": False, "error": f"File not found: {agent_json_path}"})
+        return json.dumps(
+            {"success": False, "error": f"File not found: {agent_json_path}"}
+        )
 
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
@@ -1914,7 +1987,8 @@ def import_from_export(
                 name=goal_data["name"],
                 description=goal_data["description"],
                 success_criteria=[
-                    SuccessCriterion(**sc) for sc in goal_data.get("success_criteria", [])
+                    SuccessCriterion(**sc)
+                    for sc in goal_data.get("success_criteria", [])
                 ],
                 constraints=[Constraint(**c) for c in goal_data.get("constraints", [])],
             )
@@ -1937,7 +2011,9 @@ def import_from_export(
                     "conditional": EdgeCondition.CONDITIONAL,
                     "llm_decide": EdgeCondition.LLM_DECIDE,
                 }
-                e["condition"] = condition_map.get(condition_str, EdgeCondition.ON_SUCCESS)
+                e["condition"] = condition_map.get(
+                    condition_str, EdgeCondition.ON_SUCCESS
+                )
             session.edges.append(EdgeSpec(**e))
     except (KeyError, TypeError, ValueError, ValidationError) as e:
         return json.dumps({"success": False, "error": f"Malformed agent.json: {e}"})
@@ -1973,7 +2049,9 @@ def get_session_status() -> str:
             "nodes": [n.id for n in session.nodes],
             "edges": [(e.source, e.target) for e in session.edges],
             "mcp_servers": [s["name"] for s in session.mcp_servers],
-            "event_loop_nodes": [n.id for n in session.nodes if n.node_type == "event_loop"],
+            "event_loop_nodes": [
+                n.id for n in session.nodes if n.node_type == "event_loop"
+            ],
             "client_facing_nodes": [n.id for n in session.nodes if n.client_facing],
             "feedback_edges": [e.id for e in session.edges if e.priority < 0],
         }
@@ -1982,10 +2060,15 @@ def get_session_status() -> str:
 
 @mcp.tool()
 def configure_loop(
-    max_iterations: Annotated[int, "Maximum loop iterations per node execution (default 50)"] = 50,
-    max_tool_calls_per_turn: Annotated[int, "Maximum tool calls per LLM turn (default 30)"] = 30,
+    max_iterations: Annotated[
+        int, "Maximum loop iterations per node execution (default 50)"
+    ] = 50,
+    max_tool_calls_per_turn: Annotated[
+        int, "Maximum tool calls per LLM turn (default 30)"
+    ] = 30,
     stall_detection_threshold: Annotated[
-        int, "Consecutive identical responses before stall detection triggers (default 3)"
+        int,
+        "Consecutive identical responses before stall detection triggers (default 3)",
     ] = 3,
     max_history_tokens: Annotated[
         int, "Maximum conversation history tokens before compaction (default 32000)"
@@ -2073,7 +2156,9 @@ def add_mcp_server(
 
     # Check for duplicate
     if any(s["name"] == name for s in session.mcp_servers):
-        return json.dumps({"success": False, "error": f"MCP server '{name}' already registered"})
+        return json.dumps(
+            {"success": False, "error": f"MCP server '{name}' already registered"}
+        )
 
     # Parse JSON inputs
     try:
@@ -2204,7 +2289,9 @@ def list_mcp_tools(
     if server_name:
         servers_to_query = [s for s in session.mcp_servers if s["name"] == server_name]
         if not servers_to_query:
-            return json.dumps({"success": False, "error": f"MCP server '{server_name}' not found"})
+            return json.dumps(
+                {"success": False, "error": f"MCP server '{server_name}' not found"}
+            )
 
     all_tools = {}
 
@@ -2239,7 +2326,9 @@ def list_mcp_tools(
         except Exception as e:
             all_tools[server_config["name"]] = {"error": f"Failed to connect: {str(e)}"}
 
-    total_tools = sum(len(tools) if isinstance(tools, list) else 0 for tools in all_tools.values())
+    total_tools = sum(
+        len(tools) if isinstance(tools, list) else 0 for tools in all_tools.values()
+    )
 
     return json.dumps(
         {
@@ -2264,7 +2353,11 @@ def remove_mcp_server(
             session.mcp_servers.pop(i)
             _save_session(session)  # Auto-save
             return json.dumps(
-                {"success": True, "removed": name, "remaining_servers": len(session.mcp_servers)}
+                {
+                    "success": True,
+                    "removed": name,
+                    "remaining_servers": len(session.mcp_servers),
+                }
             )
 
     return json.dumps({"success": False, "error": f"MCP server '{name}' not found"})
@@ -2315,7 +2408,9 @@ def test_node(
     if node_spec.node_type == "router":
         # Show routing decision
         result["routing_options"] = node_spec.routes
-        result["simulation"] = "Router would evaluate routes based on input and select target node"
+        result["simulation"] = (
+            "Router would evaluate routes based on input and select target node"
+        )
 
     elif node_spec.node_type == "event_loop":
         # EventLoopNode simulation
@@ -2347,7 +2442,9 @@ def test_node(
 
     # Show memory state after (simulated)
     result["expected_memory_state"] = {
-        "inputs_available": {k: input_data.get(k, "<not provided>") for k in node_spec.input_keys},
+        "inputs_available": {
+            k: input_data.get(k, "<not provided>") for k in node_spec.input_keys
+        },
         "outputs_to_write": node_spec.output_keys,
         "nullable_outputs": node_spec.nullable_output_keys or [],
     }
@@ -2501,7 +2598,9 @@ def test_graph(
             "steps_executed": steps,
             "goal": {
                 "name": session.goal.name,
-                "success_criteria": [sc.description for sc in session.goal.success_criteria],
+                "success_criteria": [
+                    sc.description for sc in session.goal.success_criteria
+                ],
             },
             "recommendation": "Review the execution trace above. Does this flow achieve the goal?",
         },
@@ -2604,7 +2703,9 @@ def generate_constraint_tests(
 - category: string (optional, default: "general")
 - check: string (optional, how to validate: "llm_judge", expression, or function name)""",
     ],
-    agent_path: Annotated[str, "Path to agent export folder (e.g., 'exports/my_agent')"] = "",
+    agent_path: Annotated[
+        str, "Path to agent export folder (e.g., 'exports/my_agent')"
+    ] = "",
 ) -> str:
     """
     Get constraint test guidelines for a goal.
@@ -2632,7 +2733,9 @@ def generate_constraint_tests(
 
     # Format constraints for display
     constraints_formatted = (
-        _format_constraints(goal.constraints) if goal.constraints else "No constraints defined"
+        _format_constraints(goal.constraints)
+        if goal.constraints
+        else "No constraints defined"
     )
 
     # Generate the file header that should be used
@@ -2649,7 +2752,9 @@ def generate_constraint_tests(
             "agent_path": str(path),
             "agent_module": agent_module,
             "output_file": f"{str(path)}/tests/test_constraints.py",
-            "constraints": [c.model_dump() for c in goal.constraints] if goal.constraints else [],
+            "constraints": (
+                [c.model_dump() for c in goal.constraints] if goal.constraints else []
+            ),
             "constraints_formatted": constraints_formatted,
             "test_guidelines": {
                 "max_tests": 5,
@@ -2692,7 +2797,9 @@ def generate_success_tests(
     goal_json: Annotated[str, "JSON string of the Goal object"],
     node_names: Annotated[str, "Comma-separated list of agent node names"] = "",
     tool_names: Annotated[str, "Comma-separated list of available tool names"] = "",
-    agent_path: Annotated[str, "Path to agent export folder (e.g., 'exports/my_agent')"] = "",
+    agent_path: Annotated[
+        str, "Path to agent export folder (e.g., 'exports/my_agent')"
+    ] = "",
 ) -> str:
     """
     Get success criteria test guidelines for a goal.
@@ -2743,9 +2850,11 @@ def generate_success_tests(
             "agent_path": str(path),
             "agent_module": agent_module,
             "output_file": f"{str(path)}/tests/test_success_criteria.py",
-            "success_criteria": [c.model_dump() for c in goal.success_criteria]
-            if goal.success_criteria
-            else [],
+            "success_criteria": (
+                [c.model_dump() for c in goal.success_criteria]
+                if goal.success_criteria
+                else []
+            ),
             "success_criteria_formatted": criteria_formatted,
             "agent_context": {
                 "node_names": nodes if nodes else ["(not specified)"],
@@ -2894,6 +3003,7 @@ def run_tests(
     try:
         result = subprocess.run(
             cmd,
+            encoding="utf-8",
             capture_output=True,
             text=True,
             timeout=600,  # 10 minute timeout
@@ -2964,7 +3074,9 @@ def run_tests(
     failures = []
     # Match FAILURES section
     failure_section = re.search(
-        r"=+ FAILURES =+(.+?)(?:=+ (?:short test summary|ERRORS|warnings) =+|$)", output, re.DOTALL
+        r"=+ FAILURES =+(.+?)(?:=+ (?:short test summary|ERRORS|warnings) =+|$)",
+        output,
+        re.DOTALL,
     )
     if failure_section:
         failure_text = failure_section.group(1)
@@ -2997,7 +3109,9 @@ def run_tests(
             "return_code": result.returncode,
             "test_results": test_results,
             "failures": failures,
-            "raw_output": output[-2000:] if len(output) > 2000 else output,  # Last 2000 chars
+            "raw_output": (
+                output[-2000:] if len(output) > 2000 else output
+            ),  # Last 2000 chars
         }
     )
 
@@ -3006,7 +3120,9 @@ def run_tests(
 def debug_test(
     goal_id: Annotated[str, "ID of the goal"],
     test_name: Annotated[str, "Name of the test function (e.g., test_constraint_foo)"],
-    agent_path: Annotated[str, "Path to agent export folder (e.g., 'exports/my_agent')"] = "",
+    agent_path: Annotated[
+        str, "Path to agent export folder (e.g., 'exports/my_agent')"
+    ] = "",
 ) -> str:
     """
     Run a specific test with verbose output for debugging.
@@ -3085,6 +3201,7 @@ def debug_test(
     try:
         result = subprocess.run(
             cmd,
+            encoding="utf-8",
             capture_output=True,
             text=True,
             timeout=120,  # 2 minute timeout for single test
@@ -3118,25 +3235,22 @@ def debug_test(
         output_lower = output.lower()
 
         if any(
-            p in output_lower for p in ["typeerror", "attributeerror", "keyerror", "valueerror"]
+            p in output_lower
+            for p in ["typeerror", "attributeerror", "keyerror", "valueerror"]
         ):
             error_category = "IMPLEMENTATION_ERROR"
-            suggestion = "Fix the bug in agent code - check the traceback for the exact location"
+            suggestion = (
+                "Fix the bug in agent code - check the traceback for the exact location"
+            )
         elif any(p in output_lower for p in ["assertionerror", "assert", "expected"]):
             error_category = "ASSERTION_FAILURE"
-            suggestion = (
-                "The test assertion failed - fix the agent logic or update test expectation"
-            )
+            suggestion = "The test assertion failed - fix the agent logic or update test expectation"
         elif any(p in output_lower for p in ["timeout", "timed out"]):
             error_category = "TIMEOUT"
-            suggestion = (
-                "The test or agent took too long - check for infinite loops or slow operations"
-            )
+            suggestion = "The test or agent took too long - check for infinite loops or slow operations"
         elif any(p in output_lower for p in ["importerror", "modulenotfounderror"]):
             error_category = "IMPORT_ERROR"
-            suggestion = (
-                "Missing module or incorrect import path - check your agent package structure"
-            )
+            suggestion = "Missing module or incorrect import path - check your agent package structure"
         elif any(p in output_lower for p in ["connectionerror", "api", "rate limit"]):
             error_category = "API_ERROR"
             suggestion = "External API issue - check API keys and network connectivity"
@@ -3146,7 +3260,9 @@ def debug_test(
 
     # Extract the assertion/error message
     error_message = None
-    error_match = re.search(r"(AssertionError|Error|Exception):\s*(.+?)(?:\n|$)", output)
+    error_match = re.search(
+        r"(AssertionError|Error|Exception):\s*(.+?)(?:\n|$)", output
+    )
     if error_match:
         error_message = error_match.group(2).strip()
 
@@ -3160,7 +3276,9 @@ def debug_test(
             "error_message": error_message,
             "suggestion": suggestion,
             "command": " ".join(cmd),
-            "output": output[-3000:] if len(output) > 3000 else output,  # Last 3000 chars
+            "output": (
+                output[-3000:] if len(output) > 3000 else output
+            ),  # Last 3000 chars
         },
         indent=2,
     )
@@ -3169,7 +3287,9 @@ def debug_test(
 @mcp.tool()
 def list_tests(
     goal_id: Annotated[str, "ID of the goal"],
-    agent_path: Annotated[str, "Path to agent export folder (e.g., 'exports/my_agent')"] = "",
+    agent_path: Annotated[
+        str, "Path to agent export folder (e.g., 'exports/my_agent')"
+    ] = "",
 ) -> str:
     """
     List tests for an agent by scanning Python test files.
@@ -3308,7 +3428,9 @@ def _get_credential_store():
 
 @mcp.tool()
 def check_missing_credentials(
-    agent_path: Annotated[str, "Path to the exported agent directory (e.g., 'exports/my-agent')"],
+    agent_path: Annotated[
+        str, "Path to the exported agent directory (e.g., 'exports/my-agent')"
+    ],
 ) -> str:
     """
     Detect missing credentials for an agent by inspecting its tools and node types.
@@ -3405,7 +3527,9 @@ def store_credential(
     credential_name: Annotated[
         str, "Logical credential name (e.g., 'hubspot', 'brave_search', 'anthropic')"
     ],
-    credential_value: Annotated[str, "The secret value to store (API key, token, etc.)"],
+    credential_value: Annotated[
+        str, "The secret value to store (API key, token, etc.)"
+    ],
     alias: Annotated[
         str,
         "Named alias for this account (e.g., 'work', 'personal'). Defaults to 'default'. "
@@ -3414,7 +3538,9 @@ def store_credential(
     key_name: Annotated[
         str, "Key name within the credential (e.g., 'api_key', 'access_token')"
     ] = "api_key",
-    display_name: Annotated[str, "Human-readable name (e.g., 'HubSpot Access Token')"] = "",
+    display_name: Annotated[
+        str, "Human-readable name (e.g., 'HubSpot Access Token')"
+    ] = "",
 ) -> str:
     """
     Store a credential securely in the local encrypted store at ~/.hive/credentials.
@@ -3481,7 +3607,9 @@ def list_stored_credentials() -> str:
                 "storage_id": info.storage_id,
                 "status": info.status,
                 "created_at": info.created_at.isoformat() if info.created_at else None,
-                "last_validated": info.last_validated.isoformat() if info.last_validated else None,
+                "last_validated": (
+                    info.last_validated.isoformat() if info.last_validated else None
+                ),
             }
             identity = info.identity.to_dict()
             if identity:
@@ -3502,7 +3630,9 @@ def list_stored_credentials() -> str:
 
 @mcp.tool()
 def delete_stored_credential(
-    credential_name: Annotated[str, "Logical credential name to delete (e.g., 'hubspot')"],
+    credential_name: Annotated[
+        str, "Logical credential name to delete (e.g., 'hubspot')"
+    ],
     alias: Annotated[
         str,
         "Alias of the account to delete (e.g., 'work', 'personal'). Defaults to 'default'.",
@@ -3523,9 +3653,11 @@ def delete_stored_credential(
                 "credential": credential_name,
                 "alias": alias,
                 "storage_id": storage_id,
-                "message": f"Credential '{storage_id}' deleted"
-                if deleted
-                else f"Credential '{storage_id}' not found",
+                "message": (
+                    f"Credential '{storage_id}' deleted"
+                    if deleted
+                    else f"Credential '{storage_id}' not found"
+                ),
             }
         )
     except Exception as e:
@@ -3574,7 +3706,9 @@ def validate_credential(
 
 @mcp.tool()
 def verify_credentials(
-    agent_path: Annotated[str, "Path to the exported agent directory (e.g., 'exports/my-agent')"],
+    agent_path: Annotated[
+        str, "Path to the exported agent directory (e.g., 'exports/my-agent')"
+    ],
 ) -> str:
     """
     Verify that all required credentials are configured for an agent.
@@ -3670,7 +3804,9 @@ def list_agent_sessions(
     all_sessions = _scan_agent_sessions(work_dir)
 
     if not all_sessions:
-        return json.dumps({"sessions": [], "total": 0, "offset": offset, "limit": limit})
+        return json.dumps(
+            {"sessions": [], "total": 0, "offset": offset, "limit": limit}
+        )
 
     summaries = []
     for session_id, state_path in all_sessions:
@@ -3695,7 +3831,9 @@ def list_agent_sessions(
                 "updated_at": timestamps.get("updated_at", ""),
                 "completed_at": timestamps.get("completed_at"),
                 "is_resumable": data.get("is_resumable", False),
-                "is_resumable_from_checkpoint": data.get("is_resumable_from_checkpoint", False),
+                "is_resumable_from_checkpoint": data.get(
+                    "is_resumable_from_checkpoint", False
+                ),
                 "current_node": progress.get("current_node"),
                 "paused_at": progress.get("paused_at"),
                 "steps_executed": progress.get("steps_executed", 0),
@@ -3715,7 +3853,9 @@ def list_agent_sessions(
 @mcp.tool()
 def get_agent_session_state(
     agent_work_dir: Annotated[str, "Path to the agent's working directory"],
-    session_id: Annotated[str, "The session ID (e.g., 'session_20260208_143022_abc12345')"],
+    session_id: Annotated[
+        str, "The session ID (e.g., 'session_20260208_143022_abc12345')"
+    ],
 ) -> str:
     """
     Load full session state for a specific session.
@@ -3796,7 +3936,9 @@ def list_agent_checkpoints(
         str,
         "Filter by type: 'node_start', 'node_complete', 'loop_iteration'. Empty for all.",
     ] = "",
-    is_clean: Annotated[str, "Filter by clean status: 'true', 'false', or empty for all."] = "",
+    is_clean: Annotated[
+        str, "Filter by clean status: 'true', 'false', or empty for all."
+    ] = "",
 ) -> str:
     """
     List checkpoints for a specific session.
@@ -3845,7 +3987,9 @@ def list_agent_checkpoints(
 
     # Apply filters
     if checkpoint_type:
-        checkpoints = [c for c in checkpoints if c.get("checkpoint_type") == checkpoint_type]
+        checkpoints = [
+            c for c in checkpoints if c.get("checkpoint_type") == checkpoint_type
+        ]
     if is_clean:
         clean_val = is_clean.lower() == "true"
         checkpoints = [c for c in checkpoints if c.get("is_clean") == clean_val]
@@ -3893,7 +4037,9 @@ def get_agent_checkpoint(
         else:
             cp_files = sorted(checkpoint_dir.glob("cp_*.json"))
             if not cp_files:
-                return json.dumps({"error": f"No checkpoints found for session: {session_id}"})
+                return json.dumps(
+                    {"error": f"No checkpoints found for session: {session_id}"}
+                )
             checkpoint_id = cp_files[-1].stem
 
     cp_path = checkpoint_dir / f"{checkpoint_id}.json"

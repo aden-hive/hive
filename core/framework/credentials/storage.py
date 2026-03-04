@@ -20,7 +20,12 @@ from typing import Any
 
 from pydantic import SecretStr
 
-from .models import CredentialDecryptionError, CredentialKey, CredentialObject, CredentialType
+from .models import (
+    CredentialDecryptionError,
+    CredentialKey,
+    CredentialObject,
+    CredentialType,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -227,7 +232,7 @@ class EncryptedFileStorage(CredentialStorage):
         index_path = self.base_path / "metadata" / "index.json"
         if not index_path.exists():
             return []
-        with open(index_path) as f:
+        with open(index_path, encoding="utf-8") as f:
             index = json.load(f)
         return list(index.get("credentials", {}).keys())
 
@@ -268,7 +273,7 @@ class EncryptedFileStorage(CredentialStorage):
         index_path = self.base_path / "metadata" / "index.json"
 
         if index_path.exists():
-            with open(index_path) as f:
+            with open(index_path, encoding="utf-8") as f:
                 index = json.load(f)
         else:
             index = {"credentials": {}, "version": "1.0"}
@@ -283,7 +288,7 @@ class EncryptedFileStorage(CredentialStorage):
 
         index["last_modified"] = datetime.now(UTC).isoformat()
 
-        with open(index_path, "w") as f:
+        with open(index_path, "w", encoding="utf-8") as f:
             json.dump(index, f, indent=2)
 
 

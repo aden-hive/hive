@@ -9,7 +9,12 @@ import pytest
 from framework.graph import Goal, NodeSpec, SuccessCriterion
 from framework.graph.edge import GraphSpec
 from framework.llm.provider import LLMProvider, LLMResponse, Tool
-from framework.llm.stream_events import FinishEvent, StreamEvent, TextDeltaEvent, ToolCallEvent
+from framework.llm.stream_events import (
+    FinishEvent,
+    StreamEvent,
+    TextDeltaEvent,
+    ToolCallEvent,
+)
 from framework.runtime.event_bus import EventBus
 from framework.runtime.execution_stream import EntryPointSpec, ExecutionStream
 from framework.runtime.outcome_aggregator import OutcomeAggregator
@@ -225,14 +230,16 @@ async def test_shared_session_reuses_directory_and_memory(tmp_path):
 
     # Run primary execution — creates session directory and state.json
     primary_exec_id = await primary_stream.execute({"user_name": "alice"})
-    primary_result = await primary_stream.wait_for_completion(primary_exec_id, timeout=5)
+    primary_result = await primary_stream.wait_for_completion(
+        primary_exec_id, timeout=5
+    )
     assert primary_result is not None
     assert primary_result.success
 
     # Verify primary session's state.json exists and has the primary entry_point
     primary_state_path = tmp_path / "sessions" / primary_exec_id / "state.json"
     assert primary_state_path.exists()
-    primary_state = json.loads(primary_state_path.read_text())
+    primary_state = json.loads(primary_state_path.read_text(encoding="utf-8"))
     assert primary_state["entry_point"] == "primary"
 
     # Async stream — simulates a webhook entry point sharing the session
@@ -264,7 +271,9 @@ async def test_shared_session_reuses_directory_and_memory(tmp_path):
         "resume_session_id": primary_exec_id,
         "memory": {"rules": "star important emails"},
     }
-    async_exec_id = await async_stream.execute({"event": "new_email"}, session_state=session_state)
+    async_exec_id = await async_stream.execute(
+        {"event": "new_email"}, session_state=session_state
+    )
 
     # Should reuse the primary session ID
     assert async_exec_id == primary_exec_id
@@ -275,7 +284,7 @@ async def test_shared_session_reuses_directory_and_memory(tmp_path):
 
     # State.json should NOT have been overwritten by the async execution
     # (it should still show the primary entry point)
-    final_state = json.loads(primary_state_path.read_text())
+    final_state = json.loads(primary_state_path.read_text(encoding="utf-8"))
     assert final_state["entry_point"] == "primary"
 
     # Verify only ONE session directory exists (not two)

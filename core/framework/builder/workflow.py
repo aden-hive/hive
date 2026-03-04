@@ -136,7 +136,9 @@ class GraphBuilder:
         storage_path: Path | str | None = None,
         session_id: str | None = None,
     ):
-        self.storage_path = Path(storage_path) if storage_path else Path.home() / ".core" / "builds"
+        self.storage_path = (
+            Path(storage_path) if storage_path else Path.home() / ".core" / "builds"
+        )
         self.storage_path.mkdir(parents=True, exist_ok=True)
 
         if session_id:
@@ -247,7 +249,9 @@ class GraphBuilder:
         # Type-specific validation
         if node.node_type == "event_loop":
             if node.tools and not node.system_prompt:
-                warnings.append(f"Event loop node '{node.id}' should have a system_prompt")
+                warnings.append(
+                    f"Event loop node '{node.id}' should have a system_prompt"
+                )
 
         if node.node_type == "router":
             if not node.routes:
@@ -293,7 +297,9 @@ class GraphBuilder:
             if edge.source == node_id or edge.target == node_id:
                 return ValidationResult(
                     valid=False,
-                    errors=[f"Cannot remove node '{node_id}': referenced by edge '{edge.id}'"],
+                    errors=[
+                        f"Cannot remove node '{node_id}': referenced by edge '{edge.id}'"
+                    ],
                 )
 
         self.session.nodes = [n for n in self.session.nodes if n.id != node_id]
@@ -383,7 +389,9 @@ class GraphBuilder:
         if len(entry_candidates) == 0 and self.session.nodes:
             errors.append("No entry node found (all nodes have incoming edges)")
         elif len(entry_candidates) > 1:
-            warnings.append(f"Multiple entry candidates: {entry_candidates}. Specify one.")
+            warnings.append(
+                f"Multiple entry candidates: {entry_candidates}. Specify one."
+            )
 
         # Check for terminal nodes
         terminal_candidates = []
@@ -452,7 +460,9 @@ class GraphBuilder:
         This method is safe to call from async contexts (Jupyter, FastAPI, etc.).
         executor_factory should return a configured GraphExecutor.
         """
-        self._require_phase([BuildPhase.ADDING_NODES, BuildPhase.ADDING_EDGES, BuildPhase.TESTING])
+        self._require_phase(
+            [BuildPhase.ADDING_NODES, BuildPhase.ADDING_EDGES, BuildPhase.TESTING]
+        )
         self.session.phase = BuildPhase.TESTING
 
         try:
@@ -470,7 +480,9 @@ class GraphBuilder:
             # Check result
             passed = result.success
             if test.expected_output is not None:
-                passed = passed and (result.output.get("result") == test.expected_output)
+                passed = passed and (
+                    result.output.get("result") == test.expected_output
+                )
             if test.expected_contains:
                 output_str = str(result.output)
                 passed = passed and (test.expected_contains in output_str)
@@ -660,7 +672,7 @@ class GraphBuilder:
         # Generate Python code
         code = self._generate_code(graph)
 
-        Path(path).write_text(code)
+        Path(path).write_text(code, encoding="utf-8")
         self.session.phase = BuildPhase.EXPORTED
         self._save_session()
 
@@ -754,7 +766,7 @@ class GraphBuilder:
         """Save session to disk."""
         self.session.updated_at = datetime.now()
         path = self.storage_path / f"{self.session.id}.json"
-        path.write_text(self.session.model_dump_json(indent=2))
+        path.write_text(self.session.model_dump_json(indent=2), encoding="utf-8")
 
     def _load_session(self, session_id: str) -> BuildSession:
         """Load session from disk."""
@@ -787,9 +799,11 @@ class GraphBuilder:
             "tests": len(self.session.test_cases),
             "tests_passed": sum(1 for t in self.session.test_results if t.passed),
             "approvals": len(self.session.approvals),
-            "pending_validation": self._pending_validation.model_dump()
-            if self._pending_validation
-            else None,
+            "pending_validation": (
+                self._pending_validation.model_dump()
+                if self._pending_validation
+                else None
+            ),
         }
 
     def show(self) -> str:
@@ -818,7 +832,9 @@ class GraphBuilder:
         if self.session.edges:
             lines.append("Edges:")
             for edge in self.session.edges:
-                lines.append(f"  {edge.source} --{edge.condition.value}--> {edge.target}")
+                lines.append(
+                    f"  {edge.source} --{edge.condition.value}--> {edge.target}"
+                )
             lines.append("")
 
         if self._pending_validation:

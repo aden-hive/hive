@@ -11,7 +11,11 @@ def register_tools(mcp: FastMCP) -> None:
 
     @mcp.tool()
     def execute_command_tool(
-        command: str, workspace_id: str, agent_id: str, session_id: str, cwd: str | None = None
+        command: str,
+        workspace_id: str,
+        agent_id: str,
+        session_id: str,
+        cwd: str | None = None,
     ) -> dict:
         """
         Purpose
@@ -39,7 +43,9 @@ def register_tools(mcp: FastMCP) -> None:
         """
         try:
             # Default cwd is the session root
-            session_root = os.path.join(WORKSPACES_DIR, workspace_id, agent_id, session_id)
+            session_root = os.path.join(
+                WORKSPACES_DIR, workspace_id, agent_id, session_id
+            )
             os.makedirs(session_root, exist_ok=True)
 
             if cwd:
@@ -48,7 +54,13 @@ def register_tools(mcp: FastMCP) -> None:
                 secure_cwd = session_root
 
             result = subprocess.run(
-                command, shell=True, cwd=secure_cwd, capture_output=True, text=True, timeout=60
+                command,
+                shell=True,
+                cwd=secure_cwd,
+                capture_output=True,
+                text=True,
+                timeout=60,
+                encoding="utf-8",
             )
 
             return {

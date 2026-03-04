@@ -283,7 +283,11 @@ class TestRuntimeLogStore:
         store.append_node_detail(
             _sid("testsync0"),
             NodeDetail(
-                node_id="n1", node_name="A", success=True, input_tokens=100, output_tokens=50
+                node_id="n1",
+                node_name="A",
+                success=True,
+                input_tokens=100,
+                output_tokens=50,
             ),
         )
         store.append_node_detail(
@@ -303,9 +307,20 @@ class TestRuntimeLogStore:
         store.ensure_run_dir(_sid("corrupt00"))
 
         # Write a valid line, a corrupt line, then another valid line
-        jsonl_path = tmp_path / "logs" / "sessions" / _sid("corrupt00") / "logs" / "details.jsonl"
-        valid1 = json.dumps(NodeDetail(node_id="n1", node_name="A", success=True).model_dump())
-        valid2 = json.dumps(NodeDetail(node_id="n2", node_name="B", success=True).model_dump())
+        jsonl_path = (
+            tmp_path
+            / "logs"
+            / "sessions"
+            / _sid("corrupt00")
+            / "logs"
+            / "details.jsonl"
+        )
+        valid1 = json.dumps(
+            NodeDetail(node_id="n1", node_name="A", success=True).model_dump()
+        )
+        valid2 = json.dumps(
+            NodeDetail(node_id="n2", node_name="B", success=True).model_dump()
+        )
         jsonl_path.write_text(f"{valid1}\n{{corrupt line\n{valid2}\n")
 
         details = store.read_node_details_sync(_sid("corrupt00"))
@@ -351,9 +366,15 @@ class TestRuntimeLogger:
         )
 
         # Verify the file exists and has one line
-        jsonl_path = tmp_path / "logs" / "sessions" / run_id / "logs" / "tool_logs.jsonl"
+        jsonl_path = (
+            tmp_path / "logs" / "sessions" / run_id / "logs" / "tool_logs.jsonl"
+        )
         assert jsonl_path.exists()
-        lines = [line for line in jsonl_path.read_text().strip().split("\n") if line]
+        lines = [
+            line
+            for line in jsonl_path.read_text(encoding="utf-8").strip().split("\n")
+            if line
+        ]
         assert len(lines) == 1
 
         data = json.loads(lines[0])
@@ -376,7 +397,8 @@ class TestRuntimeLogger:
 
         jsonl_path = tmp_path / "logs" / "sessions" / run_id / "logs" / "details.jsonl"
         assert jsonl_path.exists()
-        lines = [line for line in jsonl_path.read_text().strip().split("\n") if line]
+        content = jsonl_path.read_text(encoding="utf-8").strip()
+        lines = [line for line in content.split("\n") if line]
         assert len(lines) == 1
 
         data = json.loads(lines[0])
@@ -707,7 +729,8 @@ class TestRuntimeLogger:
         assert summary is not None
         assert summary.needs_attention is True
         assert any(
-            "failed" in r.lower() or "escalat" in r.lower() for r in summary.attention_reasons
+            "failed" in r.lower() or "escalat" in r.lower()
+            for r in summary.attention_reasons
         )
 
     @pytest.mark.asyncio

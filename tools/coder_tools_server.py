@@ -78,7 +78,9 @@ def _resolve_path(path: str) -> str:
     try:
         common = os.path.commonpath([resolved, PROJECT_ROOT])
     except ValueError as err:
-        raise ValueError(f"Access denied: '{path}' is outside the project root.") from err
+        raise ValueError(
+            f"Access denied: '{path}' is outside the project root."
+        ) from err
     if common != PROJECT_ROOT:
         raise ValueError(f"Access denied: '{path}' is outside the project root.")
     return resolved
@@ -90,7 +92,13 @@ def _resolve_path(path: str) -> str:
 def _snapshot_git(*args: str) -> str:
     """Run a git command with the snapshot GIT_DIR and PROJECT_ROOT worktree."""
     cmd = ["git", "--git-dir", SNAPSHOT_DIR, "--work-tree", PROJECT_ROOT, *args]
-    result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+    result = subprocess.run(
+        cmd,
+        capture_output=True,
+        text=True,
+        timeout=30,
+        encoding="utf-8",
+    )
     return result.stdout.strip()
 
 
@@ -104,6 +112,7 @@ def _ensure_snapshot_repo():
             ["git", "init", "--bare", SNAPSHOT_DIR],
             capture_output=True,
             timeout=10,
+            encoding="utf-8",
         )
         _snapshot_git("config", "core.autocrlf", "false")
 
@@ -152,6 +161,7 @@ def run_command(command: str, cwd: str = "", timeout: int = 120) -> str:
             capture_output=True,
             text=True,
             timeout=timeout,
+            encoding="utf-8",
             env={
                 **os.environ,
                 "PYTHONPATH": (
@@ -228,6 +238,7 @@ def undo_changes(path: str = "") -> str:
                 capture_output=True,
                 text=True,
                 timeout=10,
+                encoding="utf-8",
             )
             return f"Restored: {path}"
         else:
@@ -238,7 +249,9 @@ def undo_changes(path: str = "") -> str:
 
             _snapshot_git("checkout", ".")
             changed = diff_out.strip().split("\n")
-            return f"Restored {len(changed)} file(s):\n" + "\n".join(f"  {f}" for f in changed)
+            return f"Restored {len(changed)} file(s):\n" + "\n".join(
+                f"  {f}" for f in changed
+            )
     except Exception as e:
         return f"Error restoring files: {e}"
 
@@ -272,7 +285,9 @@ def list_agent_tools(
     """
     if output_schema not in ("simple", "full"):
         return json.dumps(
-            {"error": f"Invalid output_schema: {output_schema!r}. Use 'simple' or 'full'."}
+            {
+                "error": f"Invalid output_schema: {output_schema!r}. Use 'simple' or 'full'."
+            }
         )
 
     # Resolve config path
@@ -352,7 +367,9 @@ def list_agent_tools(
     # Apply output schema
     if output_schema == "simple":
         groups = {
-            prefix: [{"name": t["name"], "description": t["description"]} for t in tools]
+            prefix: [
+                {"name": t["name"], "description": t["description"]} for t in tools
+            ]
             for prefix, tools in groups.items()
         }
 
@@ -395,7 +412,9 @@ def validate_agent_tools(agent_path: str) -> str:
     try:
         from framework.server.app import validate_agent_path
     except ImportError:
-        return json.dumps({"error": "Cannot validate agent path: framework package not available"})
+        return json.dumps(
+            {"error": "Cannot validate agent path: framework package not available"}
+        )
 
     try:
         resolved = str(validate_agent_path(resolved))
@@ -553,7 +572,9 @@ def list_agents() -> str:
                 "source": source,
                 "has_nodes": os.path.isdir(os.path.join(agent_dir, "nodes")),
                 "has_tests": os.path.isdir(os.path.join(agent_dir, "tests")),
-                "has_mcp_config": os.path.isfile(os.path.join(agent_dir, "mcp_servers.json")),
+                "has_mcp_config": os.path.isfile(
+                    os.path.join(agent_dir, "mcp_servers.json")
+                ),
             }
 
             # Read description from __init__.py docstring
@@ -909,7 +930,9 @@ def get_agent_checkpoint(
         else:
             cp_files = sorted(checkpoint_dir.glob("cp_*.json"))
             if not cp_files:
-                return json.dumps({"error": f"No checkpoints for session: {session_id}"})
+                return json.dumps(
+                    {"error": f"No checkpoints for session: {session_id}"}
+                )
             checkpoint_id = cp_files[-1].stem
 
     cp_path = checkpoint_dir / f"{checkpoint_id}.json"
@@ -1012,7 +1035,9 @@ def run_agent_tests(
     core_path = os.path.join(PROJECT_ROOT, "core")
     exports_path = os.path.join(PROJECT_ROOT, "exports")
     fw_agents_path = os.path.join(PROJECT_ROOT, "core", "framework", "agents")
-    env["PYTHONPATH"] = f"{core_path}:{exports_path}:{fw_agents_path}:{PROJECT_ROOT}:{pythonpath}"
+    env["PYTHONPATH"] = (
+        f"{core_path}:{exports_path}:{fw_agents_path}:{PROJECT_ROOT}:{pythonpath}"
+    )
 
     try:
         result = subprocess.run(
@@ -1021,6 +1046,7 @@ def run_agent_tests(
             text=True,
             timeout=120,
             env=env,
+            encoding="utf-8",
         )
     except subprocess.TimeoutExpired:
         return json.dumps(
@@ -1126,12 +1152,18 @@ def main() -> None:
 
     parser = argparse.ArgumentParser(description="Coder Tools MCP Server")
     parser.add_argument("--project-root", default="")
-    parser.add_argument("--port", type=int, default=int(os.getenv("CODER_TOOLS_PORT", "4002")))
+    parser.add_argument(
+        "--port", type=int, default=int(os.getenv("CODER_TOOLS_PORT", "4002"))
+    )
     parser.add_argument("--host", default="0.0.0.0")
     parser.add_argument("--stdio", action="store_true")
     args = parser.parse_args()
 
-    PROJECT_ROOT = os.path.abspath(args.project_root) if args.project_root else _find_project_root()
+    PROJECT_ROOT = (
+        os.path.abspath(args.project_root)
+        if args.project_root
+        else _find_project_root()
+    )
     SNAPSHOT_DIR = os.path.join(
         os.path.expanduser("~"),
         ".hive",

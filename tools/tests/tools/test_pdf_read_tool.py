@@ -28,7 +28,7 @@ class TestPdfReadTool:
     def test_read_pdf_invalid_extension(self, pdf_read_fn, tmp_path: Path):
         """Reading non-PDF file returns error."""
         txt_file = tmp_path / "test.txt"
-        txt_file.write_text("not a pdf")
+        txt_file.write_text("not a pdf", encoding="utf-8")
 
         result = pdf_read_fn(file_path=str(txt_file))
 
@@ -81,7 +81,9 @@ class TestPdfReadTool:
         result = pdf_read_fn(file_path=str(pdf_file), include_metadata=True)
         assert isinstance(result, dict)
 
-    def test_truncation_flag_for_page_range(self, pdf_read_fn, tmp_path: Path, monkeypatch):
+    def test_truncation_flag_for_page_range(
+        self, pdf_read_fn, tmp_path: Path, monkeypatch
+    ):
         """When requested pages exceed max_pages, response includes truncation metadata."""
 
         class FakePage:

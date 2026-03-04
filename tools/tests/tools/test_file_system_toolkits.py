@@ -83,10 +83,12 @@ class TestViewFileTool:
         register_tools(mcp)
         return mcp._tool_manager._tools["view_file"].fn
 
-    def test_view_existing_file(self, view_file_fn, mock_workspace, mock_secure_path, tmp_path):
+    def test_view_existing_file(
+        self, view_file_fn, mock_workspace, mock_secure_path, tmp_path
+    ):
         """Viewing an existing file returns content and metadata."""
         test_file = tmp_path / "test.txt"
-        test_file.write_text("Hello, World!")
+        test_file.write_text("Hello, World!", encoding="utf-8")
 
         result = view_file_fn(path="test.txt", **mock_workspace)
 
@@ -95,18 +97,22 @@ class TestViewFileTool:
         assert result["size_bytes"] == len(b"Hello, World!")
         assert result["lines"] == 1
 
-    def test_view_nonexistent_file(self, view_file_fn, mock_workspace, mock_secure_path):
+    def test_view_nonexistent_file(
+        self, view_file_fn, mock_workspace, mock_secure_path
+    ):
         """Viewing a non-existent file returns an error."""
         result = view_file_fn(path="nonexistent.txt", **mock_workspace)
 
         assert "error" in result
         assert "not found" in result["error"].lower()
 
-    def test_view_multiline_file(self, view_file_fn, mock_workspace, mock_secure_path, tmp_path):
+    def test_view_multiline_file(
+        self, view_file_fn, mock_workspace, mock_secure_path, tmp_path
+    ):
         """Viewing a multiline file returns correct line count."""
         test_file = tmp_path / "multiline.txt"
         content = "Line 1\nLine 2\nLine 3\nLine 4\n"
-        test_file.write_text(content)
+        test_file.write_text(content, encoding="utf-8")
 
         result = view_file_fn(path="multiline.txt", **mock_workspace)
 
@@ -114,10 +120,12 @@ class TestViewFileTool:
         assert result["content"] == content
         assert result["lines"] == 4
 
-    def test_view_empty_file(self, view_file_fn, mock_workspace, mock_secure_path, tmp_path):
+    def test_view_empty_file(
+        self, view_file_fn, mock_workspace, mock_secure_path, tmp_path
+    ):
         """Viewing an empty file returns empty content."""
         test_file = tmp_path / "empty.txt"
-        test_file.write_text("")
+        test_file.write_text("", encoding="utf-8")
 
         result = view_file_fn(path="empty.txt", **mock_workspace)
 
@@ -126,7 +134,9 @@ class TestViewFileTool:
         assert result["size_bytes"] == 0
         assert result["lines"] == 0
 
-    def test_view_file_with_unicode(self, view_file_fn, mock_workspace, mock_secure_path, tmp_path):
+    def test_view_file_with_unicode(
+        self, view_file_fn, mock_workspace, mock_secure_path, tmp_path
+    ):
         """Viewing a file with unicode characters works correctly."""
         test_file = tmp_path / "unicode.txt"
         content = "Hello 世界! 🌍 émoji"
@@ -138,12 +148,14 @@ class TestViewFileTool:
         assert result["content"] == content
         assert result["size_bytes"] == len(content.encode("utf-8"))
 
-    def test_view_nested_file(self, view_file_fn, mock_workspace, mock_secure_path, tmp_path):
+    def test_view_nested_file(
+        self, view_file_fn, mock_workspace, mock_secure_path, tmp_path
+    ):
         """Viewing a file in a nested directory works correctly."""
         nested = tmp_path / "nested" / "dir"
         nested.mkdir(parents=True)
         test_file = nested / "file.txt"
-        test_file.write_text("nested content")
+        test_file.write_text("nested content", encoding="utf-8")
 
         result = view_file_fn(path="nested/dir/file.txt", **mock_workspace)
 
@@ -156,7 +168,7 @@ class TestViewFileTool:
         """Viewing a file with max_size truncates content when exceeding limit."""
         test_file = tmp_path / "large.txt"
         content = "x" * 1000
-        test_file.write_text(content)
+        test_file.write_text(content, encoding="utf-8")
 
         result = view_file_fn(path="large.txt", max_size=100, **mock_workspace)
 
@@ -171,7 +183,7 @@ class TestViewFileTool:
     ):
         """Viewing a file with negative max_size returns error."""
         test_file = tmp_path / "test.txt"
-        test_file.write_text("content")
+        test_file.write_text("content", encoding="utf-8")
 
         result = view_file_fn(path="test.txt", max_size=-1, **mock_workspace)
 
@@ -196,9 +208,11 @@ class TestViewFileTool:
     ):
         """Viewing a file with invalid encoding returns error."""
         test_file = tmp_path / "test.txt"
-        test_file.write_text("content")
+        test_file.write_text("content", encoding="utf-8")
 
-        result = view_file_fn(path="test.txt", encoding="invalid-encoding", **mock_workspace)
+        result = view_file_fn(
+            path="test.txt", encoding="invalid-encoding", **mock_workspace
+        )
 
         assert "error" in result
         assert "Failed to read file" in result["error"]
@@ -214,9 +228,13 @@ class TestWriteToFileTool:
         register_tools(mcp)
         return mcp._tool_manager._tools["write_to_file"].fn
 
-    def test_write_new_file(self, write_to_file_fn, mock_workspace, mock_secure_path, tmp_path):
+    def test_write_new_file(
+        self, write_to_file_fn, mock_workspace, mock_secure_path, tmp_path
+    ):
         """Writing to a new file creates it successfully."""
-        result = write_to_file_fn(path="new_file.txt", content="Test content", **mock_workspace)
+        result = write_to_file_fn(
+            path="new_file.txt", content="Test content", **mock_workspace
+        )
 
         assert result["success"] is True
         assert result["mode"] == "written"
@@ -225,12 +243,14 @@ class TestWriteToFileTool:
         # Verify file was created
         created_file = tmp_path / "new_file.txt"
         assert created_file.exists()
-        assert created_file.read_text() == "Test content"
+        assert created_file.read_text(encoding="utf-8") == "Test content"
 
-    def test_write_append_mode(self, write_to_file_fn, mock_workspace, mock_secure_path, tmp_path):
+    def test_write_append_mode(
+        self, write_to_file_fn, mock_workspace, mock_secure_path, tmp_path
+    ):
         """Writing with append=True appends to existing file."""
         test_file = tmp_path / "append_test.txt"
-        test_file.write_text("Line 1\n")
+        test_file.write_text("Line 1\n", encoding="utf-8")
 
         result = write_to_file_fn(
             path="append_test.txt", content="Line 2\n", append=True, **mock_workspace
@@ -238,31 +258,35 @@ class TestWriteToFileTool:
 
         assert result["success"] is True
         assert result["mode"] == "appended"
-        assert test_file.read_text() == "Line 1\nLine 2\n"
+        assert test_file.read_text(encoding="utf-8") == "Line 1\nLine 2\n"
 
     def test_write_overwrite_existing(
         self, write_to_file_fn, mock_workspace, mock_secure_path, tmp_path
     ):
         """Writing to existing file overwrites it by default."""
         test_file = tmp_path / "overwrite.txt"
-        test_file.write_text("Original content")
+        test_file.write_text("Original content", encoding="utf-8")
 
-        result = write_to_file_fn(path="overwrite.txt", content="New content", **mock_workspace)
+        result = write_to_file_fn(
+            path="overwrite.txt", content="New content", **mock_workspace
+        )
 
         assert result["success"] is True
         assert result["mode"] == "written"
-        assert test_file.read_text() == "New content"
+        assert test_file.read_text(encoding="utf-8") == "New content"
 
     def test_write_creates_parent_directories(
         self, write_to_file_fn, mock_workspace, mock_secure_path, tmp_path
     ):
         """Writing creates parent directories if they don't exist."""
-        result = write_to_file_fn(path="nested/dir/file.txt", content="Test", **mock_workspace)
+        result = write_to_file_fn(
+            path="nested/dir/file.txt", content="Test", **mock_workspace
+        )
 
         assert result["success"] is True
         created_file = tmp_path / "nested" / "dir" / "file.txt"
         assert created_file.exists()
-        assert created_file.read_text() == "Test"
+        assert created_file.read_text(encoding="utf-8") == "Test"
 
     def test_write_empty_content(
         self, write_to_file_fn, mock_workspace, mock_secure_path, tmp_path
@@ -274,7 +298,7 @@ class TestWriteToFileTool:
         assert result["bytes_written"] == 0
         created_file = tmp_path / "empty.txt"
         assert created_file.exists()
-        assert created_file.read_text() == ""
+        assert created_file.read_text(encoding="utf-8") == ""
 
 
 class TestListDirTool:
@@ -287,11 +311,13 @@ class TestListDirTool:
         register_tools(mcp)
         return mcp._tool_manager._tools["list_dir"].fn
 
-    def test_list_directory(self, list_dir_fn, mock_workspace, mock_secure_path, tmp_path):
+    def test_list_directory(
+        self, list_dir_fn, mock_workspace, mock_secure_path, tmp_path
+    ):
         """Listing a directory returns all entries."""
         # Create test files and directories
-        (tmp_path / "file1.txt").write_text("content")
-        (tmp_path / "file2.txt").write_text("content")
+        (tmp_path / "file1.txt").write_text("content", encoding="utf-8")
+        (tmp_path / "file2.txt").write_text("content", encoding="utf-8")
         (tmp_path / "subdir").mkdir()
 
         result = list_dir_fn(path=".", **mock_workspace)
@@ -306,7 +332,9 @@ class TestListDirTool:
             assert "type" in entry
             assert entry["type"] in ["file", "directory"]
 
-    def test_list_empty_directory(self, list_dir_fn, mock_workspace, mock_secure_path, tmp_path):
+    def test_list_empty_directory(
+        self, list_dir_fn, mock_workspace, mock_secure_path, tmp_path
+    ):
         """Listing an empty directory returns empty list."""
         empty_dir = tmp_path / "empty"
         empty_dir.mkdir()
@@ -317,7 +345,9 @@ class TestListDirTool:
         assert result["total_count"] == 0
         assert result["entries"] == []
 
-    def test_list_nonexistent_directory(self, list_dir_fn, mock_workspace, mock_secure_path):
+    def test_list_nonexistent_directory(
+        self, list_dir_fn, mock_workspace, mock_secure_path
+    ):
         """Listing a non-existent directory returns error."""
         result = list_dir_fn(path="nonexistent_dir", **mock_workspace)
 
@@ -328,8 +358,8 @@ class TestListDirTool:
         self, list_dir_fn, mock_workspace, mock_secure_path, tmp_path
     ):
         """Listing a directory returns file sizes for files."""
-        (tmp_path / "small.txt").write_text("hi")
-        (tmp_path / "larger.txt").write_text("hello world")
+        (tmp_path / "small.txt").write_text("hi", encoding="utf-8")
+        (tmp_path / "larger.txt").write_text("hello world", encoding="utf-8")
         (tmp_path / "subdir").mkdir()
 
         result = list_dir_fn(path=".", **mock_workspace)
@@ -356,7 +386,9 @@ class TestReplaceFileContentTool:
 
     @pytest.fixture
     def replace_file_content_fn(self, mcp):
-        from aden_tools.tools.file_system_toolkits.replace_file_content import register_tools
+        from aden_tools.tools.file_system_toolkits.replace_file_content import (
+            register_tools,
+        )
 
         register_tools(mcp)
         return mcp._tool_manager._tools["replace_file_content"].fn
@@ -366,7 +398,7 @@ class TestReplaceFileContentTool:
     ):
         """Replacing content in a file works correctly."""
         test_file = tmp_path / "replace_test.txt"
-        test_file.write_text("Hello World! Hello again!")
+        test_file.write_text("Hello World! Hello again!", encoding="utf-8")
 
         result = replace_file_content_fn(
             path="replace_test.txt", target="Hello", replacement="Hi", **mock_workspace
@@ -374,14 +406,14 @@ class TestReplaceFileContentTool:
 
         assert result["success"] is True
         assert result["occurrences_replaced"] == 2
-        assert test_file.read_text() == "Hi World! Hi again!"
+        assert test_file.read_text(encoding="utf-8") == "Hi World! Hi again!"
 
     def test_replace_target_not_found(
         self, replace_file_content_fn, mock_workspace, mock_secure_path, tmp_path
     ):
         """Replacing non-existent target returns error."""
         test_file = tmp_path / "test.txt"
-        test_file.write_text("Hello World")
+        test_file.write_text("Hello World", encoding="utf-8")
 
         result = replace_file_content_fn(
             path="test.txt", target="nonexistent", replacement="new", **mock_workspace
@@ -406,7 +438,7 @@ class TestReplaceFileContentTool:
     ):
         """Replacing content with single occurrence works correctly."""
         test_file = tmp_path / "single.txt"
-        test_file.write_text("Hello World")
+        test_file.write_text("Hello World", encoding="utf-8")
 
         result = replace_file_content_fn(
             path="single.txt", target="Hello", replacement="Hi", **mock_workspace
@@ -414,14 +446,16 @@ class TestReplaceFileContentTool:
 
         assert result["success"] is True
         assert result["occurrences_replaced"] == 1
-        assert test_file.read_text() == "Hi World"
+        assert test_file.read_text(encoding="utf-8") == "Hi World"
 
     def test_replace_multiline_content(
         self, replace_file_content_fn, mock_workspace, mock_secure_path, tmp_path
     ):
         """Replacing content across multiple lines works correctly."""
         test_file = tmp_path / "multiline.txt"
-        test_file.write_text("Line 1\nTODO: fix this\nLine 3\nTODO: add tests\n")
+        test_file.write_text(
+            "Line 1\nTODO: fix this\nLine 3\nTODO: add tests\n", encoding="utf-8"
+        )
 
         result = replace_file_content_fn(
             path="multiline.txt", target="TODO:", replacement="DONE:", **mock_workspace
@@ -429,7 +463,8 @@ class TestReplaceFileContentTool:
 
         assert result["success"] is True
         assert result["occurrences_replaced"] == 2
-        assert test_file.read_text() == "Line 1\nDONE: fix this\nLine 3\nDONE: add tests\n"
+        expected = "Line 1\nDONE: fix this\nLine 3\nDONE: add tests\n"
+        assert test_file.read_text(encoding="utf-8") == expected
 
 
 class TestGrepSearchTool:
@@ -447,9 +482,11 @@ class TestGrepSearchTool:
     ):
         """Searching a single file returns matches."""
         test_file = tmp_path / "search_test.txt"
-        test_file.write_text("Line 1\nLine 2 with pattern\nLine 3")
+        test_file.write_text("Line 1\nLine 2 with pattern\nLine 3", encoding="utf-8")
 
-        result = grep_search_fn(path="search_test.txt", pattern="pattern", **mock_workspace)
+        result = grep_search_fn(
+            path="search_test.txt", pattern="pattern", **mock_workspace
+        )
 
         assert result["success"] is True
         assert result["total_matches"] == 1
@@ -462,9 +499,11 @@ class TestGrepSearchTool:
     ):
         """Searching with no matches returns empty list."""
         test_file = tmp_path / "test.txt"
-        test_file.write_text("Hello World")
+        test_file.write_text("Hello World", encoding="utf-8")
 
-        result = grep_search_fn(path="test.txt", pattern="nonexistent", **mock_workspace)
+        result = grep_search_fn(
+            path="test.txt", pattern="nonexistent", **mock_workspace
+        )
 
         assert result["success"] is True
         assert result["total_matches"] == 0
@@ -475,15 +514,17 @@ class TestGrepSearchTool:
     ):
         """Searching directory non-recursively only searches immediate files."""
         # Create files in root
-        (tmp_path / "file1.txt").write_text("pattern here")
-        (tmp_path / "file2.txt").write_text("no match here")
+        (tmp_path / "file1.txt").write_text("pattern here", encoding="utf-8")
+        (tmp_path / "file2.txt").write_text("no match here", encoding="utf-8")
 
         # Create nested directory with file
         nested = tmp_path / "nested"
         nested.mkdir()
-        (nested / "nested_file.txt").write_text("pattern in nested")
+        (nested / "nested_file.txt").write_text("pattern in nested", encoding="utf-8")
 
-        result = grep_search_fn(path=".", pattern="pattern", recursive=False, **mock_workspace)
+        result = grep_search_fn(
+            path=".", pattern="pattern", recursive=False, **mock_workspace
+        )
 
         assert result["success"] is True
         assert result["total_matches"] == 1  # Only finds pattern in root, not in nested
@@ -494,14 +535,16 @@ class TestGrepSearchTool:
     ):
         """Searching directory recursively finds matches in subdirectories."""
         # Create files in root
-        (tmp_path / "file1.txt").write_text("pattern here")
+        (tmp_path / "file1.txt").write_text("pattern here", encoding="utf-8")
 
         # Create nested directory with file
         nested = tmp_path / "nested"
         nested.mkdir()
-        (nested / "nested_file.txt").write_text("pattern in nested")
+        (nested / "nested_file.txt").write_text("pattern in nested", encoding="utf-8")
 
-        result = grep_search_fn(path=".", pattern="pattern", recursive=True, **mock_workspace)
+        result = grep_search_fn(
+            path=".", pattern="pattern", recursive=True, **mock_workspace
+        )
 
         assert result["success"] is True
         assert result["total_matches"] == 2  # Finds pattern in both files
@@ -512,9 +555,11 @@ class TestGrepSearchTool:
     ):
         """Searching with regex pattern finds complex matches."""
         test_file = tmp_path / "regex_test.txt"
-        test_file.write_text("foo123bar\nfoo456bar\nbaz789baz\n")
+        test_file.write_text("foo123bar\nfoo456bar\nbaz789baz\n", encoding="utf-8")
 
-        result = grep_search_fn(path="regex_test.txt", pattern=r"foo\d+bar", **mock_workspace)
+        result = grep_search_fn(
+            path="regex_test.txt", pattern=r"foo\d+bar", **mock_workspace
+        )
 
         assert result["success"] is True
         assert result["total_matches"] == 2
@@ -526,9 +571,11 @@ class TestGrepSearchTool:
     ):
         """Searching returns one match per line even with multiple occurrences."""
         test_file = tmp_path / "multi_match.txt"
-        test_file.write_text("hello hello hello\nworld\nhello again")
+        test_file.write_text("hello hello hello\nworld\nhello again", encoding="utf-8")
 
-        result = grep_search_fn(path="multi_match.txt", pattern="hello", **mock_workspace)
+        result = grep_search_fn(
+            path="multi_match.txt", pattern="hello", **mock_workspace
+        )
 
         assert result["success"] is True
         assert result["total_matches"] == 2  # Line 1 and Line 3
@@ -539,12 +586,16 @@ class TestExecuteCommandTool:
 
     @pytest.fixture
     def execute_command_fn(self, mcp):
-        from aden_tools.tools.file_system_toolkits.execute_command_tool import register_tools
+        from aden_tools.tools.file_system_toolkits.execute_command_tool import (
+            register_tools,
+        )
 
         register_tools(mcp)
         return mcp._tool_manager._tools["execute_command_tool"].fn
 
-    def test_execute_simple_command(self, execute_command_fn, mock_workspace, mock_secure_path):
+    def test_execute_simple_command(
+        self, execute_command_fn, mock_workspace, mock_secure_path
+    ):
         """Executing a simple command returns output."""
         result = execute_command_fn(command="echo 'Hello World'", **mock_workspace)
 
@@ -552,7 +603,9 @@ class TestExecuteCommandTool:
         assert result["return_code"] == 0
         assert "Hello World" in result["stdout"]
 
-    def test_execute_failing_command(self, execute_command_fn, mock_workspace, mock_secure_path):
+    def test_execute_failing_command(
+        self, execute_command_fn, mock_workspace, mock_secure_path
+    ):
         """Executing a failing command returns non-zero exit code."""
         result = execute_command_fn(command="exit 1", **mock_workspace)
 
@@ -563,7 +616,9 @@ class TestExecuteCommandTool:
         self, execute_command_fn, mock_workspace, mock_secure_path
     ):
         """Executing a command that writes to stderr captures it."""
-        result = execute_command_fn(command="echo 'error message' >&2", **mock_workspace)
+        result = execute_command_fn(
+            command="echo 'error message' >&2", **mock_workspace
+        )
 
         assert result["success"] is True
         assert "error message" in result.get("stderr", "")
@@ -573,7 +628,7 @@ class TestExecuteCommandTool:
     ):
         """Executing ls command lists files."""
         # Create a test file
-        (tmp_path / "testfile.txt").write_text("content")
+        (tmp_path / "testfile.txt").write_text("content", encoding="utf-8")
 
         result = execute_command_fn(command=f"ls {tmp_path}", **mock_workspace)
 
@@ -581,9 +636,13 @@ class TestExecuteCommandTool:
         assert result["return_code"] == 0
         assert "testfile.txt" in result["stdout"]
 
-    def test_execute_command_with_pipe(self, execute_command_fn, mock_workspace, mock_secure_path):
+    def test_execute_command_with_pipe(
+        self, execute_command_fn, mock_workspace, mock_secure_path
+    ):
         """Executing a command with pipe works correctly."""
-        result = execute_command_fn(command="echo 'hello world' | tr 'a-z' 'A-Z'", **mock_workspace)
+        result = execute_command_fn(
+            command="echo 'hello world' | tr 'a-z' 'A-Z'", **mock_workspace
+        )
 
         assert result["success"] is True
         assert result["return_code"] == 0
@@ -600,17 +659,23 @@ class TestApplyDiffTool:
         register_tools(mcp)
         return mcp._tool_manager._tools["apply_diff"].fn
 
-    def test_apply_diff_file_not_found(self, apply_diff_fn, mock_workspace, mock_secure_path):
+    def test_apply_diff_file_not_found(
+        self, apply_diff_fn, mock_workspace, mock_secure_path
+    ):
         """Applying diff to non-existent file returns error."""
-        result = apply_diff_fn(path="nonexistent.txt", diff_text="some diff", **mock_workspace)
+        result = apply_diff_fn(
+            path="nonexistent.txt", diff_text="some diff", **mock_workspace
+        )
 
         assert "error" in result
         assert "not found" in result["error"].lower()
 
-    def test_apply_diff_successful(self, apply_diff_fn, mock_workspace, mock_secure_path, tmp_path):
+    def test_apply_diff_successful(
+        self, apply_diff_fn, mock_workspace, mock_secure_path, tmp_path
+    ):
         """Applying a valid diff successfully modifies the file."""
         test_file = tmp_path / "diff_test.txt"
-        test_file.write_text("Hello World")
+        test_file.write_text("Hello World", encoding="utf-8")
 
         # Create a simple diff using diff_match_patch format
         import diff_match_patch as dmp_module
@@ -619,18 +684,22 @@ class TestApplyDiffTool:
         patches = dmp.patch_make("Hello World", "Hello Universe")
         diff_text = dmp.patch_toText(patches)
 
-        result = apply_diff_fn(path="diff_test.txt", diff_text=diff_text, **mock_workspace)
+        result = apply_diff_fn(
+            path="diff_test.txt", diff_text=diff_text, **mock_workspace
+        )
 
         assert result["success"] is True
         assert result["all_successful"] is True
         assert result["patches_applied"] > 0
-        assert test_file.read_text() == "Hello Universe"
+        assert test_file.read_text(encoding="utf-8") == "Hello Universe"
 
-    def test_apply_diff_multiline(self, apply_diff_fn, mock_workspace, mock_secure_path, tmp_path):
+    def test_apply_diff_multiline(
+        self, apply_diff_fn, mock_workspace, mock_secure_path, tmp_path
+    ):
         """Applying diff to multiline content works correctly."""
         test_file = tmp_path / "multiline.txt"
         original = "Line 1\nLine 2\nLine 3\n"
-        test_file.write_text(original)
+        test_file.write_text(original, encoding="utf-8")
 
         import diff_match_patch as dmp_module
 
@@ -639,11 +708,13 @@ class TestApplyDiffTool:
         patches = dmp.patch_make(original, modified)
         diff_text = dmp.patch_toText(patches)
 
-        result = apply_diff_fn(path="multiline.txt", diff_text=diff_text, **mock_workspace)
+        result = apply_diff_fn(
+            path="multiline.txt", diff_text=diff_text, **mock_workspace
+        )
 
         assert result["success"] is True
         assert result["all_successful"] is True
-        assert test_file.read_text() == modified
+        assert test_file.read_text(encoding="utf-8") == modified
 
     def test_apply_diff_invalid_patch(
         self, apply_diff_fn, mock_workspace, mock_secure_path, tmp_path
@@ -651,16 +722,18 @@ class TestApplyDiffTool:
         """Applying an invalid diff handles gracefully."""
         test_file = tmp_path / "test.txt"
         original_content = "Original content"
-        test_file.write_text(original_content)
+        test_file.write_text(original_content, encoding="utf-8")
 
         # Invalid diff text
-        result = apply_diff_fn(path="test.txt", diff_text="invalid diff format", **mock_workspace)
+        result = apply_diff_fn(
+            path="test.txt", diff_text="invalid diff format", **mock_workspace
+        )
 
         # Should either error or show no patches applied
         if "error" not in result:
             assert result.get("patches_applied", 0) == 0
         # File should remain unchanged
-        assert test_file.read_text() == original_content
+        assert test_file.read_text(encoding="utf-8") == original_content
 
 
 class TestApplyPatchTool:
@@ -673,9 +746,13 @@ class TestApplyPatchTool:
         register_tools(mcp)
         return mcp._tool_manager._tools["apply_patch"].fn
 
-    def test_apply_patch_file_not_found(self, apply_patch_fn, mock_workspace, mock_secure_path):
+    def test_apply_patch_file_not_found(
+        self, apply_patch_fn, mock_workspace, mock_secure_path
+    ):
         """Applying patch to non-existent file returns error."""
-        result = apply_patch_fn(path="nonexistent.txt", patch_text="some patch", **mock_workspace)
+        result = apply_patch_fn(
+            path="nonexistent.txt", patch_text="some patch", **mock_workspace
+        )
 
         assert "error" in result
         assert "not found" in result["error"].lower()
@@ -685,7 +762,7 @@ class TestApplyPatchTool:
     ):
         """Applying a valid patch successfully modifies the file."""
         test_file = tmp_path / "patch_test.txt"
-        test_file.write_text("Hello World")
+        test_file.write_text("Hello World", encoding="utf-8")
 
         # Create a simple patch using diff_match_patch format
         import diff_match_patch as dmp_module
@@ -694,12 +771,14 @@ class TestApplyPatchTool:
         patches = dmp.patch_make("Hello World", "Hello Python")
         patch_text = dmp.patch_toText(patches)
 
-        result = apply_patch_fn(path="patch_test.txt", patch_text=patch_text, **mock_workspace)
+        result = apply_patch_fn(
+            path="patch_test.txt", patch_text=patch_text, **mock_workspace
+        )
 
         assert result["success"] is True
         assert result["all_successful"] is True
         assert result["patches_applied"] > 0
-        assert test_file.read_text() == "Hello Python"
+        assert test_file.read_text(encoding="utf-8") == "Hello Python"
 
     def test_apply_patch_multiline(
         self, apply_patch_fn, mock_workspace, mock_secure_path, tmp_path
@@ -707,7 +786,7 @@ class TestApplyPatchTool:
         """Applying patch to multiline content works correctly."""
         test_file = tmp_path / "multiline.txt"
         original = "Line 1\nLine 2\nLine 3\n"
-        test_file.write_text(original)
+        test_file.write_text(original, encoding="utf-8")
 
         import diff_match_patch as dmp_module
 
@@ -716,11 +795,13 @@ class TestApplyPatchTool:
         patches = dmp.patch_make(original, modified)
         patch_text = dmp.patch_toText(patches)
 
-        result = apply_patch_fn(path="multiline.txt", patch_text=patch_text, **mock_workspace)
+        result = apply_patch_fn(
+            path="multiline.txt", patch_text=patch_text, **mock_workspace
+        )
 
         assert result["success"] is True
         assert result["all_successful"] is True
-        assert test_file.read_text() == modified
+        assert test_file.read_text(encoding="utf-8") == modified
 
     def test_apply_patch_invalid_patch(
         self, apply_patch_fn, mock_workspace, mock_secure_path, tmp_path
@@ -728,7 +809,7 @@ class TestApplyPatchTool:
         """Applying an invalid patch handles gracefully."""
         test_file = tmp_path / "test.txt"
         original_content = "Original content"
-        test_file.write_text(original_content)
+        test_file.write_text(original_content, encoding="utf-8")
 
         # Invalid patch text
         result = apply_patch_fn(
@@ -739,7 +820,7 @@ class TestApplyPatchTool:
         if "error" not in result:
             assert result.get("patches_applied", 0) == 0
         # File should remain unchanged
-        assert test_file.read_text() == original_content
+        assert test_file.read_text(encoding="utf-8") == original_content
 
     def test_apply_patch_multiple_changes(
         self, apply_patch_fn, mock_workspace, mock_secure_path, tmp_path
@@ -747,7 +828,7 @@ class TestApplyPatchTool:
         """Applying patch with multiple changes works correctly."""
         test_file = tmp_path / "complex.txt"
         original = "Function foo() {\n  return 42;\n}\n"
-        test_file.write_text(original)
+        test_file.write_text(original, encoding="utf-8")
 
         import diff_match_patch as dmp_module
 
@@ -756,8 +837,10 @@ class TestApplyPatchTool:
         patches = dmp.patch_make(original, modified)
         patch_text = dmp.patch_toText(patches)
 
-        result = apply_patch_fn(path="complex.txt", patch_text=patch_text, **mock_workspace)
+        result = apply_patch_fn(
+            path="complex.txt", patch_text=patch_text, **mock_workspace
+        )
 
         assert result["success"] is True
         assert result["all_successful"] is True
-        assert test_file.read_text() == modified
+        assert test_file.read_text(encoding="utf-8") == modified

@@ -97,7 +97,9 @@ def batch_approval(
         valid, error = req.validate_action()
         if not valid:
             results.append(
-                ApprovalResult.error_result(req.test_id, req.action, error or "Invalid request")
+                ApprovalResult.error_result(
+                    req.test_id, req.action, error or "Invalid request"
+                )
             )
             counts["errors"] += 1
             continue
@@ -227,7 +229,9 @@ def _process_action(
                 test.modify(edited_code)
                 storage.update_test(test)
                 print("✓ Modified and approved")
-                return ApprovalResult.success_result(test.id, action, "Modified and approved")
+                return ApprovalResult.success_result(
+                    test.id, action, "Modified and approved"
+                )
             else:
                 # No changes made, treat as approve
                 test.approve()
@@ -242,7 +246,9 @@ def _process_action(
             return ApprovalResult.success_result(test.id, action, "Skipped")
 
         else:
-            return ApprovalResult.error_result(test.id, action, f"Unknown action: {action}")
+            return ApprovalResult.error_result(
+                test.id, action, f"Unknown action: {action}"
+            )
 
     except Exception as e:
         return ApprovalResult.error_result(test.id, action, str(e))
@@ -270,10 +276,10 @@ def _edit_test_code(code: str) -> str:
 
     try:
         # Open editor
-        subprocess.run([editor, temp_path], check=True)
+        subprocess.run([editor, temp_path], check=True, encoding="utf-8")
 
         # Read edited code
-        with open(temp_path) as f:
+        with open(temp_path, encoding="utf-8") as f:
             return f.read()
     except subprocess.CalledProcessError:
         print("Editor failed, keeping original code")

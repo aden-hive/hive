@@ -40,6 +40,7 @@ def open_browser(url: str) -> tuple[bool, str]:
                 ["open", url],
                 check=True,
                 capture_output=True,
+                encoding="utf-8",
             )
             return True, "Opened in browser"
 
@@ -50,6 +51,7 @@ def open_browser(url: str) -> tuple[bool, str]:
                     ["xdg-open", url],
                     check=True,
                     capture_output=True,
+                    encoding="utf-8",
                 )
                 return True, "Opened in browser"
             except FileNotFoundError:
@@ -75,7 +77,9 @@ def open_browser(url: str) -> tuple[bool, str]:
         return False, f"Failed to open browser: {e}"
 
 
-def get_aden_auth_url(provider_name: str, base_url: str = "https://hive.adenhq.com") -> str:
+def get_aden_auth_url(
+    provider_name: str, base_url: str = "https://hive.adenhq.com"
+) -> str:
     """
     Get the Aden authorization URL for a provider.
 

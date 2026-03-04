@@ -20,6 +20,7 @@ def test_check_requirements():
         [sys.executable, "scripts/check_requirements.py", "json", "sys", "os"],
         capture_output=True,
         text=True,
+        encoding="utf-8",
     )
     print(f"Exit code: {result.returncode}")
     print(f"Output:\n{result.stdout}")
@@ -39,6 +40,7 @@ def test_check_requirements():
         [sys.executable, "scripts/check_requirements.py", "json", "nonexistent_module"],
         capture_output=True,
         text=True,
+        encoding="utf-8",
     )
     print(f"Exit code: {result.returncode}")
     print(f"Output:\n{result.stdout}")
@@ -46,9 +48,9 @@ def test_check_requirements():
     try:
         data = json.loads(result.stdout)
         assert data["json"] == "ok", "json should be ok"
-        assert "error" in data["nonexistent_module"], (
-            "nonexistent_module should have error"
-        )
+        assert (
+            "error" in data["nonexistent_module"]
+        ), "nonexistent_module should have error"
         assert result.returncode == 1, "Exit code should be 1 when errors exist"
         print("✓ Test 2 passed")
     except Exception as e:

@@ -47,7 +47,8 @@ def runtime_logs_dir(tmp_path: Path) -> Path:
                 "duration_ms": 3000,
                 "execution_quality": "clean",
             }
-        )
+        ),
+        encoding="utf-8",
     )
     _write_jsonl(
         run1_dir / "details.jsonl",
@@ -143,7 +144,8 @@ def runtime_logs_dir(tmp_path: Path) -> Path:
                 "duration_ms": 60000,
                 "execution_quality": "failed",
             }
-        )
+        ),
+        encoding="utf-8",
     )
     _write_jsonl(
         run2_dir / "details.jsonl",
@@ -234,7 +236,9 @@ class TestQueryRuntimeLogs:
         assert result["runs"][0]["status"] == "success"
 
     def test_filter_needs_attention(self, query_logs_fn, runtime_logs_dir: Path):
-        result = query_logs_fn(agent_work_dir=str(runtime_logs_dir), status="needs_attention")
+        result = query_logs_fn(
+            agent_work_dir=str(runtime_logs_dir), status="needs_attention"
+        )
         assert result["total"] == 1
         assert result["runs"][0]["needs_attention"] is True
 
@@ -247,7 +251,9 @@ class TestQueryRuntimeLogs:
         result = query_logs_fn(agent_work_dir=str(runtime_logs_dir), limit=1)
         assert len(result["runs"]) == 1
 
-    def test_in_progress_runs_visible(self, query_logs_fn, runtime_logs_dir_with_in_progress: Path):
+    def test_in_progress_runs_visible(
+        self, query_logs_fn, runtime_logs_dir_with_in_progress: Path
+    ):
         result = query_logs_fn(agent_work_dir=str(runtime_logs_dir_with_in_progress))
         assert result["total"] == 3
         run_ids = {r["run_id"] for r in result["runs"]}
@@ -326,7 +332,9 @@ class TestQueryRuntimeLogRaw:
         assert all(s["node_id"] == "node-1" for s in result["steps"])
         assert result["steps"][0]["tool_calls"][0]["tool_name"] == "web_search"
 
-    def test_filter_by_node_id_and_step_index(self, query_raw_fn, runtime_logs_dir: Path):
+    def test_filter_by_node_id_and_step_index(
+        self, query_raw_fn, runtime_logs_dir: Path
+    ):
         result = query_raw_fn(
             agent_work_dir=str(runtime_logs_dir),
             run_id="20250101T000001_abc12345",

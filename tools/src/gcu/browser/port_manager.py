@@ -70,11 +70,13 @@ def allocate_port(profile: str, storage_path: Path | None = None) -> int:
     # Check for stored port
     if port_file and port_file.exists():
         try:
-            stored_port = int(port_file.read_text().strip())
+            stored_port = int(port_file.read_text(encoding="utf-8").strip())
             if CDP_PORT_MIN <= stored_port <= CDP_PORT_MAX:
                 if _is_port_available(stored_port):
                     _allocated_ports.add(stored_port)
-                    logger.info(f"Reusing stored CDP port {stored_port} for profile '{profile}'")
+                    logger.info(
+                        f"Reusing stored CDP port {stored_port} for profile '{profile}'"
+                    )
                     return stored_port
         except (ValueError, OSError):
             pass  # Stored port invalid or unavailable
@@ -87,7 +89,7 @@ def allocate_port(profile: str, storage_path: Path | None = None) -> int:
             # Persist port assignment
             if port_file:
                 try:
-                    port_file.write_text(str(port))
+                    port_file.write_text(str(port), encoding="utf-8")
                 except OSError as e:
                     logger.warning(f"Failed to save port to file: {e}")
             return port

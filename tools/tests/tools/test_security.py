@@ -35,7 +35,9 @@ class TestGetSecurePath:
 
         get_secure_path("file.txt", **ids)  # Called for side effect (creates directory)
 
-        session_dir = self.workspaces_dir / "test-workspace" / "test-agent" / "test-session"
+        session_dir = (
+            self.workspaces_dir / "test-workspace" / "test-agent" / "test-session"
+        )
         assert session_dir.exists()
         assert session_dir.is_dir()
 
@@ -98,7 +100,10 @@ class TestGetSecurePath:
 
         with pytest.raises(ValueError, match="workspace_id.*required"):
             get_secure_path(
-                "file.txt", workspace_id="", agent_id=ids["agent_id"], session_id=ids["session_id"]
+                "file.txt",
+                workspace_id="",
+                agent_id=ids["agent_id"],
+                session_id=ids["session_id"],
             )
 
     def test_missing_agent_id_raises(self, ids):
@@ -130,7 +135,9 @@ class TestGetSecurePath:
         from aden_tools.tools.file_system_toolkits.security import get_secure_path
 
         with pytest.raises(ValueError):
-            get_secure_path("file.txt", workspace_id=None, agent_id="agent", session_id="session")
+            get_secure_path(
+                "file.txt", workspace_id=None, agent_id="agent", session_id="session"
+            )
 
     def test_simple_filename(self, ids):
         """Simple filename resolves correctly."""
@@ -139,7 +146,11 @@ class TestGetSecurePath:
         result = get_secure_path("file.txt", **ids)
 
         expected = (
-            self.workspaces_dir / "test-workspace" / "test-agent" / "test-session" / "file.txt"
+            self.workspaces_dir
+            / "test-workspace"
+            / "test-agent"
+            / "test-session"
+            / "file.txt"
         )
         assert result == str(expected)
 
@@ -149,7 +160,9 @@ class TestGetSecurePath:
 
         result = get_secure_path(".", **ids)
 
-        expected = self.workspaces_dir / "test-workspace" / "test-agent" / "test-session"
+        expected = (
+            self.workspaces_dir / "test-workspace" / "test-agent" / "test-session"
+        )
         assert result == str(expected)
 
     def test_dot_slash_path(self, ids):
@@ -225,7 +238,9 @@ class TestGetSecurePath:
 
         result = get_secure_path("", **ids)
 
-        expected = self.workspaces_dir / "test-workspace" / "test-agent" / "test-session"
+        expected = (
+            self.workspaces_dir / "test-workspace" / "test-agent" / "test-session"
+        )
         assert result == str(expected)
 
     def test_symlink_within_sandbox_works(self, ids):
@@ -233,12 +248,14 @@ class TestGetSecurePath:
         from aden_tools.tools.file_system_toolkits.security import get_secure_path
 
         # Create session directory structure
-        session_dir = self.workspaces_dir / "test-workspace" / "test-agent" / "test-session"
+        session_dir = (
+            self.workspaces_dir / "test-workspace" / "test-agent" / "test-session"
+        )
         session_dir.mkdir(parents=True, exist_ok=True)
 
         # Create a target file and a symlink to it
         target_file = session_dir / "target.txt"
-        target_file.write_text("content")
+        target_file.write_text("content", encoding="utf-8")
         symlink_path = session_dir / "link_to_target"
         symlink_path.symlink_to(target_file)
 
@@ -258,12 +275,14 @@ class TestGetSecurePath:
         from aden_tools.tools.file_system_toolkits.security import get_secure_path
 
         # Create session directory
-        session_dir = self.workspaces_dir / "test-workspace" / "test-agent" / "test-session"
+        session_dir = (
+            self.workspaces_dir / "test-workspace" / "test-agent" / "test-session"
+        )
         session_dir.mkdir(parents=True, exist_ok=True)
 
         # Create a symlink inside session pointing outside
         outside_target = self.workspaces_dir / "outside_file.txt"
-        outside_target.write_text("sensitive data")
+        outside_target.write_text("sensitive data", encoding="utf-8")
         symlink_path = session_dir / "escape_link"
         symlink_path.symlink_to(outside_target)
 

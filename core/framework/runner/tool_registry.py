@@ -19,8 +19,8 @@ logger = logging.getLogger(__name__)
 # Per-execution context overrides.  Each asyncio task (and thus each
 # concurrent graph execution) gets its own copy, so there are no races
 # when multiple ExecutionStreams run in parallel.
-_execution_context: contextvars.ContextVar[dict[str, Any] | None] = contextvars.ContextVar(
-    "_execution_context", default=None
+_execution_context: contextvars.ContextVar[dict[str, Any] | None] = (
+    contextvars.ContextVar("_execution_context", default=None)
 )
 
 
@@ -59,8 +59,12 @@ class ToolRegistry:
         # MCP resync tracking
         self._mcp_config_path: Path | None = None  # Path used for initial load
         self._mcp_tool_names: set[str] = set()  # Tool names registered from MCP
-        self._mcp_cred_snapshot: set[str] = set()  # Credential filenames at MCP load time
-        self._mcp_aden_key_snapshot: str | None = None  # ADEN_API_KEY value at MCP load time
+        self._mcp_cred_snapshot: set[str] = (
+            set()
+        )  # Credential filenames at MCP load time
+        self._mcp_aden_key_snapshot: str | None = (
+            None  # ADEN_API_KEY value at MCP load time
+        )
         self._mcp_server_tools: dict[str, set[str]] = {}  # server name -> tool names
 
     def register(
@@ -210,7 +214,9 @@ class ToolRegistry:
                     self.register(name, tool, make_executor(name))
                 else:
                     # Register tool without executor (will use mock)
-                    self.register(name, tool, lambda inputs: {"mock": True, "inputs": inputs})
+                    self.register(
+                        name, tool, lambda inputs: {"mock": True, "inputs": inputs}
+                    )
                 count += 1
 
         # Check for @tool decorated functions
@@ -340,7 +346,7 @@ class ToolRegistry:
         self._mcp_config_path = Path(config_path)
 
         try:
-            with open(config_path) as f:
+            with open(config_path, encoding="utf-8") as f:
                 config = json.load(f)
         except Exception as e:
             logger.warning(f"Failed to load MCP config from {config_path}: {e}")
@@ -441,7 +447,9 @@ class ToolRegistry:
 
                             # Only inject context params the tool accepts
                             filtered_context = {
-                                k: v for k, v in base_context.items() if k in tool_params
+                                k: v
+                                for k, v in base_context.items()
+                                if k in tool_params
                             }
                             # Strip context params from LLM inputs — the framework
                             # values are authoritative (prevents the LLM from passing
@@ -460,7 +468,9 @@ class ToolRegistry:
                                 return result[0]
                             return result
                         except Exception as e:
-                            logger.error(f"MCP tool '{tool_name}' execution failed: {e}")
+                            logger.error(
+                                f"MCP tool '{tool_name}' execution failed: {e}"
+                            )
                             return {"error": str(e)}
 
                     return executor
@@ -499,7 +509,9 @@ class ToolRegistry:
 
         # Strip framework-internal context params from LLM-facing schema.
         # The LLM can't know these values; they're auto-injected at call time.
-        properties = {k: v for k, v in properties.items() if k not in self.CONTEXT_PARAMS}
+        properties = {
+            k: v for k, v in properties.items() if k not in self.CONTEXT_PARAMS
+        }
         required = [r for r in required if r not in self.CONTEXT_PARAMS]
 
         # Convert to framework Tool format
@@ -572,7 +584,11 @@ class ToolRegistry:
     def _snapshot_credentials(self) -> set[str]:
         """Return the set of credential filenames currently on disk."""
         try:
-            return set(self._CREDENTIAL_DIR.iterdir()) if self._CREDENTIAL_DIR.is_dir() else set()
+            return (
+                set(self._CREDENTIAL_DIR.iterdir())
+                if self._CREDENTIAL_DIR.is_dir()
+                else set()
+            )
         except OSError:
             return set()
 
@@ -601,9 +617,11 @@ class ToolRegistry:
         reason = (
             "Credential files and ADEN_API_KEY changed"
             if files_changed and aden_key_changed
-            else "ADEN_API_KEY changed"
-            if aden_key_changed
-            else "Credential files changed"
+            else (
+                "ADEN_API_KEY changed"
+                if aden_key_changed
+                else "Credential files changed"
+            )
         )
         logger.info("%s — resyncing MCP servers", reason)
 

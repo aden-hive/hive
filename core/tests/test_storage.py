@@ -98,7 +98,7 @@ class TestFileStorageRunOperations:
         assert run_file.exists()
 
         # Verify it's valid JSON
-        with open(run_file) as f:
+        with open(run_file, encoding="utf-8") as f:
             data = json.load(f)
         assert data["id"] == "my_run"
 
@@ -332,7 +332,9 @@ class TestCacheEntry:
 # === CONCURRENTSTORAGE TESTS ===
 
 
-@pytest.mark.skip(reason="ConcurrentStorage is deprecated - wraps deprecated FileStorage")
+@pytest.mark.skip(
+    reason="ConcurrentStorage is deprecated - wraps deprecated FileStorage"
+)
 class TestConcurrentStorageBasics:
     """Test basic ConcurrentStorage operations."""
 
@@ -377,7 +379,9 @@ class TestConcurrentStorageBasics:
         assert storage._running is False
 
 
-@pytest.mark.skip(reason="ConcurrentStorage is deprecated - wraps deprecated FileStorage")
+@pytest.mark.skip(
+    reason="ConcurrentStorage is deprecated - wraps deprecated FileStorage"
+)
 class TestConcurrentStorageRunOperations:
     """Test ConcurrentStorage run operations."""
 
@@ -482,7 +486,9 @@ class TestConcurrentStorageRunOperations:
             await storage.stop()
 
 
-@pytest.mark.skip(reason="ConcurrentStorage is deprecated - wraps deprecated FileStorage")
+@pytest.mark.skip(
+    reason="ConcurrentStorage is deprecated - wraps deprecated FileStorage"
+)
 class TestConcurrentStorageQueryOperations:
     """Test ConcurrentStorage query operations."""
 
@@ -538,7 +544,9 @@ class TestConcurrentStorageQueryOperations:
             await storage.stop()
 
 
-@pytest.mark.skip(reason="ConcurrentStorage is deprecated - wraps deprecated FileStorage")
+@pytest.mark.skip(
+    reason="ConcurrentStorage is deprecated - wraps deprecated FileStorage"
+)
 class TestConcurrentStorageCacheManagement:
     """Test ConcurrentStorage cache management."""
 
@@ -569,7 +577,9 @@ class TestConcurrentStorageCacheManagement:
         # Add fresh entry
         storage._cache["fresh"] = CacheEntry(value="test", timestamp=time.time())
         # Add expired entry
-        storage._cache["expired"] = CacheEntry(value="test", timestamp=time.time() - 120)
+        storage._cache["expired"] = CacheEntry(
+            value="test", timestamp=time.time() - 120
+        )
 
         stats = storage.get_cache_stats()
 
@@ -578,7 +588,9 @@ class TestConcurrentStorageCacheManagement:
         assert stats["valid_entries"] == 1
 
 
-@pytest.mark.skip(reason="ConcurrentStorage is deprecated - wraps deprecated FileStorage")
+@pytest.mark.skip(
+    reason="ConcurrentStorage is deprecated - wraps deprecated FileStorage"
+)
 class TestConcurrentStorageSyncAPI:
     """Test ConcurrentStorage synchronous API for backward compatibility."""
 
@@ -612,7 +624,9 @@ class TestConcurrentStorageSyncAPI:
         assert loaded is None
 
 
-@pytest.mark.skip(reason="ConcurrentStorage is deprecated - wraps deprecated FileStorage")
+@pytest.mark.skip(
+    reason="ConcurrentStorage is deprecated - wraps deprecated FileStorage"
+)
 class TestConcurrentStorageStats:
     """Test ConcurrentStorage statistics."""
 

@@ -160,7 +160,10 @@ class CredentialSetupSession:
     @classmethod
     def from_nodes(cls, nodes: list[NodeSpec]) -> CredentialSetupSession:
         """Create a setup session by detecting missing credentials from nodes."""
-        from framework.credentials.validation import _status_to_missing, validate_agent_credentials
+        from framework.credentials.validation import (
+            _status_to_missing,
+            validate_agent_credentials,
+        )
 
         result = validate_agent_credentials(nodes, verify=False, raise_on_error=False)
         missing = [_status_to_missing(c) for c in result.credentials if not c.available]
@@ -181,12 +184,17 @@ class CredentialSetupSession:
                 are NOT yet available. If False, include all required
                 credentials regardless of availability.
         """
-        from framework.credentials.validation import _status_to_missing, validate_agent_credentials
+        from framework.credentials.validation import (
+            _status_to_missing,
+            validate_agent_credentials,
+        )
 
         nodes = load_agent_nodes(agent_path)
         result = validate_agent_credentials(nodes, verify=False, raise_on_error=False)
         if missing_only:
-            missing = [_status_to_missing(c) for c in result.credentials if not c.available]
+            missing = [
+                _status_to_missing(c) for c in result.credentials if not c.available
+            ]
         else:
             missing = [_status_to_missing(c) for c in result.credentials]
         return cls(missing)
@@ -198,7 +206,9 @@ class CredentialSetupSession:
         errors: list[str] = []
 
         if not self.missing:
-            self._print(f"\n{Colors.GREEN}✓ All credentials are already configured!{Colors.NC}\n")
+            self._print(
+                f"\n{Colors.GREEN}✓ All credentials are already configured!{Colors.NC}\n"
+            )
             return SetupResult(success=True)
 
         self._print_header()
@@ -270,7 +280,9 @@ class CredentialSetupSession:
             )
             return True
         except Exception as e:
-            self._print(f"{Colors.RED}Failed to initialize credential store: {e}{Colors.NC}")
+            self._print(
+                f"{Colors.RED}Failed to initialize credential store: {e}{Colors.NC}"
+            )
             return False
 
     def _setup_single_credential(self, cred: MissingCredential) -> bool:
@@ -349,7 +361,9 @@ class CredentialSetupSession:
                     return options[choice_num - 1][0]
             except ValueError:
                 pass
-            self._print(f"{Colors.RED}Invalid choice. Enter 1-{len(options)}{Colors.NC}")
+            self._print(
+                f"{Colors.RED}Invalid choice. Enter 1-{len(options)}{Colors.NC}"
+            )
 
     def _setup_direct_api_key(self, cred: MissingCredential) -> bool:
         """Guide user through direct API key setup."""
@@ -359,7 +373,9 @@ class CredentialSetupSession:
             self._print(cred.api_key_instructions)
 
         if cred.help_url:
-            self._print(f"\n{Colors.CYAN}Get your API key at:{Colors.NC} {cred.help_url}")
+            self._print(
+                f"\n{Colors.CYAN}Get your API key at:{Colors.NC} {cred.help_url}"
+            )
 
         # Collect key (use password input to hide the value)
         self._print("")
@@ -427,7 +443,9 @@ class CredentialSetupSession:
             # Check if the credential was synced
             cred_id = cred.credential_id or cred.credential_name
             if store.is_available(cred_id):
-                self._print(f"{Colors.GREEN}✓ {cred.credential_name} synced from Aden{Colors.NC}")
+                self._print(
+                    f"{Colors.GREEN}✓ {cred.credential_name} synced from Aden{Colors.NC}"
+                )
                 # Export to current session
                 try:
                     value = store.get_key(cred_id, cred.credential_key)
@@ -440,13 +458,17 @@ class CredentialSetupSession:
                 self._print(
                     f"{Colors.YELLOW}⚠ {cred.credential_name} not found in Aden account.{Colors.NC}"
                 )
-                self._print("Please connect this integration on https://hive.adenhq.com first.")
+                self._print(
+                    "Please connect this integration on https://hive.adenhq.com first."
+                )
                 return False
         except Exception as e:
             self._print(f"{Colors.RED}Failed to sync from Aden: {e}{Colors.NC}")
             return False
 
-    def _run_health_check(self, cred: MissingCredential, value: str) -> dict[str, Any] | None:
+    def _run_health_check(
+        self, cred: MissingCredential, value: str
+    ) -> dict[str, Any] | None:
         """Run health check on credential value."""
         try:
             from aden_tools.credentials import check_credential_health
@@ -465,7 +487,11 @@ class CredentialSetupSession:
         """Store credential in encrypted store and export to env."""
         from pydantic import SecretStr
 
-        from framework.credentials import CredentialKey, CredentialObject, CredentialStore
+        from framework.credentials import (
+            CredentialKey,
+            CredentialObject,
+            CredentialStore,
+        )
 
         try:
             store = CredentialStore.with_encrypted_storage()
@@ -480,13 +506,17 @@ class CredentialSetupSession:
             store.save_credential(cred_obj)
             self._print(f"{Colors.GREEN}✓ Stored in ~/.hive/credentials/{Colors.NC}")
         except Exception as e:
-            self._print(f"{Colors.YELLOW}⚠ Could not store in credential store: {e}{Colors.NC}")
+            self._print(
+                f"{Colors.YELLOW}⚠ Could not store in credential store: {e}{Colors.NC}"
+            )
 
         # Export to current session
         os.environ[cred.env_var] = value
         self._print(f"{Colors.GREEN}✓ Exported to current session{Colors.NC}")
 
-    def _print_summary(self, configured: list[str], skipped: list[str], errors: list[str]) -> None:
+    def _print_summary(
+        self, configured: list[str], skipped: list[str], errors: list[str]
+    ) -> None:
         """Print final summary."""
         self._print("")
         self._print(f"{Colors.YELLOW}{'=' * 60}{Colors.NC}")
@@ -509,9 +539,13 @@ class CredentialSetupSession:
                 self._print(f"    • {err}")
 
         if not skipped and not errors:
-            self._print(f"\n{Colors.GREEN}All credentials configured successfully!{Colors.NC}")
+            self._print(
+                f"\n{Colors.GREEN}All credentials configured successfully!{Colors.NC}"
+            )
         elif skipped:
-            self._print(f"\n{Colors.YELLOW}Note: Skipped credentials must be configured ")
+            self._print(
+                f"\n{Colors.YELLOW}Note: Skipped credentials must be configured "
+            )
             self._print(f"before running the agent.{Colors.NC}")
 
         self._print("")
@@ -568,7 +602,7 @@ def _load_nodes_from_python_agent(agent_path: Path) -> list:
 def _load_nodes_from_json_agent(agent_json: Path) -> list:
     """Load nodes from a JSON-based agent."""
     try:
-        with open(agent_json) as f:
+        with open(agent_json, encoding="utf-8") as f:
             data = json.load(f)
 
         from framework.graph import NodeSpec

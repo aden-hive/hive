@@ -162,7 +162,10 @@ def _fuzzy_find_candidates(content: str, old_text: str):
     # Strategy 2: Line-trimmed match
     for i in range(len(content_lines) - n_search + 1):
         window = content_lines[i : i + n_search]
-        if all(cl.strip() == sl.strip() for cl, sl in zip(window, search_lines, strict=True)):
+        if all(
+            cl.strip() == sl.strip()
+            for cl, sl in zip(window, search_lines, strict=True)
+        ):
             yield "\n".join(window)
 
     # Strategy 3: Block-anchor match (first/last line as anchors, fuzzy middle)
@@ -173,7 +176,10 @@ def _fuzzy_find_candidates(content: str, old_text: str):
         for i, line in enumerate(content_lines):
             if line.strip() == first_trimmed:
                 end = i + n_search
-                if end <= len(content_lines) and content_lines[end - 1].strip() == last_trimmed:
+                if (
+                    end <= len(content_lines)
+                    and content_lines[end - 1].strip() == last_trimmed
+                ):
                     block = content_lines[i:end]
                     middle_content = "\n".join(block[1:-1])
                     middle_search = "\n".join(search_lines[1:-1])
@@ -272,7 +278,9 @@ def register_file_tools(
 
         if _is_binary(resolved):
             size = os.path.getsize(resolved)
-            return f"Binary file: {path} ({size:,} bytes). Cannot display binary content."
+            return (
+                f"Binary file: {path} ({size:,} bytes). Cannot display binary content."
+            )
 
         try:
             with open(resolved, encoding="utf-8", errors="replace") as f:
@@ -303,7 +311,9 @@ def register_file_tools(
             lines_shown = len(output_lines)
             actual_end = start_idx + lines_shown
             if actual_end < total_lines or truncated_by_bytes:
-                result += f"\n\n(Showing lines {start_idx + 1}-{actual_end} of {total_lines}."
+                result += (
+                    f"\n\n(Showing lines {start_idx + 1}-{actual_end} of {total_lines}."
+                )
                 if truncated_by_bytes:
                     result += " Truncated by byte budget."
                 result += f" Use offset={actual_end + 1} to continue reading.)"
@@ -333,14 +343,18 @@ def register_file_tools(
             with open(resolved, "w", encoding="utf-8") as f:
                 f.write(content)
 
-            line_count = content.count("\n") + (1 if content and not content.endswith("\n") else 0)
+            line_count = content.count("\n") + (
+                1 if content and not content.endswith("\n") else 0
+            )
             action = "Updated" if existed else "Created"
             return f"{action} {path} ({len(content):,} bytes, {line_count} lines)"
         except Exception as e:
             return f"Error writing file: {e}"
 
     @mcp.tool()
-    def edit_file(path: str, old_text: str, new_text: str, replace_all: bool = False) -> str:
+    def edit_file(
+        path: str, old_text: str, new_text: str, replace_all: bool = False
+    ) -> str:
         """Replace text in a file using a fuzzy-match cascade.
 
         Tries exact match first, then falls back through increasingly fuzzy
@@ -412,7 +426,9 @@ def register_file_tools(
                 f.write(new_content)
 
             diff = _compute_diff(content, new_content, path)
-            match_info = f" (matched via {strategy_used})" if strategy_used != "exact" else ""
+            match_info = (
+                f" (matched via {strategy_used})" if strategy_used != "exact" else ""
+            )
             result = f"Replaced {count} occurrence(s) in {path}{match_info}"
             if diff:
                 result += f"\n\n{diff}"
@@ -448,7 +464,9 @@ def register_file_tools(
             entries: list[str] = []
             if recursive:
                 for root, dirs, files in os.walk(resolved):
-                    dirs[:] = sorted(d for d in dirs if d not in skip and not d.startswith("."))
+                    dirs[:] = sorted(
+                        d for d in dirs if d not in skip and not d.startswith(".")
+                    )
                     rel_root = os.path.relpath(root, resolved)
                     if rel_root == ".":
                         rel_root = ""
@@ -501,7 +519,13 @@ def register_file_tools(
                 cmd.extend(["--glob", include])
             cmd.append(resolved)
 
-            rg_result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+            rg_result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=30,
+                encoding="utf-8",
+            )
             if rg_result.returncode <= 1:
                 output = rg_result.stdout.strip()
                 if not output:
@@ -517,9 +541,7 @@ def register_file_tools(
                 total = output.count("\n") + 1
                 result_str = "\n".join(lines)
                 if total > SEARCH_RESULT_LIMIT:
-                    result_str += (
-                        f"\n\n... ({total} total matches, showing first {SEARCH_RESULT_LIMIT})"
-                    )
+                    result_str += f"\n\n... ({total} total matches, showing first {SEARCH_RESULT_LIMIT})"
                 return result_str
         except FileNotFoundError:
             pass  # ripgrep not installed — fall through to Python
@@ -538,7 +560,9 @@ def register_file_tools(
                     if include and not fnmatch.fnmatch(fname, include):
                         continue
                     fpath = os.path.join(root, fname)
-                    display_path = os.path.relpath(fpath, project_root) if project_root else fpath
+                    display_path = (
+                        os.path.relpath(fpath, project_root) if project_root else fpath
+                    )
                     try:
                         with open(fpath, encoding="utf-8", errors="ignore") as f:
                             for i, line in enumerate(f, 1):

@@ -27,7 +27,9 @@ TEST_SESSION_ID = "test-session"
 @pytest.fixture
 def excel_tools(mcp: FastMCP, tmp_path: Path):
     """Register all Excel tools and return them as a dict."""
-    with patch("aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR", str(tmp_path)):
+    with patch(
+        "aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR", str(tmp_path)
+    ):
         register_tools(mcp)
         yield {
             "excel_read": mcp._tool_manager._tools["excel_read"].fn,
@@ -158,7 +160,10 @@ class TestExcelRead:
 
     def test_read_basic_xlsx(self, excel_read_fn, basic_xlsx, tmp_path):
         """Read a basic Excel file successfully."""
-        with patch("aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR", str(tmp_path)):
+        with patch(
+            "aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR",
+            str(tmp_path),
+        ):
             result = excel_read_fn(
                 path="basic.xlsx",
                 workspace_id=TEST_WORKSPACE_ID,
@@ -177,7 +182,10 @@ class TestExcelRead:
 
     def test_read_specific_sheet(self, excel_read_fn, multi_sheet_xlsx, tmp_path):
         """Read a specific sheet from an Excel file."""
-        with patch("aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR", str(tmp_path)):
+        with patch(
+            "aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR",
+            str(tmp_path),
+        ):
             result = excel_read_fn(
                 path="multi_sheet.xlsx",
                 workspace_id=TEST_WORKSPACE_ID,
@@ -192,9 +200,14 @@ class TestExcelRead:
         assert result["row_count"] == 2
         assert result["rows"][0]["name"] == "Widget"
 
-    def test_read_nonexistent_sheet_error(self, excel_read_fn, multi_sheet_xlsx, tmp_path):
+    def test_read_nonexistent_sheet_error(
+        self, excel_read_fn, multi_sheet_xlsx, tmp_path
+    ):
         """Return error for non-existent sheet."""
-        with patch("aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR", str(tmp_path)):
+        with patch(
+            "aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR",
+            str(tmp_path),
+        ):
             result = excel_read_fn(
                 path="multi_sheet.xlsx",
                 workspace_id=TEST_WORKSPACE_ID,
@@ -209,7 +222,10 @@ class TestExcelRead:
 
     def test_read_with_limit(self, excel_read_fn, basic_xlsx, tmp_path):
         """Read Excel with row limit."""
-        with patch("aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR", str(tmp_path)):
+        with patch(
+            "aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR",
+            str(tmp_path),
+        ):
             result = excel_read_fn(
                 path="basic.xlsx",
                 workspace_id=TEST_WORKSPACE_ID,
@@ -228,7 +244,10 @@ class TestExcelRead:
 
     def test_read_with_offset(self, excel_read_fn, basic_xlsx, tmp_path):
         """Read Excel with row offset."""
-        with patch("aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR", str(tmp_path)):
+        with patch(
+            "aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR",
+            str(tmp_path),
+        ):
             result = excel_read_fn(
                 path="basic.xlsx",
                 workspace_id=TEST_WORKSPACE_ID,
@@ -245,7 +264,10 @@ class TestExcelRead:
 
     def test_read_with_limit_and_offset(self, excel_read_fn, large_xlsx, tmp_path):
         """Read Excel with both limit and offset (pagination)."""
-        with patch("aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR", str(tmp_path)):
+        with patch(
+            "aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR",
+            str(tmp_path),
+        ):
             result = excel_read_fn(
                 path="large.xlsx",
                 workspace_id=TEST_WORKSPACE_ID,
@@ -265,7 +287,10 @@ class TestExcelRead:
 
     def test_file_not_found(self, excel_read_fn, session_dir, tmp_path):
         """Return error for non-existent file."""
-        with patch("aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR", str(tmp_path)):
+        with patch(
+            "aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR",
+            str(tmp_path),
+        ):
             result = excel_read_fn(
                 path="nonexistent.xlsx",
                 workspace_id=TEST_WORKSPACE_ID,
@@ -280,9 +305,12 @@ class TestExcelRead:
         """Return error for non-Excel file extension."""
         # Create a text file
         txt_file = session_dir / "data.txt"
-        txt_file.write_text("name,age\nAlice,30\n")
+        txt_file.write_text("name,age\nAlice,30\n", encoding="utf-8")
 
-        with patch("aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR", str(tmp_path)):
+        with patch(
+            "aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR",
+            str(tmp_path),
+        ):
             result = excel_read_fn(
                 path="data.txt",
                 workspace_id=TEST_WORKSPACE_ID,
@@ -295,7 +323,10 @@ class TestExcelRead:
 
     def test_empty_xlsx_file(self, excel_read_fn, empty_xlsx, tmp_path):
         """Read empty Excel file (returns empty result)."""
-        with patch("aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR", str(tmp_path)):
+        with patch(
+            "aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR",
+            str(tmp_path),
+        ):
             result = excel_read_fn(
                 path="empty.xlsx",
                 workspace_id=TEST_WORKSPACE_ID,
@@ -309,7 +340,10 @@ class TestExcelRead:
 
     def test_headers_only_xlsx(self, excel_read_fn, headers_only_xlsx, tmp_path):
         """Read Excel with only headers (no data rows)."""
-        with patch("aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR", str(tmp_path)):
+        with patch(
+            "aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR",
+            str(tmp_path),
+        ):
             result = excel_read_fn(
                 path="headers_only.xlsx",
                 workspace_id=TEST_WORKSPACE_ID,
@@ -325,7 +359,10 @@ class TestExcelRead:
 
     def test_missing_workspace_id(self, excel_read_fn, basic_xlsx, tmp_path):
         """Return error when workspace_id is missing."""
-        with patch("aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR", str(tmp_path)):
+        with patch(
+            "aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR",
+            str(tmp_path),
+        ):
             result = excel_read_fn(
                 path="basic.xlsx",
                 workspace_id="",
@@ -337,7 +374,10 @@ class TestExcelRead:
 
     def test_missing_agent_id(self, excel_read_fn, basic_xlsx, tmp_path):
         """Return error when agent_id is missing."""
-        with patch("aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR", str(tmp_path)):
+        with patch(
+            "aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR",
+            str(tmp_path),
+        ):
             result = excel_read_fn(
                 path="basic.xlsx",
                 workspace_id=TEST_WORKSPACE_ID,
@@ -349,7 +389,10 @@ class TestExcelRead:
 
     def test_missing_session_id(self, excel_read_fn, basic_xlsx, tmp_path):
         """Return error when session_id is missing."""
-        with patch("aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR", str(tmp_path)):
+        with patch(
+            "aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR",
+            str(tmp_path),
+        ):
             result = excel_read_fn(
                 path="basic.xlsx",
                 workspace_id=TEST_WORKSPACE_ID,
@@ -361,7 +404,10 @@ class TestExcelRead:
 
     def test_path_traversal_blocked(self, excel_read_fn, session_dir, tmp_path):
         """Prevent path traversal attacks."""
-        with patch("aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR", str(tmp_path)):
+        with patch(
+            "aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR",
+            str(tmp_path),
+        ):
             result = excel_read_fn(
                 path="../../../etc/passwd.xlsx",
                 workspace_id=TEST_WORKSPACE_ID,
@@ -373,7 +419,10 @@ class TestExcelRead:
 
     def test_negative_limit(self, excel_read_fn, basic_xlsx, tmp_path):
         """Return error for negative limit."""
-        with patch("aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR", str(tmp_path)):
+        with patch(
+            "aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR",
+            str(tmp_path),
+        ):
             result = excel_read_fn(
                 path="basic.xlsx",
                 workspace_id=TEST_WORKSPACE_ID,
@@ -387,7 +436,10 @@ class TestExcelRead:
 
     def test_negative_offset(self, excel_read_fn, basic_xlsx, tmp_path):
         """Return error for negative offset."""
-        with patch("aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR", str(tmp_path)):
+        with patch(
+            "aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR",
+            str(tmp_path),
+        ):
             result = excel_read_fn(
                 path="basic.xlsx",
                 workspace_id=TEST_WORKSPACE_ID,
@@ -401,7 +453,10 @@ class TestExcelRead:
 
     def test_offset_beyond_rows(self, excel_read_fn, basic_xlsx, tmp_path):
         """Offset beyond available rows returns empty result."""
-        with patch("aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR", str(tmp_path)):
+        with patch(
+            "aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR",
+            str(tmp_path),
+        ):
             result = excel_read_fn(
                 path="basic.xlsx",
                 workspace_id=TEST_WORKSPACE_ID,
@@ -417,7 +472,10 @@ class TestExcelRead:
 
     def test_read_with_dates(self, excel_read_fn, xlsx_with_dates, tmp_path):
         """Read Excel with date values (should serialize to ISO format)."""
-        with patch("aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR", str(tmp_path)):
+        with patch(
+            "aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR",
+            str(tmp_path),
+        ):
             result = excel_read_fn(
                 path="dates.xlsx",
                 workspace_id=TEST_WORKSPACE_ID,
@@ -435,7 +493,10 @@ class TestExcelWrite:
 
     def test_write_new_xlsx(self, excel_tools, session_dir, tmp_path):
         """Write a new Excel file successfully."""
-        with patch("aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR", str(tmp_path)):
+        with patch(
+            "aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR",
+            str(tmp_path),
+        ):
             result = excel_tools["excel_write"](
                 path="output.xlsx",
                 workspace_id=TEST_WORKSPACE_ID,
@@ -459,7 +520,10 @@ class TestExcelWrite:
 
     def test_write_with_custom_sheet_name(self, excel_tools, session_dir, tmp_path):
         """Write Excel with custom sheet name."""
-        with patch("aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR", str(tmp_path)):
+        with patch(
+            "aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR",
+            str(tmp_path),
+        ):
             result = excel_tools["excel_write"](
                 path="output.xlsx",
                 workspace_id=TEST_WORKSPACE_ID,
@@ -475,7 +539,10 @@ class TestExcelWrite:
 
     def test_write_creates_parent_directories(self, excel_tools, session_dir, tmp_path):
         """Write creates parent directories if needed."""
-        with patch("aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR", str(tmp_path)):
+        with patch(
+            "aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR",
+            str(tmp_path),
+        ):
             result = excel_tools["excel_write"](
                 path="subdir/nested/output.xlsx",
                 workspace_id=TEST_WORKSPACE_ID,
@@ -490,7 +557,10 @@ class TestExcelWrite:
 
     def test_write_empty_columns_error(self, excel_tools, session_dir, tmp_path):
         """Return error when columns is empty."""
-        with patch("aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR", str(tmp_path)):
+        with patch(
+            "aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR",
+            str(tmp_path),
+        ):
             result = excel_tools["excel_write"](
                 path="output.xlsx",
                 workspace_id=TEST_WORKSPACE_ID,
@@ -505,7 +575,10 @@ class TestExcelWrite:
 
     def test_write_non_xlsx_extension_error(self, excel_tools, session_dir, tmp_path):
         """Return error for non-Excel file extension."""
-        with patch("aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR", str(tmp_path)):
+        with patch(
+            "aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR",
+            str(tmp_path),
+        ):
             result = excel_tools["excel_write"](
                 path="output.txt",
                 workspace_id=TEST_WORKSPACE_ID,
@@ -520,7 +593,10 @@ class TestExcelWrite:
 
     def test_write_empty_rows(self, excel_tools, session_dir, tmp_path):
         """Write Excel with headers but no rows."""
-        with patch("aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR", str(tmp_path)):
+        with patch(
+            "aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR",
+            str(tmp_path),
+        ):
             result = excel_tools["excel_write"](
                 path="output.xlsx",
                 workspace_id=TEST_WORKSPACE_ID,
@@ -539,7 +615,10 @@ class TestExcelAppend:
 
     def test_append_to_existing_xlsx(self, excel_tools, basic_xlsx, tmp_path):
         """Append rows to an existing Excel file."""
-        with patch("aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR", str(tmp_path)):
+        with patch(
+            "aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR",
+            str(tmp_path),
+        ):
             result = excel_tools["excel_append"](
                 path="basic.xlsx",
                 workspace_id=TEST_WORKSPACE_ID,
@@ -557,7 +636,10 @@ class TestExcelAppend:
 
     def test_append_to_specific_sheet(self, excel_tools, multi_sheet_xlsx, tmp_path):
         """Append rows to a specific sheet."""
-        with patch("aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR", str(tmp_path)):
+        with patch(
+            "aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR",
+            str(tmp_path),
+        ):
             result = excel_tools["excel_append"](
                 path="multi_sheet.xlsx",
                 workspace_id=TEST_WORKSPACE_ID,
@@ -573,7 +655,10 @@ class TestExcelAppend:
 
     def test_append_file_not_found(self, excel_tools, session_dir, tmp_path):
         """Return error when file doesn't exist."""
-        with patch("aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR", str(tmp_path)):
+        with patch(
+            "aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR",
+            str(tmp_path),
+        ):
             result = excel_tools["excel_append"](
                 path="nonexistent.xlsx",
                 workspace_id=TEST_WORKSPACE_ID,
@@ -587,7 +672,10 @@ class TestExcelAppend:
 
     def test_append_empty_rows_error(self, excel_tools, basic_xlsx, tmp_path):
         """Return error when rows is empty."""
-        with patch("aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR", str(tmp_path)):
+        with patch(
+            "aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR",
+            str(tmp_path),
+        ):
             result = excel_tools["excel_append"](
                 path="basic.xlsx",
                 workspace_id=TEST_WORKSPACE_ID,
@@ -602,9 +690,12 @@ class TestExcelAppend:
     def test_append_non_xlsx_extension_error(self, excel_tools, session_dir, tmp_path):
         """Return error for non-Excel file extension."""
         txt_file = session_dir / "data.txt"
-        txt_file.write_text("name\nAlice\n")
+        txt_file.write_text("name\nAlice\n", encoding="utf-8")
 
-        with patch("aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR", str(tmp_path)):
+        with patch(
+            "aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR",
+            str(tmp_path),
+        ):
             result = excel_tools["excel_append"](
                 path="data.txt",
                 workspace_id=TEST_WORKSPACE_ID,
@@ -622,7 +713,10 @@ class TestExcelInfo:
 
     def test_get_info_basic_xlsx(self, excel_tools, basic_xlsx, tmp_path):
         """Get info about a basic Excel file."""
-        with patch("aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR", str(tmp_path)):
+        with patch(
+            "aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR",
+            str(tmp_path),
+        ):
             result = excel_tools["excel_info"](
                 path="basic.xlsx",
                 workspace_id=TEST_WORKSPACE_ID,
@@ -642,7 +736,10 @@ class TestExcelInfo:
 
     def test_get_info_multi_sheet_xlsx(self, excel_tools, multi_sheet_xlsx, tmp_path):
         """Get info about a multi-sheet Excel file."""
-        with patch("aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR", str(tmp_path)):
+        with patch(
+            "aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR",
+            str(tmp_path),
+        ):
             result = excel_tools["excel_info"](
                 path="multi_sheet.xlsx",
                 workspace_id=TEST_WORKSPACE_ID,
@@ -658,7 +755,10 @@ class TestExcelInfo:
 
     def test_get_info_file_not_found(self, excel_tools, session_dir, tmp_path):
         """Return error when file doesn't exist."""
-        with patch("aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR", str(tmp_path)):
+        with patch(
+            "aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR",
+            str(tmp_path),
+        ):
             result = excel_tools["excel_info"](
                 path="nonexistent.xlsx",
                 workspace_id=TEST_WORKSPACE_ID,
@@ -669,12 +769,17 @@ class TestExcelInfo:
         assert "error" in result
         assert "not found" in result["error"].lower()
 
-    def test_get_info_non_xlsx_extension_error(self, excel_tools, session_dir, tmp_path):
+    def test_get_info_non_xlsx_extension_error(
+        self, excel_tools, session_dir, tmp_path
+    ):
         """Return error for non-Excel file extension."""
         txt_file = session_dir / "data.txt"
-        txt_file.write_text("name\nAlice\n")
+        txt_file.write_text("name\nAlice\n", encoding="utf-8")
 
-        with patch("aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR", str(tmp_path)):
+        with patch(
+            "aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR",
+            str(tmp_path),
+        ):
             result = excel_tools["excel_info"](
                 path="data.txt",
                 workspace_id=TEST_WORKSPACE_ID,
@@ -691,7 +796,10 @@ class TestExcelSheetList:
 
     def test_list_sheets_basic(self, excel_tools, basic_xlsx, tmp_path):
         """List sheets in a basic Excel file."""
-        with patch("aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR", str(tmp_path)):
+        with patch(
+            "aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR",
+            str(tmp_path),
+        ):
             result = excel_tools["excel_sheet_list"](
                 path="basic.xlsx",
                 workspace_id=TEST_WORKSPACE_ID,
@@ -705,7 +813,10 @@ class TestExcelSheetList:
 
     def test_list_sheets_multi_sheet(self, excel_tools, multi_sheet_xlsx, tmp_path):
         """List sheets in a multi-sheet Excel file."""
-        with patch("aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR", str(tmp_path)):
+        with patch(
+            "aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR",
+            str(tmp_path),
+        ):
             result = excel_tools["excel_sheet_list"](
                 path="multi_sheet.xlsx",
                 workspace_id=TEST_WORKSPACE_ID,
@@ -721,7 +832,10 @@ class TestExcelSheetList:
 
     def test_list_sheets_file_not_found(self, excel_tools, session_dir, tmp_path):
         """Return error when file doesn't exist."""
-        with patch("aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR", str(tmp_path)):
+        with patch(
+            "aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR",
+            str(tmp_path),
+        ):
             result = excel_tools["excel_sheet_list"](
                 path="nonexistent.xlsx",
                 workspace_id=TEST_WORKSPACE_ID,
@@ -732,12 +846,17 @@ class TestExcelSheetList:
         assert "error" in result
         assert "not found" in result["error"].lower()
 
-    def test_list_sheets_non_xlsx_extension_error(self, excel_tools, session_dir, tmp_path):
+    def test_list_sheets_non_xlsx_extension_error(
+        self, excel_tools, session_dir, tmp_path
+    ):
         """Return error for non-Excel file extension."""
         txt_file = session_dir / "data.txt"
-        txt_file.write_text("name\nAlice\n")
+        txt_file.write_text("name\nAlice\n", encoding="utf-8")
 
-        with patch("aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR", str(tmp_path)):
+        with patch(
+            "aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR",
+            str(tmp_path),
+        ):
             result = excel_tools["excel_sheet_list"](
                 path="data.txt",
                 workspace_id=TEST_WORKSPACE_ID,
@@ -760,7 +879,10 @@ class TestExcelIntegration:
             {"name": "Charlie", "score": 92},
         ]
 
-        with patch("aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR", str(tmp_path)):
+        with patch(
+            "aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR",
+            str(tmp_path),
+        ):
             # Write
             write_result = excel_tools["excel_write"](
                 path="test.xlsx",
@@ -787,7 +909,10 @@ class TestExcelIntegration:
 
     def test_write_append_read(self, excel_tools, session_dir, tmp_path):
         """Write, append, and then read back all data."""
-        with patch("aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR", str(tmp_path)):
+        with patch(
+            "aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR",
+            str(tmp_path),
+        ):
             # Write initial data
             excel_tools["excel_write"](
                 path="test.xlsx",
@@ -831,7 +956,10 @@ class TestExcelSql:
 
     def test_sql_basic_query(self, excel_tools, basic_xlsx, tmp_path):
         """Run basic SQL query on Excel file."""
-        with patch("aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR", str(tmp_path)):
+        with patch(
+            "aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR",
+            str(tmp_path),
+        ):
             result = excel_tools["excel_sql"](
                 path="basic.xlsx",
                 workspace_id=TEST_WORKSPACE_ID,
@@ -846,7 +974,10 @@ class TestExcelSql:
 
     def test_sql_with_filter(self, excel_tools, basic_xlsx, tmp_path):
         """Run SQL query with WHERE clause."""
-        with patch("aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR", str(tmp_path)):
+        with patch(
+            "aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR",
+            str(tmp_path),
+        ):
             result = excel_tools["excel_sql"](
                 path="basic.xlsx",
                 workspace_id=TEST_WORKSPACE_ID,
@@ -860,7 +991,10 @@ class TestExcelSql:
 
     def test_sql_with_aggregation(self, excel_tools, basic_xlsx, tmp_path):
         """Run SQL query with aggregation."""
-        with patch("aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR", str(tmp_path)):
+        with patch(
+            "aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR",
+            str(tmp_path),
+        ):
             result = excel_tools["excel_sql"](
                 path="basic.xlsx",
                 workspace_id=TEST_WORKSPACE_ID,
@@ -875,7 +1009,10 @@ class TestExcelSql:
 
     def test_sql_specific_sheet(self, excel_tools, multi_sheet_xlsx, tmp_path):
         """Run SQL query on specific sheet."""
-        with patch("aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR", str(tmp_path)):
+        with patch(
+            "aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR",
+            str(tmp_path),
+        ):
             result = excel_tools["excel_sql"](
                 path="multi_sheet.xlsx",
                 workspace_id=TEST_WORKSPACE_ID,
@@ -891,7 +1028,10 @@ class TestExcelSql:
 
     def test_sql_join_sheets(self, excel_tools, multi_sheet_xlsx, tmp_path):
         """Join data across multiple sheets."""
-        with patch("aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR", str(tmp_path)):
+        with patch(
+            "aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR",
+            str(tmp_path),
+        ):
             result = excel_tools["excel_sql"](
                 path="multi_sheet.xlsx",
                 workspace_id=TEST_WORKSPACE_ID,
@@ -906,7 +1046,10 @@ class TestExcelSql:
 
     def test_sql_empty_query_error(self, excel_tools, basic_xlsx, tmp_path):
         """Return error for empty query."""
-        with patch("aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR", str(tmp_path)):
+        with patch(
+            "aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR",
+            str(tmp_path),
+        ):
             result = excel_tools["excel_sql"](
                 path="basic.xlsx",
                 workspace_id=TEST_WORKSPACE_ID,
@@ -920,7 +1063,10 @@ class TestExcelSql:
 
     def test_sql_non_select_rejected(self, excel_tools, basic_xlsx, tmp_path):
         """Reject non-SELECT queries for security."""
-        with patch("aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR", str(tmp_path)):
+        with patch(
+            "aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR",
+            str(tmp_path),
+        ):
             result = excel_tools["excel_sql"](
                 path="basic.xlsx",
                 workspace_id=TEST_WORKSPACE_ID,
@@ -934,7 +1080,10 @@ class TestExcelSql:
 
     def test_sql_drop_blocked(self, excel_tools, basic_xlsx, tmp_path):
         """Block DROP statements."""
-        with patch("aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR", str(tmp_path)):
+        with patch(
+            "aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR",
+            str(tmp_path),
+        ):
             result = excel_tools["excel_sql"](
                 path="basic.xlsx",
                 workspace_id=TEST_WORKSPACE_ID,
@@ -947,7 +1096,10 @@ class TestExcelSql:
 
     def test_sql_insert_blocked(self, excel_tools, basic_xlsx, tmp_path):
         """Block INSERT statements."""
-        with patch("aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR", str(tmp_path)):
+        with patch(
+            "aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR",
+            str(tmp_path),
+        ):
             result = excel_tools["excel_sql"](
                 path="basic.xlsx",
                 workspace_id=TEST_WORKSPACE_ID,
@@ -960,7 +1112,10 @@ class TestExcelSql:
 
     def test_sql_file_not_found(self, excel_tools, session_dir, tmp_path):
         """Return error when file doesn't exist."""
-        with patch("aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR", str(tmp_path)):
+        with patch(
+            "aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR",
+            str(tmp_path),
+        ):
             result = excel_tools["excel_sql"](
                 path="nonexistent.xlsx",
                 workspace_id=TEST_WORKSPACE_ID,
@@ -978,7 +1133,10 @@ class TestExcelSearch:
 
     def test_search_basic_contains(self, excel_tools, basic_xlsx, tmp_path):
         """Search for text containing a term."""
-        with patch("aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR", str(tmp_path)):
+        with patch(
+            "aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR",
+            str(tmp_path),
+        ):
             result = excel_tools["excel_search"](
                 path="basic.xlsx",
                 workspace_id=TEST_WORKSPACE_ID,
@@ -993,7 +1151,10 @@ class TestExcelSearch:
 
     def test_search_case_insensitive(self, excel_tools, basic_xlsx, tmp_path):
         """Search is case-insensitive by default."""
-        with patch("aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR", str(tmp_path)):
+        with patch(
+            "aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR",
+            str(tmp_path),
+        ):
             result = excel_tools["excel_search"](
                 path="basic.xlsx",
                 workspace_id=TEST_WORKSPACE_ID,
@@ -1008,7 +1169,10 @@ class TestExcelSearch:
 
     def test_search_case_sensitive(self, excel_tools, basic_xlsx, tmp_path):
         """Case-sensitive search."""
-        with patch("aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR", str(tmp_path)):
+        with patch(
+            "aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR",
+            str(tmp_path),
+        ):
             result = excel_tools["excel_search"](
                 path="basic.xlsx",
                 workspace_id=TEST_WORKSPACE_ID,
@@ -1024,7 +1188,10 @@ class TestExcelSearch:
 
     def test_search_exact_match(self, excel_tools, basic_xlsx, tmp_path):
         """Search with exact match."""
-        with patch("aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR", str(tmp_path)):
+        with patch(
+            "aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR",
+            str(tmp_path),
+        ):
             result = excel_tools["excel_search"](
                 path="basic.xlsx",
                 workspace_id=TEST_WORKSPACE_ID,
@@ -1040,7 +1207,10 @@ class TestExcelSearch:
 
     def test_search_starts_with(self, excel_tools, basic_xlsx, tmp_path):
         """Search with starts_with match."""
-        with patch("aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR", str(tmp_path)):
+        with patch(
+            "aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR",
+            str(tmp_path),
+        ):
             result = excel_tools["excel_search"](
                 path="basic.xlsx",
                 workspace_id=TEST_WORKSPACE_ID,
@@ -1056,7 +1226,10 @@ class TestExcelSearch:
 
     def test_search_across_sheets(self, excel_tools, multi_sheet_xlsx, tmp_path):
         """Search across all sheets."""
-        with patch("aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR", str(tmp_path)):
+        with patch(
+            "aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR",
+            str(tmp_path),
+        ):
             result = excel_tools["excel_search"](
                 path="multi_sheet.xlsx",
                 workspace_id=TEST_WORKSPACE_ID,
@@ -1072,7 +1245,10 @@ class TestExcelSearch:
 
     def test_search_specific_sheet(self, excel_tools, multi_sheet_xlsx, tmp_path):
         """Search in specific sheet only."""
-        with patch("aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR", str(tmp_path)):
+        with patch(
+            "aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR",
+            str(tmp_path),
+        ):
             result = excel_tools["excel_search"](
                 path="multi_sheet.xlsx",
                 workspace_id=TEST_WORKSPACE_ID,
@@ -1088,7 +1264,10 @@ class TestExcelSearch:
 
     def test_search_skips_header_row(self, excel_tools, basic_xlsx, tmp_path):
         """Search should not match column header names."""
-        with patch("aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR", str(tmp_path)):
+        with patch(
+            "aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR",
+            str(tmp_path),
+        ):
             result = excel_tools["excel_search"](
                 path="basic.xlsx",
                 workspace_id=TEST_WORKSPACE_ID,
@@ -1103,7 +1282,10 @@ class TestExcelSearch:
 
     def test_search_no_matches(self, excel_tools, basic_xlsx, tmp_path):
         """Search returns empty when no matches."""
-        with patch("aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR", str(tmp_path)):
+        with patch(
+            "aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR",
+            str(tmp_path),
+        ):
             result = excel_tools["excel_search"](
                 path="basic.xlsx",
                 workspace_id=TEST_WORKSPACE_ID,
@@ -1118,7 +1300,10 @@ class TestExcelSearch:
 
     def test_search_empty_term_error(self, excel_tools, basic_xlsx, tmp_path):
         """Return error for empty search term."""
-        with patch("aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR", str(tmp_path)):
+        with patch(
+            "aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR",
+            str(tmp_path),
+        ):
             result = excel_tools["excel_search"](
                 path="basic.xlsx",
                 workspace_id=TEST_WORKSPACE_ID,
@@ -1132,7 +1317,10 @@ class TestExcelSearch:
 
     def test_search_invalid_match_type(self, excel_tools, basic_xlsx, tmp_path):
         """Return error for invalid match_type."""
-        with patch("aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR", str(tmp_path)):
+        with patch(
+            "aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR",
+            str(tmp_path),
+        ):
             result = excel_tools["excel_search"](
                 path="basic.xlsx",
                 workspace_id=TEST_WORKSPACE_ID,
@@ -1147,7 +1335,10 @@ class TestExcelSearch:
 
     def test_search_file_not_found(self, excel_tools, session_dir, tmp_path):
         """Return error when file doesn't exist."""
-        with patch("aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR", str(tmp_path)):
+        with patch(
+            "aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR",
+            str(tmp_path),
+        ):
             result = excel_tools["excel_search"](
                 path="nonexistent.xlsx",
                 workspace_id=TEST_WORKSPACE_ID,

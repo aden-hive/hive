@@ -159,17 +159,23 @@ class TestPathTraversalProtection:
     def test_blocks_web_shell_creation(self, storage):
         """Block attempts to create web shells."""
         with pytest.raises(ValueError):
-            storage._add_to_index("by_goal", "../../var/www/html/shell", "malicious_code")
+            storage._add_to_index(
+                "by_goal", "../../var/www/html/shell", "malicious_code"
+            )
 
     def test_blocks_cron_injection(self, storage):
         """Block attempts to create cron jobs."""
         with pytest.raises(ValueError):
-            storage._add_to_index("by_node", "../../../etc/cron.d/backdoor", "reverse_shell")
+            storage._add_to_index(
+                "by_node", "../../../etc/cron.d/backdoor", "reverse_shell"
+            )
 
     def test_blocks_sudoers_modification(self, storage):
         """Block attempts to modify sudoers file."""
         with pytest.raises(ValueError):
-            storage._add_to_index("by_status", "../../../../etc/sudoers", "ALL=(ALL) NOPASSWD:ALL")
+            storage._add_to_index(
+                "by_status", "../../../../etc/sudoers", "ALL=(ALL) NOPASSWD:ALL"
+            )
 
 
 class TestPathTraversalWithActualFiles:
@@ -184,7 +190,7 @@ class TestPathTraversalWithActualFiles:
 
             # Create a secret file outside storage
             secret_file = tmpdir_path / "secret.txt"
-            secret_file.write_text("SENSITIVE_DATA")
+            secret_file.write_text("SENSITIVE_DATA", encoding="utf-8")
 
             storage = FileStorage(storage_dir)
 
@@ -193,7 +199,7 @@ class TestPathTraversalWithActualFiles:
                 storage.get_runs_by_goal("../secret")
 
             # Verify the secret file was not accessed (still contains original data)
-            assert secret_file.read_text() == "SENSITIVE_DATA"
+            assert secret_file.read_text(encoding="utf-8") == "SENSITIVE_DATA"
 
     def test_cannot_write_outside_storage(self):
         """Verify that we can't write files outside storage directory."""
