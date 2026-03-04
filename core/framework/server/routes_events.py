@@ -38,6 +38,7 @@ DEFAULT_EVENT_TYPES = [
     EventType.WORKER_LOADED,
     EventType.CREDENTIALS_REQUIRED,
     EventType.SUBAGENT_REPORT,
+    EventType.QUEEN_MODE_CHANGED,
 ]
 
 # Keepalive interval in seconds
@@ -91,6 +92,7 @@ async def handle_events(request: web.Request) -> web.StreamResponse:
         "node_loop_started",
         "credentials_required",
         "worker_loaded",
+        "queen_mode_changed",
     }
 
     client_disconnected = asyncio.Event()
