@@ -3,7 +3,7 @@ import re
 
 from mcp.server.fastmcp import FastMCP
 
-from ..hashline import compute_line_hash
+from aden_tools.hashline import compute_line_hash
 from ..security import WORKSPACES_DIR, get_secure_path
 
 

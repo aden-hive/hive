@@ -1,121 +1,21 @@
 import contextlib
 import json
 import os
-import re
 import tempfile
 
 from mcp.server.fastmcp import FastMCP
 
-from ..hashline import format_hashlines, parse_anchor, validate_anchor
+from aden_tools.hashline import (
+    format_hashlines,
+    maybe_strip,
+    parse_anchor,
+    strip_boundary_echo,
+    strip_content_prefixes,
+    strip_insert_echo,
+    validate_anchor,
+)
+
 from ..security import get_secure_path
-
-_HASHLINE_PREFIX_RE = re.compile(r"^\d+:[0-9a-f]{4}\|")
-
-
-def _strip_content_prefixes(lines: list[str]) -> list[str]:
-    """Strip hashline prefixes from content lines when all have them.
-
-    LLMs frequently copy hashline-formatted text (e.g. '5:a3b1|content') into
-    their content fields. Only strips when 2+ non-empty lines all match the
-    exact hashline prefix pattern (N:hhhh|). Single-line content is left alone
-    to avoid false positives on literal text that happens to match the pattern.
-    """
-    if not lines:
-        return lines
-    non_empty = [ln for ln in lines if ln]
-    if len(non_empty) < 2:
-        return lines
-    prefix_count = sum(1 for ln in non_empty if _HASHLINE_PREFIX_RE.match(ln))
-    if prefix_count < len(non_empty):
-        return lines
-    return [_HASHLINE_PREFIX_RE.sub("", ln) for ln in lines]
-
-
-def _whitespace_equal(a: str, b: str) -> bool:
-    """Compare strings ignoring spaces and tabs."""
-    return a.replace(" ", "").replace("\t", "") == b.replace(" ", "").replace("\t", "")
-
-
-def _strip_insert_echo(
-    anchor_line: str, new_lines: list[str], *, position: str = "first"
-) -> list[str]:
-    """Strip echoed anchor line from insert content.
-
-    If the model echoes the anchor line in inserted content, remove it to
-    avoid duplication. Only applies when content has 2+ lines and both the
-    anchor and checked content line are non-blank.
-
-    position="first" (insert_after): check first line, strip from front.
-    position="last" (insert_before): check last line, strip from end.
-    """
-    if len(new_lines) <= 1:
-        return new_lines
-    if position == "last":
-        if not anchor_line.strip() or not new_lines[-1].strip():
-            return new_lines
-        if _whitespace_equal(new_lines[-1], anchor_line):
-            return new_lines[:-1]
-    else:
-        if not anchor_line.strip() or not new_lines[0].strip():
-            return new_lines
-        if _whitespace_equal(new_lines[0], anchor_line):
-            return new_lines[1:]
-    return new_lines
-
-
-def _strip_boundary_echo(
-    file_lines: list[str], start_1idx: int, end_1idx: int, new_lines: list[str]
-) -> list[str]:
-    """Strip echoed boundary context from replace_lines content.
-
-    If the model includes the line before AND after the replaced range as part
-    of the replacement content, strip those echoed boundary lines. Both
-    boundaries must echo simultaneously before either is stripped (a single
-    boundary match is too likely to be a coincidence with real content).
-    Only applies when the replacement has more lines than the range being
-    replaced, and both the boundary line and content line are non-blank.
-    """
-    range_count = end_1idx - start_1idx + 1
-    if len(new_lines) <= 1 or len(new_lines) <= range_count:
-        return new_lines
-
-    # Check if leading boundary echoes
-    before_idx = start_1idx - 2  # 0-indexed line before range
-    leading_echoes = (
-        before_idx >= 0
-        and new_lines[0].strip()
-        and file_lines[before_idx].strip()
-        and _whitespace_equal(new_lines[0], file_lines[before_idx])
-    )
-
-    # Check if trailing boundary echoes
-    after_idx = end_1idx  # 0-indexed line after range
-    trailing_echoes = (
-        after_idx < len(file_lines)
-        and new_lines[-1].strip()
-        and file_lines[after_idx].strip()
-        and _whitespace_equal(new_lines[-1], file_lines[after_idx])
-    )
-
-    # Only strip if BOTH boundaries echo and there is content between them.
-    # len < 3 means no real content between the two boundary lines, so
-    # stripping would produce an empty list (accidental deletion).
-    if not (leading_echoes and trailing_echoes) or len(new_lines) < 3:
-        return new_lines
-
-    return new_lines[1:-1]
-
-
-def _maybe_strip(new_lines, strip_fn, action_name, auto_cleanup, cleanup_actions):
-    """Apply a strip function if auto_cleanup is enabled, tracking actions."""
-    if not auto_cleanup:
-        return new_lines
-    cleaned = strip_fn(new_lines)
-    if cleaned != new_lines:
-        if action_name not in cleanup_actions:
-            cleanup_actions.append(action_name)
-        return cleaned
-    return new_lines
 
 
 def register_tools(mcp: FastMCP) -> None:
@@ -234,9 +134,9 @@ def register_tools(mcp: FastMCP) -> None:
                     idx = line_num - 1
                     new_content = op["content"]
                     new_lines = [new_content] if new_content else []
-                    new_lines = _maybe_strip(
+                    new_lines = maybe_strip(
                         new_lines,
-                        _strip_content_prefixes,
+                        strip_content_prefixes,
                         "prefix_strip",
                         auto_cleanup,
                         cleanup_actions,
@@ -269,16 +169,16 @@ def register_tools(mcp: FastMCP) -> None:
                         return {"error": f"Edit #{i + 1} (replace_lines): content must be a string"}
                     new_content = op["content"]
                     new_lines = new_content.splitlines() if new_content else []
-                    new_lines = _maybe_strip(
+                    new_lines = maybe_strip(
                         new_lines,
-                        _strip_content_prefixes,
+                        strip_content_prefixes,
                         "prefix_strip",
                         auto_cleanup,
                         cleanup_actions,
                     )
-                    new_lines = _maybe_strip(
+                    new_lines = maybe_strip(
                         new_lines,
-                        lambda nl, s=start_num, e=end_num: _strip_boundary_echo(lines, s, e, nl),
+                        lambda nl, s=start_num, e=end_num: strip_boundary_echo(lines, s, e, nl),
                         "boundary_echo_strip",
                         auto_cleanup,
                         cleanup_actions,
@@ -298,16 +198,16 @@ def register_tools(mcp: FastMCP) -> None:
                     if not new_content:
                         return {"error": f"Edit #{i + 1} (insert_after): content is empty"}
                     new_lines = new_content.splitlines()
-                    new_lines = _maybe_strip(
+                    new_lines = maybe_strip(
                         new_lines,
-                        _strip_content_prefixes,
+                        strip_content_prefixes,
                         "prefix_strip",
                         auto_cleanup,
                         cleanup_actions,
                     )
-                    new_lines = _maybe_strip(
+                    new_lines = maybe_strip(
                         new_lines,
-                        lambda nl, _idx=idx: _strip_insert_echo(lines[_idx], nl),
+                        lambda nl, _idx=idx: strip_insert_echo(lines[_idx], nl),
                         "insert_echo_strip",
                         auto_cleanup,
                         cleanup_actions,
@@ -327,16 +227,16 @@ def register_tools(mcp: FastMCP) -> None:
                     if not new_content:
                         return {"error": f"Edit #{i + 1} (insert_before): content is empty"}
                     new_lines = new_content.splitlines()
-                    new_lines = _maybe_strip(
+                    new_lines = maybe_strip(
                         new_lines,
-                        _strip_content_prefixes,
+                        strip_content_prefixes,
                         "prefix_strip",
                         auto_cleanup,
                         cleanup_actions,
                     )
-                    new_lines = _maybe_strip(
+                    new_lines = maybe_strip(
                         new_lines,
-                        lambda nl, _idx=idx: _strip_insert_echo(lines[_idx], nl, position="last"),
+                        lambda nl, _idx=idx: strip_insert_echo(lines[_idx], nl, position="last"),
                         "insert_echo_strip",
                         auto_cleanup,
                         cleanup_actions,
@@ -372,9 +272,9 @@ def register_tools(mcp: FastMCP) -> None:
                     if not new_content:
                         return {"error": f"Edit #{i + 1} (append): content must not be empty"}
                     new_lines = new_content.splitlines()
-                    new_lines = _maybe_strip(
+                    new_lines = maybe_strip(
                         new_lines,
-                        _strip_content_prefixes,
+                        strip_content_prefixes,
                         "prefix_strip",
                         auto_cleanup,
                         cleanup_actions,
@@ -386,10 +286,6 @@ def register_tools(mcp: FastMCP) -> None:
                     return {"error": f"Edit #{i + 1}: unknown op '{unknown}'"}
 
         # 4. Check for overlapping splice ranges
-        # Each splice is (start_0idx, end_0idx, new_lines, op_index).
-        # Pure insertions have start > end (e.g. insert_after line 2 = (3, 2, ...)).
-        # Two insertions at the same point are allowed.
-        # An insertion inside a replace range is NOT allowed.
         for j in range(len(splices)):
             for k in range(j + 1, len(splices)):
                 s_a, e_a, _, idx_a = splices[j]
@@ -397,13 +293,10 @@ def register_tools(mcp: FastMCP) -> None:
                 is_insert_a = s_a > e_a
                 is_insert_b = s_b > e_b
 
-                # Two insertions at the same point: allowed
                 if is_insert_a and is_insert_b:
                     continue
 
-                # Insertion vs replace range: check if insertion point is inside range
                 if is_insert_a and not is_insert_b:
-                    # insert point is s_a; replace covers [s_b, e_b]
                     if s_b <= s_a <= e_b + 1:
                         return {
                             "error": (
@@ -414,7 +307,6 @@ def register_tools(mcp: FastMCP) -> None:
                     continue
 
                 if is_insert_b and not is_insert_a:
-                    # insert point is s_b; replace covers [s_a, e_a]
                     if s_a <= s_b <= e_a + 1:
                         return {
                             "error": (
@@ -424,7 +316,6 @@ def register_tools(mcp: FastMCP) -> None:
                         }
                     continue
 
-                # Two replace ranges: check for intersection
                 if not (e_a < s_b or e_b < s_a):
                     return {
                         "error": (
@@ -438,7 +329,6 @@ def register_tools(mcp: FastMCP) -> None:
         working = list(lines)
         for start, end, new_lines, _ in sorted(splices, key=lambda s: (s[0], s[3]), reverse=True):
             if start > end:
-                # Pure insertion always counts as a change
                 changes_made += 1
                 for k, nl in enumerate(new_lines):
                     working.insert(start + k, nl)

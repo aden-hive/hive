@@ -2,7 +2,7 @@
 
 import pytest
 
-from aden_tools.tools.file_system_toolkits.hashline import (
+from aden_tools.hashline import (
     compute_line_hash,
     format_hashlines,
     parse_anchor,
