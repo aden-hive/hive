@@ -1,0 +1,117 @@
+{
+  "agent": {
+    "id": "oss_contributor_accelerator",
+    "name": "OSS Contributor Accelerator",
+    "version": "1.0.0",
+    "description": "Rank high-leverage OSS issues and generate execution-ready contribution briefs with PR drafts."
+  },
+  "graph": {
+    "id": "oss-contributor-accelerator-graph",
+    "goal_id": "oss-contributor-accelerator",
+    "version": "1.0.0",
+    "entry_node": "intake",
+    "entry_points": {
+      "start": "intake"
+    },
+    "pause_nodes": [],
+    "terminal_nodes": [
+      "contribution-pack"
+    ],
+    "nodes": [
+      {
+        "id": "intake",
+        "name": "Intake",
+        "node_type": "event_loop",
+        "client_facing": true,
+        "input_keys": [],
+        "output_keys": [
+          "repo_context"
+        ]
+      },
+      {
+        "id": "issue-scout",
+        "name": "Issue Scout",
+        "node_type": "event_loop",
+        "client_facing": false,
+        "input_keys": [
+          "repo_context"
+        ],
+        "output_keys": [
+          "shortlisted_issues"
+        ],
+        "tools": [
+          "github_get_repo",
+          "github_list_issues",
+          "github_get_issue"
+        ]
+      },
+      {
+        "id": "selection",
+        "name": "Selection",
+        "node_type": "event_loop",
+        "client_facing": true,
+        "input_keys": [
+          "shortlisted_issues",
+          "repo_context"
+        ],
+        "output_keys": [
+          "selected_issues"
+        ]
+      },
+      {
+        "id": "contribution-pack",
+        "name": "Contribution Pack",
+        "node_type": "event_loop",
+        "client_facing": true,
+        "input_keys": [
+          "selected_issues",
+          "repo_context"
+        ],
+        "output_keys": [
+          "contribution_brief"
+        ],
+        "tools": [
+          "save_data",
+          "append_data",
+          "serve_file_to_user"
+        ]
+      }
+    ],
+    "edges": [
+      {
+        "id": "intake-to-issue-scout",
+        "source": "intake",
+        "target": "issue-scout",
+        "condition": "on_success",
+        "priority": 1
+      },
+      {
+        "id": "issue-scout-to-selection",
+        "source": "issue-scout",
+        "target": "selection",
+        "condition": "on_success",
+        "priority": 1
+      },
+      {
+        "id": "selection-to-contribution-pack",
+        "source": "selection",
+        "target": "contribution-pack",
+        "condition": "on_success",
+        "priority": 1
+      }
+    ]
+  },
+  "required_tools": [
+    "github_get_repo",
+    "github_list_issues",
+    "github_get_issue",
+    "save_data",
+    "append_data",
+    "serve_file_to_user"
+  ],
+  "metadata": {
+    "created_by": "template",
+    "node_count": 4,
+    "edge_count": 3
+  }
+}
