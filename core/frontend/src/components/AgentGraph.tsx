@@ -31,6 +31,7 @@ interface AgentGraphProps {
   version?: string;
   runState?: RunState;
   building?: boolean;
+  queenMode?: "building" | "staging" | "running";
 }
 
 // --- Extracted RunButton so hover state survives parent re-renders ---
@@ -145,7 +146,7 @@ function truncateLabel(label: string, availablePx: number, fontSize: number): st
   return label.slice(0, Math.max(maxChars - 1, 1)) + "\u2026";
 }
 
-export default function AgentGraph({ nodes, title: _title, onNodeClick, onRun, onPause, version, runState: externalRunState, building }: AgentGraphProps) {
+export default function AgentGraph({ nodes, title: _title, onNodeClick, onRun, onPause, version, runState: externalRunState, building, queenMode }: AgentGraphProps) {
   const [localRunState, setLocalRunState] = useState<RunState>("idle");
   const runState = externalRunState ?? localRunState;
   const runBtnRef = useRef<HTMLButtonElement>(null);

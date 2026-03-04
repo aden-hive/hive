@@ -101,39 +101,78 @@ class QueenModeState:
                 )
             )
 
-    async def switch_to_running(self) -> None:
-        """Switch to running mode and notify the queen."""
+    async def switch_to_running(self, source: str = "tool") -> None:
+        """Switch to running mode and notify the queen.
+
+        Args:
+            source: Who triggered the switch — "tool" (queen LLM),
+                "frontend" (user clicked Run), or "auto" (system).
+        """
+        if self.mode == "running":
+            return
         self.mode = "running"
         tool_names = [t.name for t in self.running_tools]
-        logger.info("Queen mode → running (tools: %s)", tool_names)
+        logger.info("Queen mode → running (source=%s, tools: %s)", source, tool_names)
         await self._emit_mode_event()
         if self.inject_notification:
-            await self.inject_notification(
-                "[MODE CHANGE] Switched to RUNNING mode. "
-                "Worker is executing. You now have monitoring/lifecycle tools: "
-                + ", ".join(tool_names)
-                + "."
-            )
+            if source == "frontend":
+                msg = (
+                    "[MODE CHANGE] The user clicked Run in the UI. Switched to RUNNING mode. "
+                    "Worker is now executing. You have monitoring/lifecycle tools: "
+                    + ", ".join(tool_names) + "."
+                )
+            else:
+                msg = (
+                    "[MODE CHANGE] Switched to RUNNING mode. "
+                    "Worker is executing. You now have monitoring/lifecycle tools: "
+                    + ", ".join(tool_names) + "."
+                )
+            await self.inject_notification(msg)
 
-    async def switch_to_staging(self) -> None:
-        """Switch to staging mode and notify the queen."""
+    async def switch_to_staging(self, source: str = "tool") -> None:
+        """Switch to staging mode and notify the queen.
+
+        Args:
+            source: Who triggered the switch — "tool", "frontend", or "auto".
+        """
+        if self.mode == "staging":
+            return
         self.mode = "staging"
         tool_names = [t.name for t in self.staging_tools]
-        logger.info("Queen mode → staging (tools: %s)", tool_names)
+        logger.info("Queen mode → staging (source=%s, tools: %s)", source, tool_names)
         await self._emit_mode_event()
         if self.inject_notification:
-            await self.inject_notification(
-                "[MODE CHANGE] Switched to STAGING mode. "
-                "Agent loaded and ready. Call run_agent_with_input(task) to start, "
-                "or stop_worker_and_edit() to go back to building. "
-                "Available tools: " + ", ".join(tool_names) + "."
-            )
+            if source == "frontend":
+                msg = (
+                    "[MODE CHANGE] The user stopped the worker from the UI. Switched to STAGING mode. "
+                    "Agent is still loaded. Available tools: " + ", ".join(tool_names) + "."
+                )
+            elif source == "auto":
+                msg = (
+                    "[MODE CHANGE] Worker execution completed. Switched to STAGING mode. "
+                    "Agent is still loaded. Call run_agent_with_input(task) to run again. "
+                    "Available tools: " + ", ".join(tool_names) + "."
+                )
+            else:
+                msg = (
+                    "[MODE CHANGE] Switched to STAGING mode. "
+                    "Agent loaded and ready. Call run_agent_with_input(task) to start, "
+                    "or stop_worker_and_edit() to go back to building. "
+                    "Available tools: " + ", ".join(tool_names) + "."
+                )
+            await self.inject_notification(msg)
 
-    async def switch_to_building(self) -> None:
-        """Switch to building mode and notify the queen."""
+    async def switch_to_building(self, source: str = "tool") -> None:
+        """Switch to building mode and notify the queen.
+
+        Args:
+            source: Who triggered the switch — "tool", "frontend", or "auto".
+        """
+        if self.mode == "building":
+            return
         self.mode = "building"
         tool_names = [t.name for t in self.building_tools]
-        logger.info("Queen mode → building (tools: %s)", tool_names)
+        logger.info("Queen mode → building (source=%s, tools: %s)", source, tool_names)
         await self._emit_mode_event()
         if self.inject_notification:
             await self.inject_notification(
@@ -456,6 +495,42 @@ def register_queen_lifecycle_tools(
     registry.register(
         "stop_worker_and_edit", _stop_edit_tool, lambda inputs: stop_worker_and_edit()
     )
+    tools_registered += 1
+
+    # --- reload_agent ---------------------------------------------------------
+
+    async def reload_agent() -> str:
+        """Stop the worker and return to staging mode for a fresh run.
+
+        Use this when the worker has finished (or you want to restart it)
+        with new input.  Unlike stop_worker_and_edit, this keeps the agent
+        loaded and stays in staging — no code-editing tools are restored.
+        """
+        stop_result = await stop_worker()
+
+        # Switch to staging mode
+        if mode_state is not None:
+            await mode_state.switch_to_staging()
+
+        result = json.loads(stop_result)
+        result["mode"] = "staging"
+        result["message"] = (
+            "Worker stopped. You are now in staging mode. "
+            "Call run_agent_with_input(task) to run again with new input, "
+            "or stop_worker_and_edit() if code changes are needed."
+        )
+        return json.dumps(result)
+
+    _reload_tool = Tool(
+        name="reload_agent",
+        description=(
+            "Stop the running worker and return to staging mode. "
+            "Use this when the user wants to re-run the agent with different input "
+            "without making code changes. The agent stays loaded and ready."
+        ),
+        parameters={"type": "object", "properties": {}},
+    )
+    registry.register("reload_agent", _reload_tool, lambda inputs: reload_agent())
     tools_registered += 1
 
     # --- get_worker_status ----------------------------------------------------

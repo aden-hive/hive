@@ -40,6 +40,8 @@ class Session:
     runner: Any | None = None  # AgentRunner
     worker_runtime: Any | None = None  # AgentRuntime
     worker_info: Any | None = None  # AgentInfo
+    # Queen mode state (building/staging/running)
+    mode_state: Any = None  # QueenModeState
     # Judge (active when worker is loaded)
     judge_task: asyncio.Task | None = None
     escalation_sub: str | None = None
@@ -429,6 +431,7 @@ class SessionManager:
         # Start in staging when the caller provided an agent, building otherwise.
         initial_mode = "staging" if worker_identity else "building"
         mode_state = QueenModeState(mode=initial_mode, event_bus=session.event_bus)
+        session.mode_state = mode_state
 
         # Always register lifecycle tools — they check session.worker_runtime
         # at call time, so they work even if no worker is loaded yet.
@@ -466,6 +469,18 @@ class SessionManager:
         building_names = set(_QUEEN_BUILDING_TOOLS)
         staging_names = set(_QUEEN_STAGING_TOOLS)
         running_names = set(_QUEEN_RUNNING_TOOLS)
+
+        registered_names = {t.name for t in queen_tools}
+        missing_building = building_names - registered_names
+        if missing_building:
+            logger.warning(
+                "Queen: %d/%d building tools NOT registered: %s",
+                len(missing_building),
+                len(building_names),
+                sorted(missing_building),
+            )
+        logger.info("Queen: registered tools: %s", sorted(registered_names))
+
         mode_state.building_tools = [t for t in queen_tools if t.name in building_names]
         mode_state.staging_tools = [t for t in queen_tools if t.name in staging_names]
         mode_state.running_tools = [t for t in queen_tools if t.name in running_names]
@@ -522,6 +537,20 @@ class SessionManager:
                         await node.inject_event(content)
 
                 mode_state.inject_notification = _inject_mode_notification
+
+                # Auto-switch to staging when worker execution finishes naturally
+                from framework.runtime.event_bus import EventType as _ET
+
+                async def _on_worker_done(event):
+                    if event.stream_id == "queen":
+                        return
+                    if mode_state.mode == "running":
+                        await mode_state.switch_to_staging(source="auto")
+
+                session.event_bus.subscribe(
+                    event_types=[_ET.EXECUTION_COMPLETED, _ET.EXECUTION_FAILED],
+                    handler=_on_worker_done,
+                )
 
                 logger.info(
                     "Queen starting in %s mode with %d tools: %s",
