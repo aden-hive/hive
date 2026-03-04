@@ -8,6 +8,7 @@ import TopBar from "@/components/TopBar";
 import { TAB_STORAGE_KEY, loadPersistedTabs, savePersistedTabs, type PersistedTabState } from "@/lib/tab-persistence";
 import NodeDetailPanel from "@/components/NodeDetailPanel";
 import CredentialsModal, { type Credential, createFreshCredentials, cloneCredentials, allRequiredCredentialsMet, clearCredentialCache } from "@/components/CredentialsModal";
+import HistorySidebar from "@/components/HistorySidebar";
 import { agentsApi } from "@/api/agents";
 import { executionApi } from "@/api/execution";
 import { graphsApi } from "@/api/graphs";
@@ -71,6 +72,10 @@ interface Session {
   graphNodes: GraphNode[];
   credentials: Credential[];
   backendSessionId?: string;
+  /** The cold history session ID this tab was originally opened from (if any).
+   * Used to detect "already open" even after backendSessionId is updated to a
+   * new live session ID when the cold session is revived. */
+  historySourceId?: string;
 }
 
 function createSession(agentType: string, label: string, existingCredentials?: Credential[]): Session {
@@ -294,6 +299,9 @@ export default function Workspace() {
   const initialAgent = rawAgent;
   const hasExplicitAgent = searchParams.has("agent");
   const initialPrompt = searchParams.get("prompt") || "";
+  // ?session= param: when navigating from the home history sidebar, this
+  // carries the backendSessionId to open as a tab on mount.
+  const initialSessionId = searchParams.get("session") || "";
 
   // Sessions grouped by agent type — restore from localStorage if available
   const [sessionsByAgent, setSessionsByAgent] = useState<Record<string, Session[]>>(() => {
@@ -310,6 +318,7 @@ export default function Workspace() {
         session.id = tab.id;
         session.backendSessionId = tab.backendSessionId;
         session.tabKey = tab.tabKey; // restore so future persistence uses correct key
+        session.historySourceId = tab.historySourceId;
         // Restore messages and graph from localStorage (up to 50 messages).
         // If the backend session is still alive, loadAgentForType may
         // append additional messages fetched from the server.
@@ -328,15 +337,23 @@ export default function Workspace() {
       return initial;
     }
 
+    // If there are already persisted tabs for this agent type, don't create
+    // a new one — the post-mount effect will call handleHistoryOpen if needed
+    // (for ?session= params coming from the home page sidebar).
     if (initial[initialAgent]?.length) {
       return initial;
     }
 
+    // Only create a fresh default tab when there are no persisted tabs at all.
+    // If ?session= was passed we intentionally do NOT create a tab here —
+    // handleHistoryOpen is called post-mount and does proper dedup.
     if (initialAgent === "new-agent") {
-      initial["new-agent"] = [...(initial["new-agent"] || []), createSession("new-agent", "New Agent")];
-    } else {
-      initial[initialAgent] = [...(initial[initialAgent] || []),
-        createSession(initialAgent, formatAgentDisplayName(initialAgent))];
+      const s = createSession("new-agent", "New Agent");
+      initial["new-agent"] = [...(initial["new-agent"] || []), s];
+    } else if (!initialSessionId) {
+      // Only auto-create an agent tab if there's no session to restore
+      const s = createSession(initialAgent, formatAgentDisplayName(initialAgent));
+      initial[initialAgent] = [...(initial[initialAgent] || []), s];
     }
 
     return initial;
@@ -344,6 +361,17 @@ export default function Workspace() {
 
   const [activeSessionByAgent, setActiveSessionByAgent] = useState<Record<string, string>>(() => {
     const persisted = loadPersistedTabs();
+    // If initialSessionId maps to an already-restored tab, activate that tab
+    if (initialSessionId) {
+      for (const [tabKey, sessions] of Object.entries(sessionsByAgent)) {
+        const match = sessions.find(
+          s => s.backendSessionId === initialSessionId || s.historySourceId === initialSessionId,
+        );
+        if (match) {
+          return { ...(persisted?.activeSessionByAgent ?? {}), [tabKey]: match.id };
+        }
+      }
+    }
     if (persisted) {
       const restored = { ...persisted.activeSessionByAgent };
       const urlSessions = sessionsByAgent[initialAgent];
@@ -357,6 +385,14 @@ export default function Workspace() {
   });
 
   const [activeWorker, setActiveWorker] = useState(() => {
+    // If initialSessionId maps to an already-restored tab, activate that key
+    if (initialSessionId) {
+      for (const [tabKey, sessions] of Object.entries(sessionsByAgent)) {
+        if (sessions.some(
+          s => s.backendSessionId === initialSessionId || s.historySourceId === initialSessionId,
+        )) return tabKey;
+      }
+    }
     if (!hasExplicitAgent) {
       const persisted = loadPersistedTabs();
       if (persisted?.activeWorker) return persisted.activeWorker;
@@ -370,6 +406,19 @@ export default function Workspace() {
     navigate("/workspace", { replace: true });
   }, []);
 
+  // --- Sidebar refresh key: increment to force HistorySidebar to re-poll ---
+  const [historySidebarRefreshKey, setHistorySidebarRefreshKey] = useState(0);
+
+  // Post-mount: if the URL carried a ?session= param (from the home page history
+  // sidebar), open it via handleHistoryOpen instead of creating a tab in init state.
+  // This is the single canonical path — it has robust dedup (checks backendSessionId
+  // AND historySourceId across all in-memory tabs) and is safe to call after persisted
+  // state has been hydrated.
+  // We capture initialSessionId and related URL params in stable refs so the effect
+  // only fires once on mount, regardless of re-renders.
+  const initialSessionIdRef = useRef(initialSessionId);
+  const initialAgentRef = useRef(initialAgent);
+  const mountedRef = useRef(false);
   const [credentialsOpen, setCredentialsOpen] = useState(false);
   // Explicit agent path for the credentials modal — set from 424 responses
   // when activeWorker doesn't match the actual agent (e.g. "new-agent" tab).
@@ -394,6 +443,12 @@ export default function Workspace() {
   // Using a ref avoids stale-closure bugs when multiple SSE events
   // arrive in the same React batch.
   const turnCounterRef = useRef<Record<string, number>>({});
+
+  // Synchronous ref to suppress the queen's auto-intro SSE messages
+  // after a cold-restore (where we already restored the conversation from disk).
+  // Using a ref avoids the race condition where sessionId is set in agentState
+  // (opening SSE) before the suppressQueenIntro flag can be committed.
+  const suppressIntroRef = useRef(new Set<string>());
 
   // --- Consolidated per-agent backend state ---
   const [agentStates, setAgentStates] = useState<Record<string, AgentBackendState>>({});
@@ -426,6 +481,7 @@ export default function Workspace() {
           label: s.label,
           // agentStates is keyed by tabKey (unique per tab), not by base agentType
           backendSessionId: s.backendSessionId || agentStates[tKey]?.sessionId || undefined,
+          ...(s.historySourceId ? { historySourceId: s.historySourceId } : {}),
         });
         sessions[s.id] = { messages: s.messages, graphNodes: s.graphNodes };
       }
@@ -485,7 +541,7 @@ export default function Workspace() {
       const { Framework: _fw, ...userFacing } = result;
       const all = Object.values(userFacing).flat();
       setDiscoverAgents(all);
-    }).catch(() => {});
+    }).catch(() => { });
   }, []);
 
   // --- Agent loading: loadAgentForType ---
@@ -522,48 +578,55 @@ export default function Workspace() {
           }
         }
 
-        if (!liveSession) {
-          liveSession = await sessionsApi.create(undefined, undefined, undefined, prompt);
+        let restoredMessageCount = 0;
 
-          // Restore previous conversation from disk when the server restarted
-          // (coldRestoreId) or the session ID was stored but is gone (storedId).
+        if (!liveSession) {
+          // Fetch conversation history from disk BEFORE creating the new session.
+          // SKIP if messages were already pre-populated by handleHistoryOpen.
           const restoreFrom = coldRestoreId ?? storedId;
-          let restoredMessageCount = 0;
-          if (restoreFrom) {
+          const preRestoredMsgs: ChatMessage[] = [];
+          const alreadyHasMessages = (sessionsRef.current[agentType] || [])[0]?.messages?.length > 0;
+          if (restoreFrom && !alreadyHasMessages) {
             try {
               const { messages: queenMsgs } = await sessionsApi.queenMessages(restoreFrom);
-              if (queenMsgs.length > 0) {
-                const restoredMsgs = (queenMsgs as Message[]).map(m => {
-                  const msg = backendMessageToChatMessage(m, agentType, "Queen Bee");
-                  msg.role = "queen";
-                  return msg;
-                });
-                restoredMsgs.sort((a, b) => (a.createdAt ?? 0) - (b.createdAt ?? 0));
-                setSessionsByAgent(prev => ({
-                  ...prev,
-                  [agentType]: (prev[agentType] || []).map((s, i) =>
-                    i === 0 ? { ...s, messages: restoredMsgs, graphNodes: [] } : s,
-                  ),
-                }));
-                restoredMessageCount = restoredMsgs.length;
-              } else {
-                // No messages on disk — wipe stale localStorage cache
-                setSessionsByAgent(prev => ({
-                  ...prev,
-                  [agentType]: (prev[agentType] || []).map((s, i) =>
-                    i === 0 ? { ...s, messages: [], graphNodes: [] } : s,
-                  ),
-                }));
+              for (const m of queenMsgs as Message[]) {
+                const msg = backendMessageToChatMessage(m, agentType, "Queen Bee");
+                msg.role = "queen";
+                preRestoredMsgs.push(msg);
               }
             } catch {
-              // Queen messages unavailable — wipe stale cache
-              setSessionsByAgent(prev => ({
-                ...prev,
-                [agentType]: (prev[agentType] || []).map((s, i) =>
-                  i === 0 ? { ...s, messages: [], graphNodes: [] } : s,
-                ),
-              }));
+              // Not available — will start fresh
             }
+          }
+
+          // Suppress the queen's intro cycle whenever we are about to restore a
+          // previous conversation, or whenever we have a stored session ID (even if
+          // its files are gone) — the user never expects a greeting on reopen.
+          const willRestore = !!(restoreFrom);
+          if (willRestore || preRestoredMsgs.length > 0) suppressIntroRef.current.add(agentType);
+
+          // Pass coldRestoreId as queenResumeFrom so the backend writes queen
+          // messages into the ORIGINAL session's directory — all conversation
+          // history accumulates in one place across server restarts.
+          liveSession = await sessionsApi.create(undefined, undefined, undefined, prompt, coldRestoreId ?? undefined);
+
+          if (preRestoredMsgs.length > 0) {
+            preRestoredMsgs.sort((a, b) => (a.createdAt ?? 0) - (b.createdAt ?? 0));
+            setSessionsByAgent(prev => ({
+              ...prev,
+              [agentType]: (prev[agentType] || []).map((s, i) =>
+                i === 0 ? { ...s, messages: preRestoredMsgs, graphNodes: [] } : s,
+              ),
+            }));
+            restoredMessageCount = preRestoredMsgs.length;
+          } else if (restoreFrom) {
+            // We had a stored session but no messages on disk — wipe stale localStorage cache
+            setSessionsByAgent(prev => ({
+              ...prev,
+              [agentType]: (prev[agentType] || []).map((s, i) =>
+                i === 0 ? { ...s, messages: [], graphNodes: [] } : s,
+              ),
+            }));
           }
 
           // Show the initial prompt as a user message only on a truly fresh session
@@ -581,13 +644,22 @@ export default function Workspace() {
           }
         }
 
-        // Store backendSessionId on the Session object for persistence
+        // Store backendSessionId on the Session object for persistence.
+        // Also set historySourceId so the sidebar \"already-open\" check works
+        // even after cold-revive changes backendSessionId to a new live session ID.
         setSessionsByAgent(prev => ({
           ...prev,
           [agentType]: (prev[agentType] || []).map((s, i) =>
-            i === 0 ? { ...s, backendSessionId: liveSession!.session_id } : s,
+            i === 0 ? {
+              ...s,
+              backendSessionId: liveSession!.session_id,
+              historySourceId: s.historySourceId || coldRestoreId || undefined,
+            } : s,
           ),
         }));
+
+        // If no messages were actually restored, lift the intro suppression
+        if (restoredMessageCount === 0) suppressIntroRef.current.delete(agentType);
 
         updateAgentState(agentType, {
           sessionId: liveSession.session_id,
@@ -612,22 +684,42 @@ export default function Workspace() {
     try {
       let liveSession: LiveSession | undefined;
       let isResumedSession = false;
+      // Set when the stored session is cold (server restarted) so we can restore
+      // messages from the old session files after creating a new live session.
+      let coldRestoreId: string | undefined;
 
       // Try to reconnect to an existing backend session (e.g., after browser refresh).
       // The backendSessionId is persisted in localStorage per tab.
-      const storedSessionId = sessionsRef.current[agentType]?.[0]?.backendSessionId;
+      // Also check historySourceId — handleHistoryOpen populates this with the
+      // original session ID from the sidebar. Use it as a fallback for stored ID.
+      const historySourceId = sessionsRef.current[agentType]?.[0]?.historySourceId;
+      const storedSessionId = sessionsRef.current[agentType]?.[0]?.backendSessionId
+        || historySourceId;
       if (storedSessionId) {
         try {
-          liveSession = await sessionsApi.get(storedSessionId);
-          isResumedSession = true;
+          const sessionData = await sessionsApi.get(storedSessionId);
+          if (sessionData.cold) {
+            // Server restarted — conversation files survive on disk, no live runtime.
+            coldRestoreId = storedSessionId;
+          } else {
+            liveSession = sessionData;
+            isResumedSession = true;
+          }
         } catch {
-          // Session gone (server restarted, etc.) — fall through to create new
+          // 404: session was explicitly stopped (via closeAgentTab) but conversation
+          // files likely still exist on disk. Treat it as cold so we can restore.
+          // Verify files exist before assuming cold — if queenMessages succeeds with
+          // content, files are there.
+          coldRestoreId = historySourceId || storedSessionId;
         }
       }
 
       if (!liveSession) {
-        // Reconnect failed — clear stale cached messages from localStorage restore
-        if (storedSessionId) {
+        // Reconnect failed — clear stale cached messages from localStorage restore.
+        // NEVER wipe when: (a) doing a cold restore (we'll restore from disk) or
+        // (b) handleHistoryOpen already pre-populated messages (alreadyHasMessages).
+        const alreadyHasMessages = (sessionsRef.current[agentType] || [])[0]?.messages?.length > 0;
+        if (storedSessionId && !coldRestoreId && !alreadyHasMessages) {
           setSessionsByAgent(prev => ({
             ...prev,
             [agentType]: (prev[agentType] || []).map((s, i) =>
@@ -636,8 +728,48 @@ export default function Workspace() {
           }));
         }
 
+        // CRITICAL: Pre-fetch queen messages from the old session directory BEFORE
+        // creating the new session. When queen_resume_from is set the new session writes
+        // to the SAME directory, so if we fetch after creation we risk capturing the
+        // new queen's greeting in the restored history.
+        // SKIP if messages were already pre-populated by handleHistoryOpen (avoids
+        // double-fetch and greeting leakage).
+        let preQueenMsgs: ChatMessage[] = [];
+        if (coldRestoreId && !alreadyHasMessages) {
+          try {
+            const { messages: queenMsgs } = await sessionsApi.queenMessages(coldRestoreId);
+            // Also pre-fetch worker messages from the old session if a resumable worker exists
+            const displayNameTemp = formatAgentDisplayName(agentPath);
+            for (const m of queenMsgs as Message[]) {
+              const msg = backendMessageToChatMessage(m, agentType, "Queen Bee");
+              msg.role = "queen";
+              preQueenMsgs.push(msg);
+            }
+            // Also try to grab worker messages while we're here
+            try {
+              const { sessions: workerSessions } = await sessionsApi.workerSessions(coldRestoreId);
+              const resumable = workerSessions.find(s => s.status === "active" || s.status === "paused");
+              if (resumable) {
+                const { messages: wMsgs } = await sessionsApi.messages(coldRestoreId, resumable.session_id);
+                for (const m of wMsgs as Message[]) {
+                  preQueenMsgs.push(backendMessageToChatMessage(m, agentType, displayNameTemp));
+                }
+              }
+            } catch { /* not critical */ }
+          } catch {
+            // Not available — will start fresh
+          }
+        }
+
+        // Suppress intro whenever we are about to restore a previous conversation.
+        // The user never expects a greeting when reopening a session.
+        if (coldRestoreId) suppressIntroRef.current.add(agentType);
+
         try {
-          liveSession = await sessionsApi.create(agentPath);
+          // Pass coldRestoreId as queenResumeFrom so the backend writes queen
+          // messages into the ORIGINAL session's directory — all conversation
+          // history accumulates in one place across server restarts.
+          liveSession = await sessionsApi.create(agentPath, undefined, undefined, undefined, coldRestoreId ?? undefined);
         } catch (loadErr: unknown) {
           // 424 = credentials required — open the credentials modal
           if (loadErr instanceof ApiError && loadErr.status === 424) {
@@ -678,51 +810,78 @@ export default function Workspace() {
             liveSession = body as unknown as LiveSession;
           }
         }
+
+        // If we pre-fetched messages for a cold restore, populate the UI immediately.
+        // This happens before the SSE connection opens so no greeting can slip through.
+        if (preQueenMsgs.length > 0) {
+          preQueenMsgs.sort((a, b) => (a.createdAt ?? 0) - (b.createdAt ?? 0));
+          setSessionsByAgent(prev => ({
+            ...prev,
+            [agentType]: (prev[agentType] || []).map((s, i) =>
+              i === 0 ? { ...s, messages: preQueenMsgs, graphNodes: [] } : s,
+            ),
+          }));
+        }
       }
 
       // At this point liveSession is guaranteed set — if both reconnect and create
       // failed, the throw inside the catch exits the outer try block.
       const session = liveSession!;
       const displayName = formatAgentDisplayName(session.worker_name || agentPath);
-      updateAgentState(agentType, { sessionId: session.session_id, displayName });
+      // NOTE: do NOT set sessionId in agentState yet — that opens the SSE
+      // connection, and we need suppressIntroRef to be set first (which it is,
+      // synchronously above).  sessionId is set in the final updateAgentState
+      // at the bottom of this block.
 
-      // Update the session label
+      // Update the session label + backendSessionId.  Also set historySourceId
+      // so the sidebar "already-open" check works even after cold-revive changes
+      // backendSessionId to a new live session ID.
       setSessionsByAgent((prev) => {
         const sessions = prev[agentType] || [];
         if (!sessions.length) return prev;
         return {
           ...prev,
           [agentType]: sessions.map((s, i) =>
-            i === 0 ? { ...s, label: sessions.length === 1 ? displayName : `${displayName} #${i + 1}`, backendSessionId: session.session_id } : s,
+            i === 0 ? {
+              ...s,
+              label: sessions.length === 1 ? displayName : `${displayName} #${i + 1}`,
+              backendSessionId: session.session_id,
+              // Preserve existing historySourceId; set it from coldRestoreId if missing
+              historySourceId: s.historySourceId || coldRestoreId || undefined,
+            } : s,
           ),
         };
       });
 
-      // Check worker session status (detects running worker).
-      // Only restore messages when rejoining an existing backend session.
+      // Restore messages when rejoining an existing session OR cold-restoring from disk.
       let isWorkerRunning = false;
       const restoredMsgs: ChatMessage[] = [];
-      try {
-        const { sessions: workerSessions } = await sessionsApi.workerSessions(session.session_id);
-        const resumable = workerSessions.find(
-          (s) => s.status === "active" || s.status === "paused",
-        );
-        isWorkerRunning = resumable?.status === "active";
+      // For cold-restore, use the old session ID. For live resume, use current session.
+      const historyId = coldRestoreId ?? (isResumedSession ? session.session_id : undefined);
 
-        if (isResumedSession && resumable) {
-          const { messages } = await sessionsApi.messages(session.session_id, resumable.session_id);
-          for (const m of messages as Message[]) {
-            restoredMsgs.push(backendMessageToChatMessage(m, agentType, displayName));
-          }
-        }
-      } catch {
-        // Worker session listing failed — not critical
-      }
-
-      // Restore queen conversation when rejoining an existing session
-      if (isResumedSession) {
+      // For LIVE resume (not cold restore), fetch worker + queen messages now.
+      // For cold restore they were already pre-fetched above (before create) so we skip to avoid
+      // double-restoring and to avoid capturing the new greeting.
+      if (historyId && !coldRestoreId) {
         try {
-          const { messages: queenMsgs } = await sessionsApi.queenMessages(session.session_id);
+          const { sessions: workerSessions } = await sessionsApi.workerSessions(historyId);
+          const resumable = workerSessions.find(
+            (s) => s.status === "active" || s.status === "paused",
+          );
+          isWorkerRunning = resumable?.status === "active";
+
+          if (resumable) {
+            const { messages } = await sessionsApi.messages(historyId, resumable.session_id);
+            for (const m of messages as Message[]) {
+              restoredMsgs.push(backendMessageToChatMessage(m, agentType, displayName));
+            }
+          }
+        } catch {
+          // Worker session listing failed — not critical
+        }
+
+        try {
+          const { messages: queenMsgs } = await sessionsApi.queenMessages(historyId);
           for (const m of queenMsgs as Message[]) {
             const msg = backendMessageToChatMessage(m, agentType, "Queen Bee");
             msg.role = "queen";
@@ -733,7 +892,8 @@ export default function Workspace() {
         }
       }
 
-      // Merge queen + worker messages in chronological order
+      // Merge messages in chronological order (only for live resume; cold restore
+      // was already applied above before create).
       if (restoredMsgs.length > 0) {
         restoredMsgs.sort((a, b) => (a.createdAt ?? 0) - (b.createdAt ?? 0));
         setSessionsByAgent((prev) => ({
@@ -744,7 +904,12 @@ export default function Workspace() {
         }));
       }
 
+      // If no messages were actually restored, lift the intro suppression gate
+      if (restoredMsgs.length === 0 && !coldRestoreId) suppressIntroRef.current.delete(agentType);
+
       updateAgentState(agentType, {
+        sessionId: session.session_id,
+        displayName,
         ready: true,
         loading: false,
         queenReady: true,
@@ -1018,6 +1183,9 @@ export default function Workspace() {
 
       const isQueen = streamId === "queen";
       if (isQueen) console.log('[QUEEN] handleSSEEvent:', event.type, 'agentType:', agentType);
+      // Drop queen message content while suppressing the auto-intro after a cold-restore.
+      // Uses a synchronous ref to avoid race conditions with React state batching.
+      const suppressQueenMessages = isQueen && suppressIntroRef.current.has(agentType);
       const agentDisplayName = agentStates[agentType]?.displayName;
       const displayName = isQueen ? "Queen Bee" : (agentDisplayName || undefined);
       const role = isQueen ? "queen" as const : "worker" as const;
@@ -1065,6 +1233,8 @@ export default function Workspace() {
 
         case "execution_completed":
           if (isQueen) {
+            // If we were suppressing the intro cycle, this is where it ends — lift the gate.
+            suppressIntroRef.current.delete(agentType);
             updateAgentState(agentType, { isTyping: false });
           } else {
             // Flush any remaining LLM snapshots before clearing state
@@ -1099,7 +1269,7 @@ export default function Workspace() {
         case "llm_text_delta": {
           const chatMsg = sseEventToChatMessage(event, agentType, displayName, currentTurn);
           if (isQueen) console.log('[QUEEN] chatMsg:', chatMsg?.id, chatMsg?.content?.slice(0, 50), 'turn:', currentTurn);
-          if (chatMsg) {
+          if (chatMsg && !suppressQueenMessages) {
             if (isQueen) chatMsg.role = role;
             upsertChatMessage(agentType, chatMsg);
           }
@@ -1509,15 +1679,17 @@ export default function Workspace() {
             nodeSpecs: [],
           });
 
-          // Update session label (tab name) and clear graph nodes for fresh fetch
+          // Update ONLY the active session's label + graph nodes — never touch
+          // sessions belonging to a different tab sharing the same agentType key.
+          // Also clear worker messages so the fresh worker starts with a clean slate.
+          const activeId = activeSessionRef.current[agentType];
           setSessionsByAgent(prev => ({
             ...prev,
-            [agentType]: (prev[agentType] || []).map(s => ({
-              ...s,
-              label: displayName,
-              graphNodes: [],
-              messages: s.messages.filter(m => m.role !== "worker"),
-            })),
+            [agentType]: (prev[agentType] || []).map(s =>
+              s.id === activeId || (!activeId && prev[agentType]?.[0]?.id === s.id)
+                ? { ...s, label: displayName, graphNodes: [], messages: s.messages.filter(m => m.role !== "worker") }
+                : s
+            ),
           }));
 
           // Explicitly fetch graph topology for the newly loaded worker
@@ -1607,6 +1779,8 @@ export default function Workspace() {
         s.id === activeSession.id ? { ...s, messages: [...s.messages, userMsg] } : s
       ),
     }));
+    // Clear intro suppression — user is now actively sending messages.
+    suppressIntroRef.current.delete(activeWorker);
     updateAgentState(activeWorker, { isTyping: true });
 
     if (state?.sessionId && state?.ready) {
@@ -1723,9 +1897,9 @@ export default function Workspace() {
         : Promise.resolve();
 
       pausePromise
-        .catch(() => {})                          // pause failure shouldn't block kill
+        .catch(() => { })                          // pause failure shouldn't block kill
         .then(() => sessionsApi.stop(state.sessionId!))
-        .catch(() => {});                         // fire-and-forget
+        .catch(() => { });                         // fire-and-forget
     }
 
     const allTypes = Object.keys(sessionsByAgent).filter(k => (sessionsByAgent[k] || []).length > 0);
@@ -1785,6 +1959,102 @@ export default function Workspace() {
     setActiveWorker(tabKey);
   }, [sessionsByAgent]);
 
+  // Open a history session: switch to its existing tab, or open a new tab.
+  // Async so we can pre-fetch messages before creating the tab — this gives
+  // instant visual feedback without waiting for loadAgentForType.
+  const handleHistoryOpen = useCallback(async (sessionId: string, agentPath?: string | null, agentName?: string | null) => {
+    // Always refresh the sidebar list so newly-started sessions appear promptly.
+    setHistorySidebarRefreshKey(k => k + 1);
+
+    // Already open as a tab — just switch to it.
+    for (const [type, sessions] of Object.entries(sessionsByAgent)) {
+      for (const s of sessions) {
+        if (s.backendSessionId === sessionId || s.historySourceId === sessionId) {
+          setActiveWorker(type);
+          setActiveSessionByAgent(prev => ({ ...prev, [type]: s.id }));
+          if (s.messages.length > 0) {
+            suppressIntroRef.current.add(type);
+          }
+          return;
+        }
+      }
+    }
+
+    // Pre-fetch messages from disk so the tab opens with conversation already shown.
+    // This happens BEFORE creating the tab so no "new session" empty state is visible.
+    let prefetchedMessages: ChatMessage[] = [];
+    try {
+      const { messages: queenMsgs } = await sessionsApi.queenMessages(sessionId);
+      for (const m of queenMsgs as Message[]) {
+        const resolvedType = agentPath || "new-agent";
+        const msg = backendMessageToChatMessage(m, resolvedType, "Queen Bee");
+        msg.role = "queen";
+        prefetchedMessages.push(msg);
+      }
+      if (prefetchedMessages.length > 0) {
+        prefetchedMessages.sort((a, b) => (a.createdAt ?? 0) - (b.createdAt ?? 0));
+      }
+    } catch {
+      // Not available — session will open empty and loadAgentForType will try again
+    }
+
+    const resolvedAgentType = agentPath || "new-agent";
+    const existingTabCount = Object.keys(sessionsByAgent).filter(
+      k => baseAgentType(k) === resolvedAgentType && (sessionsByAgent[k] || []).length > 0
+    ).length;
+    const rawLabel = agentName ||
+      (agentPath ? agentPath.replace(/\/$/, "").split("/").pop()?.replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase()) || agentPath : null) ||
+      "New Agent";
+    const label = existingTabCount === 0 ? rawLabel : `${rawLabel} #${existingTabCount + 1}`;
+    const newSession = createSession(resolvedAgentType, label);
+    newSession.backendSessionId = sessionId;
+    newSession.historySourceId = sessionId;
+    // Pre-populate messages so the chat panel immediately shows the conversation
+    if (prefetchedMessages.length > 0) {
+      newSession.messages = prefetchedMessages;
+    }
+    const tabKey = existingTabCount === 0 ? resolvedAgentType : `${resolvedAgentType}::${newSession.id}`;
+    if (tabKey !== resolvedAgentType) newSession.tabKey = tabKey;
+
+    // Suppress queen intro BEFORE the tab is created so loadAgentForType
+    // never sees an unsuppressed window — the user never expects a greeting on reopen.
+    if (prefetchedMessages.length > 0 || sessionId) {
+      suppressIntroRef.current.add(tabKey);
+    }
+
+    setSessionsByAgent(prev => ({ ...prev, [tabKey]: [newSession] }));
+    setActiveSessionByAgent(prev => ({ ...prev, [tabKey]: newSession.id }));
+    setActiveWorker(tabKey);
+  }, [sessionsByAgent]);
+
+  // Post-mount: open the session from the URL ?session= param via handleHistoryOpen.
+  // This runs AFTER persisted tabs are hydrated, so dedup works correctly.
+  // Use a ref guard so it fires exactly once even in React StrictMode.
+  useEffect(() => {
+    if (mountedRef.current) return;
+    mountedRef.current = true;
+    const sid = initialSessionIdRef.current;
+    if (!sid) return;
+    // Fetch agent metadata from the backend so handleHistoryOpen gets the right
+    // agentPath and agentName (needed to label the tab correctly).
+    sessionsApi.history().then(r => {
+      const match = r.sessions.find((s: { session_id: string }) => s.session_id === sid);
+      handleHistoryOpen(
+        sid,
+        match?.agent_path ?? initialAgentRef.current !== "new-agent" ? initialAgentRef.current : null,
+        match?.agent_name ?? null,
+      );
+    }).catch(() => {
+      // History fetch failed — still open the session with what we know.
+      handleHistoryOpen(
+        sid,
+        initialAgentRef.current !== "new-agent" ? initialAgentRef.current : null,
+        null,
+      );
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const activeWorkerLabel = activeAgentState?.displayName || formatAgentDisplayName(baseAgentType(activeWorker));
 
 
@@ -1834,9 +2104,20 @@ export default function Workspace() {
 
       {/* Main content area */}
       <div className="flex flex-1 min-h-0">
-        <div className="w-[340px] min-w-[280px] bg-card/30 flex flex-col border-r border-border/30">
+
+        {/* ── Persistent history sidebar ──────────────────────────────── */}
+        <HistorySidebar
+          onOpen={handleHistoryOpen}
+          openSessionIds={Object.values(sessionsByAgent).flat().flatMap(s => [s.backendSessionId, s.historySourceId].filter(Boolean)) as string[]}
+          activeSessionId={agentStates[activeWorker]?.sessionId ?? activeSession?.backendSessionId ?? null}
+          activeHistorySourceId={activeSession?.historySourceId ?? null}
+          refreshKey={historySidebarRefreshKey}
+        />
+
+        {/* ── Pipeline graph + chat ──────────────────────────────────── */}
+        <div className="w-[300px] min-w-[240px] bg-card/30 flex flex-col border-r border-border/30">
           <div className="flex-1 min-h-0">
-          <AgentGraph
+            <AgentGraph
               nodes={currentGraph.nodes}
               title={currentGraph.title}
               onNodeClick={(node) => setSelectedNode(prev => prev?.id === node.id ? null : node)}
@@ -1926,7 +2207,7 @@ export default function Workspace() {
                     <div className="flex items-start gap-3 min-w-0">
                       <div className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 mt-0.5 bg-[hsl(210,40%,55%)]/15 border border-[hsl(210,40%,55%)]/25">
                         <span className="text-sm" style={{ color: "hsl(210,40%,55%)" }}>
-                          {{"webhook": "\u26A1", "timer": "\u23F1", "api": "\u2192", "event": "\u223F"}[selectedNode.triggerType || ""] || "\u26A1"}
+                          {{ "webhook": "\u26A1", "timer": "\u23F1", "api": "\u2192", "event": "\u223F" }[selectedNode.triggerType || ""] || "\u26A1"}
                         </span>
                       </div>
                       <div className="min-w-0">
