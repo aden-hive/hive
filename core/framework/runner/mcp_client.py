@@ -7,6 +7,9 @@ Supports both STDIO and HTTP transports using the official MCP Python SDK.
 import asyncio
 import logging
 import os
+import sys
+import threading
+from concurrent.futures import TimeoutError as FuturesTimeoutError
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
@@ -73,6 +76,8 @@ class MCPClient:
         # Background event loop for persistent STDIO connection
         self._loop = None
         self._loop_thread = None
+        # Serialize STDIO tool calls (avoids races, helps on Windows)
+        self._stdio_call_lock = threading.Lock()
 
     def _run_async(self, coro):
         """
@@ -89,7 +94,20 @@ class MCPClient:
             # Check if loop is running AND not closed
             if self._loop.is_running() and not self._loop.is_closed():
                 future = asyncio.run_coroutine_threadsafe(coro, self._loop)
-                return future.result()
+                try:
+                    return future.result(timeout=120)
+                except (TimeoutError, FuturesTimeoutError):
+                    logger.error(
+                        "MCP tool call timed out after 120s — connection may be dead."
+                    )
+                    try:
+                        self.disconnect()
+                    except Exception as e:
+                        logger.debug("Disconnect after timeout: %s", e)
+                    raise RuntimeError(
+                        "MCP tool call timed out. The server may have crashed or become unresponsive. "
+                        "Try again — the connection will be re-established."
+                    ) from None
             # else: fall through to the standard approach below
             # This handles the case when STDIO loop exists but is stopped/closed
 
@@ -156,11 +174,19 @@ class MCPClient:
             # Create server parameters
             # Always inherit parent environment and merge with any custom env vars
             merged_env = {**os.environ, **(self.config.env or {})}
+            # On Windows, passing cwd can cause WinError 267 ("invalid directory name").
+            # tool_registry passes cwd=None and uses absolute script paths when applicable.
+            cwd = self.config.cwd
+            if os.name == "nt" and cwd is not None:
+                # Avoid passing cwd on Windows; tool_registry should have set cwd=None
+                # and absolute script paths for tools-dir servers. If cwd is still set,
+                # pass None to prevent WinError 267 (caller should use absolute paths).
+                cwd = None
             server_params = StdioServerParameters(
                 command=self.config.command,
                 args=self.config.args,
                 env=merged_env,
-                cwd=self.config.cwd,
+                cwd=cwd,
             )
 
             # Store for later use
@@ -184,10 +210,13 @@ class MCPClient:
                         from mcp.client.stdio import stdio_client
 
                         # Create persistent stdio client context.
-                        # Redirect server stderr to devnull to prevent raw
-                        # output from leaking behind the TUI.
-                        devnull = open(os.devnull, "w")  # noqa: SIM115
-                        self._stdio_context = stdio_client(server_params, errlog=devnull)
+                        # On Windows, use stderr so subprocess startup errors are visible
+                        # when debugging "Connection closed" / MCP registration failures.
+                        if os.name == "nt":
+                            errlog = sys.stderr
+                        else:
+                            errlog = open(os.devnull, "w")  # noqa: SIM115
+                        self._stdio_context = stdio_client(server_params, errlog=errlog)
                         (
                             self._read_stream,
                             self._write_stream,
@@ -353,7 +382,12 @@ class MCPClient:
             raise ValueError(f"Unknown tool: {tool_name}")
 
         if self.config.transport == "stdio":
-            return self._run_async(self._call_tool_stdio_async(tool_name, arguments))
+            with self._stdio_call_lock:
+                if not self._session and self._connected:
+                    self._connected = False
+                if not self._connected:
+                    self.connect()
+                return self._run_async(self._call_tool_stdio_async(tool_name, arguments))
         else:
             return self._call_tool_http(tool_name, arguments)
 
@@ -448,11 +482,15 @@ class MCPClient:
             if self._stdio_context:
                 await self._stdio_context.__aexit__(None, None, None)
         except asyncio.CancelledError:
-            logger.warning(
+            logger.debug(
                 "STDIO context cleanup was cancelled; proceeding with best-effort shutdown"
             )
         except Exception as e:
-            logger.warning(f"Error closing STDIO context: {e}")
+            msg = str(e).lower()
+            if "cancel scope" in msg or "different task" in msg:
+                logger.debug("STDIO context teardown (known anyio quirk): %s", e)
+            else:
+                logger.warning(f"Error closing STDIO context: {e}")
         finally:
             self._stdio_context = None
 

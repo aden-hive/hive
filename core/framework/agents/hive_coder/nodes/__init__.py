@@ -131,13 +131,18 @@ errors yourself. Don't declare success until validation passes.
 
 # Tools
 
+## Paths (MANDATORY)
+**Always use RELATIVE paths** (e.g. `exports/agent_name/config.py`, `exports/agent_name/nodes/__init__.py`).
+**Never use absolute paths** like `/mnt/data/...` or `/workspace/...` — they fail. The project root is implicit.
+
 ## File I/O
 - read_file(path, offset?, limit?) — read with line numbers
 - write_file(path, content) — create/overwrite, auto-mkdir
 - edit_file(path, old_text, new_text, replace_all?) — fuzzy-match edit
 - list_directory(path, recursive?) — list contents
 - search_files(pattern, path?, include?) — regex search
-- run_command(command, cwd?, timeout?) — shell execution
+- run_command(command, cwd?, timeout?) — shell execution. Prefer \
+run_agent_tests for tests; run_command can timeout on long runs.
 - undo_changes(path?) — restore from git snapshot
 
 ## Meta-Agent
@@ -177,10 +182,11 @@ for patterns:
   read_file("exports/{name}/nodes/__init__.py")
 
 ## Post-Build Testing
-After writing agent code, validate structurally AND run tests:
-  run_command("python -c 'from {name} import default_agent; \\
-    print(default_agent.validate())'")
-  run_agent_tests("{name}")
+**Prefer dedicated tools** — run_command can timeout (MCP). Use:
+  validate_agent_tools("exports/{name}")  # tool existence check
+  run_agent_tests("{name}")               # run pytest
+Avoid run_command for pytest or long validation. Structural checks via \
+run_command (validate, AgentRunner.load) are optional; they may timeout.
 
 ## Debugging Built Agents
 When a user says "my agent is failing" or "debug this agent":
@@ -507,39 +513,40 @@ triggers, use `AsyncEntryPointSpec` (from framework.graph.edge) and \
 
 ## 5. Verify
 
-Run FOUR validation steps after writing. All must pass:
+**Reliability note:** run_command can timeout (MCP/stdio limits). Do Steps 1 \
+and 2 first — they are reliable. Steps 3 and 4 use run_command and may timeout.
 
-**Step A — Class validation** (checks graph structure):
+**Step 1 — Tool validation** (REQUIRED; reliable):
+```
+validate_agent_tools("exports/{name}")
+```
+Checks that declared tools exist in the agent's MCP servers. If any are \
+missing: fix node definitions. Run list_agent_tools() to see what's available.
+
+**Step 2 — Run tests** (REQUIRED; reliable):
+```
+run_agent_tests("{name}")
+```
+Runs pytest with proper timeouts. **Do NOT use run_command with pytest** — \
+it times out. Use run_agent_tests only.
+
+**Step 3 — Class validation** (optional; may timeout):
 ```
 run_command("python -c 'from {name} import default_agent; \\
   print(default_agent.validate())'")
 ```
+Structural check. Skip if it times out; Steps 1–2 and load_built_agent suffice.
 
-**Step B — Runner load test** (checks package export contract — \
-THIS IS THE SAME PATH THE TUI USES):
+**Step 4 — Runner load test** (optional; may timeout):
 ```
 run_command("python -c 'from framework.runner.runner import \\
   AgentRunner; r = AgentRunner.load(\"exports/{name}\"); \\
   print(\"AgentRunner.load: OK\")'")
 ```
-This catches missing __init__.py exports, bad conversation_mode, \
-invalid loop_config, and unreachable nodes. If Step A passes but \
-Step B fails, the problem is in __init__.py exports.
+Catches __init__.py exports, conversation_mode, loop_config. Skip if timeout; \
+load_built_agent will surface load errors when you load the agent.
 
-**Step C — Tool validation** (checks that declared tools actually exist \
-in the agent's MCP servers — catches hallucinated tool names):
-```
-validate_agent_tools("exports/{name}")
-```
-If any tools are missing: fix the node definitions to use only tools \
-that exist. Run list_agent_tools() to see what's available.
-
-**Step D — Run tests:**
-```
-run_agent_tests("{name}")
-```
-
-If anything fails: read error, fix with edit_file, re-validate. Up to 3x.
+If Steps 1 or 2 fail: read error, fix with edit_file, re-validate. Up to 3x.
 
 **CRITICAL: Testing forever-alive agents**
 Most agents use `terminal_nodes=[]` (forever-alive). This means \
@@ -598,54 +605,31 @@ start_agent("{name}")           # triggers default entry point
 
 _queen_tools_docs = """
 
-## Operating Modes
+## Worker Lifecycle
+- start_worker(task) — Start the worker with a task description. The \
+worker runs autonomously until it finishes or asks the user a question.
+- stop_worker() — Cancel the worker's current execution.
+- get_worker_status() — Check if the worker is idle, running, or waiting \
+for user input. Returns execution details.
+- inject_worker_message(content) — Send a message to the running worker. \
+Use this to relay user instructions or concerns.
 
-You operate in one of three modes. Your available tools change based on the \
-mode. The system notifies you when a mode change occurs.
+## Monitoring
+- get_worker_health_summary() — Read the latest health data from the judge.
+- notify_operator(ticket_id, analysis, urgency) — Alert the user about a \
+critical issue. Use sparingly.
 
-### BUILDING mode (default)
-You have full coding tools for building and modifying agents:
-- File I/O: read_file, write_file, edit_file, list_directory, search_files, \
-run_command, undo_changes
-- Meta-agent: list_agent_tools, validate_agent_tools, \
-list_agents, list_agent_sessions, get_agent_session_state, get_agent_session_memory, \
-list_agent_checkpoints, get_agent_checkpoint, run_agent_tests
-- load_built_agent(agent_path) — Load the agent and switch to STAGING mode
-- list_credentials(credential_id?) — List authorized credentials
+## Agent Loading
+- load_built_agent(agent_path) — Load a newly built agent as the worker in \
+this session. If a worker is already loaded, it is automatically unloaded \
+first. **Call in a separate turn** after write_file, validate_agent_tools, and \
+run_agent_tests have finished — never in the same batch, or files may \
+not exist yet.
 
-When you finish building an agent, call load_built_agent(path) to stage it.
-
-### STAGING mode (agent loaded, not yet running)
-The agent is loaded and ready to run. You can inspect it and launch it:
-- Read-only: read_file, list_directory, search_files, run_command
-- list_credentials(credential_id?) — Verify credentials are configured
-- get_worker_status() — Check the loaded worker
-- run_agent_with_input(task) — Start the worker and switch to RUNNING mode
-- stop_worker_and_edit() — Go back to BUILDING mode
-
-In STAGING mode you do NOT have write tools. If you need to modify the agent, \
-call stop_worker_and_edit() to go back to BUILDING mode.
-
-### RUNNING mode (worker is executing)
-The worker is running. You have monitoring and lifecycle tools:
-- Read-only: read_file, list_directory, search_files, run_command
-- get_worker_status() — Check worker status (idle, running, waiting)
-- inject_worker_message(content) — Send a message to the running worker
-- get_worker_health_summary() — Read the latest health data
-- notify_operator(ticket_id, analysis, urgency) — Alert the user (use sparingly)
-- stop_worker() — Stop the worker and return to STAGING mode, then ask the user what to do next
-- stop_worker_and_edit() — Stop the worker and switch back to BUILDING mode
-
-In RUNNING mode you do NOT have write tools or agent construction tools. \
-If you need to modify the agent, call stop_worker_and_edit() to switch back \
-to BUILDING mode. To stop the worker and ask the user what to do next, call \
-stop_worker() to return to STAGING mode.
-
-### Mode transitions
-- load_built_agent(path) → switches to STAGING mode
-- run_agent_with_input(task) → starts worker, switches to RUNNING mode
-- stop_worker() → stops worker, switches to STAGING mode (ask user: re-run or edit?)
-- stop_worker_and_edit() → stops worker (if running), switches to BUILDING mode
+## Credentials
+- list_credentials(credential_id?) — List all authorized credentials in the \
+local store. Returns IDs, aliases, status, and identity metadata (never \
+secrets). Optionally filter by credential_id.
 """
 
 _queen_behavior = """
@@ -781,16 +765,14 @@ building something new.
 When the user asks to change, modify, or update the loaded worker \
 (e.g., "change the report node", "add a node", "delete node X"):
 
-1. Call stop_worker_and_edit() — this stops the worker and gives you \
-coding tools (switches to BUILDING mode).
-2. Use the **Path** from the Worker Profile to locate the agent files.
-3. Read the relevant files (nodes/__init__.py, agent.py, etc.).
-4. Make the requested changes using edit_file / write_file.
-5. Run validation (default_agent.validate(), AgentRunner.load(), \
-validate_agent_tools()).
-6. **Reload the modified worker**: call load_built_agent("{path}") \
-so the changes take effect immediately (switches to STAGING mode). \
-Then call run_agent_with_input(task) to restart execution.
+1. Use the **Path** from the Worker Profile to locate the agent files.
+2. Read the relevant files (nodes/__init__.py, agent.py, etc.).
+3. Make the requested changes using edit_file / write_file.
+4. Run validation: validate_agent_tools(path), run_agent_tests(name). \
+Avoid run_command for validation — it can timeout.
+5. **Reload the modified worker**: call load_built_agent("{path}") \
+so the changes take effect immediately. If a worker is already loaded, \
+stop it first, then reload.
 
 Do NOT skip step 6 — without reloading, the user will still be \
 interacting with the old version.

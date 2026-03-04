@@ -71,8 +71,40 @@ def _find_project_root() -> str:
 
 def _resolve_path(path: str) -> str:
     """Resolve path relative to PROJECT_ROOT. Raises ValueError if outside."""
+    # Normalize slashes for cross-platform (e.g. exports/hi_agent from LLM)
+    path = path.replace("/", os.sep)
     if os.path.isabs(path):
         resolved = os.path.abspath(path)
+        try:
+            common = os.path.commonpath([resolved, PROJECT_ROOT])
+        except ValueError:
+            common = ""
+        if common != PROJECT_ROOT:
+            # LLM may emit wrong-root paths (/mnt/data, /workspace, etc.).
+            # Strip known prefixes and treat the remainder as relative to PROJECT_ROOT.
+            path_norm = path.replace("\\", "/")
+            for prefix in ("/mnt/data/", "/mnt/data", "/workspace/", "/workspace",
+                          "/repo/", "/repo"):
+                p = prefix.rstrip("/") + "/"
+                if path_norm.startswith(p) or (path_norm.startswith(prefix.rstrip("/")) and len(path_norm) > len(prefix)):
+                    suffix = path_norm[len(prefix.rstrip("/")):].lstrip("/")
+                    if suffix:
+                        path = suffix.replace("/", os.sep)
+                        resolved = os.path.abspath(os.path.join(PROJECT_ROOT, path))
+                        break
+            else:
+                # Try extracting exports/ or core/ subpath from the absolute path
+                parts = path.split(os.sep)
+                if "exports" in parts:
+                    idx = parts.index("exports")
+                    path = os.sep.join(parts[idx:])
+                    resolved = os.path.abspath(os.path.join(PROJECT_ROOT, path))
+                elif "core" in parts:
+                    idx = parts.index("core")
+                    path = os.sep.join(parts[idx:])
+                    resolved = os.path.abspath(os.path.join(PROJECT_ROOT, path))
+                else:
+                    raise ValueError(f"Access denied: '{path}' is outside the project root.")
     else:
         resolved = os.path.abspath(os.path.join(PROJECT_ROOT, path))
     try:
@@ -122,7 +154,38 @@ def _take_snapshot() -> str:
 
 # ── Tool: run_command ─────────────────────────────────────────────────────
 
-MAX_COMMAND_OUTPUT = 30_000  # chars before truncation
+MAX_COMMAND_OUTPUT = 16_000  # chars before truncation (keep under stdio pipe buffer)
+
+
+def _translate_command_for_windows(command: str) -> str:
+    """Translate common Unix commands to Windows equivalents."""
+    if os.name != "nt":
+        return command
+    cmd = command.strip()
+
+    # mkdir -p: Unix creates parents; Windows mkdir already does; -p becomes a dir name
+    if cmd.startswith("mkdir -p ") or cmd.startswith("mkdir -p\t"):
+        rest = cmd[9:].lstrip().replace("/", os.sep)
+        return "mkdir " + rest
+
+    # ls / pwd: cmd.exe uses dir and cd
+    # Order matters: replace longer patterns first
+    for unix, win in [
+        ("ls -la", "dir /a"),
+        ("ls -al", "dir /a"),
+        ("ls -l", "dir"),
+        ("ls -a", "dir /a"),
+        ("ls ", "dir "),
+        ("pwd", "cd"),
+    ]:
+        cmd = cmd.replace(unix, win)
+    # Standalone "ls" at end (e.g. "cd x && ls")
+    if cmd.endswith(" ls"):
+        cmd = cmd[:-3] + " dir"
+    elif cmd == "ls":
+        cmd = "dir"
+
+    return cmd
 
 
 @mcp.tool()
@@ -141,9 +204,12 @@ def run_command(command: str, cwd: str = "", timeout: int = 120) -> str:
         Combined stdout/stderr with exit code
     """
     timeout = min(timeout, 300)
+    # Use lower internal timeout so we return before MCP client's 120s timeout
+    cmd_timeout = min(timeout, 90)
     work_dir = _resolve_path(cwd) if cwd else PROJECT_ROOT
 
     try:
+        command = _translate_command_for_windows(command)
         start = time.monotonic()
         result = subprocess.run(
             command,
@@ -151,12 +217,15 @@ def run_command(command: str, cwd: str = "", timeout: int = 120) -> str:
             cwd=work_dir,
             capture_output=True,
             text=True,
-            timeout=timeout,
+            timeout=cmd_timeout,
             env={
                 **os.environ,
-                "PYTHONPATH": (
-                    f"{PROJECT_ROOT}/core:{PROJECT_ROOT}/exports"
-                    f":{PROJECT_ROOT}/core/framework/agents"
+                "PYTHONPATH": os.pathsep.join(
+                    [
+                        os.path.join(PROJECT_ROOT, "core"),
+                        os.path.join(PROJECT_ROOT, "exports"),
+                        os.path.join(PROJECT_ROOT, "core", "framework", "agents"),
+                    ]
                 ),
             },
         )
@@ -181,7 +250,7 @@ def run_command(command: str, cwd: str = "", timeout: int = 120) -> str:
         return output
     except subprocess.TimeoutExpired:
         return (
-            f"Error: Command timed out after {timeout}s. "
+            f"Error: Command timed out after {cmd_timeout}s. "
             "Consider breaking it into smaller operations."
         )
     except Exception as e:
@@ -254,9 +323,111 @@ def list_agent_tools(
 ) -> str:
     """Discover tools available for agent building, grouped by category.
 
-    Connects to each MCP server, lists tools, then disconnects. Use this
-    BEFORE designing an agent to know exactly which tools exist. Only use
-    tools from this list in node definitions — never guess or fabricate.
+    Connects to each MCP server, lists all tools with full schemas, then
+    disconnects. Use this to see what tools are available before designing
+    an agent — never rely on static documentation.
+
+    Args:
+        server_config_path: Path to mcp_servers.json (relative to project root).
+            Default: the hive-tools server config at tools/mcp_servers.json.
+            Can also point to any agent's mcp_servers.json.
+
+    Returns:
+        JSON listing of all tools with names, descriptions, and input schemas
+    """
+    # Resolve config path
+    if not server_config_path:
+        # Default: look for the main hive-tools mcp_servers.json
+        candidates = [
+            os.path.join(PROJECT_ROOT, "tools", "mcp_servers.json"),
+            os.path.join(PROJECT_ROOT, "mcp_servers.json"),
+        ]
+        config_path = None
+        for c in candidates:
+            if os.path.isfile(c):
+                config_path = c
+                break
+        if not config_path:
+            return "Error: No mcp_servers.json found. Provide server_config_path."
+    else:
+        config_path = _resolve_path(server_config_path)
+        if not os.path.isfile(config_path):
+            return f"Error: Config file not found: {server_config_path}"
+
+    try:
+        with open(config_path, encoding="utf-8") as f:
+            servers_config = json.load(f)
+    except (json.JSONDecodeError, OSError) as e:
+        return f"Error reading config: {e}"
+
+    # Import MCPClient (deferred — needs PYTHONPATH to include core/)
+    try:
+        from pathlib import Path
+
+        from framework.runner.mcp_client import MCPClient, MCPServerConfig
+        from framework.runner.tool_registry import ToolRegistry
+    except ImportError:
+        return "Error: Cannot import MCPClient. Ensure PYTHONPATH includes the core/ directory."
+
+    all_tools = []
+    errors = []
+    config_dir = Path(config_path).parent
+
+    for server_name, server_conf in servers_config.items():
+        # Use shared resolution (Windows cwd/script path handling)
+        resolved = ToolRegistry.resolve_mcp_stdio_config(
+            {"name": server_name, **server_conf}, config_dir
+        )
+        try:
+            config = MCPServerConfig(
+                name=server_name,
+                transport=resolved.get("transport", "stdio"),
+                command=resolved.get("command"),
+                args=resolved.get("args", []),
+                env=resolved.get("env", {}),
+                cwd=resolved.get("cwd"),
+                url=resolved.get("url"),
+                headers=resolved.get("headers", {}),
+            )
+            client = MCPClient(config)
+            client.connect()
+            tools = client.list_tools()
+
+            for tool in tools:
+                all_tools.append(
+                    {
+                        "server": server_name,
+                        "name": tool.name,
+                        "description": tool.description,
+                        "input_schema": tool.input_schema,
+                    }
+                )
+
+            client.disconnect()
+        except Exception as e:
+            errors.append({"server": server_name, "error": str(e)})
+
+    result = {
+        "tools": all_tools,
+        "total": len(all_tools),
+        "servers_queried": len(servers_config),
+    }
+    if errors:
+        result["errors"] = errors
+
+    return json.dumps(result, indent=2, default=str)
+
+
+# ── Meta-agent: Agent tool catalog ────────────────────────────────────────
+
+
+@mcp.tool()
+def list_agent_tools(server_config_path: str = "") -> str:
+    """List all tools available for agent building from the hive-tools MCP server.
+
+    Returns tool names grouped by category. Use this BEFORE designing an agent
+    to know exactly which tools exist. Only use tools from this list in node
+    definitions — never guess or fabricate tool names.
 
     Args:
         server_config_path: Path to mcp_servers.json. Default: tools/mcp_servers.json
@@ -300,28 +471,31 @@ def list_agent_tools(
         return json.dumps({"error": f"Failed to read config: {e}"})
 
     try:
+        from pathlib import Path
+
         from framework.runner.mcp_client import MCPClient, MCPServerConfig
+        from framework.runner.tool_registry import ToolRegistry
     except ImportError:
         return json.dumps({"error": "Cannot import MCPClient"})
 
     all_tools: list[dict] = []
     errors = []
-    config_dir = os.path.dirname(config_path)
+    config_dir = Path(config_path).parent
 
     for server_name, server_conf in servers_config.items():
-        cwd = server_conf.get("cwd", "")
-        if cwd and not os.path.isabs(cwd):
-            cwd = os.path.abspath(os.path.join(config_dir, cwd))
+        resolved = ToolRegistry.resolve_mcp_stdio_config(
+            {"name": server_name, **server_conf}, config_dir
+        )
         try:
             config = MCPServerConfig(
                 name=server_name,
-                transport=server_conf.get("transport", "stdio"),
-                command=server_conf.get("command"),
-                args=server_conf.get("args", []),
-                env=server_conf.get("env", {}),
-                cwd=cwd or None,
-                url=server_conf.get("url"),
-                headers=server_conf.get("headers", {}),
+                transport=resolved.get("transport", "stdio"),
+                command=resolved.get("command"),
+                args=resolved.get("args", []),
+                env=resolved.get("env", {}),
+                cwd=resolved.get("cwd"),
+                url=resolved.get("url"),
+                headers=resolved.get("headers", {}),
             )
             client = MCPClient(config)
             client.connect()
@@ -410,19 +584,24 @@ def validate_agent_tools(agent_path: str) -> str:
     if not os.path.isdir(resolved):
         return json.dumps({"error": f"Agent directory not found: {agent_path}"})
 
+    agent_dir = resolved  # Keep path; 'resolved' is reused for MCP config in loop
+
     # --- Discover available tools from agent's MCP servers ---
-    mcp_config_path = os.path.join(resolved, "mcp_servers.json")
+    mcp_config_path = os.path.join(agent_dir, "mcp_servers.json")
     if not os.path.isfile(mcp_config_path):
         return json.dumps({"error": f"No mcp_servers.json found in {agent_path}"})
 
     try:
+        from pathlib import Path
+
         from framework.runner.mcp_client import MCPClient, MCPServerConfig
+        from framework.runner.tool_registry import ToolRegistry
     except ImportError:
         return json.dumps({"error": "Cannot import MCPClient"})
 
     available_tools: set[str] = set()
     discovery_errors = []
-    config_dir = os.path.dirname(mcp_config_path)
+    config_dir = Path(mcp_config_path).parent
 
     try:
         with open(mcp_config_path, encoding="utf-8") as f:
@@ -431,19 +610,19 @@ def validate_agent_tools(agent_path: str) -> str:
         return json.dumps({"error": f"Failed to read mcp_servers.json: {e}"})
 
     for server_name, server_conf in servers_config.items():
-        cwd = server_conf.get("cwd", "")
-        if cwd and not os.path.isabs(cwd):
-            cwd = os.path.abspath(os.path.join(config_dir, cwd))
+        resolved = ToolRegistry.resolve_mcp_stdio_config(
+            {"name": server_name, **server_conf}, config_dir
+        )
         try:
             config = MCPServerConfig(
                 name=server_name,
-                transport=server_conf.get("transport", "stdio"),
-                command=server_conf.get("command"),
-                args=server_conf.get("args", []),
-                env=server_conf.get("env", {}),
-                cwd=cwd or None,
-                url=server_conf.get("url"),
-                headers=server_conf.get("headers", {}),
+                transport=resolved.get("transport", "stdio"),
+                command=resolved.get("command"),
+                args=resolved.get("args", []),
+                env=resolved.get("env", {}),
+                cwd=resolved.get("cwd"),
+                url=resolved.get("url"),
+                headers=resolved.get("headers", {}),
             )
             client = MCPClient(config)
             client.connect()
@@ -454,7 +633,7 @@ def validate_agent_tools(agent_path: str) -> str:
             discovery_errors.append({"server": server_name, "error": str(e)})
 
     # --- Load agent nodes and extract declared tools ---
-    agent_py = os.path.join(resolved, "agent.py")
+    agent_py = os.path.join(agent_dir, "agent.py")
     if not os.path.isfile(agent_py):
         return json.dumps({"error": f"No agent.py found in {agent_path}"})
 
@@ -462,8 +641,8 @@ def validate_agent_tools(agent_path: str) -> str:
     import importlib.util
     import sys
 
-    package_name = os.path.basename(resolved)
-    parent_dir = os.path.dirname(os.path.abspath(resolved))
+    package_name = os.path.basename(agent_dir)
+    parent_dir = os.path.dirname(os.path.abspath(agent_dir))
     if parent_dir not in sys.path:
         sys.path.insert(0, parent_dir)
 
@@ -1006,26 +1185,30 @@ def run_agent_tests(
         cmd.append("-x")
     cmd.append("--tb=short")
 
-    # Set PYTHONPATH
+    # Set PYTHONPATH (use pathsep for Windows)
     env = os.environ.copy()
     pythonpath = env.get("PYTHONPATH", "")
     core_path = os.path.join(PROJECT_ROOT, "core")
     exports_path = os.path.join(PROJECT_ROOT, "exports")
     fw_agents_path = os.path.join(PROJECT_ROOT, "core", "framework", "agents")
-    env["PYTHONPATH"] = f"{core_path}:{exports_path}:{fw_agents_path}:{PROJECT_ROOT}:{pythonpath}"
+    path_parts = [core_path, exports_path, fw_agents_path, PROJECT_ROOT]
+    if pythonpath:
+        path_parts.append(pythonpath)
+    env["PYTHONPATH"] = os.pathsep.join(path_parts)
 
+    # Use 90s so we return before MCP client's 120s timeout
     try:
         result = subprocess.run(
             cmd,
             capture_output=True,
             text=True,
-            timeout=120,
+            timeout=90,
             env=env,
         )
     except subprocess.TimeoutExpired:
         return json.dumps(
             {
-                "error": "Tests timed out after 120 seconds. A test may be hanging "
+                "error": "Tests timed out after 90 seconds. A test may be hanging "
                 "(e.g. a client-facing node waiting for stdin). Use mock mode "
                 "or add timeouts to async tests.",
                 "command": " ".join(cmd),
@@ -1144,7 +1327,7 @@ def main() -> None:
     register_file_tools(
         mcp,
         resolve_path=_resolve_path,
-        before_write=_take_snapshot,
+        before_write=None,  # Git snapshot causes stdio deadlock on Windows; undo_changes limited
         project_root=PROJECT_ROOT,
     )
 
