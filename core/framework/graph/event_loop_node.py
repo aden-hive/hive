@@ -613,6 +613,8 @@ class EventLoopNode(NodeProtocol):
                         user_input_requested,
                         ask_user_prompt,
                         ask_user_options,
+                        request_system_prompt,
+                        request_messages,
                     ) = await self._run_single_turn(
                         ctx, conversation, tools, iteration, accumulator
                     )
@@ -647,6 +649,8 @@ class EventLoopNode(NodeProtocol):
                         stream_id=stream_id,
                         execution_id=execution_id,
                         iteration=iteration,
+                        system_prompt=request_system_prompt,
+                        messages=request_messages,
                         assistant_text=assistant_text,
                         tool_calls=logged_tool_calls,
                         tool_results=real_tool_results,
@@ -1576,11 +1580,22 @@ class EventLoopNode(NodeProtocol):
         tools: list[Tool],
         iteration: int,
         accumulator: OutputAccumulator,
-    ) -> tuple[str, list[dict], list[str], dict[str, int], list[dict], bool, str, list[str] | None]:
+    ) -> tuple[
+        str,
+        list[dict],
+        list[str],
+        dict[str, int],
+        list[dict],
+        bool,
+        str,
+        list[str] | None,
+        str,
+        list[dict[str, Any]],
+    ]:
         """Run a single LLM turn with streaming and tool execution.
 
         Returns (assistant_text, real_tool_results, outputs_set, token_counts, logged_tool_calls,
-        user_input_requested, ask_user_prompt, ask_user_options).
+        user_input_requested, ask_user_prompt, ask_user_options, system_prompt, messages).
 
         ``real_tool_results`` contains only results from actual tools (web_search,
         etc.), NOT from the synthetic ``set_output`` or ``ask_user`` tools.
@@ -1600,6 +1615,8 @@ class EventLoopNode(NodeProtocol):
         token_counts: dict[str, int] = {"input": 0, "output": 0}
         tool_call_count = 0
         final_text = ""
+        final_system_prompt = conversation.system_prompt
+        final_messages: list[dict[str, Any]] = []
         # Track output keys set via set_output across all inner iterations
         outputs_set_this_turn: list[str] = []
         user_input_requested = False
@@ -1635,6 +1652,8 @@ class EventLoopNode(NodeProtocol):
                 )
                 await conversation.add_user_message("[Continue working on your current task.]")
                 messages = conversation.to_llm_messages()
+            final_system_prompt = conversation.system_prompt
+            final_messages = messages
 
             accumulated_text = ""
             tool_calls: list[ToolCallEvent] = []
@@ -1753,6 +1772,8 @@ class EventLoopNode(NodeProtocol):
                     user_input_requested,
                     ask_user_prompt,
                     ask_user_options,
+                    final_system_prompt,
+                    final_messages,
                 )
 
             # Execute tool calls — framework tools (set_output, ask_user)
