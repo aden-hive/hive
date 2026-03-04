@@ -124,11 +124,16 @@ def discover_agents() -> dict[str, list[AgentEntry]]:
         _is_valid_agent_dir,
     )
 
+    # Find project root (where examples/ and exports/ live)
+    # This file is at: core/framework/tui/screens/agent_picker.py
+    # Project root is 4 levels up
+    project_root = Path(__file__).resolve().parent.parent.parent.parent.parent
+
     groups: dict[str, list[AgentEntry]] = {}
     sources = [
-        ("Your Agents", Path("exports")),
+        ("Your Agents", project_root / "exports"),
         ("Framework", _get_framework_agents_dir()),
-        ("Examples", Path("examples/templates")),
+        ("Examples", project_root / "examples" / "templates"),
     ]
 
     for category, base_dir in sources:

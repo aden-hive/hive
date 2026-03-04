@@ -241,7 +241,7 @@ Ask if they need anything else or want to analyze another meeting.
 **STEP 4 — After user responds:**
 - set_output("delivery_status", "completed")
 """,
-    tools=["save_data", "serve_file_to_user", "slack_post_message"],
+    tools=["save_data", "serve_file_to_user", "slack_send_message"],
 )
 
 __all__ = [
