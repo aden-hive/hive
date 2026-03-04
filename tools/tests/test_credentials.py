@@ -308,6 +308,7 @@ class TestCredentialSpecs:
         assert spec.startup_required is False
         assert "brave.com" in spec.help_url
 
+
 class TestNodeTypeValidation:
     """Tests for node type credential validation."""
 

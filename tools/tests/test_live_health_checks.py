@@ -144,9 +144,8 @@ class TestLiveIntegrationWiring:
     def test_wiring_valid(self, credential_name):
         """No wiring issues for credentials with health checkers."""
         issues = validate_integration_wiring(credential_name)
-        assert not issues, (
-            f"Wiring issues for '{credential_name}':\n"
-            + "\n".join(f"  - {i}" for i in issues)
+        assert not issues, f"Wiring issues for '{credential_name}':\n" + "\n".join(
+            f"  - {i}" for i in issues
         )
 
 
