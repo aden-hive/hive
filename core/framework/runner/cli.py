@@ -1928,7 +1928,6 @@ def cmd_setup_credentials(args: argparse.Namespace) -> int:
 def _open_browser(url: str) -> None:
     """Open URL in the default browser (best-effort, non-blocking)."""
     import subprocess
-    import sys
 
     try:
         if sys.platform == "darwin":
@@ -1937,6 +1936,12 @@ def _open_browser(url: str) -> None:
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
                 encoding="utf-8",
+            )
+        elif sys.platform == "win32":
+            subprocess.Popen(
+                ["cmd", "/c", "start", "", url],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
             )
         elif sys.platform == "linux":
             subprocess.Popen(
