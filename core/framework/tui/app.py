@@ -539,7 +539,8 @@ class AdenTUI(App):
                 except Exception:
                     log.warning("Queen: MCP config failed to load", exc_info=True)
 
-            mode_state = QueenModeState(mode="building", event_bus=event_bus)
+            # Worker is already loaded in TUI path → start in staging mode.
+            mode_state = QueenModeState(mode="staging", event_bus=event_bus)
 
             register_queen_lifecycle_tools(
                 queen_registry,
