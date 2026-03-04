@@ -2,7 +2,6 @@ import { useState, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { Crown, Mail, Briefcase, Shield, Search, Newspaper, ArrowRight, Hexagon, Send, Bot } from "lucide-react";
 import TopBar from "@/components/TopBar";
-import HistorySidebar from "@/components/HistorySidebar";
 import type { LucideIcon } from "lucide-react";
 import { agentsApi } from "@/api/agents";
 import type { DiscoverEntry } from "@/api/types";
@@ -83,15 +82,8 @@ export default function Home() {
     <div className="min-h-screen h-screen bg-background flex flex-col overflow-hidden">
       <TopBar />
 
-      {/* Body: sidebar + main */}
+      {/* Body: main */}
       <div className="flex flex-1 min-h-0">
-        {/* Persistent history sidebar */}
-        <HistorySidebar
-          onOpen={(sessionId, agentPath) => {
-            navigate(`/workspace?agent=${encodeURIComponent(agentPath || "new-agent")}&session=${encodeURIComponent(sessionId)}`);
-          }}
-        />
-
         {/* Main content */}
         <div className="flex-1 flex flex-col items-center justify-center p-6 overflow-y-auto">
           <div className="w-full max-w-2xl">

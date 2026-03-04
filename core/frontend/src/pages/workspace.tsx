@@ -8,7 +8,6 @@ import TopBar from "@/components/TopBar";
 import { TAB_STORAGE_KEY, loadPersistedTabs, savePersistedTabs, type PersistedTabState } from "@/lib/tab-persistence";
 import NodeDetailPanel from "@/components/NodeDetailPanel";
 import CredentialsModal, { type Credential, createFreshCredentials, cloneCredentials, allRequiredCredentialsMet, clearCredentialCache } from "@/components/CredentialsModal";
-import HistorySidebar from "@/components/HistorySidebar";
 import { agentsApi } from "@/api/agents";
 import { executionApi } from "@/api/execution";
 import { graphsApi } from "@/api/graphs";
@@ -449,9 +448,6 @@ export default function Workspace() {
   useEffect(() => {
     navigate("/workspace", { replace: true });
   }, []);
-
-  // --- Sidebar refresh key: increment to force HistorySidebar to re-poll ---
-  const [historySidebarRefreshKey, setHistorySidebarRefreshKey] = useState(0);
 
   // Post-mount: if the URL carried a ?session= param (from the home page history
   // sidebar), open it via handleHistoryOpen instead of creating a tab in init state.
@@ -902,7 +898,10 @@ export default function Workspace() {
           [agentType]: sessions.map((s, i) =>
             i === 0 ? {
               ...s,
-              label: sessions.length === 1 ? displayName : `${displayName} #${i + 1}`,
+              // Preserve existing label if it was already set with a #N suffix by
+              // addAgentSession/handleHistoryOpen. Only overwrite with the bare
+              // displayName when the label doesn't match the resolved display name.
+              label: s.label.startsWith(displayName) ? s.label : displayName,
               backendSessionId: session.session_id,
               // Preserve existing historySourceId; set it from coldRestoreId if missing
               historySourceId: s.historySourceId || coldRestoreId || undefined,
@@ -1432,7 +1431,7 @@ export default function Workspace() {
                 queenIsTyping: false,
                 pendingQuestion: prompt || null,
                 pendingOptions: options,
-                pendingQuestionSource: options ? "worker" : null,
+                pendingQuestionSource: "worker",
               });
             }
           }
@@ -1886,6 +1885,41 @@ export default function Workspace() {
       return;
     }
 
+    // If worker is awaiting free-text input (no options / no QuestionWidget),
+    // route the message directly to the worker instead of the queen.
+    if (agentStates[activeWorker]?.awaitingInput && agentStates[activeWorker]?.pendingQuestionSource === "worker" && !agentStates[activeWorker]?.pendingOptions) {
+      const state = agentStates[activeWorker];
+      if (state?.sessionId && state?.ready) {
+        const userMsg: ChatMessage = {
+          id: makeId(), agent: "You", agentColor: "",
+          content: text, timestamp: "", type: "user", thread, createdAt: Date.now(),
+        };
+        setSessionsByAgent(prev => ({
+          ...prev,
+          [activeWorker]: prev[activeWorker].map(s =>
+            s.id === activeSession.id ? { ...s, messages: [...s.messages, userMsg] } : s
+          ),
+        }));
+        updateAgentState(activeWorker, { awaitingInput: false, workerInputMessageId: null, isTyping: true, pendingQuestion: null, pendingOptions: null, pendingQuestionSource: null });
+        executionApi.workerInput(state.sessionId, text).catch((err: unknown) => {
+          const errMsg = err instanceof Error ? err.message : String(err);
+          const errorChatMsg: ChatMessage = {
+            id: makeId(), agent: "System", agentColor: "",
+            content: `Failed to send to worker: ${errMsg}`,
+            timestamp: "", type: "system", thread, createdAt: Date.now(),
+          };
+          setSessionsByAgent(prev => ({
+            ...prev,
+            [activeWorker]: prev[activeWorker].map(s =>
+              s.id === activeSession.id ? { ...s, messages: [...s.messages, errorChatMsg] } : s
+            ),
+          }));
+          updateAgentState(activeWorker, { isTyping: false, isStreaming: false });
+        });
+      }
+      return;
+    }
+
     // If queen has a pending question widget, dismiss it when user types directly
     if (agentStates[activeWorker]?.pendingQuestionSource === "queen") {
       updateAgentState(activeWorker, { pendingQuestion: null, pendingOptions: null, pendingQuestionSource: null });
@@ -2168,9 +2202,6 @@ export default function Workspace() {
   // Async so we can pre-fetch messages before creating the tab — this gives
   // instant visual feedback without waiting for loadAgentForType.
   const handleHistoryOpen = useCallback(async (sessionId: string, agentPath?: string | null, agentName?: string | null) => {
-    // Always refresh the sidebar list so newly-started sessions appear promptly.
-    setHistorySidebarRefreshKey(k => k + 1);
-
     // Already open as a tab — just switch to it.
     for (const [type, sessions] of Object.entries(sessionsByAgent)) {
       for (const s of sessions) {
@@ -2309,15 +2340,6 @@ export default function Workspace() {
 
       {/* Main content area */}
       <div className="flex flex-1 min-h-0">
-
-        {/* ── Persistent history sidebar ──────────────────────────────── */}
-        <HistorySidebar
-          onOpen={handleHistoryOpen}
-          openSessionIds={Object.values(sessionsByAgent).flat().flatMap(s => [s.backendSessionId, s.historySourceId].filter(Boolean)) as string[]}
-          activeSessionId={agentStates[activeWorker]?.sessionId ?? activeSession?.backendSessionId ?? null}
-          activeHistorySourceId={activeSession?.historySourceId ?? null}
-          refreshKey={historySidebarRefreshKey}
-        />
 
         {/* ── Pipeline graph + chat ──────────────────────────────────── */}
         <div className="w-[300px] min-w-[240px] bg-card/30 flex flex-col border-r border-border/30">
