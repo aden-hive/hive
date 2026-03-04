@@ -131,7 +131,9 @@ def _resolve_path(path: str) -> str:
 def _snapshot_git(*args: str) -> str:
     """Run a git command with the snapshot GIT_DIR and PROJECT_ROOT worktree."""
     cmd = ["git", "--git-dir", SNAPSHOT_DIR, "--work-tree", PROJECT_ROOT, *args]
-    result = subprocess.run(cmd, capture_output=True, text=True, timeout=30, stdin=subprocess.DEVNULL)
+    result = subprocess.run(
+        cmd, capture_output=True, text=True, timeout=30, stdin=subprocess.DEVNULL
+    )
     return result.stdout.strip()
 
 
