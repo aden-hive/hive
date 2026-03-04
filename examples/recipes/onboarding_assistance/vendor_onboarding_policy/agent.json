@@ -1,0 +1,14 @@
+{
+  "name": "vendor_onboarding_policy",
+  "description": "Policy-Aware Vendor Onboarding Agent that validates vendor onboarding requests, performs compliance checks, calculates risk scores, and escalates high-risk vendors to human review.",
+  "version": "0.1.0",
+  "entry_point": "agent.py",
+  "category": "onboarding_assistance",
+  "tags": [
+    "vendor",
+    "compliance",
+    "risk",
+    "human-in-the-loop",
+    "business-process"
+  ]
+}

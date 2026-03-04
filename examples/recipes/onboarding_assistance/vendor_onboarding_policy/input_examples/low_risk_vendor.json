@@ -1,0 +1,10 @@
+{
+  "vendor_name": "Acme Software Ltd",
+  "country": "Germany",
+  "service_type": "Software Development",
+  "annual_contract_value": 25000,
+  "documents": [
+    "registration_certificate",
+    "tax_certificate"
+  ]
+}
