@@ -1,6 +1,6 @@
 """Tests for pinecone_tool - Pinecone vector database operations."""
 
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 from fastmcp import FastMCP

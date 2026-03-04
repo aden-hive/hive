@@ -1,6 +1,6 @@
 """Tests for snowflake_tool - Snowflake SQL REST API."""
 
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 from fastmcp import FastMCP

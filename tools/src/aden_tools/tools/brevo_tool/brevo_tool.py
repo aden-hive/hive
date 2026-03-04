@@ -181,7 +181,7 @@ class _BrevoClient:
 
 def register_tools(
     mcp: FastMCP,
-    credentials: "CredentialStoreAdapter | None" = None,
+    credentials: CredentialStoreAdapter | None = None,
 ) -> None:
     """Register Brevo tools with the MCP server."""
 

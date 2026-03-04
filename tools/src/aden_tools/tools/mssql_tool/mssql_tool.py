@@ -162,7 +162,7 @@ def register_tools(
                 for i, column in enumerate(columns):
                     value = row[i]
                     # Convert to JSON-serializable types
-                    if hasattr(value, 'isoformat'):  # datetime objects
+                    if hasattr(value, "isoformat"):  # datetime objects
                         value = value.isoformat()
                     row_dict[column] = value
                 rows.append(row_dict)
@@ -484,7 +484,7 @@ def register_tools(
                         row_dict = {}
                         for i, column in enumerate(columns):
                             value = row[i]
-                            if hasattr(value, 'isoformat'):
+                            if hasattr(value, "isoformat"):
                                 value = value.isoformat()
                             row_dict[column] = value
                         rows.append(row_dict)

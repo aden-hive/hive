@@ -1,6 +1,6 @@
 """Tests for obsidian_tool - Obsidian Local REST API."""
 
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 from fastmcp import FastMCP

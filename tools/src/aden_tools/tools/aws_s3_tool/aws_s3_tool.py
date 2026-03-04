@@ -53,7 +53,7 @@ def _sign_request(
     region: str,
 ) -> dict:
     """Sign an S3 request with AWS SigV4 and return updated headers."""
-    now = datetime.datetime.now(datetime.timezone.utc)
+    now = datetime.datetime.now(datetime.UTC)
     datestamp = now.strftime("%Y%m%d")
     amz_date = now.strftime("%Y%m%dT%H%M%SZ")
 

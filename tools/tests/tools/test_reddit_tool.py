@@ -1,6 +1,6 @@
 """Tests for reddit_tool - Community content monitoring and search."""
 
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 from fastmcp import FastMCP

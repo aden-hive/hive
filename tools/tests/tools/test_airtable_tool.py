@@ -1,6 +1,6 @@
 """Tests for airtable_tool - Record CRUD and base metadata."""
 
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 from fastmcp import FastMCP

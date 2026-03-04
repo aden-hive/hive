@@ -1,8 +1,6 @@
 """Tests for Pushover tool."""
 from unittest.mock import MagicMock, patch
 
-import pytest
-
 from aden_tools.tools.pushover_tool.pushover_tool import (
     _PushoverClient,
     register_tools,

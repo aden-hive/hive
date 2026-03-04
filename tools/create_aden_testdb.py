@@ -14,12 +14,12 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # Database connection settings (from environment variables)
-SERVER = os.getenv('MSSQL_SERVER', r'MONSTER\MSSQLSERVERR')
-USERNAME = os.getenv('MSSQL_USERNAME')
-PASSWORD = os.getenv('MSSQL_PASSWORD')
+SERVER = os.getenv("MSSQL_SERVER", r"MONSTER\MSSQLSERVERR")
+USERNAME = os.getenv("MSSQL_USERNAME")
+PASSWORD = os.getenv("MSSQL_PASSWORD")
 
 # SQL file path
-SQL_FILE = os.path.join(os.path.dirname(__file__), 'init_aden_testdb.sql')
+SQL_FILE = os.path.join(os.path.dirname(__file__), "init_aden_testdb.sql")
 
 
 def execute_sql_file():
@@ -32,7 +32,7 @@ def execute_sql_file():
             print(f"[ERROR] SQL file not found: {SQL_FILE}")
             return False
 
-        with open(SQL_FILE, 'r', encoding='utf-8') as f:
+        with open(SQL_FILE, encoding="utf-8") as f:
             sql_script = f.read()
 
         print("=" * 70)
@@ -44,11 +44,11 @@ def execute_sql_file():
 
         # Connect to master database (to create new database)
         connection_string = (
-            f'DRIVER={{ODBC Driver 17 for SQL Server}};'
-            f'SERVER={SERVER};'
-            f'DATABASE=master;'
-            f'UID={USERNAME};'
-            f'PWD={PASSWORD};'
+            f"DRIVER={{ODBC Driver 17 for SQL Server}};"
+            f"SERVER={SERVER};"
+            f"DATABASE=master;"
+            f"UID={USERNAME};"
+            f"PWD={PASSWORD};"
         )
 
         print("Connecting to SQL Server...")
@@ -62,11 +62,11 @@ def execute_sql_file():
         print("-" * 70)
 
         # Split by GO statements and execute each batch
-        batches = sql_script.split('\nGO\n')
+        batches = sql_script.split("\nGO\n")
 
         for i, batch in enumerate(batches, 1):
             batch = batch.strip()
-            if batch and not batch.startswith('--'):
+            if batch and not batch.startswith("--"):
                 try:
                     cursor.execute(batch)
                     # Print any messages from the server

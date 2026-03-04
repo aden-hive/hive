@@ -1,6 +1,6 @@
 """Tests for twitter_tool - Tweet search and user lookup."""
 
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 from fastmcp import FastMCP

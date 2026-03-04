@@ -3,41 +3,42 @@ Test MSSQL Schema Discovery
 Verifies that the mssql_get_schema functionality works correctly.
 """
 
+import io
 import os
 import sys
-import io
-from dotenv import load_dotenv
+
 import pyodbc
+from dotenv import load_dotenv
 
 # Force UTF-8 encoding for console output
-sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
+sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8")
 
 # Load environment variables from .env file
 load_dotenv()
 
 # Database connection settings
-SERVER = os.getenv('MSSQL_SERVER', r'MONSTER\MSSQLSERVERR')
-DATABASE = os.getenv('MSSQL_DATABASE', 'AdenTestDB')
-USERNAME = os.getenv('MSSQL_USERNAME')
-PASSWORD = os.getenv('MSSQL_PASSWORD')
+SERVER = os.getenv("MSSQL_SERVER", r"MONSTER\MSSQLSERVERR")
+DATABASE = os.getenv("MSSQL_DATABASE", "AdenTestDB")
+USERNAME = os.getenv("MSSQL_USERNAME")
+PASSWORD = os.getenv("MSSQL_PASSWORD")
 
 
 def get_connection():
     """Create and return a database connection."""
     if USERNAME and PASSWORD:
         connection_string = (
-            f'DRIVER={{ODBC Driver 17 for SQL Server}};'
-            f'SERVER={SERVER};'
-            f'DATABASE={DATABASE};'
-            f'UID={USERNAME};'
-            f'PWD={PASSWORD};'
+            f"DRIVER={{ODBC Driver 17 for SQL Server}};"
+            f"SERVER={SERVER};"
+            f"DATABASE={DATABASE};"
+            f"UID={USERNAME};"
+            f"PWD={PASSWORD};"
         )
     else:
         connection_string = (
-            f'DRIVER={{ODBC Driver 17 for SQL Server}};'
-            f'SERVER={SERVER};'
-            f'DATABASE={DATABASE};'
-            f'Trusted_Connection=yes;'
+            f"DRIVER={{ODBC Driver 17 for SQL Server}};"
+            f"SERVER={SERVER};"
+            f"DATABASE={DATABASE};"
+            f"Trusted_Connection=yes;"
         )
 
     return pyodbc.connect(connection_string, timeout=10)

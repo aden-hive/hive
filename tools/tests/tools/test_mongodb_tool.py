@@ -1,6 +1,6 @@
 """Tests for mongodb_tool - Document CRUD and aggregation."""
 
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 from fastmcp import FastMCP

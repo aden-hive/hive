@@ -1,6 +1,6 @@
 """Tests for confluence_tool - Confluence wiki & knowledge management."""
 
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 from fastmcp import FastMCP

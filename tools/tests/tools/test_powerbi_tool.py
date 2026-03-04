@@ -1,6 +1,6 @@
 """Tests for powerbi_tool - Power BI workspace, dataset, and report management."""
 
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 from fastmcp import FastMCP

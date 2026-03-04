@@ -50,7 +50,7 @@ def _api_call(
     """Make a signed POST request to the Redshift Data API."""
     host = f"{SERVICE}.{region}.amazonaws.com"
     body = json.dumps(payload).encode("utf-8")
-    now = datetime.datetime.now(datetime.timezone.utc)
+    now = datetime.datetime.now(datetime.UTC)
     datestamp = now.strftime("%Y%m%d")
     amz_date = now.strftime("%Y%m%dT%H%M%SZ")
     payload_hash = hashlib.sha256(body).hexdigest()

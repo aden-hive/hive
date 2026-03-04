@@ -1,6 +1,6 @@
 """Tests for notion_tool - Pages, databases, and search."""
 
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 from fastmcp import FastMCP

@@ -6,9 +6,9 @@ This script grants the necessary permissions to the 'sa' user to access AdenTE t
 
 import pyodbc
 
-SERVER = r'MONSTER\MSSQLSERVERR'
-USERNAME = 'sa'
-PASSWORD = '622622aA.'
+SERVER = r"MONSTER\MSSQLSERVERR"
+USERNAME = "sa"
+PASSWORD = "622622aA."
 
 
 def grant_permissions():
@@ -18,12 +18,12 @@ def grant_permissions():
     try:
         # Connect to AdenTestDB
         connection_string = (
-            f'DRIVER={{ODBC Driver 17 for SQL Server}};'
-            f'SERVER={SERVER};'
-            f'DATABASE=AdenTestDB;'
-            f'UID={USERNAME};'
-            f'PWD={PASSWORD};'
-            f'TrustServerCertificate=yes;'
+            f"DRIVER={{ODBC Driver 17 for SQL Server}};"
+            f"SERVER={SERVER};"
+            f"DATABASE=AdenTestDB;"
+            f"UID={USERNAME};"
+            f"PWD={PASSWORD};"
+            f"TrustServerCertificate=yes;"
         )
 
         print("=" * 70)
@@ -59,16 +59,16 @@ def grant_permissions():
 
         return True
 
-    except pyodbc.Error as e:
+    except pyodbc.Error:
         # If we can't connect, try connecting to master and creating user
         try:
             connection_string = (
-                f'DRIVER={{ODBC Driver 17 for SQL Server}};'
-                f'SERVER={SERVER};'
-                f'DATABASE=master;'
-                f'UID={USERNAME};'
-                f'PWD={PASSWORD};'
-                f'TrustServerCertificate=yes;'
+                f"DRIVER={{ODBC Driver 17 for SQL Server}};"
+                f"SERVER={SERVER};"
+                f"DATABASE=master;"
+                f"UID={USERNAME};"
+                f"PWD={PASSWORD};"
+                f"TrustServerCertificate=yes;"
             )
 
             print("Attempting to grant permissions via master database...")

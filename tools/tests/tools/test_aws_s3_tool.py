@@ -1,6 +1,6 @@
 """Tests for aws_s3_tool - S3 object storage operations."""
 
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 from fastmcp import FastMCP

@@ -1,6 +1,6 @@
 """Tests for sap_tool - SAP S/4HANA Cloud read-only procurement data."""
 
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 from fastmcp import FastMCP

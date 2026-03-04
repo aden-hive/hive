@@ -1,6 +1,6 @@
 """Tests for azure_sql_tool - Azure SQL Database management."""
 
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 from fastmcp import FastMCP

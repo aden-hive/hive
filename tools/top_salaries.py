@@ -2,23 +2,24 @@
 Query to find top 3 highest paid employees
 """
 
-import os
 import io
+import os
 import sys
+
 import pyodbc
 from dotenv import load_dotenv
 
 # Force UTF-8 encoding for console output
-sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
+sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8")
 
 # Load environment variables
 load_dotenv()
 
 # Database connection settings
-SERVER = os.getenv('MSSQL_SERVER', r'MONSTER\MSSQLSERVERR')
-DATABASE = os.getenv('MSSQL_DATABASE', 'AdenTestDB')
-USERNAME = os.getenv('MSSQL_USERNAME')
-PASSWORD = os.getenv('MSSQL_PASSWORD')
+SERVER = os.getenv("MSSQL_SERVER", r"MONSTER\MSSQLSERVERR")
+DATABASE = os.getenv("MSSQL_DATABASE", "AdenTestDB")
+USERNAME = os.getenv("MSSQL_USERNAME")
+PASSWORD = os.getenv("MSSQL_PASSWORD")
 
 def main():
     connection = None
@@ -27,18 +28,18 @@ def main():
         # Connect to database
         if USERNAME and PASSWORD:
             connection_string = (
-                f'DRIVER={{ODBC Driver 17 for SQL Server}};'
-                f'SERVER={SERVER};'
-                f'DATABASE={DATABASE};'
-                f'UID={USERNAME};'
-                f'PWD={PASSWORD};'
+                f"DRIVER={{ODBC Driver 17 for SQL Server}};"
+                f"SERVER={SERVER};"
+                f"DATABASE={DATABASE};"
+                f"UID={USERNAME};"
+                f"PWD={PASSWORD};"
             )
         else:
             connection_string = (
-                f'DRIVER={{ODBC Driver 17 for SQL Server}};'
-                f'SERVER={SERVER};'
-                f'DATABASE={DATABASE};'
-                f'Trusted_Connection=yes;'
+                f"DRIVER={{ODBC Driver 17 for SQL Server}};"
+                f"SERVER={SERVER};"
+                f"DATABASE={DATABASE};"
+                f"Trusted_Connection=yes;"
             )
 
         connection = pyodbc.connect(connection_string)

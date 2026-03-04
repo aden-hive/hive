@@ -1,6 +1,6 @@
 """Tests for gitlab_tool - Projects, issues, and merge requests."""
 
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 from fastmcp import FastMCP

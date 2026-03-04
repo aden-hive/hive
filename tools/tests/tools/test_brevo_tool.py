@@ -390,7 +390,7 @@ class TestBrevoGetContact:
         with patch("httpx.get") as mock_get:
             mock_response = MagicMock()
             mock_response.status_code = 200
-            mock_response.content = b'{}'
+            mock_response.content = b"{}"
             mock_response.json.return_value = {
                 "id": 42,
                 "email": "user@example.com",
@@ -550,7 +550,7 @@ class TestBrevoGetEmailStats:
         with patch("httpx.get") as mock_get:
             mock_response = MagicMock()
             mock_response.status_code = 200
-            mock_response.content = b'{}'
+            mock_response.content = b"{}"
             mock_response.json.return_value = {
                 "messageId": "<abc123@smtp-relay.brevo.com>",
                 "email": "user@example.com",

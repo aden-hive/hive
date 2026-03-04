@@ -1,6 +1,6 @@
 """Tests for zendesk_tool - Ticket management and search."""
 
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 from fastmcp import FastMCP

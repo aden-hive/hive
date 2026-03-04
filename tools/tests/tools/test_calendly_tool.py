@@ -1,6 +1,6 @@
 """Tests for calendly_tool - Scheduling events and invitees."""
 
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 from fastmcp import FastMCP

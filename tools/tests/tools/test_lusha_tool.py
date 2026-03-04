@@ -1,6 +1,6 @@
 """Tests for lusha_tool - B2B contact and company enrichment."""
 
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 from fastmcp import FastMCP

@@ -31,13 +31,13 @@ from aden_tools.tools import register_all_tools
 
 from .conftest import (
     CREDENTIAL_STORE_META_MODULES,
-    UNREGISTERED_COMMUNITY_MODULES,
     CREDENTIAL_TOOL_MODULE_IDS,
     CREDENTIAL_TOOL_MODULES,
     KNOWN_PHANTOM_TOOLS,
     MODULE_TO_TOOLS,
     TOOL_MODULE_IDS,
     TOOL_MODULES,
+    UNREGISTERED_COMMUNITY_MODULES,
 )
 
 # ---------------------------------------------------------------------------

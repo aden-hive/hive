@@ -1,6 +1,6 @@
 """Tests for google_sheets_tool - Spreadsheet data access."""
 
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 from fastmcp import FastMCP

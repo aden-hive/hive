@@ -1,6 +1,6 @@
 """Tests for kafka_tool - Apache Kafka via Confluent REST Proxy."""
 
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 from fastmcp import FastMCP

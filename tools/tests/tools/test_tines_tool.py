@@ -1,6 +1,6 @@
 """Tests for tines_tool - Security automation stories and actions."""
 
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 from fastmcp import FastMCP

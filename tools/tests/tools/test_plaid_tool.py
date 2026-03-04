@@ -1,6 +1,6 @@
 """Tests for plaid_tool - Plaid banking & financial data operations."""
 
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 from fastmcp import FastMCP

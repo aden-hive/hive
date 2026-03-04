@@ -2,24 +2,24 @@
 Query Average Salary by Department
 """
 
-import os
 import io
+import os
 import sys
 
 import pyodbc
 from dotenv import load_dotenv
 
 # Force UTF-8 encoding for console output
-sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
+sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8")
 
 # Load environment variables from .env file
 load_dotenv()
 
 # Database connection settings (from environment variables)
-SERVER = os.getenv('MSSQL_SERVER', r'MONSTER\\MSSQLSERVERR')
-DATABASE = os.getenv('MSSQL_DATABASE', 'AdenTestDB')
-USERNAME = os.getenv('MSSQL_USERNAME')
-PASSWORD = os.getenv('MSSQL_PASSWORD')
+SERVER = os.getenv("MSSQL_SERVER", r"MONSTER\\MSSQLSERVERR")
+DATABASE = os.getenv("MSSQL_DATABASE", "AdenTestDB")
+USERNAME = os.getenv("MSSQL_USERNAME")
+PASSWORD = os.getenv("MSSQL_PASSWORD")
 
 
 def main():
@@ -31,19 +31,19 @@ def main():
         if USERNAME and PASSWORD:
             # SQL Server Authentication
             connection_string = (
-                f'DRIVER={{ODBC Driver 17 for SQL Server}};'
-                f'SERVER={SERVER};'
-                f'DATABASE={DATABASE};'
-                f'UID={USERNAME};'
-                f'PWD={PASSWORD};'
+                f"DRIVER={{ODBC Driver 17 for SQL Server}};"
+                f"SERVER={SERVER};"
+                f"DATABASE={DATABASE};"
+                f"UID={USERNAME};"
+                f"PWD={PASSWORD};"
             )
         else:
             # Windows Authentication
             connection_string = (
-                f'DRIVER={{ODBC Driver 17 for SQL Server}};'
-                f'SERVER={SERVER};'
-                f'DATABASE={DATABASE};'
-                f'Trusted_Connection=yes;'
+                f"DRIVER={{ODBC Driver 17 for SQL Server}};"
+                f"SERVER={SERVER};"
+                f"DATABASE={DATABASE};"
+                f"Trusted_Connection=yes;"
             )
 
         connection = pyodbc.connect(connection_string)
@@ -95,7 +95,7 @@ def main():
 
         print("-" * 80)
         print()
-        print(f"📊 Summary:")
+        print("📊 Summary:")
         print(f"   • Total departments with employees: {len(results)}")
         print(f"   • Highest average salary: ${highest_avg:,.2f} ({results[0][0]})")
         print(f"   • Lowest average salary: ${results[-1][1]:,.2f} ({results[-1][0]})")

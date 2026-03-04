@@ -1,6 +1,6 @@
 """Tests for twilio_tool - SMS and WhatsApp messaging."""
 
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 from fastmcp import FastMCP

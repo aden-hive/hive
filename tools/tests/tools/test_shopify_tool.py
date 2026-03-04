@@ -1,6 +1,6 @@
 """Tests for shopify_tool - Shopify Admin REST API."""
 
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 from fastmcp import FastMCP

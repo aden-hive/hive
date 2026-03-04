@@ -1,6 +1,5 @@
 """Tests for yahoo_finance_tool - Stock quotes, historical prices, and financial data."""
 
-import sys
 from types import ModuleType
 from unittest.mock import MagicMock, patch
 

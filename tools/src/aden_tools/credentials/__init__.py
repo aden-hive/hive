@@ -57,46 +57,68 @@ To add a new credential:
 
 from .airtable import AIRTABLE_CREDENTIALS
 from .apify import APIFY_CREDENTIALS
-from .aws_s3 import AWS_S3_CREDENTIALS
-from .asana import ASANA_CREDENTIALS
 from .apollo import APOLLO_CREDENTIALS
+from .asana import ASANA_CREDENTIALS
 from .attio import ATTIO_CREDENTIALS
+from .aws_s3 import AWS_S3_CREDENTIALS
+from .azure_sql import AZURE_SQL_CREDENTIALS
 from .base import CredentialError, CredentialSpec
 from .bigquery import BIGQUERY_CREDENTIALS
 from .brevo import BREVO_CREDENTIALS
 from .browser import get_aden_auth_url, get_aden_setup_url, open_browser
 from .calcom import CALCOM_CREDENTIALS
 from .calendly import CALENDLY_CREDENTIALS
+from .cloudinary import CLOUDINARY_CREDENTIALS
 from .confluence import CONFLUENCE_CREDENTIALS
 from .databricks import DATABRICKS_CREDENTIALS
 from .discord import DISCORD_CREDENTIALS
 from .docker_hub import DOCKER_HUB_CREDENTIALS
-from .pipedrive import PIPEDRIVE_CREDENTIALS
 from .email import EMAIL_CREDENTIALS
 from .gcp_vision import GCP_VISION_CREDENTIALS
 from .github import GITHUB_CREDENTIALS
+from .gitlab import GITLAB_CREDENTIALS
 from .google_analytics import GOOGLE_ANALYTICS_CREDENTIALS
 from .google_calendar import GOOGLE_CALENDAR_CREDENTIALS
 from .google_docs import GOOGLE_DOCS_CREDENTIALS
 from .google_maps import GOOGLE_MAPS_CREDENTIALS
 from .google_search_console import GOOGLE_SEARCH_CONSOLE_CREDENTIALS
+from .google_sheets import GOOGLE_SHEETS_CREDENTIALS
+from .greenhouse import GREENHOUSE_CREDENTIALS
 from .health_check import (
     BaseHttpHealthChecker,
     HealthCheckResult,
     check_credential_health,
     validate_integration_wiring,
 )
-from .huggingface import HUGGINGFACE_CREDENTIALS
 from .hubspot import HUBSPOT_CREDENTIALS
+from .huggingface import HUGGINGFACE_CREDENTIALS
 from .intercom import INTERCOM_CREDENTIALS
+from .jira import JIRA_CREDENTIALS
+from .kafka import KAFKA_CREDENTIALS
+from .langfuse import LANGFUSE_CREDENTIALS
 from .linear import LINEAR_CREDENTIALS
-from .mongodb import MONGODB_CREDENTIALS
 from .llm import LLM_CREDENTIALS
+from .lusha import LUSHA_CREDENTIALS
+from .microsoft_graph import MICROSOFT_GRAPH_CREDENTIALS
+from .mongodb import MONGODB_CREDENTIALS
+from .n8n import N8N_CREDENTIALS
 from .news import NEWS_CREDENTIALS
+from .notion import NOTION_CREDENTIALS
+from .obsidian import OBSIDIAN_CREDENTIALS
 from .pagerduty import PAGERDUTY_CREDENTIALS
+from .pinecone import PINECONE_CREDENTIALS
+from .pipedrive import PIPEDRIVE_CREDENTIALS
+from .plaid import PLAID_CREDENTIALS
 from .postgres import POSTGRES_CREDENTIALS
+from .powerbi import POWERBI_CREDENTIALS
+from .pushover import PUSHOVER_CREDENTIALS
 from .quickbooks import QUICKBOOKS_CREDENTIALS
 from .razorpay import RAZORPAY_CREDENTIALS
+from .reddit import REDDIT_CREDENTIALS
+from .redis import REDIS_CREDENTIALS
+from .redshift import REDSHIFT_CREDENTIALS
+from .salesforce import SALESFORCE_CREDENTIALS
+from .sap import SAP_CREDENTIALS
 from .search import SEARCH_CREDENTIALS
 from .serpapi import SERPAPI_CREDENTIALS
 from .shell_config import (
@@ -105,45 +127,23 @@ from .shell_config import (
     get_shell_config_path,
     get_shell_source_command,
 )
+from .shopify import SHOPIFY_CREDENTIALS
 from .slack import SLACK_CREDENTIALS
+from .snowflake import SNOWFLAKE_CREDENTIALS
 from .store_adapter import CredentialStoreAdapter
 from .stripe import STRIPE_CREDENTIALS
-from .microsoft_graph import MICROSOFT_GRAPH_CREDENTIALS
-from .pushover import PUSHOVER_CREDENTIALS
-from .redis import REDIS_CREDENTIALS
 from .supabase import SUPABASE_CREDENTIALS
 from .telegram import TELEGRAM_CREDENTIALS
+from .terraform import TERRAFORM_CREDENTIALS
 from .tines import TINES_CREDENTIALS
+from .trello import TRELLO_CREDENTIALS
+from .twilio import TWILIO_CREDENTIALS
 from .twitter import TWITTER_CREDENTIALS
 from .vercel import VERCEL_CREDENTIALS
 from .youtube import YOUTUBE_CREDENTIALS
-from .pinecone import PINECONE_CREDENTIALS
-from .plaid import PLAID_CREDENTIALS
-from .trello import TRELLO_CREDENTIALS
-from .cloudinary import CLOUDINARY_CREDENTIALS
-from .gitlab import GITLAB_CREDENTIALS
-from .google_sheets import GOOGLE_SHEETS_CREDENTIALS
-from .greenhouse import GREENHOUSE_CREDENTIALS
-from .jira import JIRA_CREDENTIALS
-from .notion import NOTION_CREDENTIALS
-from .reddit import REDDIT_CREDENTIALS
-from .twilio import TWILIO_CREDENTIALS
 from .zendesk import ZENDESK_CREDENTIALS
 from .zoho_crm import ZOHO_CRM_CREDENTIALS
-from .terraform import TERRAFORM_CREDENTIALS
-from .lusha import LUSHA_CREDENTIALS
-from .powerbi import POWERBI_CREDENTIALS
-from .snowflake import SNOWFLAKE_CREDENTIALS
-from .azure_sql import AZURE_SQL_CREDENTIALS
-from .kafka import KAFKA_CREDENTIALS
-from .redshift import REDSHIFT_CREDENTIALS
-from .sap import SAP_CREDENTIALS
-from .salesforce import SALESFORCE_CREDENTIALS
-from .shopify import SHOPIFY_CREDENTIALS
 from .zoom import ZOOM_CREDENTIALS
-from .n8n import N8N_CREDENTIALS
-from .langfuse import LANGFUSE_CREDENTIALS
-from .obsidian import OBSIDIAN_CREDENTIALS
 
 # Merged registry of all credentials
 CREDENTIAL_SPECS = {

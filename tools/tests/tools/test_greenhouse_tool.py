@@ -1,6 +1,6 @@
 """Tests for greenhouse_tool - ATS & recruiting workflow."""
 
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 from fastmcp import FastMCP

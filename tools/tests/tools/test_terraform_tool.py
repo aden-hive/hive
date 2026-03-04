@@ -1,6 +1,6 @@
 """Tests for terraform_tool - Terraform Cloud workspace and run management."""
 
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 from fastmcp import FastMCP

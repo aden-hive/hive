@@ -1,6 +1,6 @@
 """Tests for n8n_tool - n8n workflow automation API."""
 
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 from fastmcp import FastMCP
