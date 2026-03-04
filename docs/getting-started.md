@@ -87,6 +87,8 @@ uv run python core/examples/manual_agent.py
 
 This demonstrates the core runtime loop using pure Python functions, skipping the complexity of LLM setup and file-based configuration.
 
+For more examples (including MCP integration), see [core/examples/README.md](../core/examples/README.md).
+
 ## Project Structure
 
 ```
