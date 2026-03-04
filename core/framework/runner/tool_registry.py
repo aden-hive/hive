@@ -243,12 +243,10 @@ class ToolRegistry:
         def _wrap_result(tool_use_id: str, result: Any) -> ToolResult:
             if isinstance(result, ToolResult):
                 return result
-            is_error = isinstance(result, dict) and "error" in result
-            content = json.dumps(result) if not isinstance(result, str) else result
             return ToolResult(
                 tool_use_id=tool_use_id,
-                content=content,
-                is_error=is_error,
+                content=json.dumps(result) if not isinstance(result, str) else result,
+                is_error=False,
             )
 
         def executor(tool_use: ToolUse) -> ToolResult:
@@ -441,7 +439,7 @@ class ToolRegistry:
         self._mcp_config_path = Path(config_path)
 
         try:
-            with open(config_path, encoding="utf-8") as f:
+            with open(config_path) as f:
                 config = json.load(f)
         except Exception as e:
             logger.warning(f"Failed to load MCP config from {config_path}: {e}")
@@ -578,8 +576,7 @@ class ToolRegistry:
             return count
 
         except Exception as e:
-            name = server_config.get("name", "unknown")
-            logger.error(f"Failed to register MCP server '{name}': {e}")
+            logger.error(f"Failed to register MCP server: {e}")
             if "Connection closed" in str(e) and os.name == "nt":
                 logger.debug(
                     "On Windows, check that the MCP subprocess starts (e.g. uv in PATH, "

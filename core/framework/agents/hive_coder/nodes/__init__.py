@@ -602,31 +602,54 @@ start_agent("{name}")           # triggers default entry point
 
 _queen_tools_docs = """
 
-## Worker Lifecycle
-- start_worker(task) — Start the worker with a task description. The \
-worker runs autonomously until it finishes or asks the user a question.
-- stop_worker() — Cancel the worker's current execution.
-- get_worker_status() — Check if the worker is idle, running, or waiting \
-for user input. Returns execution details.
-- inject_worker_message(content) — Send a message to the running worker. \
-Use this to relay user instructions or concerns.
+## Operating Modes
 
-## Monitoring
-- get_worker_health_summary() — Read the latest health data from the judge.
-- notify_operator(ticket_id, analysis, urgency) — Alert the user about a \
-critical issue. Use sparingly.
+You operate in one of three modes. Your available tools change based on the \
+mode. The system notifies you when a mode change occurs.
 
-## Agent Loading
-- load_built_agent(agent_path) — Load a newly built agent as the worker in \
-this session. If a worker is already loaded, it is automatically unloaded \
-first. **Call in a separate turn** after write_file, run_command, and \
-validate_agent_tools have finished — never in the same batch, or files may \
-not exist yet.
+### BUILDING mode (default)
+You have full coding tools for building and modifying agents:
+- File I/O: read_file, write_file, edit_file, list_directory, search_files, \
+run_command, undo_changes
+- Meta-agent: list_agent_tools, validate_agent_tools, \
+list_agents, list_agent_sessions, get_agent_session_state, get_agent_session_memory, \
+list_agent_checkpoints, get_agent_checkpoint, run_agent_tests
+- load_built_agent(agent_path) — Load the agent and switch to STAGING mode
+- list_credentials(credential_id?) — List authorized credentials
 
-## Credentials
-- list_credentials(credential_id?) — List all authorized credentials in the \
-local store. Returns IDs, aliases, status, and identity metadata (never \
-secrets). Optionally filter by credential_id.
+When you finish building an agent, call load_built_agent(path) to stage it.
+
+### STAGING mode (agent loaded, not yet running)
+The agent is loaded and ready to run. You can inspect it and launch it:
+- Read-only: read_file, list_directory, search_files, run_command
+- list_credentials(credential_id?) — Verify credentials are configured
+- get_worker_status() — Check the loaded worker
+- run_agent_with_input(task) — Start the worker and switch to RUNNING mode
+- stop_worker_and_edit() — Go back to BUILDING mode
+
+In STAGING mode you do NOT have write tools. If you need to modify the agent, \
+call stop_worker_and_edit() to go back to BUILDING mode.
+
+### RUNNING mode (worker is executing)
+The worker is running. You have monitoring and lifecycle tools:
+- Read-only: read_file, list_directory, search_files, run_command
+- get_worker_status() — Check worker status (idle, running, waiting)
+- inject_worker_message(content) — Send a message to the running worker
+- get_worker_health_summary() — Read the latest health data
+- notify_operator(ticket_id, analysis, urgency) — Alert the user (use sparingly)
+- stop_worker() — Stop the worker and return to STAGING mode, then ask the user what to do next
+- stop_worker_and_edit() — Stop the worker and switch back to BUILDING mode
+
+In RUNNING mode you do NOT have write tools or agent construction tools. \
+If you need to modify the agent, call stop_worker_and_edit() to switch back \
+to BUILDING mode. To stop the worker and ask the user what to do next, call \
+stop_worker() to return to STAGING mode.
+
+### Mode transitions
+- load_built_agent(path) → switches to STAGING mode
+- run_agent_with_input(task) → starts worker, switches to RUNNING mode
+- stop_worker() → stops worker, switches to STAGING mode (ask user: re-run or edit?)
+- stop_worker_and_edit() → stops worker (if running), switches to BUILDING mode
 """
 
 _queen_behavior = """
@@ -762,14 +785,16 @@ building something new.
 When the user asks to change, modify, or update the loaded worker \
 (e.g., "change the report node", "add a node", "delete node X"):
 
-1. Use the **Path** from the Worker Profile to locate the agent files.
-2. Read the relevant files (nodes/__init__.py, agent.py, etc.).
-3. Make the requested changes using edit_file / write_file.
-4. Run validation (default_agent.validate(), AgentRunner.load(), \
+1. Call stop_worker_and_edit() — this stops the worker and gives you \
+coding tools (switches to BUILDING mode).
+2. Use the **Path** from the Worker Profile to locate the agent files.
+3. Read the relevant files (nodes/__init__.py, agent.py, etc.).
+4. Make the requested changes using edit_file / write_file.
+5. Run validation (default_agent.validate(), AgentRunner.load(), \
 validate_agent_tools()).
-5. **Reload the modified worker**: call load_built_agent("{path}") \
-so the changes take effect immediately. If a worker is already loaded, \
-stop it first, then reload.
+6. **Reload the modified worker**: call load_built_agent("{path}") \
+so the changes take effect immediately (switches to STAGING mode). \
+Then call run_agent_with_input(task) to restart execution.
 
 Do NOT skip step 6 — without reloading, the user will still be \
 interacting with the old version.

@@ -368,10 +368,6 @@ class MCPClient:
 
         if self.config.transport == "stdio":
             with self._stdio_call_lock:
-                if not self._session and self._connected:
-                    self._connected = False
-                if not self._connected:
-                    self.connect()
                 return self._run_async(self._call_tool_stdio_async(tool_name, arguments))
         else:
             return self._call_tool_http(tool_name, arguments)

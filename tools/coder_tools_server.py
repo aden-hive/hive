@@ -310,7 +310,7 @@ def undo_changes(path: str = "") -> str:
         return f"Error restoring files: {e}"
 
 
-# ── Meta-agent: Tool discovery ────────────────────────────────────────────
+# ── Meta-agent: Agent tool catalog ────────────────────────────────────────
 
 
 @mcp.tool()
@@ -321,111 +321,9 @@ def list_agent_tools(
 ) -> str:
     """Discover tools available for agent building, grouped by category.
 
-    Connects to each MCP server, lists all tools with full schemas, then
-    disconnects. Use this to see what tools are available before designing
-    an agent — never rely on static documentation.
-
-    Args:
-        server_config_path: Path to mcp_servers.json (relative to project root).
-            Default: the hive-tools server config at tools/mcp_servers.json.
-            Can also point to any agent's mcp_servers.json.
-
-    Returns:
-        JSON listing of all tools with names, descriptions, and input schemas
-    """
-    # Resolve config path
-    if not server_config_path:
-        # Default: look for the main hive-tools mcp_servers.json
-        candidates = [
-            os.path.join(PROJECT_ROOT, "tools", "mcp_servers.json"),
-            os.path.join(PROJECT_ROOT, "mcp_servers.json"),
-        ]
-        config_path = None
-        for c in candidates:
-            if os.path.isfile(c):
-                config_path = c
-                break
-        if not config_path:
-            return "Error: No mcp_servers.json found. Provide server_config_path."
-    else:
-        config_path = _resolve_path(server_config_path)
-        if not os.path.isfile(config_path):
-            return f"Error: Config file not found: {server_config_path}"
-
-    try:
-        with open(config_path, encoding="utf-8") as f:
-            servers_config = json.load(f)
-    except (json.JSONDecodeError, OSError) as e:
-        return f"Error reading config: {e}"
-
-    # Import MCPClient (deferred — needs PYTHONPATH to include core/)
-    try:
-        from pathlib import Path
-
-        from framework.runner.mcp_client import MCPClient, MCPServerConfig
-        from framework.runner.tool_registry import ToolRegistry
-    except ImportError:
-        return "Error: Cannot import MCPClient. Ensure PYTHONPATH includes the core/ directory."
-
-    all_tools = []
-    errors = []
-    config_dir = Path(config_path).parent
-
-    for server_name, server_conf in servers_config.items():
-        # Use shared resolution (Windows cwd/script path handling)
-        resolved = ToolRegistry.resolve_mcp_stdio_config(
-            {"name": server_name, **server_conf}, config_dir
-        )
-        try:
-            config = MCPServerConfig(
-                name=server_name,
-                transport=resolved.get("transport", "stdio"),
-                command=resolved.get("command"),
-                args=resolved.get("args", []),
-                env=resolved.get("env", {}),
-                cwd=resolved.get("cwd"),
-                url=resolved.get("url"),
-                headers=resolved.get("headers", {}),
-            )
-            client = MCPClient(config)
-            client.connect()
-            tools = client.list_tools()
-
-            for tool in tools:
-                all_tools.append(
-                    {
-                        "server": server_name,
-                        "name": tool.name,
-                        "description": tool.description,
-                        "input_schema": tool.input_schema,
-                    }
-                )
-
-            client.disconnect()
-        except Exception as e:
-            errors.append({"server": server_name, "error": str(e)})
-
-    result = {
-        "tools": all_tools,
-        "total": len(all_tools),
-        "servers_queried": len(servers_config),
-    }
-    if errors:
-        result["errors"] = errors
-
-    return json.dumps(result, indent=2, default=str)
-
-
-# ── Meta-agent: Agent tool catalog ────────────────────────────────────────
-
-
-@mcp.tool()
-def list_agent_tools(server_config_path: str = "") -> str:
-    """List all tools available for agent building from the hive-tools MCP server.
-
-    Returns tool names grouped by category. Use this BEFORE designing an agent
-    to know exactly which tools exist. Only use tools from this list in node
-    definitions — never guess or fabricate tool names.
+    Connects to each MCP server, lists tools, then disconnects. Use this
+    BEFORE designing an agent to know exactly which tools exist. Only use
+    tools from this list in node definitions — never guess or fabricate.
 
     Args:
         server_config_path: Path to mcp_servers.json. Default: tools/mcp_servers.json
