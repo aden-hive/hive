@@ -177,7 +177,7 @@ class TestSpecToolsMatchRegistered:
     def registered_tools(self) -> set[str]:
         """Register all tools and return the set of registered tool names."""
         mcp = FastMCP("spec-check")
-        register_all_tools(mcp, credentials=None)
+        register_all_tools(mcp, credentials=None, include_unverified=True)
         return set(mcp._tool_manager._tools.keys())
 
     @pytest.mark.parametrize("spec_name", list(CREDENTIAL_SPECS.keys()))
@@ -240,7 +240,7 @@ class TestToolNamesInReturnList:
     def all_tools_return(self) -> list[str]:
         """Call register_all_tools and return the tool name list."""
         mcp = FastMCP("return-check")
-        return register_all_tools(mcp, credentials=None)
+        return register_all_tools(mcp, credentials=None, include_unverified=True)
 
     @pytest.mark.parametrize("spec_name", list(CREDENTIAL_SPECS.keys()))
     def test_spec_tools_in_return_list(self, spec_name: str, all_tools_return: list[str]):
