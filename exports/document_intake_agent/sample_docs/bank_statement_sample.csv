@@ -1,0 +1,12 @@
+Date,Description,Amount,Balance,Type
+2024-03-01,Opening Balance,0.00,5425.33,BALANCE
+2024-03-02,Direct Deposit - Salary,3500.00,8925.33,CREDIT
+2024-03-02,Starbucks #1234,-12.45,8912.88,DEBIT
+2024-03-03,Amazon Purchase,-89.99,8822.89,DEBIT
+2024-03-03,Venmo Transfer - John Smith,-50.00,8772.89,DEBIT
+2024-03-04,Gas Station,-45.23,8727.66,DEBIT
+2024-03-04,Grocery Store,-156.78,8570.88,DEBIT
+2024-03-05,Interest Payment,2.15,8573.03,CREDIT
+2024-03-05,Netflix Subscription,-15.99,8557.04,DEBIT
+2024-03-06,ATM Withdrawal,-100.00,8457.04,DEBIT
+2024-03-06,ATM Fee,-3.00,8454.04,DEBIT

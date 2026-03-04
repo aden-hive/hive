@@ -1,0 +1,27 @@
+Starbucks Coffee Company
+Store #1234
+555 Main Street
+San Francisco, CA 94102
+
+**RECEIPT**
+
+Transaction: 12345678
+Date: March 4, 2024
+Time: 08:30 AM
+Cashier: Sarah M.
+
+Items Purchased:
+1x Pike Place Roast - Grande      $2.45
+1x Blueberry Muffin              $2.95
+1x Oat Milk Latte - Venti        $5.25
+
+Subtotal:                        $10.65
+Tax (8.875%):                    $0.95
+Total:                           $11.60
+
+Payment Method: Credit Card ****1234
+Tip:                             $1.50
+Final Amount:                    $13.10
+
+Thank you for visiting Starbucks!
+Customer Copy

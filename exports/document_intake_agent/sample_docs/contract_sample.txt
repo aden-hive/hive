@@ -1,0 +1,49 @@
+SOFTWARE DEVELOPMENT AGREEMENT
+
+This Software Development Agreement ("Agreement") is entered into on March 1, 2024 ("Effective Date") between:
+
+DEVELOPER:
+ByteCraft Solutions LLC
+789 Tech Boulevard
+Austin, TX 78701
+
+CLIENT:
+DataFlow Corporation
+321 Enterprise Drive
+New York, NY 10001
+
+1. SCOPE OF WORK
+Developer agrees to create a custom inventory management system according to the specifications outlined in Exhibit A.
+
+2. DELIVERABLES
+- Web-based application with user authentication
+- Database design and implementation
+- API integration with existing systems
+- User documentation and training materials
+
+3. TIMELINE
+Project Start Date: March 15, 2024
+Phase 1 Completion: May 15, 2024
+Final Delivery: July 1, 2024
+
+4. COMPENSATION
+Total Contract Value: $45,000
+Payment Schedule:
+- 30% upon signing ($13,500)
+- 40% at Phase 1 completion ($18,000)
+- 30% upon final delivery ($13,500)
+
+5. INTELLECTUAL PROPERTY
+All work product shall belong to Client upon full payment.
+
+6. CONFIDENTIALITY
+Both parties agree to maintain confidentiality of proprietary information.
+
+IN WITNESS WHEREOF, the parties have executed this Agreement on the date first written above.
+
+DEVELOPER:                     CLIENT:
+_________________             _________________
+John Smith                    Sarah Johnson
+President, ByteCraft Solutions   CTO, DataFlow Corporation
+
+Date: March 1, 2024          Date: March 1, 2024

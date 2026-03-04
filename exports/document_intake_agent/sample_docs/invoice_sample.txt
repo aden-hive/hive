@@ -1,0 +1,29 @@
+INVOICE
+
+Acme Software Solutions
+123 Business Street
+San Francisco, CA 94105
+Phone: (555) 123-4567
+
+INVOICE TO:
+TechCorp Inc.
+456 Innovation Ave
+Palo Alto, CA 94301
+
+Invoice Number: INV-2024-0123
+Invoice Date: March 1, 2024
+Due Date: March 31, 2024
+
+DESCRIPTION                          QTY    RATE      AMOUNT
+Software Development Services         40    $150.00   $6,000.00
+Code Review and Testing               8     $125.00   $1,000.00
+Technical Documentation               4     $100.00   $400.00
+
+                               Subtotal:    $7,400.00
+                               Tax (8.5%):   $629.00
+                               TOTAL:       $8,029.00
+
+Payment Terms: Net 30 days
+Payment Method: Check or Wire Transfer
+
+Thank you for your business!
