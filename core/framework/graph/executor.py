@@ -14,9 +14,12 @@ import logging
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from framework.graph.checkpoint_config import CheckpointConfig
+
+if TYPE_CHECKING:
+    from framework.schemas.replay import ReplayConfig
 from framework.graph.edge import EdgeCondition, EdgeSpec, GraphSpec
 from framework.graph.goal import Goal
 from framework.graph.node import (
@@ -411,6 +414,7 @@ class GraphExecutor:
         session_state: dict[str, Any] | None = None,
         checkpoint_config: "CheckpointConfig | None" = None,
         validate_graph: bool = True,
+        replay_config: "ReplayConfig | None" = None,
     ) -> ExecutionResult:
         """
         Execute a graph for a goal.
@@ -451,6 +455,107 @@ class GraphExecutor:
                     "Register tools via ToolRegistry or remove tool declarations from nodes."
                 ),
             )
+
+        # --- Replay injection block ---
+        # When replay_config is provided, wrap self.llm and self.tool_executor with
+        # caching wrappers that return stored responses from the source session's L3
+        # tool_logs.jsonl instead of calling live LLM / tool systems.
+        # We temporarily replace instance variables so that _build_context() and
+        # _get_node_implementation() transparently pick up the wrappers with no
+        # further changes required inside the hot dispatch loop.
+        _replay_interceptor = None
+        _orig_llm = self.llm
+        _orig_tool_executor = self.tool_executor
+
+        # Support the escape-hatch threading pattern used by AgentRunner.run_replay():
+        # replay_config may arrive packed inside session_state["_replay_config"] when
+        # the caller cannot thread it through AgentRuntime → ExecutionStream directly.
+        if replay_config is None and session_state and "_replay_config" in session_state:
+            from framework.schemas.replay import ReplayConfig as _RC
+
+            _rc_raw = session_state.pop("_replay_config")
+            replay_config = _RC.model_validate(_rc_raw)
+
+        if replay_config is not None:
+            from framework.runtime.replay_runtime import (
+                ReplayCache,
+                ReplayInterceptor,
+                ReplayLLMProvider,
+                make_replay_tool_executor,
+            )
+            from framework.schemas.replay import ReplayConfig as _ReplayConfig
+            from framework.runtime.runtime_log_store import RuntimeLogStore
+            from framework.storage.session_store import SessionStore
+
+            _session_store = SessionStore(self._storage_path) if self._storage_path else None
+            if _session_store is None:
+                return ExecutionResult(
+                    success=False,
+                    error="Replay requires a configured storage_path on GraphExecutor.",
+                )
+
+            _source_state = await _session_store.read_state(replay_config.source_session_id)
+            if _source_state is None:
+                return ExecutionResult(
+                    success=False,
+                    error=f"Replay source session '{replay_config.source_session_id}' not found.",
+                )
+
+            # Merge source input_data with any caller-supplied overrides
+            input_data = {**_source_state.input_data, **replay_config.input_overrides}
+
+            # Build replay cache from source session's L3 tool_logs.jsonl
+            _log_store = RuntimeLogStore(self._storage_path / "sessions")
+            try:
+                _cache = await ReplayCache.from_session(
+                    replay_config.source_session_id, _log_store
+                )
+            except ValueError as _cache_err:
+                return ExecutionResult(success=False, error=str(_cache_err))
+
+            _replay_interceptor = ReplayInterceptor(
+                _cache,
+                freeze_llm=replay_config.freeze_llm,
+                freeze_tools=replay_config.freeze_tools,
+            )
+            self.llm = ReplayLLMProvider(self.llm, _replay_interceptor)  # type: ignore[assignment]
+            self.tool_executor = make_replay_tool_executor(
+                self.tool_executor, _replay_interceptor
+            )
+
+            # Clear node registry so _get_node_implementation() recreates EventLoopNodes
+            # with the new (replay-wrapped) tool_executor instead of returning cached ones.
+            self.node_registry.clear()
+
+            # from_node: start replay from a specific node using the nearest checkpoint's
+            # memory snapshot so intermediate state is correctly restored.
+            if replay_config.from_node:
+                session_state = dict(session_state or {})
+                session_state["paused_at"] = replay_config.from_node
+                if self._storage_path:
+                    _cs = CheckpointStore(self._storage_path)
+                    _index = await _cs.load_index()
+                    if _index:
+                        for _chk_sum in reversed(_index.checkpoints):
+                            if _chk_sum.current_node == replay_config.from_node or (
+                                _chk_sum.next_node == replay_config.from_node
+                            ):
+                                _chk = await _cs.load_checkpoint(_chk_sum.checkpoint_id)
+                                if _chk:
+                                    session_state["memory"] = _chk.shared_memory
+                                    session_state["execution_path"] = _chk.execution_path
+                                break
+
+            self.logger.info(
+                "🔁 Replay mode active — source: %s | freeze_llm=%s freeze_tools=%s | "
+                "cache: %d LLM entries, %d tool entries",
+                replay_config.source_session_id,
+                replay_config.freeze_llm,
+                replay_config.freeze_tools,
+                _cache.total_llm_entries,
+                _cache.total_tool_entries,
+            )
+        # --- End replay injection block ---
 
         # Initialize execution state
         memory = SharedMemory()
@@ -923,6 +1028,10 @@ class GraphExecutor:
 
                 # Execute node
                 self.logger.info("   Executing...")
+                # Inform the replay interceptor (if active) which node is starting
+                # so its internal step/tool counters reset correctly for this node.
+                if _replay_interceptor is not None:
+                    _replay_interceptor.set_node(current_node_id)
                 result = await node_impl.execute(ctx)
 
                 # Emit node-completed event (skip event_loop nodes)
@@ -1725,6 +1834,10 @@ class GraphExecutor:
                 from framework.runner.tool_registry import ToolRegistry
 
                 ToolRegistry.reset_execution_context(_ctx_token)
+
+            # Restore original LLM provider and tool executor if replay wrapped them.
+            self.llm = _orig_llm
+            self.tool_executor = _orig_tool_executor
 
     def _build_context(
         self,
