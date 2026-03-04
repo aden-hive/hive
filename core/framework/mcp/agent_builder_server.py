@@ -10,6 +10,7 @@ Usage:
 import json
 import logging
 import os
+import shutil
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -161,7 +162,7 @@ def _load_session(session_id: str) -> BuildSession:
     if not session_file.exists():
         raise ValueError(f"Session '{session_id}' not found")
 
-    with open(session_file) as f:
+    with open(session_file, encoding="utf-8") as f:
         data = json.load(f)
 
     return BuildSession.from_dict(data)
@@ -173,7 +174,7 @@ def _load_active_session() -> BuildSession | None:
         return None
 
     try:
-        with open(ACTIVE_SESSION_FILE) as f:
+        with open(ACTIVE_SESSION_FILE, encoding="utf-8") as f:
             session_id = f.read().strip()
 
         if session_id:
@@ -227,7 +228,7 @@ def list_sessions() -> str:
     if SESSIONS_DIR.exists():
         for session_file in SESSIONS_DIR.glob("*.json"):
             try:
-                with open(session_file) as f:
+                with open(session_file, encoding="utf-8") as f:
                     data = json.load(f)
                     sessions.append(
                         {
@@ -247,7 +248,7 @@ def list_sessions() -> str:
     active_id = None
     if ACTIVE_SESSION_FILE.exists():
         try:
-            with open(ACTIVE_SESSION_FILE) as f:
+            with open(ACTIVE_SESSION_FILE, encoding="utf-8") as f:
                 active_id = f.read().strip()
         except Exception:
             pass
@@ -309,7 +310,7 @@ def delete_session(session_id: Annotated[str, "ID of the session to delete"]) ->
             _session = None
 
         if ACTIVE_SESSION_FILE.exists():
-            with open(ACTIVE_SESSION_FILE) as f:
+            with open(ACTIVE_SESSION_FILE, encoding="utf-8") as f:
                 active_id = f.read().strip()
                 if active_id == session_id:
                     ACTIVE_SESSION_FILE.unlink()
@@ -562,16 +563,29 @@ def _validate_agent_path(agent_path: str) -> tuple[Path | None, str | None]:
     path = Path(agent_path)
 
     # Resolve relative paths against project root (not MCP server's cwd)
-    if not path.is_absolute() and not path.exists():
-        resolved = _PROJECT_ROOT / path
-        if resolved.exists():
-            path = resolved
+    if not path.is_absolute():
+        path = _PROJECT_ROOT / path
+
+    # Restrict to allowed directories BEFORE checking existence to prevent
+    # leaking whether arbitrary filesystem paths exist on disk.
+    from framework.server.app import validate_agent_path
+
+    try:
+        path = validate_agent_path(path)
+    except ValueError:
+        return None, json.dumps(
+            {
+                "success": False,
+                "error": "agent_path must be inside an allowed directory "
+                "(exports/, examples/, or ~/.hive/agents/)",
+            }
+        )
 
     if not path.exists():
         return None, json.dumps(
             {
                 "success": False,
-                "error": f"Agent path not found: {path}",
+                "error": f"Agent path not found: {agent_path}",
                 "hint": "Run export_graph to create an agent in exports/ first",
             }
         )
@@ -586,7 +600,7 @@ def add_node(
     description: Annotated[str, "What this node does"],
     node_type: Annotated[
         str,
-        "Type: event_loop (recommended), router.",
+        "Type: event_loop (recommended), gcu (browser automation), router.",
     ],
     input_keys: Annotated[str, "JSON array of keys this node reads from shared memory"],
     output_keys: Annotated[str, "JSON array of keys this node writes to shared memory"],
@@ -675,8 +689,23 @@ def add_node(
     if node_type == "event_loop" and not system_prompt:
         warnings.append(f"Event loop node '{node_id}' should have a system_prompt")
 
+    # GCU node validation
+    if node_type == "gcu":
+        if tools_list:
+            warnings.append(
+                f"GCU node '{node_id}' auto-includes all browser tools from the "
+                f"gcu-tools MCP server. Manually listed tools {tools_list} will be "
+                f"merged with the auto-included set."
+            )
+        if not system_prompt:
+            warnings.append(
+                f"GCU node '{node_id}' has a default browser best-practices prompt. "
+                f"Consider adding a task-specific system_prompt — it will be appended "
+                f"after the browser instructions."
+            )
+
     # Warn about client_facing on nodes with tools (likely autonomous work)
-    if node_type == "event_loop" and client_facing and tools_list:
+    if node_type in ("event_loop", "gcu") and client_facing and tools_list:
         warnings.append(
             f"Node '{node_id}' is client_facing=True but has tools {tools_list}. "
             "Nodes with tools typically do autonomous work and should be "
@@ -1774,6 +1803,14 @@ def export_graph() -> str:
             enriched_criteria.append(crit_dict)
         export_data["goal"]["success_criteria"] = enriched_criteria
 
+    # Auto-add GCU MCP server if any node uses the gcu type
+    has_gcu_nodes = any(n.node_type == "gcu" for n in session.nodes)
+    if has_gcu_nodes:
+        from framework.graph.gcu import GCU_MCP_SERVER_CONFIG, GCU_SERVER_NAME
+
+        if not any(s.get("name") == GCU_SERVER_NAME for s in session.mcp_servers):
+            session.mcp_servers.append(dict(GCU_MCP_SERVER_CONFIG))
+
     # === WRITE FILES TO DISK ===
     # Create exports directory
     exports_dir = Path("exports") / session.name
@@ -1864,7 +1901,7 @@ def import_from_export(
         return json.dumps({"success": False, "error": f"File not found: {agent_json_path}"})
 
     try:
-        data = json.loads(path.read_text())
+        data = json.loads(path.read_text(encoding="utf-8"))
     except json.JSONDecodeError as e:
         return json.dumps({"success": False, "error": f"Invalid JSON: {e}"})
 
@@ -1946,7 +1983,7 @@ def get_session_status() -> str:
 @mcp.tool()
 def configure_loop(
     max_iterations: Annotated[int, "Maximum loop iterations per node execution (default 50)"] = 50,
-    max_tool_calls_per_turn: Annotated[int, "Maximum tool calls per LLM turn (default 10)"] = 10,
+    max_tool_calls_per_turn: Annotated[int, "Maximum tool calls per LLM turn (default 30)"] = 30,
     stall_detection_threshold: Annotated[
         int, "Consecutive identical responses before stall detection triggers (default 3)"
     ] = 3,
@@ -2772,6 +2809,21 @@ def run_tests(
     import re
     import subprocess
 
+    # Guard: pytest must be available as a subprocess command.
+    # Install with: pip install 'framework[testing]'
+    if shutil.which("pytest") is None:
+        return json.dumps(
+            {
+                "goal_id": goal_id,
+                "error": (
+                    "pytest is not installed or not on PATH. "
+                    "Hive's test runner requires pytest at runtime. "
+                    "Install it with: pip install 'framework[testing]' "
+                    "or: uv pip install 'framework[testing]'"
+                ),
+            }
+        )
+
     path, err = _validate_agent_path(agent_path)
     if err:
         return err
@@ -2842,6 +2894,7 @@ def run_tests(
     try:
         result = subprocess.run(
             cmd,
+            encoding="utf-8",
             capture_output=True,
             text=True,
             timeout=600,  # 10 minute timeout
@@ -2965,6 +3018,22 @@ def debug_test(
     import re
     import subprocess
 
+    # Guard: pytest must be available as a subprocess command.
+    # Install with: pip install 'framework[testing]'
+    if shutil.which("pytest") is None:
+        return json.dumps(
+            {
+                "goal_id": goal_id,
+                "test_name": test_name,
+                "error": (
+                    "pytest is not installed or not on PATH. "
+                    "Hive's test runner requires pytest at runtime. "
+                    "Install it with: pip install 'framework[testing]' "
+                    "or: uv pip install 'framework[testing]'"
+                ),
+            }
+        )
+
     # Derive agent_path from session if not provided
     if not agent_path and _session:
         agent_path = f"exports/{_session.name}"
@@ -2986,7 +3055,7 @@ def debug_test(
     # Find which file contains the test
     test_file = None
     for py_file in tests_dir.glob("test_*.py"):
-        content = py_file.read_text()
+        content = py_file.read_text(encoding="utf-8")
         if f"def {test_name}" in content or f"async def {test_name}" in content:
             test_file = py_file
             break
@@ -3017,6 +3086,7 @@ def debug_test(
     try:
         result = subprocess.run(
             cmd,
+            encoding="utf-8",
             capture_output=True,
             text=True,
             timeout=120,  # 2 minute timeout for single test
@@ -3138,7 +3208,7 @@ def list_tests(
     tests = []
     for test_file in sorted(tests_dir.glob("test_*.py")):
         try:
-            content = test_file.read_text()
+            content = test_file.read_text(encoding="utf-8")
             tree = ast.parse(content)
 
             # Find all async function definitions that start with "test_"

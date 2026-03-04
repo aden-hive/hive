@@ -184,7 +184,7 @@ class TestPathTraversalWithActualFiles:
 
             # Create a secret file outside storage
             secret_file = tmpdir_path / "secret.txt"
-            secret_file.write_text("SENSITIVE_DATA")
+            secret_file.write_text("SENSITIVE_DATA", encoding="utf-8")
 
             storage = FileStorage(storage_dir)
 
@@ -193,7 +193,7 @@ class TestPathTraversalWithActualFiles:
                 storage.get_runs_by_goal("../secret")
 
             # Verify the secret file was not accessed (still contains original data)
-            assert secret_file.read_text() == "SENSITIVE_DATA"
+            assert secret_file.read_text(encoding="utf-8") == "SENSITIVE_DATA"
 
     def test_cannot_write_outside_storage(self):
         """Verify that we can't write files outside storage directory."""

@@ -133,7 +133,7 @@ class TestExpectedToolsRegistered:
         from aden_tools.tools import register_all_tools
 
         mcp = FastMCP("test-all")
-        returned_names = register_all_tools(mcp, credentials=None)
+        returned_names = register_all_tools(mcp, credentials=None, include_unverified=True)
         registered = set(mcp._tool_manager._tools.keys())
 
         # Every returned name must actually be registered

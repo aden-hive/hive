@@ -401,6 +401,43 @@ def register_commands(subparsers: argparse._SubParsersAction) -> None:
     )
     serve_parser.set_defaults(func=cmd_serve)
 
+    # open command (serve + auto-open browser)
+    open_parser = subparsers.add_parser(
+        "open",
+        help="Start HTTP server and open dashboard in browser",
+        description="Shortcut for 'hive serve --open'. "
+        "Starts the HTTP server and opens the dashboard.",
+    )
+    open_parser.add_argument(
+        "--host",
+        type=str,
+        default="127.0.0.1",
+        help="Host to bind (default: 127.0.0.1)",
+    )
+    open_parser.add_argument(
+        "--port",
+        "-p",
+        type=int,
+        default=8787,
+        help="Port to listen on (default: 8787)",
+    )
+    open_parser.add_argument(
+        "--agent",
+        "-a",
+        type=str,
+        action="append",
+        default=[],
+        help="Agent path to preload (repeatable)",
+    )
+    open_parser.add_argument(
+        "--model",
+        "-m",
+        type=str,
+        default=None,
+        help="LLM model for preloaded agents",
+    )
+    open_parser.set_defaults(func=cmd_open)
+
 
 def _load_resume_state(
     agent_path: str, session_id: str, checkpoint_id: str | None = None
@@ -428,7 +465,7 @@ def _load_resume_state(
         if not cp_path.exists():
             return None
         try:
-            cp_data = json.loads(cp_path.read_text())
+            cp_data = json.loads(cp_path.read_text(encoding="utf-8"))
         except (json.JSONDecodeError, OSError):
             return None
         return {
@@ -444,7 +481,7 @@ def _load_resume_state(
         if not state_path.exists():
             return None
         try:
-            state_data = json.loads(state_path.read_text())
+            state_data = json.loads(state_path.read_text(encoding="utf-8"))
         except (json.JSONDecodeError, OSError):
             return None
         progress = state_data.get("progress", {})
@@ -517,7 +554,7 @@ def cmd_run(args: argparse.Namespace) -> int:
             return 1
     elif args.input_file:
         try:
-            with open(args.input_file) as f:
+            with open(args.input_file, encoding="utf-8") as f:
                 context = json.load(f)
         except (FileNotFoundError, json.JSONDecodeError) as e:
             print(f"Error reading input file: {e}", file=sys.stderr)
@@ -659,7 +696,7 @@ def cmd_run(args: argparse.Namespace) -> int:
 
     # Output results
     if args.output:
-        with open(args.output, "w") as f:
+        with open(args.output, "w", encoding="utf-8") as f:
             json.dump(output, f, indent=2, default=str)
         if not args.quiet:
             print(f"Results written to {args.output}")
@@ -1474,7 +1511,7 @@ def _extract_python_agent_metadata(agent_path: Path) -> tuple[str, str]:
         return fallback_name, fallback_desc
 
     try:
-        with open(config_path) as f:
+        with open(config_path, encoding="utf-8") as f:
             tree = ast.parse(f.read())
 
         # Find AgentMetadata class definition
@@ -1885,17 +1922,92 @@ def cmd_setup_credentials(args: argparse.Namespace) -> int:
 def _open_browser(url: str) -> None:
     """Open URL in the default browser (best-effort, non-blocking)."""
     import subprocess
-    import sys
 
     try:
         if sys.platform == "darwin":
-            subprocess.Popen(["open", url], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            subprocess.Popen(
+                ["open", url],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                encoding="utf-8",
+            )
+        elif sys.platform == "win32":
+            subprocess.Popen(
+                ["cmd", "/c", "start", "", url],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
         elif sys.platform == "linux":
             subprocess.Popen(
-                ["xdg-open", url], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+                ["xdg-open", url],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                encoding="utf-8",
             )
     except Exception:
         pass  # Best-effort — don't crash if browser can't open
+
+
+def _build_frontend() -> bool:
+    """Build the frontend if source is newer than dist. Returns True if dist exists."""
+    import subprocess
+
+    # Find the frontend directory relative to this file or cwd
+    candidates = [
+        Path("core/frontend"),
+        Path(__file__).resolve().parent.parent.parent / "frontend",
+    ]
+    frontend_dir: Path | None = None
+    for c in candidates:
+        if (c / "package.json").is_file():
+            frontend_dir = c.resolve()
+            break
+
+    if frontend_dir is None:
+        return False
+
+    dist_dir = frontend_dir / "dist"
+    src_dir = frontend_dir / "src"
+
+    # Skip build if dist is up-to-date (newest src file older than dist index.html)
+    index_html = dist_dir / "index.html"
+    if index_html.exists() and src_dir.is_dir():
+        dist_mtime = index_html.stat().st_mtime
+        needs_build = False
+        for f in src_dir.rglob("*"):
+            if f.is_file() and f.stat().st_mtime > dist_mtime:
+                needs_build = True
+                break
+        if not needs_build:
+            return True
+
+    # Need to build
+    print("Building frontend...")
+    try:
+        # Ensure deps are installed
+        subprocess.run(
+            ["npm", "install", "--no-fund", "--no-audit"],
+            encoding="utf-8",
+            cwd=frontend_dir,
+            check=True,
+            capture_output=True,
+        )
+        subprocess.run(
+            ["npm", "run", "build"],
+            encoding="utf-8",
+            cwd=frontend_dir,
+            check=True,
+            capture_output=True,
+        )
+        print("Frontend built.")
+        return True
+    except FileNotFoundError:
+        print("Node.js not found — skipping frontend build.")
+        return dist_dir.is_dir()
+    except subprocess.CalledProcessError as exc:
+        stderr = exc.stderr.decode(errors="replace") if exc.stderr else ""
+        print(f"Frontend build failed: {stderr[:500]}")
+        return dist_dir.is_dir()
 
 
 def cmd_serve(args: argparse.Namespace) -> int:
@@ -1903,6 +2015,8 @@ def cmd_serve(args: argparse.Namespace) -> int:
     import logging
 
     from aiohttp import web
+
+    _build_frontend()
 
     from framework.server.app import create_app
 
@@ -1928,7 +2042,7 @@ def cmd_serve(args: argparse.Namespace) -> int:
                 print(f"Error loading {agent_path}: {e}")
 
         # Start server using AppRunner/TCPSite (same pattern as webhook_server.py)
-        runner = web.AppRunner(app)
+        runner = web.AppRunner(app, access_log=None)
         await runner.setup()
         site = web.TCPSite(runner, args.host, args.port)
         await site.start()
@@ -1969,3 +2083,9 @@ def cmd_serve(args: argparse.Namespace) -> int:
         print("\nServer stopped.")
 
     return 0
+
+
+def cmd_open(args: argparse.Namespace) -> int:
+    """Start the HTTP API server and open the dashboard in the browser."""
+    args.open = True
+    return cmd_serve(args)

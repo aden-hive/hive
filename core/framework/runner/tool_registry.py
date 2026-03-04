@@ -61,6 +61,7 @@ class ToolRegistry:
         self._mcp_tool_names: set[str] = set()  # Tool names registered from MCP
         self._mcp_cred_snapshot: set[str] = set()  # Credential filenames at MCP load time
         self._mcp_aden_key_snapshot: str | None = None  # ADEN_API_KEY value at MCP load time
+        self._mcp_server_tools: dict[str, set[str]] = {}  # server name -> tool names
 
     def register(
         self,
@@ -294,6 +295,10 @@ class ToolRegistry:
         """Check if a tool is registered."""
         return name in self._tools
 
+    def get_server_tool_names(self, server_name: str) -> set[str]:
+        """Return tool names registered from a specific MCP server."""
+        return set(self._mcp_server_tools.get(server_name, set()))
+
     def set_session_context(self, **context) -> None:
         """
         Set session context to auto-inject into tool calls.
@@ -335,7 +340,7 @@ class ToolRegistry:
         self._mcp_config_path = Path(config_path)
 
         try:
-            with open(config_path) as f:
+            with open(config_path, encoding="utf-8") as f:
                 config = json.load(f)
         except Exception as e:
             logger.warning(f"Failed to load MCP config from {config_path}: {e}")
@@ -411,6 +416,9 @@ class ToolRegistry:
             self._mcp_clients.append(client)
 
             # Register each tool
+            server_name = server_config["name"]
+            if server_name not in self._mcp_server_tools:
+                self._mcp_server_tools[server_name] = set()
             count = 0
             for mcp_tool in client.list_tools():
                 # Convert MCP tool to framework Tool (strips context params from LLM schema)
@@ -435,7 +443,15 @@ class ToolRegistry:
                             filtered_context = {
                                 k: v for k, v in base_context.items() if k in tool_params
                             }
-                            merged_inputs = {**filtered_context, **inputs}
+                            # Strip context params from LLM inputs — the framework
+                            # values are authoritative (prevents the LLM from passing
+                            # e.g. data_dir="/data" and overriding the real path).
+                            clean_inputs = {
+                                k: v
+                                for k, v in inputs.items()
+                                if k not in registry_ref.CONTEXT_PARAMS
+                            }
+                            merged_inputs = {**clean_inputs, **filtered_context}
                             result = client_ref.call_tool(tool_name, merged_inputs)
                             # MCP tools return content array, extract the result
                             if isinstance(result, list) and len(result) > 0:
@@ -456,6 +472,7 @@ class ToolRegistry:
                     make_mcp_executor(client, mcp_tool.name, self, tool_params),
                 )
                 self._mcp_tool_names.add(mcp_tool.name)
+                self._mcp_server_tools[server_name].add(mcp_tool.name)
                 count += 1
 
             logger.info(f"Registered {count} tools from MCP server '{config.name}'")

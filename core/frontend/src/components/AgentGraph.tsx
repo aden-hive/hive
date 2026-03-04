@@ -30,6 +30,8 @@ interface AgentGraphProps {
   onPause?: () => void;
   version?: string;
   runState?: RunState;
+  building?: boolean;
+  queenMode?: "building" | "staging" | "running";
 }
 
 // --- Extracted RunButton so hover state survives parent re-renders ---
@@ -136,14 +138,15 @@ const triggerIcons: Record<string, string> = {
   event: "\u223F",    // sine wave
 };
 
-function formatLabel(id: string): string {
-  return id
-    .split("-")
-    .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
-    .join(" ");
+/** Truncate label to fit within `availablePx` at the given fontSize. */
+function truncateLabel(label: string, availablePx: number, fontSize: number): string {
+  const avgCharW = fontSize * 0.58;
+  const maxChars = Math.floor(availablePx / avgCharW);
+  if (label.length <= maxChars) return label;
+  return label.slice(0, Math.max(maxChars - 1, 1)) + "\u2026";
 }
 
-export default function AgentGraph({ nodes, title: _title, onNodeClick, onRun, onPause, version, runState: externalRunState }: AgentGraphProps) {
+export default function AgentGraph({ nodes, title: _title, onNodeClick, onRun, onPause, version, runState: externalRunState, building, queenMode }: AgentGraphProps) {
   const [localRunState, setLocalRunState] = useState<RunState>("idle");
   const runState = externalRunState ?? localRunState;
   const runBtnRef = useRef<HTMLButtonElement>(null);
@@ -275,10 +278,17 @@ export default function AgentGraph({ nodes, title: _title, onNodeClick, onRun, o
               </span>
             )}
           </div>
-          <RunButton runState={runState} disabled={nodes.length === 0} onRun={handleRun} onPause={onPause ?? (() => {})} btnRef={runBtnRef} />
+          <RunButton runState={runState} disabled={nodes.length === 0 || queenMode === "building"} onRun={handleRun} onPause={onPause ?? (() => {})} btnRef={runBtnRef} />
         </div>
         <div className="flex-1 flex items-center justify-center px-5">
-          <p className="text-xs text-muted-foreground/60 text-center italic">No pipeline configured yet.<br/>Chat with the Queen to get started.</p>
+          {building ? (
+            <div className="flex flex-col items-center gap-3">
+              <Loader2 className="w-6 h-6 animate-spin text-primary/60" />
+              <p className="text-xs text-muted-foreground/80 text-center">Building agent...</p>
+            </div>
+          ) : (
+            <p className="text-xs text-muted-foreground/60 text-center italic">No pipeline configured yet.<br/>Chat with the Queen to get started.</p>
+          )}
         </div>
       </div>
     );
@@ -403,10 +413,25 @@ export default function AgentGraph({ nodes, title: _title, onNodeClick, onRun, o
   const renderTriggerNode = (node: GraphNode, i: number) => {
     const pos = nodePos(i);
     const icon = triggerIcons[node.triggerType || ""] || "\u26A1";
-    const clipId = `clip-trigger-${node.id}`;
+    const triggerFontSize = nodeW < 140 ? 10.5 : 11.5;
+    const triggerAvailW = nodeW - 38;
+    const triggerDisplayLabel = truncateLabel(node.label, triggerAvailW, triggerFontSize);
+    const nextFireIn = node.triggerConfig?.next_fire_in as number | undefined;
+
+    // Format countdown for display below node
+    let countdownLabel: string | null = null;
+    if (nextFireIn != null && nextFireIn > 0) {
+      const h = Math.floor(nextFireIn / 3600);
+      const m = Math.floor((nextFireIn % 3600) / 60);
+      const s = Math.floor(nextFireIn % 60);
+      countdownLabel = h > 0
+        ? `next in ${h}h ${String(m).padStart(2, "0")}m`
+        : `next in ${m}m ${String(s).padStart(2, "0")}s`;
+    }
 
     return (
       <g key={node.id} onClick={() => onNodeClick?.(node)} style={{ cursor: onNodeClick ? "pointer" : "default" }}>
+        <title>{node.label}</title>
         {/* Pill-shaped background with dashed border */}
         <rect
           x={pos.x} y={pos.y}
@@ -428,20 +453,27 @@ export default function AgentGraph({ nodes, title: _title, onNodeClick, onRun, o
         </text>
 
         {/* Label */}
-        <clipPath id={clipId}>
-          <rect x={pos.x + 30} y={pos.y} width={nodeW - 38} height={NODE_H} />
-        </clipPath>
         <text
           x={pos.x + 32} y={pos.y + NODE_H / 2}
           fill={triggerColors.text}
-          fontSize={nodeW < 140 ? 10.5 : 11.5}
+          fontSize={triggerFontSize}
           fontWeight={500}
           dominantBaseline="middle"
           letterSpacing="0.01em"
-          clipPath={`url(#${clipId})`}
         >
-          {node.label}
+          {triggerDisplayLabel}
         </text>
+
+        {/* Countdown label below node */}
+        {countdownLabel && (
+          <text
+            x={pos.x + nodeW / 2} y={pos.y + NODE_H + 13}
+            fill="hsl(210,30%,50%)" fontSize={9.5}
+            textAnchor="middle" fontStyle="italic" opacity={0.7}
+          >
+            {countdownLabel}
+          </text>
+        )}
       </g>
     );
   };
@@ -453,10 +485,14 @@ export default function AgentGraph({ nodes, title: _title, onNodeClick, onRun, o
     const isActive = node.status === "running" || node.status === "looping";
     const isDone = node.status === "complete";
     const colors = statusColors[node.status];
-    const clipId = `clip-label-${node.id}`;
+
+    const fontSize = nodeW < 140 ? 10.5 : 12.5;
+    const labelAvailW = nodeW - 38;
+    const displayLabel = truncateLabel(node.label, labelAvailW, fontSize);
 
     return (
       <g key={node.id} onClick={() => onNodeClick?.(node)} style={{ cursor: onNodeClick ? "pointer" : "default" }}>
+        <title>{node.label}</title>
         {/* Ambient glow for active nodes */}
         {isActive && (
           <>
@@ -504,20 +540,16 @@ export default function AgentGraph({ nodes, title: _title, onNodeClick, onRun, o
           </text>
         )}
 
-        {/* Label -- properly capitalized, clipped for narrow nodes */}
-        <clipPath id={clipId}>
-          <rect x={pos.x + 30} y={pos.y} width={nodeW - 38} height={NODE_H} />
-        </clipPath>
+        {/* Label -- truncated with ellipsis for narrow nodes */}
         <text
           x={pos.x + 32} y={pos.y + NODE_H / 2}
           fill={isActive ? "hsl(45,90%,85%)" : isDone ? "hsl(40,20%,75%)" : "hsl(35,10%,45%)"}
-          fontSize={nodeW < 140 ? 10.5 : 12.5}
+          fontSize={fontSize}
           fontWeight={isActive ? 600 : isDone ? 500 : 400}
           dominantBaseline="middle"
           letterSpacing="0.01em"
-          clipPath={`url(#${clipId})`}
         >
-          {formatLabel(node.id)}
+          {displayLabel}
         </text>
 
         {/* Status label for active nodes */}
@@ -568,18 +600,26 @@ export default function AgentGraph({ nodes, title: _title, onNodeClick, onRun, o
       </div>
 
       {/* Graph */}
-      <div className="flex-1 overflow-y-auto overflow-x-hidden px-3 pb-5">
+      <div className="flex-1 overflow-y-auto overflow-x-hidden px-3 pb-5 relative">
         <svg
           width={svgWidth}
           height={svgHeight}
           viewBox={`0 0 ${svgWidth} ${svgHeight}`}
-          className="select-none"
+          className={`select-none${building ? " opacity-30" : ""}`}
           style={{ fontFamily: "'Inter', system-ui, sans-serif" }}
         >
           {forwardEdges.map((e, i) => renderForwardEdge(e, i))}
           {backEdges.map((e, i) => renderBackEdge(e, i))}
           {nodes.map((n, i) => renderNode(n, i))}
         </svg>
+        {building && (
+          <div className="absolute inset-0 flex items-center justify-center">
+            <div className="flex flex-col items-center gap-3">
+              <Loader2 className="w-6 h-6 animate-spin text-primary/60" />
+              <p className="text-xs text-muted-foreground/80">Rebuilding agent...</p>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

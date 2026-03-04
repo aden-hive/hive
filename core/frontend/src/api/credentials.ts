@@ -22,6 +22,7 @@ export interface AgentCredentialRequirement {
   direct_api_key_supported: boolean;
   aden_supported: boolean;
   credential_key: string;
+  alternative_group: string | null;
 }
 
 export const credentialsApi = {

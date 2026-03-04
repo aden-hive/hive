@@ -238,7 +238,7 @@ class TestGetSecurePath:
 
         # Create a target file and a symlink to it
         target_file = session_dir / "target.txt"
-        target_file.write_text("content")
+        target_file.write_text("content", encoding="utf-8")
         symlink_path = session_dir / "link_to_target"
         symlink_path.symlink_to(target_file)
 
@@ -263,7 +263,7 @@ class TestGetSecurePath:
 
         # Create a symlink inside session pointing outside
         outside_target = self.workspaces_dir / "outside_file.txt"
-        outside_target.write_text("sensitive data")
+        outside_target.write_text("sensitive data", encoding="utf-8")
         symlink_path = session_dir / "escape_link"
         symlink_path.symlink_to(outside_target)
 

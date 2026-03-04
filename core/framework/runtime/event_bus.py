@@ -130,9 +130,18 @@ class EventType(StrEnum):
     WORKER_ESCALATION_TICKET = "worker_escalation_ticket"
     QUEEN_INTERVENTION_REQUESTED = "queen_intervention_requested"
 
+    # Execution resurrection (auto-restart on non-fatal failure)
+    EXECUTION_RESURRECTED = "execution_resurrected"
+
     # Worker lifecycle (session manager → frontend)
     WORKER_LOADED = "worker_loaded"
     CREDENTIALS_REQUIRED = "credentials_required"
+
+    # Queen mode changes (building ↔ running)
+    QUEEN_MODE_CHANGED = "queen_mode_changed"
+
+    # Subagent reports (one-way progress updates from sub-agents)
+    SUBAGENT_REPORT = "subagent_report"
 
 
 @dataclass
@@ -709,15 +718,24 @@ class EventBus:
         node_id: str,
         prompt: str = "",
         execution_id: str | None = None,
+        options: list[str] | None = None,
     ) -> None:
-        """Emit client input requested event (client_facing=True nodes)."""
+        """Emit client input requested event (client_facing=True nodes).
+
+        Args:
+            options: Optional predefined choices for the user (1-3 items).
+                     The frontend appends an "Other" free-text option automatically.
+        """
+        data: dict[str, Any] = {"prompt": prompt}
+        if options:
+            data["options"] = options
         await self.publish(
             AgentEvent(
                 type=EventType.CLIENT_INPUT_REQUESTED,
                 stream_id=stream_id,
                 node_id=node_id,
                 execution_id=execution_id,
-                data={"prompt": prompt},
+                data=data,
             )
         )
 
@@ -1008,6 +1026,30 @@ class EventBus:
                     "severity": severity,
                     "queen_graph_id": queen_graph_id,
                     "queen_stream_id": queen_stream_id,
+                },
+            )
+        )
+
+    async def emit_subagent_report(
+        self,
+        stream_id: str,
+        node_id: str,
+        subagent_id: str,
+        message: str,
+        data: dict[str, Any] | None = None,
+        execution_id: str | None = None,
+    ) -> None:
+        """Emit a one-way progress report from a sub-agent."""
+        await self.publish(
+            AgentEvent(
+                type=EventType.SUBAGENT_REPORT,
+                stream_id=stream_id,
+                node_id=node_id,
+                execution_id=execution_id,
+                data={
+                    "subagent_id": subagent_id,
+                    "message": message,
+                    "data": data,
                 },
             )
         )

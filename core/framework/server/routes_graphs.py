@@ -45,6 +45,7 @@ def _node_to_dict(node) -> dict:
         "client_facing": node.client_facing,
         "success_criteria": node.success_criteria,
         "system_prompt": node.system_prompt or "",
+        "sub_agents": node.sub_agents,
     }
 
 
@@ -79,7 +80,7 @@ async def handle_list_nodes(request: web.Request) -> web.Response:
         )
         if state_path.exists():
             try:
-                state = json.loads(state_path.read_text())
+                state = json.loads(state_path.read_text(encoding="utf-8"))
                 progress = state.get("progress", {})
                 visit_counts = progress.get("node_visit_counts", {})
                 failures = progress.get("nodes_with_failures", [])
@@ -99,6 +100,7 @@ async def handle_list_nodes(request: web.Request) -> web.Response:
         {"source": e.source, "target": e.target, "condition": e.condition, "priority": e.priority}
         for e in graph.edges
     ]
+    rt = session.worker_runtime
     entry_points = [
         {
             "id": ep.id,
@@ -106,6 +108,11 @@ async def handle_list_nodes(request: web.Request) -> web.Response:
             "entry_node": ep.entry_node,
             "trigger_type": ep.trigger_type,
             "trigger_config": ep.trigger_config,
+            **(
+                {"next_fire_in": nf}
+                if rt and (nf := rt.get_timer_next_fire_in(ep.id)) is not None
+                else {}
+            ),
         }
         for ep in reg.entry_points.values()
     ]

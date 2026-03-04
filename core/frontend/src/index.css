@@ -87,6 +87,11 @@
   button {
     cursor: pointer;
   }
+
+  textarea {
+    padding: 0;
+    margin: 0;
+  }
 }
 
 * {
@@ -161,4 +166,13 @@
 }
 .animate-in.slide-in-from-right {
   animation: slide-in-from-right 0.2s ease-out;
+}
+
+/* Slide-up animation for question widget */
+@keyframes slide-in-from-bottom {
+  from { transform: translateY(16px); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
+}
+.animate-in.slide-in-from-bottom {
+  animation: slide-in-from-bottom 0.25s ease-out;
 }

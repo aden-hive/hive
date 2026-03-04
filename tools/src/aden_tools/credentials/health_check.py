@@ -8,6 +8,7 @@ to verify the credential works.
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass, field
 from typing import Any, Protocol
 
@@ -100,6 +101,72 @@ class HubSpotHealthChecker:
             return HealthCheckResult(
                 valid=False,
                 message=f"Failed to connect to HubSpot: {e}",
+                details={"error": str(e)},
+            )
+
+
+class ZohoCRMHealthChecker:
+    """Health checker for Zoho CRM credentials."""
+
+    TIMEOUT = 10.0
+
+    def check(self, access_token: str) -> HealthCheckResult:
+        """
+        Validate Zoho token by making lightweight API call.
+
+        Uses /users?type=CurrentUser so module permissions are not required.
+        """
+        api_domain = os.getenv("ZOHO_API_DOMAIN", "https://www.zohoapis.com").rstrip("/")
+        endpoint = f"{api_domain}/crm/v2/users?type=CurrentUser"
+        try:
+            with httpx.Client(timeout=self.TIMEOUT) as client:
+                response = client.get(
+                    endpoint,
+                    headers={
+                        "Authorization": f"Zoho-oauthtoken {access_token}",
+                        "Accept": "application/json",
+                    },
+                )
+
+                if response.status_code == 200:
+                    return HealthCheckResult(
+                        valid=True,
+                        message="Zoho CRM credentials valid",
+                    )
+                elif response.status_code == 401:
+                    return HealthCheckResult(
+                        valid=False,
+                        message="Zoho CRM token is invalid or expired",
+                        details={"status_code": 401},
+                    )
+                elif response.status_code == 403:
+                    return HealthCheckResult(
+                        valid=False,
+                        message="Zoho CRM token lacks required scopes",
+                        details={"status_code": 403},
+                    )
+                elif response.status_code == 429:
+                    return HealthCheckResult(
+                        valid=True,
+                        message="Zoho CRM credentials valid (rate limited)",
+                        details={"status_code": 429, "rate_limited": True},
+                    )
+                else:
+                    return HealthCheckResult(
+                        valid=False,
+                        message=f"Zoho CRM API returned status {response.status_code}",
+                        details={"status_code": response.status_code},
+                    )
+        except httpx.TimeoutException:
+            return HealthCheckResult(
+                valid=False,
+                message="Zoho CRM API request timed out",
+                details={"error": "timeout"},
+            )
+        except httpx.RequestError as e:
+            return HealthCheckResult(
+                valid=False,
+                message=f"Failed to connect to Zoho CRM: {e}",
                 details={"error": str(e)},
             )
 
@@ -563,6 +630,66 @@ class SlackHealthChecker:
             )
 
 
+class CalendlyHealthChecker:
+    """Health checker for Calendly API tokens."""
+
+    ENDPOINT = "https://api.calendly.com/users/me"
+    TIMEOUT = 10.0
+
+    def check(self, api_token: str) -> HealthCheckResult:
+        """
+        Validate Calendly token by calling /users/me.
+
+        Makes a GET request to verify the token works.
+        """
+        try:
+            with httpx.Client(timeout=self.TIMEOUT) as client:
+                response = client.get(
+                    self.ENDPOINT,
+                    headers={
+                        "Authorization": f"Bearer {api_token}",
+                        "Content-Type": "application/json",
+                    },
+                )
+
+                if response.status_code == 200:
+                    return HealthCheckResult(
+                        valid=True,
+                        message="Calendly token valid",
+                        details={},
+                    )
+                elif response.status_code == 401:
+                    return HealthCheckResult(
+                        valid=False,
+                        message="Calendly token is invalid or expired",
+                        details={"status_code": 401},
+                    )
+                elif response.status_code == 403:
+                    return HealthCheckResult(
+                        valid=False,
+                        message="Calendly token access forbidden",
+                        details={"status_code": 403},
+                    )
+                else:
+                    return HealthCheckResult(
+                        valid=False,
+                        message=f"Calendly API returned status {response.status_code}",
+                        details={"status_code": response.status_code},
+                    )
+        except httpx.TimeoutException:
+            return HealthCheckResult(
+                valid=False,
+                message="Calendly API request timed out",
+                details={"error": "timeout"},
+            )
+        except httpx.RequestError as e:
+            return HealthCheckResult(
+                valid=False,
+                message=f"Failed to connect to Calendly API: {e}",
+                details={"error": str(e)},
+            )
+
+
 class GitHubHealthChecker:
     """Health checker for GitHub Personal Access Token."""
 
@@ -821,6 +948,71 @@ class GoogleMapsHealthChecker:
             )
 
 
+class LushaHealthChecker:
+    """Health checker for Lusha API credentials."""
+
+    ENDPOINT = "https://api.lusha.com/account/usage"
+    TIMEOUT = 10.0
+
+    def check(self, api_key: str) -> HealthCheckResult:
+        """
+        Validate Lusha API key by checking account usage endpoint.
+
+        This is a lightweight authenticated request that confirms API access.
+        """
+        try:
+            with httpx.Client(timeout=self.TIMEOUT) as client:
+                response = client.get(
+                    self.ENDPOINT,
+                    headers={
+                        "api_key": api_key,
+                        "Accept": "application/json",
+                    },
+                )
+
+                if response.status_code == 200:
+                    return HealthCheckResult(
+                        valid=True,
+                        message="Lusha API key valid",
+                    )
+                elif response.status_code == 401:
+                    return HealthCheckResult(
+                        valid=False,
+                        message="Lusha API key is invalid",
+                        details={"status_code": 401},
+                    )
+                elif response.status_code == 403:
+                    return HealthCheckResult(
+                        valid=False,
+                        message="Lusha API key lacks required permissions",
+                        details={"status_code": 403},
+                    )
+                elif response.status_code == 429:
+                    return HealthCheckResult(
+                        valid=True,
+                        message="Lusha API key valid (rate/credit limited)",
+                        details={"status_code": 429, "rate_limited": True},
+                    )
+                else:
+                    return HealthCheckResult(
+                        valid=False,
+                        message=f"Lusha API returned status {response.status_code}",
+                        details={"status_code": response.status_code},
+                    )
+        except httpx.TimeoutException:
+            return HealthCheckResult(
+                valid=False,
+                message="Lusha API request timed out",
+                details={"error": "timeout"},
+            )
+        except httpx.RequestError as e:
+            return HealthCheckResult(
+                valid=False,
+                message=f"Failed to connect to Lusha API: {e}",
+                details={"error": str(e)},
+            )
+
+
 class GoogleGmailHealthChecker(OAuthBearerHealthChecker):
     """Health checker for Google Gmail OAuth tokens."""
 
@@ -981,6 +1173,130 @@ class BrevoHealthChecker(BaseHttpHealthChecker):
         return identity
 
 
+class IntercomHealthChecker(OAuthBearerHealthChecker):
+    """Health checker for Intercom access tokens."""
+
+    def __init__(self):
+        super().__init__(
+            endpoint="https://api.intercom.io/me",
+            service_name="Intercom",
+        )
+
+
+# --- Simple Bearer-auth checkers ---
+
+
+class ApifyHealthChecker(BaseHttpHealthChecker):
+    ENDPOINT = "https://api.apify.com/v2/users/me"
+    SERVICE_NAME = "Apify"
+
+
+class AsanaHealthChecker(BaseHttpHealthChecker):
+    ENDPOINT = "https://app.asana.com/api/1.0/users/me"
+    SERVICE_NAME = "Asana"
+
+
+class AttioHealthChecker(BaseHttpHealthChecker):
+    ENDPOINT = "https://api.attio.com/v2/workspace_members"
+    SERVICE_NAME = "Attio"
+
+
+class DockerHubHealthChecker(BaseHttpHealthChecker):
+    ENDPOINT = "https://hub.docker.com/v2/user/login"
+    SERVICE_NAME = "Docker Hub"
+
+
+class GoogleSearchConsoleHealthChecker(BaseHttpHealthChecker):
+    ENDPOINT = "https://www.googleapis.com/webmasters/v3/sites"
+    SERVICE_NAME = "Google Search Console"
+
+
+class HuggingFaceHealthChecker(BaseHttpHealthChecker):
+    ENDPOINT = "https://huggingface.co/api/whoami-v2"
+    SERVICE_NAME = "Hugging Face"
+
+
+class LinearHealthChecker(BaseHttpHealthChecker):
+    ENDPOINT = "https://api.linear.app/graphql"
+    SERVICE_NAME = "Linear"
+
+
+class MicrosoftGraphHealthChecker(BaseHttpHealthChecker):
+    ENDPOINT = "https://graph.microsoft.com/v1.0/me"
+    SERVICE_NAME = "Microsoft Graph"
+
+
+class PineconeHealthChecker(BaseHttpHealthChecker):
+    ENDPOINT = "https://api.pinecone.io/indexes"
+    SERVICE_NAME = "Pinecone"
+
+
+class VercelHealthChecker(BaseHttpHealthChecker):
+    ENDPOINT = "https://api.vercel.com/v2/user"
+    SERVICE_NAME = "Vercel"
+
+
+# --- Custom-header auth checkers ---
+
+
+class GitLabHealthChecker(BaseHttpHealthChecker):
+    ENDPOINT = "https://gitlab.com/api/v4/user"
+    SERVICE_NAME = "GitLab"
+    AUTH_TYPE = BaseHttpHealthChecker.AUTH_HEADER
+    AUTH_HEADER_NAME = "PRIVATE-TOKEN"
+    AUTH_HEADER_TEMPLATE = "{token}"
+
+
+class NotionHealthChecker(BaseHttpHealthChecker):
+    ENDPOINT = "https://api.notion.com/v1/users/me"
+    SERVICE_NAME = "Notion"
+
+    def _build_headers(self, credential_value: str) -> dict[str, str]:
+        headers = super()._build_headers(credential_value)
+        headers["Notion-Version"] = "2022-06-28"
+        return headers
+
+
+# --- Basic-auth checkers ---
+
+
+class GreenhouseHealthChecker(BaseHttpHealthChecker):
+    ENDPOINT = "https://harvest.greenhouse.io/v1/jobs?per_page=1"
+    SERVICE_NAME = "Greenhouse"
+    AUTH_TYPE = BaseHttpHealthChecker.AUTH_BASIC
+
+
+# --- Query-param auth checkers ---
+
+
+class PipedriveHealthChecker(BaseHttpHealthChecker):
+    ENDPOINT = "https://api.pipedrive.com/v1/users/me"
+    SERVICE_NAME = "Pipedrive"
+    AUTH_TYPE = BaseHttpHealthChecker.AUTH_QUERY
+    AUTH_QUERY_PARAM_NAME = "api_token"
+
+
+class TrelloKeyHealthChecker(BaseHttpHealthChecker):
+    ENDPOINT = "https://api.trello.com/1/members/me"
+    SERVICE_NAME = "Trello"
+    AUTH_TYPE = BaseHttpHealthChecker.AUTH_QUERY
+    AUTH_QUERY_PARAM_NAME = "key"
+
+
+class TrelloTokenHealthChecker(BaseHttpHealthChecker):
+    ENDPOINT = "https://api.trello.com/1/members/me"
+    SERVICE_NAME = "Trello"
+    AUTH_TYPE = BaseHttpHealthChecker.AUTH_QUERY
+    AUTH_QUERY_PARAM_NAME = "token"
+
+
+class YouTubeHealthChecker(BaseHttpHealthChecker):
+    ENDPOINT = "https://www.googleapis.com/youtube/v3/videoCategories?part=snippet&regionCode=US"
+    SERVICE_NAME = "YouTube"
+    AUTH_TYPE = BaseHttpHealthChecker.AUTH_QUERY
+    AUTH_QUERY_PARAM_NAME = "key"
+
+
 # Registry of health checkers
 HEALTH_CHECKERS: dict[str, CredentialHealthChecker] = {
     "discord": DiscordHealthChecker(),
@@ -998,11 +1314,47 @@ HEALTH_CHECKERS: dict[str, CredentialHealthChecker] = {
     "google_docs": GoogleDocsHealthChecker(),
     "calcom": CalcomHealthChecker(),
     "serpapi": SerpApiHealthChecker(),
+    "apify": ApifyHealthChecker(),
     "apollo": ApolloHealthChecker(),
-    "telegram": TelegramHealthChecker(),
-    "newsdata": NewsdataHealthChecker(),
-    "finlight": FinlightHealthChecker(),
+    "asana": AsanaHealthChecker(),
+    "attio": AttioHealthChecker(),
+    "brave_search": BraveSearchHealthChecker(),
     "brevo": BrevoHealthChecker(),
+    "calcom": CalcomHealthChecker(),
+    "calendly_pat": CalendlyHealthChecker(),
+    "discord": DiscordHealthChecker(),
+    "docker_hub": DockerHubHealthChecker(),
+    "exa_search": ExaSearchHealthChecker(),
+    "finlight": FinlightHealthChecker(),
+    "github": GitHubHealthChecker(),
+    "gitlab_token": GitLabHealthChecker(),
+    "google": GoogleGmailHealthChecker(),
+    "google_calendar_oauth": GoogleCalendarHealthChecker(),
+    "google_docs": GoogleDocsHealthChecker(),
+    "google_maps": GoogleMapsHealthChecker(),
+    "google_search": GoogleSearchHealthChecker(),
+    "google_search_console": GoogleSearchConsoleHealthChecker(),
+    "greenhouse_token": GreenhouseHealthChecker(),
+    "hubspot": HubSpotHealthChecker(),
+    "huggingface": HuggingFaceHealthChecker(),
+    "intercom": IntercomHealthChecker(),
+    "linear": LinearHealthChecker(),
+    "lusha_api_key": LushaHealthChecker(),
+    "microsoft_graph": MicrosoftGraphHealthChecker(),
+    "newsdata": NewsdataHealthChecker(),
+    "notion_token": NotionHealthChecker(),
+    "pinecone": PineconeHealthChecker(),
+    "pipedrive": PipedriveHealthChecker(),
+    "resend": ResendHealthChecker(),
+    "serpapi": SerpApiHealthChecker(),
+    "slack": SlackHealthChecker(),
+    "stripe": StripeHealthChecker(),
+    "telegram": TelegramHealthChecker(),
+    "trello_key": TrelloKeyHealthChecker(),
+    "trello_token": TrelloTokenHealthChecker(),
+    "vercel": VercelHealthChecker(),
+    "youtube": YouTubeHealthChecker(),
+    "zoho_crm": ZohoCRMHealthChecker(),
 }
 
 

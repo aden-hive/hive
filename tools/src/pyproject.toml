@@ -1,0 +1,14 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "aden-tools"
+version = "0.0.1"
+description = "Aden Tools package"
+requires-python = ">=3.8"
+dependencies = []   # add real deps here later if needed
+
+[tool.setuptools.packages.find]
+where = ["."]
+namespaces = false

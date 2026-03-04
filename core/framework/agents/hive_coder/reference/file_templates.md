@@ -57,51 +57,28 @@ metadata = AgentMetadata()
 
 from framework.graph import NodeSpec
 
-# Node 1: Intake (client-facing)
-intake_node = NodeSpec(
-    id="intake",
-    name="Intake",
-    description="Gather requirements from the user",
+# Node 1: Process (autonomous entry node)
+# The queen handles intake and passes structured input via
+# run_agent_with_input(task). NO client-facing intake node.
+# The queen defines input_keys at build time and fills them at run time.
+process_node = NodeSpec(
+    id="process",
+    name="Process",
+    description="Execute the task using available tools",
     node_type="event_loop",
-    client_facing=True,
     max_node_visits=0,  # Unlimited for forever-alive
-    input_keys=["topic"],
-    output_keys=["brief"],
-    success_criteria="The brief is specific and actionable.",
-    system_prompt="""\
-You are an intake specialist.
-
-**STEP 1 — Read and respond (text only, NO tool calls):**
-1. Read the topic provided
-2. If vague, ask 1-2 clarifying questions
-3. If clear, confirm your understanding
-
-**STEP 2 — After the user confirms, call set_output:**
-- set_output("brief", "Clear description of what to do")
-""",
-    tools=[],
-)
-
-# Node 2: Worker (autonomous)
-worker_node = NodeSpec(
-    id="worker",
-    name="Worker",
-    description="Do the main work",
-    node_type="event_loop",
-    max_node_visits=0,
-    input_keys=["brief", "feedback"],
+    input_keys=["user_request", "feedback"],
     output_keys=["results"],
     nullable_output_keys=["feedback"],  # Only on feedback edge
     success_criteria="Results are complete and accurate.",
     system_prompt="""\
-You are a worker agent. Given a brief, do the work.
-
-If feedback is provided, this is a follow-up — address the feedback.
+You are a processing agent. Your task is in memory under "user_request". \
+If "feedback" is present, this is a revision — address the feedback.
 
 Work in phases:
 1. Use tools to gather/process data
 2. Analyze results
-3. Call set_output for each key in a SEPARATE turn:
+3. Call set_output in a SEPARATE turn:
    - set_output("results", "structured results")
 """,
     tools=["web_search", "web_scrape", "save_data", "load_data", "list_data_files"],
@@ -115,7 +92,7 @@ review_node = NodeSpec(
     node_type="event_loop",
     client_facing=True,
     max_node_visits=0,
-    input_keys=["results", "brief"],
+    input_keys=["results", "user_request"],
     output_keys=["next_action", "feedback"],
     nullable_output_keys=["feedback"],
     success_criteria="User has reviewed and decided next steps.",
@@ -128,14 +105,14 @@ Present the results to the user.
 3. Ask: satisfied, or want changes?
 
 **STEP 2 — After user responds, call set_output:**
-- set_output("next_action", "new_topic")   — if starting fresh
+- set_output("next_action", "done")        — if satisfied
 - set_output("next_action", "revise")      — if changes needed
 - set_output("feedback", "what to change") — only if revising
 """,
     tools=[],
 )
 
-__all__ = ["intake_node", "worker_node", "review_node"]
+__all__ = ["process_node", "review_node"]
 ```
 
 ## agent.py
@@ -155,7 +132,7 @@ from framework.runtime.agent_runtime import AgentRuntime, create_agent_runtime
 from framework.runtime.execution_stream import EntryPointSpec
 
 from .config import default_config, metadata
-from .nodes import intake_node, worker_node, review_node
+from .nodes import process_node, review_node
 
 # Goal definition
 goal = Goal(
@@ -172,27 +149,26 @@ goal = Goal(
 )
 
 # Node list
-nodes = [intake_node, worker_node, review_node]
+nodes = [process_node, review_node]
 
 # Edge definitions
 edges = [
-    EdgeSpec(id="intake-to-worker", source="intake", target="worker",
+    EdgeSpec(id="process-to-review", source="process", target="review",
              condition=EdgeCondition.ON_SUCCESS, priority=1),
-    EdgeSpec(id="worker-to-review", source="worker", target="review",
-             condition=EdgeCondition.ON_SUCCESS, priority=1),
-    # Feedback loop
-    EdgeSpec(id="review-to-worker", source="review", target="worker",
+    # Feedback loop — revise results
+    EdgeSpec(id="review-to-process", source="review", target="process",
              condition=EdgeCondition.CONDITIONAL,
              condition_expr="str(next_action).lower() == 'revise'", priority=2),
-    # Loop back for new topic
-    EdgeSpec(id="review-to-intake", source="review", target="intake",
+    # Loop back for next task (queen sends new input)
+    EdgeSpec(id="review-done", source="review", target="process",
              condition=EdgeCondition.CONDITIONAL,
-             condition_expr="str(next_action).lower() == 'new_topic'", priority=1),
+             condition_expr="str(next_action).lower() == 'done'", priority=1),
 ]
 
-# Graph configuration
-entry_node = "intake"
-entry_points = {"start": "intake"}
+# Graph configuration — entry is the autonomous process node
+# The queen handles intake and passes the task via run_agent_with_input(task)
+entry_node = "process"
+entry_points = {"start": "process"}
 pause_nodes = []
 terminal_nodes = []  # Forever-alive
 
@@ -208,7 +184,7 @@ class MyAgent:
         self.goal = goal
         self.nodes = nodes
         self.edges = edges
-        self.entry_node = entry_node
+        self.entry_node = entry_node  # "process" — autonomous entry
         self.entry_points = entry_points
         self.pause_nodes = pause_nodes
         self.terminal_nodes = terminal_nodes
@@ -235,16 +211,14 @@ class MyAgent:
             identity_prompt=identity_prompt,
         )
 
-    def _setup(self, mock_mode=False):
+    def _setup(self):
         self._storage_path = Path.home() / ".hive" / "agents" / "my_agent"
         self._storage_path.mkdir(parents=True, exist_ok=True)
         self._tool_registry = ToolRegistry()
         mcp_config = Path(__file__).parent / "mcp_servers.json"
         if mcp_config.exists():
             self._tool_registry.load_mcp_config(mcp_config)
-        llm = None
-        if not mock_mode:
-            llm = LiteLLMProvider(model=self.config.model, api_key=self.config.api_key, api_base=self.config.api_base)
+        llm = LiteLLMProvider(model=self.config.model, api_key=self.config.api_key, api_base=self.config.api_base)
         tools = list(self._tool_registry.get_tools().values())
         tool_executor = self._tool_registry.get_executor()
         self._graph = self._build_graph()
@@ -257,9 +231,9 @@ class MyAgent:
                                                 checkpoint_max_age_days=7, async_checkpoint=True),
         )
 
-    async def start(self, mock_mode=False):
+    async def start(self):
         if self._agent_runtime is None:
-            self._setup(mock_mode=mock_mode)
+            self._setup()
         if not self._agent_runtime.is_running:
             await self._agent_runtime.start()
 
@@ -274,8 +248,8 @@ class MyAgent:
         return await self._agent_runtime.trigger_and_wait(
             entry_point_id=entry_point, input_data=input_data or {}, session_state=session_state)
 
-    async def run(self, context, mock_mode=False, session_state=None):
-        await self.start(mock_mode=mock_mode)
+    async def run(self, context, session_state=None):
+        await self.start()
         try:
             result = await self.trigger_and_wait("default", context, session_state=session_state)
             return result or ExecutionResult(success=False, error="Execution timeout")
@@ -471,19 +445,17 @@ def cli():
 
 @cli.command()
 @click.option("--topic", "-t", required=True)
-@click.option("--mock", is_flag=True)
 @click.option("--verbose", "-v", is_flag=True)
-def run(topic, mock, verbose):
+def run(topic, verbose):
     """Execute the agent."""
     setup_logging(verbose=verbose)
-    result = asyncio.run(default_agent.run({"topic": topic}, mock_mode=mock))
+    result = asyncio.run(default_agent.run({"topic": topic}))
     click.echo(json.dumps({"success": result.success, "output": result.output}, indent=2, default=str))
     sys.exit(0 if result.success else 1)
 
 
 @cli.command()
-@click.option("--mock", is_flag=True)
-def tui(mock):
+def tui():
     """Launch TUI dashboard."""
     from pathlib import Path
     from framework.tui.app import AdenTUI
@@ -499,10 +471,10 @@ def tui(mock):
         storage.mkdir(parents=True, exist_ok=True)
         mcp_cfg = Path(__file__).parent / "mcp_servers.json"
         if mcp_cfg.exists(): agent._tool_registry.load_mcp_config(mcp_cfg)
-        llm = None if mock else LiteLLMProvider(model=agent.config.model, api_key=agent.config.api_key, api_base=agent.config.api_base)
+        llm = LiteLLMProvider(model=agent.config.model, api_key=agent.config.api_key, api_base=agent.config.api_base)
         runtime = create_agent_runtime(
             graph=agent._build_graph(), goal=agent.goal, storage_path=storage,
-            entry_points=[EntryPointSpec(id="start", name="Start", entry_node="intake", trigger_type="manual", isolation_level="isolated")],
+            entry_points=[EntryPointSpec(id="start", name="Start", entry_node="process", trigger_type="manual", isolation_level="isolated")],
             llm=llm, tools=list(agent._tool_registry.get_tools().values()), tool_executor=agent._tool_registry.get_executor())
         await runtime.start()
         try:
@@ -564,7 +536,6 @@ import sys
 from pathlib import Path
 
 import pytest
-import pytest_asyncio
 
 _repo_root = Path(__file__).resolve().parents[3]
 for _p in ["exports", "core"]:
@@ -576,18 +547,17 @@ AGENT_PATH = str(Path(__file__).resolve().parents[1])
 
 
 @pytest.fixture(scope="session")
-def mock_mode():
-    return True
+def agent_module():
+    """Import the agent package for structural validation."""
+    import importlib
+    return importlib.import_module(Path(AGENT_PATH).name)
 
 
-@pytest_asyncio.fixture(scope="session")
-async def runner(tmp_path_factory, mock_mode):
+@pytest.fixture(scope="session")
+def runner_loaded():
+    """Load the agent through AgentRunner (structural only, no LLM needed)."""
     from framework.runner.runner import AgentRunner
-    storage = tmp_path_factory.mktemp("agent_storage")
-    r = AgentRunner.load(AGENT_PATH, mock_mode=mock_mode, storage_path=storage)
-    r._setup()
-    yield r
-    await r.cleanup_async()
+    return AgentRunner.load(AGENT_PATH)
 ```
 
 ## entry_points Format
