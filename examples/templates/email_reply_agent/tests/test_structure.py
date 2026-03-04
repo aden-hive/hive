@@ -1,7 +1,5 @@
 """Structural tests for Email Reply Agent."""
 
-import pytest
-
 
 class TestAgentStructure:
     """Test agent graph structure."""

@@ -37,6 +37,10 @@ export const executionApi = {
   chat: (sessionId: string, message: string) =>
     api.post<ChatResult>(`/sessions/${sessionId}/chat`, { message }),
 
+  /** Queue context for the queen without triggering an LLM response. */
+  queenContext: (sessionId: string, message: string) =>
+    api.post<ChatResult>(`/sessions/${sessionId}/queen-context`, { message }),
+
   workerInput: (sessionId: string, message: string) =>
     api.post<ChatResult>(`/sessions/${sessionId}/worker-input`, { message }),
 

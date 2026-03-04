@@ -48,11 +48,11 @@ profile_setup → daily_intake → update_tracker → analyze_progress → gener
 ```
 `analyze_progress` has no tools. `schedule_reminders` just sets one boolean. `report` just presents analysis. `update_tracker` and `generate_plan` are sequential autonomous work.
 
-**Good example** (3 nodes):
+**Good example** (2 nodes):
 ```
-intake (client-facing) → process (autonomous: track + analyze + plan) → intake (loop back)
+process (autonomous: track + analyze + plan) → review (client-facing) → process (loop back)
 ```
-One client-facing node handles ALL user interaction (setup, logging, reports). One autonomous node handles ALL backend work (CSV update, analysis, plan generation) with tools and context preserved.
+The queen handles intake (gathering requirements from the user) and passes the task via `run_agent_with_input(task)`. One autonomous node handles ALL backend work (CSV update, analysis, plan generation) with tools and context preserved. One client-facing node handles review/approval when needed.
 
 12. **Adding framework gating for LLM behavior** — Don't add output rollback, premature rejection, or interaction protocol injection. Fix with better prompts or custom judges.
 
@@ -109,3 +109,5 @@ def test_research_routes_back_to_interact(self):
 25. **Manually wiring browser tools on event_loop nodes** — If the agent needs browser automation, use `node_type="gcu"` which auto-includes all browser tools and prepends best-practices guidance. Do NOT manually list browser tool names on event_loop nodes — they may not exist in the MCP server or may be incomplete. See the GCU Guide appendix.
 
 26. **Using GCU nodes as regular graph nodes** — GCU nodes (`node_type="gcu"`) are exclusively subagents. They must ONLY appear in a parent node's `sub_agents=["gcu-node-id"]` list and be invoked via `delegate_to_sub_agent()`. They must NEVER be connected via edges, used as entry nodes, or used as terminal nodes. If a GCU node appears as an edge source or target, the graph will fail pre-load validation.
+
+27. **Adding a client-facing intake node to worker agents** — The queen owns intake. She defines the entry node's `input_keys` at build time and fills them via `run_agent_with_input(task)` at run time. Worker agents should start with an autonomous processing node, NOT a client-facing intake node that asks the user for requirements. Client-facing nodes in workers are for mid-execution review/approval only.

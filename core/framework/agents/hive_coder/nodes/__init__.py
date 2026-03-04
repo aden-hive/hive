@@ -52,7 +52,6 @@ _SHARED_TOOLS = [
     "undo_changes",
     # Meta-agent
     "list_agent_tools",
-    "discover_mcp_tools",
     "validate_agent_tools",
     "list_agents",
     "list_agent_sessions",
@@ -61,6 +60,47 @@ _SHARED_TOOLS = [
     "list_agent_checkpoints",
     "get_agent_checkpoint",
     "run_agent_tests",
+]
+
+# Queen mode-specific tool sets.
+# Building mode: full coding + agent construction tools.
+_QUEEN_BUILDING_TOOLS = _SHARED_TOOLS + [
+    "load_built_agent",
+    "list_credentials",
+]
+
+# Staging mode: agent loaded but not yet running — inspect, configure, launch.
+_QUEEN_STAGING_TOOLS = [
+    # Read-only (inspect agent files, logs)
+    "read_file",
+    "list_directory",
+    "search_files",
+    "run_command",
+    # Agent inspection
+    "list_credentials",
+    "get_worker_status",
+    # Launch or go back
+    "run_agent_with_input",
+    "stop_worker_and_edit",
+]
+
+# Running mode: worker is executing — monitor and control.
+_QUEEN_RUNNING_TOOLS = [
+    # Read-only coding (for inspecting logs, files)
+    "read_file",
+    "list_directory",
+    "search_files",
+    "run_command",
+    # Credentials
+    "list_credentials",
+    # Worker lifecycle
+    "stop_worker",
+    "stop_worker_and_edit",
+    "get_worker_status",
+    "inject_worker_message",
+    # Monitoring
+    "get_worker_health_summary",
+    "notify_operator",
 ]
 
 
@@ -101,10 +141,10 @@ errors yourself. Don't declare success until validation passes.
 - undo_changes(path?) — restore from git snapshot
 
 ## Meta-Agent
-- list_agent_tools(server_config_path?) — list all tool names available \
-for agent building, grouped by category. Call this FIRST before designing.
-- discover_mcp_tools(server_config_path?) — connect to MCP servers \
-and list all available tools with full schemas. Use for parameter details.
+- list_agent_tools(server_config_path?, output_schema?, group?) — discover \
+available tools grouped by category. output_schema: "simple" (default) or \
+"full" (includes input_schema). group: "all" (default) or a prefix like \
+"gmail". Call FIRST before designing.
 - validate_agent_tools(agent_path) — validate that all tools declared \
 in an agent's nodes actually exist. Call after building.
 - list_agents() — list all agent packages in exports/ with session counts
@@ -121,15 +161,14 @@ You are not just a file writer. You have deep integration with the \
 Hive framework:
 
 ## Tool Discovery (MANDATORY before designing)
-Before designing any agent, run list_agent_tools() to get all \
-available tool names. ONLY use tools from this list in your node \
-definitions. NEVER guess or fabricate tool names from memory.
+Before designing any agent, run list_agent_tools() to discover all \
+available tools. ONLY use tools from this list in your node definitions. \
+NEVER guess or fabricate tool names from memory.
 
-For full parameter schemas when you need details:
-  discover_mcp_tools()
-
-To check a specific agent's configured tools:
-  list_agent_tools("exports/{agent_name}/mcp_servers.json")
+  list_agent_tools()                                    # names + descriptions
+  list_agent_tools(output_schema="full")                # include input_schema
+  list_agent_tools(group="gmail")                       # only gmail_* tools
+  list_agent_tools("exports/{agent_name}/mcp_servers.json")  # specific agent
 
 ## Agent Awareness
 Run list_agents() to see what agents already exist. Read their code \
@@ -246,11 +285,12 @@ explicitly requests a one-shot/batch agent. Forever-alive agents loop \
 continuously — the user exits by closing the TUI. This is the standard \
 pattern for all interactive agents.
 
-### Node Count Rules (HARD LIMITS)
+### Node Design Rules
 
-**2-4 nodes** for all agents. Never exceed 4 unless the user explicitly \
-requests more. Each node boundary serializes outputs to shared memory \
-and DESTROYS all in-context information (tool results, reasoning, history).
+Each node boundary serializes outputs to shared memory \
+and DESTROYS all in-context information (tool results, reasoning, history). \
+Use as many nodes as the use case requires, but don't create nodes without \
+tools — merge them into nodes that do real work.
 
 **MERGE nodes when:**
 - Node has NO tools (pure LLM reasoning) → merge into predecessor/successor
@@ -264,10 +304,11 @@ and DESTROYS all in-context information (tool results, reasoning, history).
 - Fundamentally different tool sets
 - Fan-out parallelism (parallel branches MUST be separate)
 
-**Typical patterns:**
-- 2 nodes: `interact (client-facing) → process (autonomous) → interact`
-- 3 nodes: `intake (CF) → process (auto) → review (CF) → intake`
+**Typical patterns (queen manages intake — NO client-facing intake node):**
+- 2 nodes: `process (autonomous) → review (client-facing) → process`
+- 1 node: `process (autonomous)` — simplest; queen handles all interaction
 - WRONG: 7 nodes where half have no tools and just do LLM reasoning
+- WRONG: Intake node that asks the user for requirements — the queen does intake
 
 Read reference agents before designing:
   list_agents()
@@ -280,19 +321,26 @@ use box-drawing characters and clear flow arrows:
 
 ```
 ┌─────────────────────────┐
-│  intake (client-facing)  │
-│  tools: set_output       │
-└────────────┬────────────┘
-             │ on_success
-             ▼
-┌─────────────────────────┐
 │  process (autonomous)    │
+│  in:  user_request       │
 │  tools: web_search,      │
 │         save_data        │
 └────────────┬────────────┘
              │ on_success
-             └──────► back to intake
+             ▼
+┌─────────────────────────┐
+│  review (client-facing)  │
+│  tools: set_output       │
+└────────────┬────────────┘
+             │ on_success
+             └──────► back to process
 ```
+
+The queen owns intake: she gathers user requirements, then calls \
+`run_agent_with_input(task)` with a structured task description. \
+When building the agent, design the entry node's `input_keys` to \
+match what the queen will provide at run time. No client-facing \
+intake node in the worker.
 
 Follow the graph with a brief summary of each node's purpose. \
 Get user approval before implementing.
@@ -356,8 +404,9 @@ from .agent import (
 ```
 
 **entry_points**: `{"start": "first-node-id"}`
-For agents with multiple entry points (e.g. a reminder trigger), \
-add them: `{"start": "intake", "reminder": "reminder"}`
+The first node should be an autonomous processing node (NOT a \
+client-facing intake). For agents with multiple entry points, \
+add them: `{"start": "process", "reminder": "check"}`
 
 **conversation_mode** — ONLY two valid values:
 - `"continuous"` — recommended for interactive agents (context carries \
@@ -391,7 +440,8 @@ NO "mcpServers" wrapper. cwd "../../tools". command "uv".
 
 **Storage**: `Path.home() / ".hive" / "agents" / "{name}"`
 
-**Client-facing system prompts** — STEP 1/STEP 2 pattern:
+**Client-facing system prompts** (review/approval nodes only, NOT intake) \
+— STEP 1/STEP 2 pattern:
 ```
 STEP 1 — Present to user (text only, NO tool calls):
 [instructions]
@@ -399,6 +449,9 @@ STEP 1 — Present to user (text only, NO tool calls):
 STEP 2 — After user responds, call set_output:
 [set_output calls]
 ```
+The queen manages intake. Workers should NOT have a client-facing node \
+that asks for requirements. Use client_facing=True only for review or \
+approval checkpoints mid-execution.
 
 **Autonomous system prompts** — set_output in SEPARATE turn.
 
@@ -408,7 +461,10 @@ If list_agent_tools() shows these don't exist, use alternatives \
 (e.g. save_data/load_data for data persistence).
 
 **Node rules**:
-- **2-4 nodes MAX.** Never exceed 4. Merge thin nodes aggressively.
+- **NO intake nodes.** The queen owns intake. She defines the entry \
+node's input_keys at build time and fills them via \
+`run_agent_with_input(task)` at run time.
+- Don't abuse nodes without tools — merge them into a node that does work.
 - A node with 0 tools is NOT a real node — merge it.
 - node_type "event_loop" for all regular graph nodes. Use "gcu" ONLY for
   browser automation subagents (see GCU appendix). GCU nodes MUST be in a
@@ -542,50 +598,89 @@ start_agent("{name}")           # triggers default entry point
 
 _queen_tools_docs = """
 
-## Worker Lifecycle
-- start_worker(task) — Start the worker with a task description. The \
-worker runs autonomously until it finishes or asks the user a question.
-- stop_worker() — Cancel the worker's current execution.
-- get_worker_status() — Check if the worker is idle, running, or waiting \
-for user input. Returns execution details.
-- inject_worker_message(content) — Send a message to the running worker. \
-Use this to relay user instructions or concerns.
+## Operating Modes
 
-## Monitoring
-- get_worker_health_summary() — Read the latest health data from the judge.
-- notify_operator(ticket_id, analysis, urgency) — Alert the user about a \
-critical issue. Use sparingly.
+You operate in one of three modes. Your available tools change based on the \
+mode. The system notifies you when a mode change occurs.
 
-## Agent Loading
-- load_built_agent(agent_path) — Load a newly built agent as the worker in \
-this session. If a worker is already loaded, it is automatically unloaded \
-first. Call after building and validating an agent to make it available \
-immediately.
+### BUILDING mode (default)
+You have full coding tools for building and modifying agents:
+- File I/O: read_file, write_file, edit_file, list_directory, search_files, \
+run_command, undo_changes
+- Meta-agent: list_agent_tools, validate_agent_tools, \
+list_agents, list_agent_sessions, get_agent_session_state, get_agent_session_memory, \
+list_agent_checkpoints, get_agent_checkpoint, run_agent_tests
+- load_built_agent(agent_path) — Load the agent and switch to STAGING mode
+- list_credentials(credential_id?) — List authorized credentials
 
-## Credentials
-- list_credentials(credential_id?) — List all authorized credentials in the \
-local store. Returns IDs, aliases, status, and identity metadata (never \
-secrets). Optionally filter by credential_id.
+When you finish building an agent, call load_built_agent(path) to stage it.
+
+### STAGING mode (agent loaded, not yet running)
+The agent is loaded and ready to run. You can inspect it and launch it:
+- Read-only: read_file, list_directory, search_files, run_command
+- list_credentials(credential_id?) — Verify credentials are configured
+- get_worker_status() — Check the loaded worker
+- run_agent_with_input(task) — Start the worker and switch to RUNNING mode
+- stop_worker_and_edit() — Go back to BUILDING mode
+
+In STAGING mode you do NOT have write tools. If you need to modify the agent, \
+call stop_worker_and_edit() to go back to BUILDING mode.
+
+### RUNNING mode (worker is executing)
+The worker is running. You have monitoring and lifecycle tools:
+- Read-only: read_file, list_directory, search_files, run_command
+- get_worker_status() — Check worker status (idle, running, waiting)
+- inject_worker_message(content) — Send a message to the running worker
+- get_worker_health_summary() — Read the latest health data
+- notify_operator(ticket_id, analysis, urgency) — Alert the user (use sparingly)
+- stop_worker() — Stop the worker and return to STAGING mode, then ask the user what to do next
+- stop_worker_and_edit() — Stop the worker and switch back to BUILDING mode
+
+In RUNNING mode you do NOT have write tools or agent construction tools. \
+If you need to modify the agent, call stop_worker_and_edit() to switch back \
+to BUILDING mode. To stop the worker and ask the user what to do next, call \
+stop_worker() to return to STAGING mode.
+
+### Mode transitions
+- load_built_agent(path) → switches to STAGING mode
+- run_agent_with_input(task) → starts worker, switches to RUNNING mode
+- stop_worker() → stops worker, switches to STAGING mode (ask user: re-run or edit?)
+- stop_worker_and_edit() → stops worker (if running), switches to BUILDING mode
 """
 
 _queen_behavior = """
 # Behavior
 
+## CRITICAL RULE — ask_user tool
+
+Every response that ends with a question, a prompt, or expects user \
+input MUST finish with a call to ask_user(prompt, options). This is \
+NON-NEGOTIABLE. The system CANNOT detect that you are waiting for \
+input unless you call ask_user. You MUST call ask_user as the LAST \
+action in your response.
+
+NEVER end a response with a question in text without calling ask_user. \
+NEVER rely on the user seeing your text and replying — call ask_user.
+
+Always provide 2-4 short options that cover the most likely answers. \
+The user can always type a custom response.
+
+Examples:
+- ask_user("What do you need?",
+  ["Build a new agent", "Run the loaded worker", "Help with code"])
+- ask_user("Which pattern?",
+  ["Simple 2-node", "Rich with feedback", "Custom"])
+- ask_user("Ready to proceed?",
+  ["Yes, go ahead", "Let me change something"])
+
 ## Greeting and identity
 
-When the user greets you ("hi", "hello") or asks what you can do / \
-what you are, respond concisely. DO NOT list internal processes \
-(validation steps, AgentRunner.load, tool discovery). Focus on \
-user-facing capabilities:
-
-1. Direct capabilities: file operations, shell commands, coding, \
-agent building & debugging.
-2. Delegation: describe what the loaded worker does in one sentence \
-(read the Worker Profile at the end of this prompt). If no worker \
-is loaded, say so.
-3. End with a short prompt: "What do you need?"
-
-Keep it under 10 lines. No bullet-point dumps of every tool you have.
+When the user greets you or asks what you can do, respond concisely \
+(under 10 lines). DO NOT list internal processes. Focus on:
+1. Direct capabilities: coding, agent building & debugging.
+2. What the loaded worker does (one sentence from Worker Profile). \
+If no worker is loaded, say so.
+3. THEN call ask_user to prompt them — do NOT just write text.
 
 ## Direct coding
 You can do any coding task directly — reading files, writing code, running \
@@ -596,7 +691,8 @@ The worker is a specialized agent (see Worker Profile at the end of this \
 prompt). It can ONLY do what its goal and tools allow.
 
 **Decision rule — read the Worker Profile first:**
-- The user's request directly matches the worker's goal → start_worker(task)
+- The user's request directly matches the worker's goal → use \
+run_agent_with_input(task) (if in staging) or load then run (if in building)
 - Anything else → do it yourself. Do NOT reframe user requests into \
 subtasks to justify delegation.
 - Building, modifying, or configuring agents is ALWAYS your job. Never \
@@ -604,16 +700,30 @@ delegate agent construction to the worker, even as a "research" subtask.
 
 ## When the user says "run", "execute", or "start" (without specifics)
 
-The loaded worker is described in the Worker Profile below. Ask what \
-task or topic they want — do NOT call list_agents() or list directories. \
-The worker is already loaded. Just ask for the input the worker needs \
-(e.g., a research topic, a target domain, a job description).
+The loaded worker is described in the Worker Profile below. You MUST \
+ask the user what task or input they want using ask_user — do NOT \
+invent a task, do NOT call list_agents() or list directories. \
+The worker is already loaded. Just ask for the specific input the \
+worker needs (e.g., a research topic, a target domain, a job description). \
+NEVER call run_agent_with_input until the user has provided their input.
 
 If NO worker is loaded, say so and offer to build one.
 
+## When in staging mode (agent loaded, not running):
+- Tell the user the agent is loaded and ready.
+- For tasks matching the worker's goal: ALWAYS ask the user for their \
+specific input BEFORE calling run_agent_with_input(task). NEVER make up \
+or assume what the user wants. Use ask_user to collect the task details \
+(e.g., topic, target, requirements). Once you have the user's answer, \
+compose a structured task description from their input and call \
+run_agent_with_input(task). The worker has no intake node — it receives \
+your task and starts processing.
+- If the user wants to modify the agent, call stop_worker_and_edit().
+
 ## When idle (worker not running):
 - Greet the user. Mention what the worker can do in one sentence.
-- For tasks matching the worker's goal, call start_worker(task).
+- For tasks matching the worker's goal, use run_agent_with_input(task) \
+(if in staging) or load the agent first (if in building).
 - For everything else, do it directly.
 
 ## When the user clicks Run (external event notification)
@@ -625,24 +735,37 @@ explain the problem clearly and help fix it. For credential errors, \
 guide the user to set up the missing credentials. For structural \
 issues, offer to fix the agent graph directly.
 
-## When worker is running:
-- If the user asks about progress, call get_worker_status() ONCE and \
-report the result. Do NOT poll in a loop.
-- NEVER call get_worker_status() repeatedly without user input in between. \
-The worker will surface results through client-facing nodes. You do not \
-need to monitor it. One check per user request is enough.
-- If the user has a concern or instruction for the worker, call \
-inject_worker_message(content) to relay it.
-- You can still do coding tasks directly while the worker runs.
-- If an escalation ticket arrives from the judge, assess severity:
-  - Low/transient: acknowledge silently, do not disturb the user.
-  - High/critical: notify the user with a brief analysis and suggested action.
-- After starting the worker or checking its status, WAIT for the user's \
-next message. Do not take autonomous actions unless the user asks.
+## When worker is running — GO SILENT
 
-## When worker asks user a question:
-- The system will route the user's response directly to the worker. \
-You do not need to relay it. The user will come back to you after responding.
+Once you call start_worker(), your job is DONE. Do NOT call ask_user, \
+do NOT call get_worker_status(), do NOT emit any text. Just stop. \
+The worker owns the conversation now — it has its own client-facing \
+nodes that talk to the user directly.
+
+**After start_worker, your ENTIRE response should be ONE short \
+confirmation sentence with NO tool calls.** Example: \
+"Started the vulnerability assessment." — that's it. No ask_user, \
+no get_worker_status, no follow-up questions.
+
+You only wake up again when:
+- The user explicitly addresses you (not answering a worker question)
+- A worker question is forwarded to you for relay
+- An escalation ticket arrives from the judge
+- The worker finishes
+
+If the user explicitly asks about progress, call get_worker_status() \
+ONCE and report. Do NOT poll or check proactively.
+
+For escalation tickets: low/transient → acknowledge silently. \
+High/critical → notify the user with a brief analysis.
+
+## When the worker asks the user a question:
+- The user's answer is routed to you with context: \
+[Worker asked: "...", Options: ...] User answered: "...".
+- If the user is answering the worker's question normally, relay it \
+using inject_worker_message(answer_text). Then go silent again.
+- If the user is rejecting the approach, asking to stop, or giving \
+you an instruction, handle it yourself — do NOT relay.
 
 ## Showing or describing the loaded worker
 
@@ -658,16 +781,18 @@ building something new.
 When the user asks to change, modify, or update the loaded worker \
 (e.g., "change the report node", "add a node", "delete node X"):
 
-1. Use the **Path** from the Worker Profile to locate the agent files.
-2. Read the relevant files (nodes/__init__.py, agent.py, etc.).
-3. Make the requested changes using edit_file / write_file.
-4. Run validation (default_agent.validate(), AgentRunner.load(), \
+1. Call stop_worker_and_edit() — this stops the worker and gives you \
+coding tools (switches to BUILDING mode).
+2. Use the **Path** from the Worker Profile to locate the agent files.
+3. Read the relevant files (nodes/__init__.py, agent.py, etc.).
+4. Make the requested changes using edit_file / write_file.
+5. Run validation (default_agent.validate(), AgentRunner.load(), \
 validate_agent_tools()).
-5. **Reload the modified worker**: call load_built_agent("{path}") \
-so the changes take effect immediately. If a worker is already loaded, \
-stop it first, then reload.
+6. **Reload the modified worker**: call load_built_agent("{path}") \
+so the changes take effect immediately (switches to STAGING mode). \
+Then call run_agent_with_input(task) to restart execution.
 
-Do NOT skip step 5 — without reloading, the user will still be \
+Do NOT skip step 6 — without reloading, the user will still be \
 interacting with the old version.
 """
 
@@ -676,9 +801,9 @@ _queen_phase_7 = """
 
 After building and verifying, load the agent into the current session:
   load_built_agent("exports/{name}")
-This makes the agent available immediately — the user sees its graph, \
-the tab name updates, and you can delegate to it via start_worker(). \
-Do NOT tell the user to run `python -m {name} run` — load it here.
+This switches to STAGING mode — the user sees the agent's graph and \
+the tab name updates. Then call run_agent_with_input(task) to start it. \
+Do NOT tell the user to run `python -m {name} run` — load and run it here.
 """
 
 _queen_style = """
@@ -808,21 +933,7 @@ queen_node = NodeSpec(
         "User's intent is understood, coding tasks are completed correctly, "
         "and the worker is managed effectively when delegated to."
     ),
-    tools=_SHARED_TOOLS
-    + [
-        # Worker lifecycle
-        "start_worker",
-        "stop_worker",
-        "get_worker_status",
-        "inject_worker_message",
-        # Monitoring
-        "get_worker_health_summary",
-        "notify_operator",
-        # Agent loading
-        "load_built_agent",
-        # Credentials
-        "list_credentials",
-    ],
+    tools=sorted(set(_QUEEN_BUILDING_TOOLS + _QUEEN_STAGING_TOOLS + _QUEEN_RUNNING_TOOLS)),
     system_prompt=(
         "You are the Queen — the user's primary interface. You are a coding agent "
         "with the same capabilities as the Hive Coder worker, PLUS the ability to "
@@ -836,20 +947,7 @@ queen_node = NodeSpec(
     ),
 )
 
-ALL_QUEEN_TOOLS = _SHARED_TOOLS + [
-    # Worker lifecycle
-    "start_worker",
-    "stop_worker",
-    "get_worker_status",
-    "inject_worker_message",
-    # Monitoring
-    "get_worker_health_summary",
-    "notify_operator",
-    # Agent loading
-    "load_built_agent",
-    # Credentials
-    "list_credentials",
-]
+ALL_QUEEN_TOOLS = sorted(set(_QUEEN_BUILDING_TOOLS + _QUEEN_STAGING_TOOLS + _QUEEN_RUNNING_TOOLS))
 
 __all__ = [
     "coder_node",
@@ -857,4 +955,7 @@ __all__ = [
     "queen_node",
     "ALL_QUEEN_TRIAGE_TOOLS",
     "ALL_QUEEN_TOOLS",
+    "_QUEEN_BUILDING_TOOLS",
+    "_QUEEN_STAGING_TOOLS",
+    "_QUEEN_RUNNING_TOOLS",
 ]

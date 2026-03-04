@@ -544,6 +544,11 @@ class NodeContext:
     # the inject_input() routing chain can find.
     shared_node_registry: dict[str, Any] = field(default_factory=dict)
 
+    # Dynamic tool provider — when set, EventLoopNode rebuilds the tool
+    # list from this callback at the start of each iteration.  Used by
+    # the queen to switch between building-mode and running-mode tools.
+    dynamic_tools_provider: Any = None  # Callable[[], list[Tool]] | None
+
 
 @dataclass
 class NodeResult:
