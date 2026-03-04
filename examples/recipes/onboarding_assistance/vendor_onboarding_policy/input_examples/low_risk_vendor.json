@@ -5,6 +5,7 @@
   "annual_contract_value": 25000,
   "documents": [
     "registration_certificate",
-    "tax_certificate"
+    "tax_certificate",
+    "privacy_policy"
   ]
 }
