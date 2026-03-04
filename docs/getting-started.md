@@ -134,7 +134,10 @@ hive/
 ## Running an Agent
 
 ```bash
-# Browse and run agents interactively (Recommended)
+# Launch the web dashboard in your browser
+hive open
+
+# Browse and run agents in terminal
 hive tui
 
 # Run a specific agent
@@ -178,7 +181,7 @@ PYTHONPATH=exports uv run python -m my_agent test --type success
 
 ## Next Steps
 
-1. **TUI Dashboard**: Run `hive tui` to explore agents interactively
+1. **Dashboard**: Run `hive open` to launch the web dashboard, or `hive tui` for the terminal UI
 2. **Detailed Setup**: See [environment-setup.md](./environment-setup.md)
 3. **Developer Guide**: See [developer-guide.md](./developer-guide.md)
 4. **Build Agents**: Use `/hive` skill in Claude Code

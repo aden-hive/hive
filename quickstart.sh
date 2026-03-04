@@ -1079,8 +1079,8 @@ if [ -z "$SUBSCRIPTION_MODE" ] && [ -n "$SELECTED_ENV_VAR" ] && [ -z "${!SELECTE
     fi
 fi
 
-# For ZAI subscription: always prompt for API key
-if [ "$SUBSCRIPTION_MODE" = "zai_code" ]; then
+# For ZAI subscription: prompt for API key only if not already set
+if [ "$SUBSCRIPTION_MODE" = "zai_code" ] && [ "$ZAI_CRED_DETECTED" = false ]; then
     echo ""
     read -r -p "Paste your ZAI API key (or press Enter to skip): " API_KEY
 
@@ -1410,6 +1410,8 @@ if [ "$FRONTEND_BUILT" = true ]; then
     echo ""
     echo -e "  ${DIM}Starting server on http://localhost:8787${NC}"
     echo -e "  ${DIM}Press Ctrl+C to stop${NC}"
+    echo ""
+    echo -e "  ${DIM}Tip: You can restart the dashboard anytime with:${NC} ${CYAN}hive open${NC}"
     echo ""
     # exec replaces the quickstart process with hive open
     exec "$SCRIPT_DIR/hive" open
