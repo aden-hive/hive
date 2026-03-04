@@ -39,6 +39,7 @@ logger = logging.getLogger(__name__)
 CLAUDE_CREDENTIALS_FILE = Path.home() / ".claude" / ".credentials.json"
 CLAUDE_OAUTH_TOKEN_URL = "https://console.anthropic.com/v1/oauth/token"
 CLAUDE_OAUTH_CLIENT_ID = "9d1c250a-e61b-44d9-88ed-5944d1962f5e"
+CLAUDE_KEYCHAIN_SERVICE = "Claude Code-credentials"
 
 # Buffer in seconds before token expiry to trigger a proactive refresh
 _TOKEN_REFRESH_BUFFER_SECS = 300  # 5 minutes
@@ -49,6 +50,96 @@ CODEX_OAUTH_TOKEN_URL = "https://auth.openai.com/oauth/token"
 CODEX_OAUTH_CLIENT_ID = "app_EMoamEEZ73f0CkXaXp7hrann"
 CODEX_KEYCHAIN_SERVICE = "Codex Auth"
 _CODEX_TOKEN_LIFETIME_SECS = 3600  # 1 hour (no explicit expiry field)
+
+
+def _read_claude_keychain() -> dict | None:
+    """Read Claude Code credentials from macOS Keychain.
+
+    Returns the parsed JSON dict, or None if not on macOS or entry missing.
+    """
+    import getpass
+    import platform
+    import subprocess
+
+    if platform.system() != "Darwin":
+        return None
+
+    try:
+        account = getpass.getuser()
+        result = subprocess.run(
+            [
+                "security",
+                "find-generic-password",
+                "-s",
+                CLAUDE_KEYCHAIN_SERVICE,
+                "-a",
+                account,
+                "-w",
+            ],
+            capture_output=True,
+            encoding="utf-8",
+            timeout=5,
+        )
+        if result.returncode != 0:
+            return None
+        raw = result.stdout.strip()
+        if not raw:
+            return None
+        return json.loads(raw)
+    except (subprocess.TimeoutExpired, json.JSONDecodeError, OSError) as exc:
+        logger.debug("Claude keychain read failed: %s", exc)
+        return None
+
+
+def _save_claude_keychain(creds: dict) -> bool:
+    """Write Claude Code credentials to macOS Keychain. Returns True on success."""
+    import getpass
+    import platform
+    import subprocess
+
+    if platform.system() != "Darwin":
+        return False
+
+    try:
+        account = getpass.getuser()
+        data = json.dumps(creds)
+        result = subprocess.run(
+            [
+                "security",
+                "add-generic-password",
+                "-U",
+                "-s",
+                CLAUDE_KEYCHAIN_SERVICE,
+                "-a",
+                account,
+                "-w",
+                data,
+            ],
+            capture_output=True,
+            timeout=5,
+        )
+        return result.returncode == 0
+    except (subprocess.TimeoutExpired, OSError) as exc:
+        logger.debug("Claude keychain write failed: %s", exc)
+        return False
+
+
+def _read_claude_credentials() -> dict | None:
+    """Read Claude Code credentials from Keychain (macOS) or file (Linux/Windows)."""
+    # Try macOS Keychain first
+    creds = _read_claude_keychain()
+    if creds:
+        return creds
+
+    # Fall back to file
+    if not CLAUDE_CREDENTIALS_FILE.exists():
+        return None
+
+    try:
+        with open(CLAUDE_CREDENTIALS_FILE, encoding="utf-8") as f:
+            return json.load(f)
+    except (json.JSONDecodeError, OSError):
+        return None
 
 
 def _refresh_claude_code_token(refresh_token: str) -> dict | None:
@@ -89,16 +180,14 @@ def _refresh_claude_code_token(refresh_token: str) -> dict | None:
 
 
 def _save_refreshed_credentials(token_data: dict) -> None:
-    """Write refreshed token data back to ~/.claude/.credentials.json."""
+    """Write refreshed token data back to Keychain (macOS) or credentials file."""
     import time
 
-    if not CLAUDE_CREDENTIALS_FILE.exists():
+    creds = _read_claude_credentials()
+    if not creds:
         return
 
     try:
-        with open(CLAUDE_CREDENTIALS_FILE, encoding="utf-8") as f:
-            creds = json.load(f)
-
         oauth = creds.get("claudeAiOauth", {})
         oauth["accessToken"] = token_data["access_token"]
         if "refresh_token" in token_data:
@@ -107,9 +196,15 @@ def _save_refreshed_credentials(token_data: dict) -> None:
             oauth["expiresAt"] = int((time.time() + token_data["expires_in"]) * 1000)
         creds["claudeAiOauth"] = oauth
 
-        with open(CLAUDE_CREDENTIALS_FILE, "w", encoding="utf-8") as f:
-            json.dump(creds, f, indent=2)
-        logger.debug("Claude Code credentials refreshed successfully")
+        # Try Keychain first (macOS), fall back to file
+        if _save_claude_keychain(creds):
+            logger.debug("Claude Code credentials refreshed in Keychain")
+            return
+
+        if CLAUDE_CREDENTIALS_FILE.exists():
+            with open(CLAUDE_CREDENTIALS_FILE, "w", encoding="utf-8") as f:
+                json.dump(creds, f, indent=2)
+            logger.debug("Claude Code credentials refreshed in file")
     except (json.JSONDecodeError, OSError, KeyError) as exc:
         logger.debug("Failed to save refreshed credentials: %s", exc)
 
@@ -117,8 +212,8 @@ def _save_refreshed_credentials(token_data: dict) -> None:
 def get_claude_code_token() -> str | None:
     """Get the OAuth token from Claude Code subscription with auto-refresh.
 
-    Reads from ~/.claude/.credentials.json which is created by the
-    Claude Code CLI when users authenticate with their subscription.
+    Reads from macOS Keychain (on Darwin) or ~/.claude/.credentials.json
+    (on Linux/Windows), as created by the Claude Code CLI.
 
     If the token is expired or close to expiry, attempts an automatic
     refresh using the stored refresh token.
@@ -128,13 +223,8 @@ def get_claude_code_token() -> str | None:
     """
     import time
 
-    if not CLAUDE_CREDENTIALS_FILE.exists():
-        return None
-
-    try:
-        with open(CLAUDE_CREDENTIALS_FILE, encoding="utf-8") as f:
-            creds = json.load(f)
-    except (json.JSONDecodeError, OSError):
+    creds = _read_claude_credentials()
+    if not creds:
         return None
 
     oauth = creds.get("claudeAiOauth", {})
