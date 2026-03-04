@@ -9,7 +9,6 @@ import logging
 import os
 import sys
 import threading
-from concurrent.futures import TimeoutError as FuturesTimeoutError
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
@@ -94,20 +93,7 @@ class MCPClient:
             # Check if loop is running AND not closed
             if self._loop.is_running() and not self._loop.is_closed():
                 future = asyncio.run_coroutine_threadsafe(coro, self._loop)
-                try:
-                    return future.result(timeout=120)
-                except (TimeoutError, FuturesTimeoutError):
-                    logger.error(
-                        "MCP tool call timed out after 120s — connection may be dead."
-                    )
-                    try:
-                        self.disconnect()
-                    except Exception as e:
-                        logger.debug("Disconnect after timeout: %s", e)
-                    raise RuntimeError(
-                        "MCP tool call timed out. The server may have crashed or become unresponsive. "
-                        "Try again — the connection will be re-established."
-                    ) from None
+                return future.result()
             # else: fall through to the standard approach below
             # This handles the case when STDIO loop exists but is stopped/closed
 
@@ -210,8 +196,7 @@ class MCPClient:
                         from mcp.client.stdio import stdio_client
 
                         # Create persistent stdio client context.
-                        # On Windows, use stderr so subprocess startup errors are visible
-                        # when debugging "Connection closed" / MCP registration failures.
+                        # On Windows, use stderr so subprocess startup errors are visible.
                         if os.name == "nt":
                             errlog = sys.stderr
                         else:

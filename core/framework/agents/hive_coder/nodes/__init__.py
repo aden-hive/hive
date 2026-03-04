@@ -141,8 +141,7 @@ errors yourself. Don't declare success until validation passes.
 - edit_file(path, old_text, new_text, replace_all?) — fuzzy-match edit
 - list_directory(path, recursive?) — list contents
 - search_files(pattern, path?, include?) — regex search
-- run_command(command, cwd?, timeout?) — shell execution. Prefer \
-run_agent_tests for tests; run_command can timeout on long runs.
+- run_command(command, cwd?, timeout?) — shell execution.
 - undo_changes(path?) — restore from git snapshot
 
 ## Meta-Agent
@@ -182,11 +181,10 @@ for patterns:
   read_file("exports/{name}/nodes/__init__.py")
 
 ## Post-Build Testing
-**Prefer dedicated tools** — run_command can timeout (MCP). Use:
-  validate_agent_tools("exports/{name}")  # tool existence check
-  run_agent_tests("{name}")               # run pytest
-Avoid run_command for pytest or long validation. Structural checks via \
-run_command (validate, AgentRunner.load) are optional; they may timeout.
+After writing agent code, validate structurally AND run tests:
+  run_command("python -c 'from {name} import default_agent; \\
+    print(default_agent.validate())'")
+  run_agent_tests("{name}")
 
 ## Debugging Built Agents
 When a user says "my agent is failing" or "debug this agent":
@@ -513,40 +511,39 @@ triggers, use `AsyncEntryPointSpec` (from framework.graph.edge) and \
 
 ## 5. Verify
 
-**Reliability note:** run_command can timeout (MCP/stdio limits). Do Steps 1 \
-and 2 first — they are reliable. Steps 3 and 4 use run_command and may timeout.
+Run FOUR validation steps after writing. All must pass:
 
-**Step 1 — Tool validation** (REQUIRED; reliable):
-```
-validate_agent_tools("exports/{name}")
-```
-Checks that declared tools exist in the agent's MCP servers. If any are \
-missing: fix node definitions. Run list_agent_tools() to see what's available.
-
-**Step 2 — Run tests** (REQUIRED; reliable):
-```
-run_agent_tests("{name}")
-```
-Runs pytest with proper timeouts. **Do NOT use run_command with pytest** — \
-it times out. Use run_agent_tests only.
-
-**Step 3 — Class validation** (optional; may timeout):
+**Step A — Class validation** (checks graph structure):
 ```
 run_command("python -c 'from {name} import default_agent; \\
   print(default_agent.validate())'")
 ```
-Structural check. Skip if it times out; Steps 1–2 and load_built_agent suffice.
 
-**Step 4 — Runner load test** (optional; may timeout):
+**Step B — Runner load test** (checks package export contract — \
+THIS IS THE SAME PATH THE TUI USES):
 ```
 run_command("python -c 'from framework.runner.runner import \\
   AgentRunner; r = AgentRunner.load(\"exports/{name}\"); \\
   print(\"AgentRunner.load: OK\")'")
 ```
-Catches __init__.py exports, conversation_mode, loop_config. Skip if timeout; \
-load_built_agent will surface load errors when you load the agent.
+This catches missing __init__.py exports, bad conversation_mode, \
+invalid loop_config, and unreachable nodes. If Step A passes but \
+Step B fails, the problem is in __init__.py exports.
 
-If Steps 1 or 2 fail: read error, fix with edit_file, re-validate. Up to 3x.
+**Step C — Tool validation** (checks that declared tools actually exist \
+in the agent's MCP servers — catches hallucinated tool names):
+```
+validate_agent_tools("exports/{name}")
+```
+If any tools are missing: fix the node definitions to use only tools \
+that exist. Run list_agent_tools() to see what's available.
+
+**Step D — Run tests:**
+```
+run_agent_tests("{name}")
+```
+
+If anything fails: read error, fix with edit_file, re-validate. Up to 3x.
 
 **CRITICAL: Testing forever-alive agents**
 Most agents use `terminal_nodes=[]` (forever-alive). This means \
@@ -622,8 +619,8 @@ critical issue. Use sparingly.
 ## Agent Loading
 - load_built_agent(agent_path) — Load a newly built agent as the worker in \
 this session. If a worker is already loaded, it is automatically unloaded \
-first. **Call in a separate turn** after write_file, validate_agent_tools, and \
-run_agent_tests have finished — never in the same batch, or files may \
+first. **Call in a separate turn** after write_file, run_command, and \
+validate_agent_tools have finished — never in the same batch, or files may \
 not exist yet.
 
 ## Credentials
@@ -768,8 +765,8 @@ When the user asks to change, modify, or update the loaded worker \
 1. Use the **Path** from the Worker Profile to locate the agent files.
 2. Read the relevant files (nodes/__init__.py, agent.py, etc.).
 3. Make the requested changes using edit_file / write_file.
-4. Run validation: validate_agent_tools(path), run_agent_tests(name). \
-Avoid run_command for validation — it can timeout.
+4. Run validation (default_agent.validate(), AgentRunner.load(), \
+validate_agent_tools()).
 5. **Reload the modified worker**: call load_built_agent("{path}") \
 so the changes take effect immediately. If a worker is already loaded, \
 stop it first, then reload.

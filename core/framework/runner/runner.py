@@ -1119,11 +1119,6 @@ class AgentRunner:
                 gcu_config = dict(GCU_MCP_SERVER_CONFIG)
                 _repo_root = Path(__file__).resolve().parent.parent.parent.parent
                 gcu_config["cwd"] = str(_repo_root / "tools")
-
-                #gcu_config = self._tool_registry._resolve_mcp_server_config(
-                #    dict(GCU_MCP_SERVER_CONFIG), self.agent_path
-                #)
-
                 self._tool_registry.register_mcp_server(gcu_config)
                 gcu_tool_names = self._tool_registry.get_server_tool_names(GCU_SERVER_NAME)
 
@@ -1147,11 +1142,6 @@ class AgentRunner:
                 files_config = dict(FILES_MCP_SERVER_CONFIG)
                 _repo_root = Path(__file__).resolve().parent.parent.parent.parent
                 files_config["cwd"] = str(_repo_root / "tools")
-
-#                files_config = self._tool_registry._resolve_mcp_server_config(
-#                    dict(FILES_MCP_SERVER_CONFIG), self.agent_path
-#                )
-
                 self._tool_registry.register_mcp_server(files_config)
                 files_tool_names = self._tool_registry.get_server_tool_names(FILES_MCP_SERVER_NAME)
 

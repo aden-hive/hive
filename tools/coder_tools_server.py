@@ -204,8 +204,6 @@ def run_command(command: str, cwd: str = "", timeout: int = 120) -> str:
         Combined stdout/stderr with exit code
     """
     timeout = min(timeout, 300)
-    # Use lower internal timeout so we return before MCP client's 120s timeout
-    cmd_timeout = min(timeout, 90)
     work_dir = _resolve_path(cwd) if cwd else PROJECT_ROOT
 
     try:
@@ -217,7 +215,7 @@ def run_command(command: str, cwd: str = "", timeout: int = 120) -> str:
             cwd=work_dir,
             capture_output=True,
             text=True,
-            timeout=cmd_timeout,
+            timeout=timeout,
             env={
                 **os.environ,
                 "PYTHONPATH": os.pathsep.join(
@@ -250,7 +248,7 @@ def run_command(command: str, cwd: str = "", timeout: int = 120) -> str:
         return output
     except subprocess.TimeoutExpired:
         return (
-            f"Error: Command timed out after {cmd_timeout}s. "
+            f"Error: Command timed out after {timeout}s. "
             "Consider breaking it into smaller operations."
         )
     except Exception as e:
@@ -1196,19 +1194,18 @@ def run_agent_tests(
         path_parts.append(pythonpath)
     env["PYTHONPATH"] = os.pathsep.join(path_parts)
 
-    # Use 90s so we return before MCP client's 120s timeout
     try:
         result = subprocess.run(
             cmd,
             capture_output=True,
             text=True,
-            timeout=90,
+            timeout=120,
             env=env,
         )
     except subprocess.TimeoutExpired:
         return json.dumps(
             {
-                "error": "Tests timed out after 90 seconds. A test may be hanging "
+                "error": "Tests timed out after 120 seconds. A test may be hanging "
                 "(e.g. a client-facing node waiting for stdin). Use mock mode "
                 "or add timeouts to async tests.",
                 "command": " ".join(cmd),
