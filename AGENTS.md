@@ -2,6 +2,10 @@
 
 Shared agent instructions for this workspace.
 
+## Deprecations
+
+- **TUI is deprecated.** The terminal UI (`hive tui`) is no longer maintained. Use the browser-based interface (`hive open`) instead.
+
 ## Coding Agent Notes
 
 - 
