@@ -441,9 +441,36 @@ class NodeConversation:
     def _repair_orphaned_tool_calls(
         msgs: list[dict[str, Any]],
     ) -> list[dict[str, Any]]:
-        """Ensure every tool_call has a matching tool-result message."""
+        """Ensure tool_call / tool_result pairs are consistent.
+
+        1. **Orphaned tool results** (tool_result with no preceding tool_use)
+           are dropped.  This happens when compaction removes an assistant
+           message but leaves its tool-result messages behind.
+        2. **Orphaned tool calls** (tool_use with no following tool_result)
+           get a synthetic error result appended.  This happens when a loop
+           is cancelled mid-tool-execution.
+        """
+        # Pass 1: collect all tool_call IDs from assistant messages so we
+        # can identify orphaned tool-result messages.
+        all_tool_call_ids: set[str] = set()
+        for m in msgs:
+            if m.get("role") == "assistant":
+                for tc in m.get("tool_calls") or []:
+                    tc_id = tc.get("id")
+                    if tc_id:
+                        all_tool_call_ids.add(tc_id)
+
+        # Pass 2: build repaired list — drop orphaned tool results, patch
+        # missing tool results.
         repaired: list[dict[str, Any]] = []
         for i, m in enumerate(msgs):
+            # Drop tool-result messages whose tool_call_id has no matching
+            # tool_use in any assistant message (orphaned by compaction).
+            if m.get("role") == "tool":
+                tid = m.get("tool_call_id")
+                if tid and tid not in all_tool_call_ids:
+                    continue  # skip orphaned result
+
             repaired.append(m)
             tool_calls = m.get("tool_calls")
             if m.get("role") != "assistant" or not tool_calls:

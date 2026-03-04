@@ -2035,3 +2035,65 @@ class TestExecutionId:
             node_spec=node_spec, memory=SharedMemory(), goal=goal, input_data={}
         )
         assert ctx.execution_id == ""
+
+
+# ---------------------------------------------------------------------------
+# Subagent memory snapshot includes accumulator outputs
+# ---------------------------------------------------------------------------
+
+
+class TestSubagentAccumulatorMemory:
+    """Verify that subagent memory construction merges accumulator outputs
+    and includes the subagent's input_keys in read permissions."""
+
+    def test_accumulator_values_merged_into_parent_data(self):
+        """Keys from OutputAccumulator should appear in subagent memory."""
+        # Simulate what _execute_subagent does internally:
+        # parent shared memory has user_request but NOT tweet_content
+        parent_memory = SharedMemory()
+        parent_memory.write("user_request", "post a joke")
+        parent_data = parent_memory.read_all()  # {"user_request": "post a joke"}
+
+        # Accumulator has tweet_content (set via set_output before delegation)
+        acc = OutputAccumulator(values={"tweet_content": "Hello world!"})
+
+        # Merge accumulator outputs (the fix)
+        for key, value in acc.to_dict().items():
+            if key not in parent_data:
+                parent_data[key] = value
+
+        # Build subagent memory
+        subagent_memory = SharedMemory()
+        for key, value in parent_data.items():
+            subagent_memory.write(key, value, validate=False)
+
+        subagent_input_keys = ["tweet_content"]
+        read_keys = set(parent_data.keys()) | set(subagent_input_keys)
+        scoped = subagent_memory.with_permissions(
+            read_keys=list(read_keys), write_keys=[]
+        )
+
+        # This would have raised PermissionError before the fix
+        assert scoped.read("tweet_content") == "Hello world!"
+        assert scoped.read("user_request") == "post a joke"
+
+    def test_input_keys_allowed_even_if_not_in_data(self):
+        """Subagent input_keys should be in read permissions even if the
+        key doesn't exist in memory (returns None instead of PermissionError)."""
+        parent_memory = SharedMemory()
+        parent_memory.write("user_request", "hi")
+        parent_data = parent_memory.read_all()
+
+        subagent_memory = SharedMemory()
+        for key, value in parent_data.items():
+            subagent_memory.write(key, value, validate=False)
+
+        # input_keys includes "tweet_content" which isn't in parent_data
+        read_keys = set(parent_data.keys()) | {"tweet_content"}
+        scoped = subagent_memory.with_permissions(
+            read_keys=list(read_keys), write_keys=[]
+        )
+
+        # Should return None (not raise PermissionError)
+        assert scoped.read("tweet_content") is None
+        assert scoped.read("user_request") == "hi"

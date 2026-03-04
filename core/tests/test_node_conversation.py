@@ -1178,3 +1178,318 @@ class TestExtractToolCallHistory:
 
     def test_empty_messages(self):
         assert extract_tool_call_history([]) == ""
+
+
+# ---------------------------------------------------------------------------
+# Tests for _is_context_too_large_error
+# ---------------------------------------------------------------------------
+
+
+class TestIsContextTooLargeError:
+    def test_context_window_class_name(self):
+        from framework.graph.event_loop_node import _is_context_too_large_error
+
+        class ContextWindowExceededError(Exception):
+            pass
+
+        assert _is_context_too_large_error(ContextWindowExceededError("x"))
+
+    def test_openai_context_length(self):
+        from framework.graph.event_loop_node import _is_context_too_large_error
+
+        err = RuntimeError(
+            "This model's maximum context length is 128000 tokens"
+        )
+        assert _is_context_too_large_error(err)
+
+    def test_anthropic_too_long(self):
+        from framework.graph.event_loop_node import _is_context_too_large_error
+
+        err = RuntimeError("prompt is too long: 150000 tokens > 100000")
+        assert _is_context_too_large_error(err)
+
+    def test_generic_exceeds_limit(self):
+        from framework.graph.event_loop_node import _is_context_too_large_error
+
+        err = ValueError("Request exceeds token limit")
+        assert _is_context_too_large_error(err)
+
+    def test_unrelated_error(self):
+        from framework.graph.event_loop_node import _is_context_too_large_error
+
+        assert not _is_context_too_large_error(ValueError("connection refused"))
+        assert not _is_context_too_large_error(RuntimeError("timeout"))
+
+
+# ---------------------------------------------------------------------------
+# Tests for _format_messages_for_summary
+# ---------------------------------------------------------------------------
+
+
+class TestFormatMessagesForSummary:
+    def test_user_assistant_messages(self):
+        from framework.graph.event_loop_node import EventLoopNode
+
+        msgs = [
+            Message(seq=0, role="user", content="Hello world"),
+            Message(seq=1, role="assistant", content="Hi there"),
+        ]
+        result = EventLoopNode._format_messages_for_summary(msgs)
+        assert "[user]: Hello world" in result
+        assert "[assistant]: Hi there" in result
+
+    def test_tool_result_truncated(self):
+        from framework.graph.event_loop_node import EventLoopNode
+
+        msgs = [
+            Message(seq=0, role="tool", content="x" * 1000, tool_use_id="c1"),
+        ]
+        result = EventLoopNode._format_messages_for_summary(msgs)
+        assert "[tool result]:" in result
+        assert "..." in result
+        # Should be truncated to 500 + "..."
+        assert len(result) < 600
+
+    def test_assistant_with_tool_calls(self):
+        from framework.graph.event_loop_node import EventLoopNode
+
+        tc = [_make_tool_call("c1", "web_search", {"query": "test"})]
+        msgs = [
+            Message(seq=0, role="assistant", content="Searching", tool_calls=tc),
+        ]
+        result = EventLoopNode._format_messages_for_summary(msgs)
+        assert "web_search" in result
+        assert "[assistant (calls:" in result
+
+
+# ---------------------------------------------------------------------------
+# Tests for _llm_compact (recursive binary-search)
+# ---------------------------------------------------------------------------
+
+
+class TestLlmCompact:
+    """Test the recursive LLM compaction with mock LLM."""
+
+    def _make_node(self):
+        """Create a minimal EventLoopNode for testing."""
+        from framework.graph.event_loop_node import EventLoopNode, LoopConfig
+
+        config = LoopConfig(max_history_tokens=32000)
+        node = EventLoopNode.__new__(EventLoopNode)
+        node._config = config
+        node._event_bus = None
+        node._judge = None
+        node._approval_callback = None
+        node._tool_executor = None
+        node._adaptive_learner = None
+        # Set class-level constants (already on class, but explicit)
+        return node
+
+    def _make_ctx(self, llm_responses=None, llm_error=None):
+        """Create a mock NodeContext with controllable LLM."""
+        from unittest.mock import AsyncMock, MagicMock
+
+        from framework.graph.node import NodeSpec
+
+        spec = NodeSpec(
+            id="test",
+            name="Test Node",
+            description="A test node",
+            node_type="event_loop",
+            input_keys=[],
+            output_keys=["result"],
+        )
+
+        ctx = MagicMock()
+        ctx.node_spec = spec
+        ctx.node_id = "test"
+        ctx.stream_id = "test"
+        ctx.continuous_mode = False
+        ctx.runtime_logger = None
+
+        mock_llm = AsyncMock()
+        if llm_error:
+            mock_llm.acomplete.side_effect = llm_error
+        elif llm_responses:
+            responses = []
+            for text in llm_responses:
+                resp = MagicMock()
+                resp.content = text
+                responses.append(resp)
+            mock_llm.acomplete.side_effect = responses
+        else:
+            resp = MagicMock()
+            resp.content = "Summary of conversation."
+            mock_llm.acomplete.return_value = resp
+
+        ctx.llm = mock_llm
+        return ctx
+
+    @pytest.mark.asyncio
+    async def test_single_call_success(self):
+        node = self._make_node()
+        ctx = self._make_ctx()
+        msgs = [
+            Message(seq=0, role="user", content="Do something"),
+            Message(seq=1, role="assistant", content="Done"),
+        ]
+        result = await node._llm_compact(ctx, msgs, None)
+        assert "Summary of conversation." in result
+        ctx.llm.acomplete.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_context_too_large_triggers_split(self):
+        """When LLM raises context error, should split and retry."""
+        from unittest.mock import MagicMock
+
+        node = self._make_node()
+
+        call_count = 0
+
+        async def mock_acomplete(**kwargs):
+            nonlocal call_count
+            call_count += 1
+            # First call with full messages → fail
+            # Subsequent calls with smaller chunks → succeed
+            if call_count == 1:
+                raise RuntimeError(
+                    "This model's maximum context length is 128000 tokens"
+                )
+            resp = MagicMock()
+            resp.content = f"Summary part {call_count}"
+            return resp
+
+        ctx = self._make_ctx()
+        ctx.llm.acomplete = mock_acomplete
+
+        msgs = [
+            Message(seq=i, role="user", content=f"Message {i}")
+            for i in range(10)
+        ]
+        result = await node._llm_compact(ctx, msgs, None)
+        # Should have split and produced two summaries
+        assert "Summary part" in result
+        assert call_count >= 3  # 1 failure + 2 successful halves
+
+    @pytest.mark.asyncio
+    async def test_non_context_error_propagates(self):
+        """Non-context errors should propagate, not trigger splitting."""
+        node = self._make_node()
+        ctx = self._make_ctx(llm_error=ValueError("API key invalid"))
+        msgs = [
+            Message(seq=0, role="user", content="Hello"),
+            Message(seq=1, role="assistant", content="Hi"),
+        ]
+        with pytest.raises(ValueError, match="API key invalid"):
+            await node._llm_compact(ctx, msgs, None)
+
+    @pytest.mark.asyncio
+    async def test_proactive_split_for_large_input(self):
+        """Messages exceeding char limit should be split proactively."""
+        node = self._make_node()
+        # Lower the limit for testing
+        node._LLM_COMPACT_CHAR_LIMIT = 100
+
+        ctx = self._make_ctx(
+            llm_responses=["Part 1 summary", "Part 2 summary"],
+        )
+        msgs = [
+            Message(seq=0, role="user", content="x" * 80),
+            Message(seq=1, role="user", content="y" * 80),
+        ]
+        result = await node._llm_compact(ctx, msgs, None)
+        assert "Part 1 summary" in result
+        assert "Part 2 summary" in result
+        # LLM should have been called twice (no failure, proactive split)
+        assert ctx.llm.acomplete.call_count == 2
+
+    @pytest.mark.asyncio
+    async def test_tool_history_appended_at_top_level(self):
+        """Tool history should only be appended at depth 0."""
+        node = self._make_node()
+        ctx = self._make_ctx()
+
+        tc = [_make_tool_call("c1", "web_search", {"query": "test"})]
+        msgs = [
+            Message(seq=0, role="assistant", content="", tool_calls=tc),
+            Message(seq=1, role="tool", content="results", tool_use_id="c1"),
+        ]
+        result = await node._llm_compact(ctx, msgs, None)
+        assert "TOOLS ALREADY CALLED" in result
+        assert "web_search" in result
+
+
+# ---------------------------------------------------------------------------
+# Orphaned tool result repair
+# ---------------------------------------------------------------------------
+
+
+class TestRepairOrphanedToolCalls:
+    """Test _repair_orphaned_tool_calls handles both directions."""
+
+    def test_orphaned_tool_result_dropped(self):
+        """Tool result with no matching tool_use should be dropped."""
+        msgs = [
+            # tool result with no preceding assistant tool_use
+            {"role": "tool", "tool_call_id": "orphan_1", "content": "stale result"},
+            {"role": "user", "content": "hello"},
+            {"role": "assistant", "content": "hi"},
+        ]
+        repaired = NodeConversation._repair_orphaned_tool_calls(msgs)
+        assert len(repaired) == 2
+        assert repaired[0]["role"] == "user"
+        assert repaired[1]["role"] == "assistant"
+
+    def test_valid_tool_pair_preserved(self):
+        """Tool result with matching tool_use should be kept."""
+        msgs = [
+            {"role": "user", "content": "search"},
+            {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [{"id": "tc_1", "function": {"name": "search", "arguments": "{}"}}],
+            },
+            {"role": "tool", "tool_call_id": "tc_1", "content": "results"},
+        ]
+        repaired = NodeConversation._repair_orphaned_tool_calls(msgs)
+        assert len(repaired) == 3
+        assert repaired[2]["tool_call_id"] == "tc_1"
+
+    def test_orphaned_tool_use_gets_stub(self):
+        """Tool use with no following tool result gets a synthetic error stub."""
+        msgs = [
+            {"role": "user", "content": "search"},
+            {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [{"id": "tc_1", "function": {"name": "search", "arguments": "{}"}}],
+            },
+            # No tool result follows
+            {"role": "user", "content": "what happened?"},
+        ]
+        repaired = NodeConversation._repair_orphaned_tool_calls(msgs)
+        # Should insert a synthetic tool result between assistant and user
+        assert len(repaired) == 4
+        assert repaired[2]["role"] == "tool"
+        assert repaired[2]["tool_call_id"] == "tc_1"
+        assert "interrupted" in repaired[2]["content"].lower()
+
+    def test_mixed_orphans(self):
+        """Both orphaned results and orphaned calls handled together."""
+        msgs = [
+            # Orphaned result (no matching tool_use)
+            {"role": "tool", "tool_call_id": "gone_1", "content": "old result"},
+            {"role": "user", "content": "try again"},
+            {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [{"id": "tc_2", "function": {"name": "fetch", "arguments": "{}"}}],
+            },
+            # Missing result for tc_2
+            {"role": "user", "content": "done?"},
+        ]
+        repaired = NodeConversation._repair_orphaned_tool_calls(msgs)
+        # orphaned result dropped, stub added for tc_2
+        roles = [m["role"] for m in repaired]
+        assert roles == ["user", "assistant", "tool", "user"]
+        assert repaired[2]["tool_call_id"] == "tc_2"

@@ -476,6 +476,15 @@ class EventLoopNode(NodeProtocol):
                 if initial_message:
                     await conversation.add_user_message(initial_message)
 
+        # 2a. Guard: ensure at least one non-system message exists.
+        # A restored conversation may have 0 messages if phase_id filtering
+        # removes them all, or if a prior run stored metadata without messages
+        # (e.g. subagent that failed before the first LLM call).
+        if conversation.message_count == 0:
+            initial_message = self._build_initial_message(ctx)
+            if initial_message:
+                await conversation.add_user_message(initial_message)
+
         # 2b. Restore spill counter from existing files (resume safety)
         self._restore_spill_counter()
 
@@ -1998,6 +2007,7 @@ class EventLoopNode(NodeProtocol):
                 async def _timed_subagent(
                     _ctx: NodeContext,
                     _tc: ToolCallEvent,
+                    _acc: OutputAccumulator = accumulator,
                 ) -> tuple[ToolResult | BaseException, str, float]:
                     _s = time.time()
                     _iso = datetime.now(UTC).isoformat()
@@ -2006,6 +2016,7 @@ class EventLoopNode(NodeProtocol):
                             _ctx,
                             _tc.tool_input.get("agent_id", ""),
                             _tc.tool_input.get("task", ""),
+                            accumulator=_acc,
                         )
                     except BaseException as _exc:
                         _r = _exc
@@ -3720,6 +3731,8 @@ class EventLoopNode(NodeProtocol):
         ctx: NodeContext,
         agent_id: str,
         task: str,
+        *,
+        accumulator: OutputAccumulator | None = None,
     ) -> ToolResult:
         """Execute a subagent and return the result as a ToolResult.
 
@@ -3733,6 +3746,9 @@ class EventLoopNode(NodeProtocol):
             ctx: Parent node's context (for memory, tools, LLM access).
             agent_id: The node ID of the subagent to invoke.
             task: The task description to give the subagent.
+            accumulator: Parent's OutputAccumulator — provides outputs that
+                have been set via ``set_output`` but not yet written to
+                shared memory (which only happens after the node completes).
 
         Returns:
             ToolResult with structured JSON output containing:
@@ -3772,15 +3788,28 @@ class EventLoopNode(NodeProtocol):
         subagent_spec = ctx.node_registry[agent_id]
 
         # 2. Create read-only memory snapshot
-        # Subagent can read everything the parent can read, but write nothing
+        # Start with everything the parent can read from shared memory.
         parent_data = ctx.memory.read_all()
+
+        # Merge in-flight outputs from the parent's accumulator.
+        # set_output() writes to the accumulator but shared memory is only
+        # updated after the parent node completes — so the subagent would
+        # otherwise miss any keys the parent set before delegating.
+        if accumulator:
+            for key, value in accumulator.to_dict().items():
+                if key not in parent_data:
+                    parent_data[key] = value
+
         subagent_memory = SharedMemory()
         for key, value in parent_data.items():
             subagent_memory.write(key, value, validate=False)
 
-        # Scope to read-only: subagent can read all, write none
+        # Allow reads for parent data AND the subagent's declared input_keys
+        # (input_keys may reference keys that exist but weren't in read_all,
+        # or keys that were just written by the accumulator).
+        read_keys = set(parent_data.keys()) | set(subagent_spec.input_keys or [])
         scoped_memory = subagent_memory.with_permissions(
-            read_keys=list(parent_data.keys()),
+            read_keys=list(read_keys),
             write_keys=[],  # Read-only!
         )
 
@@ -4028,6 +4057,8 @@ class EventLoopNode(NodeProtocol):
         ctx: NodeContext,
         agent_id: str,
         task: str,
+        *,
+        accumulator: OutputAccumulator | None = None,
     ) -> ToolResult:
         """Execute a subagent and return the result as a ToolResult.
 
@@ -4041,6 +4072,9 @@ class EventLoopNode(NodeProtocol):
             ctx: Parent node's context (for memory, tools, LLM access).
             agent_id: The node ID of the subagent to invoke.
             task: The task description to give the subagent.
+            accumulator: Parent's OutputAccumulator — provides outputs that
+                have been set via ``set_output`` but not yet written to
+                shared memory (which only happens after the node completes).
 
         Returns:
             ToolResult with structured JSON output containing:
@@ -4080,15 +4114,28 @@ class EventLoopNode(NodeProtocol):
         subagent_spec = ctx.node_registry[agent_id]
 
         # 2. Create read-only memory snapshot
-        # Subagent can read everything the parent can read, but write nothing
+        # Start with everything the parent can read from shared memory.
         parent_data = ctx.memory.read_all()
+
+        # Merge in-flight outputs from the parent's accumulator.
+        # set_output() writes to the accumulator but shared memory is only
+        # updated after the parent node completes — so the subagent would
+        # otherwise miss any keys the parent set before delegating.
+        if accumulator:
+            for key, value in accumulator.to_dict().items():
+                if key not in parent_data:
+                    parent_data[key] = value
+
         subagent_memory = SharedMemory()
         for key, value in parent_data.items():
             subagent_memory.write(key, value, validate=False)
 
-        # Scope to read-only: subagent can read all, write none
+        # Allow reads for parent data AND the subagent's declared input_keys
+        # (input_keys may reference keys that exist but weren't in read_all,
+        # or keys that were just written by the accumulator).
+        read_keys = set(parent_data.keys()) | set(subagent_spec.input_keys or [])
         scoped_memory = subagent_memory.with_permissions(
-            read_keys=list(parent_data.keys()),
+            read_keys=list(read_keys),
             write_keys=[],  # Read-only!
         )
 
