@@ -1425,7 +1425,7 @@ if ($FrontendBuilt) {
     Write-Color -Text "  Starting server on http://localhost:8787" -Color DarkGray
     Write-Color -Text "  Press Ctrl+C to stop" -Color DarkGray
     Write-Host ""
-    & (Join-Path $ScriptDir "hive.ps1") serve --open
+    & (Join-Path $ScriptDir "hive.ps1") open
 } else {
     Write-Color -Text "═══════════════════════════════════════════════════════" -Color Yellow
     Write-Host ""

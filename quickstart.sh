@@ -1352,9 +1352,8 @@ if [ "$FRONTEND_BUILT" = true ]; then
     echo -e "  ${DIM}Starting server on http://localhost:8787${NC}"
     echo -e "  ${DIM}Press Ctrl+C to stop${NC}"
     echo ""
-    # exec replaces the quickstart process with hive serve
-    # --open tells it to auto-open the browser once the server is ready
-    exec "$SCRIPT_DIR/hive" serve --open
+    # exec replaces the quickstart process with hive open
+    exec "$SCRIPT_DIR/hive" open
 else
     # No frontend — show manual instructions
     echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
