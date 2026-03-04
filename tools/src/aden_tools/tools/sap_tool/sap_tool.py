@@ -20,7 +20,7 @@ def _get_config() -> tuple[str, dict] | dict:
     username = os.getenv("SAP_USERNAME", "")
     password = os.getenv("SAP_PASSWORD", "")
     if not base_url or not username or not password:
-        return {"error": "SAP_BASE_URL, SAP_USERNAME, and SAP_PASSWORD are required"}
+        return {"error": "SAP_BASE_URL, SAP_USERNAME, and SAP_PASSWORD are required", "help": "Set SAP_BASE_URL, SAP_USERNAME, and SAP_PASSWORD environment variables"}
     creds = base64.b64encode(f"{username}:{password}".encode()).decode()
     headers = {"Authorization": f"Basic {creds}", "Accept": "application/json"}
     return base_url, headers

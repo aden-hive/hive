@@ -27,7 +27,7 @@ CALENDLY_CREDENTIALS = {
 2. Generate a Personal Access Token
 3. Set environment variable:
    export CALENDLY_PAT=your-personal-access-token""",
-        health_check_endpoint="",
+        health_check_endpoint="https://api.calendly.com/users/me",
         credential_id="calendly_pat",
         credential_key="api_key",
     ),

@@ -25,7 +25,7 @@ def _get_config() -> tuple[str, str, str] | dict:
     secret_key = os.getenv("AWS_SECRET_ACCESS_KEY", "")
     region = os.getenv("AWS_REGION", "us-east-1")
     if not access_key or not secret_key:
-        return {"error": "AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY are required"}
+        return {"error": "AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY are required", "help": "Set AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY environment variables"}
     return access_key, secret_key, region
 
 

@@ -91,7 +91,7 @@ def register_tools(mcp: FastMCP, credentials: Any = None) -> None:
         """
         headers = _get_headers()
         if not headers:
-            return {"error": "LUSHA_API_KEY is required"}
+            return {"error": "LUSHA_API_KEY is required", "help": "Set LUSHA_API_KEY environment variable"}
 
         params: dict[str, str] = {}
         if email:
@@ -125,7 +125,7 @@ def register_tools(mcp: FastMCP, credentials: Any = None) -> None:
         """
         headers = _get_headers()
         if not headers:
-            return {"error": "LUSHA_API_KEY is required"}
+            return {"error": "LUSHA_API_KEY is required", "help": "Set LUSHA_API_KEY environment variable"}
 
         params: dict[str, str] = {}
         if domain:
@@ -164,7 +164,7 @@ def register_tools(mcp: FastMCP, credentials: Any = None) -> None:
         """
         headers = _get_headers()
         if not headers:
-            return {"error": "LUSHA_API_KEY is required"}
+            return {"error": "LUSHA_API_KEY is required", "help": "Set LUSHA_API_KEY environment variable"}
 
         contacts_include: dict[str, Any] = {}
         companies_include: dict[str, Any] = {}
@@ -240,7 +240,7 @@ def register_tools(mcp: FastMCP, credentials: Any = None) -> None:
         """
         headers = _get_headers()
         if not headers:
-            return {"error": "LUSHA_API_KEY is required"}
+            return {"error": "LUSHA_API_KEY is required", "help": "Set LUSHA_API_KEY environment variable"}
 
         companies_include: dict[str, Any] = {}
         if company_names:
@@ -281,7 +281,7 @@ def register_tools(mcp: FastMCP, credentials: Any = None) -> None:
         """Get Lusha API credit usage statistics."""
         headers = _get_headers()
         if not headers:
-            return {"error": "LUSHA_API_KEY is required"}
+            return {"error": "LUSHA_API_KEY is required", "help": "Set LUSHA_API_KEY environment variable"}
 
         data = _get(f"{BASE_URL}/account/usage", headers)
         if "error" in data:

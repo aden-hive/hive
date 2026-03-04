@@ -63,8 +63,8 @@ class TestHealthCheckerRegistry:
 
     def test_lusha_registered(self):
         """LushaHealthChecker is registered in HEALTH_CHECKERS."""
-        assert "lusha" in HEALTH_CHECKERS
-        assert isinstance(HEALTH_CHECKERS["lusha"], LushaHealthChecker)
+        assert "lusha_api_key" in HEALTH_CHECKERS
+        assert isinstance(HEALTH_CHECKERS["lusha_api_key"], LushaHealthChecker)
 
     def test_discord_registered(self):
         """DiscordHealthChecker is registered in HEALTH_CHECKERS."""
@@ -85,7 +85,7 @@ class TestHealthCheckerRegistry:
             "google_calendar_oauth",
             "google",
             "slack",
-            "lusha",
+            "lusha_api_key",
             "discord",
             "stripe",
             "exa_search",
@@ -97,7 +97,7 @@ class TestHealthCheckerRegistry:
             "newsdata",
             "finlight",
             "brevo",
-            "calendly",
+            "calendly_pat",
             "zoho_crm",
         }
         assert set(HEALTH_CHECKERS.keys()) == expected

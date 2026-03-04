@@ -18,7 +18,7 @@ def _get_config() -> tuple[str, dict] | dict:
     domain = os.getenv("TINES_DOMAIN", "").rstrip("/")
     api_key = os.getenv("TINES_API_KEY", "")
     if not domain or not api_key:
-        return {"error": "TINES_DOMAIN and TINES_API_KEY are required"}
+        return {"error": "TINES_DOMAIN and TINES_API_KEY are required", "help": "Set TINES_DOMAIN and TINES_API_KEY environment variables"}
     base_url = f"https://{domain}/api/v1"
     headers = {
         "Authorization": f"Bearer {api_key}",

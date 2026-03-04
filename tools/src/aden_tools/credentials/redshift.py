@@ -31,6 +31,7 @@ REDSHIFT_CREDENTIALS = {
         health_check_endpoint="",
         credential_id="redshift_access_key",
         credential_key="api_key",
+        credential_group="aws",
     ),
     "redshift_secret_key": CredentialSpec(
         env_var="AWS_SECRET_ACCESS_KEY",
@@ -50,5 +51,6 @@ REDSHIFT_CREDENTIALS = {
         health_check_endpoint="",
         credential_id="redshift_secret_key",
         credential_key="api_key",
+        credential_group="aws",
     ),
 }

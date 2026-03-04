@@ -19,7 +19,7 @@ def _get_config() -> tuple[str, dict] | dict:
     account = os.getenv("SNOWFLAKE_ACCOUNT", "").strip()
     token = os.getenv("SNOWFLAKE_TOKEN", "").strip()
     if not account or not token:
-        return {"error": "SNOWFLAKE_ACCOUNT and SNOWFLAKE_TOKEN are required"}
+        return {"error": "SNOWFLAKE_ACCOUNT and SNOWFLAKE_TOKEN are required", "help": "Set SNOWFLAKE_ACCOUNT and SNOWFLAKE_TOKEN environment variables"}
     base_url = f"https://{account}.snowflakecomputing.com/api/v2/statements"
     headers = {
         "Authorization": f"Bearer {token}",

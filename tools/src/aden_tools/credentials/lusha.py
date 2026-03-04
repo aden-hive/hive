@@ -27,7 +27,7 @@ LUSHA_CREDENTIALS = {
 2. Copy your API key
 3. Set environment variable:
    export LUSHA_API_KEY=your-api-key""",
-        health_check_endpoint="",
+        health_check_endpoint="https://api.lusha.com/account/usage",
         credential_id="lusha_api_key",
         credential_key="api_key",
     ),

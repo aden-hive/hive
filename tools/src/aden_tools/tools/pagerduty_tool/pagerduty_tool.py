@@ -99,7 +99,7 @@ def register_tools(mcp: FastMCP, credentials: Any = None) -> None:
         """
         headers = _get_headers()
         if headers is None:
-            return {"error": "PAGERDUTY_API_KEY is required"}
+            return {"error": "PAGERDUTY_API_KEY is required", "help": "Set PAGERDUTY_API_KEY environment variable"}
 
         params: dict[str, Any] = {"limit": min(limit, 100)}
         if status:
@@ -135,7 +135,7 @@ def register_tools(mcp: FastMCP, credentials: Any = None) -> None:
         """
         headers = _get_headers()
         if headers is None:
-            return {"error": "PAGERDUTY_API_KEY is required"}
+            return {"error": "PAGERDUTY_API_KEY is required", "help": "Set PAGERDUTY_API_KEY environment variable"}
         if not incident_id:
             return {"error": "incident_id is required"}
 
@@ -167,7 +167,7 @@ def register_tools(mcp: FastMCP, credentials: Any = None) -> None:
         """
         headers = _get_headers(write=True)
         if headers is None:
-            return {"error": "PAGERDUTY_API_KEY is required"}
+            return {"error": "PAGERDUTY_API_KEY is required", "help": "Set PAGERDUTY_API_KEY environment variable"}
         if not title or not service_id:
             return {"error": "title and service_id are required"}
 
@@ -204,7 +204,7 @@ def register_tools(mcp: FastMCP, credentials: Any = None) -> None:
         """
         headers = _get_headers(write=True)
         if headers is None:
-            return {"error": "PAGERDUTY_API_KEY is required"}
+            return {"error": "PAGERDUTY_API_KEY is required", "help": "Set PAGERDUTY_API_KEY environment variable"}
         if not incident_id:
             return {"error": "incident_id is required"}
         if not status:
@@ -237,7 +237,7 @@ def register_tools(mcp: FastMCP, credentials: Any = None) -> None:
         """
         headers = _get_headers()
         if headers is None:
-            return {"error": "PAGERDUTY_API_KEY is required"}
+            return {"error": "PAGERDUTY_API_KEY is required", "help": "Set PAGERDUTY_API_KEY environment variable"}
 
         params: dict[str, Any] = {"limit": min(limit, 100)}
         if query:

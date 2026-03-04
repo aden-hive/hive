@@ -39,7 +39,7 @@ TRELLO_CREDENTIALS = {
         credential_key="api_key",
     ),
     "trello_token": CredentialSpec(
-        env_var="TRELLO_TOKEN",
+        env_var="TRELLO_API_TOKEN",
         tools=[
             "trello_list_boards",
             "trello_get_member",

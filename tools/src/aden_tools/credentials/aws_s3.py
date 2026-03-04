@@ -32,6 +32,7 @@ AWS_S3_CREDENTIALS = {
         health_check_endpoint="",
         credential_id="aws_access_key",
         credential_key="api_key",
+        credential_group="aws",
     ),
     "aws_secret_key": CredentialSpec(
         env_var="AWS_SECRET_ACCESS_KEY",
@@ -51,5 +52,6 @@ AWS_S3_CREDENTIALS = {
         health_check_endpoint="",
         credential_id="aws_secret_key",
         credential_key="api_key",
+        credential_group="aws",
     ),
 }

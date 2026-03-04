@@ -19,9 +19,9 @@ def _get_config() -> tuple[str, str, dict] | dict:
     rest_url = os.getenv("KAFKA_REST_URL", "").rstrip("/")
     cluster_id = os.getenv("KAFKA_CLUSTER_ID", "")
     if not rest_url:
-        return {"error": "KAFKA_REST_URL is required"}
+        return {"error": "KAFKA_REST_URL is required", "help": "Set KAFKA_REST_URL environment variable"}
     if not cluster_id:
-        return {"error": "KAFKA_CLUSTER_ID is required"}
+        return {"error": "KAFKA_CLUSTER_ID is required", "help": "Set KAFKA_CLUSTER_ID environment variable"}
 
     headers: dict[str, str] = {"Content-Type": "application/json"}
     api_key = os.getenv("KAFKA_API_KEY", "")

@@ -19,7 +19,7 @@ def _get_config() -> tuple[str, dict] | dict:
     """Return (base_url, headers) or error dict."""
     token = os.getenv("TFC_TOKEN", "")
     if not token:
-        return {"error": "TFC_TOKEN is required"}
+        return {"error": "TFC_TOKEN is required", "help": "Set TFC_TOKEN environment variable"}
     url = os.getenv("TFC_URL", DEFAULT_URL).rstrip("/")
     base_url = f"{url}/api/v2"
     headers = {

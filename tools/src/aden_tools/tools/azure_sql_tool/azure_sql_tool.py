@@ -21,7 +21,7 @@ def _get_config() -> tuple[dict, str] | dict:
     token = os.getenv("AZURE_SQL_ACCESS_TOKEN", "")
     sub_id = os.getenv("AZURE_SUBSCRIPTION_ID", "")
     if not token or not sub_id:
-        return {"error": "AZURE_SQL_ACCESS_TOKEN and AZURE_SUBSCRIPTION_ID are required"}
+        return {"error": "AZURE_SQL_ACCESS_TOKEN and AZURE_SUBSCRIPTION_ID are required", "help": "Set AZURE_SQL_ACCESS_TOKEN and AZURE_SUBSCRIPTION_ID environment variables"}
     headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
     return headers, sub_id
 

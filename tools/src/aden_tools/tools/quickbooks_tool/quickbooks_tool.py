@@ -22,7 +22,7 @@ def _get_config() -> tuple[str, str] | dict:
     token = os.getenv("QUICKBOOKS_ACCESS_TOKEN", "")
     realm_id = os.getenv("QUICKBOOKS_REALM_ID", "")
     if not token or not realm_id:
-        return {"error": "QUICKBOOKS_ACCESS_TOKEN and QUICKBOOKS_REALM_ID are required"}
+        return {"error": "QUICKBOOKS_ACCESS_TOKEN and QUICKBOOKS_REALM_ID are required", "help": "Set QUICKBOOKS_ACCESS_TOKEN and QUICKBOOKS_REALM_ID environment variables"}
 
     use_sandbox = os.getenv("QUICKBOOKS_SANDBOX", "").lower() in ("1", "true")
     base = SANDBOX_URL if use_sandbox else PROD_URL
