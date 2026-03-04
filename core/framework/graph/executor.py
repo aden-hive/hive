@@ -71,6 +71,38 @@ class ExecutionResult:
 
 
 @dataclass
+class NodeExecutionEvent:
+    """Event data passed to pre-execution hooks."""
+
+    node_id: str
+    node_name: str
+    node_type: str
+    attempt: int
+    max_attempts: int
+    input_data: dict[str, Any]
+    memory_snapshot: dict[str, Any]
+
+
+@dataclass
+class NodeExecutionResult:
+    """Result data passed to post-execution hooks."""
+
+    node_id: str
+    node_name: str
+    node_type: str
+    success: bool
+    output: Any | None
+    error: str | None
+    tokens_used: int
+    latency_ms: int
+    attempt: int
+
+
+PreExecuteHook = Callable[[NodeExecutionEvent], Any]
+PostExecuteHook = Callable[[NodeExecutionResult], Any]
+
+
+@dataclass
 class ParallelBranch:
     """Tracks a single branch in parallel fan-out execution."""
 
@@ -132,13 +164,15 @@ class GraphExecutor:
         event_bus: Any | None = None,
         stream_id: str = "",
         execution_id: str = "",
-        runtime_logger: Any = None,
+        runtime_logger: Any | None = None,
         storage_path: str | Path | None = None,
         loop_config: dict[str, Any] | None = None,
         accounts_prompt: str = "",
         accounts_data: list[dict] | None = None,
         tool_provider_map: dict[str, str] | None = None,
         dynamic_tools_provider: Callable | None = None,
+        pre_execute_hook: PreExecuteHook | None = None,
+        post_execute_hook: PostExecuteHook | None = None,
     ):
         """
         Initialize the executor.
@@ -163,6 +197,8 @@ class GraphExecutor:
             tool_provider_map: Tool name to provider name mapping for account routing
             dynamic_tools_provider: Optional callback returning current
                 tool list (for mode switching)
+            pre_execute_hook: Optional async callback invoked before each node execution
+            post_execute_hook: Optional async callback invoked after each node execution
         """
         self.runtime = runtime
         self.llm = llm
@@ -182,6 +218,8 @@ class GraphExecutor:
         self.accounts_data = accounts_data
         self.tool_provider_map = tool_provider_map
         self.dynamic_tools_provider = dynamic_tools_provider
+        self.pre_execute_hook = pre_execute_hook
+        self.post_execute_hook = post_execute_hook
 
         # Initialize output cleaner
         self.cleansing_config = cleansing_config or CleansingConfig()
@@ -920,9 +958,38 @@ class GraphExecutor:
                         execution_id=self._execution_id,
                     )
 
+                current_attempt = node_retry_counts.get(current_node_id, 0) + 1
+                max_retries = getattr(node_spec, "max_retries", 3)
+
+                if self.pre_execute_hook:
+                    event = NodeExecutionEvent(
+                        node_id=node_spec.id,
+                        node_name=node_spec.name,
+                        node_type=node_spec.node_type,
+                        attempt=current_attempt,
+                        max_attempts=max_retries,
+                        input_data=input_data or {},
+                        memory_snapshot=memory.read_all(),
+                    )
+                    await self.pre_execute_hook(event)
+
                 # Execute node
                 self.logger.info("   Executing...")
                 result = await node_impl.execute(ctx)
+
+                if self.post_execute_hook:
+                    result_event = NodeExecutionResult(
+                        node_id=node_spec.id,
+                        node_name=node_spec.name,
+                        node_type=node_spec.node_type,
+                        success=result.success,
+                        output=result.output,
+                        error=result.error,
+                        tokens_used=result.tokens_used,
+                        latency_ms=result.latency_ms,
+                        attempt=current_attempt,
+                    )
+                    await self.post_execute_hook(result_event)
 
                 # Emit node-completed event (skip event_loop nodes)
                 if self._event_bus and node_spec.node_type != "event_loop":
@@ -2171,11 +2238,37 @@ class GraphExecutor:
                             execution_id=self._execution_id,
                         )
 
+                    if self.pre_execute_hook:
+                        event = NodeExecutionEvent(
+                            node_id=node_spec.id,
+                            node_name=node_spec.name,
+                            node_type=node_spec.node_type,
+                            attempt=attempt + 1,
+                            max_attempts=effective_max_retries,
+                            input_data=mapped,
+                            memory_snapshot=memory.read_all(),
+                        )
+                        await self.pre_execute_hook(event)
+
                     self.logger.info(
                         f"      ▶ Branch {node_spec.name}: executing (attempt {attempt + 1})"
                     )
                     result = await node_impl.execute(ctx)
                     last_result = result
+
+                    if self.post_execute_hook:
+                        result_event = NodeExecutionResult(
+                            node_id=node_spec.id,
+                            node_name=node_spec.name,
+                            node_type=node_spec.node_type,
+                            success=result.success,
+                            output=result.output,
+                            error=result.error,
+                            tokens_used=result.tokens_used,
+                            latency_ms=result.latency_ms,
+                            attempt=attempt + 1,
+                        )
+                        await self.post_execute_hook(result_event)
 
                     # Ensure L2 entry for this branch node
                     if self.runtime_logger:
