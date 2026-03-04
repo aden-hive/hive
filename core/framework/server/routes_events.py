@@ -39,6 +39,7 @@ DEFAULT_EVENT_TYPES = [
     EventType.WORKER_LOADED,
     EventType.CREDENTIALS_REQUIRED,
     EventType.SUBAGENT_REPORT,
+    EventType.QUEEN_MODE_CHANGED,
 ]
 
 # Keepalive interval in seconds
@@ -92,6 +93,7 @@ async def handle_events(request: web.Request) -> web.StreamResponse:
         "node_loop_started",
         "credentials_required",
         "worker_loaded",
+        "queen_mode_changed",
     }
 
     client_disconnected = asyncio.Event()
@@ -130,6 +132,29 @@ async def handle_events(request: web.Request) -> web.StreamResponse:
     logger.info(
         "SSE connected: session='%s', sub_id='%s', types=%d", session.id, sub_id, len(event_types)
     )
+
+    # Replay buffered events that were published before this SSE connected.
+    # The EventBus keeps a history ring-buffer; we replay the subset that
+    # produces visible chat messages so the frontend never misses early
+    # queen output.  Lifecycle events are NOT replayed to avoid duplicate
+    # state transitions (turn counter increments, etc.).
+    _REPLAY_TYPES = {
+        EventType.CLIENT_OUTPUT_DELTA.value,
+        EventType.EXECUTION_STARTED.value,
+        EventType.CLIENT_INPUT_REQUESTED.value,
+    }
+    event_type_values = {et.value for et in event_types}
+    replay_types = _REPLAY_TYPES & event_type_values
+    replayed = 0
+    for past_event in event_bus._event_history:
+        if past_event.type.value in replay_types:
+            try:
+                queue.put_nowait(past_event.to_dict())
+                replayed += 1
+            except asyncio.QueueFull:
+                break
+    if replayed:
+        logger.info("SSE replayed %d buffered events for session='%s'", replayed, session.id)
 
     event_count = 0
     close_reason = "unknown"

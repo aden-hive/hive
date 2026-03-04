@@ -48,6 +48,7 @@ def _get_manager(request: web.Request) -> SessionManager:
 def _session_to_live_dict(session) -> dict:
     """Serialize a live Session to the session-primary JSON shape."""
     info = session.worker_info
+    mode_state = getattr(session, "mode_state", None)
     return {
         "session_id": session.id,
         "worker_id": session.worker_id,
@@ -60,6 +61,7 @@ def _session_to_live_dict(session) -> dict:
         "loaded_at": session.loaded_at,
         "uptime_seconds": round(time.time() - session.loaded_at, 1),
         "intro_message": getattr(session.runner, "intro_message", "") or "",
+        "queen_mode": mode_state.mode if mode_state else "building",
     }
 
 

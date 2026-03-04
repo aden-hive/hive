@@ -18,6 +18,7 @@ from aden_tools.credentials.health_check import (
     GoogleDocsHealthChecker,
     GoogleMapsHealthChecker,
     GoogleSearchHealthChecker,
+    LushaHealthChecker,
     NewsdataHealthChecker,
     ResendHealthChecker,
     SerpApiHealthChecker,
@@ -60,6 +61,11 @@ class TestHealthCheckerRegistry:
         assert "google_calendar_oauth" in HEALTH_CHECKERS
         assert isinstance(HEALTH_CHECKERS["google_calendar_oauth"], GoogleCalendarHealthChecker)
 
+    def test_lusha_registered(self):
+        """LushaHealthChecker is registered in HEALTH_CHECKERS."""
+        assert "lusha_api_key" in HEALTH_CHECKERS
+        assert isinstance(HEALTH_CHECKERS["lusha_api_key"], LushaHealthChecker)
+
     def test_discord_registered(self):
         """DiscordHealthChecker is registered in HEALTH_CHECKERS."""
         assert "discord" in HEALTH_CHECKERS
@@ -79,6 +85,7 @@ class TestHealthCheckerRegistry:
             "google_calendar_oauth",
             "google",
             "slack",
+            "lusha_api_key",
             "discord",
             "stripe",
             "exa_search",
@@ -90,6 +97,8 @@ class TestHealthCheckerRegistry:
             "newsdata",
             "finlight",
             "brevo",
+            "calendly_pat",
+            "zoho_crm",
         }
         assert set(HEALTH_CHECKERS.keys()) == expected
 
@@ -400,6 +409,69 @@ class TestGoogleMapsHealthChecker:
 
         assert result.valid is False
         assert "connection failed" in result.details["error"]
+
+
+class TestLushaHealthChecker:
+    """Tests for LushaHealthChecker."""
+
+    def _mock_response(self, status_code, json_data=None):
+        response = MagicMock(spec=httpx.Response)
+        response.status_code = status_code
+        if json_data:
+            response.json.return_value = json_data
+        return response
+
+    @patch("aden_tools.credentials.health_check.httpx.Client")
+    def test_valid_key_200(self, mock_client_cls):
+        mock_client = MagicMock()
+        mock_client_cls.return_value.__enter__ = MagicMock(return_value=mock_client)
+        mock_client_cls.return_value.__exit__ = MagicMock(return_value=False)
+        mock_client.get.return_value = self._mock_response(200)
+
+        checker = LushaHealthChecker()
+        result = checker.check("lusha_test_key")
+
+        assert result.valid is True
+        assert "valid" in result.message.lower()
+
+    @patch("aden_tools.credentials.health_check.httpx.Client")
+    def test_invalid_key_401(self, mock_client_cls):
+        mock_client = MagicMock()
+        mock_client_cls.return_value.__enter__ = MagicMock(return_value=mock_client)
+        mock_client_cls.return_value.__exit__ = MagicMock(return_value=False)
+        mock_client.get.return_value = self._mock_response(401)
+
+        checker = LushaHealthChecker()
+        result = checker.check("invalid")
+
+        assert result.valid is False
+        assert result.details["status_code"] == 401
+
+    @patch("aden_tools.credentials.health_check.httpx.Client")
+    def test_rate_limited_429_still_valid(self, mock_client_cls):
+        mock_client = MagicMock()
+        mock_client_cls.return_value.__enter__ = MagicMock(return_value=mock_client)
+        mock_client_cls.return_value.__exit__ = MagicMock(return_value=False)
+        mock_client.get.return_value = self._mock_response(429)
+
+        checker = LushaHealthChecker()
+        result = checker.check("lusha_test_key")
+
+        assert result.valid is True
+        assert result.details.get("rate_limited") is True
+
+    @patch("aden_tools.credentials.health_check.httpx.Client")
+    def test_timeout(self, mock_client_cls):
+        mock_client = MagicMock()
+        mock_client_cls.return_value.__enter__ = MagicMock(return_value=mock_client)
+        mock_client_cls.return_value.__exit__ = MagicMock(return_value=False)
+        mock_client.get.side_effect = httpx.TimeoutException("timed out")
+
+        checker = LushaHealthChecker()
+        result = checker.check("lusha_test_key")
+
+        assert result.valid is False
+        assert result.details["error"] == "timeout"
 
 
 class TestCheckCredentialHealthDispatcher:

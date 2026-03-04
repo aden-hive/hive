@@ -8,6 +8,7 @@ to verify the credential works.
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass, field
 from typing import Any, Protocol
 
@@ -100,6 +101,72 @@ class HubSpotHealthChecker:
             return HealthCheckResult(
                 valid=False,
                 message=f"Failed to connect to HubSpot: {e}",
+                details={"error": str(e)},
+            )
+
+
+class ZohoCRMHealthChecker:
+    """Health checker for Zoho CRM credentials."""
+
+    TIMEOUT = 10.0
+
+    def check(self, access_token: str) -> HealthCheckResult:
+        """
+        Validate Zoho token by making lightweight API call.
+
+        Uses /users?type=CurrentUser so module permissions are not required.
+        """
+        api_domain = os.getenv("ZOHO_API_DOMAIN", "https://www.zohoapis.com").rstrip("/")
+        endpoint = f"{api_domain}/crm/v2/users?type=CurrentUser"
+        try:
+            with httpx.Client(timeout=self.TIMEOUT) as client:
+                response = client.get(
+                    endpoint,
+                    headers={
+                        "Authorization": f"Zoho-oauthtoken {access_token}",
+                        "Accept": "application/json",
+                    },
+                )
+
+                if response.status_code == 200:
+                    return HealthCheckResult(
+                        valid=True,
+                        message="Zoho CRM credentials valid",
+                    )
+                elif response.status_code == 401:
+                    return HealthCheckResult(
+                        valid=False,
+                        message="Zoho CRM token is invalid or expired",
+                        details={"status_code": 401},
+                    )
+                elif response.status_code == 403:
+                    return HealthCheckResult(
+                        valid=False,
+                        message="Zoho CRM token lacks required scopes",
+                        details={"status_code": 403},
+                    )
+                elif response.status_code == 429:
+                    return HealthCheckResult(
+                        valid=True,
+                        message="Zoho CRM credentials valid (rate limited)",
+                        details={"status_code": 429, "rate_limited": True},
+                    )
+                else:
+                    return HealthCheckResult(
+                        valid=False,
+                        message=f"Zoho CRM API returned status {response.status_code}",
+                        details={"status_code": response.status_code},
+                    )
+        except httpx.TimeoutException:
+            return HealthCheckResult(
+                valid=False,
+                message="Zoho CRM API request timed out",
+                details={"error": "timeout"},
+            )
+        except httpx.RequestError as e:
+            return HealthCheckResult(
+                valid=False,
+                message=f"Failed to connect to Zoho CRM: {e}",
                 details={"error": str(e)},
             )
 
@@ -563,6 +630,66 @@ class SlackHealthChecker:
             )
 
 
+class CalendlyHealthChecker:
+    """Health checker for Calendly API tokens."""
+
+    ENDPOINT = "https://api.calendly.com/users/me"
+    TIMEOUT = 10.0
+
+    def check(self, api_token: str) -> HealthCheckResult:
+        """
+        Validate Calendly token by calling /users/me.
+
+        Makes a GET request to verify the token works.
+        """
+        try:
+            with httpx.Client(timeout=self.TIMEOUT) as client:
+                response = client.get(
+                    self.ENDPOINT,
+                    headers={
+                        "Authorization": f"Bearer {api_token}",
+                        "Content-Type": "application/json",
+                    },
+                )
+
+                if response.status_code == 200:
+                    return HealthCheckResult(
+                        valid=True,
+                        message="Calendly token valid",
+                        details={},
+                    )
+                elif response.status_code == 401:
+                    return HealthCheckResult(
+                        valid=False,
+                        message="Calendly token is invalid or expired",
+                        details={"status_code": 401},
+                    )
+                elif response.status_code == 403:
+                    return HealthCheckResult(
+                        valid=False,
+                        message="Calendly token access forbidden",
+                        details={"status_code": 403},
+                    )
+                else:
+                    return HealthCheckResult(
+                        valid=False,
+                        message=f"Calendly API returned status {response.status_code}",
+                        details={"status_code": response.status_code},
+                    )
+        except httpx.TimeoutException:
+            return HealthCheckResult(
+                valid=False,
+                message="Calendly API request timed out",
+                details={"error": "timeout"},
+            )
+        except httpx.RequestError as e:
+            return HealthCheckResult(
+                valid=False,
+                message=f"Failed to connect to Calendly API: {e}",
+                details={"error": str(e)},
+            )
+
+
 class AnthropicHealthChecker:
     """Health checker for Anthropic API credentials."""
 
@@ -898,6 +1025,71 @@ class GoogleMapsHealthChecker:
             )
 
 
+class LushaHealthChecker:
+    """Health checker for Lusha API credentials."""
+
+    ENDPOINT = "https://api.lusha.com/account/usage"
+    TIMEOUT = 10.0
+
+    def check(self, api_key: str) -> HealthCheckResult:
+        """
+        Validate Lusha API key by checking account usage endpoint.
+
+        This is a lightweight authenticated request that confirms API access.
+        """
+        try:
+            with httpx.Client(timeout=self.TIMEOUT) as client:
+                response = client.get(
+                    self.ENDPOINT,
+                    headers={
+                        "api_key": api_key,
+                        "Accept": "application/json",
+                    },
+                )
+
+                if response.status_code == 200:
+                    return HealthCheckResult(
+                        valid=True,
+                        message="Lusha API key valid",
+                    )
+                elif response.status_code == 401:
+                    return HealthCheckResult(
+                        valid=False,
+                        message="Lusha API key is invalid",
+                        details={"status_code": 401},
+                    )
+                elif response.status_code == 403:
+                    return HealthCheckResult(
+                        valid=False,
+                        message="Lusha API key lacks required permissions",
+                        details={"status_code": 403},
+                    )
+                elif response.status_code == 429:
+                    return HealthCheckResult(
+                        valid=True,
+                        message="Lusha API key valid (rate/credit limited)",
+                        details={"status_code": 429, "rate_limited": True},
+                    )
+                else:
+                    return HealthCheckResult(
+                        valid=False,
+                        message=f"Lusha API returned status {response.status_code}",
+                        details={"status_code": response.status_code},
+                    )
+        except httpx.TimeoutException:
+            return HealthCheckResult(
+                valid=False,
+                message="Lusha API request timed out",
+                details={"error": "timeout"},
+            )
+        except httpx.RequestError as e:
+            return HealthCheckResult(
+                valid=False,
+                message=f"Failed to connect to Lusha API: {e}",
+                details={"error": str(e)},
+            )
+
+
 class GoogleGmailHealthChecker(OAuthBearerHealthChecker):
     """Health checker for Google Gmail OAuth tokens."""
 
@@ -1072,16 +1264,19 @@ class IntercomHealthChecker(OAuthBearerHealthChecker):
 HEALTH_CHECKERS: dict[str, CredentialHealthChecker] = {
     "discord": DiscordHealthChecker(),
     "hubspot": HubSpotHealthChecker(),
+    "zoho_crm": ZohoCRMHealthChecker(),
     "brave_search": BraveSearchHealthChecker(),
     "google_calendar_oauth": GoogleCalendarHealthChecker(),
     "google": GoogleGmailHealthChecker(),
     "slack": SlackHealthChecker(),
+    "calendly_pat": CalendlyHealthChecker(),
     "google_search": GoogleSearchHealthChecker(),
     "google_maps": GoogleMapsHealthChecker(),
     "anthropic": AnthropicHealthChecker(),
     "github": GitHubHealthChecker(),
     "intercom": IntercomHealthChecker(),
     "resend": ResendHealthChecker(),
+    "lusha_api_key": LushaHealthChecker(),
     "stripe": StripeHealthChecker(),
     "exa_search": ExaSearchHealthChecker(),
     "google_docs": GoogleDocsHealthChecker(),

@@ -488,6 +488,10 @@ class TestSpecCompleteness:
                 "razorpay_secret",
                 "google_analytics",
                 "bigquery",
+                "aws_access_key",
+                "aws_secret_key",
+                "redshift_access_key",
+                "redshift_secret_key",
             ):
                 assert spec.credential_group == "", (
                     f"Credential '{name}' has unexpected credential_group='{spec.credential_group}'"

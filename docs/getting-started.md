@@ -27,7 +27,21 @@ uv run python -c "import framework; import aden_tools; print('✓ Setup complete
 
 ## Building Your First Agent
 
+Agents are not included by default in a fresh clone.
+
+Agents are created using Claude Code or by manual creation in the
+exports/ directory. Until an agent exists, agent validation and run
+commands will fail.
+
 ### Option 1: Using Claude Code Skills (Recommended)
+
+This is the recommended way to create your first agent.
+
+**Requirements**
+
+- Anthropic (Claude) API access
+- Claude Code CLI installed
+- Unix-based shell (macOS, Linux, or Windows via WSL)
 
 ```bash
 # Setup already done via quickstart.sh above
