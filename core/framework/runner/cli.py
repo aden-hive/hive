@@ -732,7 +732,7 @@ def cmd_info(args: argparse.Namespace) -> int:
     except CredentialError as e:
         print(f"\n{e}", file=sys.stderr)
         return 1
-    except FileNotFoundError as e:
+    except (FileNotFoundError, ValueError) as e:
         print(f"Error: {e}", file=sys.stderr)
         return 1
 
@@ -799,7 +799,7 @@ def cmd_validate(args: argparse.Namespace) -> int:
     except CredentialError as e:
         print(f"\n{e}", file=sys.stderr)
         return 1
-    except FileNotFoundError as e:
+    except (FileNotFoundError, ValueError) as e:
         print(f"Error: {e}", file=sys.stderr)
         return 1
 

@@ -869,8 +869,27 @@ class AgentRunner:
         if not agent_json_path.exists():
             raise FileNotFoundError(f"No agent.py or agent.json found in {agent_path}")
 
-        with open(agent_json_path) as f:
-            graph, goal = load_agent_export(f.read())
+        # Validate that agent.json is a file, not a directory
+        if agent_json_path.is_dir():
+            raise ValueError(f"Error: agent.json is not a file (it's a directory at {agent_json_path})")
+
+        # Read and validate file content
+        try:
+            with open(agent_json_path) as f:
+                content = f.read()
+        except IsADirectoryError:
+            raise ValueError(f"Error: agent.json is not a file (it's a directory at {agent_json_path})")
+        except (IOError, OSError) as e:
+            raise ValueError(f"Error: Failed to read agent.json: {e}")
+
+        if not content.strip():
+            raise ValueError("Error: agent.json is empty")
+
+        # Parse JSON with proper error handling
+        try:
+            graph, goal = load_agent_export(content)
+        except json.JSONDecodeError as e:
+            raise ValueError(f"Error: agent.json is not valid JSON: {e}")
 
         return cls(
             agent_path=agent_path,
