@@ -426,7 +426,10 @@ class SessionManager:
                 logger.warning("Queen: MCP config failed to load", exc_info=True)
 
         # Mode state for building/running mode switching
-        from framework.tools.queen_lifecycle_tools import QueenModeState, register_queen_lifecycle_tools
+        from framework.tools.queen_lifecycle_tools import (
+            QueenModeState,
+            register_queen_lifecycle_tools,
+        )
 
         # Start in staging when the caller provided an agent, building otherwise.
         initial_mode = "staging" if worker_identity else "building"

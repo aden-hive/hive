@@ -960,17 +960,25 @@ async def _build_tool_heavy_conversation(
     for i in range(5):
         args = {"filename": "output.html", "content": "x" * 500}
         tc = [_make_tool_call(f"call_{i}", "append_data", args)]
-        conv._messages.append(Message(
-            seq=conv._next_seq, role="assistant",
-            content=f"Appending part {i}", tool_calls=tc,
-        ))
+        conv._messages.append(
+            Message(
+                seq=conv._next_seq,
+                role="assistant",
+                content=f"Appending part {i}",
+                tool_calls=tc,
+            )
+        )
         if store:
             await store.write_part(conv._next_seq, conv._messages[-1].to_storage_dict())
         conv._next_seq += 1
-        conv._messages.append(Message(
-            seq=conv._next_seq, role="tool",
-            content='{"success": true}', tool_use_id=f"call_{i}",
-        ))
+        conv._messages.append(
+            Message(
+                seq=conv._next_seq,
+                role="tool",
+                content='{"success": true}',
+                tool_use_id=f"call_{i}",
+            )
+        )
         if store:
             await store.write_part(conv._next_seq, conv._messages[-1].to_storage_dict())
         conv._next_seq += 1
@@ -983,11 +991,14 @@ async def _build_tool_heavy_conversation(
     if store:
         await store.write_part(conv._next_seq, conv._messages[-1].to_storage_dict())
     conv._next_seq += 1
-    conv._messages.append(Message(
-        seq=conv._next_seq, role="tool",
-        content="Output 'result' set successfully.",
-        tool_use_id="call_so",
-    ))
+    conv._messages.append(
+        Message(
+            seq=conv._next_seq,
+            role="tool",
+            content="Output 'result' set successfully.",
+            tool_use_id="call_so",
+        )
+    )
     if store:
         await store.write_part(conv._next_seq, conv._messages[-1].to_storage_dict())
     conv._next_seq += 1
@@ -1011,7 +1022,9 @@ class TestAggressiveStructuralCompaction:
         spill = str(tmp_path)
 
         await conv.compact_preserving_structure(
-            spillover_dir=spill, keep_recent=2, aggressive=True,
+            spillover_dir=spill,
+            keep_recent=2,
+            aggressive=True,
         )
 
         # The 5 append_data pairs (10 msgs) + 1 user msg should be collapsed.
@@ -1038,7 +1051,9 @@ class TestAggressiveStructuralCompaction:
         spill = str(tmp_path)
 
         await conv.compact_preserving_structure(
-            spillover_dir=spill, keep_recent=2, aggressive=True,
+            spillover_dir=spill,
+            keep_recent=2,
+            aggressive=True,
         )
 
         # Find all tool calls in remaining messages
@@ -1077,8 +1092,11 @@ class TestAggressiveStructuralCompaction:
         conv._next_seq += 1
         conv._messages.append(
             Message(
-                seq=conv._next_seq, role="tool", content="Connection timeout",
-                tool_use_id="call_err", is_error=True,
+                seq=conv._next_seq,
+                role="tool",
+                content="Connection timeout",
+                tool_use_id="call_err",
+                is_error=True,
             )
         )
         conv._next_seq += 1
@@ -1088,7 +1106,9 @@ class TestAggressiveStructuralCompaction:
 
         spill = str(tmp_path)
         await conv.compact_preserving_structure(
-            spillover_dir=spill, keep_recent=2, aggressive=True,
+            spillover_dir=spill,
+            keep_recent=2,
+            aggressive=True,
         )
 
         # Error pair should be preserved
@@ -1103,7 +1123,9 @@ class TestAggressiveStructuralCompaction:
         spill = str(tmp_path)
 
         await conv.compact_preserving_structure(
-            spillover_dir=spill, keep_recent=2, aggressive=False,
+            spillover_dir=spill,
+            keep_recent=2,
+            aggressive=False,
         )
 
         # All 6 tool pairs (12 msgs) should be kept as structural.
@@ -1118,14 +1140,17 @@ class TestAggressiveStructuralCompaction:
 
         # Pass 1: standard
         await conv.compact_preserving_structure(
-            spillover_dir=spill, keep_recent=2,
+            spillover_dir=spill,
+            keep_recent=2,
         )
         after_standard = conv.message_count
         assert after_standard == 15  # all structural kept
 
         # Pass 2: aggressive
         await conv.compact_preserving_structure(
-            spillover_dir=spill, keep_recent=2, aggressive=True,
+            spillover_dir=spill,
+            keep_recent=2,
+            aggressive=True,
         )
         after_aggressive = conv.message_count
         assert after_aggressive < after_standard
@@ -1140,7 +1165,9 @@ class TestAggressiveStructuralCompaction:
         spill = str(tmp_path)
 
         await conv.compact_preserving_structure(
-            spillover_dir=spill, keep_recent=2, aggressive=True,
+            spillover_dir=spill,
+            keep_recent=2,
+            aggressive=True,
         )
 
         # Verify store state matches in-memory state
@@ -1151,13 +1178,25 @@ class TestAggressiveStructuralCompaction:
 class TestExtractToolCallHistory:
     def test_basic_extraction(self):
         msgs = [
-            Message(seq=0, role="assistant", content="", tool_calls=[
-                _make_tool_call("c1", "web_search", {"query": "python async"}),
-            ]),
+            Message(
+                seq=0,
+                role="assistant",
+                content="",
+                tool_calls=[
+                    _make_tool_call("c1", "web_search", {"query": "python async"}),
+                ],
+            ),
             Message(seq=1, role="tool", content="results", tool_use_id="c1"),
-            Message(seq=2, role="assistant", content="", tool_calls=[
-                _make_tool_call("c2", "save_data", {"filename": "output.txt", "content": "data"}),
-            ]),
+            Message(
+                seq=2,
+                role="assistant",
+                content="",
+                tool_calls=[
+                    _make_tool_call(
+                        "c2", "save_data", {"filename": "output.txt", "content": "data"}
+                    ),
+                ],
+            ),
             Message(seq=3, role="tool", content="saved", tool_use_id="c2"),
         ]
         result = extract_tool_call_history(msgs)
@@ -1168,8 +1207,11 @@ class TestExtractToolCallHistory:
     def test_errors_included(self):
         msgs = [
             Message(
-                seq=0, role="tool", content="Connection refused",
-                is_error=True, tool_use_id="c1",
+                seq=0,
+                role="tool",
+                content="Connection refused",
+                is_error=True,
+                tool_use_id="c1",
             ),
         ]
         result = extract_tool_call_history(msgs)
@@ -1197,9 +1239,7 @@ class TestIsContextTooLargeError:
     def test_openai_context_length(self):
         from framework.graph.event_loop_node import _is_context_too_large_error
 
-        err = RuntimeError(
-            "This model's maximum context length is 128000 tokens"
-        )
+        err = RuntimeError("This model's maximum context length is 128000 tokens")
         assert _is_context_too_large_error(err)
 
     def test_anthropic_too_long(self):
@@ -1352,9 +1392,7 @@ class TestLlmCompact:
             # First call with full messages → fail
             # Subsequent calls with smaller chunks → succeed
             if call_count == 1:
-                raise RuntimeError(
-                    "This model's maximum context length is 128000 tokens"
-                )
+                raise RuntimeError("This model's maximum context length is 128000 tokens")
             resp = MagicMock()
             resp.content = f"Summary part {call_count}"
             return resp
@@ -1362,10 +1400,7 @@ class TestLlmCompact:
         ctx = self._make_ctx()
         ctx.llm.acomplete = mock_acomplete
 
-        msgs = [
-            Message(seq=i, role="user", content=f"Message {i}")
-            for i in range(10)
-        ]
+        msgs = [Message(seq=i, role="user", content=f"Message {i}") for i in range(10)]
         result = await node._llm_compact(ctx, msgs, None)
         # Should have split and produced two summaries
         assert "Summary part" in result

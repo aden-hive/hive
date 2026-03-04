@@ -119,13 +119,15 @@ class QueenModeState:
                 msg = (
                     "[MODE CHANGE] The user clicked Run in the UI. Switched to RUNNING mode. "
                     "Worker is now executing. You have monitoring/lifecycle tools: "
-                    + ", ".join(tool_names) + "."
+                    + ", ".join(tool_names)
+                    + "."
                 )
             else:
                 msg = (
                     "[MODE CHANGE] Switched to RUNNING mode. "
                     "Worker is executing. You now have monitoring/lifecycle tools: "
-                    + ", ".join(tool_names) + "."
+                    + ", ".join(tool_names)
+                    + "."
                 )
             await self.inject_notification(msg)
 
@@ -144,8 +146,9 @@ class QueenModeState:
         if self.inject_notification:
             if source == "frontend":
                 msg = (
-                    "[MODE CHANGE] The user stopped the worker from the UI. Switched to STAGING mode. "
-                    "Agent is still loaded. Available tools: " + ", ".join(tool_names) + "."
+                    "[MODE CHANGE] The user stopped the worker from the UI. "
+                    "Switched to STAGING mode. Agent is still loaded. "
+                    "Available tools: " + ", ".join(tool_names) + "."
                 )
             elif source == "auto":
                 msg = (

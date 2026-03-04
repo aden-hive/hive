@@ -271,7 +271,9 @@ def list_agent_tools(
         JSON with tools grouped by prefix (e.g. gmail_*, slack_*).
     """
     if output_schema not in ("simple", "full"):
-        return json.dumps({"error": f"Invalid output_schema: {output_schema!r}. Use 'simple' or 'full'."})
+        return json.dumps(
+            {"error": f"Invalid output_schema: {output_schema!r}. Use 'simple' or 'full'."}
+        )
 
     # Resolve config path
     if not server_config_path:
@@ -324,12 +326,14 @@ def list_agent_tools(
             client = MCPClient(config)
             client.connect()
             for tool in client.list_tools():
-                all_tools.append({
-                    "server": server_name,
-                    "name": tool.name,
-                    "description": tool.description,
-                    "input_schema": tool.input_schema,
-                })
+                all_tools.append(
+                    {
+                        "server": server_name,
+                        "name": tool.name,
+                        "description": tool.description,
+                        "input_schema": tool.input_schema,
+                    }
+                )
             client.disconnect()
         except Exception as e:
             errors.append({"server": server_name, "error": str(e)})

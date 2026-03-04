@@ -214,9 +214,7 @@ def extract_tool_call_history(messages: list[Message], max_entries: int = 30) ->
         unique = list(dict.fromkeys(outputs_set))
         parts.append("OUTPUTS SET: " + ", ".join(unique))
     if errors:
-        parts.append(
-            "ERRORS (do NOT retry these):\n" + "\n".join(f"  - {e}" for e in errors[:10])
-        )
+        parts.append("ERRORS (do NOT retry these):\n" + "\n".join(f"  - {e}" for e in errors[:10]))
     return "\n\n".join(parts)
 
 
@@ -809,8 +807,7 @@ class NodeConversation:
                 if msg.role != "assistant" or not msg.tool_calls:
                     continue
                 has_protected = any(
-                    tc.get("function", {}).get("name") == "set_output"
-                    for tc in msg.tool_calls
+                    tc.get("function", {}).get("name") == "set_output" for tc in msg.tool_calls
                 )
                 tc_ids = {tc.get("id", "") for tc in msg.tool_calls}
                 if has_protected:
@@ -935,9 +932,7 @@ class NodeConversation:
         # messages, so we delete everything before the recent boundary and
         # rewrite only what we want to keep.
         if self._store:
-            recent_boundary = (
-                recent_messages[0].seq if recent_messages else self._next_seq
-            )
+            recent_boundary = recent_messages[0].seq if recent_messages else self._next_seq
             await self._store.delete_parts_before(recent_boundary)
             # Write the reference message
             await self._store.write_part(ref_msg.seq, ref_msg.to_storage_dict())

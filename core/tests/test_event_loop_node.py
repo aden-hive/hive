@@ -2069,9 +2069,7 @@ class TestSubagentAccumulatorMemory:
 
         subagent_input_keys = ["tweet_content"]
         read_keys = set(parent_data.keys()) | set(subagent_input_keys)
-        scoped = subagent_memory.with_permissions(
-            read_keys=list(read_keys), write_keys=[]
-        )
+        scoped = subagent_memory.with_permissions(read_keys=list(read_keys), write_keys=[])
 
         # This would have raised PermissionError before the fix
         assert scoped.read("tweet_content") == "Hello world!"
@@ -2090,9 +2088,7 @@ class TestSubagentAccumulatorMemory:
 
         # input_keys includes "tweet_content" which isn't in parent_data
         read_keys = set(parent_data.keys()) | {"tweet_content"}
-        scoped = subagent_memory.with_permissions(
-            read_keys=list(read_keys), write_keys=[]
-        )
+        scoped = subagent_memory.with_permissions(read_keys=list(read_keys), write_keys=[])
 
         # Should return None (not raise PermissionError)
         assert scoped.read("tweet_content") is None

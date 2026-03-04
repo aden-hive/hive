@@ -576,8 +576,10 @@ class EventLoopNode(NodeProtocol):
             # 6b2. Dynamic tool refresh (mode switching)
             if ctx.dynamic_tools_provider is not None:
                 _synthetic_names = {
-                    "set_output", "ask_user",
-                    "delegate_to_sub_agent", "report_to_parent",
+                    "set_output",
+                    "ask_user",
+                    "delegate_to_sub_agent",
+                    "report_to_parent",
                 }
                 synthetic = [t for t in tools if t.name in _synthetic_names]
                 tools.clear()
@@ -889,8 +891,7 @@ class EventLoopNode(NodeProtocol):
                     # path but without failing (no outputs to demand).
                     _consecutive_empty_turns += 1
                     logger.warning(
-                        "[%s] iter=%d: empty response on node with no output_keys "
-                        "(consecutive=%d)",
+                        "[%s] iter=%d: empty response on node with no output_keys (consecutive=%d)",
                         node_id,
                         iteration,
                         _consecutive_empty_turns,
@@ -899,8 +900,7 @@ class EventLoopNode(NodeProtocol):
                         # Persistent ghost — but since this is a forever-alive
                         # node, block for user input instead of crashing.
                         logger.warning(
-                            "[%s] iter=%d: %d consecutive empty responses, "
-                            "blocking for user input",
+                            "[%s] iter=%d: %d consecutive empty responses, blocking for user input",
                             node_id,
                             iteration,
                             _consecutive_empty_turns,
@@ -3000,17 +3000,16 @@ class EventLoopNode(NodeProtocol):
             return
 
         # --- Step 3: LLM compaction at >95% (recursive binary-search) ---
-        if (
-            conversation.usage_ratio() > self._LLM_COMPACT_THRESHOLD
-            and ctx.llm is not None
-        ):
+        if conversation.usage_ratio() > self._LLM_COMPACT_THRESHOLD and ctx.llm is not None:
             logger.info(
                 "LLM compaction triggered (%.0f%% usage)",
                 conversation.usage_ratio() * 100,
             )
             try:
                 summary = await self._llm_compact(
-                    ctx, list(conversation.messages), accumulator,
+                    ctx,
+                    list(conversation.messages),
+                    accumulator,
                 )
                 await conversation.compact(
                     summary,
@@ -3031,7 +3030,9 @@ class EventLoopNode(NodeProtocol):
         )
         summary = self._build_emergency_summary(ctx, accumulator, conversation)
         await conversation.compact(
-            summary, keep_recent=1, phase_graduated=phase_grad,
+            summary,
+            keep_recent=1,
+            phase_graduated=phase_grad,
         )
         await self._log_compaction(ctx, conversation, ratio_before)
 
@@ -3054,20 +3055,23 @@ class EventLoopNode(NodeProtocol):
         from framework.graph.conversation import extract_tool_call_history
 
         if _depth > self._LLM_COMPACT_MAX_DEPTH:
-            raise RuntimeError(
-                f"LLM compaction recursion limit ({self._LLM_COMPACT_MAX_DEPTH})"
-            )
+            raise RuntimeError(f"LLM compaction recursion limit ({self._LLM_COMPACT_MAX_DEPTH})")
 
         formatted = self._format_messages_for_summary(messages)
 
         # Proactive split: avoid wasting an API call on oversized input
         if len(formatted) > self._LLM_COMPACT_CHAR_LIMIT and len(messages) > 1:
             summary = await self._llm_compact_split(
-                ctx, messages, accumulator, _depth,
+                ctx,
+                messages,
+                accumulator,
+                _depth,
             )
         else:
             prompt = self._build_llm_compaction_prompt(
-                ctx, accumulator, formatted,
+                ctx,
+                accumulator,
+                formatted,
             )
             summary_budget = max(1024, self._config.max_history_tokens // 2)
             try:
@@ -3090,7 +3094,10 @@ class EventLoopNode(NodeProtocol):
                         len(messages),
                     )
                     summary = await self._llm_compact_split(
-                        ctx, messages, accumulator, _depth,
+                        ctx,
+                        messages,
+                        accumulator,
+                        _depth,
                     )
                 else:
                     raise
@@ -3114,7 +3121,10 @@ class EventLoopNode(NodeProtocol):
         mid = max(1, len(messages) // 2)
         s1 = await self._llm_compact(ctx, messages[:mid], None, _depth + 1)
         s2 = await self._llm_compact(
-            ctx, messages[mid:], accumulator, _depth + 1,
+            ctx,
+            messages[mid:],
+            accumulator,
+            _depth + 1,
         )
         return s1 + "\n\n" + s2
 
@@ -3131,10 +3141,7 @@ class EventLoopNode(NodeProtocol):
                     content += "..."
                 lines.append(f"[tool result]: {content}")
             elif m.role == "assistant" and m.tool_calls:
-                names = [
-                    tc.get("function", {}).get("name", "?")
-                    for tc in m.tool_calls
-                ]
+                names = [tc.get("function", {}).get("name", "?") for tc in m.tool_calls]
                 text = m.content[:200] if m.content else ""
                 lines.append(f"[assistant (calls: {', '.join(names)})]: {text}")
             else:
@@ -3162,16 +3169,12 @@ class EventLoopNode(NodeProtocol):
             if done:
                 ctx_lines.append(
                     "OUTPUTS ALREADY SET:\n"
-                    + "\n".join(
-                        f"  {k}: {str(v)[:150]}" for k, v in done.items()
-                    )
+                    + "\n".join(f"  {k}: {str(v)[:150]}" for k, v in done.items())
                 )
             if todo:
                 ctx_lines.append(f"OUTPUTS STILL NEEDED: {', '.join(todo)}")
         elif spec.output_keys:
-            ctx_lines.append(
-                f"OUTPUTS STILL NEEDED: {', '.join(spec.output_keys)}"
-            )
+            ctx_lines.append(f"OUTPUTS STILL NEEDED: {', '.join(spec.output_keys)}")
 
         target_tokens = self._config.max_history_tokens // 2
         target_chars = target_tokens * 4
@@ -3224,11 +3227,9 @@ class EventLoopNode(NodeProtocol):
                 node_id=ctx.node_id,
                 node_type="event_loop",
                 step_index=-1,
-                llm_text=f"Context compacted ({level}): "
-                f"{before_pct}% \u2192 {after_pct}%",
+                llm_text=f"Context compacted ({level}): {before_pct}% \u2192 {after_pct}%",
                 verdict="COMPACTION",
-                verdict_feedback=f"level={level} "
-                f"before={before_pct}% after={after_pct}%",
+                verdict_feedback=f"level={level} before={before_pct}% after={after_pct}%",
             )
 
         if self._event_bus:
@@ -3246,7 +3247,6 @@ class EventLoopNode(NodeProtocol):
                     },
                 )
             )
-
 
     def _build_emergency_summary(
         self,

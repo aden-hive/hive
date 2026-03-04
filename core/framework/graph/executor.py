@@ -161,7 +161,8 @@ class GraphExecutor:
             accounts_prompt: Connected accounts block for system prompt injection
             accounts_data: Raw account data for per-node prompt generation
             tool_provider_map: Tool name to provider name mapping for account routing
-            dynamic_tools_provider: Optional callback returning current tool list (for mode switching)
+            dynamic_tools_provider: Optional callback returning current
+                tool list (for mode switching)
         """
         self.runtime = runtime
         self.llm = llm
@@ -317,12 +318,11 @@ class GraphExecutor:
                 c = m.content[:500] + ("..." if len(m.content) > 500 else "")
                 lines.append(f"[tool result]: {c}")
             elif m.role == "assistant" and m.tool_calls:
-                names = [
-                    tc.get("function", {}).get("name", "?")
-                    for tc in m.tool_calls
-                ]
-                lines.append(f"[assistant (calls: {', '.join(names)})]: "
-                             f"{m.content[:200] if m.content else ''}")
+                names = [tc.get("function", {}).get("name", "?") for tc in m.tool_calls]
+                lines.append(
+                    f"[assistant (calls: {', '.join(names)})]: "
+                    f"{m.content[:200] if m.content else ''}"
+                )
             else:
                 lines.append(f"[{m.role}]: {m.content}")
         formatted = "\n\n".join(lines)
@@ -330,7 +330,10 @@ class GraphExecutor:
         # Proactive split
         if len(formatted) > self._PHASE_LLM_CHAR_LIMIT and len(messages) > 1:
             summary = await self._phase_llm_compact_split(
-                conversation, next_spec, messages, _depth,
+                conversation,
+                next_spec,
+                messages,
+                _depth,
             )
         else:
             max_tokens = getattr(conversation, "_max_history_tokens", 32000)
@@ -367,7 +370,10 @@ class GraphExecutor:
             except Exception as e:
                 if _is_context_too_large_error(e) and len(messages) > 1:
                     summary = await self._phase_llm_compact_split(
-                        conversation, next_spec, messages, _depth,
+                        conversation,
+                        next_spec,
+                        messages,
+                        _depth,
                     )
                 else:
                     raise
@@ -390,10 +396,16 @@ class GraphExecutor:
         """Split messages in half and summarise each half."""
         mid = max(1, len(messages) // 2)
         s1 = await self._phase_llm_compact(
-            conversation, next_spec, messages[:mid], _depth + 1,
+            conversation,
+            next_spec,
+            messages[:mid],
+            _depth + 1,
         )
         s2 = await self._phase_llm_compact(
-            conversation, next_spec, messages[mid:], _depth + 1,
+            conversation,
+            next_spec,
+            messages[mid:],
+            _depth + 1,
         )
         return s1 + "\n\n" + s2
 
@@ -1414,9 +1426,7 @@ class GraphExecutor:
                                 _phase_ratio * 100,
                             )
                             _data_dir = (
-                                str(self._storage_path / "data")
-                                if self._storage_path
-                                else None
+                                str(self._storage_path / "data") if self._storage_path else None
                             )
                             # Step 1: Structural compaction (>=80%)
                             if _data_dir:
@@ -1440,8 +1450,7 @@ class GraphExecutor:
                                 and self._llm is not None
                             ):
                                 self.logger.info(
-                                    "   LLM phase-boundary compaction "
-                                    "(%.0f%% usage)",
+                                    "   LLM phase-boundary compaction (%.0f%% usage)",
                                     continuous_conversation.usage_ratio() * 100,
                                 )
                                 try:
@@ -1457,7 +1466,8 @@ class GraphExecutor:
                                     )
                                 except Exception as e:
                                     self.logger.warning(
-                                        "   Phase LLM compaction failed: %s", e,
+                                        "   Phase LLM compaction failed: %s",
+                                        e,
                                     )
 
                             # Step 3: Emergency (only if still over budget)

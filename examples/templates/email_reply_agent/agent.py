@@ -8,7 +8,7 @@ from framework.graph.executor import ExecutionResult
 from framework.graph.checkpoint_config import CheckpointConfig
 from framework.llm import LiteLLMProvider
 from framework.runner.tool_registry import ToolRegistry
-from framework.runtime.agent_runtime import AgentRuntime, create_agent_runtime
+from framework.runtime.agent_runtime import create_agent_runtime
 from framework.runtime.execution_stream import EntryPointSpec
 
 from .config import default_config, metadata
@@ -251,9 +251,7 @@ class EmailReplyAgent:
                 errors.append(f"Terminal node '{t}' not found")
         for ep_id, nid in self.entry_points.items():
             if nid not in node_ids:
-                errors.append(
-                    f"Entry point '{ep_id}' references unknown node '{nid}'"
-                )
+                errors.append(f"Entry point '{ep_id}' references unknown node '{nid}'")
         return {"valid": len(errors) == 0, "errors": errors, "warnings": warnings}
 
 
