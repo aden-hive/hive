@@ -1937,6 +1937,9 @@ def _open_browser(url: str) -> None:
             subprocess.Popen(
                 ["xdg-open", url], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
             )
+        elif sys.platform == "win32":
+            import os
+            os.startfile(url)
     except Exception:
         pass  # Best-effort — don't crash if browser can't open
 

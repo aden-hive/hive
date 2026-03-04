@@ -16,9 +16,7 @@ import hashlib
 import http.server
 import json
 import os
-import platform
 import secrets
-import subprocess
 import sys
 import threading
 import time
@@ -159,17 +157,10 @@ def save_credentials(token_data: dict, account_id: str) -> None:
 
 def open_browser(url: str) -> bool:
     """Open the URL in the user's default browser."""
-    system = platform.system()
+    import webbrowser
     try:
-        devnull = subprocess.DEVNULL
-        if system == "Darwin":
-            subprocess.Popen(["open", url], stdout=devnull, stderr=devnull)
-        elif system == "Windows":
-            subprocess.Popen(["cmd", "/c", "start", url], stdout=devnull, stderr=devnull)
-        else:
-            subprocess.Popen(["xdg-open", url], stdout=devnull, stderr=devnull)
-        return True
-    except OSError:
+        return webbrowser.open(url)
+    except Exception:
         return False
 
 
