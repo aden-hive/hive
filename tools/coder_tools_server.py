@@ -247,121 +247,32 @@ def undo_changes(path: str = "") -> str:
 
 
 @mcp.tool()
-def discover_mcp_tools(server_config_path: str = "") -> str:
-    """Discover available MCP tools by connecting to servers defined in a config file.
+def list_agent_tools(
+    server_config_path: str = "",
+    output_schema: str = "simple",
+    group: str = "all",
+) -> str:
+    """Discover tools available for agent building, grouped by category.
 
-    Connects to each MCP server, lists all tools with full schemas, then
-    disconnects. Use this to see what tools are available before designing
-    an agent — never rely on static documentation.
-
-    Args:
-        server_config_path: Path to mcp_servers.json (relative to project root).
-            Default: the hive-tools server config at tools/mcp_servers.json.
-            Can also point to any agent's mcp_servers.json.
-
-    Returns:
-        JSON listing of all tools with names, descriptions, and input schemas
-    """
-    # Resolve config path
-    if not server_config_path:
-        # Default: look for the main hive-tools mcp_servers.json
-        candidates = [
-            os.path.join(PROJECT_ROOT, "tools", "mcp_servers.json"),
-            os.path.join(PROJECT_ROOT, "mcp_servers.json"),
-        ]
-        config_path = None
-        for c in candidates:
-            if os.path.isfile(c):
-                config_path = c
-                break
-        if not config_path:
-            return "Error: No mcp_servers.json found. Provide server_config_path."
-    else:
-        config_path = _resolve_path(server_config_path)
-        if not os.path.isfile(config_path):
-            return f"Error: Config file not found: {server_config_path}"
-
-    try:
-        with open(config_path, encoding="utf-8") as f:
-            servers_config = json.load(f)
-    except (json.JSONDecodeError, OSError) as e:
-        return f"Error reading config: {e}"
-
-    # Import MCPClient (deferred — needs PYTHONPATH to include core/)
-    try:
-        from framework.runner.mcp_client import MCPClient, MCPServerConfig
-    except ImportError:
-        return "Error: Cannot import MCPClient. Ensure PYTHONPATH includes the core/ directory."
-
-    all_tools = []
-    errors = []
-    config_dir = os.path.dirname(config_path)
-
-    for server_name, server_conf in servers_config.items():
-        # Resolve cwd relative to config file location
-        cwd = server_conf.get("cwd", "")
-        if cwd and not os.path.isabs(cwd):
-            cwd = os.path.abspath(os.path.join(config_dir, cwd))
-
-        try:
-            config = MCPServerConfig(
-                name=server_name,
-                transport=server_conf.get("transport", "stdio"),
-                command=server_conf.get("command"),
-                args=server_conf.get("args", []),
-                env=server_conf.get("env", {}),
-                cwd=cwd or None,
-                url=server_conf.get("url"),
-                headers=server_conf.get("headers", {}),
-            )
-            client = MCPClient(config)
-            client.connect()
-            tools = client.list_tools()
-
-            for tool in tools:
-                all_tools.append(
-                    {
-                        "server": server_name,
-                        "name": tool.name,
-                        "description": tool.description,
-                        "input_schema": tool.input_schema,
-                    }
-                )
-
-            client.disconnect()
-        except Exception as e:
-            errors.append({"server": server_name, "error": str(e)})
-
-    result = {
-        "tools": all_tools,
-        "total": len(all_tools),
-        "servers_queried": len(servers_config),
-    }
-    if errors:
-        result["errors"] = errors
-
-    return json.dumps(result, indent=2, default=str)
-
-
-# ── Meta-agent: Agent tool catalog ────────────────────────────────────────
-
-
-@mcp.tool()
-def list_agent_tools(server_config_path: str = "") -> str:
-    """List all tools available for agent building from the hive-tools MCP server.
-
-    Returns tool names grouped by category. Use this BEFORE designing an agent
-    to know exactly which tools exist. Only use tools from this list in node
-    definitions — never guess or fabricate tool names.
+    Connects to each MCP server, lists tools, then disconnects. Use this
+    BEFORE designing an agent to know exactly which tools exist. Only use
+    tools from this list in node definitions — never guess or fabricate.
 
     Args:
         server_config_path: Path to mcp_servers.json. Default: tools/mcp_servers.json
             (the standard hive-tools server). Can also point to an agent's config
             to see what tools that specific agent has access to.
+        output_schema: "simple" (default) returns name and description per tool.
+            "full" also includes server and input_schema.
+        group: "all" (default) returns every category. A prefix like "gmail"
+            returns only that group's tools.
 
     Returns:
-        JSON with tool names grouped by prefix (e.g. gmail_*, slack_*, etc.)
+        JSON with tools grouped by prefix (e.g. gmail_*, slack_*).
     """
+    if output_schema not in ("simple", "full"):
+        return json.dumps({"error": f"Invalid output_schema: {output_schema!r}. Use 'simple' or 'full'."})
+
     # Resolve config path
     if not server_config_path:
         candidates = [
@@ -413,27 +324,44 @@ def list_agent_tools(server_config_path: str = "") -> str:
             client = MCPClient(config)
             client.connect()
             for tool in client.list_tools():
-                all_tools.append({"name": tool.name, "description": tool.description})
+                all_tools.append({
+                    "server": server_name,
+                    "name": tool.name,
+                    "description": tool.description,
+                    "input_schema": tool.input_schema,
+                })
             client.disconnect()
         except Exception as e:
             errors.append({"server": server_name, "error": str(e)})
 
     # Group by prefix (e.g., gmail_, slack_, stripe_)
-    groups: dict[str, list[str]] = {}
+    groups: dict[str, list[dict]] = {}
     for t in sorted(all_tools, key=lambda x: x["name"]):
         parts = t["name"].split("_", 1)
         prefix = parts[0] if len(parts) > 1 else "general"
-        groups.setdefault(prefix, []).append(t["name"])
+        groups.setdefault(prefix, []).append(t)
 
+    # Filter to a specific group
+    if group != "all":
+        groups = {group: groups[group]} if group in groups else {}
+
+    # Apply output schema
+    if output_schema == "simple":
+        groups = {
+            prefix: [{"name": t["name"], "description": t["description"]} for t in tools]
+            for prefix, tools in groups.items()
+        }
+
+    all_names = sorted(t["name"] for tools in groups.values() for t in tools)
     result: dict = {
-        "total": len(all_tools),
+        "total": len(all_names),
         "tools_by_category": groups,
-        "all_tool_names": sorted(t["name"] for t in all_tools),
+        "all_tool_names": all_names,
     }
     if errors:
         result["errors"] = errors
 
-    return json.dumps(result, indent=2)
+    return json.dumps(result, indent=2, default=str)
 
 
 # ── Meta-agent: Agent tool validation ─────────────────────────────────────
@@ -564,7 +492,7 @@ def validate_agent_tools(agent_path: str) -> str:
         result["missing_tools"] = missing_by_node
         result["message"] = (
             f"FAIL: {sum(len(v) for v in missing_by_node.values())} tool(s) declared "
-            f"in nodes do not exist. Run discover_mcp_tools() to see available tools "
+            f"in nodes do not exist. Run list_agent_tools() to see available tools "
             f"and fix the node definitions."
         )
     else:

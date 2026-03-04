@@ -52,7 +52,6 @@ _SHARED_TOOLS = [
     "undo_changes",
     # Meta-agent
     "list_agent_tools",
-    "discover_mcp_tools",
     "validate_agent_tools",
     "list_agents",
     "list_agent_sessions",
@@ -92,6 +91,8 @@ _QUEEN_RUNNING_TOOLS = [
     "list_directory",
     "search_files",
     "run_command",
+    # Credentials
+    "list_credentials",
     # Worker lifecycle
     "stop_worker_and_edit",
     "get_worker_status",
@@ -139,10 +140,10 @@ errors yourself. Don't declare success until validation passes.
 - undo_changes(path?) — restore from git snapshot
 
 ## Meta-Agent
-- list_agent_tools(server_config_path?) — list all tool names available \
-for agent building, grouped by category. Call this FIRST before designing.
-- discover_mcp_tools(server_config_path?) — connect to MCP servers \
-and list all available tools with full schemas. Use for parameter details.
+- list_agent_tools(server_config_path?, output_schema?, group?) — discover \
+available tools grouped by category. output_schema: "simple" (default) or \
+"full" (includes input_schema). group: "all" (default) or a prefix like \
+"gmail". Call FIRST before designing.
 - validate_agent_tools(agent_path) — validate that all tools declared \
 in an agent's nodes actually exist. Call after building.
 - list_agents() — list all agent packages in exports/ with session counts
@@ -159,15 +160,14 @@ You are not just a file writer. You have deep integration with the \
 Hive framework:
 
 ## Tool Discovery (MANDATORY before designing)
-Before designing any agent, run list_agent_tools() to get all \
-available tool names. ONLY use tools from this list in your node \
-definitions. NEVER guess or fabricate tool names from memory.
+Before designing any agent, run list_agent_tools() to discover all \
+available tools. ONLY use tools from this list in your node definitions. \
+NEVER guess or fabricate tool names from memory.
 
-For full parameter schemas when you need details:
-  discover_mcp_tools()
-
-To check a specific agent's configured tools:
-  list_agent_tools("exports/{agent_name}/mcp_servers.json")
+  list_agent_tools()                                    # names + descriptions
+  list_agent_tools(output_schema="full")                # include input_schema
+  list_agent_tools(group="gmail")                       # only gmail_* tools
+  list_agent_tools("exports/{agent_name}/mcp_servers.json")  # specific agent
 
 ## Agent Awareness
 Run list_agents() to see what agents already exist. Read their code \
@@ -589,7 +589,7 @@ mode. The system notifies you when a mode change occurs.
 You have full coding tools for building and modifying agents:
 - File I/O: read_file, write_file, edit_file, list_directory, search_files, \
 run_command, undo_changes
-- Meta-agent: list_agent_tools, discover_mcp_tools, validate_agent_tools, \
+- Meta-agent: list_agent_tools, validate_agent_tools, \
 list_agents, list_agent_sessions, get_agent_session_state, get_agent_session_memory, \
 list_agent_checkpoints, get_agent_checkpoint, run_agent_tests
 - load_built_agent(agent_path) — Load the agent and switch to STAGING mode

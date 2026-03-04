@@ -413,13 +413,13 @@ See `exports/gmail_inbox_guardian/agent.py` for a complete example with:
 ## Tool Discovery
 
 Do NOT rely on a static tool list — it will be outdated. Always use
-`list_agent_tools()` to get available tool names grouped by category.
-For full schemas with parameter details, use `discover_mcp_tools()`.
+`list_agent_tools()` to discover available tools, grouped by category.
 
 ```
-list_agent_tools()                            # all available tools
-list_agent_tools("exports/my_agent/mcp_servers.json")  # specific agent
-discover_mcp_tools()                          # full schemas with params
+list_agent_tools()                            # names + descriptions, all groups
+list_agent_tools(output_schema="full")        # include input_schema
+list_agent_tools(group="gmail")               # only gmail_* tools
+list_agent_tools("exports/my_agent/mcp_servers.json")  # specific agent's tools
 ```
 
 After building, validate tools exist: `validate_agent_tools("exports/{name}")`
