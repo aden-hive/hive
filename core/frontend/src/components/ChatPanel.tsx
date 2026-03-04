@@ -203,7 +203,7 @@ const MessageBubble = memo(function MessageBubble({ msg, queenMode }: { msg: Cha
               ? queenMode === "running"
                 ? "running mode"
                 : queenMode === "staging"
-                  ? "staging mode)"
+                  ? "staging mode"
                   : "building mode"
               : "Worker"}
           </span>
