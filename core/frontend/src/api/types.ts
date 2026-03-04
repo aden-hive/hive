@@ -271,6 +271,7 @@ export type EventTypeName =
   | "escalation_requested"
   | "worker_loaded"
   | "credentials_required"
+  | "queen_mode_changed"
   | "subagent_report";
 
 export interface AgentEvent {

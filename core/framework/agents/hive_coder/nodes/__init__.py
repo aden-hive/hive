@@ -70,7 +70,22 @@ _QUEEN_BUILDING_TOOLS = _SHARED_TOOLS + [
     "list_credentials",
 ]
 
-# Running mode: read-only coding + worker lifecycle tools.
+# Staging mode: agent loaded but not yet running — inspect, configure, launch.
+_QUEEN_STAGING_TOOLS = [
+    # Read-only (inspect agent files, logs)
+    "read_file",
+    "list_directory",
+    "search_files",
+    "run_command",
+    # Agent inspection
+    "list_credentials",
+    "get_worker_status",
+    # Launch or go back
+    "run_agent_with_input",
+    "stop_worker_and_edit",
+]
+
+# Running mode: worker is executing — monitor and control.
 _QUEEN_RUNNING_TOOLS = [
     # Read-only coding (for inspecting logs, files)
     "read_file",
@@ -78,7 +93,6 @@ _QUEEN_RUNNING_TOOLS = [
     "search_files",
     "run_command",
     # Worker lifecycle
-    "start_worker",
     "stop_worker_and_edit",
     "get_worker_status",
     "inject_worker_message",
@@ -568,8 +582,8 @@ _queen_tools_docs = """
 
 ## Operating Modes
 
-You operate in one of two modes. Your available tools change based on the mode. \
-The system notifies you when a mode change occurs.
+You operate in one of three modes. Your available tools change based on the \
+mode. The system notifies you when a mode change occurs.
 
 ### BUILDING mode (default)
 You have full coding tools for building and modifying agents:
@@ -578,29 +592,39 @@ run_command, undo_changes
 - Meta-agent: list_agent_tools, discover_mcp_tools, validate_agent_tools, \
 list_agents, list_agent_sessions, get_agent_session_state, get_agent_session_memory, \
 list_agent_checkpoints, get_agent_checkpoint, run_agent_tests
-- load_built_agent(agent_path) — Load the agent and switch to RUNNING mode
+- load_built_agent(agent_path) — Load the agent and switch to STAGING mode
 - list_credentials(credential_id?) — List authorized credentials
 
-When you finish building an agent, call load_built_agent(path) to switch to \
-RUNNING mode.
+When you finish building an agent, call load_built_agent(path) to stage it.
 
-### RUNNING mode (after loading an agent)
-You have worker lifecycle tools plus read-only access:
+### STAGING mode (agent loaded, not yet running)
+The agent is loaded and ready to run. You can inspect it and launch it:
 - Read-only: read_file, list_directory, search_files, run_command
-- start_worker(task) — Start the worker with a task description
+- list_credentials(credential_id?) — Verify credentials are configured
+- get_worker_status() — Check the loaded worker
+- run_agent_with_input(task) — Start the worker and switch to RUNNING mode
+- stop_worker_and_edit() — Go back to BUILDING mode
+
+In STAGING mode you do NOT have write tools. If you need to modify the agent, \
+call stop_worker_and_edit() to go back to BUILDING mode.
+
+### RUNNING mode (worker is executing)
+The worker is running. You have monitoring and lifecycle tools:
+- Read-only: read_file, list_directory, search_files, run_command
 - get_worker_status() — Check worker status (idle, running, waiting)
 - inject_worker_message(content) — Send a message to the running worker
 - get_worker_health_summary() — Read the latest health data
 - notify_operator(ticket_id, analysis, urgency) — Alert the user (use sparingly)
 - stop_worker_and_edit() — Stop the worker and switch back to BUILDING mode
 
-In RUNNING mode you do NOT have write tools (write_file, edit_file, etc.) \
-or agent construction tools. If you need to modify the agent, call \
-stop_worker_and_edit() first to switch back to BUILDING mode.
+In RUNNING mode you do NOT have write tools or agent construction tools. \
+If you need to modify the agent, call stop_worker_and_edit() to switch back \
+to BUILDING mode.
 
 ### Mode transitions
-- load_built_agent(path) → switches to RUNNING mode
-- stop_worker_and_edit() → stops worker, switches to BUILDING mode
+- load_built_agent(path) → switches to STAGING mode
+- run_agent_with_input(task) → starts worker, switches to RUNNING mode
+- stop_worker_and_edit() → stops worker (if running), switches to BUILDING mode
 """
 
 _queen_behavior = """
@@ -631,7 +655,8 @@ The worker is a specialized agent (see Worker Profile at the end of this \
 prompt). It can ONLY do what its goal and tools allow.
 
 **Decision rule — read the Worker Profile first:**
-- The user's request directly matches the worker's goal → start_worker(task)
+- The user's request directly matches the worker's goal → use \
+run_agent_with_input(task) (if in staging) or load then run (if in building)
 - Anything else → do it yourself. Do NOT reframe user requests into \
 subtasks to justify delegation.
 - Building, modifying, or configuring agents is ALWAYS your job. Never \
@@ -646,9 +671,15 @@ The worker is already loaded. Just ask for the input the worker needs \
 
 If NO worker is loaded, say so and offer to build one.
 
+## When in staging mode (agent loaded, not running):
+- Tell the user the agent is loaded and ready.
+- For tasks matching the worker's goal, call run_agent_with_input(task).
+- If the user wants to modify the agent, call stop_worker_and_edit().
+
 ## When idle (worker not running):
 - Greet the user. Mention what the worker can do in one sentence.
-- For tasks matching the worker's goal, call start_worker(task).
+- For tasks matching the worker's goal, use run_agent_with_input(task) \
+(if in staging) or load the agent first (if in building).
 - For everything else, do it directly.
 
 ## When the user clicks Run (external event notification)
@@ -701,7 +732,8 @@ coding tools (switches to BUILDING mode).
 5. Run validation (default_agent.validate(), AgentRunner.load(), \
 validate_agent_tools()).
 6. **Reload the modified worker**: call load_built_agent("{path}") \
-so the changes take effect immediately (switches back to RUNNING mode).
+so the changes take effect immediately (switches to STAGING mode). \
+Then call run_agent_with_input(task) to restart execution.
 
 Do NOT skip step 6 — without reloading, the user will still be \
 interacting with the old version.
@@ -712,9 +744,9 @@ _queen_phase_7 = """
 
 After building and verifying, load the agent into the current session:
   load_built_agent("exports/{name}")
-This makes the agent available immediately — the user sees its graph, \
-the tab name updates, and you can delegate to it via start_worker(). \
-Do NOT tell the user to run `python -m {name} run` — load it here.
+This switches to STAGING mode — the user sees the agent's graph and \
+the tab name updates. Then call run_agent_with_input(task) to start it. \
+Do NOT tell the user to run `python -m {name} run` — load and run it here.
 """
 
 _queen_style = """
@@ -844,7 +876,7 @@ queen_node = NodeSpec(
         "User's intent is understood, coding tasks are completed correctly, "
         "and the worker is managed effectively when delegated to."
     ),
-    tools=sorted(set(_QUEEN_BUILDING_TOOLS + _QUEEN_RUNNING_TOOLS)),
+    tools=sorted(set(_QUEEN_BUILDING_TOOLS + _QUEEN_STAGING_TOOLS + _QUEEN_RUNNING_TOOLS)),
     system_prompt=(
         "You are the Queen — the user's primary interface. You are a coding agent "
         "with the same capabilities as the Hive Coder worker, PLUS the ability to "
@@ -858,7 +890,7 @@ queen_node = NodeSpec(
     ),
 )
 
-ALL_QUEEN_TOOLS = sorted(set(_QUEEN_BUILDING_TOOLS + _QUEEN_RUNNING_TOOLS))
+ALL_QUEEN_TOOLS = sorted(set(_QUEEN_BUILDING_TOOLS + _QUEEN_STAGING_TOOLS + _QUEEN_RUNNING_TOOLS))
 
 __all__ = [
     "coder_node",
@@ -867,5 +899,6 @@ __all__ = [
     "ALL_QUEEN_TRIAGE_TOOLS",
     "ALL_QUEEN_TOOLS",
     "_QUEEN_BUILDING_TOOLS",
+    "_QUEEN_STAGING_TOOLS",
     "_QUEEN_RUNNING_TOOLS",
 ]

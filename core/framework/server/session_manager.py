@@ -426,7 +426,7 @@ class SessionManager:
         # Mode state for building/running mode switching
         from framework.tools.queen_lifecycle_tools import QueenModeState, register_queen_lifecycle_tools
 
-        mode_state = QueenModeState(mode="building")
+        mode_state = QueenModeState(mode="building", event_bus=session.event_bus)
 
         # Always register lifecycle tools — they check session.worker_runtime
         # at call time, so they work even if no worker is loaded yet.
@@ -455,11 +455,17 @@ class SessionManager:
         queen_tool_executor = queen_registry.get_executor()
 
         # Partition tools into mode-specific sets
-        from framework.agents.hive_coder.nodes import _QUEEN_BUILDING_TOOLS, _QUEEN_RUNNING_TOOLS
+        from framework.agents.hive_coder.nodes import (
+            _QUEEN_BUILDING_TOOLS,
+            _QUEEN_RUNNING_TOOLS,
+            _QUEEN_STAGING_TOOLS,
+        )
 
         building_names = set(_QUEEN_BUILDING_TOOLS)
+        staging_names = set(_QUEEN_STAGING_TOOLS)
         running_names = set(_QUEEN_RUNNING_TOOLS)
         mode_state.building_tools = [t for t in queen_tools if t.name in building_names]
+        mode_state.staging_tools = [t for t in queen_tools if t.name in staging_names]
         mode_state.running_tools = [t for t in queen_tools if t.name in running_names]
 
         # Build queen graph with adjusted prompt + tools

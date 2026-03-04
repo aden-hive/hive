@@ -240,6 +240,8 @@ interface AgentBackendState {
   /** The message ID of the current worker input request (for inline reply box) */
   workerInputMessageId: string | null;
   queenBuilding: boolean;
+  /** Queen operating mode — "building" (coding), "staging" (loaded), or "running" (executing) */
+  queenMode: "building" | "staging" | "running";
   workerRunState: "idle" | "deploying" | "running";
   currentExecutionId: string | null;
   nodeLogs: Record<string, string[]>;
@@ -264,6 +266,7 @@ function defaultAgentState(): AgentBackendState {
     awaitingInput: false,
     workerInputMessageId: null,
     queenBuilding: false,
+    queenMode: "building",
     workerRunState: "idle",
     currentExecutionId: null,
     nodeLogs: {},
@@ -1212,13 +1215,7 @@ export default function Workspace() {
         case "tool_call_started": {
           console.log('[TOOL_PILL] tool_call_started received:', { isQueen, nodeId: event.node_id, streamId: event.stream_id, agentType, executionId: event.execution_id, toolName: event.data?.tool_name });
 
-          // Detect queen building: when the queen starts writing/editing files, she's building an agent
-          if (isQueen) {
-            const tn = (event.data?.tool_name as string) || "";
-            if (tn === "write_file" || tn === "edit_file") {
-              updateAgentState(agentType, { queenBuilding: true });
-            }
-          }
+          // queenBuilding is now driven by queen_mode_changed events
 
           if (event.node_id) {
             if (!isQueen) {
@@ -1450,6 +1447,17 @@ export default function Workspace() {
           const credAgentPath = event.data?.agent_path as string | undefined;
           if (credAgentPath) setCredentialAgentPath(credAgentPath);
           setCredentialsOpen(true);
+          break;
+        }
+
+        case "queen_mode_changed": {
+          const rawMode = event.data?.mode as string;
+          const newMode: "building" | "staging" | "running" =
+            rawMode === "running" ? "running" : rawMode === "staging" ? "staging" : "building";
+          updateAgentState(agentType, {
+            queenMode: newMode,
+            queenBuilding: newMode === "building",
+          });
           break;
         }
 
@@ -1866,6 +1874,7 @@ export default function Workspace() {
                   (activeAgentState?.loading ?? true) ||
                   !(activeAgentState?.queenReady)
                 }
+                queenMode={activeAgentState?.queenMode ?? "building"}
               />
             )}
           </div>

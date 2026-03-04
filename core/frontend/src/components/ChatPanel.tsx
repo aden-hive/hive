@@ -29,6 +29,8 @@ interface ChatPanelProps {
   onCancel?: () => void;
   /** Called when user submits a reply to the worker's input request */
   onWorkerReply?: (message: string) => void;
+  /** Queen operating mode — shown as a tag on queen messages */
+  queenMode?: "building" | "staging" | "running";
 }
 
 const queenColor = "hsl(45,95%,58%)";
@@ -202,7 +204,7 @@ function WorkerInputReply({ onSubmit, disabled }: { onSubmit: (text: string) => 
   );
 }
 
-const MessageBubble = memo(function MessageBubble({ msg }: { msg: ChatMessage }) {
+const MessageBubble = memo(function MessageBubble({ msg, queenMode }: { msg: ChatMessage; queenMode?: "building" | "staging" | "running" }) {
   const isUser = msg.type === "user";
   const isQueen = msg.role === "queen";
   const color = getColor(msg.agent, msg.role);
@@ -259,6 +261,19 @@ const MessageBubble = memo(function MessageBubble({ msg }: { msg: ChatMessage })
           >
             {isQueen ? "Queen" : "Worker"}
           </span>
+          {isQueen && queenMode && (
+            <span
+              className={`text-[10px] font-medium px-1.5 py-0.5 rounded-md ${
+                queenMode === "running"
+                  ? "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400"
+                  : queenMode === "staging"
+                    ? "bg-blue-500/15 text-blue-600 dark:text-blue-400"
+                    : "bg-amber-500/15 text-amber-600 dark:text-amber-400"
+              }`}
+            >
+              {queenMode === "running" ? "Running" : queenMode === "staging" ? "Staging" : "Building"}
+            </span>
+          )}
         </div>
         <div
           className={`text-sm leading-relaxed rounded-2xl rounded-tl-md px-4 py-3 ${
@@ -270,9 +285,9 @@ const MessageBubble = memo(function MessageBubble({ msg }: { msg: ChatMessage })
       </div>
     </div>
   );
-}, (prev, next) => prev.msg.id === next.msg.id && prev.msg.content === next.msg.content);
+}, (prev, next) => prev.msg.id === next.msg.id && prev.msg.content === next.msg.content && prev.queenMode === next.queenMode);
 
-export default function ChatPanel({ messages, onSend, isWaiting, activeThread, workerAwaitingInput, disabled, onCancel, onWorkerReply }: ChatPanelProps) {
+export default function ChatPanel({ messages, onSend, isWaiting, activeThread, workerAwaitingInput, disabled, onCancel, onWorkerReply, queenMode }: ChatPanelProps) {
   const [input, setInput] = useState("");
   const [readMap, setReadMap] = useState<Record<string, number>>({});
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -327,7 +342,7 @@ export default function ChatPanel({ messages, onSend, isWaiting, activeThread, w
       <div className="flex-1 overflow-auto px-5 py-4 space-y-3">
         {threadMessages.map((msg, idx) => (
           <div key={msg.id}>
-            <MessageBubble msg={msg} />
+            <MessageBubble msg={msg} queenMode={queenMode} />
             {idx === lastWorkerMsgIdx && onWorkerReply && (
               <WorkerInputReply onSubmit={onWorkerReply} />
             )}

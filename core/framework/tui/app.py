@@ -539,7 +539,7 @@ class AdenTUI(App):
                 except Exception:
                     log.warning("Queen: MCP config failed to load", exc_info=True)
 
-            mode_state = QueenModeState(mode="building")
+            mode_state = QueenModeState(mode="building", event_bus=event_bus)
 
             register_queen_lifecycle_tools(
                 queen_registry,
@@ -563,11 +563,14 @@ class AdenTUI(App):
             from framework.agents.hive_coder.nodes import (
                 _QUEEN_BUILDING_TOOLS,
                 _QUEEN_RUNNING_TOOLS,
+                _QUEEN_STAGING_TOOLS,
             )
 
             building_names = set(_QUEEN_BUILDING_TOOLS)
+            staging_names = set(_QUEEN_STAGING_TOOLS)
             running_names = set(_QUEEN_RUNNING_TOOLS)
             mode_state.building_tools = [t for t in queen_tools if t.name in building_names]
+            mode_state.staging_tools = [t for t in queen_tools if t.name in staging_names]
             mode_state.running_tools = [t for t in queen_tools if t.name in running_names]
 
             # Build worker profile for queen's system prompt.
