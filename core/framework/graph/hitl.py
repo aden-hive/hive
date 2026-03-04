@@ -154,69 +154,17 @@ class HITLProtocol:
         """
         Parse human's raw input into structured response.
 
-        Uses Haiku to intelligently extract answers for each question.
+        Maps the raw input to the first question. For multi-question HITL,
+        the caller should present one question at a time.
         """
-        import os
-
         response = HITLResponse(request_id=request.request_id, raw_input=raw_input)
 
         # If no questions, just return raw input
         if not request.questions:
             return response
 
-        # Try to use Haiku for intelligent parsing
-        api_key = os.environ.get("ANTHROPIC_API_KEY")
-        if not use_haiku or not api_key:
-            # Simple fallback: treat as answer to first question
-            if request.questions:
-                response.answers[request.questions[0].id] = raw_input
-            return response
-
-        # Use Haiku to extract answers
-        try:
-            import json
-
-            import anthropic
-
-            questions_str = "\n".join(
-                [f"{i + 1}. {q.question} (id: {q.id})" for i, q in enumerate(request.questions)]
-            )
-
-            prompt = f"""Parse the user's response and extract answers for each question.
-
-Questions asked:
-{questions_str}
-
-User's response:
-{raw_input}
-
-Extract the answer for each question. Output JSON with question IDs as keys.
-
-Example format:
-{{"question-1": "answer here", "question-2": "answer here"}}"""
-
-            client = anthropic.Anthropic(api_key=api_key)
-            message = client.messages.create(
-                model="claude-haiku-4-5-20251001",
-                max_tokens=500,
-                messages=[{"role": "user", "content": prompt}],
-            )
-
-            # Parse Haiku's response
-            import re
-
-            response_text = message.content[0].text.strip()
-            json_match = re.search(r"\{[^{}]*\}", response_text, re.DOTALL)
-
-            if json_match:
-                parsed = json.loads(json_match.group())
-                response.answers = parsed
-
-        except Exception:
-            # Fallback: use raw input for first question
-            if request.questions:
-                response.answers[request.questions[0].id] = raw_input
-
+        # Map raw input to first question
+        response.answers[request.questions[0].id] = raw_input
         return response
 
     @staticmethod
