@@ -154,7 +154,7 @@ def _take_snapshot() -> str:
 
 # ── Tool: run_command ─────────────────────────────────────────────────────
 
-MAX_COMMAND_OUTPUT = 16_000  # chars before truncation (keep under stdio pipe buffer)
+MAX_COMMAND_OUTPUT = 30_000  # chars before truncation
 
 
 def _translate_command_for_windows(command: str) -> str:
@@ -310,7 +310,7 @@ def undo_changes(path: str = "") -> str:
         return f"Error restoring files: {e}"
 
 
-# ── Meta-agent: Agent tool catalog ────────────────────────────────────────
+# ── Meta-agent: Tool discovery ────────────────────────────────────────────
 
 
 @mcp.tool()
