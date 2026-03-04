@@ -365,24 +365,23 @@ class TestMockedAPIResponses:
         assert result["calendars"][0]["primary"] is True
         assert result["total"] == 2
 
-    @patch("aden_tools.tools.calendar_tool.calendar_tool.httpx.post")
-    def test_check_availability_success(self, mock_post, calendar_tools, monkeypatch):
-        """check_availability returns busy periods."""
+    @patch("aden_tools.tools.calendar_tool.calendar_tool.httpx.get")
+    def test_check_availability_success(self, mock_get, calendar_tools, monkeypatch):
+        """check_availability returns events, busy, free_slots, and conflicts."""
         monkeypatch.setenv("GOOGLE_ACCESS_TOKEN", "test-token")
 
-        mock_post.return_value = _mock_response(
+        mock_get.return_value = _mock_response(
             200,
             {
-                "calendars": {
-                    "primary": {
-                        "busy": [
-                            {
-                                "start": "2024-01-15T09:00:00Z",
-                                "end": "2024-01-15T10:00:00Z",
-                            }
-                        ]
+                "items": [
+                    {
+                        "id": "ev1",
+                        "summary": "Morning standup",
+                        "start": {"dateTime": "2024-01-15T09:00:00Z"},
+                        "end": {"dateTime": "2024-01-15T10:00:00Z"},
+                        "status": "confirmed",
                     }
-                }
+                ]
             },
         )
 
@@ -392,8 +391,121 @@ class TestMockedAPIResponses:
         )
 
         assert "calendars" in result
-        assert "primary" in result["calendars"]
-        assert len(result["calendars"]["primary"]["busy"]) == 1
+        cal = result["calendars"]["primary"]
+        assert len(cal["events"]) == 1
+        assert cal["events"][0]["summary"] == "Morning standup"
+        assert len(cal["busy"]) == 1
+        assert len(cal["free_slots"]) == 2  # before and after the event
+        assert len(cal["conflicts"]) == 0
+
+    @patch("aden_tools.tools.calendar_tool.calendar_tool.httpx.get")
+    def test_check_availability_detects_conflicts(self, mock_get, calendar_tools, monkeypatch):
+        """check_availability detects overlapping events."""
+        monkeypatch.setenv("GOOGLE_ACCESS_TOKEN", "test-token")
+
+        mock_get.return_value = _mock_response(
+            200,
+            {
+                "items": [
+                    {
+                        "id": "ev1",
+                        "summary": "Planning",
+                        "start": {"dateTime": "2024-01-15T14:00:00Z"},
+                        "end": {"dateTime": "2024-01-15T15:00:00Z"},
+                        "status": "confirmed",
+                    },
+                    {
+                        "id": "ev2",
+                        "summary": "Quick sync",
+                        "start": {"dateTime": "2024-01-15T14:30:00Z"},
+                        "end": {"dateTime": "2024-01-15T15:30:00Z"},
+                        "status": "confirmed",
+                    },
+                ]
+            },
+        )
+
+        result = calendar_tools["check_availability"](
+            time_min="2024-01-15T14:00:00Z",
+            time_max="2024-01-15T16:00:00Z",
+        )
+
+        cal = result["calendars"]["primary"]
+        assert len(cal["conflicts"]) == 1
+        assert "Planning" in cal["conflicts"][0]["events"]
+        assert "Quick sync" in cal["conflicts"][0]["events"]
+        # Merged busy block should span the full overlap
+        assert len(cal["busy"]) == 1
+        assert cal["busy"][0]["start"] == "2024-01-15T14:00:00+00:00"
+        assert cal["busy"][0]["end"] == "2024-01-15T15:30:00+00:00"
+
+    @patch("aden_tools.tools.calendar_tool.calendar_tool.httpx.get")
+    def test_check_availability_computes_free_slots(self, mock_get, calendar_tools, monkeypatch):
+        """check_availability computes free gaps between events."""
+        monkeypatch.setenv("GOOGLE_ACCESS_TOKEN", "test-token")
+
+        mock_get.return_value = _mock_response(
+            200,
+            {
+                "items": [
+                    {
+                        "id": "ev1",
+                        "summary": "Morning",
+                        "start": {"dateTime": "2024-01-15T09:00:00Z"},
+                        "end": {"dateTime": "2024-01-15T10:00:00Z"},
+                        "status": "confirmed",
+                    },
+                    {
+                        "id": "ev2",
+                        "summary": "Afternoon",
+                        "start": {"dateTime": "2024-01-15T14:00:00Z"},
+                        "end": {"dateTime": "2024-01-15T15:00:00Z"},
+                        "status": "confirmed",
+                    },
+                ]
+            },
+        )
+
+        result = calendar_tools["check_availability"](
+            time_min="2024-01-15T08:00:00Z",
+            time_max="2024-01-15T17:00:00Z",
+        )
+
+        cal = result["calendars"]["primary"]
+        assert len(cal["free_slots"]) == 3  # 8-9, 10-14, 15-17
+
+    @patch("aden_tools.tools.calendar_tool.calendar_tool.httpx.get")
+    def test_check_availability_skips_transparent_events(
+        self, mock_get, calendar_tools, monkeypatch
+    ):
+        """check_availability ignores transparent (show-as-free) events."""
+        monkeypatch.setenv("GOOGLE_ACCESS_TOKEN", "test-token")
+
+        mock_get.return_value = _mock_response(
+            200,
+            {
+                "items": [
+                    {
+                        "id": "ev1",
+                        "summary": "Focus time",
+                        "start": {"dateTime": "2024-01-15T09:00:00Z"},
+                        "end": {"dateTime": "2024-01-15T10:00:00Z"},
+                        "status": "confirmed",
+                        "transparency": "transparent",
+                    },
+                ]
+            },
+        )
+
+        result = calendar_tools["check_availability"](
+            time_min="2024-01-15T08:00:00Z",
+            time_max="2024-01-15T12:00:00Z",
+        )
+
+        cal = result["calendars"]["primary"]
+        assert len(cal["events"]) == 1  # event is listed
+        assert len(cal["busy"]) == 0  # but not counted as busy
+        assert len(cal["free_slots"]) == 1  # entire window is free
 
     @patch("aden_tools.tools.calendar_tool.calendar_tool.httpx.get")
     def test_unauthorized_returns_error(self, mock_get, calendar_tools, monkeypatch):
