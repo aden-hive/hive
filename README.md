@@ -126,7 +126,7 @@ Click "Try a sample agent" and check the templates. You can run a templates dire
 
 ### Run Agents
 
-Now you can run an agent by selectiing the agent (either an existing agent or example agent). You can click the Run button on the top left, or talk to the queen agent and it can run the agent for you.
+Now you can run an agent by selecting the agent (either an existing agent or example agent). You can click the Run button on the top left, or talk to the queen agent and it can run the agent for you.
 
 <img width="2500" height="1214" alt="Image" src="https://github.com/user-attachments/assets/71c38206-2ad5-49aa-bde8-6698d0bc55f5" />
 
