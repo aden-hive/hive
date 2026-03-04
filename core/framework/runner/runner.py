@@ -96,7 +96,7 @@ def _save_refreshed_credentials(token_data: dict) -> None:
         return
 
     try:
-        with open(CLAUDE_CREDENTIALS_FILE) as f:
+        with open(CLAUDE_CREDENTIALS_FILE, encoding="utf-8") as f:
             creds = json.load(f)
 
         oauth = creds.get("claudeAiOauth", {})
@@ -212,7 +212,7 @@ def _read_codex_keychain() -> dict | None:
                 "-w",
             ],
             capture_output=True,
-            text=True,
+            encoding="utf-8",
             timeout=5,
         )
         if result.returncode != 0:

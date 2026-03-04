@@ -2894,6 +2894,7 @@ def run_tests(
     try:
         result = subprocess.run(
             cmd,
+            encoding="utf-8",
             capture_output=True,
             text=True,
             timeout=600,  # 10 minute timeout
@@ -3085,6 +3086,7 @@ def debug_test(
     try:
         result = subprocess.run(
             cmd,
+            encoding="utf-8",
             capture_output=True,
             text=True,
             timeout=120,  # 2 minute timeout for single test

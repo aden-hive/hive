@@ -568,7 +568,7 @@ def _load_nodes_from_python_agent(agent_path: Path) -> list:
 def _load_nodes_from_json_agent(agent_json: Path) -> list:
     """Load nodes from a JSON-based agent."""
     try:
-        with open(agent_json) as f:
+        with open(agent_json, encoding="utf-8") as f:
             data = json.load(f)
 
         from framework.graph import NodeSpec

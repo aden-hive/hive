@@ -1932,10 +1932,18 @@ def _open_browser(url: str) -> None:
 
     try:
         if sys.platform == "darwin":
-            subprocess.Popen(["open", url], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            subprocess.Popen(
+                ["open", url],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                encoding="utf-8",
+            )
         elif sys.platform == "linux":
             subprocess.Popen(
-                ["xdg-open", url], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+                ["xdg-open", url],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                encoding="utf-8",
             )
     except Exception:
         pass  # Best-effort — don't crash if browser can't open
@@ -1980,12 +1988,14 @@ def _build_frontend() -> bool:
         # Ensure deps are installed
         subprocess.run(
             ["npm", "install", "--no-fund", "--no-audit"],
+            encoding="utf-8",
             cwd=frontend_dir,
             check=True,
             capture_output=True,
         )
         subprocess.run(
             ["npm", "run", "build"],
+            encoding="utf-8",
             cwd=frontend_dir,
             check=True,
             capture_output=True,

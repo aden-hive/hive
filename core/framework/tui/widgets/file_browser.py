@@ -38,6 +38,7 @@ def _linux_file_dialog() -> subprocess.CompletedProcess | None:
                 "--title=Select a PDF file",
                 "--file-filter=PDF files (*.pdf)|*.pdf",
             ],
+            encoding="utf-8",
             capture_output=True,
             text=True,
             timeout=300,
@@ -54,6 +55,7 @@ def _linux_file_dialog() -> subprocess.CompletedProcess | None:
                 ".",
                 "PDF files (*.pdf)",
             ],
+            encoding="utf-8",
             capture_output=True,
             text=True,
             timeout=300,
@@ -79,6 +81,7 @@ def _pick_pdf_subprocess() -> Path | None:
                     'POSIX path of (choose file of type {"com.adobe.pdf"} '
                     'with prompt "Select a PDF file")',
                 ],
+                encoding="utf-8",
                 capture_output=True,
                 text=True,
                 timeout=300,
@@ -93,6 +96,7 @@ def _pick_pdf_subprocess() -> Path | None:
             )
             result = subprocess.run(
                 ["powershell", "-NoProfile", "-Command", ps_script],
+                encoding="utf-8",
                 capture_output=True,
                 text=True,
                 timeout=300,

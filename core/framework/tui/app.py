@@ -256,7 +256,7 @@ class AdenTUI(App):
         """Override to use native `open` for file:// URLs on macOS."""
         if url.startswith("file://") and platform.system() == "Darwin":
             path = url.removeprefix("file://")
-            subprocess.Popen(["open", path])
+            subprocess.Popen(["open", path], encoding="utf-8")
         else:
             super().open_url(url, new_tab=new_tab)
 
