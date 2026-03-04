@@ -736,8 +736,8 @@ $ProviderMap = [ordered]@{
 }
 
 $DefaultModels = @{
-    anthropic   = "claude-opus-4-6"
-    openai      = "gpt-5.2"
+    anthropic   = "claude-haiku-4-5-20251001"
+    openai      = "gpt-5-mini"
     gemini      = "gemini-3-flash-preview"
     groq        = "moonshotai/kimi-k2-instruct-0905"
     cerebras    = "zai-glm-4.7"
@@ -749,14 +749,14 @@ $DefaultModels = @{
 # Model choices: array of hashtables per provider
 $ModelChoices = @{
     anthropic = @(
-        @{ Id = "claude-opus-4-6";            Label = "Opus 4.6 - Most capable (recommended)"; MaxTokens = 32768 },
-        @{ Id = "claude-sonnet-4-5-20250929"; Label = "Sonnet 4.5 - Best balance";             MaxTokens = 16384 },
-        @{ Id = "claude-sonnet-4-20250514";   Label = "Sonnet 4 - Fast + capable";             MaxTokens = 8192 },
-        @{ Id = "claude-haiku-4-5-20251001";  Label = "Haiku 4.5 - Fast + cheap";              MaxTokens = 8192 }
+        @{ Id = "claude-haiku-4-5-20251001";  Label = "Haiku 4.5 - Fast + cheap (recommended)"; MaxTokens = 8192 },
+        @{ Id = "claude-sonnet-4-20250514";   Label = "Sonnet 4 - Fast + capable";              MaxTokens = 8192 },
+        @{ Id = "claude-sonnet-4-5-20250929"; Label = "Sonnet 4.5 - Best balance";              MaxTokens = 16384 },
+        @{ Id = "claude-opus-4-6";            Label = "Opus 4.6 - Most capable";                MaxTokens = 32768 }
     )
     openai = @(
-        @{ Id = "gpt-5.2";   Label = "GPT-5.2 - Most capable (recommended)"; MaxTokens = 16384 },
-        @{ Id = "gpt-5-mini"; Label = "GPT-5 Mini - Fast + cheap";            MaxTokens = 16384 }
+        @{ Id = "gpt-5-mini"; Label = "GPT-5 Mini - Fast + cheap (recommended)"; MaxTokens = 16384 },
+        @{ Id = "gpt-5.2";   Label = "GPT-5.2 - Most capable";                   MaxTokens = 16384 }
     )
     gemini = @(
         @{ Id = "gemini-3-flash-preview"; Label = "Gemini 3 Flash - Fast (recommended)"; MaxTokens = 8192 },
@@ -1081,37 +1081,18 @@ if ($SelectedProviderId) {
 Write-Host ""
 
 # ============================================================
-# Step 5b: Browser Automation (GCU)
+# Step 5b: Browser Automation (GCU) — always enabled
 # ============================================================
 
 Write-Host ""
-Write-Color -Text "Enable browser automation?" -Color White
-Write-Color -Text "This lets your agents control a real browser - navigate websites, fill forms," -Color DarkGray
-Write-Color -Text "scrape dynamic pages, and interact with web UIs." -Color DarkGray
-Write-Host ""
-Write-Host "  " -NoNewline; Write-Color -Text "1)" -Color Cyan -NoNewline; Write-Host " Yes"
-Write-Host "  " -NoNewline; Write-Color -Text "2)" -Color Cyan -NoNewline; Write-Host " No"
-Write-Host ""
-
-do {
-    $gcuChoice = Read-Host "Enter choice (1-2)"
-} while ($gcuChoice -ne "1" -and $gcuChoice -ne "2")
-
-$GcuEnabled = $false
-if ($gcuChoice -eq "1") {
-    $GcuEnabled = $true
-    Write-Ok "Browser automation enabled"
-} else {
-    Write-Color -Text "  Browser automation skipped" -Color DarkGray
-}
+Write-Ok "Browser automation enabled"
 
 # Patch gcu_enabled into configuration.json
 if (Test-Path $HiveConfigFile) {
     $existingConfig = Get-Content -Path $HiveConfigFile -Raw | ConvertFrom-Json
-    $existingConfig | Add-Member -NotePropertyName "gcu_enabled" -NotePropertyValue $GcuEnabled -Force
+    $existingConfig | Add-Member -NotePropertyName "gcu_enabled" -NotePropertyValue $true -Force
     $existingConfig | ConvertTo-Json -Depth 4 | Set-Content -Path $HiveConfigFile -Encoding UTF8
-} elseif ($GcuEnabled) {
-    # No config file yet (user skipped LLM provider) - create minimal one
+} else {
     if (-not (Test-Path $HiveConfigDir)) {
         New-Item -ItemType Directory -Path $HiveConfigDir -Force | Out-Null
     }
