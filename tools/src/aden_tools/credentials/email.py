@@ -46,6 +46,9 @@ EMAIL_CREDENTIALS = {
             "gmail_modify_message",
             "gmail_batch_modify_messages",
             "gmail_batch_get_messages",
+            "gmail_create_draft",
+            "gmail_list_labels",
+            "gmail_create_label",
             # Google Calendar tools
             "calendar_list_events",
             "calendar_get_event",

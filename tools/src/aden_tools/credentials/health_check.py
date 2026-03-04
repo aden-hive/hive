@@ -695,18 +695,532 @@ class GoogleMapsHealthChecker:
             )
 
 
+class ApolloHealthChecker:
+    """Health checker for Apollo.io API."""
+
+    ENDPOINT = "https://api.apollo.io/v1/auth/health"
+    TIMEOUT = 10.0
+
+    def check(self, api_key: str) -> HealthCheckResult:
+        """Validate Apollo API key via the auth health endpoint."""
+        try:
+            with httpx.Client(timeout=self.TIMEOUT) as client:
+                response = client.get(
+                    self.ENDPOINT,
+                    headers={"X-Api-Key": api_key, "Accept": "application/json"},
+                )
+                if response.status_code == 200:
+                    return HealthCheckResult(valid=True, message="Apollo API key valid")
+                elif response.status_code == 401:
+                    return HealthCheckResult(
+                        valid=False,
+                        message="Apollo API key is invalid",
+                        details={"status_code": 401},
+                    )
+                else:
+                    return HealthCheckResult(
+                        valid=False,
+                        message=f"Apollo API returned status {response.status_code}",
+                        details={"status_code": response.status_code},
+                    )
+        except httpx.TimeoutException:
+            return HealthCheckResult(
+                valid=False, message="Apollo API request timed out", details={"error": "timeout"}
+            )
+        except httpx.RequestError as e:
+            return HealthCheckResult(
+                valid=False,
+                message=f"Failed to connect to Apollo API: {e}",
+                details={"error": str(e)},
+            )
+
+
+class BrevoHealthChecker:
+    """Health checker for Brevo (Sendinblue) API."""
+
+    ENDPOINT = "https://api.brevo.com/v3/account"
+    TIMEOUT = 10.0
+
+    def check(self, api_key: str) -> HealthCheckResult:
+        """Validate Brevo API key by fetching account info."""
+        try:
+            with httpx.Client(timeout=self.TIMEOUT) as client:
+                response = client.get(
+                    self.ENDPOINT,
+                    headers={"api-key": api_key, "Accept": "application/json"},
+                )
+                if response.status_code == 200:
+                    return HealthCheckResult(valid=True, message="Brevo API key valid")
+                elif response.status_code == 401:
+                    return HealthCheckResult(
+                        valid=False,
+                        message="Brevo API key is invalid",
+                        details={"status_code": 401},
+                    )
+                else:
+                    return HealthCheckResult(
+                        valid=False,
+                        message=f"Brevo API returned status {response.status_code}",
+                        details={"status_code": response.status_code},
+                    )
+        except httpx.TimeoutException:
+            return HealthCheckResult(
+                valid=False, message="Brevo API request timed out", details={"error": "timeout"}
+            )
+        except httpx.RequestError as e:
+            return HealthCheckResult(
+                valid=False,
+                message=f"Failed to connect to Brevo API: {e}",
+                details={"error": str(e)},
+            )
+
+
+class CalcomHealthChecker:
+    """Health checker for Cal.com API."""
+
+    ENDPOINT = "https://api.cal.com/v1/me"
+    TIMEOUT = 10.0
+
+    def check(self, api_key: str) -> HealthCheckResult:
+        """Validate Cal.com API key by fetching the authenticated user."""
+        try:
+            with httpx.Client(timeout=self.TIMEOUT) as client:
+                response = client.get(
+                    self.ENDPOINT,
+                    params={"apiKey": api_key},
+                )
+                if response.status_code == 200:
+                    return HealthCheckResult(valid=True, message="Cal.com API key valid")
+                elif response.status_code == 401:
+                    return HealthCheckResult(
+                        valid=False,
+                        message="Cal.com API key is invalid",
+                        details={"status_code": 401},
+                    )
+                else:
+                    return HealthCheckResult(
+                        valid=False,
+                        message=f"Cal.com API returned status {response.status_code}",
+                        details={"status_code": response.status_code},
+                    )
+        except httpx.TimeoutException:
+            return HealthCheckResult(
+                valid=False, message="Cal.com API request timed out", details={"error": "timeout"}
+            )
+        except httpx.RequestError as e:
+            return HealthCheckResult(
+                valid=False,
+                message=f"Failed to connect to Cal.com API: {e}",
+                details={"error": str(e)},
+            )
+
+
+class ExaSearchHealthChecker:
+    """Health checker for Exa Search API."""
+
+    ENDPOINT = "https://api.exa.ai/search"
+    TIMEOUT = 10.0
+
+    def check(self, api_key: str) -> HealthCheckResult:
+        """Validate Exa API key with a minimal search request."""
+        try:
+            with httpx.Client(timeout=self.TIMEOUT) as client:
+                response = client.post(
+                    self.ENDPOINT,
+                    headers={"x-api-key": api_key, "Content-Type": "application/json"},
+                    json={"query": "test", "numResults": 1},
+                )
+                if response.status_code == 200:
+                    return HealthCheckResult(valid=True, message="Exa Search API key valid")
+                elif response.status_code == 401:
+                    return HealthCheckResult(
+                        valid=False,
+                        message="Exa Search API key is invalid",
+                        details={"status_code": 401},
+                    )
+                elif response.status_code == 429:
+                    return HealthCheckResult(
+                        valid=True,
+                        message="Exa Search API key valid (rate limited)",
+                        details={"status_code": 429, "rate_limited": True},
+                    )
+                else:
+                    return HealthCheckResult(
+                        valid=False,
+                        message=f"Exa Search API returned status {response.status_code}",
+                        details={"status_code": response.status_code},
+                    )
+        except httpx.TimeoutException:
+            return HealthCheckResult(
+                valid=False,
+                message="Exa Search API request timed out",
+                details={"error": "timeout"},
+            )
+        except httpx.RequestError as e:
+            return HealthCheckResult(
+                valid=False,
+                message=f"Failed to connect to Exa Search API: {e}",
+                details={"error": str(e)},
+            )
+
+
+class FinlightHealthChecker:
+    """Health checker for Finlight news sentiment API."""
+
+    ENDPOINT = "https://api.finlight.me/v1/news"
+    TIMEOUT = 10.0
+
+    def check(self, api_key: str) -> HealthCheckResult:
+        """Validate Finlight API key with a minimal request."""
+        try:
+            with httpx.Client(timeout=self.TIMEOUT) as client:
+                response = client.get(
+                    self.ENDPOINT,
+                    headers={"X-API-KEY": api_key, "Accept": "application/json"},
+                )
+                if response.status_code == 200:
+                    return HealthCheckResult(valid=True, message="Finlight API key valid")
+                elif response.status_code == 401:
+                    return HealthCheckResult(
+                        valid=False,
+                        message="Finlight API key is invalid",
+                        details={"status_code": 401},
+                    )
+                else:
+                    return HealthCheckResult(
+                        valid=False,
+                        message=f"Finlight API returned status {response.status_code}",
+                        details={"status_code": response.status_code},
+                    )
+        except httpx.TimeoutException:
+            return HealthCheckResult(
+                valid=False,
+                message="Finlight API request timed out",
+                details={"error": "timeout"},
+            )
+        except httpx.RequestError as e:
+            return HealthCheckResult(
+                valid=False,
+                message=f"Failed to connect to Finlight API: {e}",
+                details={"error": str(e)},
+            )
+
+
+class GoogleDocsHealthChecker:
+    """Health checker for Google Docs OAuth2 tokens."""
+
+    ENDPOINT = "https://docs.googleapis.com/v1/documents/1"
+    TIMEOUT = 10.0
+
+    def check(self, access_token: str) -> HealthCheckResult:
+        """
+        Validate Google Docs OAuth token.
+
+        Requests a non-existent doc ID. A 404 means the token and scope are
+        valid; 401 means the token is invalid.
+        """
+        try:
+            with httpx.Client(timeout=self.TIMEOUT) as client:
+                response = client.get(
+                    self.ENDPOINT,
+                    headers={
+                        "Authorization": f"Bearer {access_token}",
+                        "Accept": "application/json",
+                    },
+                )
+                if response.status_code in (200, 404):
+                    return HealthCheckResult(valid=True, message="Google Docs credentials valid")
+                elif response.status_code == 401:
+                    return HealthCheckResult(
+                        valid=False,
+                        message="Google Docs token is invalid or expired",
+                        details={"status_code": 401},
+                    )
+                elif response.status_code == 403:
+                    return HealthCheckResult(
+                        valid=False,
+                        message="Google Docs token lacks required scopes",
+                        details={"status_code": 403},
+                    )
+                else:
+                    return HealthCheckResult(
+                        valid=False,
+                        message=f"Google Docs API returned status {response.status_code}",
+                        details={"status_code": response.status_code},
+                    )
+        except httpx.TimeoutException:
+            return HealthCheckResult(
+                valid=False,
+                message="Google Docs API request timed out",
+                details={"error": "timeout"},
+            )
+        except httpx.RequestError as e:
+            return HealthCheckResult(
+                valid=False,
+                message=f"Failed to connect to Google Docs API: {e}",
+                details={"error": str(e)},
+            )
+
+
+class IntercomHealthChecker:
+    """Health checker for Intercom access tokens."""
+
+    ENDPOINT = "https://api.intercom.io/me"
+    TIMEOUT = 10.0
+
+    def check(self, access_token: str) -> HealthCheckResult:
+        """Validate Intercom token by fetching the authenticated admin."""
+        try:
+            with httpx.Client(timeout=self.TIMEOUT) as client:
+                response = client.get(
+                    self.ENDPOINT,
+                    headers={
+                        "Authorization": f"Bearer {access_token}",
+                        "Accept": "application/json",
+                    },
+                )
+                if response.status_code == 200:
+                    return HealthCheckResult(valid=True, message="Intercom access token valid")
+                elif response.status_code == 401:
+                    return HealthCheckResult(
+                        valid=False,
+                        message="Intercom access token is invalid or expired",
+                        details={"status_code": 401},
+                    )
+                elif response.status_code == 403:
+                    return HealthCheckResult(
+                        valid=False,
+                        message="Intercom token lacks required permissions",
+                        details={"status_code": 403},
+                    )
+                else:
+                    return HealthCheckResult(
+                        valid=False,
+                        message=f"Intercom API returned status {response.status_code}",
+                        details={"status_code": response.status_code},
+                    )
+        except httpx.TimeoutException:
+            return HealthCheckResult(
+                valid=False,
+                message="Intercom API request timed out",
+                details={"error": "timeout"},
+            )
+        except httpx.RequestError as e:
+            return HealthCheckResult(
+                valid=False,
+                message=f"Failed to connect to Intercom API: {e}",
+                details={"error": str(e)},
+            )
+
+
+class NewsdataHealthChecker:
+    """Health checker for NewsData.io API."""
+
+    ENDPOINT = "https://newsdata.io/api/1/news"
+    TIMEOUT = 10.0
+
+    def check(self, api_key: str) -> HealthCheckResult:
+        """Validate NewsData.io API key with a minimal query."""
+        try:
+            with httpx.Client(timeout=self.TIMEOUT) as client:
+                response = client.get(
+                    self.ENDPOINT,
+                    params={"apikey": api_key, "q": "test", "size": 1},
+                )
+                if response.status_code == 200:
+                    return HealthCheckResult(valid=True, message="NewsData.io API key valid")
+                elif response.status_code == 401:
+                    return HealthCheckResult(
+                        valid=False,
+                        message="NewsData.io API key is invalid",
+                        details={"status_code": 401},
+                    )
+                elif response.status_code == 429:
+                    return HealthCheckResult(
+                        valid=True,
+                        message="NewsData.io API key valid (rate limited)",
+                        details={"status_code": 429, "rate_limited": True},
+                    )
+                else:
+                    return HealthCheckResult(
+                        valid=False,
+                        message=f"NewsData.io API returned status {response.status_code}",
+                        details={"status_code": response.status_code},
+                    )
+        except httpx.TimeoutException:
+            return HealthCheckResult(
+                valid=False,
+                message="NewsData.io API request timed out",
+                details={"error": "timeout"},
+            )
+        except httpx.RequestError as e:
+            return HealthCheckResult(
+                valid=False,
+                message=f"Failed to connect to NewsData.io API: {e}",
+                details={"error": str(e)},
+            )
+
+
+class SerpApiHealthChecker:
+    """Health checker for SerpAPI."""
+
+    ENDPOINT = "https://serpapi.com/account.json"
+    TIMEOUT = 10.0
+
+    def check(self, api_key: str) -> HealthCheckResult:
+        """Validate SerpAPI key by fetching account info."""
+        try:
+            with httpx.Client(timeout=self.TIMEOUT) as client:
+                response = client.get(
+                    self.ENDPOINT,
+                    params={"api_key": api_key},
+                )
+                if response.status_code == 200:
+                    return HealthCheckResult(valid=True, message="SerpAPI key valid")
+                elif response.status_code == 401:
+                    return HealthCheckResult(
+                        valid=False,
+                        message="SerpAPI key is invalid",
+                        details={"status_code": 401},
+                    )
+                else:
+                    return HealthCheckResult(
+                        valid=False,
+                        message=f"SerpAPI returned status {response.status_code}",
+                        details={"status_code": response.status_code},
+                    )
+        except httpx.TimeoutException:
+            return HealthCheckResult(
+                valid=False, message="SerpAPI request timed out", details={"error": "timeout"}
+            )
+        except httpx.RequestError as e:
+            return HealthCheckResult(
+                valid=False,
+                message=f"Failed to connect to SerpAPI: {e}",
+                details={"error": str(e)},
+            )
+
+
+class StripeHealthChecker:
+    """Health checker for Stripe API keys."""
+
+    ENDPOINT = "https://api.stripe.com/v1/balance"
+    TIMEOUT = 10.0
+
+    def check(self, api_key: str) -> HealthCheckResult:
+        """Validate Stripe API key by fetching account balance."""
+        try:
+            with httpx.Client(timeout=self.TIMEOUT) as client:
+                response = client.get(
+                    self.ENDPOINT,
+                    headers={"Authorization": f"Bearer {api_key}"},
+                )
+                if response.status_code == 200:
+                    return HealthCheckResult(valid=True, message="Stripe API key valid")
+                elif response.status_code == 401:
+                    return HealthCheckResult(
+                        valid=False,
+                        message="Stripe API key is invalid",
+                        details={"status_code": 401},
+                    )
+                elif response.status_code == 403:
+                    return HealthCheckResult(
+                        valid=False,
+                        message="Stripe API key lacks required permissions",
+                        details={"status_code": 403},
+                    )
+                else:
+                    return HealthCheckResult(
+                        valid=False,
+                        message=f"Stripe API returned status {response.status_code}",
+                        details={"status_code": response.status_code},
+                    )
+        except httpx.TimeoutException:
+            return HealthCheckResult(
+                valid=False, message="Stripe API request timed out", details={"error": "timeout"}
+            )
+        except httpx.RequestError as e:
+            return HealthCheckResult(
+                valid=False,
+                message=f"Failed to connect to Stripe API: {e}",
+                details={"error": str(e)},
+            )
+
+
+class TelegramHealthChecker:
+    """Health checker for Telegram Bot tokens."""
+
+    TIMEOUT = 10.0
+
+    def check(self, bot_token: str) -> HealthCheckResult:
+        """Validate Telegram bot token via the getMe endpoint."""
+        url = f"https://api.telegram.org/bot{bot_token}/getMe"
+        try:
+            with httpx.Client(timeout=self.TIMEOUT) as client:
+                response = client.get(url)
+                if response.status_code == 200:
+                    data = response.json()
+                    if data.get("ok"):
+                        username = data.get("result", {}).get("username", "unknown")
+                        return HealthCheckResult(
+                            valid=True,
+                            message=f"Telegram bot token valid (bot: @{username})",
+                            details={"username": username},
+                        )
+                    return HealthCheckResult(
+                        valid=False,
+                        message="Telegram API returned ok=false",
+                        details={"response": data},
+                    )
+                elif response.status_code == 401:
+                    return HealthCheckResult(
+                        valid=False,
+                        message="Telegram bot token is invalid",
+                        details={"status_code": 401},
+                    )
+                else:
+                    return HealthCheckResult(
+                        valid=False,
+                        message=f"Telegram API returned status {response.status_code}",
+                        details={"status_code": response.status_code},
+                    )
+        except httpx.TimeoutException:
+            return HealthCheckResult(
+                valid=False,
+                message="Telegram API request timed out",
+                details={"error": "timeout"},
+            )
+        except httpx.RequestError as e:
+            return HealthCheckResult(
+                valid=False,
+                message=f"Failed to connect to Telegram API: {e}",
+                details={"error": str(e)},
+            )
+
+
 # Registry of health checkers
 HEALTH_CHECKERS: dict[str, CredentialHealthChecker] = {
-    "discord": DiscordHealthChecker(),
-    "hubspot": HubSpotHealthChecker(),
-    "brave_search": BraveSearchHealthChecker(),
-    "google": GoogleHealthChecker(),
-    "slack": SlackHealthChecker(),
-    "google_search": GoogleSearchHealthChecker(),
-    "google_maps": GoogleMapsHealthChecker(),
     "anthropic": AnthropicHealthChecker(),
+    "apollo": ApolloHealthChecker(),
+    "brave_search": BraveSearchHealthChecker(),
+    "brevo": BrevoHealthChecker(),
+    "calcom": CalcomHealthChecker(),
+    "discord": DiscordHealthChecker(),
+    "exa_search": ExaSearchHealthChecker(),
+    "finlight": FinlightHealthChecker(),
     "github": GitHubHealthChecker(),
+    "google": GoogleHealthChecker(),
+    "google_docs": GoogleDocsHealthChecker(),
+    "google_maps": GoogleMapsHealthChecker(),
+    "google_search": GoogleSearchHealthChecker(),
+    "hubspot": HubSpotHealthChecker(),
+    "intercom": IntercomHealthChecker(),
+    "newsdata": NewsdataHealthChecker(),
     "resend": ResendHealthChecker(),
+    "serpapi": SerpApiHealthChecker(),
+    "slack": SlackHealthChecker(),
+    "stripe": StripeHealthChecker(),
+    "telegram": TelegramHealthChecker(),
 }
 
 
