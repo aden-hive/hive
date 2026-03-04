@@ -199,21 +199,14 @@ const MessageBubble = memo(function MessageBubble({ msg, queenMode }: { msg: Cha
               isQueen ? "bg-primary/15 text-primary" : "bg-muted text-muted-foreground"
             }`}
           >
-            {isQueen ? "Queen" : "Worker"}
+            {isQueen
+              ? queenMode === "running"
+                ? "Queen (running mode)"
+                : queenMode === "staging"
+                  ? "Queen (staging mode)"
+                  : "Queen (building mode)"
+              : "Worker"}
           </span>
-          {isQueen && queenMode && (
-            <span
-              className={`text-[10px] font-medium px-1.5 py-0.5 rounded-md ${
-                queenMode === "running"
-                  ? "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400"
-                  : queenMode === "staging"
-                    ? "bg-blue-500/15 text-blue-600 dark:text-blue-400"
-                    : "bg-amber-500/15 text-amber-600 dark:text-amber-400"
-              }`}
-            >
-              {queenMode === "running" ? "Running" : queenMode === "staging" ? "Staging" : "Building"}
-            </span>
-          )}
         </div>
         <div
           className={`text-sm leading-relaxed rounded-2xl rounded-tl-md px-4 py-3 ${
