@@ -418,6 +418,20 @@ class TestHashlineEditAtomicWrite:
         assert "Error" in result
         assert "unknown op" in result
 
+    def test_crlf_replace_op_no_double_conversion(self, tools, tmp_path):
+        """Replace op on a CRLF file should not corrupt \\r\\n in new_content."""
+        hashline_edit = tools[0]["hashline_edit"]
+        f = tmp_path / "f.txt"
+        f.write_bytes(b"aaa\r\nbbb\r\nccc\r\n")
+
+        edits = json.dumps([{"op": "replace", "old_content": "aaa", "new_content": "x\r\ny"}])
+        result = hashline_edit(path="f.txt", edits=edits)
+        assert "Error" not in result
+
+        raw = f.read_bytes()
+        assert b"\r\r\n" not in raw
+        assert raw == b"x\r\ny\r\nbbb\r\nccc\r\n"
+
 
 class TestHashlineEditResponseFormat:
     def test_shows_updated_content(self, tools, tmp_path):

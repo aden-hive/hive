@@ -8,6 +8,14 @@ read it, the hash won't match and the edit is cleanly rejected.
 import re
 import zlib
 
+# ── Constants ─────────────────────────────────────────────────────────────
+
+# Files beyond this size are skipped/rejected in hashline mode because
+# hashline anchors are not practical on files this large (minified
+# bundles, logs, data dumps). Shared by view_file, grep_search, and
+# hashline_edit.
+HASHLINE_MAX_FILE_BYTES = 10 * 1024 * 1024  # 10 MB
+
 # ── Hash computation ──────────────────────────────────────────────────────
 
 

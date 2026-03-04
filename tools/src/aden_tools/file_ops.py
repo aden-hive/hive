@@ -30,6 +30,7 @@ from pathlib import Path
 from fastmcp import FastMCP
 
 from aden_tools.hashline import (
+    HASHLINE_MAX_FILE_BYTES,
     compute_line_hash,
     format_hashlines,
     maybe_strip,
@@ -663,7 +664,7 @@ def register_file_tools(
             return f"Error: Failed to read file: {e}"
 
         content_bytes = len(content.encode(encoding))
-        if content_bytes > 10 * 1024 * 1024:
+        if content_bytes > HASHLINE_MAX_FILE_BYTES:
             return f"Error: File too large for hashline_edit ({content_bytes} bytes, max 10MB)"
 
         trailing_newline = content.endswith("\n")
@@ -919,9 +920,9 @@ def register_file_tools(
         if trailing_newline and joined and not joined.endswith("\n"):
             joined += "\n"
 
-        # 8. Restore original EOL style
+        # 8. Restore original EOL style (only convert bare \n, not existing \r\n)
         if eol == "\r\n":
-            joined = joined.replace("\n", "\r\n")
+            joined = re.sub(r"(?<!\r)\n", "\r\n", joined)
 
         # 9. Snapshot + atomic write
         try:

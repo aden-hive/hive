@@ -1205,6 +1205,22 @@ class TestEncodingParam:
         assert result["success"] is True
         assert f.read_bytes() == b"aaa\r\nBBB\r\nccc\r\n"
 
+    def test_crlf_replace_op_no_double_conversion(
+        self, hashline_edit_fn, mock_workspace, mock_secure_path, tmp_path
+    ):
+        """Replace op on a CRLF file should not corrupt \\r\\n in new_content."""
+        f = tmp_path / "test.txt"
+        f.write_bytes(b"aaa\r\nbbb\r\nccc\r\n")
+
+        edits = json.dumps([{"op": "replace", "old_content": "aaa", "new_content": "x\r\ny"}])
+        result = hashline_edit_fn(path="test.txt", edits=edits, **mock_workspace)
+
+        assert result["success"] is True
+        raw = f.read_bytes()
+        # Should have \r\n everywhere, no \r\r\n corruption
+        assert b"\r\r\n" not in raw
+        assert raw == b"x\r\ny\r\nbbb\r\nccc\r\n"
+
 
 class TestAllowMultiple:
     """Tests for the replace op allow_multiple flag."""

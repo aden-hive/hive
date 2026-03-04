@@ -3,7 +3,7 @@ import re
 
 from mcp.server.fastmcp import FastMCP
 
-from aden_tools.hashline import compute_line_hash
+from aden_tools.hashline import HASHLINE_MAX_FILE_BYTES, compute_line_hash
 
 from ..security import WORKSPACES_DIR, get_secure_path
 
@@ -53,6 +53,7 @@ def register_tools(mcp: FastMCP) -> None:
             session_root = os.path.join(WORKSPACES_DIR, workspace_id, agent_id, session_id)
 
             matches = []
+            skipped_large_files = []
 
             if os.path.isfile(secure_path):
                 files = [secure_path]
@@ -78,7 +79,8 @@ def register_tools(mcp: FastMCP) -> None:
                         # separators like \u2028, \x85).
                         # Skip files > 10MB to avoid excessive memory use.
                         file_size = os.path.getsize(file_path)
-                        if file_size > 10 * 1024 * 1024:
+                        if file_size > HASHLINE_MAX_FILE_BYTES:
+                            skipped_large_files.append(display_path)
                             continue
                         with open(file_path, encoding="utf-8") as f:
                             content = f.read()
@@ -110,7 +112,7 @@ def register_tools(mcp: FastMCP) -> None:
                     # Skips files that cannot be decoded or lack permissions
                     continue
 
-            return {
+            result = {
                 "success": True,
                 "pattern": pattern,
                 "path": path,
@@ -118,6 +120,9 @@ def register_tools(mcp: FastMCP) -> None:
                 "matches": matches,
                 "total_matches": len(matches),
             }
+            if skipped_large_files:
+                result["skipped_large_files"] = skipped_large_files
+            return result
 
         # 2. Specific Exception Handling (Issue #55 Requirements)
         except FileNotFoundError:

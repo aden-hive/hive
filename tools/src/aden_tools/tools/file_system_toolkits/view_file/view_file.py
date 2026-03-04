@@ -2,7 +2,7 @@ import os
 
 from mcp.server.fastmcp import FastMCP
 
-from aden_tools.hashline import format_hashlines
+from aden_tools.hashline import HASHLINE_MAX_FILE_BYTES, format_hashlines
 
 from ..security import get_secure_path
 
@@ -20,7 +20,7 @@ def register_tools(mcp: FastMCP) -> None:
         agent_id: str,
         session_id: str,
         encoding: str = "utf-8",
-        max_size: int = 10 * 1024 * 1024,
+        max_size: int = HASHLINE_MAX_FILE_BYTES,
         hashline: bool = False,
         offset: int = 1,
         limit: int = 0,

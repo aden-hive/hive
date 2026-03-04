@@ -1019,6 +1019,30 @@ class TestGrepSearchHashlineMode:
         assert result["total_matches"] == 1
         assert result["matches"][0]["line_content"] == "    hello world"
 
+    def test_hashline_skips_large_files_with_notice(
+        self, grep_search_fn, mock_workspace, mock_secure_path, tmp_path
+    ):
+        """hashline=True skips files > 10MB and reports them in the response."""
+        search_dir = tmp_path / "search_dir"
+        search_dir.mkdir()
+
+        small_file = search_dir / "small.txt"
+        small_file.write_text("hello world\n")
+
+        large_file = search_dir / "large.txt"
+        # Write just over 10MB
+        large_file.write_bytes(b"hello large\n" * (1024 * 1024))
+
+        result = grep_search_fn(
+            path="search_dir", pattern="hello", hashline=True, recursive=True, **mock_workspace
+        )
+
+        assert result["success"] is True
+        assert "skipped_large_files" in result
+        assert any("large.txt" in f for f in result["skipped_large_files"])
+        # Small file should still have matches
+        assert result["total_matches"] >= 1
+
 
 class TestHashlineCrossToolConsistency:
     """Cross-tool consistency tests for hashline workflows."""
