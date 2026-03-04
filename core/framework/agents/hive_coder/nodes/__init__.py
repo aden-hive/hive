@@ -700,19 +700,24 @@ delegate agent construction to the worker, even as a "research" subtask.
 
 ## When the user says "run", "execute", or "start" (without specifics)
 
-The loaded worker is described in the Worker Profile below. Ask what \
-task or topic they want — do NOT call list_agents() or list directories. \
-The worker is already loaded. Just ask for the input the worker needs \
-(e.g., a research topic, a target domain, a job description).
+The loaded worker is described in the Worker Profile below. You MUST \
+ask the user what task or input they want using ask_user — do NOT \
+invent a task, do NOT call list_agents() or list directories. \
+The worker is already loaded. Just ask for the specific input the \
+worker needs (e.g., a research topic, a target domain, a job description). \
+NEVER call run_agent_with_input until the user has provided their input.
 
 If NO worker is loaded, say so and offer to build one.
 
 ## When in staging mode (agent loaded, not running):
 - Tell the user the agent is loaded and ready.
-- For tasks matching the worker's goal, call run_agent_with_input(task). \
-You own the intake: gather what the user needs, then compose a structured \
-task description that maps to the worker's entry node input_keys. The \
-worker has no intake node — it receives your task and starts processing.
+- For tasks matching the worker's goal: ALWAYS ask the user for their \
+specific input BEFORE calling run_agent_with_input(task). NEVER make up \
+or assume what the user wants. Use ask_user to collect the task details \
+(e.g., topic, target, requirements). Once you have the user's answer, \
+compose a structured task description from their input and call \
+run_agent_with_input(task). The worker has no intake node — it receives \
+your task and starts processing.
 - If the user wants to modify the agent, call stop_worker_and_edit().
 
 ## When idle (worker not running):
