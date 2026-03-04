@@ -99,6 +99,7 @@ from .pinecone_tool import register_tools as register_pinecone
 from .pipedrive_tool import register_tools as register_pipedrive
 from .plaid_tool import register_tools as register_plaid
 from .port_scanner import register_tools as register_port_scanner
+from .privacy_anonymization_tool import register_tools as register_privacy_anonymization
 from .postgres_tool import register_tools as register_postgres
 from .powerbi_tool import register_tools as register_powerbi
 from .pushover_tool import register_tools as register_pushover
@@ -212,6 +213,7 @@ def _register_unverified(
     register_duckduckgo(mcp)
     register_yahoo_finance(mcp)
     register_youtube_transcript(mcp)
+    register_privacy_anonymization(mcp)
 
     # --- Credentials required ---
     register_airtable(mcp, credentials=credentials)
