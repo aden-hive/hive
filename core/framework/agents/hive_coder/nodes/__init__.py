@@ -63,6 +63,30 @@ _SHARED_TOOLS = [
     "run_agent_tests",
 ]
 
+# Queen mode-specific tool sets.
+# Building mode: full coding + agent construction tools.
+_QUEEN_BUILDING_TOOLS = _SHARED_TOOLS + [
+    "load_built_agent",
+    "list_credentials",
+]
+
+# Running mode: read-only coding + worker lifecycle tools.
+_QUEEN_RUNNING_TOOLS = [
+    # Read-only coding (for inspecting logs, files)
+    "read_file",
+    "list_directory",
+    "search_files",
+    "run_command",
+    # Worker lifecycle
+    "start_worker",
+    "stop_worker_and_edit",
+    "get_worker_status",
+    "inject_worker_message",
+    # Monitoring
+    "get_worker_health_summary",
+    "notify_operator",
+]
+
 
 # ---------------------------------------------------------------------------
 # Shared agent-building knowledge: core mandates, tool docs, meta-agent
@@ -542,30 +566,41 @@ start_agent("{name}")           # triggers default entry point
 
 _queen_tools_docs = """
 
-## Worker Lifecycle
-- start_worker(task) — Start the worker with a task description. The \
-worker runs autonomously until it finishes or asks the user a question.
-- stop_worker() — Cancel the worker's current execution.
-- get_worker_status() — Check if the worker is idle, running, or waiting \
-for user input. Returns execution details.
-- inject_worker_message(content) — Send a message to the running worker. \
-Use this to relay user instructions or concerns.
+## Operating Modes
 
-## Monitoring
-- get_worker_health_summary() — Read the latest health data from the judge.
-- notify_operator(ticket_id, analysis, urgency) — Alert the user about a \
-critical issue. Use sparingly.
+You operate in one of two modes. Your available tools change based on the mode. \
+The system notifies you when a mode change occurs.
 
-## Agent Loading
-- load_built_agent(agent_path) — Load a newly built agent as the worker in \
-this session. If a worker is already loaded, it is automatically unloaded \
-first. Call after building and validating an agent to make it available \
-immediately.
+### BUILDING mode (default)
+You have full coding tools for building and modifying agents:
+- File I/O: read_file, write_file, edit_file, list_directory, search_files, \
+run_command, undo_changes
+- Meta-agent: list_agent_tools, discover_mcp_tools, validate_agent_tools, \
+list_agents, list_agent_sessions, get_agent_session_state, get_agent_session_memory, \
+list_agent_checkpoints, get_agent_checkpoint, run_agent_tests
+- load_built_agent(agent_path) — Load the agent and switch to RUNNING mode
+- list_credentials(credential_id?) — List authorized credentials
 
-## Credentials
-- list_credentials(credential_id?) — List all authorized credentials in the \
-local store. Returns IDs, aliases, status, and identity metadata (never \
-secrets). Optionally filter by credential_id.
+When you finish building an agent, call load_built_agent(path) to switch to \
+RUNNING mode.
+
+### RUNNING mode (after loading an agent)
+You have worker lifecycle tools plus read-only access:
+- Read-only: read_file, list_directory, search_files, run_command
+- start_worker(task) — Start the worker with a task description
+- get_worker_status() — Check worker status (idle, running, waiting)
+- inject_worker_message(content) — Send a message to the running worker
+- get_worker_health_summary() — Read the latest health data
+- notify_operator(ticket_id, analysis, urgency) — Alert the user (use sparingly)
+- stop_worker_and_edit() — Stop the worker and switch back to BUILDING mode
+
+In RUNNING mode you do NOT have write tools (write_file, edit_file, etc.) \
+or agent construction tools. If you need to modify the agent, call \
+stop_worker_and_edit() first to switch back to BUILDING mode.
+
+### Mode transitions
+- load_built_agent(path) → switches to RUNNING mode
+- stop_worker_and_edit() → stops worker, switches to BUILDING mode
 """
 
 _queen_behavior = """
@@ -658,16 +693,17 @@ building something new.
 When the user asks to change, modify, or update the loaded worker \
 (e.g., "change the report node", "add a node", "delete node X"):
 
-1. Use the **Path** from the Worker Profile to locate the agent files.
-2. Read the relevant files (nodes/__init__.py, agent.py, etc.).
-3. Make the requested changes using edit_file / write_file.
-4. Run validation (default_agent.validate(), AgentRunner.load(), \
+1. Call stop_worker_and_edit() — this stops the worker and gives you \
+coding tools (switches to BUILDING mode).
+2. Use the **Path** from the Worker Profile to locate the agent files.
+3. Read the relevant files (nodes/__init__.py, agent.py, etc.).
+4. Make the requested changes using edit_file / write_file.
+5. Run validation (default_agent.validate(), AgentRunner.load(), \
 validate_agent_tools()).
-5. **Reload the modified worker**: call load_built_agent("{path}") \
-so the changes take effect immediately. If a worker is already loaded, \
-stop it first, then reload.
+6. **Reload the modified worker**: call load_built_agent("{path}") \
+so the changes take effect immediately (switches back to RUNNING mode).
 
-Do NOT skip step 5 — without reloading, the user will still be \
+Do NOT skip step 6 — without reloading, the user will still be \
 interacting with the old version.
 """
 
@@ -808,21 +844,7 @@ queen_node = NodeSpec(
         "User's intent is understood, coding tasks are completed correctly, "
         "and the worker is managed effectively when delegated to."
     ),
-    tools=_SHARED_TOOLS
-    + [
-        # Worker lifecycle
-        "start_worker",
-        "stop_worker",
-        "get_worker_status",
-        "inject_worker_message",
-        # Monitoring
-        "get_worker_health_summary",
-        "notify_operator",
-        # Agent loading
-        "load_built_agent",
-        # Credentials
-        "list_credentials",
-    ],
+    tools=sorted(set(_QUEEN_BUILDING_TOOLS + _QUEEN_RUNNING_TOOLS)),
     system_prompt=(
         "You are the Queen — the user's primary interface. You are a coding agent "
         "with the same capabilities as the Hive Coder worker, PLUS the ability to "
@@ -836,20 +858,7 @@ queen_node = NodeSpec(
     ),
 )
 
-ALL_QUEEN_TOOLS = _SHARED_TOOLS + [
-    # Worker lifecycle
-    "start_worker",
-    "stop_worker",
-    "get_worker_status",
-    "inject_worker_message",
-    # Monitoring
-    "get_worker_health_summary",
-    "notify_operator",
-    # Agent loading
-    "load_built_agent",
-    # Credentials
-    "list_credentials",
-]
+ALL_QUEEN_TOOLS = sorted(set(_QUEEN_BUILDING_TOOLS + _QUEEN_RUNNING_TOOLS))
 
 __all__ = [
     "coder_node",
@@ -857,4 +866,6 @@ __all__ = [
     "queen_node",
     "ALL_QUEEN_TRIAGE_TOOLS",
     "ALL_QUEEN_TOOLS",
+    "_QUEEN_BUILDING_TOOLS",
+    "_QUEEN_RUNNING_TOOLS",
 ]

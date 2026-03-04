@@ -138,6 +138,7 @@ class GraphExecutor:
         accounts_prompt: str = "",
         accounts_data: list[dict] | None = None,
         tool_provider_map: dict[str, str] | None = None,
+        dynamic_tools_provider: Callable | None = None,
     ):
         """
         Initialize the executor.
@@ -160,6 +161,7 @@ class GraphExecutor:
             accounts_prompt: Connected accounts block for system prompt injection
             accounts_data: Raw account data for per-node prompt generation
             tool_provider_map: Tool name to provider name mapping for account routing
+            dynamic_tools_provider: Optional callback returning current tool list (for mode switching)
         """
         self.runtime = runtime
         self.llm = llm
@@ -178,6 +180,7 @@ class GraphExecutor:
         self.accounts_prompt = accounts_prompt
         self.accounts_data = accounts_data
         self.tool_provider_map = tool_provider_map
+        self.dynamic_tools_provider = dynamic_tools_provider
 
         # Initialize output cleaner
         self.cleansing_config = cleansing_config or CleansingConfig()
@@ -1651,6 +1654,7 @@ class GraphExecutor:
             node_registry=node_registry or {},
             all_tools=list(self.tools),  # Full catalog for subagent tool resolution
             shared_node_registry=self.node_registry,  # For subagent escalation routing
+            dynamic_tools_provider=self.dynamic_tools_provider,
         )
 
     VALID_NODE_TYPES = {

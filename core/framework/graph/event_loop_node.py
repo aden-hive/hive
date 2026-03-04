@@ -548,6 +548,17 @@ class EventLoopNode(NodeProtocol):
             # 6b. Drain injection queue
             await self._drain_injection_queue(conversation)
 
+            # 6b2. Dynamic tool refresh (mode switching)
+            if ctx.dynamic_tools_provider is not None:
+                _synthetic_names = {
+                    "set_output", "ask_user",
+                    "delegate_to_sub_agent", "report_to_parent",
+                }
+                synthetic = [t for t in tools if t.name in _synthetic_names]
+                tools.clear()
+                tools.extend(ctx.dynamic_tools_provider())
+                tools.extend(synthetic)
+
             # 6c. Publish iteration event
             await self._publish_iteration(stream_id, node_id, iteration, execution_id)
 

@@ -423,16 +423,20 @@ class SessionManager:
             except Exception:
                 logger.warning("Queen: MCP config failed to load", exc_info=True)
 
+        # Mode state for building/running mode switching
+        from framework.tools.queen_lifecycle_tools import QueenModeState, register_queen_lifecycle_tools
+
+        mode_state = QueenModeState(mode="building")
+
         # Always register lifecycle tools — they check session.worker_runtime
         # at call time, so they work even if no worker is loaded yet.
-        from framework.tools.queen_lifecycle_tools import register_queen_lifecycle_tools
-
         register_queen_lifecycle_tools(
             queen_registry,
             session=session,
             session_id=session.id,
             session_manager=self,
             manager_session_id=session.id,
+            mode_state=mode_state,
         )
 
         # Monitoring tools need concrete worker paths — only register when present
@@ -449,6 +453,14 @@ class SessionManager:
 
         queen_tools = list(queen_registry.get_tools().values())
         queen_tool_executor = queen_registry.get_executor()
+
+        # Partition tools into mode-specific sets
+        from framework.agents.hive_coder.nodes import _QUEEN_BUILDING_TOOLS, _QUEEN_RUNNING_TOOLS
+
+        building_names = set(_QUEEN_BUILDING_TOOLS)
+        running_names = set(_QUEEN_RUNNING_TOOLS)
+        mode_state.building_tools = [t for t in queen_tools if t.name in building_names]
+        mode_state.running_tools = [t for t in queen_tools if t.name in running_names]
 
         # Build queen graph with adjusted prompt + tools
         _orig_node = _queen_graph.nodes[0]
@@ -491,12 +503,23 @@ class SessionManager:
                     storage_path=queen_dir,
                     loop_config=queen_graph.loop_config,
                     execution_id=session.id,
+                    dynamic_tools_provider=mode_state.get_current_tools,
                 )
                 session.queen_executor = executor
+
+                # Wire inject_notification so mode switches notify the queen LLM
+                async def _inject_mode_notification(content: str) -> None:
+                    node = executor.node_registry.get("queen")
+                    if node is not None and hasattr(node, "inject_event"):
+                        await node.inject_event(content)
+
+                mode_state.inject_notification = _inject_mode_notification
+
                 logger.info(
-                    "Queen starting with %d tools: %s",
-                    len(queen_tools),
-                    [t.name for t in queen_tools],
+                    "Queen starting in %s mode with %d tools: %s",
+                    mode_state.mode,
+                    len(mode_state.get_current_tools()),
+                    [t.name for t in mode_state.get_current_tools()],
                 )
                 result = await executor.execute(
                     graph=queen_graph,

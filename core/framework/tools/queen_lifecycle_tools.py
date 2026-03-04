@@ -36,7 +36,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -64,6 +64,51 @@ class WorkerSessionAdapter:
     worker_runtime: Any  # AgentRuntime
     event_bus: Any  # EventBus
     worker_path: Path | None = None
+
+
+@dataclass
+class QueenModeState:
+    """Mutable state container for queen building/running mode.
+
+    Shared between the dynamic_tools_provider callback and tool handlers
+    (load_built_agent, stop_worker_and_edit) that trigger mode transitions.
+    """
+
+    mode: str = "building"  # "building" or "running"
+    building_tools: list = field(default_factory=list)  # list[Tool]
+    running_tools: list = field(default_factory=list)  # list[Tool]
+    inject_notification: Any = None  # async (str) -> None
+
+    def get_current_tools(self) -> list:
+        """Return tools for the current mode."""
+        if self.mode == "running":
+            return list(self.running_tools)
+        return list(self.building_tools)
+
+    async def switch_to_running(self) -> None:
+        """Switch to running mode and notify the queen."""
+        self.mode = "running"
+        tool_names = [t.name for t in self.running_tools]
+        logger.info("Queen mode → running (tools: %s)", tool_names)
+        if self.inject_notification:
+            await self.inject_notification(
+                "[MODE CHANGE] Switched to RUNNING mode. "
+                "Building tools removed. You now have worker lifecycle tools: "
+                + ", ".join(tool_names)
+                + "."
+            )
+
+    async def switch_to_building(self) -> None:
+        """Switch to building mode and notify the queen."""
+        self.mode = "building"
+        tool_names = [t.name for t in self.building_tools]
+        logger.info("Queen mode → building (tools: %s)", tool_names)
+        if self.inject_notification:
+            await self.inject_notification(
+                "[MODE CHANGE] Switched to BUILDING mode. "
+                "Lifecycle tools removed. Full coding tools restored. "
+                "Call load_built_agent(path) when ready to run."
+            )
 
 
 def build_worker_profile(runtime: AgentRuntime, agent_path: Path | str | None = None) -> str:
@@ -120,6 +165,8 @@ def register_queen_lifecycle_tools(
     # Server context — enables load_built_agent tool
     session_manager: Any = None,
     manager_session_id: str | None = None,
+    # Mode switching
+    mode_state: QueenModeState | None = None,
 ) -> int:
     """Register queen lifecycle tools.
 
@@ -136,6 +183,9 @@ def register_queen_lifecycle_tools(
             for ``load_built_agent`` to hot-load a worker.
         manager_session_id: (Server only) The session's ID in the manager,
             used with ``session_manager.load_worker()``.
+        mode_state: (Optional) Mutable mode state for building/running
+            mode switching. When provided, load_built_agent switches to
+            running mode and stop_worker_and_edit switches to building mode.
 
     Returns the number of tools registered.
     """
@@ -341,6 +391,39 @@ def register_queen_lifecycle_tools(
         parameters={"type": "object", "properties": {}},
     )
     registry.register("stop_worker", _stop_tool, lambda inputs: stop_worker())
+    tools_registered += 1
+
+    # --- stop_worker_and_edit -------------------------------------------------
+
+    async def stop_worker_and_edit() -> str:
+        """Stop the worker and switch to building mode for editing the agent."""
+        stop_result = await stop_worker()
+
+        # Switch to building mode
+        if mode_state is not None:
+            await mode_state.switch_to_building()
+
+        result = json.loads(stop_result)
+        result["mode"] = "building"
+        result["message"] = (
+            "Worker stopped. You are now in building mode. "
+            "Use your coding tools to modify the agent, then call "
+            "load_built_agent(path) when ready to run again."
+        )
+        return json.dumps(result)
+
+    _stop_edit_tool = Tool(
+        name="stop_worker_and_edit",
+        description=(
+            "Stop the running worker and switch to building mode. "
+            "Use this when you need to modify the agent's code, nodes, or configuration. "
+            "After editing, call load_built_agent(path) to reload and run."
+        ),
+        parameters={"type": "object", "properties": {}},
+    )
+    registry.register(
+        "stop_worker_and_edit", _stop_edit_tool, lambda inputs: stop_worker_and_edit()
+    )
     tools_registered += 1
 
     # --- get_worker_status ----------------------------------------------------
@@ -818,9 +901,15 @@ def register_queen_lifecycle_tools(
                     str(resolved_path),
                 )
                 info = updated_session.worker_info
+
+                # Switch to running mode after successful load
+                if mode_state is not None:
+                    await mode_state.switch_to_running()
+
                 return json.dumps(
                     {
                         "status": "loaded",
+                        "mode": "running",
                         "worker_id": updated_session.worker_id,
                         "worker_name": info.name if info else updated_session.worker_id,
                         "goal": info.goal_name if info else "",
