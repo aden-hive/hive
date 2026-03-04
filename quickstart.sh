@@ -1059,72 +1059,130 @@ esac
 
 # For API-key providers: prompt for key (allow replacement if already set)
 if [ -z "$SUBSCRIPTION_MODE" ] && [ -n "$SELECTED_ENV_VAR" ]; then
-    CURRENT_KEY="${!SELECTED_ENV_VAR}"
-    if [ -n "$CURRENT_KEY" ]; then
-        # Key exists — offer to keep or replace
-        MASKED_KEY="${CURRENT_KEY:0:4}...${CURRENT_KEY: -4}"
-        echo ""
-        echo -e "  ${GREEN}⬢${NC} Current key: ${DIM}$MASKED_KEY${NC}"
-        read -r -p "  Press Enter to keep, or paste a new key to replace: " API_KEY
-    else
-        # No key — prompt for one
-        echo ""
-        echo -e "Get your API key from: ${CYAN}$SIGNUP_URL${NC}"
-        echo ""
-        read -r -p "Paste your $PROVIDER_NAME API key (or press Enter to skip): " API_KEY
-    fi
+    while true; do
+        CURRENT_KEY="${!SELECTED_ENV_VAR}"
+        if [ -n "$CURRENT_KEY" ]; then
+            # Key exists — offer to keep or replace
+            MASKED_KEY="${CURRENT_KEY:0:4}...${CURRENT_KEY: -4}"
+            echo ""
+            echo -e "  ${GREEN}⬢${NC} Current key: ${DIM}$MASKED_KEY${NC}"
+            read -r -p "  Press Enter to keep, or paste a new key to replace: " API_KEY
+        else
+            # No key — prompt for one
+            echo ""
+            echo -e "Get your API key from: ${CYAN}$SIGNUP_URL${NC}"
+            echo ""
+            read -r -p "Paste your $PROVIDER_NAME API key (or press Enter to skip): " API_KEY
+        fi
 
-    if [ -n "$API_KEY" ]; then
-        # Remove old export line(s) for this env var from shell rc, then append new
-        sed -i.bak "/^export ${SELECTED_ENV_VAR}=/d" "$SHELL_RC_FILE" && rm -f "${SHELL_RC_FILE}.bak"
-        echo "" >> "$SHELL_RC_FILE"
-        echo "# Hive Agent Framework - $PROVIDER_NAME API key" >> "$SHELL_RC_FILE"
-        echo "export $SELECTED_ENV_VAR=\"$API_KEY\"" >> "$SHELL_RC_FILE"
-        export "$SELECTED_ENV_VAR=$API_KEY"
-        echo ""
-        echo -e "${GREEN}⬢${NC} API key saved to $SHELL_RC_FILE"
-    elif [ -z "$CURRENT_KEY" ]; then
-        # No existing key and user skipped — abort provider
-        echo ""
-        echo -e "${YELLOW}Skipped.${NC} Add your API key to $SHELL_RC_FILE when ready."
-        SELECTED_ENV_VAR=""
-        SELECTED_PROVIDER_ID=""
-    fi
-    # else: user pressed Enter with existing key — keep it, proceed normally
+        if [ -n "$API_KEY" ]; then
+            # Remove old export line(s) for this env var from shell rc, then append new
+            sed -i.bak "/^export ${SELECTED_ENV_VAR}=/d" "$SHELL_RC_FILE" && rm -f "${SHELL_RC_FILE}.bak"
+            echo "" >> "$SHELL_RC_FILE"
+            echo "# Hive Agent Framework - $PROVIDER_NAME API key" >> "$SHELL_RC_FILE"
+            echo "export $SELECTED_ENV_VAR=\"$API_KEY\"" >> "$SHELL_RC_FILE"
+            export "$SELECTED_ENV_VAR=$API_KEY"
+            echo ""
+            echo -e "${GREEN}⬢${NC} API key saved to $SHELL_RC_FILE"
+            # Health check the new key
+            echo -n "  Verifying API key... "
+            HC_RESULT=$(uv run python "$SCRIPT_DIR/scripts/check_llm_key.py" "$SELECTED_PROVIDER_ID" "$API_KEY" 2>/dev/null) || true
+            HC_VALID=$(echo "$HC_RESULT" | $PYTHON_CMD -c "import json,sys; print(json.loads(sys.stdin.read()).get('valid',''))" 2>/dev/null) || true
+            HC_MSG=$(echo "$HC_RESULT" | $PYTHON_CMD -c "import json,sys; print(json.loads(sys.stdin.read()).get('message',''))" 2>/dev/null) || true
+            if [ "$HC_VALID" = "True" ]; then
+                echo -e "${GREEN}ok${NC}"
+                break
+            elif [ "$HC_VALID" = "False" ]; then
+                echo -e "${RED}failed${NC}"
+                echo -e "  ${YELLOW}⚠ $HC_MSG${NC}"
+                # Undo the save so the user can retry cleanly
+                sed -i.bak "/^export ${SELECTED_ENV_VAR}=/d" "$SHELL_RC_FILE" && rm -f "${SHELL_RC_FILE}.bak"
+                # Remove the comment line we just added
+                sed -i.bak "/^# Hive Agent Framework - $PROVIDER_NAME API key$/d" "$SHELL_RC_FILE" && rm -f "${SHELL_RC_FILE}.bak"
+                unset "$SELECTED_ENV_VAR"
+                echo ""
+                read -r -p "  Press Enter to try again: " _
+                # Loop back to key prompt
+            else
+                echo -e "${YELLOW}--${NC}"
+                echo -e "  ${DIM}Could not verify key (network issue). The key has been saved.${NC}"
+                break
+            fi
+        elif [ -z "$CURRENT_KEY" ]; then
+            # No existing key and user skipped — abort provider
+            echo ""
+            echo -e "${YELLOW}Skipped.${NC} Add your API key to $SHELL_RC_FILE when ready."
+            SELECTED_ENV_VAR=""
+            SELECTED_PROVIDER_ID=""
+            break
+        else
+            # User pressed Enter with existing key — keep it, proceed normally
+            break
+        fi
+    done
 fi
 
 # For ZAI subscription: prompt for API key (allow replacement if already set)
 if [ "$SUBSCRIPTION_MODE" = "zai_code" ]; then
-    if [ "$ZAI_CRED_DETECTED" = true ]; then
-        # Key exists — offer to keep or replace
-        MASKED_KEY="${ZAI_API_KEY:0:4}...${ZAI_API_KEY: -4}"
-        echo ""
-        echo -e "  ${GREEN}⬢${NC} Current ZAI key: ${DIM}$MASKED_KEY${NC}"
-        read -r -p "  Press Enter to keep, or paste a new key to replace: " API_KEY
-    else
-        # No key — prompt for one
-        echo ""
-        read -r -p "Paste your ZAI API key (or press Enter to skip): " API_KEY
-    fi
+    while true; do
+        if [ "$ZAI_CRED_DETECTED" = true ] && [ -n "$ZAI_API_KEY" ]; then
+            # Key exists — offer to keep or replace
+            MASKED_KEY="${ZAI_API_KEY:0:4}...${ZAI_API_KEY: -4}"
+            echo ""
+            echo -e "  ${GREEN}⬢${NC} Current ZAI key: ${DIM}$MASKED_KEY${NC}"
+            read -r -p "  Press Enter to keep, or paste a new key to replace: " API_KEY
+        else
+            # No key — prompt for one
+            echo ""
+            read -r -p "Paste your ZAI API key (or press Enter to skip): " API_KEY
+        fi
 
-    if [ -n "$API_KEY" ]; then
-        sed -i.bak "/^export ZAI_API_KEY=/d" "$SHELL_RC_FILE" && rm -f "${SHELL_RC_FILE}.bak"
-        echo "" >> "$SHELL_RC_FILE"
-        echo "# Hive Agent Framework - ZAI Code subscription API key" >> "$SHELL_RC_FILE"
-        echo "export ZAI_API_KEY=\"$API_KEY\"" >> "$SHELL_RC_FILE"
-        export ZAI_API_KEY="$API_KEY"
-        echo ""
-        echo -e "${GREEN}⬢${NC} ZAI API key saved to $SHELL_RC_FILE"
-    elif [ "$ZAI_CRED_DETECTED" = false ]; then
-        # No existing key and user skipped — abort provider
-        echo ""
-        echo -e "${YELLOW}Skipped.${NC} Add your ZAI API key to $SHELL_RC_FILE when ready:"
-        echo -e "  ${CYAN}echo 'export ZAI_API_KEY=\"your-key\"' >> $SHELL_RC_FILE${NC}"
-        SELECTED_ENV_VAR=""
-        SELECTED_PROVIDER_ID=""
-        SUBSCRIPTION_MODE=""
-    fi
-    # else: user pressed Enter with existing key — keep it, proceed normally
+        if [ -n "$API_KEY" ]; then
+            sed -i.bak "/^export ZAI_API_KEY=/d" "$SHELL_RC_FILE" && rm -f "${SHELL_RC_FILE}.bak"
+            echo "" >> "$SHELL_RC_FILE"
+            echo "# Hive Agent Framework - ZAI Code subscription API key" >> "$SHELL_RC_FILE"
+            echo "export ZAI_API_KEY=\"$API_KEY\"" >> "$SHELL_RC_FILE"
+            export ZAI_API_KEY="$API_KEY"
+            echo ""
+            echo -e "${GREEN}⬢${NC} ZAI API key saved to $SHELL_RC_FILE"
+            # Health check the new key
+            echo -n "  Verifying ZAI API key... "
+            HC_RESULT=$(uv run python "$SCRIPT_DIR/scripts/check_llm_key.py" "zai" "$API_KEY" "https://api.z.ai/api/coding/paas/v4" 2>/dev/null) || true
+            HC_VALID=$(echo "$HC_RESULT" | $PYTHON_CMD -c "import json,sys; print(json.loads(sys.stdin.read()).get('valid',''))" 2>/dev/null) || true
+            HC_MSG=$(echo "$HC_RESULT" | $PYTHON_CMD -c "import json,sys; print(json.loads(sys.stdin.read()).get('message',''))" 2>/dev/null) || true
+            if [ "$HC_VALID" = "True" ]; then
+                echo -e "${GREEN}ok${NC}"
+                break
+            elif [ "$HC_VALID" = "False" ]; then
+                echo -e "${RED}failed${NC}"
+                echo -e "  ${YELLOW}⚠ $HC_MSG${NC}"
+                # Undo the save so the user can retry cleanly
+                sed -i.bak "/^export ZAI_API_KEY=/d" "$SHELL_RC_FILE" && rm -f "${SHELL_RC_FILE}.bak"
+                sed -i.bak "/^# Hive Agent Framework - ZAI Code subscription API key$/d" "$SHELL_RC_FILE" && rm -f "${SHELL_RC_FILE}.bak"
+                unset ZAI_API_KEY
+                ZAI_CRED_DETECTED=false
+                echo ""
+                read -r -p "  Press Enter to try again: " _
+                # Loop back to key prompt
+            else
+                echo -e "${YELLOW}--${NC}"
+                echo -e "  ${DIM}Could not verify key (network issue). The key has been saved.${NC}"
+                break
+            fi
+        elif [ "$ZAI_CRED_DETECTED" = false ] || [ -z "$ZAI_API_KEY" ]; then
+            # No existing key and user skipped — abort provider
+            echo ""
+            echo -e "${YELLOW}Skipped.${NC} Add your ZAI API key to $SHELL_RC_FILE when ready:"
+            echo -e "  ${CYAN}echo 'export ZAI_API_KEY=\"your-key\"' >> $SHELL_RC_FILE${NC}"
+            SELECTED_ENV_VAR=""
+            SELECTED_PROVIDER_ID=""
+            SUBSCRIPTION_MODE=""
+            break
+        else
+            # User pressed Enter with existing key — keep it, proceed normally
+            break
+        fi
+    done
 fi
 
 # Prompt for model if not already selected (manual provider path)
