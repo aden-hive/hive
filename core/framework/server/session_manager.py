@@ -52,10 +52,11 @@ class SessionManager:
     (blocking I/O) then started on the event loop.
     """
 
-    def __init__(self, model: str | None = None) -> None:
+    def __init__(self, model: str | None = None, credential_store=None) -> None:
         self._sessions: dict[str, Session] = {}
         self._loading: set[str] = set()
         self._model = model
+        self._credential_store = credential_store
         self._lock = asyncio.Lock()
 
     # ------------------------------------------------------------------
@@ -217,6 +218,7 @@ class SessionManager:
                     model=resolved_model,
                     interactive=False,
                     skip_credential_validation=True,
+                    credential_store=self._credential_store,
                 ),
             )
 
