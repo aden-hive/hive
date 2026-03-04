@@ -199,10 +199,11 @@ def _copy_to_clipboard(text: str) -> None:
     """Copy text to system clipboard using platform-native tools."""
     try:
         if sys.platform == "darwin":
-            subprocess.run(["pbcopy"], input=text.encode(), check=True, timeout=5)
+            subprocess.run(["pbcopy"], encoding="utf-8", input=text.encode(), check=True, timeout=5)
         elif sys.platform == "win32":
             subprocess.run(
                 ["clip.exe"],
+                encoding="utf-8",
                 input=text.encode("utf-16le"),
                 check=True,
                 timeout=5,
@@ -211,6 +212,7 @@ def _copy_to_clipboard(text: str) -> None:
             try:
                 subprocess.run(
                     ["xclip", "-selection", "clipboard"],
+                    encoding="utf-8",
                     input=text.encode(),
                     check=True,
                     timeout=5,
@@ -218,6 +220,7 @@ def _copy_to_clipboard(text: str) -> None:
             except (subprocess.SubprocessError, FileNotFoundError):
                 subprocess.run(
                     ["xsel", "--clipboard", "--input"],
+                    encoding="utf-8",
                     input=text.encode(),
                     check=True,
                     timeout=5,

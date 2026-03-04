@@ -40,6 +40,8 @@ class Session:
     runner: Any | None = None  # AgentRunner
     worker_runtime: Any | None = None  # AgentRuntime
     worker_info: Any | None = None  # AgentInfo
+    # Queen mode state (building/staging/running)
+    mode_state: Any = None  # QueenModeState
     # Judge (active when worker is loaded)
     judge_task: asyncio.Task | None = None
     escalation_sub: str | None = None
@@ -52,10 +54,11 @@ class SessionManager:
     (blocking I/O) then started on the event loop.
     """
 
-    def __init__(self, model: str | None = None) -> None:
+    def __init__(self, model: str | None = None, credential_store=None) -> None:
         self._sessions: dict[str, Session] = {}
         self._loading: set[str] = set()
         self._model = model
+        self._credential_store = credential_store
         self._lock = asyncio.Lock()
 
     # ------------------------------------------------------------------
@@ -217,6 +220,7 @@ class SessionManager:
                     model=resolved_model,
                     interactive=False,
                     skip_credential_validation=True,
+                    credential_store=self._credential_store,
                 ),
             )
 
@@ -423,16 +427,26 @@ class SessionManager:
             except Exception:
                 logger.warning("Queen: MCP config failed to load", exc_info=True)
 
+        # Mode state for building/running mode switching
+        from framework.tools.queen_lifecycle_tools import (
+            QueenModeState,
+            register_queen_lifecycle_tools,
+        )
+
+        # Start in staging when the caller provided an agent, building otherwise.
+        initial_mode = "staging" if worker_identity else "building"
+        mode_state = QueenModeState(mode=initial_mode, event_bus=session.event_bus)
+        session.mode_state = mode_state
+
         # Always register lifecycle tools — they check session.worker_runtime
         # at call time, so they work even if no worker is loaded yet.
-        from framework.tools.queen_lifecycle_tools import register_queen_lifecycle_tools
-
         register_queen_lifecycle_tools(
             queen_registry,
             session=session,
             session_id=session.id,
             session_manager=self,
             manager_session_id=session.id,
+            mode_state=mode_state,
         )
 
         # Monitoring tools need concrete worker paths — only register when present
@@ -449,6 +463,32 @@ class SessionManager:
 
         queen_tools = list(queen_registry.get_tools().values())
         queen_tool_executor = queen_registry.get_executor()
+
+        # Partition tools into mode-specific sets
+        from framework.agents.hive_coder.nodes import (
+            _QUEEN_BUILDING_TOOLS,
+            _QUEEN_RUNNING_TOOLS,
+            _QUEEN_STAGING_TOOLS,
+        )
+
+        building_names = set(_QUEEN_BUILDING_TOOLS)
+        staging_names = set(_QUEEN_STAGING_TOOLS)
+        running_names = set(_QUEEN_RUNNING_TOOLS)
+
+        registered_names = {t.name for t in queen_tools}
+        missing_building = building_names - registered_names
+        if missing_building:
+            logger.warning(
+                "Queen: %d/%d building tools NOT registered: %s",
+                len(missing_building),
+                len(building_names),
+                sorted(missing_building),
+            )
+        logger.info("Queen: registered tools: %s", sorted(registered_names))
+
+        mode_state.building_tools = [t for t in queen_tools if t.name in building_names]
+        mode_state.staging_tools = [t for t in queen_tools if t.name in staging_names]
+        mode_state.running_tools = [t for t in queen_tools if t.name in running_names]
 
         # Build queen graph with adjusted prompt + tools
         _orig_node = _queen_graph.nodes[0]
@@ -491,12 +531,37 @@ class SessionManager:
                     storage_path=queen_dir,
                     loop_config=queen_graph.loop_config,
                     execution_id=session.id,
+                    dynamic_tools_provider=mode_state.get_current_tools,
                 )
                 session.queen_executor = executor
+
+                # Wire inject_notification so mode switches notify the queen LLM
+                async def _inject_mode_notification(content: str) -> None:
+                    node = executor.node_registry.get("queen")
+                    if node is not None and hasattr(node, "inject_event"):
+                        await node.inject_event(content)
+
+                mode_state.inject_notification = _inject_mode_notification
+
+                # Auto-switch to staging when worker execution finishes naturally
+                from framework.runtime.event_bus import EventType as _ET
+
+                async def _on_worker_done(event):
+                    if event.stream_id == "queen":
+                        return
+                    if mode_state.mode == "running":
+                        await mode_state.switch_to_staging(source="auto")
+
+                session.event_bus.subscribe(
+                    event_types=[_ET.EXECUTION_COMPLETED, _ET.EXECUTION_FAILED],
+                    handler=_on_worker_done,
+                )
+
                 logger.info(
-                    "Queen starting with %d tools: %s",
-                    len(queen_tools),
-                    [t.name for t in queen_tools],
+                    "Queen starting in %s mode with %d tools: %s",
+                    mode_state.mode,
+                    len(mode_state.get_current_tools()),
+                    [t.name for t in mode_state.get_current_tools()],
                 )
                 result = await executor.execute(
                     graph=queen_graph,

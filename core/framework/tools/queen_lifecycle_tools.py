@@ -36,7 +36,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -64,6 +64,125 @@ class WorkerSessionAdapter:
     worker_runtime: Any  # AgentRuntime
     event_bus: Any  # EventBus
     worker_path: Path | None = None
+
+
+@dataclass
+class QueenModeState:
+    """Mutable state container for queen operating mode.
+
+    Three modes: building → staging → running.
+    Shared between the dynamic_tools_provider callback and tool handlers
+    that trigger mode transitions.
+    """
+
+    mode: str = "building"  # "building", "staging", or "running"
+    building_tools: list = field(default_factory=list)  # list[Tool]
+    staging_tools: list = field(default_factory=list)  # list[Tool]
+    running_tools: list = field(default_factory=list)  # list[Tool]
+    inject_notification: Any = None  # async (str) -> None
+    event_bus: Any = None  # EventBus — for emitting QUEEN_MODE_CHANGED events
+
+    def get_current_tools(self) -> list:
+        """Return tools for the current mode."""
+        if self.mode == "running":
+            return list(self.running_tools)
+        if self.mode == "staging":
+            return list(self.staging_tools)
+        return list(self.building_tools)
+
+    async def _emit_mode_event(self) -> None:
+        """Publish a QUEEN_MODE_CHANGED event so the frontend updates the tag."""
+        if self.event_bus is not None:
+            await self.event_bus.publish(
+                AgentEvent(
+                    type=EventType.QUEEN_MODE_CHANGED,
+                    stream_id="queen",
+                    data={"mode": self.mode},
+                )
+            )
+
+    async def switch_to_running(self, source: str = "tool") -> None:
+        """Switch to running mode and notify the queen.
+
+        Args:
+            source: Who triggered the switch — "tool" (queen LLM),
+                "frontend" (user clicked Run), or "auto" (system).
+        """
+        if self.mode == "running":
+            return
+        self.mode = "running"
+        tool_names = [t.name for t in self.running_tools]
+        logger.info("Queen mode → running (source=%s, tools: %s)", source, tool_names)
+        await self._emit_mode_event()
+        if self.inject_notification:
+            if source == "frontend":
+                msg = (
+                    "[MODE CHANGE] The user clicked Run in the UI. Switched to RUNNING mode. "
+                    "Worker is now executing. You have monitoring/lifecycle tools: "
+                    + ", ".join(tool_names)
+                    + "."
+                )
+            else:
+                msg = (
+                    "[MODE CHANGE] Switched to RUNNING mode. "
+                    "Worker is executing. You now have monitoring/lifecycle tools: "
+                    + ", ".join(tool_names)
+                    + "."
+                )
+            await self.inject_notification(msg)
+
+    async def switch_to_staging(self, source: str = "tool") -> None:
+        """Switch to staging mode and notify the queen.
+
+        Args:
+            source: Who triggered the switch — "tool", "frontend", or "auto".
+        """
+        if self.mode == "staging":
+            return
+        self.mode = "staging"
+        tool_names = [t.name for t in self.staging_tools]
+        logger.info("Queen mode → staging (source=%s, tools: %s)", source, tool_names)
+        await self._emit_mode_event()
+        if self.inject_notification:
+            if source == "frontend":
+                msg = (
+                    "[MODE CHANGE] The user stopped the worker from the UI. "
+                    "Switched to STAGING mode. Agent is still loaded. "
+                    "Available tools: " + ", ".join(tool_names) + "."
+                )
+            elif source == "auto":
+                msg = (
+                    "[MODE CHANGE] Worker execution completed. Switched to STAGING mode. "
+                    "Agent is still loaded. Call run_agent_with_input(task) to run again. "
+                    "Available tools: " + ", ".join(tool_names) + "."
+                )
+            else:
+                msg = (
+                    "[MODE CHANGE] Switched to STAGING mode. "
+                    "Agent loaded and ready. Call run_agent_with_input(task) to start, "
+                    "or stop_worker_and_edit() to go back to building. "
+                    "Available tools: " + ", ".join(tool_names) + "."
+                )
+            await self.inject_notification(msg)
+
+    async def switch_to_building(self, source: str = "tool") -> None:
+        """Switch to building mode and notify the queen.
+
+        Args:
+            source: Who triggered the switch — "tool", "frontend", or "auto".
+        """
+        if self.mode == "building":
+            return
+        self.mode = "building"
+        tool_names = [t.name for t in self.building_tools]
+        logger.info("Queen mode → building (source=%s, tools: %s)", source, tool_names)
+        await self._emit_mode_event()
+        if self.inject_notification:
+            await self.inject_notification(
+                "[MODE CHANGE] Switched to BUILDING mode. "
+                "Lifecycle tools removed. Full coding tools restored. "
+                "Call load_built_agent(path) when ready to stage."
+            )
 
 
 def build_worker_profile(runtime: AgentRuntime, agent_path: Path | str | None = None) -> str:
@@ -120,6 +239,8 @@ def register_queen_lifecycle_tools(
     # Server context — enables load_built_agent tool
     session_manager: Any = None,
     manager_session_id: str | None = None,
+    # Mode switching
+    mode_state: QueenModeState | None = None,
 ) -> int:
     """Register queen lifecycle tools.
 
@@ -136,6 +257,9 @@ def register_queen_lifecycle_tools(
             for ``load_built_agent`` to hot-load a worker.
         manager_session_id: (Server only) The session's ID in the manager,
             used with ``session_manager.load_worker()``.
+        mode_state: (Optional) Mutable mode state for building/running
+            mode switching. When provided, load_built_agent switches to
+            running mode and stop_worker_and_edit switches to building mode.
 
     Returns the number of tools registered.
     """
@@ -341,6 +465,75 @@ def register_queen_lifecycle_tools(
         parameters={"type": "object", "properties": {}},
     )
     registry.register("stop_worker", _stop_tool, lambda inputs: stop_worker())
+    tools_registered += 1
+
+    # --- stop_worker_and_edit -------------------------------------------------
+
+    async def stop_worker_and_edit() -> str:
+        """Stop the worker and switch to building mode for editing the agent."""
+        stop_result = await stop_worker()
+
+        # Switch to building mode
+        if mode_state is not None:
+            await mode_state.switch_to_building()
+
+        result = json.loads(stop_result)
+        result["mode"] = "building"
+        result["message"] = (
+            "Worker stopped. You are now in building mode. "
+            "Use your coding tools to modify the agent, then call "
+            "load_built_agent(path) to stage it again."
+        )
+        return json.dumps(result)
+
+    _stop_edit_tool = Tool(
+        name="stop_worker_and_edit",
+        description=(
+            "Stop the running worker and switch to building mode. "
+            "Use this when you need to modify the agent's code, nodes, or configuration. "
+            "After editing, call load_built_agent(path) to reload and run."
+        ),
+        parameters={"type": "object", "properties": {}},
+    )
+    registry.register(
+        "stop_worker_and_edit", _stop_edit_tool, lambda inputs: stop_worker_and_edit()
+    )
+    tools_registered += 1
+
+    # --- stop_worker (Running → Staging) -------------------------------------
+
+    async def stop_worker_to_staging() -> str:
+        """Stop the running worker and switch to staging mode.
+
+        After stopping, ask the user whether they want to:
+        1. Re-run the agent with new input → call run_agent_with_input(task)
+        2. Edit the agent code → call stop_worker_and_edit() to go to building mode
+        """
+        stop_result = await stop_worker()
+
+        # Switch to staging mode
+        if mode_state is not None:
+            await mode_state.switch_to_staging()
+
+        result = json.loads(stop_result)
+        result["mode"] = "staging"
+        result["message"] = (
+            "Worker stopped. You are now in staging mode. "
+            "Ask the user: would they like to re-run with new input, "
+            "or edit the agent code?"
+        )
+        return json.dumps(result)
+
+    _stop_worker_tool = Tool(
+        name="stop_worker",
+        description=(
+            "Stop the running worker and switch to staging mode. "
+            "After stopping, ask the user whether they want to re-run "
+            "with new input or edit the agent code."
+        ),
+        parameters={"type": "object", "properties": {}},
+    )
+    registry.register("stop_worker", _stop_worker_tool, lambda inputs: stop_worker_to_staging())
     tools_registered += 1
 
     # --- get_worker_status ----------------------------------------------------
@@ -648,7 +841,7 @@ def register_queen_lifecycle_tools(
             injectable = stream.get_injectable_nodes()
             if injectable:
                 target_node_id = injectable[0]["node_id"]
-                ok = await stream.inject_input(target_node_id, content)
+                ok = await stream.inject_input(target_node_id, content, is_client_input=True)
                 if ok:
                     return json.dumps(
                         {
@@ -818,11 +1011,24 @@ def register_queen_lifecycle_tools(
                     str(resolved_path),
                 )
                 info = updated_session.worker_info
+
+                # Switch to staging mode after successful load
+                if mode_state is not None:
+                    await mode_state.switch_to_staging()
+
+                worker_name = info.name if info else updated_session.worker_id
                 return json.dumps(
                     {
                         "status": "loaded",
+                        "mode": "staging",
+                        "message": (
+                            f"Successfully loaded '{worker_name}'. "
+                            "You are now in STAGING mode. "
+                            "Call run_agent_with_input(task) to start the worker, "
+                            "or stop_worker_and_edit() to go back to building."
+                        ),
                         "worker_id": updated_session.worker_id,
-                        "worker_name": info.name if info else updated_session.worker_id,
+                        "worker_name": worker_name,
                         "goal": info.goal_name if info else "",
                         "node_count": info.node_count if info else 0,
                     }
@@ -856,6 +1062,126 @@ def register_queen_lifecycle_tools(
             lambda inputs: load_built_agent(**inputs),
         )
         tools_registered += 1
+
+    # --- run_agent_with_input ------------------------------------------------
+
+    async def run_agent_with_input(task: str) -> str:
+        """Run the loaded worker agent with the given task input.
+
+        Performs preflight checks (credentials, MCP resync), triggers the
+        worker's default entry point, and switches to running mode.
+        """
+        runtime = _get_runtime()
+        if runtime is None:
+            return json.dumps({"error": "No worker loaded in this session."})
+
+        try:
+            # Pre-flight: validate credentials and resync MCP servers.
+            loop = asyncio.get_running_loop()
+
+            async def _preflight():
+                cred_error: CredentialError | None = None
+                try:
+                    await loop.run_in_executor(
+                        None,
+                        lambda: validate_credentials(
+                            runtime.graph.nodes,
+                            interactive=False,
+                            skip=False,
+                        ),
+                    )
+                except CredentialError as e:
+                    cred_error = e
+
+                runner = getattr(session, "runner", None)
+                if runner:
+                    try:
+                        await loop.run_in_executor(
+                            None,
+                            lambda: runner._tool_registry.resync_mcp_servers_if_needed(),
+                        )
+                    except Exception as e:
+                        logger.warning("MCP resync failed: %s", e)
+
+                if cred_error is not None:
+                    raise cred_error
+
+            try:
+                await asyncio.wait_for(_preflight(), timeout=_START_PREFLIGHT_TIMEOUT)
+            except TimeoutError:
+                logger.warning(
+                    "run_agent_with_input preflight timed out after %ds — proceeding",
+                    _START_PREFLIGHT_TIMEOUT,
+                )
+            except CredentialError:
+                raise  # handled below
+
+            # Resume timers in case they were paused by a previous stop
+            runtime.resume_timers()
+
+            # Get session state from any prior execution for memory continuity
+            session_state = runtime._get_primary_session_state("default") or {}
+
+            if session_id:
+                session_state["resume_session_id"] = session_id
+
+            exec_id = await runtime.trigger(
+                entry_point_id="default",
+                input_data={"user_request": task},
+                session_state=session_state,
+            )
+
+            # Switch to running mode
+            if mode_state is not None:
+                await mode_state.switch_to_running()
+
+            return json.dumps(
+                {
+                    "status": "started",
+                    "mode": "running",
+                    "execution_id": exec_id,
+                    "task": task,
+                }
+            )
+        except CredentialError as e:
+            error_payload = credential_errors_to_json(e)
+            error_payload["agent_path"] = str(getattr(session, "worker_path", "") or "")
+
+            bus = getattr(session, "event_bus", None)
+            if bus is not None:
+                await bus.publish(
+                    AgentEvent(
+                        type=EventType.CREDENTIALS_REQUIRED,
+                        stream_id="queen",
+                        data=error_payload,
+                    )
+                )
+            return json.dumps(error_payload)
+        except Exception as e:
+            return json.dumps({"error": f"Failed to start worker: {e}"})
+
+    _run_input_tool = Tool(
+        name="run_agent_with_input",
+        description=(
+            "Run the loaded worker agent with the given task. Validates credentials, "
+            "triggers the worker's default entry point, and switches to running mode. "
+            "Use this after loading an agent (staging mode) to start execution."
+        ),
+        parameters={
+            "type": "object",
+            "properties": {
+                "task": {
+                    "type": "string",
+                    "description": "The task or input for the worker agent to execute",
+                },
+            },
+            "required": ["task"],
+        },
+    )
+    registry.register(
+        "run_agent_with_input", _run_input_tool, lambda inputs: run_agent_with_input(**inputs)
+    )
+    tools_registered += 1
 
     logger.info("Registered %d queen lifecycle tools", tools_registered)
     return tools_registered

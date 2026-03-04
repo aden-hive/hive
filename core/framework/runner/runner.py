@@ -96,7 +96,7 @@ def _save_refreshed_credentials(token_data: dict) -> None:
         return
 
     try:
-        with open(CLAUDE_CREDENTIALS_FILE) as f:
+        with open(CLAUDE_CREDENTIALS_FILE, encoding="utf-8") as f:
             creds = json.load(f)
 
         oauth = creds.get("claudeAiOauth", {})
@@ -107,7 +107,7 @@ def _save_refreshed_credentials(token_data: dict) -> None:
             oauth["expiresAt"] = int((time.time() + token_data["expires_in"]) * 1000)
         creds["claudeAiOauth"] = oauth
 
-        with open(CLAUDE_CREDENTIALS_FILE, "w") as f:
+        with open(CLAUDE_CREDENTIALS_FILE, "w", encoding="utf-8") as f:
             json.dump(creds, f, indent=2)
         logger.debug("Claude Code credentials refreshed successfully")
     except (json.JSONDecodeError, OSError, KeyError) as exc:
@@ -132,7 +132,7 @@ def get_claude_code_token() -> str | None:
         return None
 
     try:
-        with open(CLAUDE_CREDENTIALS_FILE) as f:
+        with open(CLAUDE_CREDENTIALS_FILE, encoding="utf-8") as f:
             creds = json.load(f)
     except (json.JSONDecodeError, OSError):
         return None
@@ -212,7 +212,7 @@ def _read_codex_keychain() -> dict | None:
                 "-w",
             ],
             capture_output=True,
-            text=True,
+            encoding="utf-8",
             timeout=5,
         )
         if result.returncode != 0:
@@ -231,7 +231,7 @@ def _read_codex_auth_file() -> dict | None:
     if not CODEX_AUTH_FILE.exists():
         return None
     try:
-        with open(CODEX_AUTH_FILE) as f:
+        with open(CODEX_AUTH_FILE, encoding="utf-8") as f:
             return json.load(f)
     except (json.JSONDecodeError, OSError):
         return None
@@ -324,7 +324,7 @@ def _save_refreshed_codex_credentials(auth_data: dict, token_data: dict) -> None
 
         CODEX_AUTH_FILE.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
         fd = os.open(CODEX_AUTH_FILE, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-        with os.fdopen(fd, "w") as f:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
             json.dump(auth_data, f, indent=2)
         logger.debug("Codex credentials refreshed successfully")
     except (OSError, KeyError) as exc:
@@ -621,6 +621,7 @@ class AgentRunner:
         requires_account_selection: bool = False,
         configure_for_account: Callable | None = None,
         list_accounts: Callable | None = None,
+        credential_store: Any | None = None,
     ):
         """
         Initialize the runner (use AgentRunner.load() instead).
@@ -640,6 +641,7 @@ class AgentRunner:
             requires_account_selection: If True, TUI shows account picker before starting.
             configure_for_account: Callback(runner, account_dict) to scope tools after selection.
             list_accounts: Callback() -> list[dict] to fetch available accounts.
+            credential_store: Optional shared CredentialStore (avoids creating redundant stores).
         """
         self.agent_path = agent_path
         self.graph = graph
@@ -653,6 +655,7 @@ class AgentRunner:
         self.requires_account_selection = requires_account_selection
         self._configure_for_account = configure_for_account
         self._list_accounts = list_accounts
+        self._credential_store = credential_store
 
         # Set up storage
         if storage_path:
@@ -750,6 +753,7 @@ class AgentRunner:
         model: str | None = None,
         interactive: bool = True,
         skip_credential_validation: bool | None = None,
+        credential_store: Any | None = None,
     ) -> "AgentRunner":
         """
         Load an agent from an export folder.
@@ -767,6 +771,7 @@ class AgentRunner:
                 Set to False from TUI callers that handle setup via their own UI.
             skip_credential_validation: If True, skip credential checks at load time.
                 When None (default), uses the agent module's setting.
+            credential_store: Optional shared CredentialStore (avoids creating redundant stores).
 
         Returns:
             AgentRunner instance ready to run
@@ -856,6 +861,7 @@ class AgentRunner:
                 requires_account_selection=needs_acct,
                 configure_for_account=configure_fn,
                 list_accounts=list_accts_fn,
+                credential_store=credential_store,
             )
 
         # Fallback: load from agent.json (legacy JSON-based agents)
@@ -863,7 +869,7 @@ class AgentRunner:
         if not agent_json_path.exists():
             raise FileNotFoundError(f"No agent.py or agent.json found in {agent_path}")
 
-        with open(agent_json_path) as f:
+        with open(agent_json_path, encoding="utf-8") as f:
             graph, goal = load_agent_export(f.read())
 
         return cls(
@@ -875,6 +881,7 @@ class AgentRunner:
             model=model,
             interactive=interactive,
             skip_credential_validation=skip_credential_validation or False,
+            credential_store=credential_store,
         )
 
     def register_tool(
@@ -1108,11 +1115,10 @@ class AgentRunner:
             # Auto-register GCU MCP server if tools aren't loaded yet
             gcu_tool_names = self._tool_registry.get_server_tool_names(GCU_SERVER_NAME)
             if not gcu_tool_names:
-                # Resolve relative cwd against agent path
+                # Resolve cwd to repo-level tools/ (not relative to agent_path)
                 gcu_config = dict(GCU_MCP_SERVER_CONFIG)
-                cwd = gcu_config.get("cwd")
-                if cwd and not Path(cwd).is_absolute():
-                    gcu_config["cwd"] = str((self.agent_path / cwd).resolve())
+                _repo_root = Path(__file__).resolve().parent.parent.parent.parent
+                gcu_config["cwd"] = str(_repo_root / "tools")
                 self._tool_registry.register_mcp_server(gcu_config)
                 gcu_tool_names = self._tool_registry.get_server_tool_names(GCU_SERVER_NAME)
 
@@ -1132,10 +1138,10 @@ class AgentRunner:
 
             files_tool_names = self._tool_registry.get_server_tool_names(FILES_MCP_SERVER_NAME)
             if not files_tool_names:
+                # Resolve cwd to repo-level tools/ (not relative to agent_path)
                 files_config = dict(FILES_MCP_SERVER_CONFIG)
-                cwd = files_config.get("cwd")
-                if cwd and not Path(cwd).is_absolute():
-                    files_config["cwd"] = str((self.agent_path / cwd).resolve())
+                _repo_root = Path(__file__).resolve().parent.parent.parent.parent
+                files_config["cwd"] = str(_repo_root / "tools")
                 self._tool_registry.register_mcp_server(files_config)
                 files_tool_names = self._tool_registry.get_server_tool_names(FILES_MCP_SERVER_NAME)
 
@@ -1158,7 +1164,10 @@ class AgentRunner:
         try:
             from aden_tools.credentials.store_adapter import CredentialStoreAdapter
 
-            adapter = CredentialStoreAdapter.default()
+            if self._credential_store is not None:
+                adapter = CredentialStoreAdapter(store=self._credential_store)
+            else:
+                adapter = CredentialStoreAdapter.default()
             accounts_data = adapter.get_all_account_info()
             tool_provider_map = adapter.get_tool_provider_map()
             if accounts_data:
@@ -1229,9 +1238,11 @@ class AgentRunner:
             return None
 
         try:
-            from framework.credentials import CredentialStore
+            store = self._credential_store
+            if store is None:
+                from framework.credentials import CredentialStore
 
-            store = CredentialStore.with_encrypted_storage()
+                store = CredentialStore.with_encrypted_storage()
             return store.get(cred_id)
         except Exception:
             return None

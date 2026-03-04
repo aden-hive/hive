@@ -53,7 +53,13 @@ def log_error(message: str):
 def run_command(cmd: list, error_msg: str) -> bool:
     """Run a command and return success status."""
     try:
-        subprocess.run(cmd, check=True, capture_output=True, text=True)
+        subprocess.run(
+            cmd,
+            check=True,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+        )
         return True
     except subprocess.CalledProcessError as e:
         log_error(error_msg)
@@ -97,7 +103,7 @@ def main():
     if mcp_config_path.exists():
         log_success("MCP configuration found at .mcp.json")
         logger.info("Configuration:")
-        with open(mcp_config_path) as f:
+        with open(mcp_config_path, encoding="utf-8") as f:
             config = json.load(f)
             logger.info(json.dumps(config, indent=2))
     else:
@@ -114,7 +120,7 @@ def main():
             }
         }
 
-        with open(mcp_config_path, "w") as f:
+        with open(mcp_config_path, "w", encoding="utf-8") as f:
             json.dump(config, f, indent=2)
 
         log_success("Created .mcp.json")
@@ -129,6 +135,7 @@ def main():
             check=True,
             capture_output=True,
             text=True,
+            encoding="utf-8",
         )
         log_success("MCP server module verified")
     except subprocess.CalledProcessError as e:

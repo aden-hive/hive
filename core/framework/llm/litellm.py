@@ -170,7 +170,7 @@ def _dump_failed_request(
         "temperature": kwargs.get("temperature"),
     }
 
-    with open(filepath, "w") as f:
+    with open(filepath, "w", encoding="utf-8") as f:
         json.dump(dump_data, f, indent=2, default=str)
 
     return str(filepath)

@@ -176,10 +176,7 @@ def create_app(model: str | None = None) -> web.Application:
     """
     app = web.Application(middlewares=[cors_middleware, error_middleware])
 
-    # Store manager on app for handlers
-    app["manager"] = SessionManager(model=model)
-
-    # Initialize credential store
+    # Initialize credential store (before SessionManager so it can be shared)
     from framework.credentials.store import CredentialStore
 
     try:
@@ -200,10 +197,13 @@ def create_app(model: str | None = None) -> web.Application:
             except Exception as exc:
                 logger.warning("Could not auto-persist HIVE_CREDENTIAL_KEY: %s", exc)
 
-        app["credential_store"] = CredentialStore.with_aden_sync()
+        credential_store = CredentialStore.with_aden_sync()
     except Exception:
         logger.debug("Encrypted credential store unavailable, using in-memory fallback")
-        app["credential_store"] = CredentialStore.for_testing({})
+        credential_store = CredentialStore.for_testing({})
+
+    app["credential_store"] = credential_store
+    app["manager"] = SessionManager(model=model, credential_store=credential_store)
 
     # Register shutdown hook
     app.on_shutdown.append(_on_shutdown)

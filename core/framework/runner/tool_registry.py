@@ -340,7 +340,7 @@ class ToolRegistry:
         self._mcp_config_path = Path(config_path)
 
         try:
-            with open(config_path) as f:
+            with open(config_path, encoding="utf-8") as f:
                 config = json.load(f)
         except Exception as e:
             logger.warning(f"Failed to load MCP config from {config_path}: {e}")

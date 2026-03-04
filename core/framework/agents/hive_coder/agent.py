@@ -69,7 +69,7 @@ goal = Goal(
             id="dynamic-tool-discovery",
             description=(
                 "Always discover available tools dynamically via "
-                "discover_mcp_tools before referencing tools in agent designs"
+                "list_agent_tools before referencing tools in agent designs"
             ),
             constraint_type="hard",
             category="correctness",

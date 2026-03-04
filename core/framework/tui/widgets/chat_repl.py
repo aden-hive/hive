@@ -488,7 +488,7 @@ class ChatRepl(Vertical):
                 if not state_file.exists():
                     continue
 
-                with open(state_file) as f:
+                with open(state_file, encoding="utf-8") as f:
                     state = json.load(f)
 
                 status = state.get("status", "").lower()
@@ -547,7 +547,7 @@ class ChatRepl(Vertical):
 
             # Read session state
             try:
-                with open(state_file) as f:
+                with open(state_file, encoding="utf-8") as f:
                     state = json.load(f)
 
                 # Track this session for /resume <number> lookup
@@ -599,7 +599,7 @@ class ChatRepl(Vertical):
         try:
             import json
 
-            with open(state_file) as f:
+            with open(state_file, encoding="utf-8") as f:
                 state = json.load(f)
 
             # Basic info
@@ -640,7 +640,7 @@ class ChatRepl(Vertical):
                     # Load and show checkpoints
                     for i, cp_file in enumerate(checkpoint_files[-5:], 1):  # Last 5
                         try:
-                            with open(cp_file) as f:
+                            with open(cp_file, encoding="utf-8") as f:
                                 cp_data = json.load(f)
 
                             cp_id = cp_data.get("checkpoint_id", cp_file.stem)
@@ -687,7 +687,7 @@ class ChatRepl(Vertical):
 
             import json
 
-            with open(state_file) as f:
+            with open(state_file, encoding="utf-8") as f:
                 state = json.load(f)
 
             # Resume from session state (not checkpoint)
@@ -868,27 +868,17 @@ class ChatRepl(Vertical):
             self._write_history(f"[dim]{traceback.format_exc()}[/dim]")
 
     async def _cmd_pause(self) -> None:
-        """Immediately pause execution by cancelling task (same as Ctrl+Z)."""
-        # Check if there's a current execution
-        if not self._current_exec_id:
-            self._write_history("[bold yellow]No active execution to pause[/bold yellow]")
-            self._write_history("  Start an execution first, then use /pause during execution")
-            return
-
-        # Find and cancel the execution task - executor will catch and save state
-        task_cancelled = False
-        for stream in self.runtime._streams.values():
-            exec_id = self._current_exec_id
-            task = stream._execution_tasks.get(exec_id)
-            if task and not task.done():
-                task.cancel()
-                task_cancelled = True
-                self._write_history("[bold green]⏸ Execution paused - state saved[/bold green]")
-                self._write_history("  Resume later with: [bold]/resume[/bold]")
-                break
-
-        if not task_cancelled:
-            self._write_history("[bold yellow]Execution already completed[/bold yellow]")
+        """Immediately pause execution by cancelling all running tasks (same as Ctrl+Z)."""
+        future = asyncio.run_coroutine_threadsafe(
+            self.runtime.cancel_all_tasks_async(), self._agent_loop
+        )
+        result = await asyncio.wrap_future(future)
+        if result:
+            self._current_exec_id = None
+            self._write_history("[bold green]⏸ All executions stopped[/bold green]")
+            self._write_history("  Resume later with: [bold]/resume[/bold]")
+        else:
+            self._write_history("[bold yellow]No active executions[/bold yellow]")
 
     async def _cmd_coder(self, reason: str = "") -> None:
         """User-initiated escalation to Hive Coder."""
@@ -1112,7 +1102,7 @@ class ChatRepl(Vertical):
                     continue
 
                 try:
-                    with open(state_file) as f:
+                    with open(state_file, encoding="utf-8") as f:
                         state = json.load(f)
 
                     status = state.get("status", "").lower()

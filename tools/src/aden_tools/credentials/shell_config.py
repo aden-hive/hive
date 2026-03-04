@@ -84,7 +84,7 @@ def check_env_var_in_shell_config(
     if not config_path.exists():
         return False, None
 
-    content = config_path.read_text()
+    content = config_path.read_text(encoding="utf-8")
 
     # Look for export ENV_VAR=value or export ENV_VAR="value"
     pattern = rf"^export\s+{re.escape(env_var)}=(.+)$"
@@ -130,7 +130,7 @@ def add_env_var_to_shell_config(
 
     try:
         if config_path.exists():
-            content = config_path.read_text()
+            content = config_path.read_text(encoding="utf-8")
 
             # Check if already exists
             pattern = rf"^export\s+{re.escape(env_var)}=.*$"
@@ -142,11 +142,11 @@ def add_env_var_to_shell_config(
                     content,
                     flags=re.MULTILINE,
                 )
-                config_path.write_text(new_content)
+                config_path.write_text(new_content, encoding="utf-8")
                 return True, str(config_path)
 
         # Append to file
-        with open(config_path, "a") as f:
+        with open(config_path, "a", encoding="utf-8") as f:
             f.write(f"\n# {comment}\n")
             f.write(f"{export_line}\n")
 
@@ -178,7 +178,7 @@ def remove_env_var_from_shell_config(
         return True, "Config file does not exist"
 
     try:
-        content = config_path.read_text()
+        content = config_path.read_text(encoding="utf-8")
         lines = content.split("\n")
 
         new_lines = []
@@ -206,7 +206,7 @@ def remove_env_var_from_shell_config(
 
             new_lines.append(line)
 
-        config_path.write_text("\n".join(new_lines))
+        config_path.write_text("\n".join(new_lines), encoding="utf-8")
         return True, str(config_path)
 
     except PermissionError:
