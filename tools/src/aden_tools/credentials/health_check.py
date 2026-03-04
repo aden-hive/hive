@@ -1368,10 +1368,7 @@ class TrelloTokenHealthChecker(BaseHttpHealthChecker):
 
 
 class YouTubeHealthChecker(BaseHttpHealthChecker):
-    ENDPOINT = (
-        "https://www.googleapis.com/youtube/v3/videoCategories"
-        "?part=snippet&regionCode=US"
-    )
+    ENDPOINT = "https://www.googleapis.com/youtube/v3/videoCategories?part=snippet&regionCode=US"
     SERVICE_NAME = "YouTube"
     AUTH_TYPE = BaseHttpHealthChecker.AUTH_QUERY
     AUTH_QUERY_PARAM_NAME = "key"
