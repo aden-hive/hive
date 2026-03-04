@@ -877,7 +877,7 @@ class AdenTUI(App):
         # Re-show picker so user can still select an agent
         self._show_agent_picker_initial()
 
-    def action_show_agent_picker(self) -> None:
+    async def action_show_agent_picker(self) -> None:
         """Open the agent picker (Ctrl+A or /agents)."""
         from framework.tui.screens.agent_picker import AgentPickerScreen, discover_agents
 
