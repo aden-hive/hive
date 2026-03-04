@@ -1,0 +1,286 @@
+{
+  "agent": {
+    "id": "issue_triage_agent",
+    "name": "Issue Triage Agent",
+    "version": "1.0.0",
+    "description": "Triage incoming support and bug signals from Discord, Gmail, and GitHub into a single prioritized queue with consistent severity and routing actions."
+  },
+  "graph": {
+    "id": "issue-triage-agent-graph",
+    "goal_id": "cross-channel-issue-triage",
+    "version": "1.0.0",
+    "entry_node": "intake",
+    "entry_points": {
+      "start": "intake"
+    },
+    "pause_nodes": [],
+    "terminal_nodes": [],
+    "conversation_mode": "continuous",
+    "identity_prompt": "You are an operations-grade issue triage assistant. You ingest reports from Discord, Gmail, and GitHub issues, assign severity consistently, and route work to the right place while keeping humans in control.",
+    "nodes": [
+      {
+        "id": "intake",
+        "name": "Triage Intake",
+        "description": "Collect repository/channel scope and triage policy from the operator before intake",
+        "node_type": "event_loop",
+        "input_keys": [
+          "github_owner",
+          "github_repo",
+          "discord_channel_ids",
+          "gmail_query",
+          "triage_policy",
+          "lookback_hours"
+        ],
+        "output_keys": [
+          "github_owner",
+          "github_repo",
+          "discord_channel_ids",
+          "gmail_query",
+          "triage_policy",
+          "lookback_hours"
+        ],
+        "nullable_output_keys": [
+          "gmail_query"
+        ],
+        "input_schema": {},
+        "output_schema": {},
+        "system_prompt": "Collect missing triage scope, confirm with operator, then set outputs.",
+        "tools": [],
+        "model": null,
+        "function": null,
+        "routes": {},
+        "max_retries": 3,
+        "retry_on": [],
+        "max_node_visits": 0,
+        "output_model": null,
+        "max_validation_retries": 2,
+        "client_facing": true,
+        "success_criteria": "Scope and policy are explicit and executable"
+      },
+      {
+        "id": "fetch-signals",
+        "name": "Fetch Cross-Channel Signals",
+        "description": "Gather candidate issues from GitHub issues, Discord channel messages, and Gmail",
+        "node_type": "event_loop",
+        "input_keys": [
+          "github_owner",
+          "github_repo",
+          "discord_channel_ids",
+          "gmail_query",
+          "lookback_hours"
+        ],
+        "output_keys": [
+          "raw_github_issues",
+          "raw_discord_messages",
+          "raw_emails"
+        ],
+        "nullable_output_keys": [
+          "gmail_query"
+        ],
+        "input_schema": {},
+        "output_schema": {},
+        "system_prompt": "Fetch issue signals from all three channels and emit structured raw payloads.",
+        "tools": [
+          "github_list_issues",
+          "discord_get_messages",
+          "gmail_list_messages",
+          "gmail_get_message"
+        ],
+        "model": null,
+        "function": null,
+        "routes": {},
+        "max_retries": 3,
+        "retry_on": [],
+        "max_node_visits": 0,
+        "output_model": null,
+        "max_validation_retries": 2,
+        "client_facing": false,
+        "success_criteria": "Relevant records are fetched across configured channels"
+      },
+      {
+        "id": "triage-and-route",
+        "name": "Triage And Route",
+        "description": "Normalize signals into issue records, assign severity/category/owner, and apply actions",
+        "node_type": "event_loop",
+        "input_keys": [
+          "github_owner",
+          "github_repo",
+          "triage_policy",
+          "raw_github_issues",
+          "raw_discord_messages",
+          "raw_emails"
+        ],
+        "output_keys": [
+          "triage_report",
+          "routed_count",
+          "escalated_count"
+        ],
+        "nullable_output_keys": [],
+        "input_schema": {},
+        "output_schema": {},
+        "system_prompt": "Deduplicate, classify severity/category/confidence, and execute routing actions.",
+        "tools": [
+          "github_update_issue",
+          "discord_send_message",
+          "gmail_create_draft"
+        ],
+        "model": null,
+        "function": null,
+        "routes": {},
+        "max_retries": 3,
+        "retry_on": [],
+        "max_node_visits": 0,
+        "output_model": null,
+        "max_validation_retries": 2,
+        "client_facing": false,
+        "success_criteria": "Every cluster has severity and routing action"
+      },
+      {
+        "id": "report",
+        "name": "Triage Report",
+        "description": "Present triage summary to the operator and capture next action",
+        "node_type": "event_loop",
+        "input_keys": [
+          "triage_report",
+          "routed_count",
+          "escalated_count"
+        ],
+        "output_keys": [
+          "delivery_status",
+          "next_action"
+        ],
+        "nullable_output_keys": [],
+        "input_schema": {},
+        "output_schema": {},
+        "system_prompt": "Present summary, ask next action, and set outputs.",
+        "tools": [],
+        "model": null,
+        "function": null,
+        "routes": {},
+        "max_retries": 3,
+        "retry_on": [],
+        "max_node_visits": 0,
+        "output_model": null,
+        "max_validation_retries": 2,
+        "client_facing": true,
+        "success_criteria": "Operator receives report and selects next action"
+      }
+    ],
+    "edges": [
+      {
+        "id": "intake-to-fetch",
+        "source": "intake",
+        "target": "fetch-signals",
+        "condition": "on_success",
+        "condition_expr": null,
+        "priority": 1,
+        "input_mapping": {}
+      },
+      {
+        "id": "fetch-to-triage",
+        "source": "fetch-signals",
+        "target": "triage-and-route",
+        "condition": "on_success",
+        "condition_expr": null,
+        "priority": 1,
+        "input_mapping": {}
+      },
+      {
+        "id": "triage-to-report",
+        "source": "triage-and-route",
+        "target": "report",
+        "condition": "on_success",
+        "condition_expr": null,
+        "priority": 1,
+        "input_mapping": {}
+      },
+      {
+        "id": "report-to-fetch",
+        "source": "report",
+        "target": "fetch-signals",
+        "condition": "conditional",
+        "condition_expr": "str(next_action).lower() == run_again",
+        "priority": 2,
+        "input_mapping": {}
+      },
+      {
+        "id": "report-to-intake",
+        "source": "report",
+        "target": "intake",
+        "condition": "conditional",
+        "condition_expr": "str(next_action).lower() == refine_policy",
+        "priority": 1,
+        "input_mapping": {}
+      }
+    ],
+    "max_steps": 120,
+    "max_retries_per_node": 3,
+    "description": "Cross-channel issue triage workflow for Discord, Gmail, and GitHub issues."
+  },
+  "goal": {
+    "id": "cross-channel-issue-triage",
+    "name": "Cross-Channel Issue Triage",
+    "description": "Triage incoming signals from Discord, Gmail, and GitHub issues into a single prioritized queue with consistent severity and routing actions.",
+    "status": "draft",
+    "success_criteria": [
+      {
+        "id": "coverage",
+        "description": "Collect candidate reports from all configured channels",
+        "metric": "source_coverage",
+        "target": "100% of configured sources",
+        "weight": 0.25,
+        "met": false
+      },
+      {
+        "id": "classification-quality",
+        "description": "Each unified issue gets category, severity, and rationale",
+        "metric": "classified_issue_ratio",
+        "target": ">=95%",
+        "weight": 0.25,
+        "met": false
+      },
+      {
+        "id": "routing-completion",
+        "description": "High-priority items are routed and acknowledged",
+        "metric": "routed_high_priority_ratio",
+        "target": ">=95%",
+        "weight": 0.30,
+        "met": false
+      },
+      {
+        "id": "operator-visibility",
+        "description": "Operator receives a clear triage report for each run",
+        "metric": "report_delivery",
+        "target": "100%",
+        "weight": 0.20,
+        "met": false
+      }
+    ],
+    "constraints": [
+      {
+        "id": "no-auto-close",
+        "description": "Never close GitHub issues automatically",
+        "constraint_type": "hard",
+        "category": "safety",
+        "check": ""
+      },
+      {
+        "id": "draft-only-email",
+        "description": "Only draft email responses; never send automatically",
+        "constraint_type": "hard",
+        "category": "safety",
+        "check": ""
+      },
+      {
+        "id": "traceable-triage",
+        "description": "Every severity decision must include a concise rationale",
+        "constraint_type": "quality",
+        "category": "auditability",
+        "check": ""
+      }
+    ],
+    "context": {},
+    "required_capabilities": [],
+    "created_at": "2026-03-04T00:00:00.000000"
+  }
+}
