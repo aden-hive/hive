@@ -75,6 +75,10 @@ def register_tools(mcp: FastMCP) -> None:
                         # Use splitlines() for anchor consistency with
                         # view_file/hashline_edit (handles Unicode line
                         # separators like \u2028, \x85).
+                        # Skip files > 10MB to avoid excessive memory use.
+                        file_size = os.path.getsize(file_path)
+                        if file_size > 10 * 1024 * 1024:
+                            continue
                         with open(file_path, encoding="utf-8") as f:
                             content = f.read()
                         for i, line in enumerate(content.splitlines(), 1):

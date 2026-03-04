@@ -213,177 +213,177 @@ def register_tools(mcp: FastMCP) -> None:
             if not isinstance(op, dict):
                 return {"error": f"Edit #{i + 1}: operation must be a dict"}
 
-            op_type = op.get("op")
+            match op.get("op"):
+                case "set_line":
+                    anchor = op.get("anchor", "")
+                    err = validate_anchor(anchor, lines)
+                    if err:
+                        return {"error": f"Edit #{i + 1} (set_line): {err}"}
+                    if "content" not in op:
+                        return {
+                            "error": f"Edit #{i + 1} (set_line): missing required field 'content'"
+                        }
+                    if not isinstance(op["content"], str):
+                        return {"error": f"Edit #{i + 1} (set_line): content must be a string"}
+                    if "\n" in op["content"] or "\r" in op["content"]:
+                        return {
+                            "error": f"Edit #{i + 1} (set_line): content must be a single line. "
+                            f"Use replace_lines for multi-line replacement."
+                        }
+                    line_num, _ = parse_anchor(anchor)
+                    idx = line_num - 1
+                    new_content = op["content"]
+                    new_lines = [new_content] if new_content else []
+                    new_lines = _maybe_strip(
+                        new_lines,
+                        _strip_content_prefixes,
+                        "prefix_strip",
+                        auto_cleanup,
+                        cleanup_actions,
+                    )
+                    splices.append((idx, idx, new_lines, i))
 
-            if op_type == "set_line":
-                anchor = op.get("anchor", "")
-                err = validate_anchor(anchor, lines)
-                if err:
-                    return {"error": f"Edit #{i + 1} (set_line): {err}"}
-                if "content" not in op:
-                    return {"error": f"Edit #{i + 1} (set_line): missing required field 'content'"}
-                if not isinstance(op["content"], str):
-                    return {"error": f"Edit #{i + 1} (set_line): content must be a string"}
-                if "\n" in op["content"] or "\r" in op["content"]:
-                    return {
-                        "error": f"Edit #{i + 1} (set_line): content must be a single line. "
-                        f"Use replace_lines for multi-line replacement."
-                    }
-                line_num, _ = parse_anchor(anchor)
-                idx = line_num - 1
-                new_content = op["content"]
-                new_lines = new_content.splitlines() if new_content else []
-                new_lines = _maybe_strip(
-                    new_lines,
-                    _strip_content_prefixes,
-                    "prefix_strip",
-                    auto_cleanup,
-                    cleanup_actions,
-                )
-                splices.append((idx, idx, new_lines, i))
+                case "replace_lines":
+                    start_anchor = op.get("start_anchor", "")
+                    end_anchor = op.get("end_anchor", "")
+                    err = validate_anchor(start_anchor, lines)
+                    if err:
+                        return {"error": f"Edit #{i + 1} (replace_lines start): {err}"}
+                    err = validate_anchor(end_anchor, lines)
+                    if err:
+                        return {"error": f"Edit #{i + 1} (replace_lines end): {err}"}
+                    start_num, _ = parse_anchor(start_anchor)
+                    end_num, _ = parse_anchor(end_anchor)
+                    if start_num > end_num:
+                        return {
+                            "error": f"Edit #{i + 1} (replace_lines): "
+                            f"start line {start_num} > end line {end_num}"
+                        }
+                    if "content" not in op:
+                        return {
+                            "error": (
+                                f"Edit #{i + 1} (replace_lines): missing required field 'content'"
+                            )
+                        }
+                    if not isinstance(op["content"], str):
+                        return {"error": f"Edit #{i + 1} (replace_lines): content must be a string"}
+                    new_content = op["content"]
+                    new_lines = new_content.splitlines() if new_content else []
+                    new_lines = _maybe_strip(
+                        new_lines,
+                        _strip_content_prefixes,
+                        "prefix_strip",
+                        auto_cleanup,
+                        cleanup_actions,
+                    )
+                    new_lines = _maybe_strip(
+                        new_lines,
+                        lambda nl, s=start_num, e=end_num: _strip_boundary_echo(lines, s, e, nl),
+                        "boundary_echo_strip",
+                        auto_cleanup,
+                        cleanup_actions,
+                    )
+                    splices.append((start_num - 1, end_num - 1, new_lines, i))
 
-            elif op_type == "replace_lines":
-                start_anchor = op.get("start_anchor", "")
-                end_anchor = op.get("end_anchor", "")
-                err = validate_anchor(start_anchor, lines)
-                if err:
-                    return {"error": f"Edit #{i + 1} (replace_lines start): {err}"}
-                err = validate_anchor(end_anchor, lines)
-                if err:
-                    return {"error": f"Edit #{i + 1} (replace_lines end): {err}"}
-                start_num, _ = parse_anchor(start_anchor)
-                end_num, _ = parse_anchor(end_anchor)
-                if start_num > end_num:
-                    return {
-                        "error": f"Edit #{i + 1} (replace_lines): "
-                        f"start line {start_num} > end line {end_num}"
-                    }
-                if "content" not in op:
-                    return {
-                        "error": f"Edit #{i + 1} (replace_lines): missing required field 'content'"
-                    }
-                if not isinstance(op["content"], str):
-                    return {"error": f"Edit #{i + 1} (replace_lines): content must be a string"}
-                new_content = op["content"]
-                new_lines = new_content.splitlines() if new_content else []
-                new_lines = _maybe_strip(
-                    new_lines,
-                    _strip_content_prefixes,
-                    "prefix_strip",
-                    auto_cleanup,
-                    cleanup_actions,
-                )
-                new_lines = _maybe_strip(
-                    new_lines,
-                    lambda nl, s=start_num, e=end_num: _strip_boundary_echo(lines, s, e, nl),
-                    "boundary_echo_strip",
-                    auto_cleanup,
-                    cleanup_actions,
-                )
-                splices.append((start_num - 1, end_num - 1, new_lines, i))
+                case "insert_after":
+                    anchor = op.get("anchor", "")
+                    err = validate_anchor(anchor, lines)
+                    if err:
+                        return {"error": f"Edit #{i + 1} (insert_after): {err}"}
+                    line_num, _ = parse_anchor(anchor)
+                    idx = line_num - 1
+                    new_content = op.get("content", "")
+                    if not isinstance(new_content, str):
+                        return {"error": f"Edit #{i + 1} (insert_after): content must be a string"}
+                    if not new_content:
+                        return {"error": f"Edit #{i + 1} (insert_after): content is empty"}
+                    new_lines = new_content.splitlines()
+                    new_lines = _maybe_strip(
+                        new_lines,
+                        _strip_content_prefixes,
+                        "prefix_strip",
+                        auto_cleanup,
+                        cleanup_actions,
+                    )
+                    new_lines = _maybe_strip(
+                        new_lines,
+                        lambda nl, _idx=idx: _strip_insert_echo(lines[_idx], nl),
+                        "insert_echo_strip",
+                        auto_cleanup,
+                        cleanup_actions,
+                    )
+                    splices.append((idx + 1, idx, new_lines, i))
 
-            elif op_type == "insert_after":
-                anchor = op.get("anchor", "")
-                err = validate_anchor(anchor, lines)
-                if err:
-                    return {"error": f"Edit #{i + 1} (insert_after): {err}"}
-                line_num, _ = parse_anchor(anchor)
-                idx = line_num - 1
-                new_content = op.get("content", "")
-                if not isinstance(new_content, str):
-                    return {"error": f"Edit #{i + 1} (insert_after): content must be a string"}
-                if not new_content:
-                    return {"error": f"Edit #{i + 1} (insert_after): content is empty"}
-                new_lines = new_content.splitlines()
-                new_lines = _maybe_strip(
-                    new_lines,
-                    _strip_content_prefixes,
-                    "prefix_strip",
-                    auto_cleanup,
-                    cleanup_actions,
-                )
-                new_lines = _maybe_strip(
-                    new_lines,
-                    lambda nl, _idx=idx: _strip_insert_echo(lines[_idx], nl),
-                    "insert_echo_strip",
-                    auto_cleanup,
-                    cleanup_actions,
-                )
-                # Insert after = splice at (idx+1, idx, new_lines)
-                # start > end means pure insertion at that point
-                splices.append((idx + 1, idx, new_lines, i))
+                case "insert_before":
+                    anchor = op.get("anchor", "")
+                    err = validate_anchor(anchor, lines)
+                    if err:
+                        return {"error": f"Edit #{i + 1} (insert_before): {err}"}
+                    line_num, _ = parse_anchor(anchor)
+                    idx = line_num - 1
+                    new_content = op.get("content", "")
+                    if not isinstance(new_content, str):
+                        return {"error": f"Edit #{i + 1} (insert_before): content must be a string"}
+                    if not new_content:
+                        return {"error": f"Edit #{i + 1} (insert_before): content is empty"}
+                    new_lines = new_content.splitlines()
+                    new_lines = _maybe_strip(
+                        new_lines,
+                        _strip_content_prefixes,
+                        "prefix_strip",
+                        auto_cleanup,
+                        cleanup_actions,
+                    )
+                    new_lines = _maybe_strip(
+                        new_lines,
+                        lambda nl, _idx=idx: _strip_insert_echo(lines[_idx], nl, position="last"),
+                        "insert_echo_strip",
+                        auto_cleanup,
+                        cleanup_actions,
+                    )
+                    splices.append((idx, idx - 1, new_lines, i))
 
-            elif op_type == "insert_before":
-                anchor = op.get("anchor", "")
-                err = validate_anchor(anchor, lines)
-                if err:
-                    return {"error": f"Edit #{i + 1} (insert_before): {err}"}
-                line_num, _ = parse_anchor(anchor)
-                idx = line_num - 1
-                new_content = op.get("content", "")
-                if not isinstance(new_content, str):
-                    return {"error": f"Edit #{i + 1} (insert_before): content must be a string"}
-                if not new_content:
-                    return {"error": f"Edit #{i + 1} (insert_before): content is empty"}
-                new_lines = new_content.splitlines()
-                new_lines = _maybe_strip(
-                    new_lines,
-                    _strip_content_prefixes,
-                    "prefix_strip",
-                    auto_cleanup,
-                    cleanup_actions,
-                )
-                new_lines = _maybe_strip(
-                    new_lines,
-                    lambda nl, _idx=idx: _strip_insert_echo(lines[_idx], nl, position="last"),
-                    "insert_echo_strip",
-                    auto_cleanup,
-                    cleanup_actions,
-                )
-                # Insert before = splice at (idx, idx - 1, new_lines)
-                # end < start signals a pure insertion (no lines removed).
-                # For insert_before line 1, idx=0 so end=-1.
-                splices.append((idx, idx - 1, new_lines, i))
+                case "replace":
+                    old_content = op.get("old_content")
+                    new_content = op.get("new_content")
+                    if old_content is None:
+                        return {"error": f"Edit #{i + 1} (replace): missing old_content"}
+                    if not isinstance(old_content, str):
+                        return {"error": f"Edit #{i + 1} (replace): old_content must be a string"}
+                    if not old_content:
+                        return {"error": f"Edit #{i + 1} (replace): old_content must not be empty"}
+                    if new_content is None:
+                        return {"error": f"Edit #{i + 1} (replace): missing new_content"}
+                    if not isinstance(new_content, str):
+                        return {"error": f"Edit #{i + 1} (replace): new_content must be a string"}
+                    allow_multiple = op.get("allow_multiple", False)
+                    if not isinstance(allow_multiple, bool):
+                        return {
+                            "error": f"Edit #{i + 1} (replace): allow_multiple must be a boolean"
+                        }
+                    replaces.append((old_content, new_content, i, allow_multiple))
 
-            elif op_type == "replace":
-                old_content = op.get("old_content")
-                new_content = op.get("new_content")
-                if old_content is None:
-                    return {"error": f"Edit #{i + 1} (replace): missing old_content"}
-                if not isinstance(old_content, str):
-                    return {"error": f"Edit #{i + 1} (replace): old_content must be a string"}
-                if not old_content:
-                    return {"error": f"Edit #{i + 1} (replace): old_content must not be empty"}
-                if new_content is None:
-                    return {"error": f"Edit #{i + 1} (replace): missing new_content"}
-                if not isinstance(new_content, str):
-                    return {"error": f"Edit #{i + 1} (replace): new_content must be a string"}
-                allow_multiple = op.get("allow_multiple", False)
-                if not isinstance(allow_multiple, bool):
-                    return {"error": f"Edit #{i + 1} (replace): allow_multiple must be a boolean"}
-                replaces.append((old_content, new_content, i, allow_multiple))
+                case "append":
+                    new_content = op.get("content")
+                    if new_content is None:
+                        return {"error": f"Edit #{i + 1} (append): missing content"}
+                    if not isinstance(new_content, str):
+                        return {"error": f"Edit #{i + 1} (append): content must be a string"}
+                    if not new_content:
+                        return {"error": f"Edit #{i + 1} (append): content must not be empty"}
+                    new_lines = new_content.splitlines()
+                    new_lines = _maybe_strip(
+                        new_lines,
+                        _strip_content_prefixes,
+                        "prefix_strip",
+                        auto_cleanup,
+                        cleanup_actions,
+                    )
+                    insert_point = len(lines)
+                    splices.append((insert_point, insert_point - 1, new_lines, i))
 
-            elif op_type == "append":
-                new_content = op.get("content")
-                if new_content is None:
-                    return {"error": f"Edit #{i + 1} (append): missing content"}
-                if not isinstance(new_content, str):
-                    return {"error": f"Edit #{i + 1} (append): content must be a string"}
-                if not new_content:
-                    return {"error": f"Edit #{i + 1} (append): content must not be empty"}
-                new_lines = new_content.splitlines()
-                new_lines = _maybe_strip(
-                    new_lines,
-                    _strip_content_prefixes,
-                    "prefix_strip",
-                    auto_cleanup,
-                    cleanup_actions,
-                )
-                insert_point = len(lines)
-                splices.append((insert_point, insert_point - 1, new_lines, i))
-
-            else:
-                return {"error": f"Edit #{i + 1}: unknown op '{op_type}'"}
+                case unknown:
+                    return {"error": f"Edit #{i + 1}: unknown op '{unknown}'"}
 
         # 4. Check for overlapping splice ranges
         # Each splice is (start_0idx, end_0idx, new_lines, op_index).
