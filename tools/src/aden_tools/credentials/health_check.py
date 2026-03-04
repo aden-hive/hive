@@ -1299,21 +1299,6 @@ class YouTubeHealthChecker(BaseHttpHealthChecker):
 
 # Registry of health checkers
 HEALTH_CHECKERS: dict[str, CredentialHealthChecker] = {
-    "discord": DiscordHealthChecker(),
-    "hubspot": HubSpotHealthChecker(),
-    "brave_search": BraveSearchHealthChecker(),
-    "google_calendar_oauth": GoogleCalendarHealthChecker(),
-    "google": GoogleGmailHealthChecker(),
-    "slack": SlackHealthChecker(),
-    "google_search": GoogleSearchHealthChecker(),
-    "google_maps": GoogleMapsHealthChecker(),
-    "github": GitHubHealthChecker(),
-    "resend": ResendHealthChecker(),
-    "stripe": StripeHealthChecker(),
-    "exa_search": ExaSearchHealthChecker(),
-    "google_docs": GoogleDocsHealthChecker(),
-    "calcom": CalcomHealthChecker(),
-    "serpapi": SerpApiHealthChecker(),
     "apify": ApifyHealthChecker(),
     "apollo": ApolloHealthChecker(),
     "asana": AsanaHealthChecker(),
