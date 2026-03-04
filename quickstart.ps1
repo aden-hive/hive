@@ -408,6 +408,58 @@ Write-Ok "uv detected: $uvVersion"
 Write-Host ""
 
 # Check for Node.js (needed for frontend dashboard)
+function Install-NodeViaFnm {
+    <#
+    .SYNOPSIS
+        Install Node.js 20 via fnm (Fast Node Manager) - mirrors nvm approach in quickstart.sh
+    #>
+    $fnmCmd = Get-Command fnm -ErrorAction SilentlyContinue
+    if (-not $fnmCmd) {
+        $fnmDir = Join-Path $env:LOCALAPPDATA "fnm"
+        $fnmExe = Join-Path $fnmDir "fnm.exe"
+        if (-not (Test-Path $fnmExe)) {
+            try {
+                Write-Host "    Downloading fnm (Fast Node Manager)..." -ForegroundColor DarkGray
+                $zipUrl = "https://github.com/Schniz/fnm/releases/latest/download/fnm-windows.zip"
+                $zipPath = Join-Path $env:TEMP "fnm-install.zip"
+                Invoke-WebRequest -Uri $zipUrl -OutFile $zipPath -UseBasicParsing -ErrorAction Stop
+                if (-not (Test-Path $fnmDir)) { New-Item -ItemType Directory -Path $fnmDir -Force | Out-Null }
+                Expand-Archive -Path $zipPath -DestinationPath $fnmDir -Force
+                Remove-Item $zipPath -Force -ErrorAction SilentlyContinue
+            } catch {
+                Write-Fail "fnm download failed"
+                Write-Host "    Install Node.js 20+ manually from https://nodejs.org" -ForegroundColor DarkGray
+                return $false
+            }
+        }
+        if (Test-Path (Join-Path $fnmDir "fnm.exe")) {
+            $env:PATH = "$fnmDir;$env:PATH"
+        } else {
+            Write-Fail "fnm binary not found after download"
+            Write-Host "    Install Node.js 20+ manually from https://nodejs.org" -ForegroundColor DarkGray
+            return $false
+        }
+    }
+
+    try {
+        $null = & fnm install 20 2>&1
+        if ($LASTEXITCODE -ne 0) { throw "fnm install 20 exited with code $LASTEXITCODE" }
+        & fnm env --use-on-cd --shell powershell | Out-String | Invoke-Expression
+        $null = & fnm use 20 2>&1
+        $testNode = Get-Command node -ErrorAction SilentlyContinue
+        if ($testNode) {
+            $ver = & node --version 2>$null
+            Write-Ok "Node.js $ver installed via fnm"
+            return $true
+        }
+        throw "node not found after fnm install"
+    } catch {
+        Write-Fail "Node.js installation failed"
+        Write-Host "    Install manually from https://nodejs.org" -ForegroundColor DarkGray
+        return $false
+    }
+}
+
 $NodeAvailable = $false
 $nodeCmd = Get-Command node -ErrorAction SilentlyContinue
 if ($nodeCmd) {
@@ -419,12 +471,13 @@ if ($nodeCmd) {
             $NodeAvailable = $true
         } else {
             Write-Warn "Node.js $nodeVersion found (20+ required for frontend dashboard)"
-            Write-Host "    Install from https://nodejs.org" -ForegroundColor DarkGray
+            Write-Host "    Installing Node.js 20 via fnm..." -ForegroundColor Yellow
+            $NodeAvailable = Install-NodeViaFnm
         }
     }
 } else {
-    Write-Warn "Node.js not found (optional, needed for web dashboard)"
-    Write-Host "    Install from https://nodejs.org" -ForegroundColor DarkGray
+    Write-Warn "Node.js not found. Installing via fnm..."
+    $NodeAvailable = Install-NodeViaFnm
 }
 Write-Host ""
 
