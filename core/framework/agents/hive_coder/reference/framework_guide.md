@@ -131,13 +131,19 @@ downstream node only sees the serialized summary string.
 - A "report" node that presents analysis → merge into the client-facing node
 - A "confirm" or "schedule" node that doesn't call any external service → remove
 
-**Typical agent structure (3 nodes):**
+**Typical agent structure (2 nodes):**
 ```
-intake (client-facing) ←→ process (autonomous) ←→ review (client-facing)
+process (autonomous) ←→ review (client-facing)
 ```
-Or for simpler agents, just 2 nodes:
+The queen owns intake — she gathers requirements from the user, then
+passes structured input via `run_agent_with_input(task)`. When building
+the agent, design the entry node's `input_keys` to match what the queen
+will provide at run time. Worker agents should NOT have a client-facing
+intake node. Client-facing nodes are for mid-execution review/approval only.
+
+For simpler agents, just 1 autonomous node:
 ```
-interact (client-facing) → process (autonomous) → interact (loop)
+process (autonomous) — loops back to itself
 ```
 
 ### nullable_output_keys
@@ -397,7 +403,7 @@ from .agent import (
 ### Reference Agent
 
 See `exports/gmail_inbox_guardian/agent.py` for a complete example with:
-- Primary client-facing intake node (user configures rules)
+- Primary client-facing node (user configures rules)
 - Timer-based scheduled inbox checks (every 20 min)
 - Webhook-triggered email event handling
 - Shared isolation for memory access across streams

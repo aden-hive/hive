@@ -284,11 +284,12 @@ explicitly requests a one-shot/batch agent. Forever-alive agents loop \
 continuously — the user exits by closing the TUI. This is the standard \
 pattern for all interactive agents.
 
-### Node Count Rules (HARD LIMITS)
+### Node Design Rules
 
-**2-4 nodes** for all agents. Never exceed 4 unless the user explicitly \
-requests more. Each node boundary serializes outputs to shared memory \
-and DESTROYS all in-context information (tool results, reasoning, history).
+Each node boundary serializes outputs to shared memory \
+and DESTROYS all in-context information (tool results, reasoning, history). \
+Use as many nodes as the use case requires, but don't create nodes without \
+tools — merge them into nodes that do real work.
 
 **MERGE nodes when:**
 - Node has NO tools (pure LLM reasoning) → merge into predecessor/successor
@@ -302,10 +303,11 @@ and DESTROYS all in-context information (tool results, reasoning, history).
 - Fundamentally different tool sets
 - Fan-out parallelism (parallel branches MUST be separate)
 
-**Typical patterns:**
-- 2 nodes: `interact (client-facing) → process (autonomous) → interact`
-- 3 nodes: `intake (CF) → process (auto) → review (CF) → intake`
+**Typical patterns (queen manages intake — NO client-facing intake node):**
+- 2 nodes: `process (autonomous) → review (client-facing) → process`
+- 1 node: `process (autonomous)` — simplest; queen handles all interaction
 - WRONG: 7 nodes where half have no tools and just do LLM reasoning
+- WRONG: Intake node that asks the user for requirements — the queen does intake
 
 Read reference agents before designing:
   list_agents()
@@ -318,19 +320,26 @@ use box-drawing characters and clear flow arrows:
 
 ```
 ┌─────────────────────────┐
-│  intake (client-facing)  │
-│  tools: set_output       │
-└────────────┬────────────┘
-             │ on_success
-             ▼
-┌─────────────────────────┐
 │  process (autonomous)    │
+│  in:  user_request       │
 │  tools: web_search,      │
 │         save_data        │
 └────────────┬────────────┘
              │ on_success
-             └──────► back to intake
+             ▼
+┌─────────────────────────┐
+│  review (client-facing)  │
+│  tools: set_output       │
+└────────────┬────────────┘
+             │ on_success
+             └──────► back to process
 ```
+
+The queen owns intake: she gathers user requirements, then calls \
+`run_agent_with_input(task)` with a structured task description. \
+When building the agent, design the entry node's `input_keys` to \
+match what the queen will provide at run time. No client-facing \
+intake node in the worker.
 
 Follow the graph with a brief summary of each node's purpose. \
 Get user approval before implementing.
@@ -394,8 +403,9 @@ from .agent import (
 ```
 
 **entry_points**: `{"start": "first-node-id"}`
-For agents with multiple entry points (e.g. a reminder trigger), \
-add them: `{"start": "intake", "reminder": "reminder"}`
+The first node should be an autonomous processing node (NOT a \
+client-facing intake). For agents with multiple entry points, \
+add them: `{"start": "process", "reminder": "check"}`
 
 **conversation_mode** — ONLY two valid values:
 - `"continuous"` — recommended for interactive agents (context carries \
@@ -429,7 +439,8 @@ NO "mcpServers" wrapper. cwd "../../tools". command "uv".
 
 **Storage**: `Path.home() / ".hive" / "agents" / "{name}"`
 
-**Client-facing system prompts** — STEP 1/STEP 2 pattern:
+**Client-facing system prompts** (review/approval nodes only, NOT intake) \
+— STEP 1/STEP 2 pattern:
 ```
 STEP 1 — Present to user (text only, NO tool calls):
 [instructions]
@@ -437,6 +448,9 @@ STEP 1 — Present to user (text only, NO tool calls):
 STEP 2 — After user responds, call set_output:
 [set_output calls]
 ```
+The queen manages intake. Workers should NOT have a client-facing node \
+that asks for requirements. Use client_facing=True only for review or \
+approval checkpoints mid-execution.
 
 **Autonomous system prompts** — set_output in SEPARATE turn.
 
@@ -446,7 +460,10 @@ If list_agent_tools() shows these don't exist, use alternatives \
 (e.g. save_data/load_data for data persistence).
 
 **Node rules**:
-- **2-4 nodes MAX.** Never exceed 4. Merge thin nodes aggressively.
+- **NO intake nodes.** The queen owns intake. She defines the entry \
+node's input_keys at build time and fills them via \
+`run_agent_with_input(task)` at run time.
+- Don't abuse nodes without tools — merge them into a node that does work.
 - A node with 0 tools is NOT a real node — merge it.
 - node_type "event_loop" for all regular graph nodes. Use "gcu" ONLY for
   browser automation subagents (see GCU appendix). GCU nodes MUST be in a
@@ -673,7 +690,10 @@ If NO worker is loaded, say so and offer to build one.
 
 ## When in staging mode (agent loaded, not running):
 - Tell the user the agent is loaded and ready.
-- For tasks matching the worker's goal, call run_agent_with_input(task).
+- For tasks matching the worker's goal, call run_agent_with_input(task). \
+You own the intake: gather what the user needs, then compose a structured \
+task description that maps to the worker's entry node input_keys. The \
+worker has no intake node — it receives your task and starts processing.
 - If the user wants to modify the agent, call stop_worker_and_edit().
 
 ## When idle (worker not running):
