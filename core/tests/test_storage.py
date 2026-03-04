@@ -98,7 +98,7 @@ class TestFileStorageRunOperations:
         assert run_file.exists()
 
         # Verify it's valid JSON
-        with open(run_file) as f:
+        with open(run_file, encoding="utf-8") as f:
             data = json.load(f)
         assert data["id"] == "my_run"
 

@@ -96,7 +96,7 @@ def _save_refreshed_credentials(token_data: dict) -> None:
         return
 
     try:
-        with open(CLAUDE_CREDENTIALS_FILE) as f:
+        with open(CLAUDE_CREDENTIALS_FILE, encoding="utf-8") as f:
             creds = json.load(f)
 
         oauth = creds.get("claudeAiOauth", {})
@@ -107,7 +107,7 @@ def _save_refreshed_credentials(token_data: dict) -> None:
             oauth["expiresAt"] = int((time.time() + token_data["expires_in"]) * 1000)
         creds["claudeAiOauth"] = oauth
 
-        with open(CLAUDE_CREDENTIALS_FILE, "w") as f:
+        with open(CLAUDE_CREDENTIALS_FILE, "w", encoding="utf-8") as f:
             json.dump(creds, f, indent=2)
         logger.debug("Claude Code credentials refreshed successfully")
     except (json.JSONDecodeError, OSError, KeyError) as exc:
@@ -132,7 +132,7 @@ def get_claude_code_token() -> str | None:
         return None
 
     try:
-        with open(CLAUDE_CREDENTIALS_FILE) as f:
+        with open(CLAUDE_CREDENTIALS_FILE, encoding="utf-8") as f:
             creds = json.load(f)
     except (json.JSONDecodeError, OSError):
         return None
@@ -212,7 +212,7 @@ def _read_codex_keychain() -> dict | None:
                 "-w",
             ],
             capture_output=True,
-            text=True,
+            encoding="utf-8",
             timeout=5,
         )
         if result.returncode != 0:
@@ -231,7 +231,7 @@ def _read_codex_auth_file() -> dict | None:
     if not CODEX_AUTH_FILE.exists():
         return None
     try:
-        with open(CODEX_AUTH_FILE) as f:
+        with open(CODEX_AUTH_FILE, encoding="utf-8") as f:
             return json.load(f)
     except (json.JSONDecodeError, OSError):
         return None
@@ -324,7 +324,7 @@ def _save_refreshed_codex_credentials(auth_data: dict, token_data: dict) -> None
 
         CODEX_AUTH_FILE.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
         fd = os.open(CODEX_AUTH_FILE, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-        with os.fdopen(fd, "w") as f:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
             json.dump(auth_data, f, indent=2)
         logger.debug("Codex credentials refreshed successfully")
     except (OSError, KeyError) as exc:
@@ -869,7 +869,7 @@ class AgentRunner:
         if not agent_json_path.exists():
             raise FileNotFoundError(f"No agent.py or agent.json found in {agent_path}")
 
-        with open(agent_json_path) as f:
+        with open(agent_json_path, encoding="utf-8") as f:
             graph, goal = load_agent_export(f.read())
 
         return cls(
