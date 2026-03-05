@@ -83,14 +83,20 @@ def _resolve_path(path: str) -> str:
             # LLM may emit wrong-root paths (/mnt/data, /workspace, etc.).
             # Strip known prefixes and treat the remainder as relative to PROJECT_ROOT.
             path_norm = path.replace("\\", "/")
-            for prefix in ("/mnt/data/", "/mnt/data", "/workspace/", "/workspace",
-                          "/repo/", "/repo"):
+            for prefix in (
+                "/mnt/data/",
+                "/mnt/data",
+                "/workspace/",
+                "/workspace",
+                "/repo/",
+                "/repo",
+            ):
                 p = prefix.rstrip("/") + "/"
                 prefix_stripped = prefix.rstrip("/")
                 if path_norm.startswith(p) or (
                     path_norm.startswith(prefix_stripped) and len(path_norm) > len(prefix)
                 ):
-                    suffix = path_norm[len(prefix_stripped):].lstrip("/")
+                    suffix = path_norm[len(prefix_stripped) :].lstrip("/")
                     if suffix:
                         path = suffix.replace("/", os.sep)
                         resolved = os.path.abspath(os.path.join(PROJECT_ROOT, path))

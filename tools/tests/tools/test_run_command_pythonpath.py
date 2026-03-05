@@ -20,10 +20,7 @@ pytestmark = pytest.mark.skipif(
 
 def _build_pythonpath_buggy(project_root: str) -> str:
     """Replicate current (buggy) PYTHONPATH construction in run_command."""
-    return (
-        f"{project_root}/core:{project_root}/exports"
-        f":{project_root}/core/framework/agents"
-    )
+    return f"{project_root}/core:{project_root}/exports:{project_root}/core/framework/agents"
 
 
 def _build_pythonpath_fixed(project_root: str) -> str:
