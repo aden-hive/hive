@@ -1,0 +1,22 @@
+Invoice #INV-2024-001
+Date: March 5, 2024
+Bill To:
+Acme Corporation
+123 Business St
+Suite 100
+New York, NY 10001
+
+Description:
+Professional Services - Software Development
+Hours: 40
+Rate: $150.00
+Amount: $6,000.00
+
+Subtotal: $6,000.00
+Tax (8.875%): $532.50
+Total Due: $6,532.50
+
+Payment Terms: Net 30
+Due Date: April 4, 2024
+
+Thank you for your business!
