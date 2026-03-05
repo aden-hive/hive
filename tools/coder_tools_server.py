@@ -13,8 +13,6 @@ Usage:
 """
 
 import argparse
-import difflib
-import fnmatch
 import json
 import logging
 import os
@@ -25,64 +23,6 @@ import time
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
-
-# ── Constants (inspired by opencode) ──────────────────────────────────────
-
-MAX_READ_LINES = 2000
-MAX_LINE_LENGTH = 2000
-MAX_OUTPUT_BYTES = 50 * 1024  # 50KB byte budget for read output
-MAX_COMMAND_OUTPUT = 30_000  # chars before truncation
-SEARCH_RESULT_LIMIT = 100
-
-BINARY_EXTENSIONS = frozenset(
-    {
-        ".zip",
-        ".tar",
-        ".gz",
-        ".bz2",
-        ".xz",
-        ".7z",
-        ".rar",
-        ".exe",
-        ".dll",
-        ".so",
-        ".dylib",
-        ".bin",
-        ".class",
-        ".jar",
-        ".war",
-        ".pyc",
-        ".pyo",
-        ".wasm",
-        ".png",
-        ".jpg",
-        ".jpeg",
-        ".gif",
-        ".bmp",
-        ".ico",
-        ".webp",
-        ".svg",
-        ".mp3",
-        ".mp4",
-        ".avi",
-        ".mov",
-        ".mkv",
-        ".wav",
-        ".flac",
-        ".pdf",
-        ".doc",
-        ".docx",
-        ".xls",
-        ".xlsx",
-        ".ppt",
-        ".pptx",
-        ".sqlite",
-        ".db",
-        ".o",
-        ".a",
-        ".lib",
-    }
-)
 
 
 def setup_logger():
@@ -131,8 +71,49 @@ def _find_project_root() -> str:
 
 def _resolve_path(path: str) -> str:
     """Resolve path relative to PROJECT_ROOT. Raises ValueError if outside."""
+    # Normalize slashes for cross-platform (e.g. exports/hi_agent from LLM)
+    path = path.replace("/", os.sep)
     if os.path.isabs(path):
         resolved = os.path.abspath(path)
+        try:
+            common = os.path.commonpath([resolved, PROJECT_ROOT])
+        except ValueError:
+            common = ""
+        if common != PROJECT_ROOT:
+            # LLM may emit wrong-root paths (/mnt/data, /workspace, etc.).
+            # Strip known prefixes and treat the remainder as relative to PROJECT_ROOT.
+            path_norm = path.replace("\\", "/")
+            for prefix in (
+                "/mnt/data/",
+                "/mnt/data",
+                "/workspace/",
+                "/workspace",
+                "/repo/",
+                "/repo",
+            ):
+                p = prefix.rstrip("/") + "/"
+                prefix_stripped = prefix.rstrip("/")
+                if path_norm.startswith(p) or (
+                    path_norm.startswith(prefix_stripped) and len(path_norm) > len(prefix)
+                ):
+                    suffix = path_norm[len(prefix_stripped) :].lstrip("/")
+                    if suffix:
+                        path = suffix.replace("/", os.sep)
+                        resolved = os.path.abspath(os.path.join(PROJECT_ROOT, path))
+                        break
+            else:
+                # Try extracting exports/ or core/ subpath from the absolute path
+                parts = path.split(os.sep)
+                if "exports" in parts:
+                    idx = parts.index("exports")
+                    path = os.sep.join(parts[idx:])
+                    resolved = os.path.abspath(os.path.join(PROJECT_ROOT, path))
+                elif "core" in parts:
+                    idx = parts.index("core")
+                    path = os.sep.join(parts[idx:])
+                    resolved = os.path.abspath(os.path.join(PROJECT_ROOT, path))
+                else:
+                    raise ValueError(f"Access denied: '{path}' is outside the project root.")
     else:
         resolved = os.path.abspath(os.path.join(PROJECT_ROOT, path))
     try:
@@ -144,146 +125,15 @@ def _resolve_path(path: str) -> str:
     return resolved
 
 
-def _is_binary(filepath: str) -> bool:
-    """Detect binary files by extension and content sampling."""
-    _, ext = os.path.splitext(filepath)
-    if ext.lower() in BINARY_EXTENSIONS:
-        return True
-    try:
-        with open(filepath, "rb") as f:
-            chunk = f.read(4096)
-        if b"\x00" in chunk:
-            return True
-        non_printable = sum(1 for b in chunk if b < 9 or (13 < b < 32) or b > 126)
-        return non_printable / max(len(chunk), 1) > 0.3
-    except OSError:
-        return False
-
-
-# ── Fuzzy edit strategies (ported from opencode's 9-strategy cascade) ─────
-
-
-def _levenshtein(a: str, b: str) -> int:
-    """Standard Levenshtein distance."""
-    if not a:
-        return len(b)
-    if not b:
-        return len(a)
-    m, n = len(a), len(b)
-    dp = list(range(n + 1))
-    for i in range(1, m + 1):
-        prev = dp[0]
-        dp[0] = i
-        for j in range(1, n + 1):
-            temp = dp[j]
-            if a[i - 1] == b[j - 1]:
-                dp[j] = prev
-            else:
-                dp[j] = 1 + min(prev, dp[j], dp[j - 1])
-            prev = temp
-    return dp[n]
-
-
-def _similarity(a: str, b: str) -> float:
-    maxlen = max(len(a), len(b))
-    if maxlen == 0:
-        return 1.0
-    return 1.0 - _levenshtein(a, b) / maxlen
-
-
-def _fuzzy_find_candidates(content: str, old_text: str):
-    """
-    Yield candidate substrings from content that match old_text,
-    using a cascade of increasingly fuzzy strategies.
-    Ported from opencode's edit.ts replace() cascade.
-    """
-    # Strategy 1: Exact match
-    if old_text in content:
-        yield old_text
-
-    content_lines = content.split("\n")
-    search_lines = old_text.split("\n")
-    # Strip trailing empty line from search (common copy-paste artifact)
-    while search_lines and not search_lines[-1].strip():
-        search_lines = search_lines[:-1]
-    if not search_lines:
-        return
-
-    n_search = len(search_lines)
-
-    # Strategy 2: Line-trimmed match
-    # Each line trimmed; yields original content substring preserving indentation
-    for i in range(len(content_lines) - n_search + 1):
-        window = content_lines[i : i + n_search]
-        if all(cl.strip() == sl.strip() for cl, sl in zip(window, search_lines, strict=True)):
-            yield "\n".join(window)
-
-    # Strategy 3: Block-anchor match (first/last line as anchors, fuzzy middle)
-    if n_search >= 3:
-        first_trimmed = search_lines[0].strip()
-        last_trimmed = search_lines[-1].strip()
-        candidates = []
-        for i, line in enumerate(content_lines):
-            if line.strip() == first_trimmed:
-                end = i + n_search
-                if end <= len(content_lines) and content_lines[end - 1].strip() == last_trimmed:
-                    block = content_lines[i:end]
-                    # Score middle lines
-                    middle_content = "\n".join(block[1:-1])
-                    middle_search = "\n".join(search_lines[1:-1])
-                    sim = _similarity(middle_content, middle_search)
-                    candidates.append((sim, "\n".join(block)))
-        if candidates:
-            candidates.sort(key=lambda x: x[0], reverse=True)
-            if candidates[0][0] > 0.3:
-                yield candidates[0][1]
-
-    # Strategy 4: Whitespace-normalized match
-    normalized_search = re.sub(r"\s+", " ", old_text).strip()
-    for i in range(len(content_lines) - n_search + 1):
-        window = content_lines[i : i + n_search]
-        normalized_block = re.sub(r"\s+", " ", "\n".join(window)).strip()
-        if normalized_block == normalized_search:
-            yield "\n".join(window)
-
-    # Strategy 5: Indentation-flexible match
-    def _strip_indent(lines):
-        non_empty = [ln for ln in lines if ln.strip()]
-        if not non_empty:
-            return "\n".join(lines)
-        min_indent = min(len(ln) - len(ln.lstrip()) for ln in non_empty)
-        return "\n".join(ln[min_indent:] for ln in lines)
-
-    stripped_search = _strip_indent(search_lines)
-    for i in range(len(content_lines) - n_search + 1):
-        block = content_lines[i : i + n_search]
-        if _strip_indent(block) == stripped_search:
-            yield "\n".join(block)
-
-    # Strategy 6: Trimmed-boundary match
-    trimmed = old_text.strip()
-    if trimmed != old_text and trimmed in content:
-        yield trimmed
-
-
-def _compute_diff(old: str, new: str, path: str) -> str:
-    """Compute a unified diff for display."""
-    old_lines = old.splitlines(keepends=True)
-    new_lines = new.splitlines(keepends=True)
-    diff = difflib.unified_diff(old_lines, new_lines, fromfile=path, tofile=path, n=3)
-    result = "".join(diff)
-    if len(result) > 2000:
-        result = result[:2000] + "\n... (diff truncated)"
-    return result
-
-
 # ── Git snapshot system (ported from opencode's shadow git) ───────────────
 
 
 def _snapshot_git(*args: str) -> str:
     """Run a git command with the snapshot GIT_DIR and PROJECT_ROOT worktree."""
     cmd = ["git", "--git-dir", SNAPSHOT_DIR, "--work-tree", PROJECT_ROOT, *args]
-    result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+    result = subprocess.run(
+        cmd, capture_output=True, text=True, timeout=30, encoding="utf-8", stdin=subprocess.DEVNULL
+    )
     return result.stdout.strip()
 
 
@@ -297,360 +147,58 @@ def _ensure_snapshot_repo():
             ["git", "init", "--bare", SNAPSHOT_DIR],
             capture_output=True,
             timeout=10,
+            stdin=subprocess.DEVNULL,
+            encoding="utf-8",
         )
         _snapshot_git("config", "core.autocrlf", "false")
 
 
-# ── Tool: read_file ──────────────────────────────────────────────────────
-
-
-@mcp.tool()
-def read_file(path: str, offset: int = 1, limit: int = 0) -> str:
-    """Read file contents with line numbers and byte-budget truncation.
-
-    Returns numbered lines. Binary files are detected and rejected.
-    Large files are automatically truncated at 2000 lines or 50KB.
-
-    Args:
-        path: File path (relative to project root or absolute within project)
-        offset: Starting line number, 1-indexed (default: 1)
-        limit: Max lines to return, 0 = up to 2000 (default: 0)
-
-    Returns:
-        File contents with line numbers, or error message
-    """
-    resolved = _resolve_path(path)
-
-    if os.path.isdir(resolved):
-        # List directory contents instead
-        entries = []
-        for entry in sorted(os.listdir(resolved)):
-            full = os.path.join(resolved, entry)
-            suffix = "/" if os.path.isdir(full) else ""
-            entries.append(f"  {entry}{suffix}")
-        total = len(entries)
-        return f"Directory: {path} ({total} entries)\n" + "\n".join(entries[:200])
-
-    if not os.path.isfile(resolved):
-        return f"Error: File not found: {path}"
-
-    if _is_binary(resolved):
-        size = os.path.getsize(resolved)
-        return f"Binary file: {path} ({size:,} bytes). Cannot display binary content."
-
+def _take_snapshot() -> str:
+    """Take a git snapshot and return the tree hash. Silent on failure."""
+    if not SNAPSHOT_DIR:
+        return ""
     try:
-        with open(resolved, encoding="utf-8", errors="replace") as f:
-            all_lines = f.readlines()
-
-        total_lines = len(all_lines)
-        start_idx = max(0, offset - 1)  # Convert 1-indexed to 0-indexed
-        effective_limit = limit if limit > 0 else MAX_READ_LINES
-        end_idx = min(start_idx + effective_limit, total_lines)
-
-        # Apply byte budget (like opencode)
-        output_lines = []
-        byte_count = 0
-        truncated_by_bytes = False
-        for i in range(start_idx, end_idx):
-            line = all_lines[i].rstrip("\n\r")
-            if len(line) > MAX_LINE_LENGTH:
-                line = line[:MAX_LINE_LENGTH] + "..."
-            formatted = f"{i + 1:>6}\t{line}"
-            line_bytes = len(formatted.encode("utf-8")) + 1  # +1 for newline
-            if byte_count + line_bytes > MAX_OUTPUT_BYTES:
-                truncated_by_bytes = True
-                break
-            output_lines.append(formatted)
-            byte_count += line_bytes
-
-        result = "\n".join(output_lines)
-
-        # Truncation notices
-        lines_shown = len(output_lines)
-        actual_end = start_idx + lines_shown
-        if actual_end < total_lines or truncated_by_bytes:
-            result += f"\n\n(Showing lines {start_idx + 1}-{actual_end} of {total_lines}."
-            if truncated_by_bytes:
-                result += " Truncated by byte budget."
-            result += f" Use offset={actual_end + 1} to continue reading.)"
-
-        return result
-    except Exception as e:
-        return f"Error reading file: {e}"
-
-
-# ── Tool: write_file ─────────────────────────────────────────────────────
-
-
-@mcp.tool()
-def write_file(path: str, content: str) -> str:
-    """Create or overwrite a file. Automatically creates parent directories.
-
-    Takes a snapshot before writing for undo capability.
-
-    Args:
-        path: File path relative to project root
-        content: Complete file content
-
-    Returns:
-        Success message with file stats, or error
-    """
-    resolved = _resolve_path(path)
-
-    try:
-        # Snapshot before write
-        _take_snapshot()
-
-        existed = os.path.isfile(resolved)
-        os.makedirs(os.path.dirname(resolved), exist_ok=True)
-        with open(resolved, "w", encoding="utf-8") as f:
-            f.write(content)
-
-        line_count = content.count("\n") + (1 if content and not content.endswith("\n") else 0)
-        action = "Updated" if existed else "Created"
-        return f"{action} {path} ({len(content):,} bytes, {line_count} lines)"
-    except Exception as e:
-        return f"Error writing file: {e}"
-
-
-# ── Tool: edit_file (fuzzy-match cascade) ─────────────────────────────────
-
-
-@mcp.tool()
-def edit_file(path: str, old_text: str, new_text: str, replace_all: bool = False) -> str:
-    """Replace text in a file using a fuzzy-match cascade.
-
-    Tries exact match first, then falls back through increasingly fuzzy
-    strategies: line-trimmed, block-anchor, whitespace-normalized,
-    indentation-flexible, and trimmed-boundary matching.
-
-    Inspired by opencode's 9-strategy edit tool.
-
-    Args:
-        path: File path relative to project root
-        old_text: Text to find (fuzzy matching applied if exact fails)
-        new_text: Replacement text
-        replace_all: Replace all occurrences (default: first only)
-
-    Returns:
-        Success message with diff preview, or error with suggestions
-    """
-    resolved = _resolve_path(path)
-    if not os.path.isfile(resolved):
-        return f"Error: File not found: {path}"
-
-    try:
-        with open(resolved, encoding="utf-8") as f:
-            content = f.read()
-
-        # Snapshot before edit
-        _take_snapshot()
-
-        # Try fuzzy cascade
-        matched_text = None
-        strategy_used = None
-        strategies = [
-            "exact",
-            "line-trimmed",
-            "block-anchor",
-            "whitespace-normalized",
-            "indentation-flexible",
-            "trimmed-boundary",
-        ]
-
-        for i, candidate in enumerate(_fuzzy_find_candidates(content, old_text)):
-            idx = content.find(candidate)
-            if idx == -1:
-                continue
-
-            if replace_all:
-                matched_text = candidate
-                strategy_used = strategies[min(i, len(strategies) - 1)]
-                break
-
-            # Check uniqueness
-            last_idx = content.rfind(candidate)
-            if idx == last_idx:
-                matched_text = candidate
-                strategy_used = strategies[min(i, len(strategies) - 1)]
-                break
-            # Multiple matches — continue to next strategy
-
-        if matched_text is None:
-            # Generate helpful error
-            close = difflib.get_close_matches(old_text[:200], content.split("\n"), n=3, cutoff=0.4)
-            msg = f"Error: Could not find a unique match for old_text in {path}."
-            if close:
-                suggestions = "\n".join(f"  {line}" for line in close)
-                msg += f"\n\nDid you mean one of these lines?\n{suggestions}"
-            return msg
-
-        if replace_all:
-            count = content.count(matched_text)
-            new_content = content.replace(matched_text, new_text)
-        else:
-            count = 1
-            new_content = content.replace(matched_text, new_text, 1)
-
-        # Write
-        with open(resolved, "w", encoding="utf-8") as f:
-            f.write(new_content)
-
-        # Build response with diff preview
-        diff = _compute_diff(content, new_content, path)
-        match_info = f" (matched via {strategy_used})" if strategy_used != "exact" else ""
-        result = f"Replaced {count} occurrence(s) in {path}{match_info}"
-        if diff:
-            result += f"\n\n{diff}"
-        return result
-    except Exception as e:
-        return f"Error editing file: {e}"
-
-
-# ── Tool: list_directory ──────────────────────────────────────────────────
-
-
-@mcp.tool()
-def list_directory(path: str = ".", recursive: bool = False) -> str:
-    """List directory contents with type indicators.
-
-    Args:
-        path: Directory path (relative to project root, default: root)
-        recursive: List recursively (default: False)
-
-    Returns:
-        Sorted directory listing with / suffix for directories
-    """
-    resolved = _resolve_path(path)
-    if not os.path.isdir(resolved):
-        return f"Error: Directory not found: {path}"
-
-    try:
-        skip = {
-            ".git",
-            "__pycache__",
-            "node_modules",
-            ".venv",
-            ".tox",
-            ".mypy_cache",
-            ".ruff_cache",
-        }
-        entries = []
-        if recursive:
-            for root, dirs, files in os.walk(resolved):
-                dirs[:] = sorted(d for d in dirs if d not in skip and not d.startswith("."))
-                rel_root = os.path.relpath(root, resolved)
-                if rel_root == ".":
-                    rel_root = ""
-                for f in sorted(files):
-                    if f.startswith("."):
-                        continue
-                    entries.append(os.path.join(rel_root, f) if rel_root else f)
-                    if len(entries) >= 500:
-                        entries.append("... (truncated at 500 entries)")
-                        return "\n".join(entries)
-        else:
-            for entry in sorted(os.listdir(resolved)):
-                if entry.startswith(".") or entry in skip:
-                    continue
-                full = os.path.join(resolved, entry)
-                suffix = "/" if os.path.isdir(full) else ""
-                entries.append(f"{entry}{suffix}")
-
-        return "\n".join(entries) if entries else "(empty directory)"
-    except Exception as e:
-        return f"Error listing directory: {e}"
-
-
-# ── Tool: search_files ───────────────────────────────────────────────────
-
-
-@mcp.tool()
-def search_files(pattern: str, path: str = ".", include: str = "") -> str:
-    """Search file contents using regex. Results sorted by modification time.
-
-    Uses ripgrep when available, falls back to Python regex.
-
-    Args:
-        pattern: Regex pattern to search for
-        path: Directory to search (relative to project root)
-        include: File glob filter (e.g. '*.py')
-
-    Returns:
-        Matching lines grouped by file with line numbers
-    """
-    resolved = _resolve_path(path)
-    if not os.path.isdir(resolved):
-        return f"Error: Directory not found: {path}"
-
-    try:
-        cmd = [
-            "rg",
-            "-nH",
-            "--no-messages",
-            "--hidden",
-            "--max-count=20",
-            "--glob=!.git/*",
-            pattern,
-        ]
-        if include:
-            cmd.extend(["--glob", include])
-        cmd.append(resolved)
-
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
-        if result.returncode <= 1:
-            output = result.stdout.strip()
-            if not output:
-                return "No matches found."
-
-            # Group by file, make paths relative
-            lines = []
-            for line in output.split("\n")[:SEARCH_RESULT_LIMIT]:
-                line = line.replace(PROJECT_ROOT + "/", "")
-                if len(line) > MAX_LINE_LENGTH:
-                    line = line[:MAX_LINE_LENGTH] + "..."
-                lines.append(line)
-            total = output.count("\n") + 1
-            result_str = "\n".join(lines)
-            if total > SEARCH_RESULT_LIMIT:
-                result_str += (
-                    f"\n\n... ({total} total matches, showing first {SEARCH_RESULT_LIMIT})"
-                )
-            return result_str
-    except FileNotFoundError:
-        pass
-    except subprocess.TimeoutExpired:
-        return "Error: Search timed out after 30 seconds"
-
-    # Fallback: Python regex
-    try:
-        compiled = re.compile(pattern)
-        matches = []
-        skip_dirs = {".git", "__pycache__", "node_modules", ".venv", ".tox"}
-
-        for root, dirs, files in os.walk(resolved):
-            dirs[:] = [d for d in dirs if d not in skip_dirs]
-            for fname in files:
-                if include and not fnmatch.fnmatch(fname, include):
-                    continue
-                fpath = os.path.join(root, fname)
-                rel = os.path.relpath(fpath, PROJECT_ROOT)
-                try:
-                    with open(fpath, encoding="utf-8", errors="ignore") as f:
-                        for i, line in enumerate(f, 1):
-                            if compiled.search(line):
-                                matches.append(f"{rel}:{i}:{line.rstrip()[:MAX_LINE_LENGTH]}")
-                                if len(matches) >= SEARCH_RESULT_LIMIT:
-                                    return "\n".join(matches) + "\n... (truncated)"
-                except (OSError, UnicodeDecodeError):
-                    continue
-
-        return "\n".join(matches) if matches else "No matches found."
-    except re.error as e:
-        return f"Error: Invalid regex: {e}"
+        _ensure_snapshot_repo()
+        _snapshot_git("add", ".")
+        return _snapshot_git("write-tree")
+    except Exception:
+        return ""
 
 
 # ── Tool: run_command ─────────────────────────────────────────────────────
+
+MAX_COMMAND_OUTPUT = 30_000  # chars before truncation
+
+
+def _translate_command_for_windows(command: str) -> str:
+    """Translate common Unix commands to Windows equivalents."""
+    if os.name != "nt":
+        return command
+    cmd = command.strip()
+
+    # mkdir -p: Unix creates parents; Windows mkdir already does; -p becomes a dir name
+    if cmd.startswith("mkdir -p ") or cmd.startswith("mkdir -p\t"):
+        rest = cmd[9:].lstrip().replace("/", os.sep)
+        return "mkdir " + rest
+
+    # ls / pwd: cmd.exe uses dir and cd
+    # Order matters: replace longer patterns first
+    for unix, win in [
+        ("ls -la", "dir /a"),
+        ("ls -al", "dir /a"),
+        ("ls -l", "dir"),
+        ("ls -a", "dir /a"),
+        ("ls ", "dir "),
+        ("pwd", "cd"),
+    ]:
+        cmd = cmd.replace(unix, win)
+    # Standalone "ls" at end (e.g. "cd x && ls")
+    if cmd.endswith(" ls"):
+        cmd = cmd[:-3] + " dir"
+    elif cmd == "ls":
+        cmd = "dir"
+
+    return cmd
 
 
 @mcp.tool()
@@ -668,10 +216,11 @@ def run_command(command: str, cwd: str = "", timeout: int = 120) -> str:
     Returns:
         Combined stdout/stderr with exit code
     """
-    timeout = min(timeout, 300)  # Cap at 5 minutes
+    timeout = min(timeout, 300)
     work_dir = _resolve_path(cwd) if cwd else PROJECT_ROOT
 
     try:
+        command = _translate_command_for_windows(command)
         start = time.monotonic()
         result = subprocess.run(
             command,
@@ -680,11 +229,16 @@ def run_command(command: str, cwd: str = "", timeout: int = 120) -> str:
             capture_output=True,
             text=True,
             timeout=timeout,
+            stdin=subprocess.DEVNULL,
+            encoding="utf-8",
             env={
                 **os.environ,
-                "PYTHONPATH": (
-                    f"{PROJECT_ROOT}/core:{PROJECT_ROOT}/exports"
-                    f":{PROJECT_ROOT}/core/framework/agents"
+                "PYTHONPATH": os.pathsep.join(
+                    [
+                        os.path.join(PROJECT_ROOT, "core"),
+                        os.path.join(PROJECT_ROOT, "exports"),
+                        os.path.join(PROJECT_ROOT, "core", "framework", "agents"),
+                    ]
                 ),
             },
         )
@@ -698,7 +252,6 @@ def run_command(command: str, cwd: str = "", timeout: int = 120) -> str:
 
         output = "\n".join(parts)
 
-        # Truncate large output (like opencode's MAX_METADATA_LENGTH)
         if len(output) > MAX_COMMAND_OUTPUT:
             output = (
                 output[:MAX_COMMAND_OUTPUT]
@@ -717,19 +270,7 @@ def run_command(command: str, cwd: str = "", timeout: int = 120) -> str:
         return f"Error executing command: {e}"
 
 
-# ── Tool: snapshot (git-based undo) ───────────────────────────────────────
-
-
-def _take_snapshot() -> str:
-    """Take a git snapshot and return the tree hash. Silent on failure."""
-    if not SNAPSHOT_DIR:
-        return ""
-    try:
-        _ensure_snapshot_repo()
-        _snapshot_git("add", ".")
-        return _snapshot_git("write-tree")
-    except Exception:
-        return ""
+# ── Tool: undo_changes (git-based undo) ──────────────────────────────────
 
 
 @mcp.tool()
@@ -769,6 +310,8 @@ def undo_changes(path: str = "") -> str:
                 capture_output=True,
                 text=True,
                 timeout=10,
+                stdin=subprocess.DEVNULL,
+                encoding="utf-8",
             )
             return f"Restored: {path}"
         else:
@@ -788,121 +331,34 @@ def undo_changes(path: str = "") -> str:
 
 
 @mcp.tool()
-def discover_mcp_tools(server_config_path: str = "") -> str:
-    """Discover available MCP tools by connecting to servers defined in a config file.
+def list_agent_tools(
+    server_config_path: str = "",
+    output_schema: str = "simple",
+    group: str = "all",
+) -> str:
+    """Discover tools available for agent building, grouped by category.
 
-    Connects to each MCP server, lists all tools with full schemas, then
-    disconnects. Use this to see what tools are available before designing
-    an agent — never rely on static documentation.
-
-    Args:
-        server_config_path: Path to mcp_servers.json (relative to project root).
-            Default: the hive-tools server config at tools/mcp_servers.json.
-            Can also point to any agent's mcp_servers.json.
-
-    Returns:
-        JSON listing of all tools with names, descriptions, and input schemas
-    """
-    # Resolve config path
-    if not server_config_path:
-        # Default: look for the main hive-tools mcp_servers.json
-        candidates = [
-            os.path.join(PROJECT_ROOT, "tools", "mcp_servers.json"),
-            os.path.join(PROJECT_ROOT, "mcp_servers.json"),
-        ]
-        config_path = None
-        for c in candidates:
-            if os.path.isfile(c):
-                config_path = c
-                break
-        if not config_path:
-            return "Error: No mcp_servers.json found. Provide server_config_path."
-    else:
-        config_path = _resolve_path(server_config_path)
-        if not os.path.isfile(config_path):
-            return f"Error: Config file not found: {server_config_path}"
-
-    try:
-        with open(config_path, encoding="utf-8") as f:
-            servers_config = json.load(f)
-    except (json.JSONDecodeError, OSError) as e:
-        return f"Error reading config: {e}"
-
-    # Import MCPClient (deferred — needs PYTHONPATH to include core/)
-    try:
-        from framework.runner.mcp_client import MCPClient, MCPServerConfig
-    except ImportError:
-        return "Error: Cannot import MCPClient. Ensure PYTHONPATH includes the core/ directory."
-
-    all_tools = []
-    errors = []
-    config_dir = os.path.dirname(config_path)
-
-    for server_name, server_conf in servers_config.items():
-        # Resolve cwd relative to config file location
-        cwd = server_conf.get("cwd", "")
-        if cwd and not os.path.isabs(cwd):
-            cwd = os.path.abspath(os.path.join(config_dir, cwd))
-
-        try:
-            config = MCPServerConfig(
-                name=server_name,
-                transport=server_conf.get("transport", "stdio"),
-                command=server_conf.get("command"),
-                args=server_conf.get("args", []),
-                env=server_conf.get("env", {}),
-                cwd=cwd or None,
-                url=server_conf.get("url"),
-                headers=server_conf.get("headers", {}),
-            )
-            client = MCPClient(config)
-            client.connect()
-            tools = client.list_tools()
-
-            for tool in tools:
-                all_tools.append(
-                    {
-                        "server": server_name,
-                        "name": tool.name,
-                        "description": tool.description,
-                        "input_schema": tool.input_schema,
-                    }
-                )
-
-            client.disconnect()
-        except Exception as e:
-            errors.append({"server": server_name, "error": str(e)})
-
-    result = {
-        "tools": all_tools,
-        "total": len(all_tools),
-        "servers_queried": len(servers_config),
-    }
-    if errors:
-        result["errors"] = errors
-
-    return json.dumps(result, indent=2, default=str)
-
-
-# ── Meta-agent: Agent tool catalog ────────────────────────────────────────
-
-
-@mcp.tool()
-def list_agent_tools(server_config_path: str = "") -> str:
-    """List all tools available for agent building from the hive-tools MCP server.
-
-    Returns tool names grouped by category. Use this BEFORE designing an agent
-    to know exactly which tools exist. Only use tools from this list in node
-    definitions — never guess or fabricate tool names.
+    Connects to each MCP server, lists tools, then disconnects. Use this
+    BEFORE designing an agent to know exactly which tools exist. Only use
+    tools from this list in node definitions — never guess or fabricate.
 
     Args:
         server_config_path: Path to mcp_servers.json. Default: tools/mcp_servers.json
             (the standard hive-tools server). Can also point to an agent's config
             to see what tools that specific agent has access to.
+        output_schema: "simple" (default) returns name and description per tool.
+            "full" also includes server and input_schema.
+        group: "all" (default) returns every category. A prefix like "gmail"
+            returns only that group's tools.
 
     Returns:
-        JSON with tool names grouped by prefix (e.g. gmail_*, slack_*, etc.)
+        JSON with tools grouped by prefix (e.g. gmail_*, slack_*).
     """
+    if output_schema not in ("simple", "full"):
+        return json.dumps(
+            {"error": f"Invalid output_schema: {output_schema!r}. Use 'simple' or 'full'."}
+        )
+
     # Resolve config path
     if not server_config_path:
         candidates = [
@@ -928,53 +384,75 @@ def list_agent_tools(server_config_path: str = "") -> str:
         return json.dumps({"error": f"Failed to read config: {e}"})
 
     try:
+        from pathlib import Path
+
         from framework.runner.mcp_client import MCPClient, MCPServerConfig
+        from framework.runner.tool_registry import ToolRegistry
     except ImportError:
         return json.dumps({"error": "Cannot import MCPClient"})
 
     all_tools: list[dict] = []
     errors = []
-    config_dir = os.path.dirname(config_path)
+    config_dir = Path(config_path).parent
 
     for server_name, server_conf in servers_config.items():
-        cwd = server_conf.get("cwd", "")
-        if cwd and not os.path.isabs(cwd):
-            cwd = os.path.abspath(os.path.join(config_dir, cwd))
+        resolved = ToolRegistry.resolve_mcp_stdio_config(
+            {"name": server_name, **server_conf}, config_dir
+        )
         try:
             config = MCPServerConfig(
                 name=server_name,
-                transport=server_conf.get("transport", "stdio"),
-                command=server_conf.get("command"),
-                args=server_conf.get("args", []),
-                env=server_conf.get("env", {}),
-                cwd=cwd or None,
-                url=server_conf.get("url"),
-                headers=server_conf.get("headers", {}),
+                transport=resolved.get("transport", "stdio"),
+                command=resolved.get("command"),
+                args=resolved.get("args", []),
+                env=resolved.get("env", {}),
+                cwd=resolved.get("cwd"),
+                url=resolved.get("url"),
+                headers=resolved.get("headers", {}),
             )
             client = MCPClient(config)
             client.connect()
             for tool in client.list_tools():
-                all_tools.append({"name": tool.name, "description": tool.description})
+                all_tools.append(
+                    {
+                        "server": server_name,
+                        "name": tool.name,
+                        "description": tool.description,
+                        "input_schema": tool.input_schema,
+                    }
+                )
             client.disconnect()
         except Exception as e:
             errors.append({"server": server_name, "error": str(e)})
 
     # Group by prefix (e.g., gmail_, slack_, stripe_)
-    groups: dict[str, list[str]] = {}
+    groups: dict[str, list[dict]] = {}
     for t in sorted(all_tools, key=lambda x: x["name"]):
         parts = t["name"].split("_", 1)
         prefix = parts[0] if len(parts) > 1 else "general"
-        groups.setdefault(prefix, []).append(t["name"])
+        groups.setdefault(prefix, []).append(t)
 
+    # Filter to a specific group
+    if group != "all":
+        groups = {group: groups[group]} if group in groups else {}
+
+    # Apply output schema
+    if output_schema == "simple":
+        groups = {
+            prefix: [{"name": t["name"], "description": t["description"]} for t in tools]
+            for prefix, tools in groups.items()
+        }
+
+    all_names = sorted(t["name"] for tools in groups.values() for t in tools)
     result: dict = {
-        "total": len(all_tools),
+        "total": len(all_names),
         "tools_by_category": groups,
-        "all_tool_names": sorted(t["name"] for t in all_tools),
+        "all_tool_names": all_names,
     }
     if errors:
         result["errors"] = errors
 
-    return json.dumps(result, indent=2)
+    return json.dumps(result, indent=2, default=str)
 
 
 # ── Meta-agent: Agent tool validation ─────────────────────────────────────
@@ -994,23 +472,49 @@ def validate_agent_tools(agent_path: str) -> str:
     Returns:
         JSON with validation result: pass/fail, missing tools per node, available tools
     """
-    resolved = _resolve_path(agent_path)
+    try:
+        resolved = _resolve_path(agent_path)
+    except ValueError:
+        return json.dumps({"error": "Access denied: path is outside the project root."})
+
+    # Restrict to allowed directories to prevent arbitrary code execution
+    # via importlib.import_module() below.
+    try:
+        from framework.server.app import validate_agent_path
+    except ImportError:
+        return json.dumps({"error": "Cannot validate agent path: framework package not available"})
+
+    try:
+        resolved = str(validate_agent_path(resolved))
+    except ValueError:
+        return json.dumps(
+            {
+                "error": "agent_path must be inside an allowed directory "
+                "(exports/, examples/, or ~/.hive/agents/)"
+            }
+        )
+
     if not os.path.isdir(resolved):
         return json.dumps({"error": f"Agent directory not found: {agent_path}"})
 
+    agent_dir = resolved  # Keep path; 'resolved' is reused for MCP config in loop
+
     # --- Discover available tools from agent's MCP servers ---
-    mcp_config_path = os.path.join(resolved, "mcp_servers.json")
+    mcp_config_path = os.path.join(agent_dir, "mcp_servers.json")
     if not os.path.isfile(mcp_config_path):
         return json.dumps({"error": f"No mcp_servers.json found in {agent_path}"})
 
     try:
+        from pathlib import Path
+
         from framework.runner.mcp_client import MCPClient, MCPServerConfig
+        from framework.runner.tool_registry import ToolRegistry
     except ImportError:
         return json.dumps({"error": "Cannot import MCPClient"})
 
     available_tools: set[str] = set()
     discovery_errors = []
-    config_dir = os.path.dirname(mcp_config_path)
+    config_dir = Path(mcp_config_path).parent
 
     try:
         with open(mcp_config_path, encoding="utf-8") as f:
@@ -1019,19 +523,19 @@ def validate_agent_tools(agent_path: str) -> str:
         return json.dumps({"error": f"Failed to read mcp_servers.json: {e}"})
 
     for server_name, server_conf in servers_config.items():
-        cwd = server_conf.get("cwd", "")
-        if cwd and not os.path.isabs(cwd):
-            cwd = os.path.abspath(os.path.join(config_dir, cwd))
+        resolved = ToolRegistry.resolve_mcp_stdio_config(
+            {"name": server_name, **server_conf}, config_dir
+        )
         try:
             config = MCPServerConfig(
                 name=server_name,
-                transport=server_conf.get("transport", "stdio"),
-                command=server_conf.get("command"),
-                args=server_conf.get("args", []),
-                env=server_conf.get("env", {}),
-                cwd=cwd or None,
-                url=server_conf.get("url"),
-                headers=server_conf.get("headers", {}),
+                transport=resolved.get("transport", "stdio"),
+                command=resolved.get("command"),
+                args=resolved.get("args", []),
+                env=resolved.get("env", {}),
+                cwd=resolved.get("cwd"),
+                url=resolved.get("url"),
+                headers=resolved.get("headers", {}),
             )
             client = MCPClient(config)
             client.connect()
@@ -1042,7 +546,7 @@ def validate_agent_tools(agent_path: str) -> str:
             discovery_errors.append({"server": server_name, "error": str(e)})
 
     # --- Load agent nodes and extract declared tools ---
-    agent_py = os.path.join(resolved, "agent.py")
+    agent_py = os.path.join(agent_dir, "agent.py")
     if not os.path.isfile(agent_py):
         return json.dumps({"error": f"No agent.py found in {agent_path}"})
 
@@ -1050,8 +554,8 @@ def validate_agent_tools(agent_path: str) -> str:
     import importlib.util
     import sys
 
-    package_name = os.path.basename(resolved)
-    parent_dir = os.path.dirname(os.path.abspath(resolved))
+    package_name = os.path.basename(agent_dir)
+    parent_dir = os.path.dirname(os.path.abspath(agent_dir))
     if parent_dir not in sys.path:
         sys.path.insert(0, parent_dir)
 
@@ -1084,7 +588,7 @@ def validate_agent_tools(agent_path: str) -> str:
         result["missing_tools"] = missing_by_node
         result["message"] = (
             f"FAIL: {sum(len(v) for v in missing_by_node.values())} tool(s) declared "
-            f"in nodes do not exist. Run discover_mcp_tools() to see available tools "
+            f"in nodes do not exist. Run list_agent_tools() to see available tools "
             f"and fix the node definitions."
         )
     else:
@@ -1306,94 +810,6 @@ def list_agent_sessions(
 
 
 @mcp.tool()
-def get_agent_session_state(agent_name: str, session_id: str) -> str:
-    """Load full session state (excluding memory to prevent context bloat).
-
-    Returns status, progress, result, metrics, and checkpoint info.
-    Use get_agent_session_memory to read memory contents separately.
-
-    Args:
-        agent_name: Agent package name (e.g. 'deep_research_agent')
-        session_id: Session ID (e.g. 'session_20260208_143022_abc12345')
-
-    Returns:
-        JSON with full session state
-    """
-    agent_dir = _resolve_hive_agent_path(agent_name)
-    state_path = agent_dir / "sessions" / session_id / "state.json"
-    data = _read_session_json(state_path)
-    if data is None:
-        return json.dumps({"error": f"Session not found: {session_id}"})
-
-    # Exclude memory values but show keys
-    memory = data.get("memory", {})
-    data["memory_keys"] = list(memory.keys()) if isinstance(memory, dict) else []
-    data["memory_size"] = len(memory) if isinstance(memory, dict) else 0
-    data.pop("memory", None)
-
-    return json.dumps(data, indent=2, default=str)
-
-
-@mcp.tool()
-def get_agent_session_memory(
-    agent_name: str,
-    session_id: str,
-    key: str = "",
-) -> str:
-    """Read memory contents from a session.
-
-    Memory stores intermediate results passed between nodes. Use this
-    to inspect what data was produced during execution.
-
-    Args:
-        agent_name: Agent package name
-        session_id: Session ID
-        key: Specific memory key to retrieve. Empty for all keys.
-
-    Returns:
-        JSON with memory contents
-    """
-    agent_dir = _resolve_hive_agent_path(agent_name)
-    state_path = agent_dir / "sessions" / session_id / "state.json"
-    data = _read_session_json(state_path)
-    if data is None:
-        return json.dumps({"error": f"Session not found: {session_id}"})
-
-    memory = data.get("memory", {})
-    if not isinstance(memory, dict):
-        memory = {}
-
-    if key:
-        if key not in memory:
-            return json.dumps(
-                {
-                    "error": f"Memory key not found: '{key}'",
-                    "available_keys": list(memory.keys()),
-                }
-            )
-        return json.dumps(
-            {
-                "session_id": session_id,
-                "key": key,
-                "value": memory[key],
-                "value_type": type(memory[key]).__name__,
-            },
-            indent=2,
-            default=str,
-        )
-
-    return json.dumps(
-        {
-            "session_id": session_id,
-            "memory": memory,
-            "total_keys": len(memory),
-        },
-        indent=2,
-        default=str,
-    )
-
-
-@mcp.tool()
 def list_agent_checkpoints(
     agent_name: str,
     session_id: str,
@@ -1556,6 +972,22 @@ def run_agent_tests(
     # Parse test types
     types_list = [t.strip() for t in test_types.split(",")]
 
+    # Guard: pytest must be available as a subprocess command.
+    # Install with: pip install 'framework[testing]'
+    import shutil
+
+    if shutil.which("pytest") is None:
+        return json.dumps(
+            {
+                "error": (
+                    "pytest is not installed or not on PATH. "
+                    "Hive's test runner requires pytest at runtime. "
+                    "Install it with: pip install 'framework[testing]' "
+                    "or: uv pip install 'framework[testing]'"
+                ),
+            }
+        )
+
     # Build pytest command
     cmd = ["pytest"]
 
@@ -1578,13 +1010,16 @@ def run_agent_tests(
         cmd.append("-x")
     cmd.append("--tb=short")
 
-    # Set PYTHONPATH
+    # Set PYTHONPATH (use pathsep for Windows)
     env = os.environ.copy()
     pythonpath = env.get("PYTHONPATH", "")
     core_path = os.path.join(PROJECT_ROOT, "core")
     exports_path = os.path.join(PROJECT_ROOT, "exports")
     fw_agents_path = os.path.join(PROJECT_ROOT, "core", "framework", "agents")
-    env["PYTHONPATH"] = f"{core_path}:{exports_path}:{fw_agents_path}:{PROJECT_ROOT}:{pythonpath}"
+    path_parts = [core_path, exports_path, fw_agents_path, PROJECT_ROOT]
+    if pythonpath:
+        path_parts.append(pythonpath)
+    env["PYTHONPATH"] = os.pathsep.join(path_parts)
 
     try:
         result = subprocess.run(
@@ -1593,6 +1028,8 @@ def run_agent_tests(
             text=True,
             timeout=120,
             env=env,
+            stdin=subprocess.DEVNULL,
+            encoding="utf-8",
         )
     except subprocess.TimeoutExpired:
         return json.dumps(
@@ -1694,6 +1131,8 @@ def run_agent_tests(
 def main() -> None:
     global PROJECT_ROOT, SNAPSHOT_DIR
 
+    from aden_tools.file_ops import register_file_tools
+
     parser = argparse.ArgumentParser(description="Coder Tools MCP Server")
     parser.add_argument("--project-root", default="")
     parser.add_argument("--port", type=int, default=int(os.getenv("CODER_TOOLS_PORT", "4002")))
@@ -1710,6 +1149,13 @@ def main() -> None:
     )
     logger.info(f"Project root: {PROJECT_ROOT}")
     logger.info(f"Snapshot dir: {SNAPSHOT_DIR}")
+
+    register_file_tools(
+        mcp,
+        resolve_path=_resolve_path,
+        before_write=None,  # Git snapshot causes stdio deadlock on Windows; undo_changes limited
+        project_root=PROJECT_ROOT,
+    )
 
     if args.stdio:
         mcp.run(transport="stdio")

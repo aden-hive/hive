@@ -62,8 +62,11 @@ jobs:
           uv run pytest tests/ -v
 
   test-tools:
-    name: Test Tools
-    runs-on: ubuntu-latest
+    name: Test Tools (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest]
     steps:
       - uses: actions/checkout@v4
 

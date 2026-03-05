@@ -4,6 +4,7 @@ import asyncio
 import logging
 
 from aiohttp import web
+from aiohttp.client_exceptions import ClientConnectionResetError as _AiohttpConnReset
 
 from framework.runtime.event_bus import EventType
 from framework.server.app import resolve_session
@@ -37,6 +38,8 @@ DEFAULT_EVENT_TYPES = [
     EventType.CONTEXT_COMPACTED,
     EventType.WORKER_LOADED,
     EventType.CREDENTIALS_REQUIRED,
+    EventType.SUBAGENT_REPORT,
+    EventType.QUEEN_MODE_CHANGED,
 ]
 
 # Keepalive interval in seconds
@@ -90,13 +93,26 @@ async def handle_events(request: web.Request) -> web.StreamResponse:
         "node_loop_started",
         "credentials_required",
         "worker_loaded",
+        "queen_mode_changed",
     }
+
+    client_disconnected = asyncio.Event()
 
     async def on_event(event) -> None:
         """Push event dict into queue; drop non-critical events if full."""
+        if client_disconnected.is_set():
+            return
+
         evt_dict = event.to_dict()
         if evt_dict.get("type") in _CRITICAL_EVENTS:
-            await queue.put(evt_dict)  # block rather than drop
+            try:
+                queue.put_nowait(evt_dict)
+            except asyncio.QueueFull:
+                logger.warning(
+                    "SSE client queue full on critical event; disconnecting session='%s'",
+                    session.id,
+                )
+                client_disconnected.set()
         else:
             try:
                 queue.put_nowait(evt_dict)
@@ -117,10 +133,33 @@ async def handle_events(request: web.Request) -> web.StreamResponse:
         "SSE connected: session='%s', sub_id='%s', types=%d", session.id, sub_id, len(event_types)
     )
 
+    # Replay buffered events that were published before this SSE connected.
+    # The EventBus keeps a history ring-buffer; we replay the subset that
+    # produces visible chat messages so the frontend never misses early
+    # queen output.  Lifecycle events are NOT replayed to avoid duplicate
+    # state transitions (turn counter increments, etc.).
+    _REPLAY_TYPES = {
+        EventType.CLIENT_OUTPUT_DELTA.value,
+        EventType.EXECUTION_STARTED.value,
+        EventType.CLIENT_INPUT_REQUESTED.value,
+    }
+    event_type_values = {et.value for et in event_types}
+    replay_types = _REPLAY_TYPES & event_type_values
+    replayed = 0
+    for past_event in event_bus._event_history:
+        if past_event.type.value in replay_types:
+            try:
+                queue.put_nowait(past_event.to_dict())
+                replayed += 1
+            except asyncio.QueueFull:
+                break
+    if replayed:
+        logger.info("SSE replayed %d buffered events for session='%s'", replayed, session.id)
+
     event_count = 0
     close_reason = "unknown"
     try:
-        while True:
+        while not client_disconnected.is_set():
             try:
                 data = await asyncio.wait_for(queue.get(), timeout=KEEPALIVE_INTERVAL)
                 await sse.send_event(data)
@@ -130,13 +169,23 @@ async def handle_events(request: web.Request) -> web.StreamResponse:
                         "SSE first event: session='%s', type='%s'", session.id, data.get("type")
                     )
             except TimeoutError:
-                await sse.send_keepalive()
-            except (ConnectionResetError, ConnectionError):
+                try:
+                    await sse.send_keepalive()
+                except (ConnectionResetError, ConnectionError, _AiohttpConnReset):
+                    close_reason = "client_disconnected"
+                    break
+                except Exception as exc:
+                    close_reason = f"keepalive_error: {exc}"
+                    break
+            except (ConnectionResetError, ConnectionError, _AiohttpConnReset):
                 close_reason = "client_disconnected"
                 break
             except Exception as exc:
                 close_reason = f"error: {exc}"
                 break
+
+        if client_disconnected.is_set() and close_reason == "unknown":
+            close_reason = "slow_client"
     except asyncio.CancelledError:
         close_reason = "cancelled"
     finally:

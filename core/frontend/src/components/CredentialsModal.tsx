@@ -400,17 +400,19 @@ export default function CredentialsModal({
                             <Pencil className="w-3 h-3" />
                           </button>
                         )}
-                        <button
-                          onClick={() => {
-                            setDeletingId(deletingId === row.id ? null : row.id);
-                            if (editingId) { setEditingId(null); setInputValue(""); }
-                          }}
-                          disabled={saving}
-                          className="p-1.5 rounded-md text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors"
-                          title="Delete credential"
-                        >
-                          <Trash2 className="w-3 h-3" />
-                        </button>
+                        {!(row.adenSupported && row.id !== "aden_api_key") && (
+                          <button
+                            onClick={() => {
+                              setDeletingId(deletingId === row.id ? null : row.id);
+                              if (editingId) { setEditingId(null); setInputValue(""); }
+                            }}
+                            disabled={saving}
+                            className="p-1.5 rounded-md text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors"
+                            title="Delete credential"
+                          >
+                            <Trash2 className="w-3 h-3" />
+                          </button>
+                        )}
                       </div>
                     ) : row.adenSupported && !adenPlatformConnected && row.id !== "aden_api_key" ? (
                       <span className="text-[11px] text-muted-foreground italic flex-shrink-0">

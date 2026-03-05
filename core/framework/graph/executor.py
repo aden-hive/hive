@@ -138,6 +138,7 @@ class GraphExecutor:
         accounts_prompt: str = "",
         accounts_data: list[dict] | None = None,
         tool_provider_map: dict[str, str] | None = None,
+        dynamic_tools_provider: Callable | None = None,
     ):
         """
         Initialize the executor.
@@ -160,6 +161,8 @@ class GraphExecutor:
             accounts_prompt: Connected accounts block for system prompt injection
             accounts_data: Raw account data for per-node prompt generation
             tool_provider_map: Tool name to provider name mapping for account routing
+            dynamic_tools_provider: Optional callback returning current
+                tool list (for mode switching)
         """
         self.runtime = runtime
         self.llm = llm
@@ -178,12 +181,14 @@ class GraphExecutor:
         self.accounts_prompt = accounts_prompt
         self.accounts_data = accounts_data
         self.tool_provider_map = tool_provider_map
+        self.dynamic_tools_provider = dynamic_tools_provider
 
-        # Initialize output cleaner
+        # Initialize output cleaner — uses its own dedicated fast model (CEREBRAS_API_KEY),
+        # never the main agent LLM. Passing the main LLM here would cause expensive
+        # Anthropic calls for output cleaning whenever ANTHROPIC_API_KEY is set.
         self.cleansing_config = cleansing_config or CleansingConfig()
         self.output_cleaner = OutputCleaner(
             config=self.cleansing_config,
-            llm_provider=llm,
         )
 
         # Parallel execution settings
@@ -192,6 +197,9 @@ class GraphExecutor:
 
         # Pause/resume control
         self._pause_requested = asyncio.Event()
+
+        # Track the currently executing node for external injection routing
+        self.current_node_id: str | None = None
 
     def _write_progress(
         self,
@@ -283,6 +291,125 @@ class GraphExecutor:
 
         return errors
 
+    # Max chars of formatted messages before proactively splitting for LLM.
+    _PHASE_LLM_CHAR_LIMIT = 240_000
+    _PHASE_LLM_MAX_DEPTH = 10
+
+    async def _phase_llm_compact(
+        self,
+        conversation: Any,
+        next_spec: NodeSpec,
+        messages: list,
+        _depth: int = 0,
+    ) -> str:
+        """Summarise messages for phase-boundary compaction.
+
+        Uses the same recursive binary-search splitting as EventLoopNode.
+        """
+        from framework.graph.conversation import extract_tool_call_history
+        from framework.graph.event_loop_node import _is_context_too_large_error
+
+        if _depth > self._PHASE_LLM_MAX_DEPTH:
+            raise RuntimeError("Phase LLM compaction recursion limit")
+
+        # Format messages
+        lines: list[str] = []
+        for m in messages:
+            if m.role == "tool":
+                c = m.content[:500] + ("..." if len(m.content) > 500 else "")
+                lines.append(f"[tool result]: {c}")
+            elif m.role == "assistant" and m.tool_calls:
+                names = [tc.get("function", {}).get("name", "?") for tc in m.tool_calls]
+                lines.append(
+                    f"[assistant (calls: {', '.join(names)})]: "
+                    f"{m.content[:200] if m.content else ''}"
+                )
+            else:
+                lines.append(f"[{m.role}]: {m.content}")
+        formatted = "\n\n".join(lines)
+
+        # Proactive split
+        if len(formatted) > self._PHASE_LLM_CHAR_LIMIT and len(messages) > 1:
+            summary = await self._phase_llm_compact_split(
+                conversation,
+                next_spec,
+                messages,
+                _depth,
+            )
+        else:
+            max_tokens = getattr(conversation, "_max_history_tokens", 32000)
+            target_tokens = max_tokens // 2
+            target_chars = target_tokens * 4
+
+            prompt = (
+                "You are compacting an AI agent's conversation history "
+                "at a phase boundary.\n\n"
+                f"NEXT PHASE: {next_spec.name}\n"
+            )
+            if next_spec.description:
+                prompt += f"NEXT PHASE PURPOSE: {next_spec.description}\n"
+            prompt += (
+                f"\nCONVERSATION MESSAGES:\n{formatted}\n\n"
+                "INSTRUCTIONS:\n"
+                f"Write a summary of approximately {target_chars} characters "
+                f"(~{target_tokens} tokens).\n"
+                "Preserve user-stated rules, constraints, and preferences "
+                "verbatim. Preserve key decisions and results from earlier "
+                "phases. Preserve context needed for the next phase.\n"
+            )
+            summary_budget = max(1024, max_tokens // 2)
+            try:
+                response = await self._llm.acomplete(
+                    messages=[{"role": "user", "content": prompt}],
+                    system=(
+                        "You are a conversation compactor. Write a detailed "
+                        "summary preserving context for the next phase."
+                    ),
+                    max_tokens=summary_budget,
+                )
+                summary = response.content
+            except Exception as e:
+                if _is_context_too_large_error(e) and len(messages) > 1:
+                    summary = await self._phase_llm_compact_split(
+                        conversation,
+                        next_spec,
+                        messages,
+                        _depth,
+                    )
+                else:
+                    raise
+
+        # Append tool history at top level only
+        if _depth == 0:
+            tool_history = extract_tool_call_history(messages)
+            if tool_history and "TOOLS ALREADY CALLED" not in summary:
+                summary += "\n\n" + tool_history
+
+        return summary
+
+    async def _phase_llm_compact_split(
+        self,
+        conversation: Any,
+        next_spec: NodeSpec,
+        messages: list,
+        _depth: int,
+    ) -> str:
+        """Split messages in half and summarise each half."""
+        mid = max(1, len(messages) // 2)
+        s1 = await self._phase_llm_compact(
+            conversation,
+            next_spec,
+            messages[:mid],
+            _depth + 1,
+        )
+        s2 = await self._phase_llm_compact(
+            conversation,
+            next_spec,
+            messages[mid:],
+            _depth + 1,
+        )
+        return s1 + "\n\n" + s2
+
     async def execute(
         self,
         graph: GraphSpec,
@@ -337,6 +464,9 @@ class GraphExecutor:
         cumulative_tools: list = []  # Tools accumulate, never removed
         cumulative_tool_names: set[str] = set()
         cumulative_output_keys: list[str] = []  # Output keys from all visited nodes
+
+        # Build node registry for subagent lookup
+        node_registry: dict[str, NodeSpec] = {node.id: node for node in graph.nodes}
 
         # Initialize checkpoint store if checkpointing is enabled
         checkpoint_store: CheckpointStore | None = None
@@ -491,11 +621,14 @@ class GraphExecutor:
         # node doesn't restore a filled OutputAccumulator from the previous
         # webhook run (which would cause the judge to accept immediately).
         # The conversation history is preserved (continuous memory).
+        # Exclude cold restores — those need to continue the conversation
+        # naturally without a "start fresh" marker.
         _is_fresh_shared = bool(
             session_state
             and session_state.get("resume_session_id")
             and not session_state.get("paused_at")
             and not session_state.get("resume_from_checkpoint")
+            and not session_state.get("cold_restore")
         )
         if _is_fresh_shared and is_continuous and self._storage_path:
             try:
@@ -694,6 +827,9 @@ class GraphExecutor:
                     # Execute this node, then pause
                     # (We'll check again after execution and save state)
 
+                # Expose current node for external injection routing
+                self.current_node_id = current_node_id
+
                 self.logger.info(f"\n▶ Step {steps}: {node_spec.name} ({node_spec.node_type})")
                 self.logger.info(f"   Inputs: {node_spec.input_keys}")
                 self.logger.info(f"   Outputs: {node_spec.output_keys}")
@@ -729,6 +865,7 @@ class GraphExecutor:
                     override_tools=cumulative_tools if is_continuous else None,
                     cumulative_output_keys=cumulative_output_keys if is_continuous else None,
                     event_triggered=_event_triggered,
+                    node_registry=node_registry,
                     identity_prompt=getattr(graph, "identity_prompt", ""),
                     narrative=_resume_narrative,
                     graph=graph,
@@ -1131,6 +1268,7 @@ class GraphExecutor:
                             source_result=result,
                             source_node_spec=node_spec,
                             path=path,
+                            node_registry=node_registry,
                         )
 
                         total_tokens += branch_tokens
@@ -1280,9 +1418,7 @@ class GraphExecutor:
                         # Set current phase for phase-aware compaction
                         continuous_conversation.set_current_phase(next_spec.id)
 
-                        # Opportunistic compaction at transition:
-                        # 1. Prune old tool results (free, no LLM call)
-                        # 2. If still over 80%, do a phase-graduated compact
+                        # Phase-boundary compaction (same flow as EventLoopNode._compact)
                         if continuous_conversation.usage_ratio() > 0.5:
                             await continuous_conversation.prune_old_tool_results(
                                 protect_tokens=2000,
@@ -1296,38 +1432,62 @@ class GraphExecutor:
                             _data_dir = (
                                 str(self._storage_path / "data") if self._storage_path else None
                             )
+                            # Step 1: Structural compaction (>=80%)
                             if _data_dir:
+                                _pre = continuous_conversation.usage_ratio()
                                 await continuous_conversation.compact_preserving_structure(
                                     spillover_dir=_data_dir,
                                     keep_recent=4,
                                     phase_graduated=True,
                                 )
-                                # Circuit breaker: if still over budget, fall back
-                                _post_ratio = continuous_conversation.usage_ratio()
-                                if _post_ratio >= 0.9 * _phase_ratio:
-                                    self.logger.warning(
-                                        "   Structure-preserving compaction ineffective "
-                                        "(%.0f%% -> %.0f%%), falling back to summary",
-                                        _phase_ratio * 100,
-                                        _post_ratio * 100,
-                                    )
-                                    summary = (
-                                        f"Summary of earlier phases (before {next_spec.name}). "
-                                        "See transition markers for phase details."
-                                    )
-                                    await continuous_conversation.compact(
-                                        summary,
+                                if continuous_conversation.usage_ratio() >= 0.9 * _pre:
+                                    await continuous_conversation.compact_preserving_structure(
+                                        spillover_dir=_data_dir,
                                         keep_recent=4,
                                         phase_graduated=True,
+                                        aggressive=True,
                                     )
-                            else:
+
+                            # Step 2: LLM compaction (>95%)
+                            if (
+                                continuous_conversation.usage_ratio() > 0.95
+                                and self._llm is not None
+                            ):
+                                self.logger.info(
+                                    "   LLM phase-boundary compaction (%.0f%% usage)",
+                                    continuous_conversation.usage_ratio() * 100,
+                                )
+                                try:
+                                    _llm_summary = await self._phase_llm_compact(
+                                        continuous_conversation,
+                                        next_spec,
+                                        list(continuous_conversation.messages),
+                                    )
+                                    await continuous_conversation.compact(
+                                        _llm_summary,
+                                        keep_recent=2,
+                                        phase_graduated=True,
+                                    )
+                                except Exception as e:
+                                    self.logger.warning(
+                                        "   Phase LLM compaction failed: %s",
+                                        e,
+                                    )
+
+                            # Step 3: Emergency (only if still over budget)
+                            if continuous_conversation.needs_compaction():
+                                self.logger.warning(
+                                    "   Emergency phase compaction (%.0f%%)",
+                                    continuous_conversation.usage_ratio() * 100,
+                                )
                                 summary = (
-                                    f"Summary of earlier phases (before {next_spec.name}). "
+                                    f"Summary of earlier phases "
+                                    f"(before {next_spec.name}). "
                                     "See transition markers for phase details."
                                 )
                                 await continuous_conversation.compact(
                                     summary,
-                                    keep_recent=4,
+                                    keep_recent=1,
                                     phase_graduated=True,
                                 )
 
@@ -1583,6 +1743,7 @@ class GraphExecutor:
         event_triggered: bool = False,
         identity_prompt: str = "",
         narrative: str = "",
+        node_registry: dict[str, NodeSpec] | None = None,
         graph: "GraphSpec | None" = None,
     ) -> NodeContext:
         """Build execution context for a node."""
@@ -1612,17 +1773,7 @@ class GraphExecutor:
                 node_tool_names=node_spec.tools,
             )
 
-        # Build goal context, enriched with capability summary for
-        # client-facing nodes so the LLM knows what the full agent can do.
         goal_context = goal.to_prompt_context()
-        if graph and node_spec.client_facing:
-            capability_summary = graph.build_capability_summary(graph.entry_node)
-            if capability_summary:
-                goal_context = (
-                    f"{goal_context}\n\n{capability_summary}"
-                    if goal_context
-                    else capability_summary
-                )
 
         return NodeContext(
             runtime=self.runtime,
@@ -1646,10 +1797,15 @@ class GraphExecutor:
             narrative=narrative,
             execution_id=self._execution_id,
             stream_id=self._stream_id,
+            node_registry=node_registry or {},
+            all_tools=list(self.tools),  # Full catalog for subagent tool resolution
+            shared_node_registry=self.node_registry,  # For subagent escalation routing
+            dynamic_tools_provider=self.dynamic_tools_provider,
         )
 
     VALID_NODE_TYPES = {
         "event_loop",
+        "gcu",
     }
     # Node types removed in v0.5 — provide migration guidance
     REMOVED_NODE_TYPES = {
@@ -1684,8 +1840,8 @@ class GraphExecutor:
                 f"Must be one of: {sorted(self.VALID_NODE_TYPES)}."
             )
 
-        # Create based on type (only event_loop is valid)
-        if node_spec.node_type == "event_loop":
+        # Create based on type
+        if node_spec.node_type in ("event_loop", "gcu"):
             # Auto-create EventLoopNode with sensible defaults.
             # Custom configs can still be pre-registered via node_registry.
             from framework.graph.event_loop_node import EventLoopNode, LoopConfig
@@ -1902,6 +2058,7 @@ class GraphExecutor:
         source_result: NodeResult,
         source_node_spec: Any,
         path: list[str],
+        node_registry: dict[str, NodeSpec] | None = None,
     ) -> tuple[dict[str, NodeResult], int, int]:
         """
         Execute multiple branches in parallel using asyncio.gather.
@@ -2000,7 +2157,13 @@ class GraphExecutor:
 
                     # Build context for this branch
                     ctx = self._build_context(
-                        node_spec, memory, goal, mapped, graph.max_tokens, graph=graph
+                        node_spec,
+                        memory,
+                        goal,
+                        mapped,
+                        graph.max_tokens,
+                        node_registry=node_registry,
+                        graph=graph,
                     )
                     node_impl = self._get_node_implementation(node_spec, graph.cleanup_llm_model)
 

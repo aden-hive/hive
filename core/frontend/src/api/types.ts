@@ -12,6 +12,8 @@ export interface LiveSession {
   loaded_at: number;
   uptime_seconds: number;
   intro_message?: string;
+  /** Queen operating mode — "building", "staging", or "running" */
+  queen_mode?: "building" | "staging" | "running";
   /** Present in 409 conflict responses when worker is still loading */
   loading?: boolean;
 }
@@ -19,6 +21,8 @@ export interface LiveSession {
 export interface LiveSessionDetail extends LiveSession {
   entry_points?: EntryPoint[];
   graphs?: string[];
+  /** True when the session exists on disk but is not live (server restarted). */
+  cold?: boolean;
 }
 
 export interface EntryPoint {
@@ -27,6 +31,8 @@ export interface EntryPoint {
   entry_node: string;
   trigger_type: string;
   trigger_config?: Record<string, unknown>;
+  /** Seconds until the next timer fire (only present for timer entry points). */
+  next_fire_in?: number;
 }
 
 export interface DiscoverEntry {
@@ -131,6 +137,8 @@ export interface Message {
   is_transition_marker?: boolean;
   is_client_input?: boolean;
   tool_calls?: unknown[];
+  /** Epoch seconds from file mtime — used for cross-conversation ordering */
+  created_at?: number;
   [key: string]: unknown;
 }
 
@@ -151,6 +159,7 @@ export interface NodeSpec {
   client_facing: boolean;
   success_criteria: string | null;
   system_prompt: string;
+  sub_agents?: string[];
   // Runtime enrichment (when session_id provided)
   visit_count?: number;
   has_failures?: boolean;
@@ -265,7 +274,9 @@ export type EventTypeName =
   | "custom"
   | "escalation_requested"
   | "worker_loaded"
-  | "credentials_required";
+  | "credentials_required"
+  | "queen_mode_changed"
+  | "subagent_report";
 
 export interface AgentEvent {
   type: EventTypeName;

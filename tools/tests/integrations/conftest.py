@@ -26,6 +26,11 @@ KNOWN_PHANTOM_TOOLS: set[str] = {"google_search"}
 # (meta-tools), not for external API auth. They don't need CredentialSpecs.
 CREDENTIAL_STORE_META_MODULES: set[str] = {"account_info_tool"}
 
+# Community-contributed tool variants that are not registered in the central
+# __init__.py and therefore don't need CredentialSpecs. The project has its
+# own registered equivalents (e.g., powerbi_tool, twitter_tool).
+UNREGISTERED_COMMUNITY_MODULES: set[str] = {"mssql_tool"}
+
 # --- Tool Module Discovery ---
 
 TOOLS_SRC = Path(__file__).resolve().parent.parent.parent / "src" / "aden_tools" / "tools"
@@ -48,7 +53,7 @@ def _discover_tool_modules() -> list[tuple[str, str]]:
             continue
 
         if item.is_dir() and (item / "__init__.py").exists():
-            init_text = (item / "__init__.py").read_text()
+            init_text = (item / "__init__.py").read_text(encoding="utf-8")
 
             if "register_tools" in init_text:
                 # Direct tool package (e.g., web_search_tool, email_tool)
@@ -59,7 +64,7 @@ def _discover_tool_modules() -> list[tuple[str, str]]:
                     if sub.name.startswith("_") or sub.name == "__pycache__":
                         continue
                     if sub.is_dir() and (sub / "__init__.py").exists():
-                        sub_init_text = (sub / "__init__.py").read_text()
+                        sub_init_text = (sub / "__init__.py").read_text(encoding="utf-8")
                         if "register_tools" in sub_init_text:
                             modules.append(
                                 (

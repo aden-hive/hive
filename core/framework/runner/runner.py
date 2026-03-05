@@ -12,7 +12,6 @@ from typing import TYPE_CHECKING, Any
 from framework.config import get_hive_config, get_preferred_model
 from framework.credentials.validation import (
     ensure_credential_key_env as _ensure_credential_key_env,
-    validate_agent_credentials,
 )
 from framework.graph import Goal
 from framework.graph.edge import (
@@ -25,6 +24,7 @@ from framework.graph.edge import (
 from framework.graph.executor import ExecutionResult
 from framework.graph.node import NodeSpec
 from framework.llm.provider import LLMProvider, Tool
+from framework.runner.preload_validation import run_preload_validation
 from framework.runner.tool_registry import ToolRegistry
 from framework.runtime.agent_runtime import AgentRuntime, AgentRuntimeConfig, create_agent_runtime
 from framework.runtime.execution_stream import EntryPointSpec
@@ -39,6 +39,7 @@ logger = logging.getLogger(__name__)
 CLAUDE_CREDENTIALS_FILE = Path.home() / ".claude" / ".credentials.json"
 CLAUDE_OAUTH_TOKEN_URL = "https://console.anthropic.com/v1/oauth/token"
 CLAUDE_OAUTH_CLIENT_ID = "9d1c250a-e61b-44d9-88ed-5944d1962f5e"
+CLAUDE_KEYCHAIN_SERVICE = "Claude Code-credentials"
 
 # Buffer in seconds before token expiry to trigger a proactive refresh
 _TOKEN_REFRESH_BUFFER_SECS = 300  # 5 minutes
@@ -49,6 +50,96 @@ CODEX_OAUTH_TOKEN_URL = "https://auth.openai.com/oauth/token"
 CODEX_OAUTH_CLIENT_ID = "app_EMoamEEZ73f0CkXaXp7hrann"
 CODEX_KEYCHAIN_SERVICE = "Codex Auth"
 _CODEX_TOKEN_LIFETIME_SECS = 3600  # 1 hour (no explicit expiry field)
+
+
+def _read_claude_keychain() -> dict | None:
+    """Read Claude Code credentials from macOS Keychain.
+
+    Returns the parsed JSON dict, or None if not on macOS or entry missing.
+    """
+    import getpass
+    import platform
+    import subprocess
+
+    if platform.system() != "Darwin":
+        return None
+
+    try:
+        account = getpass.getuser()
+        result = subprocess.run(
+            [
+                "security",
+                "find-generic-password",
+                "-s",
+                CLAUDE_KEYCHAIN_SERVICE,
+                "-a",
+                account,
+                "-w",
+            ],
+            capture_output=True,
+            encoding="utf-8",
+            timeout=5,
+        )
+        if result.returncode != 0:
+            return None
+        raw = result.stdout.strip()
+        if not raw:
+            return None
+        return json.loads(raw)
+    except (subprocess.TimeoutExpired, json.JSONDecodeError, OSError) as exc:
+        logger.debug("Claude keychain read failed: %s", exc)
+        return None
+
+
+def _save_claude_keychain(creds: dict) -> bool:
+    """Write Claude Code credentials to macOS Keychain. Returns True on success."""
+    import getpass
+    import platform
+    import subprocess
+
+    if platform.system() != "Darwin":
+        return False
+
+    try:
+        account = getpass.getuser()
+        data = json.dumps(creds)
+        result = subprocess.run(
+            [
+                "security",
+                "add-generic-password",
+                "-U",
+                "-s",
+                CLAUDE_KEYCHAIN_SERVICE,
+                "-a",
+                account,
+                "-w",
+                data,
+            ],
+            capture_output=True,
+            timeout=5,
+        )
+        return result.returncode == 0
+    except (subprocess.TimeoutExpired, OSError) as exc:
+        logger.debug("Claude keychain write failed: %s", exc)
+        return False
+
+
+def _read_claude_credentials() -> dict | None:
+    """Read Claude Code credentials from Keychain (macOS) or file (Linux/Windows)."""
+    # Try macOS Keychain first
+    creds = _read_claude_keychain()
+    if creds:
+        return creds
+
+    # Fall back to file
+    if not CLAUDE_CREDENTIALS_FILE.exists():
+        return None
+
+    try:
+        with open(CLAUDE_CREDENTIALS_FILE, encoding="utf-8") as f:
+            return json.load(f)
+    except (json.JSONDecodeError, OSError):
+        return None
 
 
 def _refresh_claude_code_token(refresh_token: str) -> dict | None:
@@ -89,16 +180,14 @@ def _refresh_claude_code_token(refresh_token: str) -> dict | None:
 
 
 def _save_refreshed_credentials(token_data: dict) -> None:
-    """Write refreshed token data back to ~/.claude/.credentials.json."""
+    """Write refreshed token data back to Keychain (macOS) or credentials file."""
     import time
 
-    if not CLAUDE_CREDENTIALS_FILE.exists():
+    creds = _read_claude_credentials()
+    if not creds:
         return
 
     try:
-        with open(CLAUDE_CREDENTIALS_FILE) as f:
-            creds = json.load(f)
-
         oauth = creds.get("claudeAiOauth", {})
         oauth["accessToken"] = token_data["access_token"]
         if "refresh_token" in token_data:
@@ -107,9 +196,15 @@ def _save_refreshed_credentials(token_data: dict) -> None:
             oauth["expiresAt"] = int((time.time() + token_data["expires_in"]) * 1000)
         creds["claudeAiOauth"] = oauth
 
-        with open(CLAUDE_CREDENTIALS_FILE, "w") as f:
-            json.dump(creds, f, indent=2)
-        logger.debug("Claude Code credentials refreshed successfully")
+        # Try Keychain first (macOS), fall back to file
+        if _save_claude_keychain(creds):
+            logger.debug("Claude Code credentials refreshed in Keychain")
+            return
+
+        if CLAUDE_CREDENTIALS_FILE.exists():
+            with open(CLAUDE_CREDENTIALS_FILE, "w", encoding="utf-8") as f:
+                json.dump(creds, f, indent=2)
+            logger.debug("Claude Code credentials refreshed in file")
     except (json.JSONDecodeError, OSError, KeyError) as exc:
         logger.debug("Failed to save refreshed credentials: %s", exc)
 
@@ -117,8 +212,8 @@ def _save_refreshed_credentials(token_data: dict) -> None:
 def get_claude_code_token() -> str | None:
     """Get the OAuth token from Claude Code subscription with auto-refresh.
 
-    Reads from ~/.claude/.credentials.json which is created by the
-    Claude Code CLI when users authenticate with their subscription.
+    Reads from macOS Keychain (on Darwin) or ~/.claude/.credentials.json
+    (on Linux/Windows), as created by the Claude Code CLI.
 
     If the token is expired or close to expiry, attempts an automatic
     refresh using the stored refresh token.
@@ -128,13 +223,8 @@ def get_claude_code_token() -> str | None:
     """
     import time
 
-    if not CLAUDE_CREDENTIALS_FILE.exists():
-        return None
-
-    try:
-        with open(CLAUDE_CREDENTIALS_FILE) as f:
-            creds = json.load(f)
-    except (json.JSONDecodeError, OSError):
+    creds = _read_claude_credentials()
+    if not creds:
         return None
 
     oauth = creds.get("claudeAiOauth", {})
@@ -212,7 +302,7 @@ def _read_codex_keychain() -> dict | None:
                 "-w",
             ],
             capture_output=True,
-            text=True,
+            encoding="utf-8",
             timeout=5,
         )
         if result.returncode != 0:
@@ -231,7 +321,7 @@ def _read_codex_auth_file() -> dict | None:
     if not CODEX_AUTH_FILE.exists():
         return None
     try:
-        with open(CODEX_AUTH_FILE) as f:
+        with open(CODEX_AUTH_FILE, encoding="utf-8") as f:
             return json.load(f)
     except (json.JSONDecodeError, OSError):
         return None
@@ -322,8 +412,9 @@ def _save_refreshed_codex_credentials(auth_data: dict, token_data: dict) -> None
         auth_data["tokens"] = tokens
         auth_data["last_refresh"] = datetime.now(UTC).isoformat()
 
-        CODEX_AUTH_FILE.parent.mkdir(parents=True, exist_ok=True)
-        with open(CODEX_AUTH_FILE, "w") as f:
+        CODEX_AUTH_FILE.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+        fd = os.open(CODEX_AUTH_FILE, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
             json.dump(auth_data, f, indent=2)
         logger.debug("Codex credentials refreshed successfully")
     except (OSError, KeyError) as exc:
@@ -620,6 +711,7 @@ class AgentRunner:
         requires_account_selection: bool = False,
         configure_for_account: Callable | None = None,
         list_accounts: Callable | None = None,
+        credential_store: Any | None = None,
     ):
         """
         Initialize the runner (use AgentRunner.load() instead).
@@ -639,6 +731,7 @@ class AgentRunner:
             requires_account_selection: If True, TUI shows account picker before starting.
             configure_for_account: Callback(runner, account_dict) to scope tools after selection.
             list_accounts: Callback() -> list[dict] to fetch available accounts.
+            credential_store: Optional shared CredentialStore (avoids creating redundant stores).
         """
         self.agent_path = agent_path
         self.graph = graph
@@ -652,6 +745,7 @@ class AgentRunner:
         self.requires_account_selection = requires_account_selection
         self._configure_for_account = configure_for_account
         self._list_accounts = list_accounts
+        self._credential_store = credential_store
 
         # Set up storage
         if storage_path:
@@ -678,67 +772,28 @@ class AgentRunner:
         self._agent_runtime: AgentRuntime | None = None
         self._uses_async_entry_points = self.graph.has_async_entry_points()
 
-        # Validate credentials before spawning MCP servers.
+        # Pre-load validation: structural checks + credentials.
         # Fails fast with actionable guidance — no MCP noise on screen.
-        self._validate_credentials()
+        run_preload_validation(
+            self.graph,
+            interactive=self._interactive,
+            skip_credential_validation=self.skip_credential_validation,
+        )
 
         # Auto-discover tools from tools.py
         tools_path = agent_path / "tools.py"
         if tools_path.exists():
             self._tool_registry.discover_from_module(tools_path)
 
+        # Set environment variables for MCP subprocesses
+        # These are inherited by MCP servers (e.g., GCU browser tools)
+        os.environ["HIVE_AGENT_NAME"] = agent_path.name
+        os.environ["HIVE_STORAGE_PATH"] = str(self._storage_path)
+
         # Auto-discover MCP servers from mcp_servers.json
         mcp_config_path = agent_path / "mcp_servers.json"
         if mcp_config_path.exists():
             self._load_mcp_servers_from_config(mcp_config_path)
-
-    def _validate_credentials(self) -> None:
-        """Check that required credentials are available before spawning MCP servers.
-
-        If ``interactive`` is True and stdin is a TTY, automatically launches
-        the interactive credential setup flow so the user can fix the issue
-        in-place.  Re-validates after setup succeeds.
-
-        When ``interactive`` is False (e.g. TUI callers), the CredentialError
-        propagates immediately so the caller can handle it with its own UI.
-        """
-        if self.skip_credential_validation:
-            return
-
-        if not self._interactive:
-            # Let the CredentialError propagate — caller handles UI.
-            validate_agent_credentials(self.graph.nodes)
-            return
-
-        import sys
-
-        from framework.credentials.models import CredentialError
-
-        try:
-            validate_agent_credentials(self.graph.nodes)
-            return  # All good
-        except CredentialError as e:
-            if not sys.stdin.isatty():
-                raise
-
-            # Interactive: show the error then enter credential setup
-            print(f"\n{e}", file=sys.stderr)
-
-            from framework.credentials.validation import build_setup_session_from_error
-
-            session = build_setup_session_from_error(e, nodes=self.graph.nodes)
-            if not session.missing:
-                raise
-
-            result = session.run_interactive()
-            if not result.success:
-                raise CredentialError(
-                    "Credential setup incomplete. "
-                    "Run again after configuring the required credentials."
-                ) from None
-
-            # Re-validate after setup
-            validate_agent_credentials(self.graph.nodes)
 
     @staticmethod
     def _import_agent_module(agent_path: Path):
@@ -788,6 +843,7 @@ class AgentRunner:
         model: str | None = None,
         interactive: bool = True,
         skip_credential_validation: bool | None = None,
+        credential_store: Any | None = None,
     ) -> "AgentRunner":
         """
         Load an agent from an export folder.
@@ -805,6 +861,7 @@ class AgentRunner:
                 Set to False from TUI callers that handle setup via their own UI.
             skip_credential_validation: If True, skip credential checks at load time.
                 When None (default), uses the agent module's setting.
+            credential_store: Optional shared CredentialStore (avoids creating redundant stores).
 
         Returns:
             AgentRunner instance ready to run
@@ -894,15 +951,19 @@ class AgentRunner:
                 requires_account_selection=needs_acct,
                 configure_for_account=configure_fn,
                 list_accounts=list_accts_fn,
+                credential_store=credential_store,
             )
 
         # Fallback: load from agent.json (legacy JSON-based agents)
         agent_json_path = agent_path / "agent.json"
-        if not agent_json_path.exists():
+        if not agent_json_path.is_file():
             raise FileNotFoundError(f"No agent.py or agent.json found in {agent_path}")
 
-        with open(agent_json_path) as f:
-            graph, goal = load_agent_export(f.read())
+        content = agent_json_path.read_text(encoding="utf-8").strip()
+        if not content:
+            raise FileNotFoundError(f"agent.json is empty: {agent_json_path}")
+
+        graph, goal = load_agent_export(content)
 
         return cls(
             agent_path=agent_path,
@@ -913,6 +974,7 @@ class AgentRunner:
             model=model,
             interactive=interactive,
             skip_credential_validation=skip_credential_validation or False,
+            credential_store=credential_store,
         )
 
     def register_tool(
@@ -1118,7 +1180,9 @@ class AgentRunner:
 
             # Fail fast if the agent needs an LLM but none was configured
             if self._llm is None:
-                has_llm_nodes = any(node.node_type == "event_loop" for node in self.graph.nodes)
+                has_llm_nodes = any(
+                    node.node_type in ("event_loop", "gcu") for node in self.graph.nodes
+                )
                 if has_llm_nodes:
                     from framework.credentials.models import CredentialError
 
@@ -1136,6 +1200,52 @@ class AgentRunner:
                     )
                     raise CredentialError(f"LLM API key not found for model '{self.model}'. {hint}")
 
+        # For GCU nodes: auto-register GCU MCP server if needed, then expand tool lists
+        has_gcu_nodes = any(node.node_type == "gcu" for node in self.graph.nodes)
+        if has_gcu_nodes:
+            from framework.graph.gcu import GCU_MCP_SERVER_CONFIG, GCU_SERVER_NAME
+
+            # Auto-register GCU MCP server if tools aren't loaded yet
+            gcu_tool_names = self._tool_registry.get_server_tool_names(GCU_SERVER_NAME)
+            if not gcu_tool_names:
+                # Resolve cwd to repo-level tools/ (not relative to agent_path)
+                gcu_config = dict(GCU_MCP_SERVER_CONFIG)
+                _repo_root = Path(__file__).resolve().parent.parent.parent.parent
+                gcu_config["cwd"] = str(_repo_root / "tools")
+                self._tool_registry.register_mcp_server(gcu_config)
+                gcu_tool_names = self._tool_registry.get_server_tool_names(GCU_SERVER_NAME)
+
+            # Expand each GCU node's tools list to include all GCU server tools
+            if gcu_tool_names:
+                for node in self.graph.nodes:
+                    if node.node_type == "gcu":
+                        existing = set(node.tools)
+                        for tool_name in sorted(gcu_tool_names):
+                            if tool_name not in existing:
+                                node.tools.append(tool_name)
+
+        # For event_loop/gcu nodes: auto-register file tools MCP server, then expand tool lists
+        has_loop_nodes = any(node.node_type in ("event_loop", "gcu") for node in self.graph.nodes)
+        if has_loop_nodes:
+            from framework.graph.files import FILES_MCP_SERVER_CONFIG, FILES_MCP_SERVER_NAME
+
+            files_tool_names = self._tool_registry.get_server_tool_names(FILES_MCP_SERVER_NAME)
+            if not files_tool_names:
+                # Resolve cwd to repo-level tools/ (not relative to agent_path)
+                files_config = dict(FILES_MCP_SERVER_CONFIG)
+                _repo_root = Path(__file__).resolve().parent.parent.parent.parent
+                files_config["cwd"] = str(_repo_root / "tools")
+                self._tool_registry.register_mcp_server(files_config)
+                files_tool_names = self._tool_registry.get_server_tool_names(FILES_MCP_SERVER_NAME)
+
+            if files_tool_names:
+                for node in self.graph.nodes:
+                    if node.node_type in ("event_loop", "gcu"):
+                        existing = set(node.tools)
+                        for tool_name in sorted(files_tool_names):
+                            if tool_name not in existing:
+                                node.tools.append(tool_name)
+
         # Get tools for runtime
         tools = list(self._tool_registry.get_tools().values())
         tool_executor = self._tool_registry.get_executor()
@@ -1147,7 +1257,10 @@ class AgentRunner:
         try:
             from aden_tools.credentials.store_adapter import CredentialStoreAdapter
 
-            adapter = CredentialStoreAdapter.default()
+            if self._credential_store is not None:
+                adapter = CredentialStoreAdapter(store=self._credential_store)
+            else:
+                adapter = CredentialStoreAdapter.default()
             accounts_data = adapter.get_all_account_info()
             tool_provider_map = adapter.get_tool_provider_map()
             if accounts_data:
@@ -1218,9 +1331,11 @@ class AgentRunner:
             return None
 
         try:
-            from framework.credentials import CredentialStore
+            store = self._credential_store
+            if store is None:
+                from framework.credentials import CredentialStore
 
-            store = CredentialStore.with_encrypted_storage()
+                store = CredentialStore.with_encrypted_storage()
             return store.get(cred_id)
         except Exception:
             return None
@@ -1263,6 +1378,7 @@ class AgentRunner:
                 isolation_level=async_ep.isolation_level,
                 priority=async_ep.priority,
                 max_concurrent=async_ep.max_concurrent,
+                max_resurrections=async_ep.max_resurrections,
             )
             entry_points.append(ep)
 
@@ -1672,7 +1788,9 @@ class AgentRunner:
                 warnings.append(warning_msg)
         except ImportError:
             # aden_tools not installed - fall back to direct check
-            has_llm_nodes = any(node.node_type == "event_loop" for node in self.graph.nodes)
+            has_llm_nodes = any(
+                node.node_type in ("event_loop", "gcu") for node in self.graph.nodes
+            )
             if has_llm_nodes:
                 api_key_env = self._get_api_key_env_var(self.model)
                 if api_key_env and not os.environ.get(api_key_env):

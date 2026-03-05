@@ -43,4 +43,5 @@ uv run python -m exports.my_research_agent --input '{"topic": "..."}'
 | Template | Description |
 |----------|-------------|
 | [deep_research_agent](deep_research_agent/) | Interactive research agent that searches diverse sources, evaluates findings with user checkpoints, and produces a cited HTML report |
+| [local_business_extractor](local_business_extractor/) | Finds local businesses on Google Maps, scrapes contact details, and syncs to Google Sheets |
 | [tech_news_reporter](tech_news_reporter/) | Researches the latest technology and AI news from the web and produces a well-organized report |

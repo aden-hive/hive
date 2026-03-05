@@ -71,6 +71,7 @@ def main():
             capture_output=True,
             text=True,
             check=True,
+            encoding="utf-8",
         )
         framework_path = result.stdout.strip()
         success(f"installed at {framework_path}")
@@ -84,7 +85,12 @@ def main():
     missing_deps = []
     for dep in ["mcp", "fastmcp"]:
         try:
-            subprocess.run([sys.executable, "-c", f"import {dep}"], capture_output=True, check=True)
+            subprocess.run(
+                [sys.executable, "-c", f"import {dep}"],
+                capture_output=True,
+                check=True,
+                encoding="utf-8",
+            )
         except subprocess.CalledProcessError:
             missing_deps.append(dep)
 
@@ -103,6 +109,7 @@ def main():
             capture_output=True,
             text=True,
             check=True,
+            encoding="utf-8",
         )
         success("loads successfully")
     except subprocess.CalledProcessError as e:
@@ -115,7 +122,7 @@ def main():
     mcp_config = script_dir / ".mcp.json"
     if mcp_config.exists():
         try:
-            with open(mcp_config) as f:
+            with open(mcp_config, encoding="utf-8") as f:
                 config = json.load(f)
 
             if "mcpServers" in config and "agent-builder" in config["mcpServers"]:
@@ -149,7 +156,10 @@ def main():
     for module in modules_to_check:
         try:
             subprocess.run(
-                [sys.executable, "-c", f"import {module}"], capture_output=True, check=True
+                [sys.executable, "-c", f"import {module}"],
+                capture_output=True,
+                check=True,
+                encoding="utf-8",
             )
         except subprocess.CalledProcessError:
             failed_modules.append(module)
@@ -174,6 +184,7 @@ def main():
             text=True,
             check=True,
             timeout=5,
+            encoding="utf-8",
         )
         if "OK" in result.stdout:
             success("server can start")

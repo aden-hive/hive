@@ -30,7 +30,12 @@ from pathlib import Path
 
 from aiohttp import web
 
-from framework.server.app import resolve_session, safe_path_segment, sessions_dir
+from framework.server.app import (
+    resolve_session,
+    safe_path_segment,
+    sessions_dir,
+    validate_agent_path,
+)
 from framework.server.session_manager import SessionManager
 
 logger = logging.getLogger(__name__)
@@ -43,6 +48,7 @@ def _get_manager(request: web.Request) -> SessionManager:
 def _session_to_live_dict(session) -> dict:
     """Serialize a live Session to the session-primary JSON shape."""
     info = session.worker_info
+    mode_state = getattr(session, "mode_state", None)
     return {
         "session_id": session.id,
         "worker_id": session.worker_id,
@@ -55,6 +61,7 @@ def _session_to_live_dict(session) -> dict:
         "loaded_at": session.loaded_at,
         "uptime_seconds": round(time.time() - session.loaded_at, 1),
         "intro_message": getattr(session.runner, "intro_message", "") or "",
+        "queen_mode": mode_state.mode if mode_state else "building",
     }
 
 
@@ -117,6 +124,15 @@ async def handle_create_session(request: web.Request) -> web.Response:
     session_id = body.get("session_id")
     model = body.get("model")
     initial_prompt = body.get("initial_prompt")
+    # When set, the queen writes conversations to this existing session's directory
+    # so the full history accumulates in one place across server restarts.
+    queen_resume_from = body.get("queen_resume_from")
+
+    if agent_path:
+        try:
+            agent_path = str(validate_agent_path(agent_path))
+        except ValueError as e:
+            return web.json_response({"error": str(e)}, status=400)
 
     try:
         if agent_path:
@@ -126,6 +142,7 @@ async def handle_create_session(request: web.Request) -> web.Response:
                 agent_id=agent_id,
                 model=model,
                 initial_prompt=initial_prompt,
+                queen_resume_from=queen_resume_from,
             )
         else:
             # Queen-only session
@@ -133,6 +150,7 @@ async def handle_create_session(request: web.Request) -> web.Response:
                 session_id=session_id,
                 model=model,
                 initial_prompt=initial_prompt,
+                queen_resume_from=queen_resume_from,
             )
     except ValueError as e:
         msg = str(e)
@@ -143,14 +161,17 @@ async def handle_create_session(request: web.Request) -> web.Response:
                 status=409,
             )
         return web.json_response({"error": msg}, status=409)
-    except FileNotFoundError as e:
-        return web.json_response({"error": str(e)}, status=404)
+    except FileNotFoundError:
+        return web.json_response(
+            {"error": f"Agent not found: {agent_path or 'no path'}"},
+            status=404,
+        )
     except Exception as e:
         resp = _credential_error_response(e, agent_path)
         if resp is not None:
             return resp
         logger.exception("Error creating session: %s", e)
-        return web.json_response({"error": str(e)}, status=500)
+        return web.json_response({"error": "Internal server error"}, status=500)
 
     return web.json_response(_session_to_live_dict(session), status=201)
 
@@ -163,7 +184,12 @@ async def handle_list_live_sessions(request: web.Request) -> web.Response:
 
 
 async def handle_get_live_session(request: web.Request) -> web.Response:
-    """GET /api/sessions/{session_id} — get session detail."""
+    """GET /api/sessions/{session_id} — get session detail.
+
+    Falls back to cold session metadata (HTTP 200 with ``cold: true``) when the
+    session is not alive in memory but queen conversation files exist on disk.
+    This lets the frontend detect a server restart and restore message history.
+    """
     manager = _get_manager(request)
     session_id = request.match_info["session_id"]
     session = manager.get_session(session_id)
@@ -174,6 +200,10 @@ async def handle_get_live_session(request: web.Request) -> web.Response:
                 {"session_id": session_id, "loading": True},
                 status=202,
             )
+        # Check if conversation files survived on disk (post-restart scenario)
+        cold_info = SessionManager.get_cold_session_info(session_id)
+        if cold_info is not None:
+            return web.json_response(cold_info)
         return web.json_response(
             {"error": f"Session '{session_id}' not found"},
             status=404,
@@ -182,6 +212,7 @@ async def handle_get_live_session(request: web.Request) -> web.Response:
     data = _session_to_live_dict(session)
 
     if session.worker_runtime:
+        rt = session.worker_runtime
         data["entry_points"] = [
             {
                 "id": ep.id,
@@ -189,8 +220,13 @@ async def handle_get_live_session(request: web.Request) -> web.Response:
                 "entry_node": ep.entry_node,
                 "trigger_type": ep.trigger_type,
                 "trigger_config": ep.trigger_config,
+                **(
+                    {"next_fire_in": nf}
+                    if (nf := rt.get_timer_next_fire_in(ep.id)) is not None
+                    else {}
+                ),
             }
-            for ep in session.worker_runtime.get_entry_points()
+            for ep in rt.get_entry_points()
         ]
         data["graphs"] = session.worker_runtime.list_graphs()
 
@@ -230,6 +266,11 @@ async def handle_load_worker(request: web.Request) -> web.Response:
     if not agent_path:
         return web.json_response({"error": "agent_path is required"}, status=400)
 
+    try:
+        agent_path = str(validate_agent_path(agent_path))
+    except ValueError as e:
+        return web.json_response({"error": str(e)}, status=400)
+
     worker_id = body.get("worker_id")
     model = body.get("model")
 
@@ -242,14 +283,14 @@ async def handle_load_worker(request: web.Request) -> web.Response:
         )
     except ValueError as e:
         return web.json_response({"error": str(e)}, status=409)
-    except FileNotFoundError as e:
-        return web.json_response({"error": str(e)}, status=404)
+    except FileNotFoundError:
+        return web.json_response({"error": f"Agent not found: {agent_path}"}, status=404)
     except Exception as e:
         resp = _credential_error_response(e, agent_path)
         if resp is not None:
             return resp
         logger.exception("Error loading worker: %s", e)
-        return web.json_response({"error": str(e)}, status=500)
+        return web.json_response({"error": "Internal server error"}, status=500)
 
     return web.json_response(_session_to_live_dict(session))
 
@@ -308,7 +349,8 @@ async def handle_session_entry_points(request: web.Request) -> web.Response:
             status=404,
         )
 
-    eps = session.worker_runtime.get_entry_points() if session.worker_runtime else []
+    rt = session.worker_runtime
+    eps = rt.get_entry_points() if rt else []
     return web.json_response(
         {
             "entry_points": [
@@ -318,6 +360,11 @@ async def handle_session_entry_points(request: web.Request) -> web.Response:
                     "entry_node": ep.entry_node,
                     "trigger_type": ep.trigger_type,
                     "trigger_config": ep.trigger_config,
+                    **(
+                        {"next_fire_in": nf}
+                        if rt and (nf := rt.get_timer_next_fire_in(ep.id)) is not None
+                        else {}
+                    ),
                 }
                 for ep in eps
             ]
@@ -548,11 +595,12 @@ async def handle_messages(request: web.Request) -> web.Response:
             try:
                 part = json.loads(part_file.read_text(encoding="utf-8"))
                 part["_node_id"] = node_dir.name
+                part.setdefault("created_at", part_file.stat().st_mtime)
                 all_messages.append(part)
             except (json.JSONDecodeError, OSError):
                 continue
 
-    all_messages.sort(key=lambda m: m.get("seq", 0))
+    all_messages.sort(key=lambda m: m.get("created_at", m.get("seq", 0)))
 
     client_only = request.query.get("client_only", "").lower() in ("true", "1")
     if client_only:
@@ -579,15 +627,17 @@ async def handle_messages(request: web.Request) -> web.Response:
 
 
 async def handle_queen_messages(request: web.Request) -> web.Response:
-    """GET /api/sessions/{session_id}/queen-messages — get queen conversation."""
-    session, err = resolve_session(request)
-    if err:
-        return err
+    """GET /api/sessions/{session_id}/queen-messages — get queen conversation.
 
-    queen_dir = Path.home() / ".hive" / "queen" / "session" / session.id
+    Reads directly from disk so it works for both live sessions and cold
+    (post-server-restart) sessions — no live session required.
+    """
+    session_id = request.match_info["session_id"]
+
+    queen_dir = Path.home() / ".hive" / "queen" / "session" / session_id
     convs_dir = queen_dir / "conversations"
     if not convs_dir.exists():
-        return web.json_response({"messages": []})
+        return web.json_response({"messages": [], "session_id": session_id})
 
     all_messages: list[dict] = []
     for node_dir in convs_dir.iterdir():
@@ -602,11 +652,14 @@ async def handle_queen_messages(request: web.Request) -> web.Response:
             try:
                 part = json.loads(part_file.read_text(encoding="utf-8"))
                 part["_node_id"] = node_dir.name
+                # Use file mtime as created_at so frontend can order
+                # queen and worker messages chronologically.
+                part.setdefault("created_at", part_file.stat().st_mtime)
                 all_messages.append(part)
             except (json.JSONDecodeError, OSError):
                 continue
 
-    all_messages.sort(key=lambda m: m.get("seq", 0))
+    all_messages.sort(key=lambda m: m.get("created_at", m.get("seq", 0)))
 
     # Filter to client-facing messages only
     all_messages = [
@@ -617,7 +670,58 @@ async def handle_queen_messages(request: web.Request) -> web.Response:
         and not (m["role"] == "assistant" and m.get("tool_calls"))
     ]
 
-    return web.json_response({"messages": all_messages})
+    return web.json_response({"messages": all_messages, "session_id": session_id})
+
+
+async def handle_session_history(request: web.Request) -> web.Response:
+    """GET /api/sessions/history — all queen sessions on disk (live + cold).
+
+    Returns every session directory under ~/.hive/queen/session/, newest first.
+    Live sessions have ``live: true, cold: false``; sessions that survived a
+    server restart have ``live: false, cold: true``.
+    """
+    manager = _get_manager(request)
+    live_sessions = {s.id: s for s in manager.list_sessions()}
+
+    disk_sessions = SessionManager.list_cold_sessions()
+    for s in disk_sessions:
+        if s["session_id"] in live_sessions:
+            live = live_sessions[s["session_id"]]
+            s["cold"] = False
+            s["live"] = True
+            # Fill in agent_name from live memory if meta.json wasn't written yet
+            if not s.get("agent_name") and live.worker_info:
+                s["agent_name"] = live.worker_info.name
+            if not s.get("agent_path") and live.worker_path:
+                s["agent_path"] = str(live.worker_path)
+
+    return web.json_response({"sessions": disk_sessions})
+
+
+async def handle_delete_history_session(request: web.Request) -> web.Response:
+    """DELETE /api/sessions/history/{session_id} — permanently remove a session.
+
+    Stops the live session (if still running) and deletes the queen session
+    directory from disk at ~/.hive/queen/session/{session_id}/.
+    This is the frontend 'delete from history' action.
+    """
+    manager = _get_manager(request)
+    session_id = request.match_info["session_id"]
+
+    # Stop the live session if it exists (best-effort)
+    if manager.get_session(session_id):
+        await manager.stop_session(session_id)
+
+    # Delete the queen session directory from disk
+    queen_session_dir = Path.home() / ".hive" / "queen" / "session" / session_id
+    if queen_session_dir.exists() and queen_session_dir.is_dir():
+        try:
+            shutil.rmtree(queen_session_dir)
+        except OSError as e:
+            logger.warning("Failed to delete session directory %s: %s", queen_session_dir, e)
+            return web.json_response({"error": f"Failed to delete session: {e}"}, status=500)
+
+    return web.json_response({"deleted": session_id})
 
 
 # ------------------------------------------------------------------
@@ -666,6 +770,9 @@ def register_routes(app: web.Application) -> None:
     # Session lifecycle
     app.router.add_post("/api/sessions", handle_create_session)
     app.router.add_get("/api/sessions", handle_list_live_sessions)
+    # history must be registered before {session_id} so it takes priority
+    app.router.add_get("/api/sessions/history", handle_session_history)
+    app.router.add_delete("/api/sessions/history/{session_id}", handle_delete_history_session)
     app.router.add_get("/api/sessions/{session_id}", handle_get_live_session)
     app.router.add_delete("/api/sessions/{session_id}", handle_stop_session)
 

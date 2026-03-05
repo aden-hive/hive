@@ -338,6 +338,10 @@ class AsyncEntryPointSpec(BaseModel):
     max_concurrent: int = Field(
         default=10, description="Maximum concurrent executions for this entry point"
     )
+    max_resurrections: int = Field(
+        default=3,
+        description="Auto-restart on non-fatal failure (0 to disable)",
+    )
 
     model_config = {"extra": "allow"}
 
@@ -427,8 +431,7 @@ class GraphSpec(BaseModel):
     max_tokens: int = Field(default=None)  # resolved by _resolve_max_tokens validator
 
     # Cleanup LLM for JSON extraction fallback (fast/cheap model preferred)
-    # If not set, uses CEREBRAS_API_KEY -> cerebras/llama-3.3-70b or
-    # ANTHROPIC_API_KEY -> claude-haiku-4-5 as fallback
+    # If not set, uses CEREBRAS_API_KEY -> cerebras/llama-3.3-70b
     cleanup_llm_model: str | None = None
 
     # Execution limits
@@ -502,45 +505,6 @@ class GraphSpec(BaseModel):
     def get_incoming_edges(self, node_id: str) -> list[EdgeSpec]:
         """Get all edges entering a node."""
         return [e for e in self.edges if e.target == node_id]
-
-    def build_capability_summary(self, from_node_id: str) -> str:
-        """Build a summary of the agent's downstream workflow phases and tools.
-
-        Walks the graph from *from_node_id* and collects all reachable nodes
-        (excluding the starting node itself) so that client-facing entry nodes
-        can inform the user about what the overall agent is capable of.
-
-        Returns:
-            A formatted string listing each downstream node's name,
-            description, and tools — or an empty string when there are
-            no downstream nodes.
-        """
-        reachable: list[Any] = []
-        visited: set[str] = set()
-        queue = [from_node_id]
-        while queue:
-            nid = queue.pop()
-            if nid in visited:
-                continue
-            visited.add(nid)
-            node = self.get_node(nid)
-            if node and nid != from_node_id:
-                reachable.append(node)
-            for edge in self.get_outgoing_edges(nid):
-                queue.append(edge.target)
-
-        if not reachable:
-            return ""
-
-        lines = [
-            "## Agent Capabilities",
-            "This agent has the following workflow phases and tools:",
-        ]
-        for node in reachable:
-            tool_str = f" (tools: {', '.join(node.tools)})" if node.tools else ""
-            lines.append(f"- {node.name}: {node.description}{tool_str}")
-
-        return "\n".join(lines)
 
     def detect_fan_out_nodes(self) -> dict[str, list[str]]:
         """
@@ -683,6 +647,13 @@ class GraphSpec(BaseModel):
             for edge in self.get_outgoing_edges(current):
                 to_visit.append(edge.target)
 
+        # Also mark sub-agents as reachable (they're invoked via delegate_to_sub_agent, not edges)
+        for node in self.nodes:
+            if node.id in reachable:
+                sub_agents = getattr(node, "sub_agents", []) or []
+                for sub_agent_id in sub_agents:
+                    reachable.add(sub_agent_id)
+
         # Build set of async entry point nodes for quick lookup
         async_entry_nodes = {ep.entry_node for ep in self.async_entry_points}
 
@@ -733,5 +704,49 @@ class GraphSpec(BaseModel):
                             )
                         else:
                             seen_keys[key] = node_id
+
+        # GCU nodes must only be used as subagents
+        gcu_node_ids = {n.id for n in self.nodes if n.node_type == "gcu"}
+        if gcu_node_ids:
+            # GCU nodes must not be entry nodes
+            if self.entry_node in gcu_node_ids:
+                errors.append(
+                    f"GCU node '{self.entry_node}' is used as entry node. "
+                    "GCU nodes must only be used as subagents via delegate_to_sub_agent()."
+                )
+
+            # GCU nodes must not be terminal nodes
+            for term in self.terminal_nodes:
+                if term in gcu_node_ids:
+                    errors.append(
+                        f"GCU node '{term}' is used as terminal node. "
+                        "GCU nodes must only be used as subagents."
+                    )
+
+            # GCU nodes must not be connected via edges
+            for edge in self.edges:
+                if edge.source in gcu_node_ids:
+                    errors.append(
+                        f"GCU node '{edge.source}' is used as edge source (edge '{edge.id}'). "
+                        "GCU nodes must only be used as subagents, not connected via edges."
+                    )
+                if edge.target in gcu_node_ids:
+                    errors.append(
+                        f"GCU node '{edge.target}' is used as edge target (edge '{edge.id}'). "
+                        "GCU nodes must only be used as subagents, not connected via edges."
+                    )
+
+            # GCU nodes must be referenced in at least one parent's sub_agents
+            referenced_subagents = set()
+            for node in self.nodes:
+                for sa_id in node.sub_agents or []:
+                    referenced_subagents.add(sa_id)
+
+            orphaned = gcu_node_ids - referenced_subagents
+            for nid in orphaned:
+                errors.append(
+                    f"GCU node '{nid}' is not referenced in any node's sub_agents list. "
+                    "GCU nodes must be declared as subagents of a parent node."
+                )
 
         return errors

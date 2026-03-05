@@ -20,15 +20,61 @@ import { ApiError } from "@/api/client";
 
 const makeId = () => Math.random().toString(36).slice(2, 9);
 
+/**
+ * Strip the instance suffix added when multiple tabs share the same agentType.
+ * e.g. "exports/deep_research::abc123" → "exports/deep_research"
+ * First-instance keys (no "::") are returned unchanged.
+ */
+const baseAgentType = (key: string): string => key.split("::")[0];
+
+/** Format seconds into a compact countdown string. */
+function formatCountdown(totalSecs: number): string {
+  const h = Math.floor(totalSecs / 3600);
+  const m = Math.floor((totalSecs % 3600) / 60);
+  const s = Math.floor(totalSecs % 60);
+  if (h > 0) return `${h}h ${String(m).padStart(2, "0")}m ${String(s).padStart(2, "0")}s`;
+  return `${m}m ${String(s).padStart(2, "0")}s`;
+}
+
+/** Live countdown from an initial seconds value, ticking every second. */
+function TimerCountdown({ initialSeconds }: { initialSeconds: number }) {
+  const [remaining, setRemaining] = useState(Math.max(0, Math.round(initialSeconds)));
+  const startRef = useRef({ wallTime: Date.now(), initial: Math.max(0, Math.round(initialSeconds)) });
+
+  useEffect(() => {
+    startRef.current = { wallTime: Date.now(), initial: Math.max(0, Math.round(initialSeconds)) };
+    setRemaining(Math.max(0, Math.round(initialSeconds)));
+  }, [initialSeconds]);
+
+  useEffect(() => {
+    const id = setInterval(() => {
+      const elapsed = (Date.now() - startRef.current.wallTime) / 1000;
+      setRemaining(Math.max(0, Math.round(startRef.current.initial - elapsed)));
+    }, 1000);
+    return () => clearInterval(id);
+  }, []);
+
+  if (remaining <= 0) return <span className="text-amber-400/80">firing...</span>;
+  return <span>{formatCountdown(remaining)}</span>;
+}
+
 // --- Session types ---
 interface Session {
   id: string;
   agentType: string;
+  /** The key used in sessionsByAgent / agentStates for this specific tab instance.
+   * Equals agentType for the first tab; equals "agentType::frontendSessionId" for
+   * additional tabs opened for the same agent so each gets its own isolated slot. */
+  tabKey?: string;
   label: string;
   messages: ChatMessage[];
   graphNodes: GraphNode[];
   credentials: Credential[];
   backendSessionId?: string;
+  /** The cold history session ID this tab was originally opened from (if any).
+   * Used to detect "already open" even after backendSessionId is updated to a
+   * new live session ID when the cold session is revived. */
+  historySourceId?: string;
 }
 
 function createSession(agentType: string, label: string, existingCredentials?: Credential[]): Session {
@@ -206,14 +252,30 @@ interface AgentBackendState {
   graphId: string | null;
   nodeSpecs: NodeSpec[];
   awaitingInput: boolean;
+  /** The message ID of the current worker input request (for inline reply box) */
+  workerInputMessageId: string | null;
+  queenBuilding: boolean;
+  /** Queen operating mode — "building" (coding), "staging" (loaded), or "running" (executing) */
+  queenMode: "building" | "staging" | "running";
   workerRunState: "idle" | "deploying" | "running";
   currentExecutionId: string | null;
   nodeLogs: Record<string, string[]>;
   nodeActionPlans: Record<string, string>;
+  subagentReports: { subagent_id: string; message: string; data?: Record<string, unknown>; timestamp: string }[];
   isTyping: boolean;
   isStreaming: boolean;
+  /** True only when the queen's LLM is actively processing (not worker) */
+  queenIsTyping: boolean;
+  /** True only when a worker's LLM is actively processing (not queen) */
+  workerIsTyping: boolean;
   llmSnapshots: Record<string, string>;
   activeToolCalls: Record<string, { name: string; done: boolean; streamId: string }>;
+  /** Structured question text from ask_user with options */
+  pendingQuestion: string | null;
+  /** Predefined choices from ask_user (1-3 items); UI appends "Other" */
+  pendingOptions: string[] | null;
+  /** Whether the pending question came from queen or worker */
+  pendingQuestionSource: "queen" | "worker" | null;
 }
 
 function defaultAgentState(): AgentBackendState {
@@ -227,14 +289,23 @@ function defaultAgentState(): AgentBackendState {
     graphId: null,
     nodeSpecs: [],
     awaitingInput: false,
+    workerInputMessageId: null,
+    queenBuilding: false,
+    queenMode: "building",
     workerRunState: "idle",
     currentExecutionId: null,
     nodeLogs: {},
     nodeActionPlans: {},
+    subagentReports: [],
     isTyping: false,
     isStreaming: false,
+    queenIsTyping: false,
+    workerIsTyping: false,
     llmSnapshots: {},
     activeToolCalls: {},
+    pendingQuestion: null,
+    pendingOptions: null,
+    pendingQuestionSource: null,
   };
 }
 
@@ -242,9 +313,19 @@ export default function Workspace() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const rawAgent = searchParams.get("agent") || "new-agent";
-  const initialAgent = rawAgent;
   const hasExplicitAgent = searchParams.has("agent");
   const initialPrompt = searchParams.get("prompt") || "";
+  // ?session= param: when navigating from the home history sidebar, this
+  // carries the backendSessionId to open as a tab on mount.
+  const initialSessionId = searchParams.get("session") || "";
+
+  // When submitting a new prompt from home for "new-agent", use a unique key
+  // so each prompt gets its own tab instead of overwriting the previous one.
+  const [initialAgent] = useState(() =>
+    initialPrompt && hasExplicitAgent && rawAgent === "new-agent"
+      ? `new-agent-${makeId()}`
+      : rawAgent
+  );
 
   // Sessions grouped by agent type — restore from localStorage if available
   const [sessionsByAgent, setSessionsByAgent] = useState<Record<string, Session[]>>(() => {
@@ -253,10 +334,15 @@ export default function Workspace() {
 
     if (persisted) {
       for (const tab of persisted.tabs) {
-        if (!initial[tab.agentType]) initial[tab.agentType] = [];
+        // tabKey is the actual key used in sessionsByAgent (may contain "::" suffix).
+        // Fall back to agentType for tabs persisted before this field was added.
+        const tabKey = tab.tabKey || tab.agentType;
+        if (!initial[tabKey]) initial[tabKey] = [];
         const session = createSession(tab.agentType, tab.label);
         session.id = tab.id;
         session.backendSessionId = tab.backendSessionId;
+        session.tabKey = tab.tabKey; // restore so future persistence uses correct key
+        session.historySourceId = tab.historySourceId;
         // Restore messages and graph from localStorage (up to 50 messages).
         // If the backend session is still alive, loadAgentForType may
         // append additional messages fetched from the server.
@@ -265,7 +351,7 @@ export default function Workspace() {
           session.messages = cached.messages || [];
           session.graphNodes = cached.graphNodes || [];
         }
-        initial[tab.agentType].push(session);
+        initial[tabKey].push(session);
       }
     }
 
@@ -275,15 +361,36 @@ export default function Workspace() {
       return initial;
     }
 
+    // If there are already persisted tabs for this agent type, don't create
+    // a new one — the post-mount effect will call handleHistoryOpen if needed
+    // (for ?session= params coming from the home page sidebar).
     if (initial[initialAgent]?.length) {
       return initial;
     }
 
+    // If the user submitted a new prompt from the home page, always create
+    // a fresh session so the prompt isn't lost into an existing session.
+    // initialAgent is already a unique key (e.g. "new-agent-abc123") when
+    // coming from home, so the new tab won't overwrite existing ones.
+    if (initialPrompt && hasExplicitAgent) {
+      const label = initialAgent.startsWith("new-agent")
+        ? "New Agent"
+        : formatAgentDisplayName(initialAgent);
+      const newSession = createSession(initialAgent, label);
+      initial[initialAgent] = [newSession];
+      return initial;
+    }
+
+    // Only create a fresh default tab when there are no persisted tabs at all.
+    // If ?session= was passed we intentionally do NOT create a tab here —
+    // handleHistoryOpen is called post-mount and does proper dedup.
     if (initialAgent === "new-agent") {
-      initial["new-agent"] = [...(initial["new-agent"] || []), createSession("new-agent", "New Agent")];
-    } else {
-      initial[initialAgent] = [...(initial[initialAgent] || []),
-        createSession(initialAgent, formatAgentDisplayName(initialAgent))];
+      const s = createSession("new-agent", "New Agent");
+      initial["new-agent"] = [...(initial["new-agent"] || []), s];
+    } else if (!initialSessionId) {
+      // Only auto-create an agent tab if there's no session to restore
+      const s = createSession(initialAgent, formatAgentDisplayName(initialAgent));
+      initial[initialAgent] = [...(initial[initialAgent] || []), s];
     }
 
     return initial;
@@ -291,11 +398,28 @@ export default function Workspace() {
 
   const [activeSessionByAgent, setActiveSessionByAgent] = useState<Record<string, string>>(() => {
     const persisted = loadPersistedTabs();
+    // If initialSessionId maps to an already-restored tab, activate that tab
+    if (initialSessionId) {
+      for (const [tabKey, sessions] of Object.entries(sessionsByAgent)) {
+        const match = sessions.find(
+          s => s.backendSessionId === initialSessionId || s.historySourceId === initialSessionId,
+        );
+        if (match) {
+          return { ...(persisted?.activeSessionByAgent ?? {}), [tabKey]: match.id };
+        }
+      }
+    }
     if (persisted) {
       const restored = { ...persisted.activeSessionByAgent };
       const urlSessions = sessionsByAgent[initialAgent];
-      if (urlSessions?.length && !restored[initialAgent]) {
-        restored[initialAgent] = urlSessions[0].id;
+      if (urlSessions?.length) {
+        // When a prompt was submitted from home, activate the newly created
+        // session (last in array) instead of the previously active one.
+        if (initialPrompt && hasExplicitAgent) {
+          restored[initialAgent] = urlSessions[urlSessions.length - 1].id;
+        } else if (!restored[initialAgent]) {
+          restored[initialAgent] = urlSessions[0].id;
+        }
       }
       return restored;
     }
@@ -304,6 +428,14 @@ export default function Workspace() {
   });
 
   const [activeWorker, setActiveWorker] = useState(() => {
+    // If initialSessionId maps to an already-restored tab, activate that key
+    if (initialSessionId) {
+      for (const [tabKey, sessions] of Object.entries(sessionsByAgent)) {
+        if (sessions.some(
+          s => s.backendSessionId === initialSessionId || s.historySourceId === initialSessionId,
+        )) return tabKey;
+      }
+    }
     if (!hasExplicitAgent) {
       const persisted = loadPersistedTabs();
       if (persisted?.activeWorker) return persisted.activeWorker;
@@ -317,6 +449,16 @@ export default function Workspace() {
     navigate("/workspace", { replace: true });
   }, []);
 
+  // Post-mount: if the URL carried a ?session= param (from the home page history
+  // sidebar), open it via handleHistoryOpen instead of creating a tab in init state.
+  // This is the single canonical path — it has robust dedup (checks backendSessionId
+  // AND historySourceId across all in-memory tabs) and is safe to call after persisted
+  // state has been hydrated.
+  // We capture initialSessionId and related URL params in stable refs so the effect
+  // only fires once on mount, regardless of re-renders.
+  const initialSessionIdRef = useRef(initialSessionId);
+  const initialAgentRef = useRef(initialAgent);
+  const mountedRef = useRef(false);
   const [credentialsOpen, setCredentialsOpen] = useState(false);
   // Explicit agent path for the credentials modal — set from 424 responses
   // when activeWorker doesn't match the actual agent (e.g. "new-agent" tab).
@@ -342,6 +484,12 @@ export default function Workspace() {
   // arrive in the same React batch.
   const turnCounterRef = useRef<Record<string, number>>({});
 
+  // Synchronous ref to suppress the queen's auto-intro SSE messages
+  // after a cold-restore (where we already restored the conversation from disk).
+  // Using a ref avoids the race condition where sessionId is set in agentState
+  // (opening SSE) before the suppressQueenIntro flag can be committed.
+  const suppressIntroRef = useRef(new Set<string>());
+
   // --- Consolidated per-agent backend state ---
   const [agentStates, setAgentStates] = useState<Record<string, AgentBackendState>>({});
 
@@ -365,11 +513,15 @@ export default function Workspace() {
     const sessions: Record<string, { messages: ChatMessage[]; graphNodes: GraphNode[] }> = {};
     for (const agentSessions of Object.values(sessionsByAgent)) {
       for (const s of agentSessions) {
+        const tKey = s.tabKey || s.agentType;
         tabs.push({
           id: s.id,
           agentType: s.agentType,
+          tabKey: s.tabKey,
           label: s.label,
-          backendSessionId: s.backendSessionId || agentStates[s.agentType]?.sessionId || undefined,
+          // agentStates is keyed by tabKey (unique per tab), not by base agentType
+          backendSessionId: s.backendSessionId || agentStates[tKey]?.sessionId || undefined,
+          ...(s.historySourceId ? { historySourceId: s.historySourceId } : {}),
         });
         sessions[s.id] = { messages: s.messages, graphNodes: s.graphNodes };
       }
@@ -412,7 +564,7 @@ export default function Workspace() {
             const errorMsg: ChatMessage = {
               id: makeId(), agent: "System", agentColor: "",
               content: `Failed to trigger run: ${errMsg}`,
-              timestamp: "", type: "system", thread: activeWorker,
+              timestamp: "", type: "system", thread: activeWorker, createdAt: Date.now(),
             };
             return { ...s, messages: [...s.messages, errorMsg] };
           }),
@@ -429,64 +581,132 @@ export default function Workspace() {
       const { Framework: _fw, ...userFacing } = result;
       const all = Object.values(userFacing).flat();
       setDiscoverAgents(all);
-    }).catch(() => {});
+    }).catch(() => { });
   }, []);
 
   // --- Agent loading: loadAgentForType ---
   const loadingRef = useRef(new Set<string>());
   const loadAgentForType = useCallback(async (agentType: string) => {
-    if (agentType === "new-agent") {
+    // agentType may be a unique composite key ("exports/foo::sessionId") for additional
+    // tabs — extract the real agent path for selector checks and API calls.
+    const agentPath = baseAgentType(agentType);
+    if (agentPath === "new-agent" || agentType.startsWith("new-agent-")) {
       // Create a queen-only session (no worker) for agent building
       updateAgentState(agentType, { loading: true, error: null, ready: false, sessionId: null });
       try {
         const prompt = initialPrompt || undefined;
         let liveSession: LiveSession | undefined;
 
+        // Find the active session for this agent type
+        const activeId = activeSessionRef.current[agentType];
+        const activeSess = sessionsRef.current[agentType]?.find(s => s.id === activeId)
+          || sessionsRef.current[agentType]?.[0];
+
         // Try to reconnect to stored backend session (e.g., after browser refresh)
-        const storedId = sessionsRef.current[agentType]?.[0]?.backendSessionId;
+        const storedId = activeSess?.backendSessionId;
+        // When the server restarts the session is "cold" — conversation files
+        // survive on disk but there is no live runtime.  Track the old ID so
+        // we can restore message history after creating a new session.
+        let coldRestoreId: string | undefined;
+
         if (storedId) {
           try {
-            liveSession = await sessionsApi.get(storedId);
+            const sessionData = await sessionsApi.get(storedId);
+            if (sessionData.cold) {
+              // Server restarted — files on disk, no live runtime
+              coldRestoreId = storedId;
+            } else {
+              liveSession = sessionData;
+            }
           } catch {
-            // Session gone — fall through to create new
+            // Session gone entirely (no disk files either)
           }
         }
 
+        let restoredMessageCount = 0;
+
         if (!liveSession) {
-          // Reconnect failed — clear stale cached messages from localStorage restore
-          if (storedId) {
+          // Fetch conversation history from disk BEFORE creating the new session.
+          // SKIP if messages were already pre-populated by handleHistoryOpen.
+          const restoreFrom = coldRestoreId ?? storedId;
+          const preRestoredMsgs: ChatMessage[] = [];
+          const alreadyHasMessages = (activeSess?.messages?.length ?? 0) > 0;
+          if (restoreFrom && !alreadyHasMessages) {
+            try {
+              const { messages: queenMsgs } = await sessionsApi.queenMessages(restoreFrom);
+              for (const m of queenMsgs as Message[]) {
+                const msg = backendMessageToChatMessage(m, agentType, "Queen Bee");
+                msg.role = "queen";
+                preRestoredMsgs.push(msg);
+              }
+            } catch {
+              // Not available — will start fresh
+            }
+          }
+
+          // Suppress the queen's intro cycle whenever we are about to restore a
+          // previous conversation, or whenever we have a stored session ID.
+          const willRestore = !!(restoreFrom);
+          if (willRestore || preRestoredMsgs.length > 0) suppressIntroRef.current.add(agentType);
+
+          // Pass coldRestoreId as queenResumeFrom so the backend writes queen
+          // messages into the ORIGINAL session's directory.
+          liveSession = await sessionsApi.create(undefined, undefined, undefined, prompt, coldRestoreId ?? undefined);
+
+          if (preRestoredMsgs.length > 0) {
+            preRestoredMsgs.sort((a, b) => (a.createdAt ?? 0) - (b.createdAt ?? 0));
+            if (activeId) {
+              setSessionsByAgent(prev => ({
+                ...prev,
+                [agentType]: (prev[agentType] || []).map(s =>
+                  s.id === activeId ? { ...s, messages: preRestoredMsgs, graphNodes: [] } : s,
+                ),
+              }));
+            }
+            restoredMessageCount = preRestoredMsgs.length;
+          } else if (restoreFrom && activeId) {
+            // We had a stored session but no messages on disk — wipe stale localStorage cache
             setSessionsByAgent(prev => ({
               ...prev,
-              [agentType]: (prev[agentType] || []).map((s, i) =>
-                i === 0 ? { ...s, messages: [], graphNodes: [] } : s,
+              [agentType]: (prev[agentType] || []).map(s =>
+                s.id === activeId ? { ...s, messages: [], graphNodes: [] } : s,
               ),
             }));
           }
 
-          liveSession = await sessionsApi.create(undefined, undefined, undefined, prompt);
-
-          // Show the initial prompt as a user message in chat (only on fresh create)
-          if (prompt) {
+          // Show the initial prompt as a user message only on a truly fresh session
+          if (prompt && restoredMessageCount === 0 && activeId) {
             const userMsg: ChatMessage = {
               id: makeId(), agent: "You", agentColor: "",
-              content: prompt, timestamp: "", type: "user", thread: agentType,
+              content: prompt, timestamp: "", type: "user", thread: agentType, createdAt: Date.now(),
             };
             setSessionsByAgent(prev => ({
               ...prev,
-              [agentType]: (prev[agentType] || []).map(s => ({
-                ...s, messages: [...s.messages, userMsg],
-              })),
+              [agentType]: (prev[agentType] || []).map(s =>
+                s.id === activeId ? { ...s, messages: [...s.messages, userMsg] } : s,
+              ),
             }));
           }
         }
 
-        // Store backendSessionId on the Session object for persistence
-        setSessionsByAgent(prev => ({
-          ...prev,
-          [agentType]: (prev[agentType] || []).map((s, i) =>
-            i === 0 ? { ...s, backendSessionId: liveSession!.session_id } : s,
-          ),
-        }));
+        // Store backendSessionId on the Session object for persistence.
+        // Also set historySourceId so the sidebar "already-open" check works
+        // even after cold-revive changes backendSessionId to a new live session ID.
+        if (activeId) {
+          setSessionsByAgent(prev => ({
+            ...prev,
+            [agentType]: (prev[agentType] || []).map(s =>
+              s.id === activeId ? {
+                ...s,
+                backendSessionId: liveSession!.session_id,
+                historySourceId: s.historySourceId || coldRestoreId || undefined,
+              } : s,
+            ),
+          }));
+        }
+
+        // If no messages were actually restored, lift the intro suppression
+        if (restoredMessageCount === 0) suppressIntroRef.current.delete(agentType);
 
         updateAgentState(agentType, {
           sessionId: liveSession.session_id,
@@ -511,22 +731,42 @@ export default function Workspace() {
     try {
       let liveSession: LiveSession | undefined;
       let isResumedSession = false;
+      // Set when the stored session is cold (server restarted) so we can restore
+      // messages from the old session files after creating a new live session.
+      let coldRestoreId: string | undefined;
 
       // Try to reconnect to an existing backend session (e.g., after browser refresh).
       // The backendSessionId is persisted in localStorage per tab.
-      const storedSessionId = sessionsRef.current[agentType]?.[0]?.backendSessionId;
+      // Also check historySourceId — handleHistoryOpen populates this with the
+      // original session ID from the sidebar. Use it as a fallback for stored ID.
+      const historySourceId = sessionsRef.current[agentType]?.[0]?.historySourceId;
+      const storedSessionId = sessionsRef.current[agentType]?.[0]?.backendSessionId
+        || historySourceId;
       if (storedSessionId) {
         try {
-          liveSession = await sessionsApi.get(storedSessionId);
-          isResumedSession = true;
+          const sessionData = await sessionsApi.get(storedSessionId);
+          if (sessionData.cold) {
+            // Server restarted — conversation files survive on disk, no live runtime.
+            coldRestoreId = storedSessionId;
+          } else {
+            liveSession = sessionData;
+            isResumedSession = true;
+          }
         } catch {
-          // Session gone (server restarted, etc.) — fall through to create new
+          // 404: session was explicitly stopped (via closeAgentTab) but conversation
+          // files likely still exist on disk. Treat it as cold so we can restore.
+          // Verify files exist before assuming cold — if queenMessages succeeds with
+          // content, files are there.
+          coldRestoreId = historySourceId || storedSessionId;
         }
       }
 
       if (!liveSession) {
-        // Reconnect failed — clear stale cached messages from localStorage restore
-        if (storedSessionId) {
+        // Reconnect failed — clear stale cached messages from localStorage restore.
+        // NEVER wipe when: (a) doing a cold restore (we'll restore from disk) or
+        // (b) handleHistoryOpen already pre-populated messages (alreadyHasMessages).
+        const alreadyHasMessages = (sessionsRef.current[agentType] || [])[0]?.messages?.length > 0;
+        if (storedSessionId && !coldRestoreId && !alreadyHasMessages) {
           setSessionsByAgent(prev => ({
             ...prev,
             [agentType]: (prev[agentType] || []).map((s, i) =>
@@ -535,8 +775,48 @@ export default function Workspace() {
           }));
         }
 
+        // CRITICAL: Pre-fetch queen messages from the old session directory BEFORE
+        // creating the new session. When queen_resume_from is set the new session writes
+        // to the SAME directory, so if we fetch after creation we risk capturing the
+        // new queen's greeting in the restored history.
+        // SKIP if messages were already pre-populated by handleHistoryOpen (avoids
+        // double-fetch and greeting leakage).
+        let preQueenMsgs: ChatMessage[] = [];
+        if (coldRestoreId && !alreadyHasMessages) {
+          try {
+            const { messages: queenMsgs } = await sessionsApi.queenMessages(coldRestoreId);
+            // Also pre-fetch worker messages from the old session if a resumable worker exists
+            const displayNameTemp = formatAgentDisplayName(agentPath);
+            for (const m of queenMsgs as Message[]) {
+              const msg = backendMessageToChatMessage(m, agentType, "Queen Bee");
+              msg.role = "queen";
+              preQueenMsgs.push(msg);
+            }
+            // Also try to grab worker messages while we're here
+            try {
+              const { sessions: workerSessions } = await sessionsApi.workerSessions(coldRestoreId);
+              const resumable = workerSessions.find(s => s.status === "active" || s.status === "paused");
+              if (resumable) {
+                const { messages: wMsgs } = await sessionsApi.messages(coldRestoreId, resumable.session_id);
+                for (const m of wMsgs as Message[]) {
+                  preQueenMsgs.push(backendMessageToChatMessage(m, agentType, displayNameTemp));
+                }
+              }
+            } catch { /* not critical */ }
+          } catch {
+            // Not available — will start fresh
+          }
+        }
+
+        // Suppress intro whenever we are about to restore a previous conversation.
+        // The user never expects a greeting when reopening a session.
+        if (coldRestoreId) suppressIntroRef.current.add(agentType);
+
         try {
-          liveSession = await sessionsApi.create(agentType);
+          // Pass coldRestoreId as queenResumeFrom so the backend writes queen
+          // messages into the ORIGINAL session's directory — all conversation
+          // history accumulates in one place across server restarts.
+          liveSession = await sessionsApi.create(agentPath, undefined, undefined, undefined, coldRestoreId ?? undefined);
         } catch (loadErr: unknown) {
           // 424 = credentials required — open the credentials modal
           if (loadErr instanceof ApiError && loadErr.status === 424) {
@@ -567,7 +847,11 @@ export default function Workspace() {
                   const result = await sessionsApi.get(existingSessionId);
                   if (result.loading) continue;
                   return result as LiveSession;
-                } catch {
+                } catch (pollErr) {
+                  // 404 = agent failed to load and was cleaned up — stop immediately
+                  if (pollErr instanceof ApiError && pollErr.status === 404) {
+                    throw new Error("Agent failed to load");
+                  }
                   if (i === maxAttempts - 1) throw loadErr;
                 }
               }
@@ -577,79 +861,112 @@ export default function Workspace() {
             liveSession = body as unknown as LiveSession;
           }
         }
+
+        // If we pre-fetched messages for a cold restore, populate the UI immediately.
+        // This happens before the SSE connection opens so no greeting can slip through.
+        if (preQueenMsgs.length > 0) {
+          preQueenMsgs.sort((a, b) => (a.createdAt ?? 0) - (b.createdAt ?? 0));
+          setSessionsByAgent(prev => ({
+            ...prev,
+            [agentType]: (prev[agentType] || []).map((s, i) =>
+              i === 0 ? { ...s, messages: preQueenMsgs, graphNodes: [] } : s,
+            ),
+          }));
+        }
       }
 
       // At this point liveSession is guaranteed set — if both reconnect and create
       // failed, the throw inside the catch exits the outer try block.
       const session = liveSession!;
       const displayName = formatAgentDisplayName(session.worker_name || agentType);
-      updateAgentState(agentType, { sessionId: session.session_id, displayName });
+      const initialMode = session.queen_mode || (session.has_worker ? "staging" : "building");
+      updateAgentState(agentType, {
+        sessionId: session.session_id,
+        displayName,
+        queenMode: initialMode,
+        queenBuilding: initialMode === "building",
+      });
 
-      // Update the session label
+      // Update the session label + backendSessionId.  Also set historySourceId
+      // so the sidebar "already-open" check works even after cold-revive changes
+      // backendSessionId to a new live session ID.
       setSessionsByAgent((prev) => {
         const sessions = prev[agentType] || [];
         if (!sessions.length) return prev;
         return {
           ...prev,
           [agentType]: sessions.map((s, i) =>
-            i === 0 ? { ...s, label: sessions.length === 1 ? displayName : `${displayName} #${i + 1}`, backendSessionId: session.session_id } : s,
+            i === 0 ? {
+              ...s,
+              // Preserve existing label if it was already set with a #N suffix by
+              // addAgentSession/handleHistoryOpen. Only overwrite with the bare
+              // displayName when the label doesn't match the resolved display name.
+              label: s.label.startsWith(displayName) ? s.label : displayName,
+              backendSessionId: session.session_id,
+              // Preserve existing historySourceId; set it from coldRestoreId if missing
+              historySourceId: s.historySourceId || coldRestoreId || undefined,
+            } : s,
           ),
         };
       });
 
-      // Check worker session status (detects running worker).
-      // Only restore messages when rejoining an existing backend session.
+      // Restore messages when rejoining an existing session OR cold-restoring from disk.
       let isWorkerRunning = false;
-      try {
-        const { sessions: workerSessions } = await sessionsApi.workerSessions(session.session_id);
-        const resumable = workerSessions.find(
-          (s) => s.status === "active" || s.status === "paused",
-        );
-        isWorkerRunning = resumable?.status === "active";
+      const restoredMsgs: ChatMessage[] = [];
+      // For cold-restore, use the old session ID. For live resume, use current session.
+      const historyId = coldRestoreId ?? (isResumedSession ? session.session_id : undefined);
 
-        if (isResumedSession && resumable) {
-          const { messages } = await sessionsApi.messages(session.session_id, resumable.session_id);
-          if (messages.length > 0) {
-            const chatMsgs = messages.map((m: Message) =>
-              backendMessageToChatMessage(m, agentType, displayName),
-            );
-            setSessionsByAgent((prev) => ({
-              ...prev,
-              [agentType]: (prev[agentType] || []).map((s, i) =>
-                i === 0 ? { ...s, messages: [...s.messages, ...chatMsgs] } : s,
-              ),
-            }));
-          }
-        }
-      } catch {
-        // Worker session listing failed — not critical
-      }
-
-      // Restore queen conversation when rejoining an existing session
-      if (isResumedSession) {
+      // For LIVE resume (not cold restore), fetch worker + queen messages now.
+      // For cold restore they were already pre-fetched above (before create) so we skip to avoid
+      // double-restoring and to avoid capturing the new greeting.
+      if (historyId && !coldRestoreId) {
         try {
-          const { messages: queenMsgs } = await sessionsApi.queenMessages(session.session_id);
-          if (queenMsgs.length > 0) {
-            const chatMsgs = queenMsgs.map((m: Message) => {
-              const msg = backendMessageToChatMessage(m, agentType, "Queen Bee");
-              if (msg) msg.role = "queen";
-              return msg;
-            }).filter(Boolean);
-            if (chatMsgs.length > 0) {
-              setSessionsByAgent((prev) => ({
-                ...prev,
-                [agentType]: (prev[agentType] || []).map((s, i) =>
-                  i === 0 ? { ...s, messages: [...chatMsgs, ...s.messages] } : s,
-                ),
-              }));
+          const { sessions: workerSessions } = await sessionsApi.workerSessions(historyId);
+          const resumable = workerSessions.find(
+            (s) => s.status === "active" || s.status === "paused",
+          );
+          isWorkerRunning = resumable?.status === "active";
+
+          if (resumable) {
+            const { messages } = await sessionsApi.messages(historyId, resumable.session_id);
+            for (const m of messages as Message[]) {
+              restoredMsgs.push(backendMessageToChatMessage(m, agentType, displayName));
             }
+          }
+        } catch {
+          // Worker session listing failed — not critical
+        }
+
+        try {
+          const { messages: queenMsgs } = await sessionsApi.queenMessages(historyId);
+          for (const m of queenMsgs as Message[]) {
+            const msg = backendMessageToChatMessage(m, agentType, "Queen Bee");
+            msg.role = "queen";
+            restoredMsgs.push(msg);
           }
         } catch {
           // Queen messages not available — not critical
         }
       }
 
+      // Merge messages in chronological order (only for live resume; cold restore
+      // was already applied above before create).
+      if (restoredMsgs.length > 0) {
+        restoredMsgs.sort((a, b) => (a.createdAt ?? 0) - (b.createdAt ?? 0));
+        setSessionsByAgent((prev) => ({
+          ...prev,
+          [agentType]: (prev[agentType] || []).map((s, i) =>
+            i === 0 ? { ...s, messages: [...restoredMsgs, ...s.messages] } : s,
+          ),
+        }));
+      }
+
+      // If no messages were actually restored, lift the intro suppression gate
+      if (restoredMsgs.length === 0 && !coldRestoreId) suppressIntroRef.current.delete(agentType);
+
       updateAgentState(agentType, {
+        sessionId: session.session_id,
+        displayName,
         ready: true,
         loading: false,
         queenReady: true,
@@ -672,12 +989,14 @@ export default function Workspace() {
   }, [sessionsByAgent, agentStates, loadAgentForType, updateAgentState]);
 
   // --- Fetch graph topology when a session becomes ready ---
-  const fetchGraphForAgent = useCallback(async (agentType: string, sessionId: string) => {
+  const fetchGraphForAgent = useCallback(async (agentType: string, sessionId: string, knownGraphId?: string) => {
     try {
-      const { graphs } = await sessionsApi.graphs(sessionId);
-      if (!graphs.length) return;
-
-      const graphId = graphs[0];
+      let graphId = knownGraphId;
+      if (!graphId) {
+        const { graphs } = await sessionsApi.graphs(sessionId);
+        if (!graphs.length) return;
+        graphId = graphs[0];
+      }
       const topology = await graphsApi.nodes(sessionId, graphId);
 
       updateAgentState(agentType, { graphId, nodeSpecs: topology.nodes });
@@ -713,6 +1032,51 @@ export default function Workspace() {
       fetchGraphForAgent(agentType, state.sessionId);
     }
   }, [agentStates, fetchGraphForAgent]);
+
+  // Poll entry points every second for agents with timers to keep
+  // next_fire_in countdowns fresh without re-fetching the full topology.
+  useEffect(() => {
+    const id = setInterval(async () => {
+      for (const [agentType, sessions] of Object.entries(sessionsByAgent)) {
+        const session = sessions[0];
+        if (!session) continue;
+        const timerNodes = session.graphNodes.filter(
+          (n) => n.nodeType === "trigger" && n.triggerType === "timer",
+        );
+        if (timerNodes.length === 0) continue;
+        const state = agentStates[agentType];
+        if (!state?.sessionId) continue;
+        try {
+          const { entry_points } = await sessionsApi.entryPoints(state.sessionId);
+          const fireMap = new Map<string, number>();
+          for (const ep of entry_points) {
+            if (ep.next_fire_in != null) {
+              fireMap.set(`__trigger_${ep.id}`, ep.next_fire_in);
+            }
+          }
+          if (fireMap.size === 0) continue;
+          setSessionsByAgent((prev) => {
+            const ss = prev[agentType];
+            if (!ss?.length) return prev;
+            const updated = ss[0].graphNodes.map((n) => {
+              const nfi = fireMap.get(n.id);
+              if (nfi == null || n.nodeType !== "trigger") return n;
+              return { ...n, triggerConfig: { ...n.triggerConfig, next_fire_in: nfi } };
+            });
+            // Skip update if nothing changed
+            if (updated.every((n, idx) => n === ss[0].graphNodes[idx])) return prev;
+            return {
+              ...prev,
+              [agentType]: ss.map((s, i) => (i === 0 ? { ...s, graphNodes: updated } : s)),
+            };
+          });
+        } catch {
+          // Entry points fetch failed — skip this tick
+        }
+      }
+    }, 1_000);
+    return () => clearInterval(id);
+  }, [sessionsByAgent, agentStates]);
 
   // --- Graph node status helpers (now accept agentType) ---
   const updateGraphNodeStatus = useCallback(
@@ -798,7 +1162,7 @@ export default function Workspace() {
             const errorMsg: ChatMessage = {
               id: makeId(), agent: "System", agentColor: "",
               content: `Failed to pause: ${errMsg}`,
-              timestamp: "", type: "system", thread: activeWorker,
+              timestamp: "", type: "system", thread: activeWorker, createdAt: Date.now(),
             };
             return { ...s, messages: [...s.messages, errorMsg] };
           }),
@@ -815,7 +1179,7 @@ export default function Workspace() {
     } catch {
       // Best-effort — queen may have already finished
     }
-    updateAgentState(activeWorker, { isTyping: false, isStreaming: false });
+    updateAgentState(activeWorker, { isTyping: false, isStreaming: false, queenIsTyping: false, workerIsTyping: false });
   }, [agentStates, activeWorker, updateAgentState]);
 
   // --- Node log helper (writes into agentStates) ---
@@ -840,20 +1204,27 @@ export default function Workspace() {
   // --- SSE event handler ---
   const upsertChatMessage = useCallback(
     (agentType: string, chatMsg: ChatMessage) => {
-      console.log('[UPSERT] agentType:', agentType, 'msgId:', chatMsg.id, 'thread:', chatMsg.thread, 'role:', chatMsg.role, 'content:', chatMsg.content?.slice(0, 40));
       setSessionsByAgent((prev) => {
         const sessions = prev[agentType] || [];
         const activeId = activeSessionRef.current[agentType] || sessions[0]?.id;
-        console.log('[UPSERT-inner] sessions:', sessions.length, 'activeId:', activeId, 'sessionIds:', sessions.map(s => s.id));
         return {
           ...prev,
           [agentType]: sessions.map((s) => {
             if (s.id !== activeId) return s;
             const idx = s.messages.findIndex((m) => m.id === chatMsg.id);
-            const newMessages =
-              idx >= 0
-                ? s.messages.map((m, i) => (i === idx ? chatMsg : m))
-                : [...s.messages, chatMsg];
+            let newMessages: ChatMessage[];
+            if (idx >= 0) {
+              // Update existing message in place, preserve position
+              newMessages = s.messages.map((m, i) =>
+                i === idx ? { ...chatMsg, createdAt: m.createdAt ?? chatMsg.createdAt } : m,
+              );
+            } else {
+              // Append — SSE events arrive in server-timestamp order via the
+              // shared EventBus, so arrival order already interleaves queen
+              // and worker correctly.  Local user messages are always created
+              // before their server responses, so append is safe there too.
+              newMessages = [...s.messages, chatMsg];
+            }
             return { ...s, messages: newMessages };
           }),
         };
@@ -869,11 +1240,21 @@ export default function Workspace() {
 
       const isQueen = streamId === "queen";
       if (isQueen) console.log('[QUEEN] handleSSEEvent:', event.type, 'agentType:', agentType);
+      // Drop queen message content while suppressing the auto-intro after a cold-restore.
+      // Uses a synchronous ref to avoid race conditions with React state batching.
+      const suppressQueenMessages = isQueen && suppressIntroRef.current.has(agentType);
       const agentDisplayName = agentStates[agentType]?.displayName;
       const displayName = isQueen ? "Queen Bee" : (agentDisplayName || undefined);
       const role = isQueen ? "queen" as const : "worker" as const;
       const ts = fmtLogTs(event.timestamp);
-      const currentTurn = turnCounterRef.current[agentType] ?? 0;
+      // Turn counter is per-stream so queen and worker tool pills don't
+      // interfere.  A worker node_loop_iteration no longer increments
+      // the queen's turn counter (which would cause pill ID mismatches
+      // between tool_call_started and tool_call_completed).
+      const turnKey = `${agentType}:${streamId}`;
+      const currentTurn = turnCounterRef.current[turnKey] ?? 0;
+      // Backend event timestamp for correct queen/worker message ordering
+      const eventCreatedAt = event.timestamp ? new Date(event.timestamp).getTime() : Date.now();
 
       // Mark queen as ready on the first queen SSE event
       if (isQueen && !agentStates[agentType]?.queenReady) {
@@ -883,24 +1264,29 @@ export default function Workspace() {
       switch (event.type) {
         case "execution_started":
           if (isQueen) {
-            turnCounterRef.current[agentType] = currentTurn + 1;
-            updateAgentState(agentType, { isTyping: true });
+            turnCounterRef.current[turnKey] = currentTurn + 1;
+            updateAgentState(agentType, { isTyping: true, queenIsTyping: true });
           } else {
             // Warn if prior LLM snapshots are being dropped (edge case: execution_completed never arrived)
             const priorSnapshots = agentStates[agentType]?.llmSnapshots || {};
             if (Object.keys(priorSnapshots).length > 0) {
               console.debug(`[hive] execution_started: dropping ${Object.keys(priorSnapshots).length} unflushed LLM snapshot(s)`);
             }
-            turnCounterRef.current[agentType] = currentTurn + 1;
+            turnCounterRef.current[turnKey] = currentTurn + 1;
             updateAgentState(agentType, {
               isTyping: true,
               isStreaming: false,
+              workerIsTyping: true,
               awaitingInput: false,
               workerRunState: "running",
               currentExecutionId: event.execution_id || agentStates[agentType]?.currentExecutionId || null,
               nodeLogs: {},
+              subagentReports: [],
               llmSnapshots: {},
               activeToolCalls: {},
+              pendingQuestion: null,
+              pendingOptions: null,
+              pendingQuestionSource: null,
             });
             markAllNodesAs(agentType, ["running", "looping", "complete", "error"], "pending");
           }
@@ -908,7 +1294,8 @@ export default function Workspace() {
 
         case "execution_completed":
           if (isQueen) {
-            updateAgentState(agentType, { isTyping: false });
+            suppressIntroRef.current.delete(agentType);
+            updateAgentState(agentType, { isTyping: false, queenIsTyping: false });
           } else {
             // Flush any remaining LLM snapshots before clearing state
             const completedSnapshots = agentStates[agentType]?.llmSnapshots || {};
@@ -920,12 +1307,22 @@ export default function Workspace() {
             updateAgentState(agentType, {
               isTyping: false,
               isStreaming: false,
+              workerIsTyping: false,
               awaitingInput: false,
+              workerInputMessageId: null,
               workerRunState: "idle",
               currentExecutionId: null,
               llmSnapshots: {},
+              pendingQuestion: null,
+              pendingOptions: null,
+              pendingQuestionSource: null,
             });
             markAllNodesAs(agentType, ["running", "looping"], "complete");
+
+            // Re-fetch graph topology so timer countdowns refresh
+            const sid = agentStates[agentType]?.sessionId;
+            const gid = agentStates[agentType]?.graphId;
+            if (sid) fetchGraphForAgent(agentType, sid, gid || undefined);
           }
           break;
 
@@ -936,14 +1333,14 @@ export default function Workspace() {
         case "llm_text_delta": {
           const chatMsg = sseEventToChatMessage(event, agentType, displayName, currentTurn);
           if (isQueen) console.log('[QUEEN] chatMsg:', chatMsg?.id, chatMsg?.content?.slice(0, 50), 'turn:', currentTurn);
-          if (chatMsg) {
+          if (chatMsg && !suppressQueenMessages) {
             if (isQueen) chatMsg.role = role;
             upsertChatMessage(agentType, chatMsg);
           }
 
           // Mark streaming when LLM text is actively arriving
           if (event.type === "llm_text_delta" || event.type === "client_output_delta") {
-            updateAgentState(agentType, { isStreaming: true });
+            updateAgentState(agentType, { isStreaming: true, ...(isQueen ? {} : { workerIsTyping: false }) });
           }
 
           if (event.type === "llm_text_delta" && !isQueen && event.node_id) {
@@ -964,17 +1361,89 @@ export default function Workspace() {
           }
 
           if (event.type === "client_input_requested") {
-            updateAgentState(agentType, { awaitingInput: true, isTyping: false, isStreaming: false });
+            console.log('[CLIENT_INPUT_REQ] stream_id:', streamId, 'isQueen:', isQueen, 'node_id:', event.node_id, 'prompt:', (event.data?.prompt as string)?.slice(0, 80), 'agentType:', agentType);
+            const rawOptions = event.data?.options;
+            const options = Array.isArray(rawOptions) ? (rawOptions as string[]) : null;
+            if (isQueen) {
+              const prompt = (event.data?.prompt as string) || "";
+              const isAutoBlock = !prompt && !options;
+              // Queen auto-block (empty prompt, no options) should not
+              // overwrite a pending worker question — the worker's
+              // QuestionWidget must stay visible.  Use the updater form
+              // to read the latest state and avoid stale-closure races
+              // when worker and queen events arrive in the same batch.
+              setAgentStates(prev => {
+                const cur = prev[agentType] || defaultAgentState();
+                const workerQuestionActive = cur.pendingQuestionSource === "worker";
+                if (isAutoBlock && workerQuestionActive) {
+                  return {
+                    ...prev, [agentType]: {
+                      ...cur,
+                      awaitingInput: true,
+                      isTyping: false,
+                      isStreaming: false,
+                      queenIsTyping: false,
+                      queenBuilding: false,
+                    }
+                  };
+                }
+                return {
+                  ...prev, [agentType]: {
+                    ...cur,
+                    awaitingInput: true,
+                    isTyping: false,
+                    isStreaming: false,
+                    queenIsTyping: false,
+                    queenBuilding: false,
+                    pendingQuestion: prompt || null,
+                    pendingOptions: options,
+                    pendingQuestionSource: "queen",
+                  }
+                };
+              });
+            } else {
+              // Worker input request.
+              // If the prompt is non-empty (explicit ask_user), create a visible
+              // message bubble.  For auto-block (empty prompt), the worker's text
+              // was already streamed via client_output_delta — just activate the
+              // reply box below the last worker message.
+              const eid = event.execution_id ?? "";
+              const prompt = (event.data?.prompt as string) || "";
+              if (prompt) {
+                const workerInputMsg: ChatMessage = {
+                  id: `worker-input-${eid}-${event.node_id || Date.now()}`,
+                  agent: displayName || event.node_id || "Worker",
+                  agentColor: "",
+                  content: prompt,
+                  timestamp: "",
+                  type: "worker_input_request",
+                  role: "worker",
+                  thread: agentType,
+                  createdAt: eventCreatedAt,
+                };
+                console.log('[CLIENT_INPUT_REQ] creating worker_input_request msg:', workerInputMsg.id, 'content:', prompt.slice(0, 80));
+                upsertChatMessage(agentType, workerInputMsg);
+              }
+              updateAgentState(agentType, {
+                awaitingInput: true,
+                isTyping: false,
+                isStreaming: false,
+                queenIsTyping: false,
+                pendingQuestion: prompt || null,
+                pendingOptions: options,
+                pendingQuestionSource: "worker",
+              });
+            }
           }
           if (event.type === "execution_paused") {
-            updateAgentState(agentType, { isTyping: false, isStreaming: false, awaitingInput: false });
+            updateAgentState(agentType, { isTyping: false, isStreaming: false, queenIsTyping: false, workerIsTyping: false, awaitingInput: false, workerInputMessageId: null, pendingQuestion: null, pendingOptions: null, pendingQuestionSource: null });
             if (!isQueen) {
               updateAgentState(agentType, { workerRunState: "idle", currentExecutionId: null });
               markAllNodesAs(agentType, ["running", "looping"], "pending");
             }
           }
           if (event.type === "execution_failed") {
-            updateAgentState(agentType, { isTyping: false, isStreaming: false, awaitingInput: false });
+            updateAgentState(agentType, { isTyping: false, isStreaming: false, queenIsTyping: false, workerIsTyping: false, awaitingInput: false, workerInputMessageId: null, pendingQuestion: null, pendingOptions: null, pendingQuestionSource: null });
             if (!isQueen) {
               updateAgentState(agentType, { workerRunState: "idle", currentExecutionId: null });
               if (event.node_id) {
@@ -989,7 +1458,7 @@ export default function Workspace() {
         }
 
         case "node_loop_started":
-          turnCounterRef.current[agentType] = currentTurn + 1;
+          turnCounterRef.current[turnKey] = currentTurn + 1;
           updateAgentState(agentType, { isTyping: true, activeToolCalls: {} });
           if (!isQueen && event.node_id) {
             const sessions = sessionsRef.current[agentType] || [];
@@ -1005,8 +1474,12 @@ export default function Workspace() {
           break;
 
         case "node_loop_iteration":
-          turnCounterRef.current[agentType] = currentTurn + 1;
-          updateAgentState(agentType, { isStreaming: false, activeToolCalls: {} });
+          turnCounterRef.current[turnKey] = currentTurn + 1;
+          if (isQueen) {
+            updateAgentState(agentType, { isStreaming: false, activeToolCalls: {}, awaitingInput: false, pendingQuestion: null, pendingOptions: null, pendingQuestionSource: null });
+          } else {
+            updateAgentState(agentType, { isStreaming: false, workerIsTyping: true, activeToolCalls: {}, awaitingInput: false, pendingQuestion: null, pendingOptions: null, pendingQuestionSource: null });
+          }
           if (!isQueen && event.node_id) {
             const pendingText = agentStates[agentType]?.llmSnapshots[event.node_id];
             if (pendingText?.trim()) {
@@ -1053,6 +1526,9 @@ export default function Workspace() {
 
         case "tool_call_started": {
           console.log('[TOOL_PILL] tool_call_started received:', { isQueen, nodeId: event.node_id, streamId: event.stream_id, agentType, executionId: event.execution_id, toolName: event.data?.tool_name });
+
+          // queenBuilding is now driven by queen_mode_changed events
+
           if (event.node_id) {
             if (!isQueen) {
               const pendingText = agentStates[agentType]?.llmSnapshots[event.node_id];
@@ -1066,6 +1542,28 @@ export default function Workspace() {
                 });
               }
               appendNodeLog(agentType, event.node_id, `${ts} INFO  Calling ${(event.data?.tool_name as string) || "unknown"}(${event.data?.tool_input ? truncate(JSON.stringify(event.data.tool_input), 200) : ""})`);
+
+              // Track subagent delegation start
+              if ((event.data?.tool_name as string) === "delegate_to_sub_agent") {
+                const saInput = event.data?.tool_input as Record<string, unknown> | undefined;
+                const saId = (saInput?.agent_id as string) || "";
+                if (saId) {
+                  setAgentStates(prev => {
+                    const state = prev[agentType];
+                    if (!state) return prev;
+                    return {
+                      ...prev,
+                      [agentType]: {
+                        ...state,
+                        subagentReports: [
+                          ...state.subagentReports,
+                          { subagent_id: saId, message: "Delegating...", timestamp: event.timestamp, status: "running" as const },
+                        ],
+                      },
+                    };
+                  });
+                }
+              }
             }
 
             const toolName = (event.data?.tool_name as string) || "unknown";
@@ -1089,6 +1587,7 @@ export default function Workspace() {
                 type: "tool_status",
                 role,
                 thread: agentType,
+                createdAt: eventCreatedAt,
               });
               return {
                 ...prev,
@@ -1114,6 +1613,31 @@ export default function Workspace() {
               appendNodeLog(agentType, event.node_id, `${ts} INFO  ${toolName} done${resultStr}`);
             }
 
+            // Track subagent delegation completion
+            if (toolName === "delegate_to_sub_agent" && result) {
+              try {
+                const parsed = JSON.parse(result);
+                const saId = (parsed?.metadata?.agent_id as string) || "";
+                const success = parsed?.metadata?.success as boolean;
+                if (saId) {
+                  setAgentStates(prev => {
+                    const state = prev[agentType];
+                    if (!state) return prev;
+                    return {
+                      ...prev,
+                      [agentType]: {
+                        ...state,
+                        subagentReports: [
+                          ...state.subagentReports,
+                          { subagent_id: saId, message: success ? "Completed" : "Failed", timestamp: event.timestamp, status: success ? "complete" as const : "error" as const },
+                        ],
+                      },
+                    };
+                  });
+                }
+              } catch { /* ignore parse errors */ }
+            }
+
             // Mark tool as done and update activity row
             const sid = event.stream_id;
             setAgentStates(prev => {
@@ -1134,6 +1658,7 @@ export default function Workspace() {
                 type: "tool_status",
                 role,
                 thread: agentType,
+                createdAt: eventCreatedAt,
               });
               return {
                 ...prev,
@@ -1152,6 +1677,32 @@ export default function Workspace() {
             }
           }
           break;
+
+        case "subagent_report": {
+          if (!isQueen && event.node_id) {
+            const subagentId = (event.data?.subagent_id as string) || "";
+            const message = (event.data?.message as string) || "";
+            const data = event.data?.data as Record<string, unknown> | undefined;
+            // Extract parent node ID from "parentNodeId:subagent:agentId" format
+            const parentNodeId = event.node_id.split(":subagent:")[0] || event.node_id;
+            appendNodeLog(agentType, parentNodeId, `${ts} INFO  [Subagent:${subagentId}] ${truncate(message, 200)}`);
+            setAgentStates(prev => {
+              const state = prev[agentType];
+              if (!state) return prev;
+              return {
+                ...prev,
+                [agentType]: {
+                  ...state,
+                  subagentReports: [
+                    ...state.subagentReports,
+                    { subagent_id: subagentId, message, data, timestamp: event.timestamp },
+                  ],
+                },
+              };
+            });
+          }
+          break;
+        }
 
         case "node_stalled":
           if (!isQueen && event.node_id) {
@@ -1211,34 +1762,50 @@ export default function Workspace() {
           break;
         }
 
+        case "queen_mode_changed": {
+          const rawMode = event.data?.mode as string;
+          const newMode: "building" | "staging" | "running" =
+            rawMode === "running" ? "running" : rawMode === "staging" ? "staging" : "building";
+          updateAgentState(agentType, {
+            queenMode: newMode,
+            queenBuilding: newMode === "building",
+            // Sync workerRunState so the RunButton reflects the mode
+            workerRunState: newMode === "running" ? "running" : "idle",
+          });
+          break;
+        }
+
         case "worker_loaded": {
           const workerName = event.data?.worker_name as string | undefined;
           const agentPathFromEvent = event.data?.agent_path as string | undefined;
-          const displayName = formatAgentDisplayName(workerName || agentType);
+          const displayName = formatAgentDisplayName(workerName || baseAgentType(agentType));
 
           // Invalidate cached credential requirements so the modal fetches
           // fresh data the next time it opens (the new agent may have
           // different credential needs than the previous one).
           clearCredentialCache(agentPathFromEvent);
-          clearCredentialCache(agentType);
+          clearCredentialCache(baseAgentType(agentType));
 
           // Update agent state: new display name, reset graph so topology refetch triggers
           updateAgentState(agentType, {
             displayName,
+            queenBuilding: false,
             workerRunState: "idle",
             graphId: null,
             nodeSpecs: [],
           });
 
-          // Update session label (tab name) and clear graph nodes for fresh fetch
+          // Update ONLY the active session's label + graph nodes — never touch
+          // sessions belonging to a different tab sharing the same agentType key.
+          // Also clear worker messages so the fresh worker starts with a clean slate.
+          const activeId = activeSessionRef.current[agentType];
           setSessionsByAgent(prev => ({
             ...prev,
-            [agentType]: (prev[agentType] || []).map(s => ({
-              ...s,
-              label: displayName,
-              graphNodes: [],
-              messages: s.messages.filter(m => m.role !== "worker"),
-            })),
+            [agentType]: (prev[agentType] || []).map(s =>
+              s.id === activeId || (!activeId && prev[agentType]?.[0]?.id === s.id)
+                ? { ...s, label: displayName, graphNodes: [], messages: s.messages.filter(m => m.role !== "worker") }
+                : s
+            ),
           }));
 
           // Explicitly fetch graph topology for the newly loaded worker
@@ -1276,7 +1843,7 @@ export default function Workspace() {
   const activeSession = currentSessions.find(s => s.id === activeSessionId) || currentSessions[0];
 
   const currentGraph = activeSession
-    ? { nodes: activeSession.graphNodes, title: activeAgentState?.displayName || formatAgentDisplayName(activeWorker) }
+    ? { nodes: activeSession.graphNodes, title: activeAgentState?.displayName || formatAgentDisplayName(baseAgentType(activeWorker)) }
     : { nodes: [] as GraphNode[], title: "" };
 
   // Build a flat list of all agent-type tabs for the tab bar
@@ -1302,12 +1869,12 @@ export default function Workspace() {
     if (!allRequiredCredentialsMet(activeSession.credentials)) {
       const userMsg: ChatMessage = {
         id: makeId(), agent: "You", agentColor: "",
-        content: text, timestamp: "", type: "user", thread,
+        content: text, timestamp: "", type: "user", thread, createdAt: Date.now(),
       };
       const promptMsg: ChatMessage = {
         id: makeId(), agent: "Queen Bee", agentColor: "",
         content: "Before we get started, you'll need to configure your credentials. Click the **Credentials** button in the top bar to connect the required integrations for this agent.",
-        timestamp: "", role: "queen" as const, thread,
+        timestamp: "", role: "queen" as const, thread, createdAt: Date.now(),
       };
       setSessionsByAgent(prev => ({
         ...prev,
@@ -1318,9 +1885,49 @@ export default function Workspace() {
       return;
     }
 
+    // If worker is awaiting free-text input (no options / no QuestionWidget),
+    // route the message directly to the worker instead of the queen.
+    if (agentStates[activeWorker]?.awaitingInput && agentStates[activeWorker]?.pendingQuestionSource === "worker" && !agentStates[activeWorker]?.pendingOptions) {
+      const state = agentStates[activeWorker];
+      if (state?.sessionId && state?.ready) {
+        const userMsg: ChatMessage = {
+          id: makeId(), agent: "You", agentColor: "",
+          content: text, timestamp: "", type: "user", thread, createdAt: Date.now(),
+        };
+        setSessionsByAgent(prev => ({
+          ...prev,
+          [activeWorker]: prev[activeWorker].map(s =>
+            s.id === activeSession.id ? { ...s, messages: [...s.messages, userMsg] } : s
+          ),
+        }));
+        updateAgentState(activeWorker, { awaitingInput: false, workerInputMessageId: null, isTyping: true, pendingQuestion: null, pendingOptions: null, pendingQuestionSource: null });
+        executionApi.workerInput(state.sessionId, text).catch((err: unknown) => {
+          const errMsg = err instanceof Error ? err.message : String(err);
+          const errorChatMsg: ChatMessage = {
+            id: makeId(), agent: "System", agentColor: "",
+            content: `Failed to send to worker: ${errMsg}`,
+            timestamp: "", type: "system", thread, createdAt: Date.now(),
+          };
+          setSessionsByAgent(prev => ({
+            ...prev,
+            [activeWorker]: prev[activeWorker].map(s =>
+              s.id === activeSession.id ? { ...s, messages: [...s.messages, errorChatMsg] } : s
+            ),
+          }));
+          updateAgentState(activeWorker, { isTyping: false, isStreaming: false });
+        });
+      }
+      return;
+    }
+
+    // If queen has a pending question widget, dismiss it when user types directly
+    if (agentStates[activeWorker]?.pendingQuestionSource === "queen") {
+      updateAgentState(activeWorker, { pendingQuestion: null, pendingOptions: null, pendingQuestionSource: null });
+    }
+
     const userMsg: ChatMessage = {
       id: makeId(), agent: "You", agentColor: "",
-      content: text, timestamp: "", type: "user", thread,
+      content: text, timestamp: "", type: "user", thread, createdAt: Date.now(),
     };
     setSessionsByAgent(prev => ({
       ...prev,
@@ -1328,34 +1935,16 @@ export default function Workspace() {
         s.id === activeSession.id ? { ...s, messages: [...s.messages, userMsg] } : s
       ),
     }));
-    updateAgentState(activeWorker, { isTyping: true });
+    suppressIntroRef.current.delete(activeWorker);
+    updateAgentState(activeWorker, { isTyping: true, queenIsTyping: true });
 
     if (state?.sessionId && state?.ready) {
-      executionApi.chat(state.sessionId, text).then((result) => {
-        if (result.status === "started") {
-          // Queen wasn't ready — backend triggered worker directly
-          updateAgentState(activeWorker, {
-            currentExecutionId: result.execution_id || null,
-            workerRunState: "running",
-          });
-          const notice: ChatMessage = {
-            id: makeId(), agent: "System", agentColor: "",
-            content: "The queen wasn't ready yet — your message triggered an agent run directly.",
-            timestamp: "", type: "system", thread,
-          };
-          setSessionsByAgent(prev => ({
-            ...prev,
-            [activeWorker]: prev[activeWorker].map(s =>
-              s.id === activeSession.id ? { ...s, messages: [...s.messages, notice] } : s
-            ),
-          }));
-        }
-      }).catch((err: unknown) => {
+      executionApi.chat(state.sessionId, text).catch((err: unknown) => {
         const errMsg = err instanceof Error ? err.message : String(err);
         const errorChatMsg: ChatMessage = {
           id: makeId(), agent: "System", agentColor: "",
           content: `Failed to send message: ${errMsg}`,
-          timestamp: "", type: "system", thread,
+          timestamp: "", type: "system", thread, createdAt: Date.now(),
         };
         setSessionsByAgent(prev => ({
           ...prev,
@@ -1363,13 +1952,13 @@ export default function Workspace() {
             s.id === activeSession.id ? { ...s, messages: [...s.messages, errorChatMsg] } : s
           ),
         }));
-        updateAgentState(activeWorker, { isTyping: false, isStreaming: false });
+        updateAgentState(activeWorker, { isTyping: false, isStreaming: false, queenIsTyping: false });
       });
     } else {
       const errorMsg: ChatMessage = {
         id: makeId(), agent: "System", agentColor: "",
         content: "Cannot send message: backend is not connected. Please wait for the agent to load.",
-        timestamp: "", type: "system", thread,
+        timestamp: "", type: "system", thread, createdAt: Date.now(),
       };
       setSessionsByAgent(prev => ({
         ...prev,
@@ -1380,6 +1969,161 @@ export default function Workspace() {
       updateAgentState(activeWorker, { isTyping: false, isStreaming: false });
     }
   }, [activeWorker, activeSession, agentStates, updateAgentState]);
+
+  // --- handleWorkerReply: send user input to the worker via dedicated endpoint ---
+  const handleWorkerReply = useCallback((text: string) => {
+    if (!activeSession) return;
+    const state = agentStates[activeWorker];
+    if (!state?.sessionId || !state?.ready) return;
+
+    // Add user reply to chat thread
+    const userMsg: ChatMessage = {
+      id: makeId(), agent: "You", agentColor: "",
+      content: text, timestamp: "", type: "user", thread: activeWorker, createdAt: Date.now(),
+    };
+    setSessionsByAgent(prev => ({
+      ...prev,
+      [activeWorker]: prev[activeWorker].map(s =>
+        s.id === activeSession.id ? { ...s, messages: [...s.messages, userMsg] } : s
+      ),
+    }));
+
+    // Clear awaiting state optimistically
+    updateAgentState(activeWorker, { awaitingInput: false, workerInputMessageId: null, isTyping: true, pendingQuestion: null, pendingOptions: null, pendingQuestionSource: null });
+
+    executionApi.workerInput(state.sessionId, text).catch((err: unknown) => {
+      const errMsg = err instanceof Error ? err.message : String(err);
+      const errorChatMsg: ChatMessage = {
+        id: makeId(), agent: "System", agentColor: "",
+        content: `Failed to send to worker: ${errMsg}`,
+        timestamp: "", type: "system", thread: activeWorker, createdAt: Date.now(),
+      };
+      setSessionsByAgent(prev => ({
+        ...prev,
+        [activeWorker]: prev[activeWorker].map(s =>
+          s.id === activeSession.id ? { ...s, messages: [...s.messages, errorChatMsg] } : s
+        ),
+      }));
+      updateAgentState(activeWorker, { isTyping: false, isStreaming: false });
+    });
+  }, [activeWorker, activeSession, agentStates, updateAgentState]);
+
+  // --- handleWorkerQuestionAnswer: route predefined answers direct to worker, "Other" through queen ---
+  const handleWorkerQuestionAnswer = useCallback((answer: string, isOther: boolean) => {
+    if (!activeSession) return;
+    const state = agentStates[activeWorker];
+    const question = state?.pendingQuestion || "";
+    const opts = state?.pendingOptions;
+
+    if (isOther) {
+      // "Other" free-text → route through queen for evaluation
+      updateAgentState(activeWorker, { pendingQuestion: null, pendingOptions: null, pendingQuestionSource: null });
+      if (question && opts && state?.sessionId && state?.ready) {
+        const formatted = `[Worker asked: "${question}" | Options: ${opts.join(", ")}]\nUser answered: "${answer}"`;
+        const userMsg: ChatMessage = {
+          id: makeId(), agent: "You", agentColor: "",
+          content: answer, timestamp: "", type: "user", thread: activeWorker, createdAt: Date.now(),
+        };
+        setSessionsByAgent(prev => ({
+          ...prev,
+          [activeWorker]: prev[activeWorker].map(s =>
+            s.id === activeSession.id ? { ...s, messages: [...s.messages, userMsg] } : s
+          ),
+        }));
+        updateAgentState(activeWorker, { isTyping: true, queenIsTyping: true });
+        executionApi.chat(state.sessionId, formatted).catch((err: unknown) => {
+          const errMsg = err instanceof Error ? err.message : String(err);
+          const errorChatMsg: ChatMessage = {
+            id: makeId(), agent: "System", agentColor: "",
+            content: `Failed to send message: ${errMsg}`,
+            timestamp: "", type: "system", thread: activeWorker, createdAt: Date.now(),
+          };
+          setSessionsByAgent(prev => ({
+            ...prev,
+            [activeWorker]: prev[activeWorker].map(s =>
+              s.id === activeSession.id ? { ...s, messages: [...s.messages, errorChatMsg] } : s
+            ),
+          }));
+          updateAgentState(activeWorker, { isTyping: false, isStreaming: false, queenIsTyping: false });
+        });
+      } else {
+        handleSend(answer, activeWorker);
+      }
+    } else {
+      // Predefined option → send directly to worker
+      handleWorkerReply(answer);
+      // Queue context for queen (fire-and-forget, no LLM response triggered)
+      if (question && state?.sessionId && state?.ready) {
+        const notification = `[Worker asked: "${question}" | User selected: "${answer}"]`;
+        executionApi.queenContext(state.sessionId, notification).catch(() => { });
+      }
+    }
+  }, [activeWorker, activeSession, agentStates, handleWorkerReply, handleSend, updateAgentState, setSessionsByAgent]);
+
+  // --- handleQueenQuestionAnswer: submit queen's own question answer via /chat ---
+  // The queen asked the question herself, so she already has context — just send the raw answer.
+  const handleQueenQuestionAnswer = useCallback((answer: string, _isOther: boolean) => {
+    updateAgentState(activeWorker, { pendingQuestion: null, pendingOptions: null, pendingQuestionSource: null });
+    handleSend(answer, activeWorker);
+  }, [activeWorker, handleSend, updateAgentState]);
+
+  // --- handleQuestionDismiss: user closed the question widget without answering ---
+  // Injects a dismiss signal so the blocked node can continue.
+  const handleQuestionDismiss = useCallback(() => {
+    const state = agentStates[activeWorker];
+    if (!state?.sessionId) return;
+    const source = state.pendingQuestionSource;
+    const question = state.pendingQuestion || "";
+
+    // Clear UI state immediately
+    updateAgentState(activeWorker, {
+      pendingQuestion: null,
+      pendingOptions: null,
+      pendingQuestionSource: null,
+      awaitingInput: false,
+    });
+
+    // Unblock the waiting node with a dismiss signal
+    const dismissMsg = `[User dismissed the question: "${question}"]`;
+    if (source === "worker") {
+      executionApi.workerInput(state.sessionId, dismissMsg).catch(() => { });
+    } else {
+      executionApi.chat(state.sessionId, dismissMsg).catch(() => { });
+    }
+  }, [agentStates, activeWorker, updateAgentState]);
+
+  const handleLoadAgent = useCallback(async (agentPath: string) => {
+    const state = agentStates[activeWorker];
+    if (!state?.sessionId) return;
+
+    try {
+      await sessionsApi.loadWorker(state.sessionId, agentPath);
+      // Success: worker_loaded SSE event will handle UI updates automatically
+    } catch (err) {
+      // 424 = credentials required — open the credentials modal
+      if (err instanceof ApiError && err.status === 424) {
+        const body = err.body as Record<string, unknown>;
+        setCredentialAgentPath((body.agent_path as string) || null);
+        setCredentialsOpen(true);
+        return;
+      }
+
+      const errMsg = err instanceof Error ? err.message : String(err);
+      const activeId = activeSessionRef.current[activeWorker];
+      const errorMsg: ChatMessage = {
+        id: makeId(), agent: "System", agentColor: "",
+        content: `Failed to load agent: ${errMsg}`,
+        timestamp: "", type: "system", thread: activeWorker, createdAt: Date.now(),
+      };
+      setSessionsByAgent(prev => ({
+        ...prev,
+        [activeWorker]: (prev[activeWorker] || []).map(s =>
+          s.id === activeId ? { ...s, messages: [...s.messages, errorMsg] } : s
+        ),
+      }));
+    }
+  }, [activeWorker, agentStates]);
+  void handleLoadAgent; // Used by load-agent modal (wired dynamically)
 
   const closeAgentTab = useCallback((agentType: string) => {
     setSelectedNode(null);
@@ -1392,9 +2136,9 @@ export default function Workspace() {
         : Promise.resolve();
 
       pausePromise
-        .catch(() => {})                          // pause failure shouldn't block kill
+        .catch(() => { })                          // pause failure shouldn't block kill
         .then(() => sessionsApi.stop(state.sessionId!))
-        .catch(() => {});                         // fire-and-forget
+        .catch(() => { });                         // fire-and-forget
     }
 
     const allTypes = Object.keys(sessionsByAgent).filter(k => (sessionsByAgent[k] || []).length > 0);
@@ -1426,22 +2170,128 @@ export default function Workspace() {
 
   // Create a new session for any agent type (used by NewTabPopover)
   const addAgentSession = useCallback((agentType: string, agentLabel?: string) => {
-    const sessions = sessionsByAgent[agentType] || [];
-    const newIndex = sessions.length + 1;
-    const existingCreds = sessions.length > 0 ? sessions[0].credentials : undefined;
+    // Count all existing open tabs for this base agent type (first tab uses agentType
+    // as key; subsequent tabs use "agentType::frontendSessionId" as unique keys).
+    const existingTabCount = Object.keys(sessionsByAgent).filter(
+      k => baseAgentType(k) === agentType && (sessionsByAgent[k] || []).length > 0,
+    ).length;
+
+    const newIndex = existingTabCount + 1;
+    const existingCreds = sessionsByAgent[agentType]?.[0]?.credentials;
     const displayLabel = agentLabel || formatAgentDisplayName(agentType);
     const label = newIndex === 1 ? displayLabel : `${displayLabel} #${newIndex}`;
     const newSession = createSession(agentType, label, existingCreds);
 
+    // First tab keeps agentType as its key (backward-compatible with all existing
+    // logic).  Additional tabs get a unique key so each has its own isolated
+    // agentStates slot, its own backend session, and its own tab-bar entry.
+    const tabKey = existingTabCount === 0 ? agentType : `${agentType}::${newSession.id}`;
+    if (tabKey !== agentType) {
+      newSession.tabKey = tabKey;
+    }
+
     setSessionsByAgent(prev => ({
       ...prev,
-      [agentType]: [...(prev[agentType] || []), newSession],
+      [tabKey]: [newSession],
     }));
-    setActiveSessionByAgent(prev => ({ ...prev, [agentType]: newSession.id }));
-    setActiveWorker(agentType);
+    setActiveSessionByAgent(prev => ({ ...prev, [tabKey]: newSession.id }));
+    setActiveWorker(tabKey);
   }, [sessionsByAgent]);
 
-  const activeWorkerLabel = activeAgentState?.displayName || formatAgentDisplayName(activeWorker);
+  // Open a history session: switch to its existing tab, or open a new tab.
+  // Async so we can pre-fetch messages before creating the tab — this gives
+  // instant visual feedback without waiting for loadAgentForType.
+  const handleHistoryOpen = useCallback(async (sessionId: string, agentPath?: string | null, agentName?: string | null) => {
+    // Already open as a tab — just switch to it.
+    for (const [type, sessions] of Object.entries(sessionsByAgent)) {
+      for (const s of sessions) {
+        if (s.backendSessionId === sessionId || s.historySourceId === sessionId) {
+          setActiveWorker(type);
+          setActiveSessionByAgent(prev => ({ ...prev, [type]: s.id }));
+          if (s.messages.length > 0) {
+            suppressIntroRef.current.add(type);
+          }
+          return;
+        }
+      }
+    }
+
+    // Pre-fetch messages from disk so the tab opens with conversation already shown.
+    // This happens BEFORE creating the tab so no "new session" empty state is visible.
+    let prefetchedMessages: ChatMessage[] = [];
+    try {
+      const { messages: queenMsgs } = await sessionsApi.queenMessages(sessionId);
+      for (const m of queenMsgs as Message[]) {
+        const resolvedType = agentPath || "new-agent";
+        const msg = backendMessageToChatMessage(m, resolvedType, "Queen Bee");
+        msg.role = "queen";
+        prefetchedMessages.push(msg);
+      }
+      if (prefetchedMessages.length > 0) {
+        prefetchedMessages.sort((a, b) => (a.createdAt ?? 0) - (b.createdAt ?? 0));
+      }
+    } catch {
+      // Not available — session will open empty and loadAgentForType will try again
+    }
+
+    const resolvedAgentType = agentPath || "new-agent";
+    const existingTabCount = Object.keys(sessionsByAgent).filter(
+      k => baseAgentType(k) === resolvedAgentType && (sessionsByAgent[k] || []).length > 0
+    ).length;
+    const rawLabel = agentName ||
+      (agentPath ? agentPath.replace(/\/$/, "").split("/").pop()?.replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase()) || agentPath : null) ||
+      "New Agent";
+    const label = existingTabCount === 0 ? rawLabel : `${rawLabel} #${existingTabCount + 1}`;
+    const newSession = createSession(resolvedAgentType, label);
+    newSession.backendSessionId = sessionId;
+    newSession.historySourceId = sessionId;
+    // Pre-populate messages so the chat panel immediately shows the conversation
+    if (prefetchedMessages.length > 0) {
+      newSession.messages = prefetchedMessages;
+    }
+    const tabKey = existingTabCount === 0 ? resolvedAgentType : `${resolvedAgentType}::${newSession.id}`;
+    if (tabKey !== resolvedAgentType) newSession.tabKey = tabKey;
+
+    // Suppress queen intro BEFORE the tab is created so loadAgentForType
+    // never sees an unsuppressed window — the user never expects a greeting on reopen.
+    if (prefetchedMessages.length > 0 || sessionId) {
+      suppressIntroRef.current.add(tabKey);
+    }
+
+    setSessionsByAgent(prev => ({ ...prev, [tabKey]: [newSession] }));
+    setActiveSessionByAgent(prev => ({ ...prev, [tabKey]: newSession.id }));
+    setActiveWorker(tabKey);
+  }, [sessionsByAgent]);
+
+  // Post-mount: open the session from the URL ?session= param via handleHistoryOpen.
+  // This runs AFTER persisted tabs are hydrated, so dedup works correctly.
+  // Use a ref guard so it fires exactly once even in React StrictMode.
+  useEffect(() => {
+    if (mountedRef.current) return;
+    mountedRef.current = true;
+    const sid = initialSessionIdRef.current;
+    if (!sid) return;
+    // Fetch agent metadata from the backend so handleHistoryOpen gets the right
+    // agentPath and agentName (needed to label the tab correctly).
+    sessionsApi.history().then(r => {
+      const match = r.sessions.find((s: { session_id: string }) => s.session_id === sid);
+      handleHistoryOpen(
+        sid,
+        match?.agent_path ?? initialAgentRef.current !== "new-agent" ? initialAgentRef.current : null,
+        match?.agent_name ?? null,
+      );
+    }).catch(() => {
+      // History fetch failed — still open the session with what we know.
+      handleHistoryOpen(
+        sid,
+        initialAgentRef.current !== "new-agent" ? initialAgentRef.current : null,
+        null,
+      );
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const activeWorkerLabel = activeAgentState?.displayName || formatAgentDisplayName(baseAgentType(activeWorker));
 
 
   return (
@@ -1490,15 +2340,19 @@ export default function Workspace() {
 
       {/* Main content area */}
       <div className="flex flex-1 min-h-0">
-        <div className="w-[340px] min-w-[280px] bg-card/30 flex flex-col border-r border-border/30">
+
+        {/* ── Pipeline graph + chat ──────────────────────────────────── */}
+        <div className="w-[300px] min-w-[240px] bg-card/30 flex flex-col border-r border-border/30">
           <div className="flex-1 min-h-0">
-          <AgentGraph
+            <AgentGraph
               nodes={currentGraph.nodes}
               title={currentGraph.title}
               onNodeClick={(node) => setSelectedNode(prev => prev?.id === node.id ? null : node)}
               onRun={handleRun}
               onPause={handlePause}
               runState={activeAgentState?.workerRunState ?? "idle"}
+              building={activeAgentState?.queenBuilding ?? false}
+              queenMode={activeAgentState?.queenMode ?? "building"}
             />
           </div>
         </div>
@@ -1561,12 +2415,22 @@ export default function Workspace() {
                 onSend={handleSend}
                 onCancel={handleCancelQueen}
                 activeThread={activeWorker}
-                isWaiting={(activeAgentState?.isTyping && !activeAgentState?.isStreaming) ?? false}
-                awaitingInput={activeAgentState?.awaitingInput ?? false}
+                isWaiting={(activeAgentState?.queenIsTyping && !activeAgentState?.isStreaming) ?? false}
+                isWorkerWaiting={(activeAgentState?.workerIsTyping && !activeAgentState?.isStreaming) ?? false}
+                isBusy={activeAgentState?.queenIsTyping ?? false}
                 disabled={
                   (activeAgentState?.loading ?? true) ||
                   !(activeAgentState?.queenReady)
                 }
+                queenMode={activeAgentState?.queenMode ?? "building"}
+                pendingQuestion={activeAgentState?.awaitingInput ? activeAgentState.pendingQuestion : null}
+                pendingOptions={activeAgentState?.awaitingInput ? activeAgentState.pendingOptions : null}
+                onQuestionSubmit={
+                  activeAgentState?.pendingQuestionSource === "queen"
+                    ? handleQueenQuestionAnswer
+                    : handleWorkerQuestionAnswer
+                }
+                onQuestionDismiss={handleQuestionDismiss}
               />
             )}
           </div>
@@ -1578,7 +2442,7 @@ export default function Workspace() {
                     <div className="flex items-start gap-3 min-w-0">
                       <div className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 mt-0.5 bg-[hsl(210,40%,55%)]/15 border border-[hsl(210,40%,55%)]/25">
                         <span className="text-sm" style={{ color: "hsl(210,40%,55%)" }}>
-                          {{"webhook": "\u26A1", "timer": "\u23F1", "api": "\u2192", "event": "\u223F"}[selectedNode.triggerType || ""] || "\u26A1"}
+                          {{ "webhook": "\u26A1", "timer": "\u23F1", "api": "\u2192", "event": "\u223F" }[selectedNode.triggerType || ""] || "\u26A1"}
                         </span>
                       </div>
                       <div className="min-w-0">
@@ -1612,6 +2476,17 @@ export default function Workspace() {
                         </div>
                       ) : null;
                     })()}
+                    {(() => {
+                      const nfi = (selectedNode.triggerConfig as Record<string, unknown> | undefined)?.next_fire_in as number | undefined;
+                      return nfi != null ? (
+                        <div>
+                          <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider mb-1.5">Next run</p>
+                          <p className="text-xs text-foreground/80 font-mono bg-muted/30 rounded-lg px-3 py-2 border border-border/20">
+                            <TimerCountdown initialSeconds={nfi} />
+                          </p>
+                        </div>
+                      ) : null;
+                    })()}
                     <div>
                       <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider mb-1.5">Fires into</p>
                       <p className="text-xs text-foreground/80 font-mono bg-muted/30 rounded-lg px-3 py-2 border border-border/20">
@@ -1624,6 +2499,8 @@ export default function Workspace() {
                 <NodeDetailPanel
                   node={selectedNode}
                   nodeSpec={activeAgentState?.nodeSpecs.find(n => n.id === selectedNode.id) ?? null}
+                  allNodeSpecs={activeAgentState?.nodeSpecs}
+                  subagentReports={activeAgentState?.subagentReports}
                   sessionId={activeAgentState?.sessionId || undefined}
                   graphId={activeAgentState?.graphId || undefined}
                   workerSessionId={null}
@@ -1640,7 +2517,7 @@ export default function Workspace() {
       <CredentialsModal
         agentType={activeWorker}
         agentLabel={activeWorkerLabel}
-        agentPath={credentialAgentPath || (activeWorker !== "new-agent" ? activeWorker : undefined)}
+        agentPath={credentialAgentPath || (!activeWorker.startsWith("new-agent") ? activeWorker : undefined)}
         open={credentialsOpen}
         onClose={() => { setCredentialsOpen(false); setCredentialAgentPath(null); setDismissedBanner(null); }}
         credentials={activeSession?.credentials || []}

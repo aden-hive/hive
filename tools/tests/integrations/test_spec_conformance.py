@@ -18,11 +18,11 @@ import pytest
 from fastmcp import FastMCP
 
 from aden_tools.credentials import (
+    ATTIO_CREDENTIALS,
     CREDENTIAL_SPECS,
     EMAIL_CREDENTIALS,
     GITHUB_CREDENTIALS,
     HUBSPOT_CREDENTIALS,
-    LLM_CREDENTIALS,
     SEARCH_CREDENTIALS,
     SLACK_CREDENTIALS,
 )
@@ -36,6 +36,7 @@ from .conftest import (
     MODULE_TO_TOOLS,
     TOOL_MODULE_IDS,
     TOOL_MODULES,
+    UNREGISTERED_COMMUNITY_MODULES,
 )
 
 # ---------------------------------------------------------------------------
@@ -175,7 +176,7 @@ class TestSpecToolsMatchRegistered:
     def registered_tools(self) -> set[str]:
         """Register all tools and return the set of registered tool names."""
         mcp = FastMCP("spec-check")
-        register_all_tools(mcp, credentials=None)
+        register_all_tools(mcp, credentials=None, include_unverified=True)
         return set(mcp._tool_manager._tools.keys())
 
     @pytest.mark.parametrize("spec_name", list(CREDENTIAL_SPECS.keys()))
@@ -204,12 +205,12 @@ class TestSpecsMergedIntoCredentialSpecs:
     """All category credential dicts must be merged into the global CREDENTIAL_SPECS."""
 
     CATEGORY_DICTS = {
-        "LLM_CREDENTIALS": LLM_CREDENTIALS,
         "SEARCH_CREDENTIALS": SEARCH_CREDENTIALS,
         "EMAIL_CREDENTIALS": EMAIL_CREDENTIALS,
         "GITHUB_CREDENTIALS": GITHUB_CREDENTIALS,
         "HUBSPOT_CREDENTIALS": HUBSPOT_CREDENTIALS,
         "SLACK_CREDENTIALS": SLACK_CREDENTIALS,
+        "ATTIO_CREDENTIALS": ATTIO_CREDENTIALS,
     }
 
     @pytest.mark.parametrize("category_name", list(CATEGORY_DICTS.keys()))
@@ -237,7 +238,7 @@ class TestToolNamesInReturnList:
     def all_tools_return(self) -> list[str]:
         """Call register_all_tools and return the tool name list."""
         mcp = FastMCP("return-check")
-        return register_all_tools(mcp, credentials=None)
+        return register_all_tools(mcp, credentials=None, include_unverified=True)
 
     @pytest.mark.parametrize("spec_name", list(CREDENTIAL_SPECS.keys()))
     def test_spec_tools_in_return_list(self, spec_name: str, all_tools_return: list[str]):
@@ -295,6 +296,8 @@ class TestCredentialCoverage:
         """
         if short_name in CREDENTIAL_STORE_META_MODULES:
             pytest.skip(f"'{short_name}' is a credential-store meta-module")
+        if short_name in UNREGISTERED_COMMUNITY_MODULES:
+            pytest.skip(f"'{short_name}' is an unregistered community module")
         tools_in_module = MODULE_TO_TOOLS.get(short_name, [])
         for tool_name in tools_in_module:
             assert tool_name in all_spec_tools, (

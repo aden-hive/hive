@@ -15,9 +15,14 @@ intake_node = NodeSpec(
     client_facing=True,
     max_node_visits=0,
     input_keys=["rules", "max_emails"],
-    output_keys=["rules", "max_emails"],
+    output_keys=["rules", "max_emails", "query"],
+    nullable_output_keys=["query"],
     system_prompt="""\
 You are an inbox management assistant. The user has provided rules for managing their emails.
+
+**RULES ARE ADDITIVE.** If existing rules are already present in context from a previous cycle,
+present ALL of them (old + new). The user can add, modify, or remove rules. When calling
+set_output("rules", ...), include ALL active rules — old and new combined.
 
 **STEP 1 — Respond to the user (text only, NO tool calls):**
 
@@ -35,7 +40,9 @@ The following Gmail actions are available — map the user's rules to whichever 
 
 Present the rules back to the user in plain language. Do NOT refuse rules — if the user asks for any of the above actions, confirm you will do it.
 
-Also confirm the batch size (max_emails). If max_emails is not provided, default to 100.
+Also confirm the page size (max_emails). If max_emails is not provided, default to 100.
+Note: max_emails is the page size per fetch cycle. The agent will loop through ALL inbox emails
+by fetching max_emails at a time until no more remain.
 
 Ask the user to confirm: "Does this look right? I'll proceed once you confirm."
 
@@ -45,8 +52,41 @@ Call gmail_list_labels() to show the user their current Gmail labels. This helps
 
 **STEP 3 — After the user confirms, call set_output:**
 
-- set_output("rules", <the confirmed rules as a clear text description>)
+- set_output("rules", <ALL active rules as a clear text description>)
 - set_output("max_emails", <the confirmed max_emails as a string number, e.g. "100">)
+- set_output("query", <Gmail search query if the user wants to target specific emails>)
+
+**TARGETED QUERY (optional):**
+
+If the user's rules target specific emails (e.g. "delete all emails from newsletters@example.com"),
+build a Gmail search query to fetch ONLY matching emails instead of the entire inbox. This is much
+faster and more efficient.
+
+Gmail search query syntax:
+- `from:sender@example.com` — from a specific sender
+- `to:recipient@example.com` — to a specific recipient
+- `subject:keyword` — subject contains keyword
+- `is:unread` / `is:read` — read status
+- `is:starred` / `is:important` — flags
+- `has:attachment` — has attachments
+- `filename:pdf` — attachment filename
+- `label:LABEL_NAME` — has a specific label
+- `category:promotions` / `category:social` / `category:updates` — Gmail categories
+- `newer_than:7d` / `older_than:30d` — relative time (d=days, m=months, y=years)
+- `after:2024/01/01` / `before:2024/12/31` — absolute dates
+- Combine with spaces (AND): `from:boss@co.com subject:urgent`
+- OR operator: `from:alice OR from:bob`
+- NOT / exclude: `-from:noreply@example.com` or `NOT from:noreply`
+- Grouping: `{from:alice from:bob}` (same as OR)
+
+Examples:
+- User says "trash all promotional emails" → query: `category:promotions`
+- User says "star emails from my boss jane@co.com" → query: `from:jane@co.com`
+- User says "mark unread emails older than a week as read" → query: `is:unread older_than:7d`
+- User says "apply rules to all inbox emails" → no query needed (default: `label:INBOX`)
+
+If the rules apply broadly to ALL emails, do NOT set a query — the default `label:INBOX` will be used.
+Only set a query when it would meaningfully narrow the search.
 
 """,
     tools=["gmail_list_labels"],
@@ -59,47 +99,43 @@ fetch_emails_node = NodeSpec(
     id="fetch-emails",
     name="Fetch Emails",
     description=(
-        "Fetch emails from the Gmail inbox up to the configured batch limit. "
-        "Supports pagination for continuous mode — can fetch the next batch "
-        "of emails beyond what was already processed."
+        "Fetch one page of emails from Gmail inbox. Returns emails filename "
+        "and next_page_token for pagination. The graph loops back here if "
+        "more pages remain."
     ),
     node_type="event_loop",
     client_facing=False,
     max_node_visits=0,
-    input_keys=["rules", "max_emails"],
-    output_keys=["emails"],
+    input_keys=[
+        "rules",
+        "max_emails",
+        "next_page_token",
+        "last_processed_timestamp",
+        "query",
+    ],
+    output_keys=["emails", "next_page_token"],
+    nullable_output_keys=["next_page_token"],
     system_prompt="""\
-You are a data pipeline step. Your job is to fetch emails from Gmail and write them to emails.jsonl.
+You are a data pipeline step. Your job is to fetch ONE PAGE of emails from Gmail.
 
-**FIRST-TIME FETCH (default path):**
-1. Read "max_emails" and "rules" from input context.
-2. Call bulk_fetch_emails(max_emails=<value>).
-3. The tool returns {"filename": "emails.jsonl"}.
+**INSTRUCTIONS:**
+1. Read "max_emails", "next_page_token", "last_processed_timestamp", and "query" from input context.
+2. Call bulk_fetch_emails with:
+   - max_emails=<max_emails value, default "100">
+   - page_token=<next_page_token value, if present and non-empty>
+   - after_timestamp=<last_processed_timestamp value, if present and non-empty>
+   - query=<query value, if present and non-empty; omit to default to "label:INBOX">
+3. The tool returns {"filename": "emails.jsonl", "count": N, "next_page_token": "<token or null>"}.
 4. Call set_output("emails", "emails.jsonl").
+5. Call set_output("next_page_token", <the next_page_token from the tool result, or "" if null>).
 
-**NEXT-BATCH FETCH (when user asks for "the next N" emails):**
-The user wants emails BEYOND what was already fetched. Use pagination:
-1. Call gmail_list_messages(query="label:INBOX", max_results=<previous + new count>).
-   Use page_token if needed to paginate past already-fetched emails.
-2. Identify message IDs NOT in the previous batch.
-3. Call gmail_batch_get_messages(message_ids=<new_ids>, format="metadata").
-4. For each message, call append_data(filename="emails.jsonl",
-   data=<JSON: {id, subject, from, to, date, snippet, labels}>).
-5. Call set_output("emails", "emails.jsonl").
+**IMPORTANT:** The graph will automatically loop back to this node if next_page_token is non-empty.
+You only need to fetch ONE page per visit. Do NOT loop internally.
 
-**TOOLS:**
-- bulk_fetch_emails(max_emails) — Bulk fetch from inbox, writes emails.jsonl.
-- gmail_list_messages(query, max_results, page_token) — List message IDs.
-- gmail_batch_get_messages(message_ids, format) — Fetch metadata (max 50/call).
-- append_data(filename, data) — Append a line to a JSONL file.
-
-Do NOT add commentary or explanation. Execute the appropriate path and call set_output when done.
+Do NOT add commentary or explanation. Execute the steps and call set_output when done.
 """,
     tools=[
         "bulk_fetch_emails",
-        "gmail_list_messages",
-        "gmail_batch_get_messages",
-        "append_data",
     ],
 )
 
@@ -172,6 +208,10 @@ Each turn, process exactly ONE chunk: load → classify → act → record. Then
 - CREATE CUSTOM LABEL — use gmail_create_label(name=<label_name>) to create, then apply via gmail_modify_message with add_labels=[<label_id>]
 - APPLY CUSTOM LABEL — add_labels=[<label_id>] using the ID from gmail_create_label or gmail_list_labels
 
+**QUEEN RULE INJECTION:**
+If a new rule appears in the conversation mid-processing (injected by the queen),
+apply it to the remaining unprocessed emails alongside the existing rules.
+
 **CRITICAL RULES:**
 - Your FIRST tool call MUST be load_data. Do NOT skip this.
 - You MUST call Gmail tools to execute real actions. Do NOT just report what should be done.
@@ -200,8 +240,8 @@ report_node = NodeSpec(
     node_type="event_loop",
     client_facing=True,
     max_node_visits=0,
-    input_keys=["actions_taken"],
-    output_keys=["summary_report"],
+    input_keys=["actions_taken", "rules"],
+    output_keys=["summary_report", "rules", "last_processed_timestamp"],
     system_prompt="""\
 You are an inbox management assistant. Your job is to generate a clear summary report of the actions taken on the user's emails, present it, and ask if they want to run another batch.
 
@@ -224,12 +264,16 @@ Present a clean, readable summary:
 
 3. **No Action Taken** — Any emails that didn't match any rules (if applicable).
 
-Then ask: "Would you like to run another inbox triage with new rules?"
+Then ask: "Would you like to run another inbox management cycle with new rules?"
 
-**STEP 3 — After the user responds, call set_output:**
+**STEP 3 — After the user responds, call set_output to persist state:**
 - set_output("summary_report", <the formatted report text>)
+- set_output("rules", <the current rules from context — pass them through unchanged so they persist for the next cycle>)
+- Call get_current_timestamp() and set_output("last_processed_timestamp", <the returned timestamp>)
+
+This ensures the next timer cycle knows when emails were last processed and which rules to apply.
 """,
-    tools=["load_data"],
+    tools=["load_data", "get_current_timestamp"],
 )
 
 __all__ = [
