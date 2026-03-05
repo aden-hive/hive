@@ -139,6 +139,7 @@ class GraphExecutor:
         accounts_data: list[dict] | None = None,
         tool_provider_map: dict[str, str] | None = None,
         dynamic_tools_provider: Callable | None = None,
+        dynamic_prompt_provider: Callable | None = None,
     ):
         """
         Initialize the executor.
@@ -163,6 +164,8 @@ class GraphExecutor:
             tool_provider_map: Tool name to provider name mapping for account routing
             dynamic_tools_provider: Optional callback returning current
                 tool list (for mode switching)
+            dynamic_prompt_provider: Optional callback returning current
+                system prompt (for phase switching)
         """
         self.runtime = runtime
         self.llm = llm
@@ -182,6 +185,7 @@ class GraphExecutor:
         self.accounts_data = accounts_data
         self.tool_provider_map = tool_provider_map
         self.dynamic_tools_provider = dynamic_tools_provider
+        self.dynamic_prompt_provider = dynamic_prompt_provider
 
         # Initialize output cleaner — uses its own dedicated fast model (CEREBRAS_API_KEY),
         # never the main agent LLM. Passing the main LLM here would cause expensive
@@ -1798,6 +1802,7 @@ class GraphExecutor:
             all_tools=list(self.tools),  # Full catalog for subagent tool resolution
             shared_node_registry=self.node_registry,  # For subagent escalation routing
             dynamic_tools_provider=self.dynamic_tools_provider,
+            dynamic_prompt_provider=self.dynamic_prompt_provider,
         )
 
     VALID_NODE_TYPES = {

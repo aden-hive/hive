@@ -82,6 +82,11 @@ class QueenPhaseState:
     inject_notification: Any = None  # async (str) -> None
     event_bus: Any = None  # EventBus — for emitting QUEEN_PHASE_CHANGED events
 
+    # Phase-specific prompts (set by session_manager after construction)
+    prompt_building: str = ""
+    prompt_staging: str = ""
+    prompt_running: str = ""
+
     def get_current_tools(self) -> list:
         """Return tools for the current phase."""
         if self.phase == "running":
@@ -89,6 +94,14 @@ class QueenPhaseState:
         if self.phase == "staging":
             return list(self.staging_tools)
         return list(self.building_tools)
+
+    def get_current_prompt(self) -> str:
+        """Return the system prompt for the current phase."""
+        if self.phase == "running":
+            return self.prompt_running
+        if self.phase == "staging":
+            return self.prompt_staging
+        return self.prompt_building
 
     async def _emit_phase_event(self) -> None:
         """Publish a QUEEN_PHASE_CHANGED event so the frontend updates the tag."""

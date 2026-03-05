@@ -464,11 +464,23 @@ class SessionManager:
         queen_tools = list(queen_registry.get_tools().values())
         queen_tool_executor = queen_registry.get_executor()
 
-        # Partition tools into phase-specific sets
+        # Partition tools into phase-specific sets and import prompt segments
         from framework.agents.hive_coder.nodes import (
             _QUEEN_BUILDING_TOOLS,
             _QUEEN_RUNNING_TOOLS,
             _QUEEN_STAGING_TOOLS,
+            _agent_builder_knowledge,
+            _appendices,
+            _queen_behavior_always,
+            _queen_behavior_building,
+            _queen_behavior_running,
+            _queen_behavior_staging,
+            _queen_identity,
+            _queen_phase_7,
+            _queen_style,
+            _queen_tools_building,
+            _queen_tools_running,
+            _queen_tools_staging,
         )
 
         building_names = set(_QUEEN_BUILDING_TOOLS)
@@ -492,7 +504,6 @@ class SessionManager:
 
         # Build queen graph with adjusted prompt + tools
         _orig_node = _queen_graph.nodes[0]
-        base_prompt = _orig_node.system_prompt or ""
 
         if worker_identity is None:
             worker_identity = (
@@ -501,12 +512,44 @@ class SessionManager:
                 "Handle all tasks directly using your coding tools."
             )
 
+        # Compose phase-specific prompts
+        phase_state.prompt_building = (
+            _queen_identity
+            + _agent_builder_knowledge
+            + _queen_tools_building
+            + _queen_behavior_always
+            + _queen_behavior_building
+            + _queen_phase_7
+            + _queen_style
+            + _appendices
+            + worker_identity
+        )
+        phase_state.prompt_staging = (
+            _queen_identity
+            + _queen_tools_staging
+            + _queen_behavior_always
+            + _queen_behavior_staging
+            + _queen_style
+            + worker_identity
+        )
+        phase_state.prompt_running = (
+            _queen_identity
+            + _queen_tools_running
+            + _queen_behavior_always
+            + _queen_behavior_running
+            + _queen_style
+            + worker_identity
+        )
+
+        # Use the initial phase prompt as the node's system_prompt
+        initial_prompt_text = phase_state.get_current_prompt()
+
         registered_tool_names = set(queen_registry.get_tools().keys())
         declared_tools = _orig_node.tools or []
         available_tools = [t for t in declared_tools if t in registered_tool_names]
 
         node_updates: dict = {
-            "system_prompt": base_prompt + worker_identity,
+            "system_prompt": initial_prompt_text,
         }
         if set(available_tools) != set(declared_tools):
             missing = sorted(set(declared_tools) - registered_tool_names)
@@ -532,6 +575,7 @@ class SessionManager:
                     loop_config=queen_graph.loop_config,
                     execution_id=session.id,
                     dynamic_tools_provider=phase_state.get_current_tools,
+                    dynamic_prompt_provider=phase_state.get_current_prompt,
                 )
                 session.queen_executor = executor
 

@@ -549,6 +549,12 @@ class NodeContext:
     # the queen to switch between building-mode and running-mode tools.
     dynamic_tools_provider: Any = None  # Callable[[], list[Tool]] | None
 
+    # Dynamic prompt provider — when set, EventLoopNode checks each
+    # iteration and updates the system prompt if it changed.  Used by
+    # the queen to switch between phase-specific prompts (building /
+    # staging / running) without restarting the conversation.
+    dynamic_prompt_provider: Any = None  # Callable[[], str] | None
+
 
 @dataclass
 class NodeResult:

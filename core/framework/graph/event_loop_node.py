@@ -586,6 +586,15 @@ class EventLoopNode(NodeProtocol):
                 tools.extend(ctx.dynamic_tools_provider())
                 tools.extend(synthetic)
 
+            # 6b3. Dynamic prompt refresh (phase switching)
+            if ctx.dynamic_prompt_provider is not None:
+                from framework.graph.prompt_composer import _with_datetime
+
+                _new_prompt = _with_datetime(ctx.dynamic_prompt_provider())
+                if _new_prompt != conversation.system_prompt:
+                    conversation.update_system_prompt(_new_prompt)
+                    logger.info("[%s] Dynamic prompt updated (phase switch)", node_id)
+
             # 6c. Publish iteration event
             await self._publish_iteration(stream_id, node_id, iteration, execution_id)
 
