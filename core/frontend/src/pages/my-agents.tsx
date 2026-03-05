@@ -1,7 +1,6 @@
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { Bot, Activity, Moon, Plus } from "lucide-react";
-import TopBar from "@/components/TopBar";
 import { agentsApi } from "@/api/agents";
 import type { DiscoverEntry } from "@/api/types";
 
@@ -41,9 +40,7 @@ export default function MyAgents() {
   const idleCount = agents.length - activeCount;
 
   return (
-    <div className="h-screen bg-background flex flex-col overflow-hidden">
-      <TopBar />
-
+    <div className="h-full flex flex-col">
       {/* Content */}
       <div className="flex-1 p-6 md:p-10 max-w-5xl mx-auto w-full overflow-y-auto">
         <div className="flex items-center justify-between mb-8">
