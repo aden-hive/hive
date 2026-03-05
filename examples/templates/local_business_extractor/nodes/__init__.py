@@ -77,5 +77,10 @@ sheets_sync_node = NodeSpec(
    - Use google_sheets_append_values(spreadsheet_id=id, range_name="Sheet1!A:G", values=[[name, website, email, phone, address, hours, reviews]])
 4. set_output("spreadsheet_id", id)
 """,
-    tools=["google_sheets_create_spreadsheet", "google_sheets_update_values", "google_sheets_append_values", "google_sheets_get_values"],
+    tools=[
+        "google_sheets_create_spreadsheet",
+        "google_sheets_update_values",
+        "google_sheets_append_values",
+        "google_sheets_get_values",
+    ],
 )

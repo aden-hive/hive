@@ -84,9 +84,7 @@ class TestSheetsGetValues:
                 "aden_tools.tools.google_sheets_tool.google_sheets_tool.httpx.get",
                 return_value=_mock_resp({"error": {"message": "not found"}}, status_code=404),
             ):
-                result = tool_fns["google_sheets_get_values"](
-                    spreadsheet_id="", range_name=""
-                )
+                result = tool_fns["google_sheets_get_values"](spreadsheet_id="", range_name="")
         assert "error" in result
 
     def test_successful_read(self, tool_fns):

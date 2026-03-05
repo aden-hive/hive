@@ -79,12 +79,12 @@ from .docker_hub import DOCKER_HUB_CREDENTIALS
 from .email import EMAIL_CREDENTIALS
 from .gcp_vision import GCP_VISION_CREDENTIALS
 from .github import GITHUB_CREDENTIALS
-from .greenhouse import GREENHOUSE_CREDENTIALS
 from .gitlab import GITLAB_CREDENTIALS
 from .google_analytics import GOOGLE_ANALYTICS_CREDENTIALS
 from .google_docs import GOOGLE_DOCS_CREDENTIALS
 from .google_maps import GOOGLE_MAPS_CREDENTIALS
 from .google_search_console import GOOGLE_SEARCH_CONSOLE_CREDENTIALS
+from .greenhouse import GREENHOUSE_CREDENTIALS
 from .health_check import (
     HealthCheckResult,
     check_credential_health,

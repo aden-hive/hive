@@ -7,7 +7,7 @@ from framework.graph.executor import ExecutionResult
 from framework.graph.checkpoint_config import CheckpointConfig
 from framework.llm import LiteLLMProvider
 from framework.runner.tool_registry import ToolRegistry
-from framework.runtime.agent_runtime import AgentRuntime, create_agent_runtime
+from framework.runtime.agent_runtime import create_agent_runtime
 from framework.runtime.execution_stream import EntryPointSpec
 
 from .config import default_config, metadata
@@ -18,22 +18,49 @@ goal = Goal(
     name="Local Business Extraction",
     description="Find local businesses on Maps, extract contacts, and sync to Google Sheets.",
     success_criteria=[
-        SuccessCriterion(id="sc-1", description="Extract business details from Maps", metric="count", target="5", weight=0.5),
-        SuccessCriterion(id="sc-2", description="Sync data to Google Sheets", metric="success_rate", target="1.0", weight=0.5),
+        SuccessCriterion(
+            id="sc-1",
+            description="Extract business details from Maps",
+            metric="count",
+            target="5",
+            weight=0.5,
+        ),
+        SuccessCriterion(
+            id="sc-2",
+            description="Sync data to Google Sheets",
+            metric="success_rate",
+            target="1.0",
+            weight=0.5,
+        ),
     ],
     constraints=[
-        Constraint(id="c-1", description="Must verify website presence before scraping", constraint_type="hard", category="quality"),
+        Constraint(
+            id="c-1",
+            description="Must verify website presence before scraping",
+            constraint_type="hard",
+            category="quality",
+        ),
     ],
 )
 
 nodes = [map_search_gcu, extract_contacts_node, sheets_sync_node]
 
 edges = [
-    EdgeSpec(id="extract-to-sheets", source="extract-contacts", target="sheets-sync",
-             condition=EdgeCondition.ON_SUCCESS, priority=1),
+    EdgeSpec(
+        id="extract-to-sheets",
+        source="extract-contacts",
+        target="sheets-sync",
+        condition=EdgeCondition.ON_SUCCESS,
+        priority=1,
+    ),
     # Loop back for new tasks
-    EdgeSpec(id="sheets-to-extract", source="sheets-sync", target="extract-contacts",
-             condition=EdgeCondition.ALWAYS, priority=1),
+    EdgeSpec(
+        id="sheets-to-extract",
+        source="sheets-sync",
+        target="extract-contacts",
+        condition=EdgeCondition.ALWAYS,
+        priority=1,
+    ),
 ]
 
 entry_node = "extract-contacts"
@@ -43,7 +70,12 @@ terminal_nodes = []
 
 conversation_mode = "continuous"
 identity_prompt = "You are a lead generation specialist focused on local businesses."
-loop_config = {"max_iterations": 100, "max_tool_calls_per_turn": 30, "max_history_tokens": 32000}
+loop_config = {
+    "max_iterations": 100,
+    "max_tool_calls_per_turn": 30,
+    "max_history_tokens": 32000,
+}
+
 
 class LocalBusinessExtractor:
     def __init__(self, config=None):
@@ -79,36 +111,60 @@ class LocalBusinessExtractor:
         )
 
     def _setup(self):
-        self._storage_path = Path.home() / ".hive" / "agents" / "local_business_extractor"
+        self._storage_path = (
+            Path.home() / ".hive" / "agents" / "local_business_extractor"
+        )
         self._storage_path.mkdir(parents=True, exist_ok=True)
         self._tool_registry = ToolRegistry()
         mcp_config = Path(__file__).parent / "mcp_servers.json"
         if mcp_config.exists():
             self._tool_registry.load_mcp_config(mcp_config)
-        llm = LiteLLMProvider(model=self.config.model, api_key=self.config.api_key, api_base=self.config.api_base)
+        llm = LiteLLMProvider(
+            model=self.config.model,
+            api_key=self.config.api_key,
+            api_base=self.config.api_base,
+        )
         tools = list(self._tool_registry.get_tools().values())
         tool_executor = self._tool_registry.get_executor()
         self._graph = self._build_graph()
         self._agent_runtime = create_agent_runtime(
-            graph=self._graph, goal=self.goal, storage_path=self._storage_path,
-            entry_points=[EntryPointSpec(id="default", name="Default", entry_node=self.entry_node,
-                                         trigger_type="manual", isolation_level="shared")],
-            llm=llm, tools=tools, tool_executor=tool_executor,
-            checkpoint_config=CheckpointConfig(enabled=True, checkpoint_on_node_complete=True),
+            graph=self._graph,
+            goal=self.goal,
+            storage_path=self._storage_path,
+            entry_points=[
+                EntryPointSpec(
+                    id="default",
+                    name="Default",
+                    entry_node=self.entry_node,
+                    trigger_type="manual",
+                    isolation_level="shared",
+                )
+            ],
+            llm=llm,
+            tools=tools,
+            tool_executor=tool_executor,
+            checkpoint_config=CheckpointConfig(
+                enabled=True, checkpoint_on_node_complete=True
+            ),
         )
 
     async def start(self):
-        if self._agent_runtime is None: self._setup()
-        if not self._agent_runtime.is_running: await self._agent_runtime.start()
+        if self._agent_runtime is None:
+            self._setup()
+        if not self._agent_runtime.is_running:
+            await self._agent_runtime.start()
 
     async def stop(self):
-        if self._agent_runtime and self._agent_runtime.is_running: await self._agent_runtime.stop()
+        if self._agent_runtime and self._agent_runtime.is_running:
+            await self._agent_runtime.stop()
         self._agent_runtime = None
 
     async def run(self, context, session_state=None):
         await self.start()
         try:
-            result = await self._agent_runtime.trigger_and_wait("default", context, session_state=session_state)
+            result = await self._agent_runtime.trigger_and_wait(
+                "default", context, session_state=session_state
+            )
             return result or ExecutionResult(success=False, error="Execution timeout")
         finally:
             await self.stop()
