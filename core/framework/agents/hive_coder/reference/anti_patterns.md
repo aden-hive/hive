@@ -4,8 +4,6 @@
 
 1. **Using tools that don't exist** — Always verify tools are available in the hive-tools MCP server before assigning them to nodes. Never guess tool names.
 
-2. **Wrong entry_points format** — MUST be `{"start": "first-node-id"}`. NOT a set, NOT `{node_id: [keys]}`.
-
 3. **Wrong mcp_servers.json format** — Flat dict (no `"mcpServers"` wrapper). `cwd` must be `"../../tools"`. `command` must be `"uv"` with args `["run", "python", ...]`.
 
 4. **Missing STEP 1/STEP 2 in client-facing prompts** — Without explicit phases, the LLM calls set_output before the user responds. Always use the pattern.

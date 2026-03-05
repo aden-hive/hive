@@ -57,7 +57,7 @@ goal = Goal(
             id="framework-compliance",
             description=(
                 "Generated code follows framework patterns: STEP 1/STEP 2 "
-                "for client-facing, correct imports, entry_points format"
+                "for client-facing and correct imports"
             ),
             metric="pattern_compliance",
             target="100%",

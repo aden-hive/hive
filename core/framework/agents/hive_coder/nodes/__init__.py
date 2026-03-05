@@ -467,7 +467,7 @@ Do NOT manually write these files from scratch — always use the tool.
 
 Run FOUR validation steps after writing. All must pass:
 
-**Step A — Class validation** (checks graph structure):
+**Step A — Class validation** (checks graph structure and entry_points contract):
 ```
 run_command("uv run python -c 'from {name} import default_agent; \\
   print(default_agent.validate())'")

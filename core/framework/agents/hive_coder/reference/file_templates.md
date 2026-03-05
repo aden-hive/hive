@@ -267,16 +267,60 @@ class MyAgent:
         }
 
     def validate(self):
+        """Validate graph wiring and entry-point contract."""
         errors, warnings = [], []
         node_ids = {n.id for n in self.nodes}
         for e in self.edges:
-            if e.source not in node_ids: errors.append(f"Edge {e.id}: source '{e.source}' not found")
-            if e.target not in node_ids: errors.append(f"Edge {e.id}: target '{e.target}' not found")
-        if self.entry_node not in node_ids: errors.append(f"Entry node '{self.entry_node}' not found")
+            if e.source not in node_ids:
+                errors.append(f"Edge {e.id}: source '{e.source}' not found")
+            if e.target not in node_ids:
+                errors.append(f"Edge {e.id}: target '{e.target}' not found")
+        if self.entry_node not in node_ids:
+            errors.append(f"Entry node '{self.entry_node}' not found")
         for t in self.terminal_nodes:
-            if t not in node_ids: errors.append(f"Terminal node '{t}' not found")
-        for ep_id, nid in self.entry_points.items():
-            if nid not in node_ids: errors.append(f"Entry point '{ep_id}' references unknown node '{nid}'")
+            if t not in node_ids:
+                errors.append(f"Terminal node '{t}' not found")
+
+        if not isinstance(self.entry_points, dict):
+            errors.append(
+                "Invalid entry_points: expected dict[str, str] like "
+                "{'start': '<entry-node-id>'}. "
+                f"Got {type(self.entry_points).__name__}. "
+                "Fix agent.py: set entry_points = {'start': '<entry-node-id>'}."
+            )
+        else:
+            if "start" not in self.entry_points:
+                errors.append(
+                    "entry_points must include 'start' mapped to entry_node. "
+                    "Example: {'start': '<entry-node-id>'}."
+                )
+            else:
+                start_node = self.entry_points.get("start")
+                if start_node != self.entry_node:
+                    errors.append(
+                        f"entry_points['start'] points to '{start_node}' "
+                        f"but entry_node is '{self.entry_node}'. Keep these aligned."
+                    )
+
+            for ep_id, nid in self.entry_points.items():
+                if not isinstance(ep_id, str):
+                    errors.append(
+                        f"Invalid entry_points key {ep_id!r} "
+                        f"({type(ep_id).__name__}). Entry point names must be strings."
+                    )
+                    continue
+                if not isinstance(nid, str):
+                    errors.append(
+                        f"Invalid entry_points['{ep_id}']={nid!r} "
+                        f"({type(nid).__name__}). Node ids must be strings."
+                    )
+                    continue
+                if nid not in node_ids:
+                    errors.append(
+                        f"Entry point '{ep_id}' references unknown node '{nid}'. "
+                        f"Known nodes: {sorted(node_ids)}"
+                    )
+
         return {"valid": len(errors) == 0, "errors": errors, "warnings": warnings}
 
 
