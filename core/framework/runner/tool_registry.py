@@ -327,9 +327,7 @@ class ToolRegistry:
         _execution_context.reset(token)
 
     @staticmethod
-    def resolve_mcp_stdio_config(
-        server_config: dict[str, Any], base_dir: Path
-    ) -> dict[str, Any]:
+    def resolve_mcp_stdio_config(server_config: dict[str, Any], base_dir: Path) -> dict[str, Any]:
         """Resolve cwd and script paths for MCP stdio config (Windows compatibility).
 
         Use this when building MCPServerConfig from a config file (e.g. in
