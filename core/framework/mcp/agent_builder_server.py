@@ -2899,6 +2899,7 @@ def run_tests(
             text=True,
             timeout=600,  # 10 minute timeout
             env=env,
+            stdin=subprocess.DEVNULL,
         )
     except subprocess.TimeoutExpired:
         return json.dumps(
@@ -3091,6 +3092,7 @@ def debug_test(
             text=True,
             timeout=120,  # 2 minute timeout for single test
             env=env,
+            stdin=subprocess.DEVNULL,
         )
     except subprocess.TimeoutExpired:
         return json.dumps(
@@ -3711,82 +3713,6 @@ def list_agent_sessions(
     page = summaries[offset : offset + limit]
     return json.dumps(
         {"sessions": page, "total": total, "offset": offset, "limit": limit}, indent=2
-    )
-
-
-@mcp.tool()
-def get_agent_session_state(
-    agent_work_dir: Annotated[str, "Path to the agent's working directory"],
-    session_id: Annotated[str, "The session ID (e.g., 'session_20260208_143022_abc12345')"],
-) -> str:
-    """
-    Load full session state for a specific session.
-
-    Returns complete session data including status, progress, result,
-    metrics, and checkpoint info. Memory values are excluded to prevent
-    context bloat -- use get_agent_session_memory to retrieve memory contents.
-    """
-    state_path = Path(agent_work_dir) / "sessions" / session_id / "state.json"
-    data = _read_session_json(state_path)
-    if data is None:
-        return json.dumps({"error": f"Session not found: {session_id}"})
-
-    memory = data.get("memory", {})
-    data["memory_keys"] = list(memory.keys()) if isinstance(memory, dict) else []
-    data["memory_size"] = len(memory) if isinstance(memory, dict) else 0
-    data.pop("memory", None)
-
-    return json.dumps(data, indent=2, default=str)
-
-
-@mcp.tool()
-def get_agent_session_memory(
-    agent_work_dir: Annotated[str, "Path to the agent's working directory"],
-    session_id: Annotated[str, "The session ID"],
-    key: Annotated[str, "Specific memory key to retrieve. Empty for all."] = "",
-) -> str:
-    """
-    Get memory contents from a session.
-
-    Memory stores intermediate results passed between nodes. Use this
-    to inspect what data was produced during execution.
-
-    If key is provided, returns only that memory key's value.
-    If key is empty, returns all memory keys and their values.
-    """
-    state_path = Path(agent_work_dir) / "sessions" / session_id / "state.json"
-    data = _read_session_json(state_path)
-    if data is None:
-        return json.dumps({"error": f"Session not found: {session_id}"})
-
-    memory = data.get("memory", {})
-    if not isinstance(memory, dict):
-        memory = {}
-
-    if key:
-        if key not in memory:
-            return json.dumps(
-                {
-                    "error": f"Memory key not found: '{key}'",
-                    "available_keys": list(memory.keys()),
-                }
-            )
-        value = memory[key]
-        return json.dumps(
-            {
-                "session_id": session_id,
-                "key": key,
-                "value": value,
-                "value_type": type(value).__name__,
-            },
-            indent=2,
-            default=str,
-        )
-
-    return json.dumps(
-        {"session_id": session_id, "memory": memory, "total_keys": len(memory)},
-        indent=2,
-        default=str,
     )
 
 

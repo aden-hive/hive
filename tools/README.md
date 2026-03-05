@@ -72,6 +72,7 @@ python mcp_server.py
 | `apply_diff` | Apply diff patches to files |
 | `apply_patch` | Apply unified patches to files |
 | `grep_search` | Search file contents with regex |
+| `hashline_edit` | Anchor-based file editing with hash-validated line references |
 | `execute_command_tool` | Execute shell commands |
 | `save_data` / `load_data` | Persist and retrieve structured data across steps |
 | `serve_file_to_user` | Serve a file for the user to download |
@@ -175,14 +176,17 @@ tools/
 │   └── tools/               # Tool implementations
 │       ├── example_tool/
 │       ├── file_system_toolkits/  # File operation tools
-│       │   ├── view_file.py
-│       │   ├── write_to_file.py
-│       │   ├── list_dir.py
-│       │   ├── replace_file_content.py
-│       │   ├── apply_diff.py
-│       │   ├── apply_patch.py
-│       │   ├── grep_search.py
-│       │   └── execute_command_tool.py
+│       │   ├── security.py
+│       │   ├── hashline.py
+│       │   ├── view_file/
+│       │   ├── write_to_file/
+│       │   ├── list_dir/
+│       │   ├── replace_file_content/
+│       │   ├── apply_diff/
+│       │   ├── apply_patch/
+│       │   ├── grep_search/
+│       │   ├── hashline_edit/
+│       │   └── execute_command_tool/
 │       ├── web_search_tool/
 │       ├── web_scrape_tool/
 │       ├── pdf_read_tool/
