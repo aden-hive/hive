@@ -125,7 +125,7 @@ Type the agent you want to build in the home input box
 
 ### Use Template Agents
 
-Click "Try a sample agent" and check the templates. You can run a templates directly or choose to build your version on top of the existing template.
+Click "Try a sample agent" and check the templates. You can run a template directly or choose to build your version on top of the existing template.
 
 ### Run Agents
 
