@@ -23,22 +23,22 @@ Earn XP, Discord roles, and money by testing, documenting, and building integrat
 
 ## Tiers
 
-| Tier | How to Reach | Rewards |
-|------|-------------|---------|
-| **Agent Builder** | ~500 XP (Lurkr level 5) | Discord role, bounty board access |
-| **Open Source Contributor** | ~2,000 XP (Lurkr level 15) | Discord role, name in CONTRIBUTORS.md and tool READMEs |
-| **Core Contributor** | Maintainer-approved | Monetary payout per bounty, private `#bounty-payouts` channel |
+| Tier                        | How to Reach               | Rewards                                                       |
+| --------------------------- | -------------------------- | ------------------------------------------------------------- |
+| **Agent Builder**           | ~500 XP (Lurkr level 5)    | Discord role, bounty board access                             |
+| **Open Source Contributor** | ~2,000 XP (Lurkr level 15) | Discord role, name in CONTRIBUTORS.md and tool READMEs        |
+| **Core Contributor**        | Maintainer-approved        | Monetary payout per bounty, private `#bounty-payouts` channel |
 
 Lurkr auto-assigns the first two roles. Core Contributor requires sustained, quality contributions across multiple bounty types and a maintainer vouching for you.
 
 ## Bounty Types
 
-| Type | Label | Points | What You Do |
-|------|-------|--------|-------------|
-| **Test a tool** | `bounty:test` | 20 | Test with a real API key, submit a report with logs |
-| **Write docs** | `bounty:docs` | 20 | Write a README following the [template](templates/tool-readme-template.md) |
-| **Code contribution** | `bounty:code` | 30 | Add health checker, fix a bug, or improve an integration |
-| **New integration** | `bounty:new-tool` | 75 | Build a complete integration from scratch |
+| Type                  | Label             | Points | What You Do                                                                |
+| --------------------- | ----------------- | ------ | -------------------------------------------------------------------------- |
+| **Test a tool**       | `bounty:test`     | 20     | Test with a real API key, submit a report with logs                        |
+| **Write docs**        | `bounty:docs`     | 20     | Write a README following the [template](templates/tool-readme-template.md) |
+| **Code contribution** | `bounty:code`     | 30     | Add health checker, fix a bug, or improve an integration                   |
+| **New integration**   | `bounty:new-tool` | 75     | Build a complete integration from scratch                                  |
 
 Promoting a tool from unverified to verified is the final step — submit a PR moving it from `_register_unverified()` to `_register_verified()` after the [promotion checklist](promotion-checklist.md) is complete.
 
@@ -52,15 +52,15 @@ Promoting a tool from unverified to verified is the final step — submit a PR m
 
 ## Labels
 
-| Label | Color | Meaning |
-|-------|-------|---------|
-| `bounty:test` | `#1D76DB` (blue) | Test a tool with a real API key |
-| `bounty:docs` | `#FBCA04` (yellow) | Write or improve documentation |
-| `bounty:code` | `#D93F0B` (orange) | Health checker, bug fix, or improvement |
-| `bounty:new-tool` | `#6F42C1` (purple) | Build a new integration from scratch |
-| `difficulty:easy` | `#BFD4F2` | Good first contribution |
-| `difficulty:medium` | `#D4C5F9` | Requires some familiarity |
-| `difficulty:hard` | `#F9D0C4` | Significant effort or expertise needed |
+| Label               | Color              | Meaning                                 |
+| ------------------- | ------------------ | --------------------------------------- |
+| `bounty:test`       | `#1D76DB` (blue)   | Test a tool with a real API key         |
+| `bounty:docs`       | `#FBCA04` (yellow) | Write or improve documentation          |
+| `bounty:code`       | `#D93F0B` (orange) | Health checker, bug fix, or improvement |
+| `bounty:new-tool`   | `#6F42C1` (purple) | Build a new integration from scratch    |
+| `difficulty:easy`   | `#BFD4F2`          | Good first contribution                 |
+| `difficulty:medium` | `#D4C5F9`          | Requires some familiarity               |
+| `difficulty:hard`   | `#F9D0C4`          | Significant effort or expertise needed  |
 
 ## Discord
 
@@ -86,7 +86,7 @@ A 2-week sprint to get all 55 unverified tools tested, documented, and health-ch
 - **40 `bounty:code` issues** — tools missing health checkers, `difficulty:medium`, 30 pts each
 - **55 `bounty:test` issues** — one per unverified tool, `difficulty:medium`, 20 pts each
 
-### Week 1–2
+### Week 1-2
 
 All bounty types open in parallel. Contributors self-select. Daily progress updates in `#integrations-announcements`. Day 14 wrap-up with final leaderboard and shoutouts.
 
@@ -118,16 +118,16 @@ Without this link, bounties are still tracked but Lurkr can't push XP to your Di
 
 ### What Handles What
 
-| Concern | Handled By | How |
-|---------|-----------|-----|
-| Bounty point calculation | GitHub Actions | `bounty-completed.yml` reads PR labels |
-| XP push to Discord | GitHub Actions → Lurkr API | `PATCH /levels/{guild}/users/{user}` |
-| Discord engagement XP | Lurkr bot | Native message XP (configurable per-channel) |
-| Leaderboard | Lurkr bot + GitHub Actions | `/leaderboard` in Discord + weekly webhook post |
-| Agent Builder role | Lurkr bot | Auto-assigned at level 5 |
-| OSS Contributor role | Lurkr bot | Auto-assigned at level 15 |
-| Core Contributor role | Maintainer | Manual (involves money) |
-| Identity linking | contributors.yml | PR-based, reviewed by maintainers |
+| Concern                  | Handled By                 | How                                             |
+| ------------------------ | -------------------------- | ----------------------------------------------- |
+| Bounty point calculation | GitHub Actions             | `bounty-completed.yml` reads PR labels          |
+| XP push to Discord       | GitHub Actions → Lurkr API | `PATCH /levels/{guild}/users/{user}`            |
+| Discord engagement XP    | Lurkr bot                  | Native message XP (configurable per-channel)    |
+| Leaderboard              | Lurkr bot + GitHub Actions | `/leaderboard` in Discord + weekly webhook post |
+| Agent Builder role       | Lurkr bot                  | Auto-assigned at level 5                        |
+| OSS Contributor role     | Lurkr bot                  | Auto-assigned at level 15                       |
+| Core Contributor role    | Maintainer                 | Manual (involves money)                         |
+| Identity linking         | contributors.yml           | PR-based, reviewed by maintainers               |
 
 ## Guides
 
