@@ -1,6 +1,6 @@
 # Phase 2: FunctionNode Removal + Dead Code Cleanup
 
-> Ref: [GitHub Issue #4753](https://github.com/adenhq/hive/issues/4753)
+> Ref: [GitHub Issue #4753](https://github.com/aden-hive/hive/issues/4753)
 
 ## Context
 
