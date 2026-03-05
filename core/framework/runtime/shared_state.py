@@ -31,6 +31,7 @@ class StateScope(StrEnum):
     EXECUTION = "execution"  # Local to a single execution
     STREAM = "stream"  # Shared within a stream
     GLOBAL = "global"  # Shared across all streams
+    ORCHESTRATION = "orchestration"  # Shared within a workflow for cross-agent coordination
 
 
 @dataclass
