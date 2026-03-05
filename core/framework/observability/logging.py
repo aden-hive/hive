@@ -27,7 +27,9 @@ from typing import Any
 
 # Context variable for trace propagation
 # ContextVar is thread-safe and async-safe - perfect for concurrent agent execution
-trace_context: ContextVar[dict[str, Any] | None] = ContextVar("trace_context", default=None)
+trace_context: ContextVar[dict[str, Any] | None] = ContextVar(
+    "trace_context", default=None
+)
 
 # ANSI escape code pattern (matches \033[...m or \x1b[...m)
 ANSI_ESCAPE_PATTERN = re.compile(r"\x1b\[[0-9;]*m|\033\[[0-9;]*m")
@@ -118,6 +120,9 @@ class HumanReadableFormatter(logging.Formatter):
 
     def format(self, record: logging.LogRecord) -> str:
         """Format log record as human-readable string."""
+        # Get timestamp
+        timestamp = self.formatTime(record, self.datefmt)
+
         # Get trace context - AUTOMATIC!
         context = trace_context.get() or {}
         trace_id = context.get("trace_id", "")
@@ -148,8 +153,8 @@ class HumanReadableFormatter(logging.Formatter):
         if record_event is not None:
             event = f" [{record_event}]"
 
-        # Format message: [LEVEL] [trace context] message
-        return f"{color}[{level}]{reset} {context_prefix}{record.getMessage()}{event}"
+        # Format message: TIMESTAMP [LEVEL] [trace context] message
+        return f"{timestamp} {color}[{level}]{reset} {context_prefix}{record.getMessage()}{event}"
 
 
 def configure_logging(
