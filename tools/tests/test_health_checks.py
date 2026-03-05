@@ -6,9 +6,6 @@ import httpx
 
 from aden_tools.credentials.health_check import (
     HEALTH_CHECKERS,
-    ApolloHealthChecker,
-    BrevoHealthChecker,
-    CalcomHealthChecker,
     DiscordHealthChecker,
     GitHubHealthChecker,
     GoogleHealthChecker,

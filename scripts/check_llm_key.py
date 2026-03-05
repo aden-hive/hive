@@ -87,7 +87,14 @@ PROVIDERS = {
 
 def main() -> None:
     if len(sys.argv) < 3:
-        print(json.dumps({"valid": False, "message": "Usage: check_llm_key.py <provider> <key> [api_base]"}))
+        print(
+            json.dumps(
+                {
+                    "valid": False,
+                    "message": "Usage: check_llm_key.py <provider> <key> [api_base]",
+                }
+            )
+        )
         sys.exit(2)
 
     provider_id = sys.argv[1]
