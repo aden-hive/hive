@@ -29,13 +29,18 @@ def _build_appendices() -> str:
         + "\n\n# Appendix: Anti-Patterns\n\n"
         + _anti_patterns
     )
-    if _is_gcu_enabled() and _gcu_guide:
-        parts += "\n\n# Appendix: GCU Browser Automation Guide\n\n" + _gcu_guide
     return parts
 
 
 # Shared appendices — appended to every coding node's system prompt.
 _appendices = _build_appendices()
+
+# GCU first-class section for building phase (when GCU is enabled).
+# This is placed prominently in the main prompt body, not as an appendix.
+_gcu_building_section = (
+    "\n\n# GCU Nodes — Browser Automation\n\n"
+    + _gcu_guide
+) if _is_gcu_enabled() and _gcu_guide else ""
 
 # Tools available to both coder (worker) and queen.
 _SHARED_TOOLS = [
@@ -345,7 +350,7 @@ Your questions should be **narrow, specific, and consequential**. Never ask what
 
 ## 3: Gap Analysis
 
-**Identify specific gaps** between what the user wants and what you can deliver:
+**Identify specific gaps** between what user wants and what you can deliver:
 
 | Requirement | Framework Support | Gap/Workaround |
 |-------------|-------------------|----------------|
@@ -975,6 +980,7 @@ queen_node = NodeSpec(
     system_prompt=(
         _queen_identity
         + _agent_builder_knowledge
+        + _gcu_building_section  # GCU as first-class citizen (not appendix)
         + _queen_tools_docs
         + _queen_behavior
         + _queen_phase_7
@@ -1007,4 +1013,5 @@ __all__ = [
     "_queen_style",
     "_agent_builder_knowledge",
     "_appendices",
+    "_gcu_building_section",
 ]

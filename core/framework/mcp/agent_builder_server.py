@@ -1936,8 +1936,32 @@ metadata = AgentMetadata()
 '''
 
 
+# GCU default system prompt template
+_GCU_DEFAULT_PROMPT = """\
+You are a browser automation agent. Your job is to complete the assigned task using browser tools.
+
+## Workflow
+1. browser_start (only if no browser is running yet)
+2. browser_open(url=TARGET_URL) — note the returned targetId
+3. browser_snapshot to read the page
+4. [task-specific steps]
+5. set_output("result", JSON)
+
+## Best Practices
+- Prefer browser_snapshot over browser_get_text("body") — compact accessibility tree
+- Always browser_wait after navigation
+- Use large scroll amounts (~2000-5000) for lazy-loaded content
+- If auth wall detected, report immediately — do not attempt login
+- Keep tool calls per turn ≤10
+- Tab isolation: use browser_open(background=true) and pass target_id to every call
+
+## Output format
+set_output("result", JSON) with your findings.
+"""
+
+
 def _generate_nodes_init_py(session: BuildSession) -> str:
-    """Generate nodes/__init__.py content."""
+    """Generate nodes/__init__.py content with GCU auto-configuration."""
     lines = ['"""Node definitions."""\n', "from framework.graph import NodeSpec\n"]
 
     var_names = []
@@ -1945,16 +1969,22 @@ def _generate_nodes_init_py(session: BuildSession) -> str:
         var = _node_var_name(node.id)
         var_names.append(var)
 
+        # GCU auto-configuration: set sensible defaults for GCU nodes
+        is_gcu = node.node_type == "gcu"
+        client_facing = node.client_facing if node.client_facing else (False if is_gcu else node.client_facing)
+        max_node_visits = node.max_node_visits if node.max_node_visits != 0 else (1 if is_gcu else node.max_node_visits)
+        output_keys = node.output_keys if node.output_keys else (["result"] if is_gcu else node.output_keys)
+
         # Build NodeSpec kwargs
         kwargs_parts = [
             f"    id={json.dumps(node.id)},",
             f"    name={json.dumps(node.name)},",
             f"    description={json.dumps(node.description)},",
             f"    node_type={json.dumps(node.node_type)},",
-            f"    client_facing={node.client_facing!r},",
-            f"    max_node_visits={node.max_node_visits},",
+            f"    client_facing={client_facing!r},",
+            f"    max_node_visits={max_node_visits},",
             f"    input_keys={json.dumps(node.input_keys)},",
-            f"    output_keys={json.dumps(node.output_keys)},",
+            f"    output_keys={json.dumps(output_keys)},",
         ]
         if node.nullable_output_keys:
             kwargs_parts.append(f"    nullable_output_keys={json.dumps(node.nullable_output_keys)},")
@@ -1965,10 +1995,13 @@ def _generate_nodes_init_py(session: BuildSession) -> str:
         if node.sub_agents:
             kwargs_parts.append(f"    sub_agents={json.dumps(node.sub_agents)},")
 
-        # System prompt — use triple-quoted string for readability
+        # System prompt — use GCU default for GCU nodes if not provided
         sp = node.system_prompt or ""
+        if is_gcu and not sp.strip():
+            sp = _GCU_DEFAULT_PROMPT
         kwargs_parts.append(f"    system_prompt={json.dumps(sp)},")
 
+        # Tools — GCU nodes auto-include browser tools at runtime
         kwargs_parts.append(f"    tools={json.dumps(node.tools)},")
 
         lines.append(f"\n{var} = NodeSpec(\n")
@@ -2619,6 +2652,60 @@ def initialize_agent_package() -> str:
                 rel = str(Path(info["path"]).relative_to(exports_dir)) if exports_dir.as_posix() in info["path"] else info["path"]
                 files_written[rel] = info
 
+    # 9. Generate validation commands
+    agent_name = session.name
+    validation_commands = [
+        f'run_command("uv run python -c \'from {agent_name} import default_agent; print(default_agent.validate())\'")',
+        f'run_command("uv run python -c \'from framework.runner.runner import AgentRunner; r = AgentRunner.load(\\"exports/{agent_name}\\"); print(\\"AgentRunner.load: OK\\")\'")',
+        f'validate_agent_tools("exports/{agent_name}")',
+        f'run_agent_tests("{agent_name}")',
+    ]
+
+    # 10. Generate node design warnings
+    design_warnings = []
+    for node in session.nodes:
+        # Warn about nodes with no tools
+        if not node.tools and node.node_type == "event_loop":
+            design_warnings.append({
+                "node_id": node.id,
+                "type": "no_tools",
+                "message": f"Node '{node.id}' has no tools. Consider merging into another node or adding tools.",
+                "severity": "warning",
+            })
+        # Warn about client-facing nodes that aren't entry nodes
+        if node.client_facing and node.id != entry_node:
+            design_warnings.append({
+                "node_id": node.id,
+                "type": "client_facing_not_entry",
+                "message": f"Node '{node.id}' is client_facing but not the entry node. Worker agents should not have client-facing nodes (queen handles user interaction).",
+                "severity": "warning",
+            })
+        # GCU nodes should not be client_facing
+        if node.node_type == "gcu" and node.client_facing:
+            design_warnings.append({
+                "node_id": node.id,
+                "type": "gcu_client_facing",
+                "message": f"GCU node '{node.id}' is client_facing. GCU nodes should be autonomous subagents (client_facing=False).",
+                "severity": "warning",
+            })
+        # GCU nodes should have max_node_visits=1
+        if node.node_type == "gcu" and node.max_node_visits != 1:
+            design_warnings.append({
+                "node_id": node.id,
+                "type": "gcu_max_visits",
+                "message": f"GCU node '{node.id}' should have max_node_visits=1 (single execution per delegation).",
+                "severity": "info",
+            })
+
+    # Warn about too many nodes
+    if len(session.nodes) > 4:
+        design_warnings.append({
+            "node_id": None,
+            "type": "too_many_nodes",
+            "message": f"Agent has {len(session.nodes)} nodes. Consider consolidating to 2-4 nodes for simpler architecture.",
+            "severity": "info",
+        })
+
     return json.dumps(
         {
             "success": True,
@@ -2631,11 +2718,13 @@ def initialize_agent_package() -> str:
             "has_async": has_async,
             "entry_node": entry_node,
             "entry_points": entry_points,
+            "validation_commands": validation_commands,
+            "design_warnings": design_warnings,
             "summary": (
                 f"Agent package '{session.name}' initialized at exports/{session.name}/. "
                 f"Generated {len(files_written)} files. "
                 f"Review and customize system prompts in nodes/__init__.py, "
-                f"then run validation."
+                f"then run validation commands."
             ),
         },
         default=str,
