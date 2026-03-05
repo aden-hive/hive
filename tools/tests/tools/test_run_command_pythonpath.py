@@ -8,7 +8,6 @@ the bug only manifests on Windows.
 import os
 import subprocess
 import sys
-from pathlib import Path
 
 import pytest
 

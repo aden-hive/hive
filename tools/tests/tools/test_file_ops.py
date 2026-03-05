@@ -5,8 +5,6 @@ in search_files (ripgrep and Python fallback) and cross-platform behavior.
 """
 
 import os
-import sys
-from pathlib import Path
 from unittest.mock import patch
 
 import pytest
@@ -42,7 +40,7 @@ class TestSearchFilesPathRelativization:
     """Tests for search_files path handling (Windows path separator fix)."""
 
     def test_ripgrep_output_with_backslash_relativized(self, file_ops_mcp, tmp_path):
-        """Ripgrep output using backslashes (Windows) should be relativized when project_root is set.
+        """Ripgrep output with backslashes (Windows) relativized when project_root set.
 
         Simulates: rg outputs 'C:\\Users\\...\\proj\\src\\foo.py:1:needle'
         Expected: output should show 'src\\foo.py:1:needle' or 'src/foo.py:1:needle'

@@ -86,8 +86,11 @@ def _resolve_path(path: str) -> str:
             for prefix in ("/mnt/data/", "/mnt/data", "/workspace/", "/workspace",
                           "/repo/", "/repo"):
                 p = prefix.rstrip("/") + "/"
-                if path_norm.startswith(p) or (path_norm.startswith(prefix.rstrip("/")) and len(path_norm) > len(prefix)):
-                    suffix = path_norm[len(prefix.rstrip("/")):].lstrip("/")
+                prefix_stripped = prefix.rstrip("/")
+                if path_norm.startswith(p) or (
+                    path_norm.startswith(prefix_stripped) and len(path_norm) > len(prefix)
+                ):
+                    suffix = path_norm[len(prefix_stripped):].lstrip("/")
                     if suffix:
                         path = suffix.replace("/", os.sep)
                         resolved = os.path.abspath(os.path.join(PROJECT_ROOT, path))
