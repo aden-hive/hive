@@ -6,7 +6,6 @@ import httpx
 
 from aden_tools.credentials.health_check import (
     HEALTH_CHECKERS,
-    AnthropicHealthChecker,
     ApolloHealthChecker,
     BrevoHealthChecker,
     CalcomHealthChecker,
@@ -35,11 +34,6 @@ class TestHealthCheckerRegistry:
         """GoogleSearchHealthChecker is registered in HEALTH_CHECKERS."""
         assert "google_search" in HEALTH_CHECKERS
         assert isinstance(HEALTH_CHECKERS["google_search"], GoogleSearchHealthChecker)
-
-    def test_anthropic_registered(self):
-        """AnthropicHealthChecker is registered in HEALTH_CHECKERS."""
-        assert "anthropic" in HEALTH_CHECKERS
-        assert isinstance(HEALTH_CHECKERS["anthropic"], AnthropicHealthChecker)
 
     def test_github_registered(self):
         """GitHubHealthChecker is registered in HEALTH_CHECKERS."""
@@ -78,104 +72,45 @@ class TestHealthCheckerRegistry:
             "brave_search",
             "google_search",
             "google_maps",
-            "anthropic",
             "github",
-            "intercom",
             "resend",
             "google_calendar_oauth",
             "google",
             "slack",
-            "lusha_api_key",
             "discord",
             "stripe",
             "exa_search",
             "google_docs",
             "calcom",
             "serpapi",
+            "apify",
             "apollo",
-            "telegram",
-            "newsdata",
-            "finlight",
+            "asana",
+            "attio",
             "brevo",
             "calendly_pat",
+            "docker_hub",
+            "finlight",
+            "gitlab_token",
+            "google_search_console",
+            "greenhouse_token",
+            "huggingface",
+            "intercom",
+            "linear",
+            "lusha_api_key",
+            "microsoft_graph",
+            "newsdata",
+            "notion_token",
+            "pinecone",
+            "pipedrive",
+            "telegram",
+            "trello_key",
+            "trello_token",
+            "vercel",
+            "youtube",
             "zoho_crm",
         }
         assert set(HEALTH_CHECKERS.keys()) == expected
-
-
-class TestAnthropicHealthChecker:
-    """Tests for AnthropicHealthChecker."""
-
-    def _mock_response(self, status_code, json_data=None):
-        response = MagicMock(spec=httpx.Response)
-        response.status_code = status_code
-        if json_data:
-            response.json.return_value = json_data
-        return response
-
-    @patch("aden_tools.credentials.health_check.httpx.Client")
-    def test_valid_key_200(self, mock_client_cls):
-        mock_client = MagicMock()
-        mock_client_cls.return_value.__enter__ = MagicMock(return_value=mock_client)
-        mock_client_cls.return_value.__exit__ = MagicMock(return_value=False)
-        mock_client.post.return_value = self._mock_response(200)
-
-        checker = AnthropicHealthChecker()
-        result = checker.check("sk-ant-test-key")
-
-        assert result.valid is True
-        assert "valid" in result.message.lower()
-
-    @patch("aden_tools.credentials.health_check.httpx.Client")
-    def test_invalid_key_401(self, mock_client_cls):
-        mock_client = MagicMock()
-        mock_client_cls.return_value.__enter__ = MagicMock(return_value=mock_client)
-        mock_client_cls.return_value.__exit__ = MagicMock(return_value=False)
-        mock_client.post.return_value = self._mock_response(401)
-
-        checker = AnthropicHealthChecker()
-        result = checker.check("invalid-key")
-
-        assert result.valid is False
-        assert result.details["status_code"] == 401
-
-    @patch("aden_tools.credentials.health_check.httpx.Client")
-    def test_rate_limited_429(self, mock_client_cls):
-        mock_client = MagicMock()
-        mock_client_cls.return_value.__enter__ = MagicMock(return_value=mock_client)
-        mock_client_cls.return_value.__exit__ = MagicMock(return_value=False)
-        mock_client.post.return_value = self._mock_response(429)
-
-        checker = AnthropicHealthChecker()
-        result = checker.check("sk-ant-test-key")
-
-        assert result.valid is True
-        assert result.details.get("rate_limited") is True
-
-    @patch("aden_tools.credentials.health_check.httpx.Client")
-    def test_bad_request_400_still_valid(self, mock_client_cls):
-        mock_client = MagicMock()
-        mock_client_cls.return_value.__enter__ = MagicMock(return_value=mock_client)
-        mock_client_cls.return_value.__exit__ = MagicMock(return_value=False)
-        mock_client.post.return_value = self._mock_response(400)
-
-        checker = AnthropicHealthChecker()
-        result = checker.check("sk-ant-test-key")
-
-        assert result.valid is True
-
-    @patch("aden_tools.credentials.health_check.httpx.Client")
-    def test_timeout(self, mock_client_cls):
-        mock_client = MagicMock()
-        mock_client_cls.return_value.__enter__ = MagicMock(return_value=mock_client)
-        mock_client_cls.return_value.__exit__ = MagicMock(return_value=False)
-        mock_client.post.side_effect = httpx.TimeoutException("timed out")
-
-        checker = AnthropicHealthChecker()
-        result = checker.check("sk-ant-test-key")
-
-        assert result.valid is False
-        assert result.details["error"] == "timeout"
 
 
 class TestGitHubHealthChecker:

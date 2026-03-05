@@ -288,6 +288,60 @@ async def handle_resume(request: web.Request) -> web.Response:
     )
 
 
+async def handle_pause(request: web.Request) -> web.Response:
+    """POST /api/sessions/{session_id}/pause — pause the worker (queen stays alive).
+
+    Mirrors the queen's stop_worker() tool: cancels all active worker
+    executions, pauses timers so nothing auto-restarts, but does NOT
+    touch the queen so she can observe and react to the pause.
+    """
+    session, err = resolve_session(request)
+    if err:
+        return err
+
+    if not session.worker_runtime:
+        return web.json_response({"error": "No worker loaded in this session"}, status=503)
+
+    runtime = session.worker_runtime
+    cancelled = []
+
+    for graph_id in runtime.list_graphs():
+        reg = runtime.get_graph_registration(graph_id)
+        if reg is None:
+            continue
+        for _ep_id, stream in reg.streams.items():
+            # Signal shutdown on active nodes to abort in-flight LLM streams
+            for executor in stream._active_executors.values():
+                for node in executor.node_registry.values():
+                    if hasattr(node, "signal_shutdown"):
+                        node.signal_shutdown()
+                    if hasattr(node, "cancel_current_turn"):
+                        node.cancel_current_turn()
+
+            for exec_id in list(stream.active_execution_ids):
+                try:
+                    ok = await stream.cancel_execution(exec_id)
+                    if ok:
+                        cancelled.append(exec_id)
+                except Exception:
+                    pass
+
+    # Pause timers so the next tick doesn't restart execution
+    runtime.pause_timers()
+
+    # Switch to staging (agent still loaded, ready to re-run)
+    if session.mode_state is not None:
+        await session.mode_state.switch_to_staging(source="frontend")
+
+    return web.json_response(
+        {
+            "stopped": bool(cancelled),
+            "cancelled": cancelled,
+            "timers_paused": True,
+        }
+    )
+
+
 async def handle_stop(request: web.Request) -> web.Response:
     """POST /api/sessions/{session_id}/stop — cancel a running execution.
 
@@ -416,7 +470,7 @@ def register_routes(app: web.Application) -> None:
     app.router.add_post("/api/sessions/{session_id}/chat", handle_chat)
     app.router.add_post("/api/sessions/{session_id}/queen-context", handle_queen_context)
     app.router.add_post("/api/sessions/{session_id}/worker-input", handle_worker_input)
-    app.router.add_post("/api/sessions/{session_id}/pause", handle_stop)
+    app.router.add_post("/api/sessions/{session_id}/pause", handle_pause)
     app.router.add_post("/api/sessions/{session_id}/resume", handle_resume)
     app.router.add_post("/api/sessions/{session_id}/stop", handle_stop)
     app.router.add_post("/api/sessions/{session_id}/cancel-queen", handle_cancel_queen)

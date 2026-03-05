@@ -145,7 +145,7 @@ Implement the core execution engine where every Agent operates as an isolated, a
     - [x] SharedState manager (runtime/shared_state.py)
     - [x] Session-based storage (storage/session_store.py)
     - [x] Isolation levels: ISOLATED, SHARED, SYNCHRONIZED
-- [ ] **Default Monitoring Hooks**
+- [x] **Default Monitoring Hooks**
     - [ ] Performance metrics collection
     - [ ] Resource usage tracking
     - [ ] Health check endpoints
@@ -590,7 +590,7 @@ Write the Quick Start guide, detailed tool usage documentation, and set up the M
     - [x] README with examples
     - [x] Contributing guidelines
     - [x] GitHub Page setup
-- [ ] **Tool Usage Documentation**
+- [x] **Tool Usage Documentation**
     - [ ] Comprehensive tool documentation
     - [ ] Tool integration examples
     - [ ] Best practices guide
@@ -643,7 +643,7 @@ Expose basic REST/WebSocket endpoints for external control (Start, Stop, Pause, 
     - [x] Load/unload/start/restart in AgentRuntime
     - [x] State persistence
     - [x] Recovery mechanisms
-- [ ] **REST API Endpoints**
+- [x] **REST API Endpoints**
     - [ ] Start endpoint for agent execution
     - [ ] Stop endpoint for graceful shutdown
     - [ ] Pause endpoint for execution suspension
@@ -661,7 +661,7 @@ Implement automated test execution, agent version control, and mandatory test-pa
     - [x] Test framework with pytest integration (testing/)
     - [x] Test result reporting
     - [x] Test CLI commands (test-run, test-debug, etc.)
-- [ ] **Automated Testing Pipeline**
+- [x] **Automated Testing Pipeline**
     - [ ] CI integration (GitHub Actions, etc.)
     - [ ] Mandatory test-passing gates
     - [ ] Coverage reporting
@@ -873,7 +873,7 @@ Build native frontend configurations to easily connect Open Hive's backend to lo
     - [ ] Node.js runtime support
     - [ ] Browser runtime support
 - [ ] **Platform Compatibility**
-    - [ ] Windows support improvements
+    - [x] Windows support improvements
     - [ ] macOS optimization
     - [ ] Linux distribution support
 

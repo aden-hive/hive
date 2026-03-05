@@ -92,7 +92,7 @@ def get_api_key() -> str | None:
 
 def get_gcu_enabled() -> bool:
     """Return whether GCU (browser automation) is enabled in user config."""
-    return get_hive_config().get("gcu_enabled", False)
+    return get_hive_config().get("gcu_enabled", True)
 
 
 def get_api_base() -> str | None:
