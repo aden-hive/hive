@@ -974,12 +974,12 @@ queen_node = NodeSpec(
     tools=sorted(set(_QUEEN_BUILDING_TOOLS + _QUEEN_STAGING_TOOLS + _QUEEN_RUNNING_TOOLS)),
     system_prompt=(
         _queen_identity
+        + _queen_style
         + _agent_builder_knowledge
         + _gcu_building_section  # GCU as first-class citizen (not appendix)
         + _queen_tools_docs
         + _queen_behavior
         + _queen_phase_7
-        + _queen_style
         + _appendices
     ),
 )

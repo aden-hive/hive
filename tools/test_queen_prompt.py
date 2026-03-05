@@ -53,12 +53,12 @@ def analyze_prompt():
     # Build the full prompt
     full_prompt = (
         _queen_identity
+        + _queen_style
         + _agent_builder_knowledge
         + _gcu_building_section
         + _queen_tools_docs
         + _queen_behavior
         + _queen_phase_7
-        + _queen_style
         + _appendices
     )
 
@@ -68,12 +68,12 @@ def analyze_prompt():
     print_subsection_header("SECTION BREAKDOWN")
     sections = [
         ("_queen_identity", _queen_identity),
+        ("_queen_style", _queen_style),
         ("_agent_builder_knowledge", _agent_builder_knowledge),
         ("_gcu_building_section", _gcu_building_section),
         ("_queen_tools_docs", _queen_tools_docs),
         ("_queen_behavior", _queen_behavior),
         ("_queen_phase_7", _queen_phase_7),
-        ("_queen_style", _queen_style),
         ("_appendices", _appendices),
     ]
 
