@@ -53,8 +53,6 @@ _SHARED_TOOLS = [
     "validate_agent_tools",
     "list_agents",
     "list_agent_sessions",
-    "get_agent_session_state",
-    "get_agent_session_memory",
     "list_agent_checkpoints",
     "get_agent_checkpoint",
     "run_agent_tests",
@@ -159,8 +157,6 @@ available tools grouped by category. output_schema: "simple" (default) or \
 in an agent's nodes actually exist. Call after building.
 - list_agents() — list all agent packages in exports/ with session counts
 - list_agent_sessions(agent_name, status?, limit?) — list sessions
-- get_agent_session_state(agent_name, session_id) — full session state
-- get_agent_session_memory(agent_name, session_id, key?) — memory data
 - list_agent_checkpoints(agent_name, session_id) — list checkpoints
 - get_agent_checkpoint(agent_name, session_id, checkpoint_id?) — load checkpoint
 - run_agent_tests(agent_name, test_types?, fail_fast?) — run pytest with parsing
@@ -197,8 +193,7 @@ After writing agent code, validate structurally AND run tests:
 ## Debugging Built Agents
 When a user says "my agent is failing" or "debug this agent":
 1. list_agent_sessions("{agent_name}") — find the session
-2. get_agent_session_state("{agent_name}", "{session_id}") — see status
-3. get_agent_session_memory("{agent_name}", "{session_id}") — inspect data
+2. get_worker_status
 4. list_agent_checkpoints / get_agent_checkpoint — trace execution
 
 # Agent Building Workflow
@@ -476,7 +471,7 @@ You have full coding tools for building and modifying agents:
 - File I/O: read_file, write_file, edit_file, list_directory, search_files, \
 run_command, undo_changes
 - Meta-agent: list_agent_tools, validate_agent_tools, \
-list_agents, list_agent_sessions, get_agent_session_state, get_agent_session_memory, \
+list_agents, list_agent_sessions, \
 list_agent_checkpoints, get_agent_checkpoint, run_agent_tests
 - load_built_agent(agent_path) — Load the agent and switch to STAGING phase
 - list_credentials(credential_id?) — List authorized credentials
