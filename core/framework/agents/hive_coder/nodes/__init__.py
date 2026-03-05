@@ -367,7 +367,7 @@ Your questions should be **narrow, specific, and consequential**. Never ask what
 
 Design the agent architecture:
 - Goal: id, name, description, 3-5 success criteria, 2-4 constraints
-- Nodes: **2-4 nodes MAXIMUM** (see rules below)
+- Nodes: **2-5 nodes** (warn if <2 or >5)
 - Edges: on_success for linear, conditional for routing
 - Lifecycle: ALWAYS forever-alive (`terminal_nodes=[]`) unless the user \
 explicitly requests a one-shot/batch agent. Forever-alive agents loop \
@@ -453,8 +453,9 @@ Get user approval before implementing.
 
 ## 6. Implement
 
-Call `initialize_agent_package` to generate all package files from your \
-graph session. The tool creates: config.py, nodes/__init__.py, agent.py, \
+Call `initialize_agent_package(agent_name)` to generate all package files \
+from your graph session. The agent_name must be snake_case (e.g., "my_agent").
+The tool creates: config.py, nodes/__init__.py, agent.py, \
 __init__.py, __main__.py, mcp_servers.json, tests/conftest.py, \
 agent.json, README.md.
 

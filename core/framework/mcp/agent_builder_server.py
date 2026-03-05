@@ -2543,20 +2543,41 @@ def _generate_mcp_servers_json(session: BuildSession) -> str | None:
 
 
 @mcp.tool()
-def initialize_agent_package() -> str:
+def initialize_agent_package(
+    agent_name: Annotated[str, "Name for the agent package. Must be snake_case (e.g., 'my_research_agent')."],
+) -> str:
     """
     Generate the full Python agent package from the current build session.
 
-    Creates all files needed for a runnable agent in exports/{name}/:
+    Creates all files needed for a runnable agent in exports/{agent_name}/:
     config.py, nodes/__init__.py, agent.py, __init__.py, __main__.py,
     mcp_servers.json, tests/conftest.py, agent.json, README.md.
 
     Call this INSTEAD of manually writing package files. Requires a valid
     graph (goal, nodes, edges). Uses the same validation as export_graph.
+
+    Args:
+        agent_name: Name for the agent. Must be valid snake_case for Python package.
+                    Examples: 'my_agent', 'research_bot', 'data_processor'
     """
     from pathlib import Path
+    import re
 
     session = get_session()
+
+    # Validate agent name (must be valid snake_case for Python package)
+    if not re.match(r'^[a-z][a-z0-9_]*$', agent_name):
+        return json.dumps({
+            "success": False,
+            "errors": [
+                f"Invalid agent_name '{agent_name}'. Must be snake_case: lowercase letters, numbers, underscores. "
+                f"Must start with a letter. Examples: 'my_agent', 'research_bot', 'data_processor'"
+            ],
+        })
+
+    # Update session name
+    session.name = agent_name
+    _save_session(session)
 
     # Validate first
     validation = json.loads(validate_graph())
@@ -2697,13 +2718,21 @@ def initialize_agent_package() -> str:
                 "severity": "info",
             })
 
-    # Warn about too many nodes
-    if len(session.nodes) > 4:
+    # Warn about node count (prefer 2-5 nodes)
+    node_count = len(session.nodes)
+    if node_count < 2:
+        design_warnings.append({
+            "node_id": None,
+            "type": "too_few_nodes",
+            "message": f"Agent has only {node_count} node. Consider adding nodes for better separation of concerns.",
+            "severity": "warning",
+        })
+    elif node_count > 5:
         design_warnings.append({
             "node_id": None,
             "type": "too_many_nodes",
-            "message": f"Agent has {len(session.nodes)} nodes. Consider consolidating to 2-4 nodes for simpler architecture.",
-            "severity": "info",
+            "message": f"Agent has {node_count} nodes. Consider consolidating to 2-5 nodes for simpler architecture.",
+            "severity": "warning",
         })
 
     return json.dumps(
