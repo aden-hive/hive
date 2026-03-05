@@ -1204,33 +1204,7 @@ else
     echo -e "${YELLOW}--${NC}"
 fi
 
-echo -n "  ⬡ codex CLI... "
-if command -v codex > /dev/null 2>&1; then
-    CODEX_VERSION=$(codex --version 2>/dev/null | head -1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' || echo "0.0.0")
-    # Compare version >= 0.101.0
-    CODEX_MAJOR=$(echo "$CODEX_VERSION" | cut -d. -f1)
-    CODEX_MINOR=$(echo "$CODEX_VERSION" | cut -d. -f2)
-    if [ "$CODEX_MAJOR" -gt 0 ] 2>/dev/null || { [ "$CODEX_MAJOR" -eq 0 ] && [ "$CODEX_MINOR" -ge 101 ]; } 2>/dev/null; then
-        echo -e "${GREEN}${CODEX_VERSION}${NC}"
-        CODEX_AVAILABLE=true
-    else
-        echo -e "${YELLOW}${CODEX_VERSION} (upgrade to 0.101.0+)${NC}"
-        CODEX_AVAILABLE=false
-    fi
-else
-    echo -e "${YELLOW}--${NC}"
-    CODEX_AVAILABLE=false
-fi
 
-echo -n "  ⬡ local settings... "
-if [ -f "$SCRIPT_DIR/.claude/settings.local.json" ]; then
-    echo -e "${GREEN}ok${NC}"
-elif [ -f "$SCRIPT_DIR/.claude/settings.local.json.example" ]; then
-    cp "$SCRIPT_DIR/.claude/settings.local.json.example" "$SCRIPT_DIR/.claude/settings.local.json"
-    echo -e "${GREEN}copied from example${NC}"
-else
-    echo -e "${YELLOW}--${NC}"
-fi
 
 echo -n "  ⬡ credential store... "
 if [ -n "$HIVE_CREDENTIAL_KEY" ] && [ -d "$HOME/.hive/credentials/credentials" ]; then
