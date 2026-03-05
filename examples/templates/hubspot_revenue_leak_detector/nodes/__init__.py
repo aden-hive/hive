@@ -167,17 +167,17 @@ followup_node = NodeSpec(
     id="followup",
     name="Followup",
     description=(
-        "Send re-engagement emails to every GHOSTED contact this cycle "
-        "using the send_email MCP tool, then pass halt state through."
+        "Create Gmail draft re-engagement emails for every GHOSTED contact this cycle "
+        "using gmail_create_draft, then pass halt state through."
     ),
     node_type="event_loop",
     client_facing=False,
     max_node_visits=0,
     input_keys=["cycle", "halt"],
     output_keys=["cycle", "halt"],
-    tools=["prepare_followup_emails", "send_email"],
+    tools=["prepare_followup_emails", "gmail_create_draft"],
     system_prompt="""\
-You are executing ONE follow-up email step.
+You are executing ONE follow-up email drafting step.
 
 STEP 1 — Prepare email payloads:
   Call prepare_followup_emails EXACTLY ONCE with:
@@ -190,16 +190,15 @@ STEP 1 — Prepare email payloads:
     subject  — email subject line
     html     — complete HTML email body
 
-STEP 2 — Send emails:
+STEP 2 — Create Gmail drafts:
   For each contact in contacts (if the array is not empty):
-    Call send_email with:
-      to:       contact.email
-      subject:  contact.subject
-      html:     contact.html
-      provider: "resend"
-    If send_email fails or returns an error for this contact (including missing
-    RESEND_API_KEY), log the error and continue to the next contact.
-    Do NOT retry a failed send.
+    Call gmail_create_draft with:
+      to:      contact.email
+      subject: contact.subject
+      html:    contact.html
+    If gmail_create_draft fails or returns an error for this contact,
+    log the error and continue to the next contact.
+    Do NOT retry a failed draft.
 
   If the contacts array is empty, skip this step.
 

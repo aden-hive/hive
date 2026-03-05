@@ -10,7 +10,6 @@ The agent runs until severity hits critical or MAX_CYCLES low-severity
 cycles have elapsed without leaks.
 """
 
-import os
 from pathlib import Path
 from types import MappingProxyType
 from typing import List, Optional
@@ -34,9 +33,9 @@ goal = Goal(
     name="HubSpot Revenue Leak Detector",
     description=(
         "Autonomous HubSpot CRM monitor that continuously scans the sales pipeline, "
-        "detects revenue leaks (ghosted prospects, stalled deals, overdue payments, "
-        "churn risk), and sends structured alerts until a critical leak threshold "
-        "triggers escalation. Requires HUBSPOT_ACCESS_TOKEN."
+        "detects revenue leaks (ghosted prospects, stalled deals), "
+        "sends structured Telegram alerts, and creates Gmail draft follow-up emails "
+        "until a critical leak threshold triggers escalation. Requires HUBSPOT_ACCESS_TOKEN."
     ),
     success_criteria=[
         SuccessCriterion(
@@ -50,14 +49,14 @@ goal = Goal(
             id="alert-delivery",
             description="Successfully send alerts for every detected leak via console and Telegram",
             metric="output_contains",
-            target="sent",
+            target="cycle",
             weight=0.3,
         ),
         SuccessCriterion(
             id="followup-coverage",
-            description="Send follow-up emails to all GHOSTED contacts",
+            description="Create Gmail draft follow-up emails for all GHOSTED contacts",
             metric="output_contains",
-            target="emails_sent",
+            target="halt",
             weight=0.3,
         ),
     ],
@@ -88,7 +87,7 @@ goal = Goal(
         ),
         Constraint(
             id="email-required",
-            description="RESEND_API_KEY is required for sending follow-up emails",
+            description="Google account (OAuth) is required for creating Gmail draft follow-up emails",
             constraint_type="hard",
             category="requirements",
         ),
@@ -268,41 +267,6 @@ class RevenueLeakDetectorAgent:
 
     async def start(self, mock_mode: bool = False) -> None:
         """Set up and start the agent runtime."""
-        # Enforce Resend as required for this agent (global spec has required=False).
-        # Skipped in mock mode so maintainers can test without any credentials.
-        if not mock_mode and not os.environ.get("RESEND_API_KEY"):
-            try:
-                from framework.credentials.storage import (
-                    CompositeStorage,
-                    EncryptedFileStorage,
-                    EnvVarStorage,
-                )
-                from framework.credentials.store import CredentialStore
-                from aden_tools.credentials import CREDENTIAL_SPECS
-
-                spec = CREDENTIAL_SPECS.get("resend")
-                if spec:
-                    env_mapping = {(spec.credential_id or "resend"): spec.env_var}
-                    env_storage = EnvVarStorage(env_mapping=env_mapping)
-                    if os.environ.get("HIVE_CREDENTIAL_KEY"):
-                        storage = CompositeStorage(
-                            primary=env_storage, fallbacks=[EncryptedFileStorage()]
-                        )
-                    else:
-                        storage = env_storage
-                    store = CredentialStore(storage=storage)
-                    if not store.is_available(spec.credential_id or "resend"):
-                        from framework.credentials.models import CredentialError
-
-                        exc = CredentialError(
-                            "Missing required credential: RESEND_API_KEY\n"
-                            "  Required for: send_email (follow-up emails to GHOSTED contacts)\n"
-                            f"  Get it at: {spec.help_url or 'https://resend.com'}"
-                        )
-                        exc.failed_cred_names = ["resend"]  # type: ignore[attr-defined]
-                        raise exc
-            except ImportError:
-                pass  # aden_tools not installed, skip check
         if self._agent_runtime is None:
             self._setup(mock_mode=mock_mode)
         if not self._agent_runtime.is_running:

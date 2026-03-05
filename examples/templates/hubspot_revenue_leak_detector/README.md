@@ -2,8 +2,8 @@
 
 An autonomous HubSpot CRM monitor built on the Aden Hive framework.
 Continuously scans the sales pipeline, detects revenue leak patterns,
-sends structured alerts, and emails ghosted contacts via Resend — cycling until a
-critical threshold triggers escalation and halt.
+sends structured Telegram alerts, and creates Gmail draft re-engagement emails
+for ghosted contacts — cycling until a critical threshold triggers escalation and halt.
 
 ---
 
@@ -27,7 +27,7 @@ monitor ──► analyze ──► notify ──► followup
 - **monitor** — LLM calls `hubspot_search_deals` + `hubspot_search_contacts` (MCP) to fetch deals and contact emails, then calls `scan_pipeline` to store deals for analysis
 - **analyze** — calls `detect_revenue_leaks` to classify GHOSTED/STALLED patterns and compute severity
 - **notify** — calls `build_telegram_alert` to build the report, then `telegram_send_message` (MCP) to send the Telegram alert + prints console report
-- **followup** — calls `prepare_followup_emails` to get email payloads, then `send_email` (MCP) to email GHOSTED contacts
+- **followup** — calls `prepare_followup_emails` to get email payloads, then `gmail_create_draft` (MCP) to create Gmail drafts for GHOSTED contacts
 - Loop halts when severity = **critical** or after **3 consecutive low-severity cycles**
 
 ---
@@ -50,19 +50,15 @@ The LLM uses HubSpot MCP tools to fetch deal data directly.
 export HUBSPOT_ACCESS_TOKEN="pat-na2-..."
 ```
 
-### 2. Resend Email (Required)
+### 2. Google Account / Gmail (Required)
 
-The LLM uses `send_email` MCP tool to send follow-up emails to GHOSTED contacts.
+The LLM uses `gmail_create_draft` MCP tool to create follow-up email drafts for GHOSTED contacts.
 
-1. Visit [https://resend.com/api-keys](https://resend.com/api-keys)
-2. Create an API key with **Full access**
-3. Export the key:
+1. Open the Hive app (`hive open`)
+2. Go to **Credentials → Add** and sign in with Google
+3. Grant Gmail access when prompted
 
-```bash
-export RESEND_API_KEY="re_xxx..."
-```
-
-> **Note:** You must also verify a sending domain in Resend → **Domains** before emails will deliver.
+> **Note:** Drafts are created in your Gmail for review — the agent never sends emails automatically.
 
 ### 3. Telegram Alerts
 
@@ -83,9 +79,8 @@ export TELEGRAM_CHAT_ID="-1001234567890"  # optional — auto-fetched if not set
 ## Running the Agent
 
 ```bash
-# With all credentials (HubSpot, Resend, Telegram)
+# With all credentials (HubSpot, Google OAuth via hive open, Telegram)
 export HUBSPOT_ACCESS_TOKEN="pat-na2-..."
-export RESEND_API_KEY="re_xxx..."
 export TELEGRAM_BOT_TOKEN="7123...:AAF..."
 export TELEGRAM_CHAT_ID="-1001234567890"      # optional — auto-fetched if not set
 
@@ -113,7 +108,7 @@ All external integrations go exclusively through the `hive-tools` MCP server.
 
 | MCP Tool | Purpose |
 |-----------|---------|
-| `send_email` | Send follow-up emails via Resend API |
+| `gmail_create_draft` | Create follow-up email drafts in Gmail for GHOSTED contacts |
 
 ### Telegram MCP Tools
 

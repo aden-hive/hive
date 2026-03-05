@@ -2,8 +2,8 @@
 HubSpot Revenue Leak Detector Agent — Autonomous HubSpot CRM monitor.
 
 Continuously scans HubSpot sales pipeline, detects revenue leaks (ghosted prospects,
-stalled deals, overdue invoices, churn risk), sends structured alerts via
-Telegram, and emails GHOSTED contacts via Resend. Requires HUBSPOT_ACCESS_TOKEN.
+stalled deals), sends structured alerts via Telegram, and creates Gmail draft
+follow-up emails for GHOSTED contacts. Requires HUBSPOT_ACCESS_TOKEN.
 """
 
 from .agent import RevenueLeakDetectorAgent, default_agent, goal, nodes, edges

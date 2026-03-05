@@ -3,7 +3,7 @@
     "id": "hubspot_revenue_leak_detector",
     "name": "HubSpot Revenue Leak Detector",
     "version": "1.0.0",
-    "description": "Autonomous HubSpot CRM monitor that continuously scans the sales pipeline, detects revenue leaks (ghosted prospects, stalled deals, overdue payments, churn risk), and sends structured alerts until a critical leak threshold triggers escalation. Uses HubSpot, Email (Resend), and Telegram MCP tools from hive-tools server. Requires HUBSPOT_ACCESS_TOKEN, RESEND_API_KEY, and TELEGRAM_BOT_TOKEN + TELEGRAM_CHAT_ID."
+    "description": "Autonomous HubSpot CRM monitor that continuously scans the sales pipeline, detects revenue leaks (ghosted prospects, stalled deals), sends structured Telegram alerts, and creates Gmail draft follow-up emails until a critical leak threshold triggers escalation. Uses HubSpot, Telegram, and Gmail MCP tools from hive-tools server. Requires HUBSPOT_ACCESS_TOKEN and TELEGRAM_BOT_TOKEN."
   },
   "graph": {
     "id": "hubspot-revenue-leak-detector-graph",
@@ -24,7 +24,7 @@
         "node_type": "event_loop",
         "max_node_visits": 0,
         "input_keys": ["cycle"],
-        "output_keys": ["cycle", "deals_scanned", "overdue_invoices", "support_escalations"],
+        "output_keys": ["cycle", "deals_scanned"],
         "tools": ["hubspot_search_deals", "hubspot_search_contacts", "scan_pipeline"]
       },
       {
@@ -33,7 +33,7 @@
         "description": "Detect revenue leak patterns in current HubSpot pipeline snapshot.",
         "node_type": "event_loop",
         "max_node_visits": 0,
-        "input_keys": ["cycle", "deals_scanned", "overdue_invoices", "support_escalations"],
+        "input_keys": ["cycle", "deals_scanned"],
         "output_keys": ["cycle", "leak_count", "severity", "total_at_risk", "halt"],
         "tools": ["detect_revenue_leaks"]
       },
@@ -50,12 +50,12 @@
       {
         "id": "followup",
         "name": "Followup",
-        "description": "Send re-engagement emails to GHOSTED contacts using Resend MCP tool.",
+        "description": "Create Gmail draft re-engagement emails for GHOSTED contacts using gmail_create_draft MCP tool.",
         "node_type": "event_loop",
         "max_node_visits": 0,
         "input_keys": ["cycle", "halt"],
         "output_keys": ["cycle", "halt"],
-        "tools": ["prepare_followup_emails", "send_email"]
+        "tools": ["prepare_followup_emails", "gmail_create_draft"]
       }
     ],
     "edges": [
@@ -89,7 +89,7 @@
   "goal": {
     "id": "hubspot-revenue-leak-detector",
     "name": "HubSpot Revenue Leak Detector",
-    "description": "Autonomous HubSpot CRM monitor that continuously scans the sales pipeline, detects revenue leaks (ghosted prospects, stalled deals, overdue payments, churn risk), and sends structured alerts until a critical leak threshold triggers escalation. Requires HUBSPOT_ACCESS_TOKEN, RESEND_API_KEY, and TELEGRAM_BOT_TOKEN + TELEGRAM_CHAT_ID.",
+    "description": "Autonomous HubSpot CRM monitor that continuously scans the sales pipeline, detects revenue leaks (ghosted prospects, stalled deals), sends structured Telegram alerts, and creates Gmail draft follow-up emails until a critical leak threshold triggers escalation. Requires HUBSPOT_ACCESS_TOKEN and TELEGRAM_BOT_TOKEN.",
     "success_criteria": [
       {
         "id": "leak-detection",
@@ -102,14 +102,14 @@
         "id": "alert-delivery",
         "description": "Successfully send alerts for every detected leak via console and Telegram",
         "metric": "output_contains",
-        "target": "sent",
+        "target": "cycle",
         "weight": 0.3
       },
       {
         "id": "followup-coverage",
-        "description": "Send follow-up emails to all GHOSTED contacts",
+        "description": "Create Gmail draft follow-up emails for all GHOSTED contacts",
         "metric": "output_contains",
-        "target": "emails_sent",
+        "target": "halt",
         "weight": 0.3
       }
     ],
@@ -140,7 +140,7 @@
       },
       {
         "id": "email-required",
-        "description": "RESEND_API_KEY is required for sending follow-up emails",
+        "description": "Google account (OAuth) is required for creating Gmail draft follow-up emails",
         "constraint_type": "hard",
         "category": "requirements"
       },
@@ -164,11 +164,11 @@
       "command": "uv",
       "args": ["run", "python", "mcp_server.py", "--stdio"],
       "cwd": "../../../tools",
-      "description": "Hive tools MCP server providing HubSpot CRM, Email (Resend), Telegram, web_search, web_scrape, and write_to_file tools"
+      "description": "Hive tools MCP server providing HubSpot CRM, Telegram, Gmail, web_search, web_scrape, and write_to_file tools"
     }
   },
   "metadata": {
-    "tags": ["revenue", "hubspot", "crm", "monitoring", "telegram", "resend", "email"],
+    "tags": ["revenue", "hubspot", "crm", "monitoring", "telegram", "gmail", "email"],
     "category": "business"
   }
 }

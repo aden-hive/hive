@@ -14,13 +14,13 @@ Node flow:
   notify    → build_telegram_alert(...)            [returns HTML + chat_id]
               → telegram_send_message (MCP)
   followup  → prepare_followup_emails(cycle)       [reads GHOSTED leaks]
-              → send_email (MCP) per GHOSTED contact
+              → gmail_create_draft (MCP) per GHOSTED contact
 
 Required credentials (via env vars / MCP credential store):
   HUBSPOT_ACCESS_TOKEN  — HubSpot Private App token
   TELEGRAM_BOT_TOKEN    — Telegram bot token (chat_id auto-fetched if unset)
   TELEGRAM_CHAT_ID      — Optional; auto-fetched from getUpdates if not set
-  RESEND_API_KEY        — Resend API key for email (required for follow-up emails)
+  Google OAuth          — Required for gmail_create_draft (sign in via hive open)
 """
 
 import contextvars
@@ -489,7 +489,7 @@ def _prepare_followup_emails(cycle: int) -> dict:
     """
     Build follow-up email payloads for every GHOSTED contact this cycle.
 
-    The LLM should call send_email MCP tool for each contact in the
+    The LLM should call gmail_create_draft MCP tool for each contact in the
     returned `contacts` list.
 
     Args:
@@ -501,7 +501,7 @@ def _prepare_followup_emails(cycle: int) -> dict:
           email     — recipient address
           deal_id   — HubSpot deal ID
           subject   — email subject line
-          html      — full HTML email body ready to pass to send_email
+          html      — full HTML email body ready to pass to gmail_create_draft
         message: Human-readable summary
     """
     try:
@@ -689,9 +689,8 @@ TOOLS: dict[str, Tool] = {
     "prepare_followup_emails": Tool(
         name="prepare_followup_emails",
         description=(
-            "Build ready-to-send email payloads for all GHOSTED contacts this cycle. "
-            "Returns a contacts array — call send_email MCP tool for each entry "
-            'using provider="resend". '
+            "Build draft email payloads for all GHOSTED contacts this cycle. "
+            "Returns a contacts array — call gmail_create_draft MCP tool for each entry. "
             "Must be called AFTER detect_revenue_leaks."
         ),
         parameters={

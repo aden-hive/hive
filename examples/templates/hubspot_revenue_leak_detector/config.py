@@ -14,7 +14,7 @@ class AgentMetadata:
     version: str = VERSION
     description: str = (
         "Autonomous HubSpot CRM monitor that detects revenue leaks — "
-        "ghosted prospects, stalled deals, overdue invoices, and churn risk — "
+        "ghosted prospects and stalled deals — "
         "across continuous monitoring cycles. Requires HUBSPOT_ACCESS_TOKEN."
     )
     intro_message: str = (
