@@ -131,13 +131,19 @@ errors yourself. Don't declare success until validation passes.
 
 # Tools
 
+## Paths (MANDATORY)
+**Always use RELATIVE paths**
+(e.g. `exports/agent_name/config.py`, `exports/agent_name/nodes/__init__.py`).
+**Never use absolute paths** like `/mnt/data/...` or `/workspace/...` — they fail.
+The project root is implicit.
+
 ## File I/O
 - read_file(path, offset?, limit?) — read with line numbers
 - write_file(path, content) — create/overwrite, auto-mkdir
 - edit_file(path, old_text, new_text, replace_all?) — fuzzy-match edit
 - list_directory(path, recursive?) — list contents
 - search_files(pattern, path?, include?) — regex search
-- run_command(command, cwd?, timeout?) — shell execution
+- run_command(command, cwd?, timeout?) — shell execution.
 - undo_changes(path?) — restore from git snapshot
 
 ## Meta-Agent
