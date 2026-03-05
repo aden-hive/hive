@@ -348,7 +348,10 @@ class EventBus:
             return False
 
         # Check execution filter
-        if subscription.filter_execution and subscription.filter_execution != event.execution_id:
+        if (
+            subscription.filter_execution
+            and subscription.filter_execution != event.execution_id
+        ):
             return False
 
         # Check graph filter
@@ -372,7 +375,9 @@ class EventBus:
                     logger.error(f"Handler error for {event.type}: {e}")
 
         # Run all handlers concurrently
-        await asyncio.gather(*[run_handler(h) for h in handlers], return_exceptions=True)
+        await asyncio.gather(
+            *[run_handler(h) for h in handlers], return_exceptions=True
+        )
 
     # === CONVENIENCE PUBLISHERS ===
 
@@ -444,6 +449,26 @@ class EventBus:
                 data={
                     "progress": progress,
                     "criteria_status": criteria_status,
+                },
+            )
+        )
+
+    async def emit_goal_achieved(
+        self,
+        stream_id: str,
+        goal_id: str,
+        output: dict[str, Any] | None = None,
+        execution_id: str | None = None,
+    ) -> None:
+        """Emit goal achieved event."""
+        await self.publish(
+            AgentEvent(
+                type=EventType.GOAL_ACHIEVED,
+                stream_id=stream_id,
+                execution_id=execution_id,
+                data={
+                    "goal_id": goal_id,
+                    "output": output,
                 },
             )
         )
