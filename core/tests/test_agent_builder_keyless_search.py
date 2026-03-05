@@ -31,7 +31,11 @@ def test_validate_tool_credentials_skips_web_search(monkeypatch):
     from framework.mcp import agent_builder_server as builder
 
     # Force "no credentials available" in the store; web_search should still pass.
-    monkeypatch.setattr(builder, "_get_credential_store", lambda: SimpleNamespace(is_available=lambda _k: False))
+    monkeypatch.setattr(
+        builder,
+        "_get_credential_store",
+        lambda: SimpleNamespace(is_available=lambda _k: False),
+    )
 
     assert builder._validate_tool_credentials(["web_search"]) is None
 
@@ -40,7 +44,11 @@ def test_validate_tool_credentials_skips_web_search(monkeypatch):
 def test_validate_tool_credentials_still_requires_exa(monkeypatch):
     from framework.mcp import agent_builder_server as builder
 
-    monkeypatch.setattr(builder, "_get_credential_store", lambda: SimpleNamespace(is_available=lambda _k: False))
+    monkeypatch.setattr(
+        builder,
+        "_get_credential_store",
+        lambda: SimpleNamespace(is_available=lambda _k: False),
+    )
 
     result = builder._validate_tool_credentials(["exa_search"])
     assert result is not None
