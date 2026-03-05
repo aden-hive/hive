@@ -105,14 +105,7 @@ See the [Setup Guide](setup-guide.md) for full configuration (Lurkr, webhooks, s
 
 ### Identity Linking
 
-Contributors link GitHub ↔ Discord by adding themselves to `contributors.yml`:
-
-```yaml
-contributors:
-  - github: jane-doe
-    discord: "123456789012345678"
-    name: Jane Doe
-```
+Contributors link GitHub ↔ Discord by opening a [Link Discord Account](https://github.com/aden-hive/hive/issues/new?template=link-discord.yml) issue. A GitHub Action auto-adds them to `contributors.yml` and closes the issue.
 
 Without this link, bounties are still tracked but Lurkr can't push XP to your Discord account.
 

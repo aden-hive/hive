@@ -5,9 +5,9 @@
 # GitHub Action uses this file to ping the contributor on Discord.
 #
 # HOW TO ADD YOURSELF:
-# 1. Fork this repo
-# 2. Add your entry below (keep alphabetical order)
-# 3. Submit a PR with title: "docs: link @your-github to Discord"
+# Open a "Link Discord Account" issue:
+# https://github.com/aden-hive/hive/issues/new?template=link-discord.yml
+# A GitHub Action will automatically add your entry here.
 #
 # To find your Discord ID:
 # 1. Open Discord Settings > Advanced > Enable Developer Mode
