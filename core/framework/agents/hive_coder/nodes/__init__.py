@@ -159,14 +159,16 @@ You are not just a file writer. You have deep integration with the \
 Hive framework:
 
 ## Tool Discovery (MANDATORY before designing)
-Before designing any agent, run list_agent_tools() to discover all \
-available tools. ONLY use tools from this list in your node definitions. \
+Before designing any agent, run list_agent_tools() with NO arguments \
+to see ALL available tools (names + descriptions, grouped by category). \
+ONLY use tools from this list in your node definitions. \
 NEVER guess or fabricate tool names from memory.
 
-  list_agent_tools()                                    # names + descriptions
-  list_agent_tools(output_schema="full")                # include input_schema
-  list_agent_tools(group="gmail")                       # only gmail_* tools
-  list_agent_tools("exports/{agent_name}/mcp_servers.json")  # specific agent
+  list_agent_tools()                                    # ALWAYS call this first
+  list_agent_tools(group="gmail", output_schema="full") # then drill into a category
+
+NEVER skip the first call. Always start with the full list \
+so you know what categories and tools exist before drilling in.
 
 ## Agent Awareness
 Run list_agents() to see what agents already exist. Read their code \
