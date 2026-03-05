@@ -241,3 +241,73 @@ async def test_executor_no_events_without_event_bus():
     result = await executor.execute(graph=graph, goal=goal)
 
     assert result.success is True
+
+
+from unittest.mock import patch
+
+# ---- Fake node that raises an unhandled system exception ----
+class CrashingNode:
+    def __init__(self):
+        self.attempts = 0
+
+    def validate_input(self, ctx):
+        return []
+
+    async def execute(self, ctx):
+        self.attempts += 1
+        # Simulate a raw, unhandled exception like a network timeout or DB drop
+        raise ValueError(f"Simulated transient network failure on attempt {self.attempts}")
+
+@pytest.mark.asyncio
+@patch("asyncio.sleep")  # Mock sleep so the exponential backoff doesn't slow down our test suite
+async def test_executor_handles_raw_exceptions(mock_sleep):
+    """
+    Ensures that raw Exceptions (e.g. 500s, DB drops) are caught, 
+    converted to NodeResults, and routed through standard retry logic.
+    """
+    runtime = DummyRuntime()
+    crashing_node = CrashingNode()
+
+    graph = GraphSpec(
+        id="graph-crash",
+        goal_id="g-crash",
+        nodes=[
+            NodeSpec(
+                id="n1",
+                name="node1",
+                description="crashing node",
+                node_type="event_loop",
+                input_keys=[],
+                output_keys=["result"],
+                max_retries=2,  # We expect 1 initial run + 2 retries = 3 total attempts
+            )
+        ],
+        edges=[],
+        entry_node="n1",
+    )
+
+    executor = GraphExecutor(
+        runtime=runtime,
+        node_registry={"n1": crashing_node},
+    )
+
+    goal = Goal(
+        id="g-crash",
+        name="crash-goal",
+        description="test raw exception handling",
+    )
+
+    result = await executor.execute(graph=graph, goal=goal)
+
+    # 1. Verify the node was actually attempted 2 times (1 initial + 1 retry before hitting the < 2 limit)
+    assert crashing_node.attempts == 2
+    
+    # 2. Verify the execution failed gracefully instead of crashing the thread
+    assert result.success is False
+    
+    # 3. Verify the raw Exception was correctly converted into the error string
+    assert "System exception: Simulated transient network failure" in result.error
+    
+    # 4. Verify metrics correctly tracked the retries
+    assert result.total_retries == 2
+    assert "n1" in result.nodes_with_failures
