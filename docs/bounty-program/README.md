@@ -86,7 +86,7 @@ These are the most valuable contributions — testing integrations with real API
 | **Add Health Checker** | 25 | Implement health check class + register in HEALTH_CHECKERS, merged PR |
 | **Add health_check_endpoint** | 10 | Research correct endpoint, add to CredentialSpec, merged PR |
 | **Write README** | 20 | Add missing README following the [tool README template](templates/tool-readme-template.md), merged PR |
-| **Complete Promotion Checklist** | 50 | Finish all items on the [promotion checklist](integration-promotion-checklist.md) for a tool, merged PR |
+| **Complete Promotion Checklist** | 50 | Finish all items on the [promotion checklist](promotion-checklist.md) for a tool, merged PR |
 | **New Integration** | 75 | Full implementation (tool + credential spec + tests + docs), merged PR |
 
 ### Community
@@ -349,13 +349,13 @@ This is intentionally a file-in-repo approach (not a database) because:
 
 ## Guides
 
-- **[Setup Guide](bounty-setup-guide.md)** — Complete admin setup from zero to running (30 min)
-- **[Game Master Manual](bounty-game-master-manual.md)** — Maintainer operations: posting bounties, reviewing work, managing tiers, anti-gaming
-- **[Contributor Guide](bounty-contributor-guide.md)** — Everything a contributor needs to start earning XP and completing bounties
+- **[Setup Guide](setup-guide.md)** — Complete admin setup from zero to running (30 min)
+- **[Game Master Manual](game-master-manual.md)** — Maintainer operations: posting bounties, reviewing work, managing tiers, anti-gaming
+- **[Contributor Guide](contributor-guide.md)** — Everything a contributor needs to start earning XP and completing bounties
 
 ## Reference
 
-- [Integration Promotion Checklist](integration-promotion-checklist.md) — Formal criteria for unverified -> verified
+- [Integration Promotion Checklist](promotion-checklist.md) — Formal criteria for unverified -> verified
 - [Tool README Template](templates/tool-readme-template.md) — Standard format for tool documentation
 - [Agent Test Report Template](templates/agent-test-report-template.md) — Standard format for test reports
 - [Building Tools Guide](../tools/BUILDING_TOOLS.md) — How to build integrations

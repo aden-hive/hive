@@ -159,7 +159,7 @@ Both feed into the same Lurkr level. Helping people in Discord AND doing bountie
 
 ### Complete Promotion Checklist (50 pts)
 
-**What:** Take an unverified tool through the full [promotion checklist](integration-promotion-checklist.md) to make it verified.
+**What:** Take an unverified tool through the full [promotion checklist](promotion-checklist.md) to make it verified.
 
 **How:**
 1. Pick a tool that has most checklist items already done (docs, health check, tests)
@@ -245,9 +245,9 @@ A: Yes. Lurkr awards XP for messages in `#integrations-*` channels (with a 60-se
 | What | Where |
 |------|-------|
 | Bounty board | [GitHub Issues with bounty label](https://github.com/adenhq/hive/issues?q=is%3Aissue+is%3Aopen+label%3A%22bounty%3A*%22) |
-| README template | [docs/templates/tool-readme-template.md](templates/tool-readme-template.md) |
-| Test report template | [docs/templates/agent-test-report-template.md](templates/agent-test-report-template.md) |
-| Promotion checklist | [docs/integration-promotion-checklist.md](integration-promotion-checklist.md) |
+| README template | [docs/bounty-program/templates/tool-readme-template.md](templates/tool-readme-template.md) |
+| Test report template | [docs/bounty-program/templates/agent-test-report-template.md](templates/agent-test-report-template.md) |
+| Promotion checklist | [docs/promotion-checklist.md](promotion-checklist.md) |
 | Building tools guide | [tools/BUILDING_TOOLS.md](../tools/BUILDING_TOOLS.md) |
 | Contributing guide | [CONTRIBUTING.md](../CONTRIBUTING.md) |
 | Discord | [Join](https://discord.com/invite/MXE49hrKDk) |

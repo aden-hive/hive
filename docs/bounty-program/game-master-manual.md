@@ -72,7 +72,7 @@ When a bounty PR is submitted:
 - [ ] Registered in `_register_unverified()` (not verified — needs community testing first)
 
 #### For `bounty:promote`:
-- [ ] Every item on the [promotion checklist](integration-promotion-checklist.md) is checked
+- [ ] Every item on the [promotion checklist](promotion-checklist.md) is checked
 - [ ] At least 1 community agent test report exists
 - [ ] Move registration from `_register_unverified()` to `_register_verified()`
 

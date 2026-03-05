@@ -8,7 +8,7 @@ body:
       value: |
         ## Integration Bounty
 
-        This issue is part of the [Integration Bounty Program](../../docs/integration-bounty-program.md).
+        This issue is part of the [Integration Bounty Program](../../docs/bounty-program/README.md).
         **Claim this bounty** by commenting below — a maintainer will assign you within 24 hours.
 
   - type: dropdown
@@ -90,5 +90,5 @@ body:
       description: Links to API docs, examples, or guides that will help the contributor.
       placeholder: |
         - [Building Tools Guide](../../tools/BUILDING_TOOLS.md)
-        - [Tool README Template](../../docs/templates/tool-readme-template.md)
+        - [Tool README Template](../../docs/bounty-program/templates/tool-readme-template.md)
         - API docs: https://...
