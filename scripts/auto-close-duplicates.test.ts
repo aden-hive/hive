@@ -34,7 +34,7 @@ describe("extractDuplicateIssueNumber", () => {
   test("extracts GitHub issue URL format", () => {
     expect(
       extractDuplicateIssueNumber(
-        "Duplicate of https://github.com/adenhq/hive/issues/42"
+        "Duplicate of https://github.com/aden-hive/hive/issues/42"
       )
     ).toBe(42);
   });
