@@ -735,6 +735,72 @@ class LiteLLMProvider(LLMProvider):
             },
         }
 
+    def _is_minimax_model(self) -> bool:
+        """Return True when the configured model targets MiniMax."""
+        model = (self.model or "").lower()
+        return model.startswith("minimax/") or model.startswith("minimax-")
+
+    async def _stream_via_nonstream_completion(
+        self,
+        messages: list[dict[str, Any]],
+        system: str,
+        tools: list[Tool] | None,
+        max_tokens: int,
+        response_format: dict[str, Any] | None,
+        json_mode: bool,
+    ) -> AsyncIterator[StreamEvent]:
+        """Fallback path: convert non-stream completion to stream events.
+
+        Some providers currently fail in LiteLLM's chunk parser for stream=True.
+        For those providers we do a regular async completion and emit equivalent
+        stream events so higher layers continue to work.
+        """
+        from framework.llm.stream_events import FinishEvent, StreamErrorEvent, TextDeltaEvent, TextEndEvent
+        from framework.llm.stream_events import ToolCallEvent
+
+        try:
+            response = await self.acomplete(
+                messages=messages,
+                system=system,
+                tools=tools,
+                max_tokens=max_tokens,
+                response_format=response_format,
+                json_mode=json_mode,
+            )
+        except Exception as e:
+            yield StreamErrorEvent(error=str(e), recoverable=False)
+            return
+
+        raw = response.raw_response
+        tool_calls = []
+        if raw and hasattr(raw, "choices") and raw.choices:
+            msg = raw.choices[0].message
+            tool_calls = msg.tool_calls or []
+
+        for tc in tool_calls:
+            parsed_args: Any
+            args = tc.function.arguments if tc.function else ""
+            try:
+                parsed_args = json.loads(args) if args else {}
+            except json.JSONDecodeError:
+                parsed_args = {"_raw": args}
+            yield ToolCallEvent(
+                tool_use_id=getattr(tc, "id", ""),
+                tool_name=tc.function.name if tc.function else "",
+                tool_input=parsed_args,
+            )
+
+        if response.content:
+            yield TextDeltaEvent(content=response.content, snapshot=response.content)
+            yield TextEndEvent(full_text=response.content)
+
+        yield FinishEvent(
+            stop_reason=response.stop_reason or "stop",
+            input_tokens=response.input_tokens,
+            output_tokens=response.output_tokens,
+            model=response.model,
+        )
+
     async def stream(
         self,
         messages: list[dict[str, Any]],
@@ -761,6 +827,20 @@ class LiteLLMProvider(LLMProvider):
             TextEndEvent,
             ToolCallEvent,
         )
+
+        # MiniMax currently fails in litellm's stream chunk parser for some
+        # responses (missing "id" in stream chunks). Use non-stream fallback.
+        if self._is_minimax_model():
+            async for event in self._stream_via_nonstream_completion(
+                messages=messages,
+                system=system,
+                tools=tools,
+                max_tokens=max_tokens,
+                response_format=response_format,
+                json_mode=json_mode,
+            ):
+                yield event
+            return
 
         full_messages: list[dict[str, Any]] = []
         if system:
