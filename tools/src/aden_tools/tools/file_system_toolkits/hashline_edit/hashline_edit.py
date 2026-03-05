@@ -384,7 +384,8 @@ def register_tools(mcp: FastMCP) -> None:
             fd, tmp_path = tempfile.mkstemp(dir=os.path.dirname(secure_path))
             fd_open = True
             try:
-                os.fchmod(fd, original_mode)
+                if hasattr(os, "fchmod"):
+                    os.fchmod(fd, original_mode)
                 with os.fdopen(fd, "w", encoding=encoding, newline="") as f:
                     fd_open = False
                     f.write(joined)
