@@ -559,6 +559,23 @@ def cmd_run(args: argparse.Namespace) -> int:
         except (FileNotFoundError, json.JSONDecodeError) as e:
             print(f"Error reading input file: {e}", file=sys.stderr)
             return 1
+    # Validate --output path before execution begins (fail fast, before agent loads)
+    if args.output:
+        import os
+
+        output_parent = Path(args.output).parent
+        if not output_parent.exists():
+            print(
+                f"Error: output directory does not exist: {output_parent}/",
+                file=sys.stderr,
+            )
+            return 1
+        if not os.access(output_parent, os.W_OK):
+            print(
+                f"Error: output directory is not writable: {output_parent}/",
+                file=sys.stderr,
+            )
+            return 1
 
     # Run the agent (with TUI or standard)
     if getattr(args, "tui", False):

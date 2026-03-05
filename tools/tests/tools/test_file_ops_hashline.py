@@ -2,6 +2,7 @@
 
 import json
 import os
+import sys
 
 import pytest
 from fastmcp import FastMCP
@@ -386,6 +387,9 @@ class TestHashlineEditAutoCleanup:
 
 
 class TestHashlineEditAtomicWrite:
+    @pytest.mark.skipif(
+        sys.platform == "win32", reason="POSIX permissions not supported on Windows"
+    )
     def test_preserves_permissions(self, tools, tmp_path):
         """Atomic write preserves original file permissions."""
         hashline_edit = tools[0]["hashline_edit"]
