@@ -1370,20 +1370,11 @@ class EventLoopNode(NodeProtocol):
             if not should_judge:
                 # Gap C: unjudged iteration — log as CONTINUE
                 _continue_count += 1
-                if ctx.runtime_logger:
-                    iter_latency_ms = int((time.time() - iter_start) * 1000)
-                    ctx.runtime_logger.log_step(
-                        node_id=node_id,
-                        node_type="event_loop",
-                        step_index=iteration,
-                        verdict="CONTINUE",
-                        verdict_feedback="Unjudged (judge_every_n_turns skip)",
-                        tool_calls=logged_tool_calls,
-                        llm_text=assistant_text,
-                        input_tokens=turn_tokens.get("input", 0),
-                        output_tokens=turn_tokens.get("output", 0),
-                        latency_ms=iter_latency_ms,
-                    )
+                self._log_skip_judge(
+                    ctx, node_id, iteration,
+                    "Unjudged (judge_every_n_turns skip)",
+                    logged_tool_calls, assistant_text, turn_tokens, iter_start,
+                )
                 continue
 
             # Judge evaluation (should_judge is always True here)

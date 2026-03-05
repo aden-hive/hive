@@ -838,7 +838,7 @@ def register_queen_lifecycle_tools(
         """Send a message to the running worker agent.
 
         Injects the message into the worker's active node conversation.
-        Use this to relay user instructions or concerns to the worker.
+        Use this to relay user instructions to the worker.
         """
         runtime = _get_runtime()
         if runtime is None:
