@@ -626,6 +626,7 @@ class EventLoopNode(NodeProtocol):
                         user_input_requested,
                         ask_user_prompt,
                         ask_user_options,
+                        queen_input_requested,
                         request_system_prompt,
                         request_messages,
                     ) = await self._run_single_turn(
@@ -825,6 +826,7 @@ class EventLoopNode(NodeProtocol):
                 and not real_tool_results
                 and not outputs_set
                 and not user_input_requested
+                and not queen_input_requested
             )
             if truly_empty and accumulator is not None:
                 missing = self._get_missing_output_keys(
@@ -1258,24 +1260,104 @@ class EventLoopNode(NodeProtocol):
                     if not _outputs_complete:
                         _cf_text_only_streak = 0
                         _continue_count += 1
-                        if ctx.runtime_logger:
-                            iter_latency_ms = int((time.time() - iter_start) * 1000)
-                            ctx.runtime_logger.log_step(
-                                node_id=node_id,
-                                node_type="event_loop",
-                                step_index=iteration,
-                                verdict="CONTINUE",
-                                verdict_feedback=("Blocked for ask_user input (skip judge)"),
-                                tool_calls=logged_tool_calls,
-                                llm_text=assistant_text,
-                                input_tokens=turn_tokens.get("input", 0),
-                                output_tokens=turn_tokens.get("output", 0),
-                                latency_ms=iter_latency_ms,
-                            )
+                        self._log_skip_judge(
+                            ctx, node_id, iteration,
+                            "Blocked for ask_user input (skip judge)",
+                            logged_tool_calls, assistant_text, turn_tokens, iter_start,
+                        )
                         continue
                     # All outputs set -- fall through to judge
 
                 # Auto-block beyond grace -- fall through to judge (6i)
+
+            # 6h''. Worker wait for queen guidance
+            # If a worker escalates with wait_for_response=true, pause here and
+            # skip judge evaluation until queen injects guidance.
+            if queen_input_requested:
+                if self._shutdown:
+                    await self._publish_loop_completed(
+                        stream_id, node_id, iteration + 1, execution_id
+                    )
+                    latency_ms = int((time.time() - start_time) * 1000)
+                    _continue_count += 1
+                    self._log_skip_judge(
+                        ctx, node_id, iteration,
+                        "Shutdown signaled (waiting for queen input)",
+                        logged_tool_calls, assistant_text, turn_tokens, iter_start,
+                    )
+                    if ctx.runtime_logger:
+                        ctx.runtime_logger.log_node_complete(
+                            node_id=node_id,
+                            node_name=ctx.node_spec.name,
+                            node_type="event_loop",
+                            success=True,
+                            total_steps=iteration + 1,
+                            tokens_used=total_input_tokens + total_output_tokens,
+                            input_tokens=total_input_tokens,
+                            output_tokens=total_output_tokens,
+                            latency_ms=latency_ms,
+                            exit_status="success",
+                            accept_count=_accept_count,
+                            retry_count=_retry_count,
+                            escalate_count=_escalate_count,
+                            continue_count=_continue_count,
+                        )
+                    return NodeResult(
+                        success=True,
+                        output=accumulator.to_dict(),
+                        tokens_used=total_input_tokens + total_output_tokens,
+                        latency_ms=latency_ms,
+                        conversation=conversation if _is_continuous else None,
+                    )
+
+                logger.info("[%s] iter=%d: waiting for queen input...", node_id, iteration)
+                got_input = await self._await_user_input(ctx, prompt="", emit_client_request=False)
+                logger.info("[%s] iter=%d: queen wait unblocked, got_input=%s", node_id, iteration, got_input)
+                if not got_input:
+                    await self._publish_loop_completed(
+                        stream_id, node_id, iteration + 1, execution_id
+                    )
+                    latency_ms = int((time.time() - start_time) * 1000)
+                    _continue_count += 1
+                    self._log_skip_judge(
+                        ctx, node_id, iteration,
+                        "No queen input received (shutdown during wait)",
+                        logged_tool_calls, assistant_text, turn_tokens, iter_start,
+                    )
+                    if ctx.runtime_logger:
+                        ctx.runtime_logger.log_node_complete(
+                            node_id=node_id,
+                            node_name=ctx.node_spec.name,
+                            node_type="event_loop",
+                            success=True,
+                            total_steps=iteration + 1,
+                            tokens_used=total_input_tokens + total_output_tokens,
+                            input_tokens=total_input_tokens,
+                            output_tokens=total_output_tokens,
+                            latency_ms=latency_ms,
+                            exit_status="success",
+                            accept_count=_accept_count,
+                            retry_count=_retry_count,
+                            escalate_count=_escalate_count,
+                            continue_count=_continue_count,
+                        )
+                    return NodeResult(
+                        success=True,
+                        output=accumulator.to_dict(),
+                        tokens_used=total_input_tokens + total_output_tokens,
+                        latency_ms=latency_ms,
+                        conversation=conversation if _is_continuous else None,
+                    )
+
+                recent_responses.clear()
+                _cf_text_only_streak = 0
+                _continue_count += 1
+                self._log_skip_judge(
+                    ctx, node_id, iteration,
+                    "Blocked for queen input (skip judge)",
+                    logged_tool_calls, assistant_text, turn_tokens, iter_start,
+                )
+                continue
 
             # 6i. Judge evaluation
             should_judge = (
@@ -1557,6 +1639,7 @@ class EventLoopNode(NodeProtocol):
         prompt: str = "",
         *,
         options: list[str] | None = None,
+        emit_client_request: bool = True,
     ) -> bool:
         """Block until user input arrives or shutdown is signaled.
 
@@ -1570,6 +1653,9 @@ class EventLoopNode(NodeProtocol):
             options: Optional predefined choices for the user (from ask_user).
                 Passed through to the CLIENT_INPUT_REQUESTED event so the
                 frontend can render a QuestionWidget with buttons.
+            emit_client_request: When False, wait silently without publishing
+                CLIENT_INPUT_REQUESTED. Used for worker waits where input is
+                expected from the queen via inject_worker_message().
 
         Returns True if input arrived, False if shutdown was signaled.
         """
@@ -1584,7 +1670,7 @@ class EventLoopNode(NodeProtocol):
         # without injecting, so the wait still blocks until the user types.
         self._input_ready.clear()
 
-        if self._event_bus:
+        if emit_client_request and self._event_bus:
             await self._event_bus.emit_client_input_requested(
                 stream_id=ctx.stream_id or ctx.node_id,
                 node_id=ctx.node_id,
@@ -1620,13 +1706,15 @@ class EventLoopNode(NodeProtocol):
         bool,
         str,
         list[str] | None,
+        bool,
         str,
         list[dict[str, Any]],
     ]:
         """Run a single LLM turn with streaming and tool execution.
 
         Returns (assistant_text, real_tool_results, outputs_set, token_counts, logged_tool_calls,
-        user_input_requested, ask_user_prompt, ask_user_options, system_prompt, messages).
+        user_input_requested, ask_user_prompt, ask_user_options, queen_input_requested,
+        system_prompt, messages).
 
         ``real_tool_results`` contains only results from actual tools (web_search,
         etc.), NOT from synthetic framework tools such as ``set_output``,
@@ -1635,6 +1723,9 @@ class EventLoopNode(NodeProtocol):
         this turn.  ``user_input_requested`` is True if the LLM called
         ``ask_user`` during this turn.  This separation lets the caller treat
         synthetic tools as framework concerns rather than tool-execution concerns.
+        ``queen_input_requested`` is True when the worker called
+        ``escalate_to_coder(wait_for_response=true)`` and should wait for
+        queen guidance before judge evaluation.
 
         ``logged_tool_calls`` accumulates ALL tool calls across inner iterations
         (real tools, set_output, and discarded calls) for L3 logging.  Unlike
@@ -1654,6 +1745,7 @@ class EventLoopNode(NodeProtocol):
         user_input_requested = False
         ask_user_prompt = ""
         ask_user_options: list[str] | None = None
+        queen_input_requested = False
         # Accumulate ALL tool calls across inner iterations for L3 logging.
         # Unlike real_tool_results (reset each inner iteration), this persists.
         logged_tool_calls: list[dict] = []
@@ -1804,6 +1896,7 @@ class EventLoopNode(NodeProtocol):
                     user_input_requested,
                     ask_user_prompt,
                     ask_user_options,
+                    queen_input_requested,
                     final_system_prompt,
                     final_messages,
                 )
@@ -1953,6 +2046,7 @@ class EventLoopNode(NodeProtocol):
                     # --- Framework-level escalate_to_coder handling ---
                     reason = str(tc.tool_input.get("reason", "")).strip()
                     context = str(tc.tool_input.get("context", "")).strip()
+                    wait_for_response = bool(tc.tool_input.get("wait_for_response", True))
 
                     if stream_id in ("queen", "judge"):
                         result = ToolResult(
@@ -1984,10 +2078,16 @@ class EventLoopNode(NodeProtocol):
                         context=context,
                         execution_id=execution_id,
                     )
+                    if wait_for_response:
+                        queen_input_requested = True
 
                     result = ToolResult(
                         tool_use_id=tc.tool_use_id,
-                        content="Escalation requested to hive_coder (queen).",
+                        content=(
+                            "Escalation requested to hive_coder (queen); waiting for guidance."
+                            if wait_for_response
+                            else "Escalation requested to hive_coder (queen)."
+                        ),
                         is_error=False,
                     )
                     results_by_id[tc.tool_use_id] = result
@@ -2278,6 +2378,7 @@ class EventLoopNode(NodeProtocol):
                     user_input_requested,
                     ask_user_prompt,
                     ask_user_options,
+                    queen_input_requested,
                     final_system_prompt,
                     final_messages,
                 )
@@ -2296,9 +2397,9 @@ class EventLoopNode(NodeProtocol):
                         conversation.usage_ratio() * 100,
                     )
 
-            # If ask_user was called, return immediately so the outer loop
-            # can block for user input instead of re-invoking the LLM.
-            if user_input_requested:
+            # If the turn requested external input (ask_user or queen handoff),
+            # return immediately so the outer loop can block before judge eval.
+            if user_input_requested or queen_input_requested:
                 return (
                     final_text,
                     real_tool_results,
@@ -2308,6 +2409,7 @@ class EventLoopNode(NodeProtocol):
                     user_input_requested,
                     ask_user_prompt,
                     ask_user_options,
+                    queen_input_requested,
                     final_system_prompt,
                     final_messages,
                 )
@@ -2407,7 +2509,8 @@ class EventLoopNode(NodeProtocol):
             description=(
                 "Escalate to the Hive Coder queen when blocked by errors, missing "
                 "credentials, or ambiguous constraints that require supervisor "
-                "guidance. Include a concise reason and optional context."
+                "guidance. Include a concise reason and optional context. Set "
+                "wait_for_response=true to pause until the queen injects guidance."
             ),
             parameters={
                 "type": "object",
@@ -2421,6 +2524,14 @@ class EventLoopNode(NodeProtocol):
                     "context": {
                         "type": "string",
                         "description": "Optional diagnostic details for the queen.",
+                    },
+                    "wait_for_response": {
+                        "type": "boolean",
+                        "description": (
+                            "When true (default), block this node until queen guidance "
+                            "arrives via injected input."
+                        ),
+                        "default": True,
                     },
                 },
                 "required": ["reason"],
@@ -3737,6 +3848,32 @@ class EventLoopNode(NodeProtocol):
                 output_tokens=output_tokens,
                 execution_id=execution_id,
                 iteration=iteration,
+            )
+
+    def _log_skip_judge(
+        self,
+        ctx: NodeContext,
+        node_id: str,
+        iteration: int,
+        feedback: str,
+        tool_calls: list[dict],
+        llm_text: str,
+        turn_tokens: dict[str, int],
+        iter_start: float,
+    ) -> None:
+        """Log a CONTINUE step that skips judge evaluation (e.g., waiting for input)."""
+        if ctx.runtime_logger:
+            ctx.runtime_logger.log_step(
+                node_id=node_id,
+                node_type="event_loop",
+                step_index=iteration,
+                verdict="CONTINUE",
+                verdict_feedback=feedback,
+                tool_calls=tool_calls,
+                llm_text=llm_text,
+                input_tokens=turn_tokens.get("input", 0),
+                output_tokens=turn_tokens.get("output", 0),
+                latency_ms=int((time.time() - iter_start) * 1000),
             )
 
     async def _publish_loop_completed(
