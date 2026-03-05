@@ -1106,14 +1106,22 @@ class AgentRunner:
                 # Get OAuth token from Claude Code subscription
                 api_key = get_claude_code_token()
                 if not api_key:
-                    print("Warning: Claude Code subscription configured but no token found.")
-                    print("Run 'claude' to authenticate, then try again.")
+                    warning_msg = (
+                        "Claude Code subscription configured but no token found. "
+                        "Run 'claude' to authenticate, then try again."
+                    )
+                    print(f"Warning: {warning_msg}")
+                    logger.warning("[LLM] %s", warning_msg)
             elif use_codex:
                 # Get OAuth token from Codex subscription
                 api_key = get_codex_token()
                 if not api_key:
-                    print("Warning: Codex subscription configured but no token found.")
-                    print("Run 'codex' to authenticate, then try again.")
+                    warning_msg = (
+                        "Codex subscription configured but no token found. "
+                        "Run 'codex' to authenticate, then try again."
+                    )
+                    print(f"Warning: {warning_msg}")
+                    logger.warning("[LLM] %s", warning_msg)
 
             if api_key and use_claude_code:
                 # Use litellm's built-in Anthropic OAuth support.
@@ -1175,8 +1183,12 @@ class AgentRunner:
                             if api_key_env:
                                 os.environ[api_key_env] = api_key
                         elif api_key_env:
-                            print(f"Warning: {api_key_env} not set. LLM calls will fail.")
-                            print(f"Set it with: export {api_key_env}=your-api-key")
+                            warning_msg = (
+                                f"{api_key_env} not set. LLM calls will fail. "
+                                f"Set it with: export {api_key_env}=your-api-key"
+                            )
+                            print(f"Warning: {warning_msg}")
+                            logger.warning("[LLM] %s", warning_msg)
 
             # Fail fast if the agent needs an LLM but none was configured
             if self._llm is None:
