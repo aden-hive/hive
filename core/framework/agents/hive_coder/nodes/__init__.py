@@ -178,15 +178,9 @@ NEVER guess or fabricate tool names from memory.
 NEVER skip the first call. Always start with the full list \
 so you know what categories and tools exist before drilling in.
 
-## Agent Awareness
-Run list_agents() to see what agents already exist. Read their code \
-for patterns:
-  read_file("exports/{name}/agent.py")
-  read_file("exports/{name}/nodes/__init__.py")
-
 ## Post-Build Testing
 After writing agent code, validate structurally AND run tests:
-  run_command("python -c 'from {name} import default_agent; \\
+  run_command("uv run python -c 'from {name} import default_agent; \\
     print(default_agent.validate())'")
   run_agent_tests("{name}")
 
@@ -374,14 +368,14 @@ Run FOUR validation steps after writing. All must pass:
 
 **Step A — Class validation** (checks graph structure):
 ```
-run_command("python -c 'from {name} import default_agent; \\
+run_command("uv run python -c 'from {name} import default_agent; \\
   print(default_agent.validate())'")
 ```
 
 **Step B — Runner load test** (checks package export contract — \
 THIS IS THE SAME PATH THE TUI USES):
 ```
-run_command("python -c 'from framework.runner.runner import \\
+run_command("uv run python -c 'from framework.runner.runner import \\
   AgentRunner; r = AgentRunner.load(\"exports/{name}\"); \\
   print(\"AgentRunner.load: OK\")'")
 ```
