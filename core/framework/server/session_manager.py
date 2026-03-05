@@ -402,6 +402,47 @@ class SessionManager:
     # Queen startup
     # ------------------------------------------------------------------
 
+    async def _handle_worker_handoff(self, session: Session, executor: Any, event: Any) -> None:
+        """Route worker escalation events into the queen conversation."""
+        if event.stream_id in ("queen", "judge"):
+            return
+
+        reason = str(event.data.get("reason", "")).strip()
+        context = str(event.data.get("context", "")).strip()
+        node_label = event.node_id or "unknown_node"
+        stream_label = event.stream_id or "unknown_stream"
+
+        handoff = (
+            "[WORKER_ESCALATION_REQUEST]\n"
+            f"stream_id: {stream_label}\n"
+            f"node_id: {node_label}\n"
+            f"reason: {reason or 'unspecified'}\n"
+        )
+        if context:
+            handoff += f"context:\n{context}\n"
+
+        node = executor.node_registry.get("queen")
+        if node is not None and hasattr(node, "inject_event"):
+            await node.inject_event(handoff, is_client_input=False)
+        else:
+            logger.warning("Worker handoff received but queen node not ready")
+
+    def _subscribe_worker_handoffs(self, session: Session, executor: Any) -> None:
+        """Subscribe queen to worker/subagent escalation handoff events."""
+        from framework.runtime.event_bus import EventType as _ET
+
+        if session.worker_handoff_sub is not None:
+            session.event_bus.unsubscribe(session.worker_handoff_sub)
+            session.worker_handoff_sub = None
+
+        async def _on_worker_handoff(event):
+            await self._handle_worker_handoff(session, executor, event)
+
+        session.worker_handoff_sub = session.event_bus.subscribe(
+            event_types=[_ET.ESCALATION_REQUESTED],
+            handler=_on_worker_handoff,
+        )
+
     async def _start_queen(
         self,
         session: Session,
@@ -607,36 +648,7 @@ class SessionManager:
                     event_types=[_ET.EXECUTION_COMPLETED, _ET.EXECUTION_FAILED],
                     handler=_on_worker_done,
                 )
-
-                # Worker handoff: worker/subagent -> queen via synthetic escalate_to_coder.
-                async def _on_worker_handoff(event):
-                    if event.stream_id in ("queen", "judge"):
-                        return
-
-                    reason = str(event.data.get("reason", "")).strip()
-                    context = str(event.data.get("context", "")).strip()
-                    node_label = event.node_id or "unknown_node"
-                    stream_label = event.stream_id or "unknown_stream"
-
-                    handoff = (
-                        "[WORKER_ESCALATION_REQUEST]\n"
-                        f"stream_id: {stream_label}\n"
-                        f"node_id: {node_label}\n"
-                        f"reason: {reason or 'unspecified'}\n"
-                    )
-                    if context:
-                        handoff += f"context:\n{context}\n"
-
-                    node = executor.node_registry.get("queen")
-                    if node is not None and hasattr(node, "inject_event"):
-                        await node.inject_event(handoff, is_client_input=False)
-                    else:
-                        logger.warning("Worker handoff received but queen node not ready")
-
-                session.worker_handoff_sub = session.event_bus.subscribe(
-                    event_types=[_ET.ESCALATION_REQUESTED],
-                    handler=_on_worker_handoff,
-                )
+                self._subscribe_worker_handoffs(session, executor)
 
                 logger.info(
                     "Queen starting in %s phase with %d tools: %s",
