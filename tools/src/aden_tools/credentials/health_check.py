@@ -8,11 +8,14 @@ to verify the credential works.
 
 from __future__ import annotations
 
+import logging
 import os
 from dataclasses import dataclass, field
 from typing import Any, Protocol
 
 import httpx
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -83,7 +86,10 @@ class HubSpotHealthChecker:
                     return HealthCheckResult(
                         valid=False,
                         message="HubSpot token lacks required scopes",
-                        details={"status_code": 403, "required": "crm.objects.contacts.read"},
+                        details={
+                            "status_code": 403,
+                            "required": "crm.objects.contacts.read",
+                        },
                     )
                 else:
                     return HealthCheckResult(
@@ -116,7 +122,9 @@ class ZohoCRMHealthChecker:
 
         Uses /users?type=CurrentUser so module permissions are not required.
         """
-        api_domain = os.getenv("ZOHO_API_DOMAIN", "https://www.zohoapis.com").rstrip("/")
+        api_domain = os.getenv("ZOHO_API_DOMAIN", "https://www.zohoapis.com").rstrip(
+            "/"
+        )
         endpoint = f"{api_domain}/crm/v2/users?type=CurrentUser"
         try:
             with httpx.Client(timeout=self.TIMEOUT) as client:
@@ -469,7 +477,9 @@ class BaseHttpHealthChecker:
             )
         except httpx.RequestError as e:
             error_msg = str(e)
-            if any(s in error_msg for s in ("Bearer", "Authorization", "api_key", "token")):
+            if any(
+                s in error_msg for s in ("Bearer", "Authorization", "api_key", "token")
+            ):
                 error_msg = "Request failed (details redacted for security)"
             return HealthCheckResult(
                 valid=False,
@@ -1386,9 +1396,9 @@ def check_credential_health(
     Example:
         >>> result = check_credential_health("hubspot", "pat-xxx-yyy")
         >>> if result.valid:
-        ...     print("Credential is valid!")
+        ...     logger.info("Credential is valid!")
         ... else:
-        ...     print(f"Invalid: {result.message}")
+        ...     logger.info(f"Invalid: {result.message}")
     """
     checker = HEALTH_CHECKERS.get(credential_name)
 
@@ -1433,7 +1443,7 @@ def validate_integration_wiring(credential_name: str) -> list[str]:
 
         issues = validate_integration_wiring("stripe")
         for issue in issues:
-            print(f"  - {issue}")
+            logger.info(f"  - {issue}")
     """
     from . import CREDENTIAL_SPECS
 
@@ -1456,7 +1466,9 @@ def validate_integration_wiring(credential_name: str) -> list[str]:
     if not spec.tools and not spec.node_types:
         issues.append("CredentialSpec has no tools or node_types")
     if not spec.help_url:
-        issues.append("CredentialSpec.help_url is empty (users need this to get credentials)")
+        issues.append(
+            "CredentialSpec.help_url is empty (users need this to get credentials)"
+        )
     if spec.direct_api_key_supported and not spec.api_key_instructions:
         issues.append(
             "CredentialSpec.api_key_instructions is empty but direct_api_key_supported=True"

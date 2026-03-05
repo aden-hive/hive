@@ -7,6 +7,7 @@ Credential specs are defined in separate category files (llm.py, search.py, etc.
 
 from __future__ import annotations
 
+import logging
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -16,6 +17,8 @@ from dotenv import dotenv_values
 
 if TYPE_CHECKING:
     pass
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -214,7 +217,9 @@ class CredentialManager:
             KeyError: If the credential name is not in specs
         """
         if name not in self._specs:
-            raise KeyError(f"Unknown credential '{name}'. Available: {list(self._specs.keys())}")
+            raise KeyError(
+                f"Unknown credential '{name}'. Available: {list(self._specs.keys())}"
+            )
 
         # No caching - read fresh each time for hot-reload support
         return self._get_raw(name)
@@ -242,7 +247,9 @@ class CredentialManager:
         """
         return self._tool_to_cred.get(tool_name)
 
-    def get_missing_for_tools(self, tool_names: list[str]) -> list[tuple[str, CredentialSpec]]:
+    def get_missing_for_tools(
+        self, tool_names: list[str]
+    ) -> list[tuple[str, CredentialSpec]]:
         """
         Get list of missing credentials for the given tools.
 
@@ -316,7 +323,9 @@ class CredentialManager:
         lines.append("Set these environment variables and re-run the agent.")
         return "\n".join(lines)
 
-    def get_missing_for_node_types(self, node_types: list[str]) -> list[tuple[str, CredentialSpec]]:
+    def get_missing_for_node_types(
+        self, node_types: list[str]
+    ) -> list[tuple[str, CredentialSpec]]:
         """
         Get list of missing credentials for the given node types.
 
@@ -363,7 +372,9 @@ class CredentialManager:
         missing = self.get_missing_for_node_types(node_types)
 
         if missing:
-            raise CredentialError(self._format_missing_node_type_error(missing, node_types))
+            raise CredentialError(
+                self._format_missing_node_type_error(missing, node_types)
+            )
 
     def _format_missing_node_type_error(
         self,
@@ -445,7 +456,7 @@ class CredentialManager:
         Example:
             >>> creds = CredentialManager()
             >>> options = creds.get_auth_options("hubspot")
-            >>> print(options)  # ['aden', 'direct', 'custom']
+            >>> logger.info(options)  # ['aden', 'direct', 'custom']
         """
         spec = self._specs.get(credential_name)
         if spec is None:
@@ -474,7 +485,7 @@ class CredentialManager:
         Example:
             >>> creds = CredentialManager()
             >>> info = creds.get_setup_instructions("hubspot")
-            >>> print(info['api_key_instructions'])
+            >>> logger.info(info['api_key_instructions'])
         """
         spec = self._specs.get(credential_name)
         if spec is None:
