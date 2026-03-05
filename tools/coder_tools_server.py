@@ -336,7 +336,7 @@ def list_agent_tools(
     output_schema: str = "simple",
     group: str = "all",
 ) -> str:
-    """Discover tools available for agent building, grouped by category.
+    """Discover tools available for agent building, grouped by provider.
 
     Connects to each MCP server, lists tools, then disconnects. Use this
     BEFORE designing an agent to know exactly which tools exist. Only use
@@ -348,11 +348,12 @@ def list_agent_tools(
             to see what tools that specific agent has access to.
         output_schema: "simple" (default) returns name and description per tool.
             "full" also includes server and input_schema.
-        group: "all" (default) returns every category. A prefix like "gmail"
-            returns only that group's tools.
+        group: "all" (default) returns all providers. A provider like "google"
+            returns only that provider's tools. Legacy prefix filters (e.g. "gmail")
+            are still supported.
 
     Returns:
-        JSON with tools grouped by prefix (e.g. gmail_*, slack_*).
+        JSON with tools grouped by provider.
     """
     if output_schema not in ("simple", "full"):
         return json.dumps(
@@ -425,28 +426,108 @@ def list_agent_tools(
         except Exception as e:
             errors.append({"server": server_name, "error": str(e)})
 
-    # Group by prefix (e.g., gmail_, slack_, stripe_)
-    groups: dict[str, list[dict]] = {}
-    for t in sorted(all_tools, key=lambda x: x["name"]):
-        parts = t["name"].split("_", 1)
-        prefix = parts[0] if len(parts) > 1 else "general"
-        groups.setdefault(prefix, []).append(t)
+    def _normalize_provider_name(raw: str | None, fallback: str) -> str:
+        """Normalize provider names to stable top-level buckets."""
+        text = (raw or fallback or "unknown").strip().lower()
+        text = re.sub(r"[^a-z0-9]+", "_", text).strip("_")
+        if not text:
+            return "unknown"
+        head = text.split("_", 1)[0]
+        # Collapse Google families (google_docs/google_cloud/google-custom-search -> google)
+        if head == "google":
+            return "google"
+        return head
 
-    # Filter to a specific group
+    def _build_provider_metadata() -> tuple[
+        dict[str, dict[str, dict[str, dict]]], dict[str, set[str]]
+    ]:
+        """Build tool->provider->credential metadata index from CredentialSpecs."""
+        try:
+            from aden_tools.credentials import CREDENTIAL_SPECS
+        except ImportError:
+            return {}, {}
+
+        tool_provider_auth: dict[str, dict[str, dict[str, dict]]] = {}
+        tool_providers: dict[str, set[str]] = {}
+
+        for cred_name, spec in CREDENTIAL_SPECS.items():
+            provider_hint = spec.aden_provider_name or spec.credential_group or spec.credential_id
+            provider = _normalize_provider_name(provider_hint, fallback=cred_name)
+            auth_entry = {
+                "env_var": spec.env_var,
+                "required": spec.required,
+                "description": spec.description,
+                "help_url": spec.help_url,
+                "credential_id": spec.credential_id,
+                "credential_key": spec.credential_key,
+            }
+            for tool_name in spec.tools:
+                tool_providers.setdefault(tool_name, set()).add(provider)
+                provider_map = tool_provider_auth.setdefault(tool_name, {})
+                credential_map = provider_map.setdefault(provider, {})
+                credential_map[cred_name] = auth_entry
+
+        return tool_provider_auth, tool_providers
+
+    tool_provider_auth, tool_providers = _build_provider_metadata()
+
+    def _group_by_provider(tools: list[dict]) -> dict[str, dict]:
+        """Group tools by provider, including auth metadata and providerless tools."""
+        groups: dict[str, dict] = {}
+
+        for t in sorted(tools, key=lambda x: (x["name"], x["server"])):
+            providers = sorted(tool_providers.get(t["name"], []))
+            if not providers:
+                providers = ["no_provider"]
+
+            tool_payload = {
+                "name": t["name"],
+                "description": t["description"],
+            }
+            if output_schema == "full":
+                tool_payload["server"] = t["server"]
+                tool_payload["input_schema"] = t["input_schema"]
+
+            for provider in providers:
+                bucket = groups.setdefault(
+                    provider,
+                    {
+                        "authorization": {},
+                        "tools": [],
+                    },
+                )
+                bucket["tools"].append(tool_payload)
+
+                provider_auth = tool_provider_auth.get(t["name"], {}).get(provider, {})
+                for cred_name, auth in provider_auth.items():
+                    bucket["authorization"][cred_name] = auth
+
+        for _provider, bucket in groups.items():
+            bucket["tools"] = sorted(bucket["tools"], key=lambda x: x["name"])
+            bucket["authorization"] = dict(sorted(bucket["authorization"].items()))
+
+        return dict(sorted(groups.items()))
+
+    provider_groups = _group_by_provider(all_tools)
+
+    # Filter to a specific provider (preferred) or legacy prefix (fallback)
     if group != "all":
-        groups = {group: groups[group]} if group in groups else {}
+        if group in provider_groups:
+            provider_groups = {group: provider_groups[group]}
+        else:
+            prefixed_tools = []
+            for t in all_tools:
+                parts = t["name"].split("_", 1)
+                prefix = parts[0] if len(parts) > 1 else "general"
+                if prefix == group:
+                    prefixed_tools.append(t)
+            provider_groups = _group_by_provider(prefixed_tools)
 
-    # Apply output schema
-    if output_schema == "simple":
-        groups = {
-            prefix: [{"name": t["name"], "description": t["description"]} for t in tools]
-            for prefix, tools in groups.items()
-        }
-
-    all_names = sorted(t["name"] for tools in groups.values() for t in tools)
+    all_names = sorted({t["name"] for p in provider_groups.values() for t in p["tools"]})
     result: dict = {
         "total": len(all_names),
-        "tools_by_category": groups,
+        "tools_by_provider": provider_groups,
+        "tools_by_category": provider_groups,  # backward-compat alias
         "all_tool_names": all_names,
     }
     if errors:

@@ -29,13 +29,18 @@ def _build_appendices() -> str:
         + "\n\n# Appendix: Anti-Patterns\n\n"
         + _anti_patterns
     )
-    if _is_gcu_enabled() and _gcu_guide:
-        parts += "\n\n# Appendix: GCU Browser Automation Guide\n\n" + _gcu_guide
     return parts
 
 
 # Shared appendices — appended to every coding node's system prompt.
 _appendices = _build_appendices()
+
+# GCU first-class section for building phase (when GCU is enabled).
+# This is placed prominently in the main prompt body, not as an appendix.
+_gcu_building_section = (
+    "\n\n# GCU Nodes — Browser Automation\n\n"
+    + _gcu_guide
+) if _is_gcu_enabled() and _gcu_guide else ""
 
 # Tools available to both coder (worker) and queen.
 _SHARED_TOOLS = [
@@ -266,12 +271,6 @@ After listening, present a **concrete picture** of what you think they need. Mak
 >
 > Before I start — [1-2 specific questions you genuinely can't infer]."
 
-Why this works:
-- **Proves you were listening** — they don't feel like they have to repeat themselves
-- **Shows competence** — you're already thinking in systems
-- **Fast to correct** — "no, it's more like X" takes 10 seconds vs. answering 15 questions
-- **Creates momentum** — heading toward building, not more talking
-
 ---
 
 ### 1.4: Ask Only What You Cannot Infer
@@ -345,7 +344,7 @@ Your questions should be **narrow, specific, and consequential**. Never ask what
 
 ## 3: Gap Analysis
 
-**Identify specific gaps** between what the user wants and what you can deliver:
+**Identify specific gaps** between what user wants and what you can deliver:
 
 | Requirement | Framework Support | Gap/Workaround |
 |-------------|-------------------|----------------|
@@ -362,7 +361,7 @@ Your questions should be **narrow, specific, and consequential**. Never ask what
 
 Design the agent architecture:
 - Goal: id, name, description, 3-5 success criteria, 2-4 constraints
-- Nodes: **2-4 nodes MAXIMUM** (see rules below)
+- Nodes: **2-5 nodes** (warn if <2 or >5)
 - Edges: on_success for linear, conditional for routing
 - Lifecycle: ALWAYS forever-alive (`terminal_nodes=[]`) unless the user \
 explicitly requests a one-shot/batch agent. Forever-alive agents loop \
@@ -448,8 +447,9 @@ Get user approval before implementing.
 
 ## 6. Implement
 
-Call `initialize_agent_package` to generate all package files from your \
-graph session. The tool creates: config.py, nodes/__init__.py, agent.py, \
+Call `initialize_agent_package(agent_name)` to generate all package files \
+from your graph session. The agent_name must be snake_case (e.g., "my_agent").
+The tool creates: config.py, nodes/__init__.py, agent.py, \
 __init__.py, __main__.py, mcp_servers.json, tests/conftest.py, \
 agent.json, README.md.
 
@@ -975,11 +975,12 @@ queen_node = NodeSpec(
     tools=sorted(set(_QUEEN_BUILDING_TOOLS + _QUEEN_STAGING_TOOLS + _QUEEN_RUNNING_TOOLS)),
     system_prompt=(
         _queen_identity
+        + _queen_style
         + _agent_builder_knowledge
+        + _gcu_building_section  # GCU as first-class citizen (not appendix)
         + _queen_tools_docs
         + _queen_behavior
         + _queen_phase_7
-        + _queen_style
         + _appendices
     ),
 )
@@ -1008,4 +1009,5 @@ __all__ = [
     "_queen_style",
     "_agent_builder_knowledge",
     "_appendices",
+    "_gcu_building_section",
 ]

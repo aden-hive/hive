@@ -317,6 +317,11 @@ export default function Workspace() {
 
     if (persisted) {
       for (const tab of persisted.tabs) {
+        // Skip new-agent tabs when starting fresh from home with a prompt
+        // to avoid creating duplicate sessions
+        if (initialPrompt && hasExplicitAgent && (tab.agentType === "new-agent" || tab.agentType.startsWith("new-agent-"))) {
+          continue;
+        }
         if (!initial[tab.agentType]) initial[tab.agentType] = [];
         const session = createSession(tab.agentType, tab.label);
         session.id = tab.id;
@@ -369,7 +374,15 @@ export default function Workspace() {
   const [activeSessionByAgent, setActiveSessionByAgent] = useState<Record<string, string>>(() => {
     const persisted = loadPersistedTabs();
     if (persisted) {
-      const restored = { ...persisted.activeSessionByAgent };
+      let restored = { ...persisted.activeSessionByAgent };
+      // Remove stale new-agent-* entries when starting fresh from home
+      if (initialPrompt && hasExplicitAgent) {
+        restored = Object.fromEntries(
+          Object.entries(restored).filter(([key]) =>
+            key !== "new-agent" && !key.startsWith("new-agent-")
+          )
+        );
+      }
       const urlSessions = sessionsByAgent[initialAgent];
       if (urlSessions?.length) {
         // When a prompt was submitted from home, activate the newly created
@@ -518,6 +531,10 @@ export default function Workspace() {
   // --- Agent loading: loadAgentForType ---
   const loadingRef = useRef(new Set<string>());
   const loadAgentForType = useCallback(async (agentType: string) => {
+    // Ref-based guard: prevents double-load from React StrictMode (must be first check)
+    if (loadingRef.current.has(agentType)) return;
+    loadingRef.current.add(agentType);
+
     if (agentType === "new-agent" || agentType.startsWith("new-agent-")) {
       // Create a queen-only session (no worker) for agent building
       updateAgentState(agentType, { loading: true, error: null, ready: false, sessionId: null });
@@ -591,10 +608,6 @@ export default function Workspace() {
       }
       return;
     }
-
-    // Ref-based guard: prevents double-load from React StrictMode
-    if (loadingRef.current.has(agentType)) return;
-    loadingRef.current.add(agentType);
 
     updateAgentState(agentType, { loading: true, error: null, ready: false, sessionId: null });
 

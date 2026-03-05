@@ -258,163 +258,42 @@ Judge is the SOLE acceptance mechanism — no ad-hoc framework gating.
 
 ## Async Entry Points (Webhooks, Timers, Events)
 
-For agents that need to react to external events (incoming emails, scheduled
-tasks, API calls), use `AsyncEntryPointSpec` and optionally `AgentRuntimeConfig`.
-
-### Imports
-```python
-from framework.graph.edge import GraphSpec, AsyncEntryPointSpec
-from framework.runtime.agent_runtime import AgentRuntime, AgentRuntimeConfig, create_agent_runtime
-```
-Note: `AsyncEntryPointSpec` is in `framework.graph.edge` (the graph/declarative layer).
-`AgentRuntimeConfig` is in `framework.runtime.agent_runtime` (the runtime layer).
-
-### AsyncEntryPointSpec Fields
-
-| Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| id | str | required | Unique identifier |
-| name | str | required | Human-readable name |
-| entry_node | str | required | Node ID to start execution from |
-| trigger_type | str | `"manual"` | `webhook`, `api`, `timer`, `event`, `manual` |
-| trigger_config | dict | `{}` | Trigger-specific config (see below) |
-| isolation_level | str | `"shared"` | `isolated`, `shared`, `synchronized` |
-| priority | int | `0` | Execution priority (higher = more priority) |
-| max_concurrent | int | `10` | Max concurrent executions |
-
-### Trigger Types
-
-**timer** — Fires on a schedule. Two modes: cron expressions or fixed interval.
-
-Cron (preferred for precise scheduling):
-```python
-AsyncEntryPointSpec(
-    id="daily-digest",
-    name="Daily Digest",
-    entry_node="check-node",
-    trigger_type="timer",
-    trigger_config={"cron": "0 9 * * *"},  # daily at 9am
-    isolation_level="shared",
-    max_concurrent=1,
-)
-```
-- `cron` (str) — standard cron expression (5 fields: min hour dom month dow)
-- Examples: `"0 9 * * *"` (daily 9am), `"0 9 * * MON-FRI"` (weekdays 9am), `"*/30 * * * *"` (every 30 min)
-
-Fixed interval (simpler, for polling-style tasks):
-```python
-AsyncEntryPointSpec(
-    id="scheduled-check",
-    name="Scheduled Check",
-    entry_node="check-node",
-    trigger_type="timer",
-    trigger_config={"interval_minutes": 20, "run_immediately": False},
-    isolation_level="shared",
-    max_concurrent=1,
-)
-```
-- `interval_minutes` (float) — how often to fire
-- `run_immediately` (bool, default False) — fire once on startup
-
-**event** — Subscribes to EventBus (e.g., webhook events):
-```python
-AsyncEntryPointSpec(
-    id="email-event",
-    name="Email Event Handler",
-    entry_node="process-emails",
-    trigger_type="event",
-    trigger_config={"event_types": ["webhook_received"]},
-    isolation_level="shared",
-    max_concurrent=10,
-)
-```
-- `event_types` (list[str]) — EventType values to subscribe to
-- `filter_stream` (str, optional) — only receive from this stream
-- `filter_node` (str, optional) — only receive from this node
-
-**webhook** — HTTP endpoint (requires AgentRuntimeConfig):
-The webhook server publishes `WEBHOOK_RECEIVED` events on the EventBus.
-An `event` trigger type with `event_types: ["webhook_received"]` subscribes
-to those events. The flow is:
-```
-HTTP POST /webhooks/gmail → WebhookServer → EventBus (WEBHOOK_RECEIVED)
-  → event entry point → triggers graph execution from entry_node
-```
-
-**manual** — Triggered programmatically via `runtime.trigger()`.
-
-### Isolation Levels
-
-| Level | Meaning |
-|-------|---------|
-| `isolated` | Private state per execution |
-| `shared` | Eventual consistency — async executions can read primary session memory |
-| `synchronized` | Shared with write locks (use when ordering matters) |
-
-For most async patterns, use `shared` — the async execution reads the primary
-session's memory (e.g., user-configured rules) and runs its own workflow.
-
-### AgentRuntimeConfig (for webhook servers)
+For agents that react to external events, use `AsyncEntryPointSpec`:
 
 ```python
+from framework.graph.edge import AsyncEntryPointSpec
 from framework.runtime.agent_runtime import AgentRuntimeConfig
 
+# Timer trigger (cron or interval)
+async_entry_points = [
+    AsyncEntryPointSpec(
+        id="daily-check",
+        name="Daily Check",
+        entry_node="process",
+        trigger_type="timer",
+        trigger_config={"cron": "0 9 * * *"},  # daily at 9am
+        isolation_level="shared",
+    )
+]
+
+# Webhook server (optional)
 runtime_config = AgentRuntimeConfig(
     webhook_host="127.0.0.1",
     webhook_port=8080,
-    webhook_routes=[
-        {
-            "source_id": "gmail",
-            "path": "/webhooks/gmail",
-            "methods": ["POST"],
-            "secret": None,  # Optional HMAC-SHA256 secret
-        },
-    ],
-)
-```
-`runtime_config` is a module-level variable read by `AgentRunner.load()`.
-The runner passes it to `create_agent_runtime()`. On `runtime.start()`,
-if webhook_routes is non-empty, an embedded HTTP server starts.
-
-### Session Sharing
-
-Timer and event triggers automatically call `_get_primary_session_state()`
-before execution. This finds the active user-facing session and provides
-its memory to the async execution, filtered to only the async entry node's
-`input_keys`. This means the async flow can read user-configured values
-(like rules, preferences) without needing separate configuration.
-
-### Module-Level Variables
-
-Agents with async entry points must export two additional variables:
-```python
-# In agent.py:
-async_entry_points = [AsyncEntryPointSpec(...), ...]
-runtime_config = AgentRuntimeConfig(...)  # Only if using webhooks
-```
-
-Both must be re-exported from `__init__.py`:
-```python
-from .agent import (
-    ..., async_entry_points, runtime_config,
+    webhook_routes=[{"source_id": "gmail", "path": "/webhooks/gmail", "methods": ["POST"]}],
 )
 ```
 
-### Reference Agent
+### Key Fields
+- `trigger_type`: `"timer"`, `"event"`, `"webhook"`, `"manual"`
+- `trigger_config`: `{"cron": "0 9 * * *"}` or `{"interval_minutes": 20}`
+- `isolation_level`: `"shared"` (recommended), `"isolated"`, `"synchronized"`
+- `event_types`: For event triggers, e.g., `["webhook_received"]`
 
-See `exports/gmail_inbox_guardian/agent.py` for a complete example with:
-- Primary client-facing node (user configures rules)
-- Timer-based scheduled inbox checks (every 20 min)
-- Webhook-triggered email event handling
-- Shared isolation for memory access across streams
+### Exports Required
+Both `async_entry_points` and `runtime_config` must be exported from `__init__.py`.
 
-## Framework Capabilities
-
-**Works well:** Multi-turn conversations, HITL review, tool orchestration, structured outputs, parallel execution, context management, error recovery, session persistence.
-
-**Limitations:** LLM latency (2-10s/turn), context window limits (~128K), cost per run, rate limits, node boundaries lose context.
-
-**Not designed for:** Sub-second responses, millions of items, real-time streaming, guaranteed determinism, offline/air-gapped.
+See `exports/gmail_inbox_guardian/agent.py` for complete example.
 
 ## Tool Discovery
 
