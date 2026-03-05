@@ -67,64 +67,64 @@ class WorkerSessionAdapter:
 
 
 @dataclass
-class QueenModeState:
-    """Mutable state container for queen operating mode.
+class QueenPhaseState:
+    """Mutable state container for queen operating phase.
 
-    Three modes: building → staging → running.
+    Three phases: building → staging → running.
     Shared between the dynamic_tools_provider callback and tool handlers
-    that trigger mode transitions.
+    that trigger phase transitions.
     """
 
-    mode: str = "building"  # "building", "staging", or "running"
+    phase: str = "building"  # "building", "staging", or "running"
     building_tools: list = field(default_factory=list)  # list[Tool]
     staging_tools: list = field(default_factory=list)  # list[Tool]
     running_tools: list = field(default_factory=list)  # list[Tool]
     inject_notification: Any = None  # async (str) -> None
-    event_bus: Any = None  # EventBus — for emitting QUEEN_MODE_CHANGED events
+    event_bus: Any = None  # EventBus — for emitting QUEEN_PHASE_CHANGED events
 
     def get_current_tools(self) -> list:
-        """Return tools for the current mode."""
-        if self.mode == "running":
+        """Return tools for the current phase."""
+        if self.phase == "running":
             return list(self.running_tools)
-        if self.mode == "staging":
+        if self.phase == "staging":
             return list(self.staging_tools)
         return list(self.building_tools)
 
-    async def _emit_mode_event(self) -> None:
-        """Publish a QUEEN_MODE_CHANGED event so the frontend updates the tag."""
+    async def _emit_phase_event(self) -> None:
+        """Publish a QUEEN_PHASE_CHANGED event so the frontend updates the tag."""
         if self.event_bus is not None:
             await self.event_bus.publish(
                 AgentEvent(
-                    type=EventType.QUEEN_MODE_CHANGED,
+                    type=EventType.QUEEN_PHASE_CHANGED,
                     stream_id="queen",
-                    data={"mode": self.mode},
+                    data={"phase": self.phase},
                 )
             )
 
     async def switch_to_running(self, source: str = "tool") -> None:
-        """Switch to running mode and notify the queen.
+        """Switch to running phase and notify the queen.
 
         Args:
             source: Who triggered the switch — "tool" (queen LLM),
                 "frontend" (user clicked Run), or "auto" (system).
         """
-        if self.mode == "running":
+        if self.phase == "running":
             return
-        self.mode = "running"
+        self.phase = "running"
         tool_names = [t.name for t in self.running_tools]
-        logger.info("Queen mode → running (source=%s, tools: %s)", source, tool_names)
-        await self._emit_mode_event()
+        logger.info("Queen phase → running (source=%s, tools: %s)", source, tool_names)
+        await self._emit_phase_event()
         if self.inject_notification:
             if source == "frontend":
                 msg = (
-                    "[MODE CHANGE] The user clicked Run in the UI. Switched to RUNNING mode. "
+                    "[PHASE CHANGE] The user clicked Run in the UI. Switched to RUNNING phase. "
                     "Worker is now executing. You have monitoring/lifecycle tools: "
                     + ", ".join(tool_names)
                     + "."
                 )
             else:
                 msg = (
-                    "[MODE CHANGE] Switched to RUNNING mode. "
+                    "[PHASE CHANGE] Switched to RUNNING phase. "
                     "Worker is executing. You now have monitoring/lifecycle tools: "
                     + ", ".join(tool_names)
                     + "."
@@ -132,33 +132,33 @@ class QueenModeState:
             await self.inject_notification(msg)
 
     async def switch_to_staging(self, source: str = "tool") -> None:
-        """Switch to staging mode and notify the queen.
+        """Switch to staging phase and notify the queen.
 
         Args:
             source: Who triggered the switch — "tool", "frontend", or "auto".
         """
-        if self.mode == "staging":
+        if self.phase == "staging":
             return
-        self.mode = "staging"
+        self.phase = "staging"
         tool_names = [t.name for t in self.staging_tools]
-        logger.info("Queen mode → staging (source=%s, tools: %s)", source, tool_names)
-        await self._emit_mode_event()
+        logger.info("Queen phase → staging (source=%s, tools: %s)", source, tool_names)
+        await self._emit_phase_event()
         if self.inject_notification:
             if source == "frontend":
                 msg = (
-                    "[MODE CHANGE] The user stopped the worker from the UI. "
-                    "Switched to STAGING mode. Agent is still loaded. "
+                    "[PHASE CHANGE] The user stopped the worker from the UI. "
+                    "Switched to STAGING phase. Agent is still loaded. "
                     "Available tools: " + ", ".join(tool_names) + "."
                 )
             elif source == "auto":
                 msg = (
-                    "[MODE CHANGE] Worker execution completed. Switched to STAGING mode. "
+                    "[PHASE CHANGE] Worker execution completed. Switched to STAGING phase. "
                     "Agent is still loaded. Call run_agent_with_input(task) to run again. "
                     "Available tools: " + ", ".join(tool_names) + "."
                 )
             else:
                 msg = (
-                    "[MODE CHANGE] Switched to STAGING mode. "
+                    "[PHASE CHANGE] Switched to STAGING phase. "
                     "Agent loaded and ready. Call run_agent_with_input(task) to start, "
                     "or stop_worker_and_edit() to go back to building. "
                     "Available tools: " + ", ".join(tool_names) + "."
@@ -166,20 +166,20 @@ class QueenModeState:
             await self.inject_notification(msg)
 
     async def switch_to_building(self, source: str = "tool") -> None:
-        """Switch to building mode and notify the queen.
+        """Switch to building phase and notify the queen.
 
         Args:
             source: Who triggered the switch — "tool", "frontend", or "auto".
         """
-        if self.mode == "building":
+        if self.phase == "building":
             return
-        self.mode = "building"
+        self.phase = "building"
         tool_names = [t.name for t in self.building_tools]
-        logger.info("Queen mode → building (source=%s, tools: %s)", source, tool_names)
-        await self._emit_mode_event()
+        logger.info("Queen phase → building (source=%s, tools: %s)", source, tool_names)
+        await self._emit_phase_event()
         if self.inject_notification:
             await self.inject_notification(
-                "[MODE CHANGE] Switched to BUILDING mode. "
+                "[PHASE CHANGE] Switched to BUILDING phase. "
                 "Lifecycle tools removed. Full coding tools restored. "
                 "Call load_built_agent(path) when ready to stage."
             )
@@ -240,7 +240,7 @@ def register_queen_lifecycle_tools(
     session_manager: Any = None,
     manager_session_id: str | None = None,
     # Mode switching
-    mode_state: QueenModeState | None = None,
+    phase_state: QueenPhaseState | None = None,
 ) -> int:
     """Register queen lifecycle tools.
 
@@ -257,9 +257,9 @@ def register_queen_lifecycle_tools(
             for ``load_built_agent`` to hot-load a worker.
         manager_session_id: (Server only) The session's ID in the manager,
             used with ``session_manager.load_worker()``.
-        mode_state: (Optional) Mutable mode state for building/running
-            mode switching. When provided, load_built_agent switches to
-            running mode and stop_worker_and_edit switches to building mode.
+        phase_state: (Optional) Mutable phase state for building/running
+            phase switching. When provided, load_built_agent switches to
+            running phase and stop_worker_and_edit switches to building phase.
 
     Returns the number of tools registered.
     """
@@ -470,17 +470,17 @@ def register_queen_lifecycle_tools(
     # --- stop_worker_and_edit -------------------------------------------------
 
     async def stop_worker_and_edit() -> str:
-        """Stop the worker and switch to building mode for editing the agent."""
+        """Stop the worker and switch to building phase for editing the agent."""
         stop_result = await stop_worker()
 
-        # Switch to building mode
-        if mode_state is not None:
-            await mode_state.switch_to_building()
+        # Switch to building phase
+        if phase_state is not None:
+            await phase_state.switch_to_building()
 
         result = json.loads(stop_result)
-        result["mode"] = "building"
+        result["phase"] = "building"
         result["message"] = (
-            "Worker stopped. You are now in building mode. "
+            "Worker stopped. You are now in building phase. "
             "Use your coding tools to modify the agent, then call "
             "load_built_agent(path) to stage it again."
         )
@@ -489,7 +489,7 @@ def register_queen_lifecycle_tools(
     _stop_edit_tool = Tool(
         name="stop_worker_and_edit",
         description=(
-            "Stop the running worker and switch to building mode. "
+            "Stop the running worker and switch to building phase. "
             "Use this when you need to modify the agent's code, nodes, or configuration. "
             "After editing, call load_built_agent(path) to reload and run."
         ),
@@ -503,22 +503,22 @@ def register_queen_lifecycle_tools(
     # --- stop_worker (Running → Staging) -------------------------------------
 
     async def stop_worker_to_staging() -> str:
-        """Stop the running worker and switch to staging mode.
+        """Stop the running worker and switch to staging phase.
 
         After stopping, ask the user whether they want to:
         1. Re-run the agent with new input → call run_agent_with_input(task)
-        2. Edit the agent code → call stop_worker_and_edit() to go to building mode
+        2. Edit the agent code → call stop_worker_and_edit() to go to building phase
         """
         stop_result = await stop_worker()
 
-        # Switch to staging mode
-        if mode_state is not None:
-            await mode_state.switch_to_staging()
+        # Switch to staging phase
+        if phase_state is not None:
+            await phase_state.switch_to_staging()
 
         result = json.loads(stop_result)
-        result["mode"] = "staging"
+        result["phase"] = "staging"
         result["message"] = (
-            "Worker stopped. You are now in staging mode. "
+            "Worker stopped. You are now in staging phase. "
             "Ask the user: would they like to re-run with new input, "
             "or edit the agent code?"
         )
@@ -527,7 +527,7 @@ def register_queen_lifecycle_tools(
     _stop_worker_tool = Tool(
         name="stop_worker",
         description=(
-            "Stop the running worker and switch to staging mode. "
+            "Stop the running worker and switch to staging phase. "
             "After stopping, ask the user whether they want to re-run "
             "with new input or edit the agent code."
         ),
@@ -1012,18 +1012,18 @@ def register_queen_lifecycle_tools(
                 )
                 info = updated_session.worker_info
 
-                # Switch to staging mode after successful load
-                if mode_state is not None:
-                    await mode_state.switch_to_staging()
+                # Switch to staging phase after successful load
+                if phase_state is not None:
+                    await phase_state.switch_to_staging()
 
                 worker_name = info.name if info else updated_session.worker_id
                 return json.dumps(
                     {
                         "status": "loaded",
-                        "mode": "staging",
+                        "phase": "staging",
                         "message": (
                             f"Successfully loaded '{worker_name}'. "
-                            "You are now in STAGING mode. "
+                            "You are now in STAGING phase. "
                             "Call run_agent_with_input(task) to start the worker, "
                             "or stop_worker_and_edit() to go back to building."
                         ),
@@ -1069,7 +1069,7 @@ def register_queen_lifecycle_tools(
         """Run the loaded worker agent with the given task input.
 
         Performs preflight checks (credentials, MCP resync), triggers the
-        worker's default entry point, and switches to running mode.
+        worker's default entry point, and switches to running phase.
         """
         runtime = _get_runtime()
         if runtime is None:
@@ -1131,14 +1131,14 @@ def register_queen_lifecycle_tools(
                 session_state=session_state,
             )
 
-            # Switch to running mode
-            if mode_state is not None:
-                await mode_state.switch_to_running()
+            # Switch to running phase
+            if phase_state is not None:
+                await phase_state.switch_to_running()
 
             return json.dumps(
                 {
                     "status": "started",
-                    "mode": "running",
+                    "phase": "running",
                     "execution_id": exec_id,
                     "task": task,
                 }
@@ -1164,8 +1164,8 @@ def register_queen_lifecycle_tools(
         name="run_agent_with_input",
         description=(
             "Run the loaded worker agent with the given task. Validates credentials, "
-            "triggers the worker's default entry point, and switches to running mode. "
-            "Use this after loading an agent (staging mode) to start execution."
+            "triggers the worker's default entry point, and switches to running phase. "
+            "Use this after loading an agent (staging phase) to start execution."
         ),
         parameters={
             "type": "object",

@@ -476,7 +476,7 @@ class AdenTUI(App):
         from framework.runner.tool_registry import ToolRegistry
         from framework.runtime.core import Runtime
         from framework.tools.queen_lifecycle_tools import (
-            QueenModeState,
+            QueenPhaseState,
             register_queen_lifecycle_tools,
         )
         from framework.tools.worker_monitoring_tools import register_worker_monitoring_tools
@@ -539,8 +539,8 @@ class AdenTUI(App):
                 except Exception:
                     log.warning("Queen: MCP config failed to load", exc_info=True)
 
-            # Worker is already loaded in TUI path → start in staging mode.
-            mode_state = QueenModeState(mode="staging", event_bus=event_bus)
+            # Worker is already loaded in TUI path -> start in staging phase.
+            phase_state = QueenPhaseState(phase="staging", event_bus=event_bus)
 
             register_queen_lifecycle_tools(
                 queen_registry,
@@ -548,7 +548,7 @@ class AdenTUI(App):
                 event_bus=event_bus,
                 storage_path=storage_path,
                 session_id=session_id,
-                mode_state=mode_state,
+                phase_state=phase_state,
             )
             register_worker_monitoring_tools(
                 queen_registry,
@@ -560,7 +560,7 @@ class AdenTUI(App):
             queen_tools = list(queen_registry.get_tools().values())
             queen_tool_executor = queen_registry.get_executor()
 
-            # Partition tools into mode-specific sets
+            # Partition tools into phase-specific sets
             from framework.agents.hive_coder.nodes import (
                 _QUEEN_BUILDING_TOOLS,
                 _QUEEN_RUNNING_TOOLS,
@@ -570,9 +570,9 @@ class AdenTUI(App):
             building_names = set(_QUEEN_BUILDING_TOOLS)
             staging_names = set(_QUEEN_STAGING_TOOLS)
             running_names = set(_QUEEN_RUNNING_TOOLS)
-            mode_state.building_tools = [t for t in queen_tools if t.name in building_names]
-            mode_state.staging_tools = [t for t in queen_tools if t.name in staging_names]
-            mode_state.running_tools = [t for t in queen_tools if t.name in running_names]
+            phase_state.building_tools = [t for t in queen_tools if t.name in building_names]
+            phase_state.staging_tools = [t for t in queen_tools if t.name in staging_names]
+            phase_state.running_tools = [t for t in queen_tools if t.name in running_names]
 
             # Build worker profile for queen's system prompt.
             from framework.tools.queen_lifecycle_tools import build_worker_profile
@@ -614,23 +614,23 @@ class AdenTUI(App):
                         stream_id="queen",
                         storage_path=queen_dir,
                         loop_config=queen_graph.loop_config,
-                        dynamic_tools_provider=mode_state.get_current_tools,
+                        dynamic_tools_provider=phase_state.get_current_tools,
                     )
                     self._queen_executor = executor
 
-                    # Wire inject_notification so mode switches notify the queen LLM
-                    async def _inject_mode_notification(content: str) -> None:
+                    # Wire inject_notification so phase switches notify the queen LLM
+                    async def _inject_phase_notification(content: str) -> None:
                         node = executor.node_registry.get("queen")
                         if node is not None and hasattr(node, "inject_event"):
                             await node.inject_event(content)
 
-                    mode_state.inject_notification = _inject_mode_notification
+                    phase_state.inject_notification = _inject_phase_notification
 
                     log.info(
-                        "Queen starting in %s mode with %d tools: %s",
-                        mode_state.mode,
-                        len(mode_state.get_current_tools()),
-                        [t.name for t in mode_state.get_current_tools()],
+                        "Queen starting in %s phase with %d tools: %s",
+                        phase_state.phase,
+                        len(phase_state.get_current_tools()),
+                        [t.name for t in phase_state.get_current_tools()],
                     )
                     # The queen's event_loop node runs forever (continuous mode).
                     # It blocks on _await_user_input() after each LLM turn,

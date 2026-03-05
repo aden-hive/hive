@@ -64,15 +64,15 @@ async def handle_trigger(request: web.Request) -> web.Response:
         session_state=session_state,
     )
 
-    # Cancel queen's in-progress LLM turn so it picks up the mode change cleanly
+    # Cancel queen's in-progress LLM turn so it picks up the phase change cleanly
     if session.queen_executor:
         node = session.queen_executor.node_registry.get("queen")
         if node and hasattr(node, "cancel_current_turn"):
             node.cancel_current_turn()
 
-    # Switch queen to running mode (mirrors run_agent_with_input tool behavior)
-    if session.mode_state is not None:
-        await session.mode_state.switch_to_running(source="frontend")
+    # Switch queen to running phase (mirrors run_agent_with_input tool behavior)
+    if session.phase_state is not None:
+        await session.phase_state.switch_to_running(source="frontend")
 
     return web.json_response({"execution_id": execution_id})
 
@@ -328,8 +328,8 @@ async def handle_stop(request: web.Request) -> web.Response:
                         node.cancel_current_turn()
 
                 # Switch to staging (agent still loaded, ready to re-run)
-                if session.mode_state is not None:
-                    await session.mode_state.switch_to_staging(source="frontend")
+                if session.phase_state is not None:
+                    await session.phase_state.switch_to_staging(source="frontend")
 
                 return web.json_response(
                     {

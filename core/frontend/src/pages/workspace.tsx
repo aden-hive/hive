@@ -241,8 +241,8 @@ interface AgentBackendState {
   /** The message ID of the current worker input request (for inline reply box) */
   workerInputMessageId: string | null;
   queenBuilding: boolean;
-  /** Queen operating mode — "building" (coding), "staging" (loaded), or "running" (executing) */
-  queenMode: "building" | "staging" | "running";
+  /** Queen operating phase — "building" (coding), "staging" (loaded), or "running" (executing) */
+  queenPhase: "building" | "staging" | "running";
   workerRunState: "idle" | "deploying" | "running";
   currentExecutionId: string | null;
   nodeLogs: Record<string, string[]>;
@@ -277,7 +277,7 @@ function defaultAgentState(): AgentBackendState {
     awaitingInput: false,
     workerInputMessageId: null,
     queenBuilding: false,
-    queenMode: "building",
+    queenPhase: "building",
     workerRunState: "idle",
     currentExecutionId: null,
     nodeLogs: {},
@@ -677,12 +677,12 @@ export default function Workspace() {
       // failed, the throw inside the catch exits the outer try block.
       const session = liveSession!;
       const displayName = formatAgentDisplayName(session.worker_name || agentType);
-      const initialMode = session.queen_mode || (session.has_worker ? "staging" : "building");
+      const initialPhase = session.queen_phase || (session.has_worker ? "staging" : "building");
       updateAgentState(agentType, {
         sessionId: session.session_id,
         displayName,
-        queenMode: initialMode,
-        queenBuilding: initialMode === "building",
+        queenPhase: initialPhase,
+        queenBuilding: initialPhase === "building",
       });
 
       // Update the session label
@@ -1296,7 +1296,7 @@ export default function Workspace() {
         case "tool_call_started": {
           console.log('[TOOL_PILL] tool_call_started received:', { isQueen, nodeId: event.node_id, streamId: event.stream_id, agentType, executionId: event.execution_id, toolName: event.data?.tool_name });
 
-          // queenBuilding is now driven by queen_mode_changed events
+          // queenBuilding is now driven by queen_phase_changed events
 
           if (event.node_id) {
             if (!isQueen) {
@@ -1531,15 +1531,15 @@ export default function Workspace() {
           break;
         }
 
-        case "queen_mode_changed": {
-          const rawMode = event.data?.mode as string;
-          const newMode: "building" | "staging" | "running" =
-            rawMode === "running" ? "running" : rawMode === "staging" ? "staging" : "building";
+        case "queen_phase_changed": {
+          const rawPhase = event.data?.phase as string;
+          const newPhase: "building" | "staging" | "running" =
+            rawPhase === "running" ? "running" : rawPhase === "staging" ? "staging" : "building";
           updateAgentState(agentType, {
-            queenMode: newMode,
-            queenBuilding: newMode === "building",
-            // Sync workerRunState so the RunButton reflects the mode
-            workerRunState: newMode === "running" ? "running" : "idle",
+            queenPhase: newPhase,
+            queenBuilding: newPhase === "building",
+            // Sync workerRunState so the RunButton reflects the phase
+            workerRunState: newPhase === "running" ? "running" : "idle",
           });
           break;
         }
@@ -1975,7 +1975,7 @@ export default function Workspace() {
               onPause={handlePause}
               runState={activeAgentState?.workerRunState ?? "idle"}
               building={activeAgentState?.queenBuilding ?? false}
-              queenMode={activeAgentState?.queenMode ?? "building"}
+              queenPhase={activeAgentState?.queenPhase ?? "building"}
             />
           </div>
         </div>
@@ -2045,7 +2045,7 @@ export default function Workspace() {
                   (activeAgentState?.loading ?? true) ||
                   !(activeAgentState?.queenReady)
                 }
-                queenMode={activeAgentState?.queenMode ?? "building"}
+                queenPhase={activeAgentState?.queenPhase ?? "building"}
                 pendingQuestion={activeAgentState?.awaitingInput ? activeAgentState.pendingQuestion : null}
                 pendingOptions={activeAgentState?.awaitingInput ? activeAgentState.pendingOptions : null}
                 onQuestionSubmit={

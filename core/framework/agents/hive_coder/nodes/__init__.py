@@ -60,14 +60,14 @@ _SHARED_TOOLS = [
     "initialize_agent_package",
 ]
 
-# Queen mode-specific tool sets.
-# Building mode: full coding + agent construction tools.
+# Queen phase-specific tool sets.
+# Building phase: full coding + agent construction tools.
 _QUEEN_BUILDING_TOOLS = _SHARED_TOOLS + [
     "load_built_agent",
     "list_credentials",
 ]
 
-# Staging mode: agent loaded but not yet running — inspect, configure, launch.
+# Staging phase: agent loaded but not yet running — inspect, configure, launch.
 _QUEEN_STAGING_TOOLS = [
     # Read-only (inspect agent files, logs)
     "read_file",
@@ -82,7 +82,7 @@ _QUEEN_STAGING_TOOLS = [
     "stop_worker_and_edit",
 ]
 
-# Running mode: worker is executing — monitor and control.
+# Running phase: worker is executing — monitor and control.
 _QUEEN_RUNNING_TOOLS = [
     # Read-only coding (for inspecting logs, files)
     "read_file",
@@ -454,52 +454,52 @@ _queen_tools_docs = """
 
 ## Operating Modes
 
-You operate in one of three modes. Your available tools change based on the \
-mode. The system notifies you when a mode change occurs.
+You operate in one of three phases. Your available tools change based on the \
+phase. The system notifies you when a phase change occurs.
 
-### BUILDING mode (default)
+### BUILDING phase (default)
 You have full coding tools for building and modifying agents:
 - File I/O: read_file, write_file, edit_file, list_directory, search_files, \
 run_command, undo_changes
 - Meta-agent: list_agent_tools, validate_agent_tools, \
 list_agents, list_agent_sessions, get_agent_session_state, get_agent_session_memory, \
 list_agent_checkpoints, get_agent_checkpoint, run_agent_tests
-- load_built_agent(agent_path) — Load the agent and switch to STAGING mode
+- load_built_agent(agent_path) — Load the agent and switch to STAGING phase
 - list_credentials(credential_id?) — List authorized credentials
 
 When you finish building an agent, call load_built_agent(path) to stage it.
 
-### STAGING mode (agent loaded, not yet running)
+### STAGING phase (agent loaded, not yet running)
 The agent is loaded and ready to run. You can inspect it and launch it:
 - Read-only: read_file, list_directory, search_files, run_command
 - list_credentials(credential_id?) — Verify credentials are configured
 - get_worker_status() — Check the loaded worker
-- run_agent_with_input(task) — Start the worker and switch to RUNNING mode
-- stop_worker_and_edit() — Go back to BUILDING mode
+- run_agent_with_input(task) — Start the worker and switch to RUNNING phase
+- stop_worker_and_edit() — Go back to BUILDING phase
 
-In STAGING mode you do NOT have write tools. If you need to modify the agent, \
-call stop_worker_and_edit() to go back to BUILDING mode.
+In STAGING phase you do NOT have write tools. If you need to modify the agent, \
+call stop_worker_and_edit() to go back to BUILDING phase.
 
-### RUNNING mode (worker is executing)
+### RUNNING phase (worker is executing)
 The worker is running. You have monitoring and lifecycle tools:
 - Read-only: read_file, list_directory, search_files, run_command
 - get_worker_status() — Check worker status (idle, running, waiting)
 - inject_worker_message(content) — Send a message to the running worker
 - get_worker_health_summary() — Read the latest health data
 - notify_operator(ticket_id, analysis, urgency) — Alert the user (use sparingly)
-- stop_worker() — Stop the worker and return to STAGING mode, then ask the user what to do next
-- stop_worker_and_edit() — Stop the worker and switch back to BUILDING mode
+- stop_worker() — Stop the worker and return to STAGING phase, then ask the user what to do next
+- stop_worker_and_edit() — Stop the worker and switch back to BUILDING phase
 
-In RUNNING mode you do NOT have write tools or agent construction tools. \
+In RUNNING phase you do NOT have write tools or agent construction tools. \
 If you need to modify the agent, call stop_worker_and_edit() to switch back \
-to BUILDING mode. To stop the worker and ask the user what to do next, call \
-stop_worker() to return to STAGING mode.
+to BUILDING phase. To stop the worker and ask the user what to do next, call \
+stop_worker() to return to STAGING phase.
 
 ### Mode transitions
-- load_built_agent(path) → switches to STAGING mode
-- run_agent_with_input(task) → starts worker, switches to RUNNING mode
-- stop_worker() → stops worker, switches to STAGING mode (ask user: re-run or edit?)
-- stop_worker_and_edit() → stops worker (if running), switches to BUILDING mode
+- load_built_agent(path) → switches to STAGING phase
+- run_agent_with_input(task) → starts worker, switches to RUNNING phase
+- stop_worker() → stops worker, switches to STAGING phase (ask user: re-run or edit?)
+- stop_worker_and_edit() → stops worker (if running), switches to BUILDING phase
 """
 
 _queen_behavior = """
@@ -563,7 +563,7 @@ NEVER call run_agent_with_input until the user has provided their input.
 
 If NO worker is loaded, say so and offer to build one.
 
-## When in staging mode (agent loaded, not running):
+## When in staging phase (agent loaded, not running):
 - Tell the user the agent is loaded and ready.
 - For tasks matching the worker's goal: ALWAYS ask the user for their \
 specific input BEFORE calling run_agent_with_input(task). NEVER make up \
@@ -636,14 +636,14 @@ When the user asks to change, modify, or update the loaded worker \
 (e.g., "change the report node", "add a node", "delete node X"):
 
 1. Call stop_worker_and_edit() — this stops the worker and gives you \
-coding tools (switches to BUILDING mode).
+coding tools (switches to BUILDING phase).
 2. Use the **Path** from the Worker Profile to locate the agent files.
 3. Read the relevant files (nodes/__init__.py, agent.py, etc.).
 4. Make the requested changes using edit_file / write_file.
 5. Run validation (default_agent.validate(), AgentRunner.load(), \
 validate_agent_tools()).
 6. **Reload the modified worker**: call load_built_agent("{path}") \
-so the changes take effect immediately (switches to STAGING mode). \
+so the changes take effect immediately (switches to STAGING phase). \
 Then call run_agent_with_input(task) to restart execution.
 
 Do NOT skip step 6 — without reloading, the user will still be \
@@ -655,7 +655,7 @@ _queen_phase_7 = """
 
 After building and verifying, load the agent into the current session:
   load_built_agent("exports/{name}")
-This switches to STAGING mode — the user sees the agent's graph and \
+This switches to STAGING phase — the user sees the agent's graph and \
 the tab name updates. Then call run_agent_with_input(task) to start it. \
 Do NOT tell the user to run `python -m {name} run` — load and run it here.
 """
