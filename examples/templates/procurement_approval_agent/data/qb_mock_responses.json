@@ -1,0 +1,53 @@
+[
+  {
+    "timestamp": "2026-02-27T08:48:49.781503+00:00",
+    "request": {
+      "po_number": "PO-20260224-001",
+      "po_data": {
+        "po_number": "PO-20260224-001",
+        "vendor": "TechSource LLC",
+        "amount": 1200.0,
+        "currency": "USD"
+      }
+    },
+    "response": {
+      "qb_po_id": "QB-PO-20260224-001",
+      "sync_status": "mock_synced",
+      "api": "quickbooks.purchase_orders.create"
+    }
+  },
+  {
+    "timestamp": "2026-02-27T08:48:49.784913+00:00",
+    "request": {
+      "po_number": "PO-20260224-001",
+      "po_data": {
+        "po_number": "PO-20260224-001",
+        "vendor": "TechSource LLC",
+        "amount": 1200.0,
+        "currency": "USD"
+      }
+    },
+    "response": {
+      "qb_po_id": "QB-PO-20260224-001",
+      "sync_status": "mock_synced",
+      "api": "quickbooks.purchase_orders.create"
+    }
+  },
+  {
+    "timestamp": "2026-02-27T08:48:49.794828+00:00",
+    "request": {
+      "po_number": "PO-20260224-001",
+      "po_data": {
+        "po_number": "PO-20260224-001",
+        "vendor": "TechSource LLC",
+        "amount": 1200.0,
+        "currency": "USD"
+      }
+    },
+    "response": {
+      "qb_po_id": "QB-PO-20260224-001",
+      "sync_status": "mock_synced",
+      "api": "quickbooks.purchase_orders.create"
+    }
+  }
+]
