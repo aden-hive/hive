@@ -1477,6 +1477,26 @@ if [ -n "$HIVE_CREDENTIAL_KEY" ]; then
     echo ""
 fi
 
+# Show tool summary
+TOOL_COUNTS=$(uv run python -c "
+from fastmcp import FastMCP
+from aden_tools.tools import register_all_tools
+mv = FastMCP('v')
+v = register_all_tools(mv, include_unverified=False)
+ma = FastMCP('a')
+a = register_all_tools(ma, include_unverified=True)
+print(f'{len(v)}|{len(a) - len(v)}')
+" 2>/dev/null)
+if [ -n "$TOOL_COUNTS" ]; then
+    VERIFIED=$(echo "$TOOL_COUNTS" | cut -d'|' -f1)
+    UNVERIFIED=$(echo "$TOOL_COUNTS" | cut -d'|' -f2)
+    echo -e "${BOLD}Tools:${NC}"
+    echo -e "  ${GREEN}⬢${NC} ${VERIFIED} verified    ${DIM}${UNVERIFIED} unverified available${NC}"
+    echo -e "  ${DIM}Enable unverified: INCLUDE_UNVERIFIED_TOOLS=true${NC}"
+    echo -e "  ${DIM}Learn more: docs/tools.md${NC}"
+    echo ""
+fi
+
 # Show Codex instructions if available
 if [ "$CODEX_AVAILABLE" = true ]; then
     echo -e "${BOLD}Build a New Agent (Codex):${NC}"
@@ -1520,7 +1540,7 @@ else
     echo ""
     echo -e "  Launch the interactive dashboard to browse and run agents:"
     echo -e "  You can start an example agent or an agent built by yourself:"
-    echo -e "     ${CYAN}hive tui${NC}"
+    echo -e "     ${CYAN}hive open${NC}"
     echo ""
     echo -e "${DIM}Run ./quickstart.sh again to reconfigure.${NC}"
     echo ""
