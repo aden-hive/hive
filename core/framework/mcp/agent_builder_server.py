@@ -10,6 +10,7 @@ Usage:
 import json
 import logging
 import os
+import shutil
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -161,7 +162,7 @@ def _load_session(session_id: str) -> BuildSession:
     if not session_file.exists():
         raise ValueError(f"Session '{session_id}' not found")
 
-    with open(session_file) as f:
+    with open(session_file, encoding="utf-8") as f:
         data = json.load(f)
 
     return BuildSession.from_dict(data)
@@ -173,7 +174,7 @@ def _load_active_session() -> BuildSession | None:
         return None
 
     try:
-        with open(ACTIVE_SESSION_FILE) as f:
+        with open(ACTIVE_SESSION_FILE, encoding="utf-8") as f:
             session_id = f.read().strip()
 
         if session_id:
@@ -227,7 +228,7 @@ def list_sessions() -> str:
     if SESSIONS_DIR.exists():
         for session_file in SESSIONS_DIR.glob("*.json"):
             try:
-                with open(session_file) as f:
+                with open(session_file, encoding="utf-8") as f:
                     data = json.load(f)
                     sessions.append(
                         {
@@ -247,7 +248,7 @@ def list_sessions() -> str:
     active_id = None
     if ACTIVE_SESSION_FILE.exists():
         try:
-            with open(ACTIVE_SESSION_FILE) as f:
+            with open(ACTIVE_SESSION_FILE, encoding="utf-8") as f:
                 active_id = f.read().strip()
         except Exception:
             pass
@@ -309,7 +310,7 @@ def delete_session(session_id: Annotated[str, "ID of the session to delete"]) ->
             _session = None
 
         if ACTIVE_SESSION_FILE.exists():
-            with open(ACTIVE_SESSION_FILE) as f:
+            with open(ACTIVE_SESSION_FILE, encoding="utf-8") as f:
                 active_id = f.read().strip()
                 if active_id == session_id:
                     ACTIVE_SESSION_FILE.unlink()
@@ -562,16 +563,29 @@ def _validate_agent_path(agent_path: str) -> tuple[Path | None, str | None]:
     path = Path(agent_path)
 
     # Resolve relative paths against project root (not MCP server's cwd)
-    if not path.is_absolute() and not path.exists():
-        resolved = _PROJECT_ROOT / path
-        if resolved.exists():
-            path = resolved
+    if not path.is_absolute():
+        path = _PROJECT_ROOT / path
+
+    # Restrict to allowed directories BEFORE checking existence to prevent
+    # leaking whether arbitrary filesystem paths exist on disk.
+    from framework.server.app import validate_agent_path
+
+    try:
+        path = validate_agent_path(path)
+    except ValueError:
+        return None, json.dumps(
+            {
+                "success": False,
+                "error": "agent_path must be inside an allowed directory "
+                "(exports/, examples/, or ~/.hive/agents/)",
+            }
+        )
 
     if not path.exists():
         return None, json.dumps(
             {
                 "success": False,
-                "error": f"Agent path not found: {path}",
+                "error": f"Agent path not found: {agent_path}",
                 "hint": "Run export_graph to create an agent in exports/ first",
             }
         )
@@ -586,7 +600,7 @@ def add_node(
     description: Annotated[str, "What this node does"],
     node_type: Annotated[
         str,
-        "Type: event_loop (recommended), router.",
+        "Type: event_loop (recommended), gcu (browser automation), router.",
     ],
     input_keys: Annotated[str, "JSON array of keys this node reads from shared memory"],
     output_keys: Annotated[str, "JSON array of keys this node writes to shared memory"],
@@ -675,8 +689,23 @@ def add_node(
     if node_type == "event_loop" and not system_prompt:
         warnings.append(f"Event loop node '{node_id}' should have a system_prompt")
 
+    # GCU node validation
+    if node_type == "gcu":
+        if tools_list:
+            warnings.append(
+                f"GCU node '{node_id}' auto-includes all browser tools from the "
+                f"gcu-tools MCP server. Manually listed tools {tools_list} will be "
+                f"merged with the auto-included set."
+            )
+        if not system_prompt:
+            warnings.append(
+                f"GCU node '{node_id}' has a default browser best-practices prompt. "
+                f"Consider adding a task-specific system_prompt — it will be appended "
+                f"after the browser instructions."
+            )
+
     # Warn about client_facing on nodes with tools (likely autonomous work)
-    if node_type == "event_loop" and client_facing and tools_list:
+    if node_type in ("event_loop", "gcu") and client_facing and tools_list:
         warnings.append(
             f"Node '{node_id}' is client_facing=True but has tools {tools_list}. "
             "Nodes with tools typically do autonomous work and should be "
@@ -1774,6 +1803,14 @@ def export_graph() -> str:
             enriched_criteria.append(crit_dict)
         export_data["goal"]["success_criteria"] = enriched_criteria
 
+    # Auto-add GCU MCP server if any node uses the gcu type
+    has_gcu_nodes = any(n.node_type == "gcu" for n in session.nodes)
+    if has_gcu_nodes:
+        from framework.graph.gcu import GCU_MCP_SERVER_CONFIG, GCU_SERVER_NAME
+
+        if not any(s.get("name") == GCU_SERVER_NAME for s in session.mcp_servers):
+            session.mcp_servers.append(dict(GCU_MCP_SERVER_CONFIG))
+
     # === WRITE FILES TO DISK ===
     # Create exports directory
     exports_dir = Path("exports") / session.name
@@ -1864,7 +1901,7 @@ def import_from_export(
         return json.dumps({"success": False, "error": f"File not found: {agent_json_path}"})
 
     try:
-        data = json.loads(path.read_text())
+        data = json.loads(path.read_text(encoding="utf-8"))
     except json.JSONDecodeError as e:
         return json.dumps({"success": False, "error": f"Invalid JSON: {e}"})
 
@@ -1946,7 +1983,7 @@ def get_session_status() -> str:
 @mcp.tool()
 def configure_loop(
     max_iterations: Annotated[int, "Maximum loop iterations per node execution (default 50)"] = 50,
-    max_tool_calls_per_turn: Annotated[int, "Maximum tool calls per LLM turn (default 10)"] = 10,
+    max_tool_calls_per_turn: Annotated[int, "Maximum tool calls per LLM turn (default 30)"] = 30,
     stall_detection_threshold: Annotated[
         int, "Consecutive identical responses before stall detection triggers (default 3)"
     ] = 3,
@@ -2772,6 +2809,21 @@ def run_tests(
     import re
     import subprocess
 
+    # Guard: pytest must be available as a subprocess command.
+    # Install with: pip install 'framework[testing]'
+    if shutil.which("pytest") is None:
+        return json.dumps(
+            {
+                "goal_id": goal_id,
+                "error": (
+                    "pytest is not installed or not on PATH. "
+                    "Hive's test runner requires pytest at runtime. "
+                    "Install it with: pip install 'framework[testing]' "
+                    "or: uv pip install 'framework[testing]'"
+                ),
+            }
+        )
+
     path, err = _validate_agent_path(agent_path)
     if err:
         return err
@@ -2842,10 +2894,12 @@ def run_tests(
     try:
         result = subprocess.run(
             cmd,
+            encoding="utf-8",
             capture_output=True,
             text=True,
             timeout=600,  # 10 minute timeout
             env=env,
+            stdin=subprocess.DEVNULL,
         )
     except subprocess.TimeoutExpired:
         return json.dumps(
@@ -2965,6 +3019,22 @@ def debug_test(
     import re
     import subprocess
 
+    # Guard: pytest must be available as a subprocess command.
+    # Install with: pip install 'framework[testing]'
+    if shutil.which("pytest") is None:
+        return json.dumps(
+            {
+                "goal_id": goal_id,
+                "test_name": test_name,
+                "error": (
+                    "pytest is not installed or not on PATH. "
+                    "Hive's test runner requires pytest at runtime. "
+                    "Install it with: pip install 'framework[testing]' "
+                    "or: uv pip install 'framework[testing]'"
+                ),
+            }
+        )
+
     # Derive agent_path from session if not provided
     if not agent_path and _session:
         agent_path = f"exports/{_session.name}"
@@ -2986,7 +3056,7 @@ def debug_test(
     # Find which file contains the test
     test_file = None
     for py_file in tests_dir.glob("test_*.py"):
-        content = py_file.read_text()
+        content = py_file.read_text(encoding="utf-8")
         if f"def {test_name}" in content or f"async def {test_name}" in content:
             test_file = py_file
             break
@@ -3017,10 +3087,12 @@ def debug_test(
     try:
         result = subprocess.run(
             cmd,
+            encoding="utf-8",
             capture_output=True,
             text=True,
             timeout=120,  # 2 minute timeout for single test
             env=env,
+            stdin=subprocess.DEVNULL,
         )
     except subprocess.TimeoutExpired:
         return json.dumps(
@@ -3138,7 +3210,7 @@ def list_tests(
     tests = []
     for test_file in sorted(tests_dir.glob("test_*.py")):
         try:
-            content = test_file.read_text()
+            content = test_file.read_text(encoding="utf-8")
             tree = ast.parse(content)
 
             # Find all async function definitions that start with "test_"
@@ -3338,6 +3410,11 @@ def store_credential(
         str, "Logical credential name (e.g., 'hubspot', 'brave_search', 'anthropic')"
     ],
     credential_value: Annotated[str, "The secret value to store (API key, token, etc.)"],
+    alias: Annotated[
+        str,
+        "Named alias for this account (e.g., 'work', 'personal'). Defaults to 'default'. "
+        "Use aliases to store multiple accounts for the same service.",
+    ] = "default",
     key_name: Annotated[
         str, "Key name within the credential (e.g., 'api_key', 'access_token')"
     ] = "api_key",
@@ -3347,38 +3424,42 @@ def store_credential(
     Store a credential securely in the local encrypted store at ~/.hive/credentials.
 
     Uses Fernet encryption (AES-128-CBC + HMAC). Requires HIVE_CREDENTIAL_KEY env var.
+
+    Credentials are stored as {credential_name}/{alias}, allowing multiple named accounts
+    per service (e.g., 'brave_search/work', 'brave_search/personal').
+    A health check is run automatically to validate the key and extract identity metadata.
     """
     try:
-        from pydantic import SecretStr
+        from framework.credentials.local.registry import LocalCredentialRegistry
 
-        from framework.credentials import CredentialKey, CredentialObject
-
-        store = _get_credential_store()
-
-        if not display_name:
-            display_name = credential_name.replace("_", " ").title()
-
-        cred = CredentialObject(
-            id=credential_name,
-            name=display_name,
-            keys={
-                key_name: CredentialKey(
-                    name=key_name,
-                    value=SecretStr(credential_value),
-                )
-            },
+        registry = LocalCredentialRegistry.default()
+        info, health_result = registry.save_account(
+            credential_id=credential_name,
+            alias=alias,
+            api_key=credential_value,
+            run_health_check=True,
         )
-        store.save_credential(cred)
 
-        return json.dumps(
-            {
-                "success": True,
-                "credential": credential_name,
-                "key": key_name,
-                "location": "~/.hive/credentials",
-                "encrypted": True,
+        result: dict = {
+            "success": True,
+            "credential": credential_name,
+            "alias": alias,
+            "storage_id": info.storage_id,
+            "status": info.status,
+            "location": "~/.hive/credentials",
+            "encrypted": True,
+        }
+
+        if health_result is not None:
+            result["health_check"] = {
+                "valid": health_result.valid,
+                "message": health_result.message,
             }
-        )
+            identity = info.identity.to_dict()
+            if identity:
+                result["identity"] = identity
+
+        return json.dumps(result)
     except Exception as e:
         return json.dumps({"success": False, "error": str(e)})
 
@@ -3388,26 +3469,28 @@ def list_stored_credentials() -> str:
     """
     List all credentials currently stored in the local encrypted store.
 
-    Returns credential IDs and metadata (never returns secret values).
+    Returns credential IDs, aliases, status, and identity metadata (never returns secret values).
     """
     try:
-        store = _get_credential_store()
-        credential_ids = store.list_credentials()
+        from framework.credentials.local.registry import LocalCredentialRegistry
+
+        registry = LocalCredentialRegistry.default()
+        accounts = registry.list_accounts()
 
         credentials = []
-        for cred_id in credential_ids:
-            try:
-                cred = store.get_credential(cred_id)
-                credentials.append(
-                    {
-                        "id": cred.id,
-                        "name": cred.name,
-                        "keys": list(cred.keys.keys()),
-                        "created_at": cred.created_at.isoformat() if cred.created_at else None,
-                    }
-                )
-            except Exception:
-                credentials.append({"id": cred_id, "error": "Could not load"})
+        for info in accounts:
+            entry: dict = {
+                "credential_id": info.credential_id,
+                "alias": info.alias,
+                "storage_id": info.storage_id,
+                "status": info.status,
+                "created_at": info.created_at.isoformat() if info.created_at else None,
+                "last_validated": info.last_validated.isoformat() if info.last_validated else None,
+            }
+            identity = info.identity.to_dict()
+            if identity:
+                entry["identity"] = identity
+            credentials.append(entry)
 
         return json.dumps(
             {
@@ -3424,22 +3507,71 @@ def list_stored_credentials() -> str:
 @mcp.tool()
 def delete_stored_credential(
     credential_name: Annotated[str, "Logical credential name to delete (e.g., 'hubspot')"],
+    alias: Annotated[
+        str,
+        "Alias of the account to delete (e.g., 'work', 'personal'). Defaults to 'default'.",
+    ] = "default",
 ) -> str:
     """
     Delete a credential from the local encrypted store.
     """
     try:
-        store = _get_credential_store()
-        deleted = store.delete_credential(credential_name)
+        from framework.credentials.local.registry import LocalCredentialRegistry
+
+        registry = LocalCredentialRegistry.default()
+        storage_id = f"{credential_name}/{alias}"
+        deleted = registry.delete_account(credential_name, alias)
         return json.dumps(
             {
                 "success": deleted,
                 "credential": credential_name,
-                "message": f"Credential '{credential_name}' deleted"
+                "alias": alias,
+                "storage_id": storage_id,
+                "message": f"Credential '{storage_id}' deleted"
                 if deleted
-                else f"Credential '{credential_name}' not found",
+                else f"Credential '{storage_id}' not found",
             }
         )
+    except Exception as e:
+        return json.dumps({"success": False, "error": str(e)})
+
+
+@mcp.tool()
+def validate_credential(
+    credential_name: Annotated[
+        str, "Logical credential name to validate (e.g., 'brave_search', 'github')"
+    ],
+    alias: Annotated[
+        str,
+        "Alias of the account to validate (e.g., 'work', 'personal'). Defaults to 'default'.",
+    ] = "default",
+) -> str:
+    """
+    Re-run health check for a stored credential and update its status.
+
+    Makes a live API call to verify the credential is still valid and updates
+    the stored status and last_validated timestamp.
+    """
+    try:
+        from framework.credentials.local.registry import LocalCredentialRegistry
+
+        registry = LocalCredentialRegistry.default()
+        result = registry.validate_account(credential_name, alias)
+
+        response: dict = {
+            "credential": credential_name,
+            "alias": alias,
+            "storage_id": f"{credential_name}/{alias}",
+            "valid": result.valid,
+            "status": "active" if result.valid else "failed",
+            "message": result.message,
+        }
+
+        identity = result.details.get("identity") if result.details else None
+        if identity:
+            response["identity"] = identity
+
+        return json.dumps(response)
     except Exception as e:
         return json.dumps({"success": False, "error": str(e)})
 
@@ -3581,82 +3713,6 @@ def list_agent_sessions(
     page = summaries[offset : offset + limit]
     return json.dumps(
         {"sessions": page, "total": total, "offset": offset, "limit": limit}, indent=2
-    )
-
-
-@mcp.tool()
-def get_agent_session_state(
-    agent_work_dir: Annotated[str, "Path to the agent's working directory"],
-    session_id: Annotated[str, "The session ID (e.g., 'session_20260208_143022_abc12345')"],
-) -> str:
-    """
-    Load full session state for a specific session.
-
-    Returns complete session data including status, progress, result,
-    metrics, and checkpoint info. Memory values are excluded to prevent
-    context bloat -- use get_agent_session_memory to retrieve memory contents.
-    """
-    state_path = Path(agent_work_dir) / "sessions" / session_id / "state.json"
-    data = _read_session_json(state_path)
-    if data is None:
-        return json.dumps({"error": f"Session not found: {session_id}"})
-
-    memory = data.get("memory", {})
-    data["memory_keys"] = list(memory.keys()) if isinstance(memory, dict) else []
-    data["memory_size"] = len(memory) if isinstance(memory, dict) else 0
-    data.pop("memory", None)
-
-    return json.dumps(data, indent=2, default=str)
-
-
-@mcp.tool()
-def get_agent_session_memory(
-    agent_work_dir: Annotated[str, "Path to the agent's working directory"],
-    session_id: Annotated[str, "The session ID"],
-    key: Annotated[str, "Specific memory key to retrieve. Empty for all."] = "",
-) -> str:
-    """
-    Get memory contents from a session.
-
-    Memory stores intermediate results passed between nodes. Use this
-    to inspect what data was produced during execution.
-
-    If key is provided, returns only that memory key's value.
-    If key is empty, returns all memory keys and their values.
-    """
-    state_path = Path(agent_work_dir) / "sessions" / session_id / "state.json"
-    data = _read_session_json(state_path)
-    if data is None:
-        return json.dumps({"error": f"Session not found: {session_id}"})
-
-    memory = data.get("memory", {})
-    if not isinstance(memory, dict):
-        memory = {}
-
-    if key:
-        if key not in memory:
-            return json.dumps(
-                {
-                    "error": f"Memory key not found: '{key}'",
-                    "available_keys": list(memory.keys()),
-                }
-            )
-        value = memory[key]
-        return json.dumps(
-            {
-                "session_id": session_id,
-                "key": key,
-                "value": value,
-                "value_type": type(value).__name__,
-            },
-            indent=2,
-            default=str,
-        )
-
-    return json.dumps(
-        {"session_id": session_id, "memory": memory, "total_keys": len(memory)},
-        indent=2,
-        default=str,
     )
 
 

@@ -1,0 +1,24 @@
+# Identity mapping: GitHub username -> Discord ID
+#
+# This file links GitHub accounts to Discord accounts for the
+# Integration Bounty Program. When a bounty PR is merged, the
+# GitHub Action uses this file to ping the contributor on Discord.
+#
+# HOW TO ADD YOURSELF:
+# 1. Fork this repo
+# 2. Add your entry below (keep alphabetical order)
+# 3. Submit a PR with title: "docs: link @your-github to Discord"
+#
+# To find your Discord ID:
+# 1. Open Discord Settings > Advanced > Enable Developer Mode
+# 2. Right-click your name > Copy User ID
+#
+# Format:
+#   - github: your-github-username
+#     discord: "your-discord-id"  # quotes required (it's a number)
+#     name: Your Display Name      # optional
+
+contributors:
+  # - github: example-user
+  #   discord: "123456789012345678"
+  #   name: Example User

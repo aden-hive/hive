@@ -16,7 +16,7 @@ The agent is deeply integrated with the framework: it can discover available MCP
 - **`reference/`** — Framework guide, file templates, and anti-patterns docs embedded as agent reference material
 
 ### New: Coder Tools MCP Server (`tools/coder_tools_server.py`)
-- 1500-line MCP server providing 15 tools: `read_file`, `write_file`, `edit_file` (with opencode-style 9-strategy fuzzy matching), `list_directory`, `search_files`, `run_command`, `undo_changes`, `discover_mcp_tools`, `list_agents`, `list_agent_sessions`, `get_agent_session_state`, `get_agent_session_memory`, `list_agent_checkpoints`, `get_agent_checkpoint`, `run_agent_tests`
+- 1500-line MCP server providing 13 tools: `read_file`, `write_file`, `edit_file` (with opencode-style 9-strategy fuzzy matching), `list_directory`, `search_files`, `run_command`, `undo_changes`, `discover_mcp_tools`, `list_agents`, `list_agent_sessions`, `list_agent_checkpoints`, `get_agent_checkpoint`, `run_agent_tests`
 - Path-scoped security: all file operations sandboxed to project root
 - Git-based undo: automatic snapshots before writes with `undo_changes` rollback
 

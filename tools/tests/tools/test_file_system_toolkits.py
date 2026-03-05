@@ -1,5 +1,6 @@
 """Tests for file_system_toolkits tools (FastMCP)."""
 
+import json
 import os
 from unittest.mock import patch
 
@@ -70,7 +71,11 @@ def mock_secure_path(tmp_path):
                                             "aden_tools.tools.file_system_toolkits.execute_command_tool.execute_command_tool.WORKSPACES_DIR",
                                             str(tmp_path),
                                         ):
-                                            yield
+                                            with patch(
+                                                "aden_tools.tools.file_system_toolkits.hashline_edit.hashline_edit.get_secure_path",
+                                                side_effect=_get_secure_path,
+                                            ):
+                                                yield
 
 
 class TestViewFileTool:
@@ -86,7 +91,7 @@ class TestViewFileTool:
     def test_view_existing_file(self, view_file_fn, mock_workspace, mock_secure_path, tmp_path):
         """Viewing an existing file returns content and metadata."""
         test_file = tmp_path / "test.txt"
-        test_file.write_text("Hello, World!")
+        test_file.write_text("Hello, World!", encoding="utf-8")
 
         result = view_file_fn(path="test.txt", **mock_workspace)
 
@@ -106,7 +111,7 @@ class TestViewFileTool:
         """Viewing a multiline file returns correct line count."""
         test_file = tmp_path / "multiline.txt"
         content = "Line 1\nLine 2\nLine 3\nLine 4\n"
-        test_file.write_text(content)
+        test_file.write_text(content, encoding="utf-8")
 
         result = view_file_fn(path="multiline.txt", **mock_workspace)
 
@@ -117,7 +122,7 @@ class TestViewFileTool:
     def test_view_empty_file(self, view_file_fn, mock_workspace, mock_secure_path, tmp_path):
         """Viewing an empty file returns empty content."""
         test_file = tmp_path / "empty.txt"
-        test_file.write_text("")
+        test_file.write_text("", encoding="utf-8")
 
         result = view_file_fn(path="empty.txt", **mock_workspace)
 
@@ -143,7 +148,7 @@ class TestViewFileTool:
         nested = tmp_path / "nested" / "dir"
         nested.mkdir(parents=True)
         test_file = nested / "file.txt"
-        test_file.write_text("nested content")
+        test_file.write_text("nested content", encoding="utf-8")
 
         result = view_file_fn(path="nested/dir/file.txt", **mock_workspace)
 
@@ -156,7 +161,7 @@ class TestViewFileTool:
         """Viewing a file with max_size truncates content when exceeding limit."""
         test_file = tmp_path / "large.txt"
         content = "x" * 1000
-        test_file.write_text(content)
+        test_file.write_text(content, encoding="utf-8")
 
         result = view_file_fn(path="large.txt", max_size=100, **mock_workspace)
 
@@ -171,7 +176,7 @@ class TestViewFileTool:
     ):
         """Viewing a file with negative max_size returns error."""
         test_file = tmp_path / "test.txt"
-        test_file.write_text("content")
+        test_file.write_text("content", encoding="utf-8")
 
         result = view_file_fn(path="test.txt", max_size=-1, **mock_workspace)
 
@@ -196,7 +201,7 @@ class TestViewFileTool:
     ):
         """Viewing a file with invalid encoding returns error."""
         test_file = tmp_path / "test.txt"
-        test_file.write_text("content")
+        test_file.write_text("content", encoding="utf-8")
 
         result = view_file_fn(path="test.txt", encoding="invalid-encoding", **mock_workspace)
 
@@ -204,48 +209,29 @@ class TestViewFileTool:
         assert "Failed to read file" in result["error"]
 
     def test_view_file_truncation_does_not_split_multibyte_chars(
-        self, view_file_fn, mock_workspace, mock_secure_path, tmp_path
-    ):
-        """Regression: truncating at max_size must not split a multibyte character.
+      self, view_file_fn, mock_workspace, mock_secure_path, tmp_path
+  ):
+      """Regression: content[:max_size] treats a byte limit as a char limit.
+      Byte-slicing the encoded buffer + errors='ignore' is the correct fix.
+      """
+      # 5 emoji × 4 bytes = 20 bytes; max_size=6 fits exactly one (4 bytes)
+      emoji_content = "🌍🌎🌏🌐🌑"
+      test_file = tmp_path / "emoji.txt"
+      test_file.write_text(emoji_content, encoding="utf-8")
 
-        Bug: the old code did content[:max_size] where max_size is in bytes, but
-        content is a Python str (Unicode). For multibyte encodings a char-index
-        cut ≠ a byte-boundary cut, causing UnicodeEncodeError or silent corruption.
+      result = view_file_fn(path="emoji.txt", max_size=6, **mock_workspace)
 
-        Example: '🌍' encodes to 4 bytes in UTF-8. If max_size=3 the old code
-        produced content[:3] == '🌍' (one emoji) and then tried to re-encode it,
-        which would yield 4 bytes — exceeding the limit — or silently let it pass.
-        The fixed code truncates the byte buffer itself and decodes with
-        errors='ignore' so no partial sequences survive.
-        """
-        # Build a file whose content is a string of emoji (4 bytes each in UTF-8)
-        # total = 5 emoji × 4 bytes = 20 bytes
-        emoji_content = "🌍🌎🌏🌐🌑"
-        test_file = tmp_path / "emoji.txt"
-        test_file.write_text(emoji_content, encoding="utf-8")
-
-        # max_size = 6 bytes → only the first emoji (4 bytes) must survive
-        result = view_file_fn(path="emoji.txt", max_size=6, **mock_workspace)
-
-        assert result["success"] is True
-        # Must contain the truncation marker
-        assert "[... Content truncated due to size limit ...]" in result["content"]
-        # The retained text before the marker must be valid Unicode (no UnicodeError)
-        retained = result["content"].split("\n\n[... Content truncated due to size limit ...]")[0]
-        retained.encode("utf-8")  # must not raise
-        # Every retained character must be a complete emoji, not a broken surrogate
-        for ch in retained:
-            assert ord(ch) > 0, "Broken/null character found after truncation"
+      assert result["success"] is True
+      assert "[... Content truncated due to size limit ...]" in result["content"]
+      retained = result["content"].split("\n\n[... Content truncated due to size limit ...]")[0]
+      retained.encode("utf-8")  # raises if truncation left a partial sequence
+      for ch in retained:
+          assert ord(ch) > 0, "Broken/null character found after truncation"
 
     def test_view_file_size_bytes_matches_actual_encoding(
-        self, view_file_fn, mock_workspace, mock_secure_path, tmp_path
-    ):
-        """Regression: size_bytes in the response was always computed with 'utf-8'
-        regardless of the encoding parameter, giving wrong values for encodings
-        like 'utf-16' where a character occupies a different number of bytes.
-
-        The fix computes size_bytes using the same encoding as the open() call.
-        """
+       self, view_file_fn, mock_workspace, mock_secure_path, tmp_path
+   ):
+        """Regression: size_bytes was hardcoded to utf-8 regardless of encoding param."""
         content = "Hello"
         test_file = tmp_path / "utf16.txt"
         test_file.write_text(content, encoding="utf-16")
@@ -254,13 +240,47 @@ class TestViewFileTool:
 
         assert result["success"] is True
         assert result["content"] == content
-        # utf-16 encodes "Hello" as BOM(2) + 5×2 = 12 bytes; utf-8 would be 5.
-        # The response must report the utf-16 byte length, not the utf-8 one.
+        # utf-16: BOM(2) + 5×2 = 12 bytes, not the 5 utf-8 would give
         expected_bytes = len(content.encode("utf-16"))
         assert result["size_bytes"] == expected_bytes, (
-            f"size_bytes should reflect the actual encoding ({expected_bytes} bytes for utf-16) "
-            f"but got {result['size_bytes']}"
+            f"expected {expected_bytes} (utf-16), got {result['size_bytes']}"
         )
+        
+    def test_offset_without_hashline_returns_error(
+        self, view_file_fn, mock_workspace, mock_secure_path, tmp_path
+    ):
+        """Passing offset without hashline=True returns error."""
+        test_file = tmp_path / "test.txt"
+        test_file.write_text("aaa\nbbb\nccc\n")
+
+        result = view_file_fn(path="test.txt", offset=5, **mock_workspace)
+
+        assert "error" in result
+        assert "hashline=True" in result["error"]
+
+    def test_limit_without_hashline_returns_error(
+        self, view_file_fn, mock_workspace, mock_secure_path, tmp_path
+    ):
+        """Passing limit without hashline=True returns error."""
+        test_file = tmp_path / "test.txt"
+        test_file.write_text("aaa\nbbb\nccc\n")
+
+        result = view_file_fn(path="test.txt", limit=10, **mock_workspace)
+
+        assert "error" in result
+        assert "hashline=True" in result["error"]
+
+    def test_offset_and_limit_without_hashline_returns_error(
+        self, view_file_fn, mock_workspace, mock_secure_path, tmp_path
+    ):
+        """Passing both offset and limit without hashline=True returns error."""
+        test_file = tmp_path / "test.txt"
+        test_file.write_text("aaa\nbbb\nccc\n")
+
+        result = view_file_fn(path="test.txt", offset=2, limit=5, **mock_workspace)
+
+        assert "error" in result
+        assert "hashline=True" in result["error"]
 
 
 class TestWriteToFileTool:
@@ -284,12 +304,12 @@ class TestWriteToFileTool:
         # Verify file was created
         created_file = tmp_path / "new_file.txt"
         assert created_file.exists()
-        assert created_file.read_text() == "Test content"
+        assert created_file.read_text(encoding="utf-8") == "Test content"
 
     def test_write_append_mode(self, write_to_file_fn, mock_workspace, mock_secure_path, tmp_path):
         """Writing with append=True appends to existing file."""
         test_file = tmp_path / "append_test.txt"
-        test_file.write_text("Line 1\n")
+        test_file.write_text("Line 1\n", encoding="utf-8")
 
         result = write_to_file_fn(
             path="append_test.txt", content="Line 2\n", append=True, **mock_workspace
@@ -297,20 +317,20 @@ class TestWriteToFileTool:
 
         assert result["success"] is True
         assert result["mode"] == "appended"
-        assert test_file.read_text() == "Line 1\nLine 2\n"
+        assert test_file.read_text(encoding="utf-8") == "Line 1\nLine 2\n"
 
     def test_write_overwrite_existing(
         self, write_to_file_fn, mock_workspace, mock_secure_path, tmp_path
     ):
         """Writing to existing file overwrites it by default."""
         test_file = tmp_path / "overwrite.txt"
-        test_file.write_text("Original content")
+        test_file.write_text("Original content", encoding="utf-8")
 
         result = write_to_file_fn(path="overwrite.txt", content="New content", **mock_workspace)
 
         assert result["success"] is True
         assert result["mode"] == "written"
-        assert test_file.read_text() == "New content"
+        assert test_file.read_text(encoding="utf-8") == "New content"
 
     def test_write_creates_parent_directories(
         self, write_to_file_fn, mock_workspace, mock_secure_path, tmp_path
@@ -321,7 +341,7 @@ class TestWriteToFileTool:
         assert result["success"] is True
         created_file = tmp_path / "nested" / "dir" / "file.txt"
         assert created_file.exists()
-        assert created_file.read_text() == "Test"
+        assert created_file.read_text(encoding="utf-8") == "Test"
 
     def test_write_empty_content(
         self, write_to_file_fn, mock_workspace, mock_secure_path, tmp_path
@@ -333,7 +353,7 @@ class TestWriteToFileTool:
         assert result["bytes_written"] == 0
         created_file = tmp_path / "empty.txt"
         assert created_file.exists()
-        assert created_file.read_text() == ""
+        assert created_file.read_text(encoding="utf-8") == ""
 
 
 class TestListDirTool:
@@ -349,8 +369,8 @@ class TestListDirTool:
     def test_list_directory(self, list_dir_fn, mock_workspace, mock_secure_path, tmp_path):
         """Listing a directory returns all entries."""
         # Create test files and directories
-        (tmp_path / "file1.txt").write_text("content")
-        (tmp_path / "file2.txt").write_text("content")
+        (tmp_path / "file1.txt").write_text("content", encoding="utf-8")
+        (tmp_path / "file2.txt").write_text("content", encoding="utf-8")
         (tmp_path / "subdir").mkdir()
 
         result = list_dir_fn(path=".", **mock_workspace)
@@ -387,8 +407,8 @@ class TestListDirTool:
         self, list_dir_fn, mock_workspace, mock_secure_path, tmp_path
     ):
         """Listing a directory returns file sizes for files."""
-        (tmp_path / "small.txt").write_text("hi")
-        (tmp_path / "larger.txt").write_text("hello world")
+        (tmp_path / "small.txt").write_text("hi", encoding="utf-8")
+        (tmp_path / "larger.txt").write_text("hello world", encoding="utf-8")
         (tmp_path / "subdir").mkdir()
 
         result = list_dir_fn(path=".", **mock_workspace)
@@ -425,7 +445,7 @@ class TestReplaceFileContentTool:
     ):
         """Replacing content in a file works correctly."""
         test_file = tmp_path / "replace_test.txt"
-        test_file.write_text("Hello World! Hello again!")
+        test_file.write_text("Hello World! Hello again!", encoding="utf-8")
 
         result = replace_file_content_fn(
             path="replace_test.txt", target="Hello", replacement="Hi", **mock_workspace
@@ -433,14 +453,14 @@ class TestReplaceFileContentTool:
 
         assert result["success"] is True
         assert result["occurrences_replaced"] == 2
-        assert test_file.read_text() == "Hi World! Hi again!"
+        assert test_file.read_text(encoding="utf-8") == "Hi World! Hi again!"
 
     def test_replace_target_not_found(
         self, replace_file_content_fn, mock_workspace, mock_secure_path, tmp_path
     ):
         """Replacing non-existent target returns error."""
         test_file = tmp_path / "test.txt"
-        test_file.write_text("Hello World")
+        test_file.write_text("Hello World", encoding="utf-8")
 
         result = replace_file_content_fn(
             path="test.txt", target="nonexistent", replacement="new", **mock_workspace
@@ -465,7 +485,7 @@ class TestReplaceFileContentTool:
     ):
         """Replacing content with single occurrence works correctly."""
         test_file = tmp_path / "single.txt"
-        test_file.write_text("Hello World")
+        test_file.write_text("Hello World", encoding="utf-8")
 
         result = replace_file_content_fn(
             path="single.txt", target="Hello", replacement="Hi", **mock_workspace
@@ -473,14 +493,14 @@ class TestReplaceFileContentTool:
 
         assert result["success"] is True
         assert result["occurrences_replaced"] == 1
-        assert test_file.read_text() == "Hi World"
+        assert test_file.read_text(encoding="utf-8") == "Hi World"
 
     def test_replace_multiline_content(
         self, replace_file_content_fn, mock_workspace, mock_secure_path, tmp_path
     ):
         """Replacing content across multiple lines works correctly."""
         test_file = tmp_path / "multiline.txt"
-        test_file.write_text("Line 1\nTODO: fix this\nLine 3\nTODO: add tests\n")
+        test_file.write_text("Line 1\nTODO: fix this\nLine 3\nTODO: add tests\n", encoding="utf-8")
 
         result = replace_file_content_fn(
             path="multiline.txt", target="TODO:", replacement="DONE:", **mock_workspace
@@ -488,7 +508,8 @@ class TestReplaceFileContentTool:
 
         assert result["success"] is True
         assert result["occurrences_replaced"] == 2
-        assert test_file.read_text() == "Line 1\nDONE: fix this\nLine 3\nDONE: add tests\n"
+        expected = "Line 1\nDONE: fix this\nLine 3\nDONE: add tests\n"
+        assert test_file.read_text(encoding="utf-8") == expected
 
 
 class TestGrepSearchTool:
@@ -506,7 +527,7 @@ class TestGrepSearchTool:
     ):
         """Searching a single file returns matches."""
         test_file = tmp_path / "search_test.txt"
-        test_file.write_text("Line 1\nLine 2 with pattern\nLine 3")
+        test_file.write_text("Line 1\nLine 2 with pattern\nLine 3", encoding="utf-8")
 
         result = grep_search_fn(path="search_test.txt", pattern="pattern", **mock_workspace)
 
@@ -521,7 +542,7 @@ class TestGrepSearchTool:
     ):
         """Searching with no matches returns empty list."""
         test_file = tmp_path / "test.txt"
-        test_file.write_text("Hello World")
+        test_file.write_text("Hello World", encoding="utf-8")
 
         result = grep_search_fn(path="test.txt", pattern="nonexistent", **mock_workspace)
 
@@ -534,13 +555,13 @@ class TestGrepSearchTool:
     ):
         """Searching directory non-recursively only searches immediate files."""
         # Create files in root
-        (tmp_path / "file1.txt").write_text("pattern here")
-        (tmp_path / "file2.txt").write_text("no match here")
+        (tmp_path / "file1.txt").write_text("pattern here", encoding="utf-8")
+        (tmp_path / "file2.txt").write_text("no match here", encoding="utf-8")
 
         # Create nested directory with file
         nested = tmp_path / "nested"
         nested.mkdir()
-        (nested / "nested_file.txt").write_text("pattern in nested")
+        (nested / "nested_file.txt").write_text("pattern in nested", encoding="utf-8")
 
         result = grep_search_fn(path=".", pattern="pattern", recursive=False, **mock_workspace)
 
@@ -553,12 +574,12 @@ class TestGrepSearchTool:
     ):
         """Searching directory recursively finds matches in subdirectories."""
         # Create files in root
-        (tmp_path / "file1.txt").write_text("pattern here")
+        (tmp_path / "file1.txt").write_text("pattern here", encoding="utf-8")
 
         # Create nested directory with file
         nested = tmp_path / "nested"
         nested.mkdir()
-        (nested / "nested_file.txt").write_text("pattern in nested")
+        (nested / "nested_file.txt").write_text("pattern in nested", encoding="utf-8")
 
         result = grep_search_fn(path=".", pattern="pattern", recursive=True, **mock_workspace)
 
@@ -571,7 +592,7 @@ class TestGrepSearchTool:
     ):
         """Searching with regex pattern finds complex matches."""
         test_file = tmp_path / "regex_test.txt"
-        test_file.write_text("foo123bar\nfoo456bar\nbaz789baz\n")
+        test_file.write_text("foo123bar\nfoo456bar\nbaz789baz\n", encoding="utf-8")
 
         result = grep_search_fn(path="regex_test.txt", pattern=r"foo\d+bar", **mock_workspace)
 
@@ -585,7 +606,7 @@ class TestGrepSearchTool:
     ):
         """Searching returns one match per line even with multiple occurrences."""
         test_file = tmp_path / "multi_match.txt"
-        test_file.write_text("hello hello hello\nworld\nhello again")
+        test_file.write_text("hello hello hello\nworld\nhello again", encoding="utf-8")
 
         result = grep_search_fn(path="multi_match.txt", pattern="hello", **mock_workspace)
 
@@ -632,7 +653,7 @@ class TestExecuteCommandTool:
     ):
         """Executing ls command lists files."""
         # Create a test file
-        (tmp_path / "testfile.txt").write_text("content")
+        (tmp_path / "testfile.txt").write_text("content", encoding="utf-8")
 
         result = execute_command_fn(command=f"ls {tmp_path}", **mock_workspace)
 
@@ -669,7 +690,7 @@ class TestApplyDiffTool:
     def test_apply_diff_successful(self, apply_diff_fn, mock_workspace, mock_secure_path, tmp_path):
         """Applying a valid diff successfully modifies the file."""
         test_file = tmp_path / "diff_test.txt"
-        test_file.write_text("Hello World")
+        test_file.write_text("Hello World", encoding="utf-8")
 
         # Create a simple diff using diff_match_patch format
         import diff_match_patch as dmp_module
@@ -683,13 +704,13 @@ class TestApplyDiffTool:
         assert result["success"] is True
         assert result["all_successful"] is True
         assert result["patches_applied"] > 0
-        assert test_file.read_text() == "Hello Universe"
+        assert test_file.read_text(encoding="utf-8") == "Hello Universe"
 
     def test_apply_diff_multiline(self, apply_diff_fn, mock_workspace, mock_secure_path, tmp_path):
         """Applying diff to multiline content works correctly."""
         test_file = tmp_path / "multiline.txt"
         original = "Line 1\nLine 2\nLine 3\n"
-        test_file.write_text(original)
+        test_file.write_text(original, encoding="utf-8")
 
         import diff_match_patch as dmp_module
 
@@ -702,7 +723,7 @@ class TestApplyDiffTool:
 
         assert result["success"] is True
         assert result["all_successful"] is True
-        assert test_file.read_text() == modified
+        assert test_file.read_text(encoding="utf-8") == modified
 
     def test_apply_diff_invalid_patch(
         self, apply_diff_fn, mock_workspace, mock_secure_path, tmp_path
@@ -710,7 +731,7 @@ class TestApplyDiffTool:
         """Applying an invalid diff handles gracefully."""
         test_file = tmp_path / "test.txt"
         original_content = "Original content"
-        test_file.write_text(original_content)
+        test_file.write_text(original_content, encoding="utf-8")
 
         # Invalid diff text
         result = apply_diff_fn(path="test.txt", diff_text="invalid diff format", **mock_workspace)
@@ -719,7 +740,7 @@ class TestApplyDiffTool:
         if "error" not in result:
             assert result.get("patches_applied", 0) == 0
         # File should remain unchanged
-        assert test_file.read_text() == original_content
+        assert test_file.read_text(encoding="utf-8") == original_content
 
 
 class TestApplyPatchTool:
@@ -744,7 +765,7 @@ class TestApplyPatchTool:
     ):
         """Applying a valid patch successfully modifies the file."""
         test_file = tmp_path / "patch_test.txt"
-        test_file.write_text("Hello World")
+        test_file.write_text("Hello World", encoding="utf-8")
 
         # Create a simple patch using diff_match_patch format
         import diff_match_patch as dmp_module
@@ -758,7 +779,7 @@ class TestApplyPatchTool:
         assert result["success"] is True
         assert result["all_successful"] is True
         assert result["patches_applied"] > 0
-        assert test_file.read_text() == "Hello Python"
+        assert test_file.read_text(encoding="utf-8") == "Hello Python"
 
     def test_apply_patch_multiline(
         self, apply_patch_fn, mock_workspace, mock_secure_path, tmp_path
@@ -766,7 +787,7 @@ class TestApplyPatchTool:
         """Applying patch to multiline content works correctly."""
         test_file = tmp_path / "multiline.txt"
         original = "Line 1\nLine 2\nLine 3\n"
-        test_file.write_text(original)
+        test_file.write_text(original, encoding="utf-8")
 
         import diff_match_patch as dmp_module
 
@@ -779,7 +800,7 @@ class TestApplyPatchTool:
 
         assert result["success"] is True
         assert result["all_successful"] is True
-        assert test_file.read_text() == modified
+        assert test_file.read_text(encoding="utf-8") == modified
 
     def test_apply_patch_invalid_patch(
         self, apply_patch_fn, mock_workspace, mock_secure_path, tmp_path
@@ -787,7 +808,7 @@ class TestApplyPatchTool:
         """Applying an invalid patch handles gracefully."""
         test_file = tmp_path / "test.txt"
         original_content = "Original content"
-        test_file.write_text(original_content)
+        test_file.write_text(original_content, encoding="utf-8")
 
         # Invalid patch text
         result = apply_patch_fn(
@@ -798,7 +819,7 @@ class TestApplyPatchTool:
         if "error" not in result:
             assert result.get("patches_applied", 0) == 0
         # File should remain unchanged
-        assert test_file.read_text() == original_content
+        assert test_file.read_text(encoding="utf-8") == original_content
 
     def test_apply_patch_multiple_changes(
         self, apply_patch_fn, mock_workspace, mock_secure_path, tmp_path
@@ -806,7 +827,7 @@ class TestApplyPatchTool:
         """Applying patch with multiple changes works correctly."""
         test_file = tmp_path / "complex.txt"
         original = "Function foo() {\n  return 42;\n}\n"
-        test_file.write_text(original)
+        test_file.write_text(original, encoding="utf-8")
 
         import diff_match_patch as dmp_module
 
@@ -819,4 +840,298 @@ class TestApplyPatchTool:
 
         assert result["success"] is True
         assert result["all_successful"] is True
-        assert test_file.read_text() == modified
+        assert test_file.read_text(encoding="utf-8") == modified
+
+
+class TestViewFileHashlineMode:
+    """Tests for view_file hashline mode."""
+
+    @pytest.fixture
+    def view_file_fn(self, mcp):
+        from aden_tools.tools.file_system_toolkits.view_file import register_tools
+
+        register_tools(mcp)
+        return mcp._tool_manager._tools["view_file"].fn
+
+    def test_hashline_format(self, view_file_fn, mock_workspace, mock_secure_path, tmp_path):
+        """hashline=True returns N:hhhh|content format."""
+        test_file = tmp_path / "test.txt"
+        test_file.write_text("hello\nworld\n")
+
+        result = view_file_fn(path="test.txt", hashline=True, **mock_workspace)
+
+        assert result["success"] is True
+        assert result["hashline"] is True
+        lines = result["content"].split("\n")
+        assert lines[0].startswith("1:")
+        assert "|hello" in lines[0]
+        assert lines[1].startswith("2:")
+        assert "|world" in lines[1]
+
+    def test_hashline_offset(self, view_file_fn, mock_workspace, mock_secure_path, tmp_path):
+        """hashline with offset skips initial lines."""
+        test_file = tmp_path / "test.txt"
+        test_file.write_text("aaa\nbbb\nccc\n")
+
+        result = view_file_fn(path="test.txt", hashline=True, offset=2, **mock_workspace)
+
+        assert result["success"] is True
+        assert result["offset"] == 2
+        lines = result["content"].split("\n")
+        assert lines[0].startswith("2:")
+        assert "|bbb" in lines[0]
+
+    def test_hashline_limit(self, view_file_fn, mock_workspace, mock_secure_path, tmp_path):
+        """hashline with limit restricts number of lines."""
+        test_file = tmp_path / "test.txt"
+        test_file.write_text("aaa\nbbb\nccc\nddd\n")
+
+        result = view_file_fn(path="test.txt", hashline=True, limit=2, **mock_workspace)
+
+        assert result["success"] is True
+        assert result["limit"] == 2
+        assert result["shown_lines"] == 2
+        assert result["total_lines"] == 4
+
+    def test_hashline_total_and_shown_lines(
+        self, view_file_fn, mock_workspace, mock_secure_path, tmp_path
+    ):
+        """total_lines and shown_lines are reported correctly."""
+        test_file = tmp_path / "test.txt"
+        test_file.write_text("a\nb\nc\nd\ne\n")
+
+        result = view_file_fn(path="test.txt", hashline=True, offset=2, limit=2, **mock_workspace)
+
+        assert result["total_lines"] == 5
+        assert result["shown_lines"] == 2
+
+    def test_default_mode_unchanged(self, view_file_fn, mock_workspace, mock_secure_path, tmp_path):
+        """Default mode (hashline=False) returns the same format as before."""
+        test_file = tmp_path / "test.txt"
+        test_file.write_text("hello\n")
+
+        result = view_file_fn(path="test.txt", **mock_workspace)
+
+        assert result["success"] is True
+        assert "hashline" not in result
+        assert result["content"] == "hello\n"
+        assert result["lines"] == 1
+
+    def test_hashline_offset_zero_returns_error(
+        self, view_file_fn, mock_workspace, mock_secure_path, tmp_path
+    ):
+        """hashline with offset=0 returns error (must be >= 1)."""
+        test_file = tmp_path / "test.txt"
+        test_file.write_text("aaa\nbbb\n")
+
+        result = view_file_fn(path="test.txt", hashline=True, offset=0, **mock_workspace)
+
+        assert "error" in result
+        assert "offset" in result["error"].lower()
+
+    def test_hashline_negative_offset_returns_error(
+        self, view_file_fn, mock_workspace, mock_secure_path, tmp_path
+    ):
+        """hashline with negative offset returns error."""
+        test_file = tmp_path / "test.txt"
+        test_file.write_text("aaa\nbbb\n")
+
+        result = view_file_fn(path="test.txt", hashline=True, offset=-1, **mock_workspace)
+
+        assert "error" in result
+        assert "offset" in result["error"].lower()
+
+    def test_hashline_negative_limit_returns_error(
+        self, view_file_fn, mock_workspace, mock_secure_path, tmp_path
+    ):
+        """hashline with negative limit returns error."""
+        test_file = tmp_path / "test.txt"
+        test_file.write_text("aaa\nbbb\n")
+
+        result = view_file_fn(path="test.txt", hashline=True, limit=-1, **mock_workspace)
+
+        assert "error" in result
+        assert "limit" in result["error"].lower()
+
+    def test_hashline_truncated_file_returns_error(
+        self, view_file_fn, mock_workspace, mock_secure_path, tmp_path
+    ):
+        """Large file with hashline=True and no offset/limit returns error directing to paginate."""
+        test_file = tmp_path / "large.txt"
+        # Create a file larger than the max_size we'll pass
+        content = "line\n" * 100  # 500 bytes
+        test_file.write_text(content)
+
+        result = view_file_fn(path="large.txt", hashline=True, max_size=50, **mock_workspace)
+
+        assert "error" in result
+        assert "too large" in result["error"].lower()
+        assert "offset" in result["error"].lower()
+        assert "limit" in result["error"].lower()
+
+    def test_hashline_offset_beyond_end_returns_error(
+        self, view_file_fn, mock_workspace, mock_secure_path, tmp_path
+    ):
+        """hashline with offset beyond total lines returns error."""
+        test_file = tmp_path / "test.txt"
+        test_file.write_text("aaa\nbbb\n")
+
+        result = view_file_fn(path="test.txt", hashline=True, offset=50, **mock_workspace)
+
+        assert "error" in result
+        assert "beyond" in result["error"].lower()
+        assert "2 lines" in result["error"]
+
+    def test_hashline_large_file_with_offset_limit_works(
+        self, view_file_fn, mock_workspace, mock_secure_path, tmp_path
+    ):
+        """Large file using offset/limit bypasses full-file size check."""
+        test_file = tmp_path / "large.txt"
+        lines = [f"line {i}" for i in range(1, 101)]
+        test_file.write_text("\n".join(lines) + "\n")
+
+        # File is large (> max_size=200), but offset/limit lets us page through it
+        result = view_file_fn(
+            path="large.txt", hashline=True, offset=10, limit=5, max_size=200, **mock_workspace
+        )
+
+        assert result["success"] is True
+        assert result["shown_lines"] == 5
+        assert result["total_lines"] == 100
+        # First shown line should be line 10
+        first_line = result["content"].split("\n")[0]
+        assert first_line.startswith("10:")
+        assert "|line 10" in first_line
+
+
+class TestGrepSearchHashlineMode:
+    """Tests for grep_search hashline mode."""
+
+    @pytest.fixture
+    def grep_search_fn(self, mcp):
+        from aden_tools.tools.file_system_toolkits.grep_search import register_tools
+
+        register_tools(mcp)
+        return mcp._tool_manager._tools["grep_search"].fn
+
+    def test_hashline_anchor_present(
+        self, grep_search_fn, mock_workspace, mock_secure_path, tmp_path
+    ):
+        """hashline=True includes anchor field in matches."""
+        test_file = tmp_path / "test.txt"
+        test_file.write_text("hello world\ngoodbye world\n")
+
+        result = grep_search_fn(path="test.txt", pattern="hello", hashline=True, **mock_workspace)
+
+        assert result["success"] is True
+        assert result["total_matches"] == 1
+        match = result["matches"][0]
+        assert "anchor" in match
+        # Anchor format: N:hhhh (4-char hash)
+        assert match["anchor"].startswith("1:")
+        assert len(match["anchor"]) == 6  # "1:hhhh"
+
+    def test_hashline_anchor_absent_by_default(
+        self, grep_search_fn, mock_workspace, mock_secure_path, tmp_path
+    ):
+        """hashline=False (default) does not include anchor field."""
+        test_file = tmp_path / "test.txt"
+        test_file.write_text("hello world\n")
+
+        result = grep_search_fn(path="test.txt", pattern="hello", **mock_workspace)
+
+        assert result["success"] is True
+        assert result["total_matches"] == 1
+        assert "anchor" not in result["matches"][0]
+
+    def test_grep_hashline_preserves_indentation(
+        self, grep_search_fn, mock_workspace, mock_secure_path, tmp_path
+    ):
+        """hashline=True preserves leading whitespace in line_content."""
+        test_file = tmp_path / "test.txt"
+        test_file.write_text("    hello world\n")
+
+        result = grep_search_fn(path="test.txt", pattern="hello", hashline=True, **mock_workspace)
+
+        assert result["success"] is True
+        assert result["total_matches"] == 1
+        assert result["matches"][0]["line_content"] == "    hello world"
+
+    def test_hashline_skips_large_files_with_notice(
+        self, grep_search_fn, mock_workspace, mock_secure_path, tmp_path
+    ):
+        """hashline=True skips files > 10MB and reports them in the response."""
+        search_dir = tmp_path / "search_dir"
+        search_dir.mkdir()
+
+        small_file = search_dir / "small.txt"
+        small_file.write_text("hello world\n")
+
+        large_file = search_dir / "large.txt"
+        # Write just over 10MB
+        large_file.write_bytes(b"hello large\n" * (1024 * 1024))
+
+        result = grep_search_fn(
+            path="search_dir", pattern="hello", hashline=True, recursive=True, **mock_workspace
+        )
+
+        assert result["success"] is True
+        assert "skipped_large_files" in result
+        assert any("large.txt" in f for f in result["skipped_large_files"])
+        # Small file should still have matches
+        assert result["total_matches"] >= 1
+
+
+class TestHashlineCrossToolConsistency:
+    """Cross-tool consistency tests for hashline workflows."""
+
+    @pytest.fixture
+    def view_file_fn(self, mcp):
+        from aden_tools.tools.file_system_toolkits.view_file import register_tools
+
+        register_tools(mcp)
+        return mcp._tool_manager._tools["view_file"].fn
+
+    @pytest.fixture
+    def grep_search_fn(self, mcp):
+        from aden_tools.tools.file_system_toolkits.grep_search import register_tools
+
+        register_tools(mcp)
+        return mcp._tool_manager._tools["grep_search"].fn
+
+    @pytest.fixture
+    def hashline_edit_fn(self, mcp):
+        from aden_tools.tools.file_system_toolkits.hashline_edit import register_tools
+
+        register_tools(mcp)
+        return mcp._tool_manager._tools["hashline_edit"].fn
+
+    def test_unicode_line_separator_anchor_roundtrip(
+        self,
+        view_file_fn,
+        grep_search_fn,
+        hashline_edit_fn,
+        mock_workspace,
+        mock_secure_path,
+        tmp_path,
+    ):
+        """Anchors from grep hashline mode should be consumable by hashline_edit."""
+        test_file = tmp_path / "test.txt"
+        test_file.write_text("A\u2028B\nC\n", encoding="utf-8")
+
+        # Hashline view sees U+2028 as a line boundary via splitlines()
+        view_res = view_file_fn(path="test.txt", hashline=True, **mock_workspace)
+        assert view_res["success"] is True
+        assert view_res["total_lines"] == 3
+
+        # grep_search line iteration treats U+2028 as in-line content
+        grep_res = grep_search_fn(path="test.txt", pattern="B", hashline=True, **mock_workspace)
+        assert grep_res["success"] is True
+        assert grep_res["total_matches"] == 1
+
+        anchor = grep_res["matches"][0]["anchor"]
+        edits = json.dumps([{"op": "set_line", "anchor": anchor, "content": "X"}])
+        edit_res = hashline_edit_fn(path="test.txt", edits=edits, **mock_workspace)
+
+        assert "error" not in edit_res, edit_res.get("error")
+        assert edit_res["success"] is True

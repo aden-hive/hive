@@ -27,9 +27,9 @@ from typing import Any
 
 from rich.text import Text
 from textual.app import ComposeResult
-from textual.containers import Vertical
+from textual.containers import Horizontal, Vertical
 from textual.message import Message
-from textual.widgets import Label, TextArea
+from textual.widgets import Button, Label, TextArea
 
 from framework.runtime.agent_runtime import AgentRuntime
 from framework.runtime.event_bus import AgentEvent
@@ -38,7 +38,7 @@ from framework.tui.widgets.selectable_rich_log import SelectableRichLog as RichL
 
 
 class ChatTextArea(TextArea):
-    """TextArea that submits on Enter and inserts newlines on Shift+Enter."""
+    """TextArea that submits on Enter and inserts newlines on Shift+Enter (or Ctrl+J)."""
 
     class Submitted(Message):
         """Posted when the user presses Enter."""
@@ -55,7 +55,7 @@ class ChatTextArea(TextArea):
                 self.post_message(self.Submitted(text))
             event.stop()
             event.prevent_default()
-        elif event.key == "shift+enter":
+        elif event.key in ("shift+enter", "ctrl+j"):
             event.key = "enter"
             await super()._on_key(event)
         else:
@@ -70,6 +70,54 @@ class ChatRepl(Vertical):
         width: 100%;
         height: 100%;
         layout: vertical;
+    }
+
+    ChatRepl > #input-row {
+        width: 100%;
+        height: auto;
+        dock: bottom;
+    }
+
+    ChatRepl > #input-row > ChatTextArea {
+        width: 1fr;
+        height: auto;
+        max-height: 7;
+        dock: none;
+        margin-top: 1;
+    }
+
+    ChatRepl > #input-row > #action-button {
+        width: auto;
+        height: auto;
+        min-width: 10;
+        margin-top: 1;
+        margin-left: 1;
+        border: none;
+        dock: none;
+    }
+
+    ChatRepl > #input-row > #action-button.send-mode {
+        background: $success;
+        color: $text;
+    }
+
+    ChatRepl > #input-row > #action-button.send-mode:hover {
+        background: $success-darken-1;
+    }
+
+    ChatRepl > #input-row > #action-button.pause-mode {
+        background: red;
+        color: white;
+    }
+
+    ChatRepl > #input-row > #action-button.pause-mode:hover {
+        background: darkred;
+    }
+
+    ChatRepl > #input-row > #action-button:disabled {
+        background: $panel;
+        color: $text-muted;
+        opacity: 0.4;
     }
 
     ChatRepl > RichLog {
@@ -104,17 +152,12 @@ class ChatRepl(Vertical):
         display: none;
     }
 
-    ChatRepl > ChatTextArea {
-        width: 100%;
-        height: auto;
-        max-height: 7;
-        dock: bottom;
+    ChatRepl > #input-row > ChatTextArea {
         background: $surface;
         border: tall $primary;
-        margin-top: 1;
     }
 
-    ChatRepl > ChatTextArea:focus {
+    ChatRepl > #input-row > ChatTextArea:focus {
         border: tall $accent;
     }
     """
@@ -141,6 +184,14 @@ class ChatRepl(Vertical):
         self._show_logs: bool = False  # Clean mode by default
         self._log_buffer: list[str] = []  # Buffered log lines for backfill on toggle ON
         self._attached_pdf: dict | None = None  # Pending PDF attachment for next message
+
+        # Queen-primary mode: when set, user input defaults to the queen.
+        # The worker only gets input when it explicitly asks (CLIENT_INPUT_REQUESTED).
+        self._queen_inject_callback: Any = None  # async (str) -> bool, set by app.py
+        self._worker_waiting: bool = False  # True when worker asked for input
+        self._worker_input_node_id: str | None = None
+        self._worker_input_graph_id: str | None = None
+        self._streaming_source: str | None = None  # "queen" | None; set by app.py per event
 
         # Dedicated event loop for agent execution.
         # Keeps blocking runtime code (LLM calls, MCP tools) off
@@ -171,7 +222,9 @@ class ChatRepl(Vertical):
             min_width=0,
         )
         yield Label("Agent is processing...", id="processing-indicator")
-        yield ChatTextArea(id="chat-input", placeholder="Enter input for agent...")
+        with Horizontal(id="input-row"):
+            yield ChatTextArea(id="chat-input", placeholder="Enter input for agent...")
+            yield Button("↵ Send", id="action-button", disabled=True)
 
     # Regex for file:// URIs that are NOT already inside Rich [link=...] markup
     _FILE_URI_RE = re.compile(r"(?<!\[link=)(file://[^\s)\]>*]+)")
@@ -435,7 +488,7 @@ class ChatRepl(Vertical):
                 if not state_file.exists():
                     continue
 
-                with open(state_file) as f:
+                with open(state_file, encoding="utf-8") as f:
                     state = json.load(f)
 
                 status = state.get("status", "").lower()
@@ -494,7 +547,7 @@ class ChatRepl(Vertical):
 
             # Read session state
             try:
-                with open(state_file) as f:
+                with open(state_file, encoding="utf-8") as f:
                     state = json.load(f)
 
                 # Track this session for /resume <number> lookup
@@ -546,7 +599,7 @@ class ChatRepl(Vertical):
         try:
             import json
 
-            with open(state_file) as f:
+            with open(state_file, encoding="utf-8") as f:
                 state = json.load(f)
 
             # Basic info
@@ -587,7 +640,7 @@ class ChatRepl(Vertical):
                     # Load and show checkpoints
                     for i, cp_file in enumerate(checkpoint_files[-5:], 1):  # Last 5
                         try:
-                            with open(cp_file) as f:
+                            with open(cp_file, encoding="utf-8") as f:
                                 cp_data = json.load(f)
 
                             cp_id = cp_data.get("checkpoint_id", cp_file.stem)
@@ -634,7 +687,7 @@ class ChatRepl(Vertical):
 
             import json
 
-            with open(state_file) as f:
+            with open(state_file, encoding="utf-8") as f:
                 state = json.load(f)
 
             # Resume from session state (not checkpoint)
@@ -710,6 +763,8 @@ class ChatRepl(Vertical):
                     f"[green]✓[/green] Resume started (execution: {exec_id[:12]}...)"
                 )
                 self._write_history("  Agent is continuing from where it stopped...")
+                # Enable Pause button now that execution is running
+                self._set_button_pause_mode()
 
             except Exception as e:
                 self._write_history(f"[bold red]Error starting resume:[/bold red] {e}")
@@ -798,6 +853,8 @@ class ChatRepl(Vertical):
                     f"[green]✓[/green] Recovery started (execution: {exec_id[:12]}...)"
                 )
                 self._write_history("  Agent is continuing from checkpoint...")
+                # Enable Pause button now that execution is running
+                self._set_button_pause_mode()
 
             except Exception as e:
                 self._write_history(f"[bold red]Error starting recovery:[/bold red] {e}")
@@ -811,27 +868,17 @@ class ChatRepl(Vertical):
             self._write_history(f"[dim]{traceback.format_exc()}[/dim]")
 
     async def _cmd_pause(self) -> None:
-        """Immediately pause execution by cancelling task (same as Ctrl+Z)."""
-        # Check if there's a current execution
-        if not self._current_exec_id:
-            self._write_history("[bold yellow]No active execution to pause[/bold yellow]")
-            self._write_history("  Start an execution first, then use /pause during execution")
-            return
-
-        # Find and cancel the execution task - executor will catch and save state
-        task_cancelled = False
-        for stream in self.runtime._streams.values():
-            exec_id = self._current_exec_id
-            task = stream._execution_tasks.get(exec_id)
-            if task and not task.done():
-                task.cancel()
-                task_cancelled = True
-                self._write_history("[bold green]⏸ Execution paused - state saved[/bold green]")
-                self._write_history("  Resume later with: [bold]/resume[/bold]")
-                break
-
-        if not task_cancelled:
-            self._write_history("[bold yellow]Execution already completed[/bold yellow]")
+        """Immediately pause execution by cancelling all running tasks (same as Ctrl+Z)."""
+        future = asyncio.run_coroutine_threadsafe(
+            self.runtime.cancel_all_tasks_async(), self._agent_loop
+        )
+        result = await asyncio.wrap_future(future)
+        if result:
+            self._current_exec_id = None
+            self._write_history("[bold green]⏸ All executions stopped[/bold green]")
+            self._write_history("  Resume later with: [bold]/resume[/bold]")
+        else:
+            self._write_history("[bold yellow]No active executions[/bold yellow]")
 
     async def _cmd_coder(self, reason: str = "") -> None:
         """User-initiated escalation to Hive Coder."""
@@ -950,13 +997,25 @@ class ChatRepl(Vertical):
         except ValueError as e:
             self._write_history(f"[bold red]Error:[/bold red] {e}")
 
+    # Known node IDs from external executors (queen, judge) that aren't
+    # in the worker's graph.  Maps node_id → display name.
+    _EXTERNAL_NODE_NAMES: dict[str, str] = {"queen": "Queen"}
+
     def _node_label(self, node_id: str | None = None) -> str:
         """Resolve a node_id to a Rich-formatted speaker label."""
         nid = node_id or self._active_node_id
         if nid:
             node = self.runtime.graph.get_node(nid)
-            name = node.name if node else nid
+            if node:
+                name = node.name
+            elif nid in self._EXTERNAL_NODE_NAMES:
+                name = self._EXTERNAL_NODE_NAMES[nid]
+            else:
+                name = nid
             return f"[bold blue]{name}:[/bold blue]"
+        # No node_id at all — use streaming source if available.
+        if self._streaming_source == "queen":
+            return "[bold blue]Queen:[/bold blue]"
         return "[bold blue]Agent:[/bold blue]"
 
     def _clear_streaming(self) -> None:
@@ -1043,7 +1102,7 @@ class ChatRepl(Vertical):
                     continue
 
                 try:
-                    with open(state_file) as f:
+                    with open(state_file, encoding="utf-8") as f:
                         state = json.load(f)
 
                     status = state.get("status", "").lower()
@@ -1087,9 +1146,70 @@ class ChatRepl(Vertical):
             # Silently fail - don't block TUI startup
             pass
 
+    def _set_button_send_mode(self) -> None:
+        """Switch the action button to Send mode (green arrow)."""
+        try:
+            btn = self.query_one("#action-button", Button)
+            btn.label = "↵ Send"
+            btn.disabled = False
+            btn.remove_class("pause-mode")
+            btn.add_class("send-mode")
+        except Exception:
+            pass
+
+    def _set_button_pause_mode(self) -> None:
+        """Switch the action button to Pause mode (red pause)."""
+        try:
+            btn = self.query_one("#action-button", Button)
+            btn.label = "⏸ Pause"
+            btn.disabled = False
+            btn.remove_class("send-mode")
+            btn.add_class("pause-mode")
+        except Exception:
+            pass
+
+    def _set_button_idle_mode(self) -> None:
+        """Switch the action button to idle/disabled state."""
+        try:
+            btn = self.query_one("#action-button", Button)
+            btn.label = "↵ Send"
+            btn.disabled = True
+            btn.remove_class("pause-mode")
+            btn.add_class("send-mode")
+        except Exception:
+            pass
+
     async def on_chat_text_area_submitted(self, message: ChatTextArea.Submitted) -> None:
         """Handle chat input submission."""
         await self._submit_input(message.text)
+
+    def on_text_area_changed(self, event: TextArea.Changed) -> None:
+        """Toggle the Send button based on whether there is text in the input."""
+        if event.text_area.id != "chat-input":
+            return
+        # Only update button if we're not currently executing (Pause takes priority)
+        if self._current_exec_id is not None:
+            return
+        has_text = bool(event.text_area.text.strip())
+        if has_text:
+            self._set_button_send_mode()
+        else:
+            self._set_button_idle_mode()
+
+    async def on_button_pressed(self, event: Button.Pressed) -> None:
+        """Handle action button click — Send when idle, Pause when executing."""
+        if event.button.id != "action-button":
+            return
+        if self._current_exec_id is not None:
+            # Execution running → act as Pause
+            await self._cmd_pause()
+        else:
+            # No execution → act as Send (submit whatever is in the input)
+            chat_input = self.query_one("#chat-input", ChatTextArea)
+            text = chat_input.text.strip()
+            if text:
+                chat_input.clear()
+                await self._submit_input(text)
 
     async def _submit_input(self, user_input: str) -> None:
         """Handle submitted text — either start new execution or inject input."""
@@ -1102,6 +1222,13 @@ class ChatRepl(Vertical):
             await self._handle_command(user_input)
             return
 
+        # ── Queen-primary routing ──────────────────────────────────────
+        # When a queen callback is set, all user input defaults to the
+        # queen UNLESS the worker has explicitly asked for input.
+        if self._queen_inject_callback is not None:
+            return await self._submit_input_queen_primary(user_input)
+
+        # ── Legacy routing (no queen) ──────────────────────────────────
         # Client-facing input: route to the waiting node
         if self._waiting_for_input and self._input_node_id:
             self._write_history(f"[bold green]You:[/bold green] {user_input}")
@@ -1154,15 +1281,20 @@ class ChatRepl(Vertical):
         self._write_history(f"[bold green]You:[/bold green] {user_input}")
 
         try:
-            # Get entry point
+            # Get entry points for the active graph, preferring manual
+            # (interactive) ones over event/timer-driven ones.
             entry_points = self.runtime.get_entry_points()
-            if not entry_points:
+            manual_eps = [ep for ep in entry_points if ep.trigger_type in ("manual", "api")]
+            if not manual_eps:
+                manual_eps = entry_points  # fallback: use whatever is available
+            if not manual_eps:
                 self._write_history("[bold red]Error:[/bold red] No entry points")
                 return
 
             # Determine the input key from the entry node
-            entry_point = entry_points[0]
-            entry_node = self.runtime.graph.get_node(entry_point.entry_node)
+            entry_point = manual_eps[0]
+            active_graph = self.runtime.get_active_graph()
+            entry_node = active_graph.get_node(entry_point.entry_node)
 
             if entry_node and entry_node.input_keys:
                 input_key = entry_node.input_keys[0]
@@ -1175,6 +1307,9 @@ class ChatRepl(Vertical):
             # Show processing indicator
             indicator.update("Thinking...")
             indicator.display = True
+
+            # Switch button to Pause mode
+            self._set_button_pause_mode()
 
             # Keep input enabled for commands during execution
             chat_input = self.query_one("#chat-input", ChatTextArea)
@@ -1208,6 +1343,52 @@ class ChatRepl(Vertical):
             chat_input = self.query_one("#chat-input", ChatTextArea)
             chat_input.disabled = False
             self._write_history(f"[bold red]Error:[/bold red] {e}")
+
+    async def _submit_input_queen_primary(self, user_input: str) -> None:
+        """Route input in queen-primary mode.
+
+        Priority:
+        1. Worker override — worker asked for input via CLIENT_INPUT_REQUESTED
+        2. Default — inject into the queen conversation
+        """
+        self._write_history(f"[bold green]You:[/bold green] {user_input}")
+
+        # 1. Worker override: worker explicitly asked for user input
+        if self._worker_waiting and self._worker_input_node_id:
+            chat_input = self.query_one("#chat-input", ChatTextArea)
+            chat_input.placeholder = "Worker processing..."
+
+            indicator = self.query_one("#processing-indicator", Label)
+            indicator.update("Worker thinking...")
+
+            node_id = self._worker_input_node_id
+            graph_id = self._worker_input_graph_id
+            self._worker_waiting = False
+            self._worker_input_node_id = None
+            self._worker_input_graph_id = None
+
+            try:
+                future = asyncio.run_coroutine_threadsafe(
+                    self.runtime.inject_input(node_id, user_input, graph_id=graph_id),
+                    self._agent_loop,
+                )
+                await asyncio.wrap_future(future)
+            except Exception as e:
+                self._write_history(f"[bold red]Error delivering to worker:[/bold red] {e}")
+            return
+
+        # 2. Default: inject into the queen
+        indicator = self.query_one("#processing-indicator", Label)
+        indicator.update("Queen thinking...")
+
+        try:
+            future = asyncio.run_coroutine_threadsafe(
+                self._queen_inject_callback(user_input),
+                self._agent_loop,
+            )
+            await asyncio.wrap_future(future)
+        except Exception as e:
+            self._write_history(f"[bold red]Error delivering to queen:[/bold red] {e}")
 
     # -- Event handlers called by app.py _handle_event --
 
@@ -1269,10 +1450,6 @@ class ChatRepl(Vertical):
             indicator.update("Preparing question...")
             return
 
-        if tool_name == "escalate_to_coder":
-            indicator.update("Escalating to coder...")
-            return
-
         # Update indicator to show tool activity
         indicator.update(f"Using tool: {tool_name}...")
 
@@ -1284,7 +1461,7 @@ class ChatRepl(Vertical):
 
     def handle_tool_completed(self, tool_name: str, result: str, is_error: bool) -> None:
         """Handle a tool call completing."""
-        if tool_name in ("ask_user", "escalate_to_coder"):
+        if tool_name == "ask_user":
             return
 
         result_str = str(result)
@@ -1325,6 +1502,9 @@ class ChatRepl(Vertical):
         self._pending_ask_question = ""
         self._log_buffer.clear()
 
+        # Reset button to idle/send mode
+        self._set_button_idle_mode()
+
         # Re-enable input
         chat_input = self.query_one("#chat-input", ChatTextArea)
         chat_input.disabled = False
@@ -1347,6 +1527,9 @@ class ChatRepl(Vertical):
         self._input_node_id = None
         self._active_node_id = None
         self._log_buffer.clear()
+
+        # Reset button to idle/send mode
+        self._set_button_idle_mode()
 
         # Re-enable input
         chat_input = self.query_one("#chat-input", ChatTextArea)
@@ -1396,10 +1579,41 @@ class ChatRepl(Vertical):
         chat_input = self.query_one("#chat-input", ChatTextArea)
         chat_input.disabled = False
         node = self.runtime.graph.get_node(node_id) if node_id else None
-        name = node.name if node else None
+        name = node.name if node else self._EXTERNAL_NODE_NAMES.get(node_id or "", None)
         chat_input.placeholder = (
             f"Type your response to {name}..." if name else "Type your response..."
         )
+        chat_input.focus()
+
+    def handle_worker_input_requested(self, node_id: str, graph_id: str | None = None) -> None:
+        """Handle the worker asking for user input in queen-primary mode.
+
+        Sets the worker override flag so the next user input goes to the
+        worker instead of the queen.  After the user responds, the flag
+        clears and input reverts to the queen.
+        """
+        # Flush queen streaming if any
+        if self._streaming_snapshot:
+            self._write_history(f"[bold blue]Queen:[/bold blue] {self._streaming_snapshot}")
+            self._clear_streaming()
+
+        self._worker_waiting = True
+        self._worker_input_node_id = node_id or None
+        self._worker_input_graph_id = graph_id
+
+        # Display the ask_user question if stashed
+        question = self._pending_ask_question
+        self._pending_ask_question = ""
+        if question:
+            label = self._node_label(node_id)
+            self._write_history(f"{label} {question}")
+
+        indicator = self.query_one("#processing-indicator", Label)
+        indicator.update("Worker is waiting for your input...")
+
+        chat_input = self.query_one("#chat-input", ChatTextArea)
+        chat_input.disabled = False
+        chat_input.placeholder = "Type your response to the worker..."
         chat_input.focus()
 
     def handle_node_completed(self, node_id: str) -> None:

@@ -46,7 +46,7 @@ def cli():
 @click.option("--verbose", "-v", is_flag=True, help="Show execution details")
 @click.option("--debug", is_flag=True, help="Show debug logging")
 def run(rules, max_emails, mock, quiet, verbose, debug):
-    """Execute inbox triage with the given rules."""
+    """Execute inbox management with the given rules."""
     if not quiet:
         setup_logging(verbose=verbose, debug=debug)
 

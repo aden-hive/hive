@@ -37,8 +37,6 @@ Ported from `agent_builder_server.py` lines 3484-3856. Pure filesystem reads —
 | Tool | Purpose |
 |------|---------|
 | `list_agent_sessions(agent_name, status?, limit?)` | List sessions, filterable by status |
-| `get_agent_session_state(agent_name, session_id)` | Full session state (memory excluded to prevent context bloat) |
-| `get_agent_session_memory(agent_name, session_id, key?)` | Read memory contents from a session |
 | `list_agent_checkpoints(agent_name, session_id)` | List checkpoints for debugging |
 | `get_agent_checkpoint(agent_name, session_id, checkpoint_id?)` | Load a checkpoint's full state |
 
@@ -67,7 +65,7 @@ Add all 8 tools after the existing `undo_changes` tool:
 
 # ── Meta-agent: Session & checkpoint inspection ───────────────
 # _resolve_hive_agent_path(), _read_session_json(), _scan_agent_sessions(), _truncate_value()
-# list_agent_sessions(), get_agent_session_state(), get_agent_session_memory()
+# list_agent_sessions(), list_agent_checkpoints(), get_agent_checkpoint()
 # list_agent_checkpoints(), get_agent_checkpoint()
 
 # ── Meta-agent: Test execution ────────────────────────────────

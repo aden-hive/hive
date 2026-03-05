@@ -66,8 +66,8 @@ export EXA_API_KEY="..."
 # Run agents without LLM calls (structure-only validation)
 export MOCK_MODE=1
 
-# Custom credentials storage path (default: ~/.aden/credentials)
-export ADEN_CREDENTIALS_PATH="/custom/path"
+# Fernet encryption key for credential store at ~/.hive/credentials
+export HIVE_CREDENTIAL_KEY="your-fernet-key"
 
 # Custom agent storage path (default: /tmp)
 export AGENT_STORAGE_PATH="/custom/storage"

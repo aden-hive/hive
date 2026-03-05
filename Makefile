@@ -1,4 +1,4 @@
-.PHONY: lint format check test install-hooks help
+.PHONY: lint format check test install-hooks help frontend-install frontend-dev frontend-build
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
@@ -20,9 +20,30 @@ check: ## Run all checks without modifying files (CI-safe)
 	cd core && ruff format --check .
 	cd tools && ruff format --check .
 
-test: ## Run all tests
+test: ## Run all tests (core + tools, excludes live)
 	cd core && uv run python -m pytest tests/ -v
+	cd tools && uv run python -m pytest -v
+
+test-tools: ## Run tool tests only (mocked, no credentials needed)
+	cd tools && uv run python -m pytest -v
+
+test-live: ## Run live integration tests (requires real API credentials)
+	cd tools && uv run python -m pytest -m live -s -o "addopts=" --log-cli-level=INFO
+
+test-all: ## Run everything including live tests
+	cd core && uv run python -m pytest tests/ -v
+	cd tools && uv run python -m pytest -v
+	cd tools && uv run python -m pytest -m live -s -o "addopts=" --log-cli-level=INFO
 
 install-hooks: ## Install pre-commit hooks
 	uv pip install pre-commit
 	pre-commit install
+
+frontend-install: ## Install frontend npm packages
+	cd core/frontend && npm install
+
+frontend-dev: ## Start frontend dev server
+	cd core/frontend && npm run dev
+
+frontend-build: ## Build frontend for production
+	cd core/frontend && npm run build

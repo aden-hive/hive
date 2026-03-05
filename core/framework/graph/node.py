@@ -166,7 +166,7 @@ class NodeSpec(BaseModel):
     # Node behavior type
     node_type: str = Field(
         default="event_loop",
-        description="Type: 'event_loop' (recommended), 'router', 'human_input'.",
+        description="Type: 'event_loop' (recommended), 'gcu' (browser automation).",
     )
 
     # Data flow
@@ -202,6 +202,16 @@ class NodeSpec(BaseModel):
     tools: list[str] = Field(default_factory=list, description="Tool names this node can use")
     model: str | None = Field(
         default=None, description="Specific model to use (defaults to graph default)"
+    )
+
+    # For subagent delegation
+    sub_agents: list[str] = Field(
+        default_factory=list,
+        description="Node IDs that can be invoked as subagents from this node",
+    )
+    # For function nodes
+    function: str | None = Field(
+        default=None, description="Function name or path for function nodes"
     )
 
     # For router nodes
@@ -505,8 +515,39 @@ class NodeContext:
     # Connected accounts prompt (injected from runner)
     accounts_prompt: str = ""
 
+    # Resume context — Layer 1 (identity) and Layer 2 (narrative) for
+    # rebuilding the full system prompt when restoring from conversation store.
+    identity_prompt: str = ""
+    narrative: str = ""
+
     # Event-triggered execution (no interactive user attached)
     event_triggered: bool = False
+
+    # Execution ID (from StreamRuntimeAdapter)
+    execution_id: str = ""
+
+    # Stream identity — the ExecutionStream this node runs within.
+    # Falls back to node_id when not set (legacy / standalone executor).
+    stream_id: str = ""
+
+    # Subagent mode
+    is_subagent_mode: bool = False  # True when running as a subagent (prevents nested delegation)
+    report_callback: Any = None  # async (message: str, data: dict | None) -> None
+    node_registry: dict[str, "NodeSpec"] = field(default_factory=dict)  # For subagent lookup
+
+    # Full tool catalog (unfiltered) — used by _execute_subagent to resolve
+    # subagent tools that aren't in the parent node's filtered available_tools.
+    all_tools: list[Tool] = field(default_factory=list)
+
+    # Shared reference to the executor's node_registry — used by subagent
+    # escalation (_EscalationReceiver) to register temporary receivers that
+    # the inject_input() routing chain can find.
+    shared_node_registry: dict[str, Any] = field(default_factory=dict)
+
+    # Dynamic tool provider — when set, EventLoopNode rebuilds the tool
+    # list from this callback at the start of each iteration.  Used by
+    # the queen to switch between building-mode and running-mode tools.
+    dynamic_tools_provider: Any = None  # Callable[[], list[Tool]] | None
 
 
 @dataclass
@@ -544,7 +585,6 @@ class NodeResult:
         Generate a human-readable summary of this node's execution and output.
 
         This is like toString() - it describes what the node produced in its current state.
-        Uses Haiku to intelligently summarize complex outputs.
         """
         if not self.success:
             return f"❌ Failed: {self.error}"
@@ -552,59 +592,13 @@ class NodeResult:
         if not self.output:
             return "✓ Completed (no output)"
 
-        # Use Haiku to generate intelligent summary
-        import os
-
-        api_key = os.environ.get("ANTHROPIC_API_KEY")
-
-        if not api_key:
-            # Fallback: simple key-value listing
-            parts = [f"✓ Completed with {len(self.output)} outputs:"]
-            for key, value in list(self.output.items())[:5]:  # Limit to 5 keys
-                value_str = str(value)[:100]
-                if len(str(value)) > 100:
-                    value_str += "..."
-                parts.append(f"  • {key}: {value_str}")
-            return "\n".join(parts)
-
-        # Use Haiku to generate intelligent summary
-        try:
-            import json
-
-            import anthropic
-
-            node_context = ""
-            if node_spec:
-                node_context = f"\nNode: {node_spec.name}\nPurpose: {node_spec.description}"
-
-            output_json = json.dumps(self.output, indent=2, default=str)[:2000]
-            prompt = (
-                f"Generate a 1-2 sentence human-readable summary of "
-                f"what this node produced.{node_context}\n\n"
-                f"Node output:\n{output_json}\n\n"
-                "Provide a concise, clear summary that a human can quickly "
-                "understand. Focus on the key information produced."
-            )
-
-            client = anthropic.Anthropic(api_key=api_key)
-            message = client.messages.create(
-                model="claude-3-5-haiku-20241022",
-                max_tokens=200,
-                messages=[{"role": "user", "content": prompt}],
-            )
-
-            summary = message.content[0].text.strip()
-            return f"✓ {summary}"
-
-        except Exception:
-            # Fallback on error
-            parts = [f"✓ Completed with {len(self.output)} outputs:"]
-            for key, value in list(self.output.items())[:3]:
-                value_str = str(value)[:80]
-                if len(str(value)) > 80:
-                    value_str += "..."
-                parts.append(f"  • {key}: {value_str}")
-            return "\n".join(parts)
+        parts = [f"✓ Completed with {len(self.output)} outputs:"]
+        for key, value in list(self.output.items())[:5]:  # Limit to 5 keys
+            value_str = str(value)[:100]
+            if len(str(value)) > 100:
+                value_str += "..."
+            parts.append(f"  • {key}: {value_str}")
+        return "\n".join(parts)
 
 
 class NodeProtocol(ABC):
