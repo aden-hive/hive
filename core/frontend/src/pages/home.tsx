@@ -82,13 +82,13 @@ export default function Home() {
   };
 
   const handlePromptHint = (text: string) => {
-    navigate(`/workspace?agent=new-agent&prompt=${encodeURIComponent(text)}`);
+    navigate("/workspace?agent=new-agent", { state: { prompt: text } });
   };
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (inputValue.trim()) {
-      navigate(`/workspace?agent=new-agent&prompt=${encodeURIComponent(inputValue.trim())}`);
+      navigate("/workspace?agent=new-agent", { state: { prompt: inputValue.trim() } });
     }
   };
 
