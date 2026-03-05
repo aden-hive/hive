@@ -7,11 +7,11 @@ from framework.graph import NodeSpec
 # Load reference docs at import time so they're always in the system prompt.
 # No voluntary read_file() calls needed — the LLM gets everything upfront.
 _ref_dir = Path(__file__).parent.parent / "reference"
-_framework_guide = (_ref_dir / "framework_guide.md").read_text()
-_file_templates = (_ref_dir / "file_templates.md").read_text()
-_anti_patterns = (_ref_dir / "anti_patterns.md").read_text()
+_framework_guide = (_ref_dir / "framework_guide.md").read_text(encoding="utf-8")
+_file_templates = (_ref_dir / "file_templates.md").read_text(encoding="utf-8")
+_anti_patterns = (_ref_dir / "anti_patterns.md").read_text(encoding="utf-8")
 _gcu_guide_path = _ref_dir / "gcu_guide.md"
-_gcu_guide = _gcu_guide_path.read_text() if _gcu_guide_path.exists() else ""
+_gcu_guide = _gcu_guide_path.read_text(encoding="utf-8") if _gcu_guide_path.exists() else ""
 
 
 def _is_gcu_enabled() -> bool:
@@ -46,6 +46,7 @@ _SHARED_TOOLS = [
     "read_file",
     "write_file",
     "edit_file",
+    "hashline_edit",
     "list_directory",
     "search_files",
     "run_command",
@@ -55,8 +56,6 @@ _SHARED_TOOLS = [
     "validate_agent_tools",
     "list_agents",
     "list_agent_sessions",
-    "get_agent_session_state",
-    "get_agent_session_memory",
     "list_agent_checkpoints",
     "get_agent_checkpoint",
     "run_agent_tests",
@@ -131,12 +130,23 @@ errors yourself. Don't declare success until validation passes.
 
 # Tools
 
+## Paths (MANDATORY)
+**Always use RELATIVE paths**
+(e.g. `exports/agent_name/config.py`, `exports/agent_name/nodes/__init__.py`).
+**Never use absolute paths** like `/mnt/data/...` or `/workspace/...` — they fail.
+The project root is implicit.
+
 ## File I/O
-- read_file(path, offset?, limit?) — read with line numbers
+- read_file(path, offset?, limit?, hashline?) — read with line numbers; \
+hashline=True for N:hhhh|content anchors (use with hashline_edit)
 - write_file(path, content) — create/overwrite, auto-mkdir
 - edit_file(path, old_text, new_text, replace_all?) — fuzzy-match edit
+- hashline_edit(path, edits, auto_cleanup?, encoding?) — anchor-based \
+editing using N:hhhh refs from read_file(hashline=True). Ops: set_line, \
+replace_lines, insert_after, insert_before, replace, append
 - list_directory(path, recursive?) — list contents
-- search_files(pattern, path?, include?) — regex search
+- search_files(pattern, path?, include?, hashline?) — regex search; \
+hashline=True for anchors in results
 - run_command(command, cwd?, timeout?) — shell execution
 - undo_changes(path?) — restore from git snapshot
 
@@ -149,8 +159,6 @@ available tools grouped by category. output_schema: "simple" (default) or \
 in an agent's nodes actually exist. Call after building.
 - list_agents() — list all agent packages in exports/ with session counts
 - list_agent_sessions(agent_name, status?, limit?) — list sessions
-- get_agent_session_state(agent_name, session_id) — full session state
-- get_agent_session_memory(agent_name, session_id, key?) — memory data
 - list_agent_checkpoints(agent_name, session_id) — list checkpoints
 - get_agent_checkpoint(agent_name, session_id, checkpoint_id?) — load checkpoint
 - run_agent_tests(agent_name, test_types?, fail_fast?) — run pytest with parsing
@@ -185,8 +193,7 @@ After writing agent code, validate structurally AND run tests:
 ## Debugging Built Agents
 When a user says "my agent is failing" or "debug this agent":
 1. list_agent_sessions("{agent_name}") — find the session
-2. get_agent_session_state("{agent_name}", "{session_id}") — see status
-3. get_agent_session_memory("{agent_name}", "{session_id}") — inspect data
+2. get_worker_status
 4. list_agent_checkpoints / get_agent_checkpoint — trace execution
 
 # Agent Building Workflow
@@ -608,7 +615,7 @@ You have full coding tools for building and modifying agents:
 - File I/O: read_file, write_file, edit_file, list_directory, search_files, \
 run_command, undo_changes
 - Meta-agent: list_agent_tools, validate_agent_tools, \
-list_agents, list_agent_sessions, get_agent_session_state, get_agent_session_memory, \
+list_agents, list_agent_sessions, \
 list_agent_checkpoints, get_agent_checkpoint, run_agent_tests
 - load_built_agent(agent_path) — Load the agent and switch to STAGING mode
 - list_credentials(credential_id?) — List authorized credentials

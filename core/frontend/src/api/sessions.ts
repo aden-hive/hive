@@ -13,12 +13,13 @@ export const sessionsApi = {
   // --- Session lifecycle ---
 
   /** Create a session. If agentPath is provided, loads worker in one step. */
-  create: (agentPath?: string, agentId?: string, model?: string, initialPrompt?: string) =>
+  create: (agentPath?: string, agentId?: string, model?: string, initialPrompt?: string, queenResumeFrom?: string) =>
     api.post<LiveSession>("/sessions", {
       agent_path: agentPath,
       agent_id: agentId,
       model,
       initial_prompt: initialPrompt,
+      queen_resume_from: queenResumeFrom || undefined,
     }),
 
   /** List all active sessions. */
@@ -66,9 +67,17 @@ export const sessionsApi = {
   graphs: (sessionId: string) =>
     api.get<{ graphs: string[] }>(`/sessions/${sessionId}/graphs`),
 
-  /** Get queen conversation history for a session. */
+  /** Get queen conversation history for a session (works for cold/post-restart sessions too). */
   queenMessages: (sessionId: string) =>
-    api.get<{ messages: Message[] }>(`/sessions/${sessionId}/queen-messages`),
+    api.get<{ messages: Message[]; session_id: string }>(`/sessions/${sessionId}/queen-messages`),
+
+  /** List all queen sessions on disk — live + cold (post-restart). */
+  history: () =>
+    api.get<{ sessions: Array<{ session_id: string; cold: boolean; live: boolean; has_messages: boolean; created_at: number; agent_name?: string | null; agent_path?: string | null }> }>("/sessions/history"),
+
+  /** Permanently delete a history session (stops live session + removes disk files). */
+  deleteHistory: (sessionId: string) =>
+    api.delete<{ deleted: string }>(`/sessions/history/${sessionId}`),
 
   // --- Worker session browsing (persisted execution runs) ---
 

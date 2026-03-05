@@ -191,7 +191,7 @@ Both events are handled in the cross-graph filter (events from non-active graphs
 
 ## Known Gaps
 
-**Gap 1 — Resolved.** The queen is now the full `HiveCoderAgent` graph (not a minimal hand-assembled subset). `_load_judge_and_queen` calls `HiveCoderAgent._setup(mock_mode=True)` to load hive-tools MCP, then merges those tools into the worker runtime alongside monitoring tools. When the operator connects via Ctrl+Q, they get `coder_node` with `read_file`, `write_file`, `run_command`, `restart_agent`, `get_agent_session_state`, and all other hive-tools. The `ticket_triage_node` still handles auto-triage on ticket events. `self._queen_agent` is held on the TUI instance to keep the MCP process alive.
+**Gap 1 — Resolved.** The queen is now the full `HiveCoderAgent` graph (not a minimal hand-assembled subset). `_load_judge_and_queen` calls `HiveCoderAgent._setup(mock_mode=True)` to load hive-tools MCP, then merges those tools into the worker runtime alongside monitoring tools. When the operator connects via Ctrl+Q, they get `coder_node` with `read_file`, `write_file`, `run_command`, `restart_agent`, and all other hive-tools. The `ticket_triage_node` still handles auto-triage on ticket events. `self._queen_agent` is held on the TUI instance to keep the MCP process alive.
 
 **Gap 2 — LLM-hang detection latency.**
 If the worker's LLM call hangs (API never returns), no new log entries are written. The judge detects this on its next timer tick (≤2 min). Bounded latency, not zero.

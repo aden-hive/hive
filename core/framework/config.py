@@ -6,6 +6,7 @@ helper functions.
 """
 
 import json
+import logging
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -18,6 +19,7 @@ from framework.graph.edge import DEFAULT_MAX_TOKENS
 # ---------------------------------------------------------------------------
 
 HIVE_CONFIG_FILE = Path.home() / ".hive" / "configuration.json"
+logger = logging.getLogger(__name__)
 
 
 def get_hive_config() -> dict[str, Any]:
@@ -27,7 +29,12 @@ def get_hive_config() -> dict[str, Any]:
     try:
         with open(HIVE_CONFIG_FILE, encoding="utf-8-sig") as f:
             return json.load(f)
-    except (json.JSONDecodeError, OSError):
+    except (json.JSONDecodeError, OSError) as e:
+        logger.warning(
+            "Failed to load Hive config %s: %s",
+            HIVE_CONFIG_FILE,
+            e,
+        )
         return {}
 
 
@@ -92,7 +99,7 @@ def get_api_key() -> str | None:
 
 def get_gcu_enabled() -> bool:
     """Return whether GCU (browser automation) is enabled in user config."""
-    return get_hive_config().get("gcu_enabled", False)
+    return get_hive_config().get("gcu_enabled", True)
 
 
 def get_api_base() -> str | None:

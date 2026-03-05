@@ -20,6 +20,7 @@ def test_check_requirements():
         [sys.executable, "scripts/check_requirements.py", "json", "sys", "os"],
         capture_output=True,
         text=True,
+        encoding="utf-8",
     )
     print(f"Exit code: {result.returncode}")
     print(f"Output:\n{result.stdout}")
@@ -39,6 +40,7 @@ def test_check_requirements():
         [sys.executable, "scripts/check_requirements.py", "json", "nonexistent_module"],
         capture_output=True,
         text=True,
+        encoding="utf-8",
     )
     print(f"Exit code: {result.returncode}")
     print(f"Output:\n{result.stdout}")

@@ -82,6 +82,7 @@ Use Hive when you need:
 
 - Python 3.11+ for agent development
 - An LLM provider that powers the agents
+- **ripgrep (optional, recommended on Windows):** The `search_files` tool uses ripgrep for faster file search. If not installed, a Python fallback is used. On Windows: `winget install BurntSushi.ripgrep` or `scoop install ripgrep`
 
 > **Note for Windows Users:** It is strongly recommended to use **WSL (Windows Subsystem for Linux)** or **Git Bash** to run this framework. Some core automation scripts may not execute correctly in standard Command Prompt or PowerShell.
 
@@ -111,6 +112,8 @@ This sets up:
 - All required Python dependencies with `uv`
 
 - At last, it will initiate the open hive interface in your browser
+
+> **Tip:** To reopen the dashboard later, run `hive open` from the project directory.
 
 <img width="2500" height="1214" alt="home-screen" src="https://github.com/user-attachments/assets/134d897f-5e75-4874-b00b-e0505f6b45c4" />
 

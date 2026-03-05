@@ -162,7 +162,7 @@ def _load_session(session_id: str) -> BuildSession:
     if not session_file.exists():
         raise ValueError(f"Session '{session_id}' not found")
 
-    with open(session_file) as f:
+    with open(session_file, encoding="utf-8") as f:
         data = json.load(f)
 
     return BuildSession.from_dict(data)
@@ -174,7 +174,7 @@ def _load_active_session() -> BuildSession | None:
         return None
 
     try:
-        with open(ACTIVE_SESSION_FILE) as f:
+        with open(ACTIVE_SESSION_FILE, encoding="utf-8") as f:
             session_id = f.read().strip()
 
         if session_id:
@@ -228,7 +228,7 @@ def list_sessions() -> str:
     if SESSIONS_DIR.exists():
         for session_file in SESSIONS_DIR.glob("*.json"):
             try:
-                with open(session_file) as f:
+                with open(session_file, encoding="utf-8") as f:
                     data = json.load(f)
                     sessions.append(
                         {
@@ -248,7 +248,7 @@ def list_sessions() -> str:
     active_id = None
     if ACTIVE_SESSION_FILE.exists():
         try:
-            with open(ACTIVE_SESSION_FILE) as f:
+            with open(ACTIVE_SESSION_FILE, encoding="utf-8") as f:
                 active_id = f.read().strip()
         except Exception:
             pass
@@ -310,7 +310,7 @@ def delete_session(session_id: Annotated[str, "ID of the session to delete"]) ->
             _session = None
 
         if ACTIVE_SESSION_FILE.exists():
-            with open(ACTIVE_SESSION_FILE) as f:
+            with open(ACTIVE_SESSION_FILE, encoding="utf-8") as f:
                 active_id = f.read().strip()
                 if active_id == session_id:
                     ACTIVE_SESSION_FILE.unlink()
@@ -2894,10 +2894,12 @@ def run_tests(
     try:
         result = subprocess.run(
             cmd,
+            encoding="utf-8",
             capture_output=True,
             text=True,
             timeout=600,  # 10 minute timeout
             env=env,
+            stdin=subprocess.DEVNULL,
         )
     except subprocess.TimeoutExpired:
         return json.dumps(
@@ -3085,10 +3087,12 @@ def debug_test(
     try:
         result = subprocess.run(
             cmd,
+            encoding="utf-8",
             capture_output=True,
             text=True,
             timeout=120,  # 2 minute timeout for single test
             env=env,
+            stdin=subprocess.DEVNULL,
         )
     except subprocess.TimeoutExpired:
         return json.dumps(
@@ -3709,82 +3713,6 @@ def list_agent_sessions(
     page = summaries[offset : offset + limit]
     return json.dumps(
         {"sessions": page, "total": total, "offset": offset, "limit": limit}, indent=2
-    )
-
-
-@mcp.tool()
-def get_agent_session_state(
-    agent_work_dir: Annotated[str, "Path to the agent's working directory"],
-    session_id: Annotated[str, "The session ID (e.g., 'session_20260208_143022_abc12345')"],
-) -> str:
-    """
-    Load full session state for a specific session.
-
-    Returns complete session data including status, progress, result,
-    metrics, and checkpoint info. Memory values are excluded to prevent
-    context bloat -- use get_agent_session_memory to retrieve memory contents.
-    """
-    state_path = Path(agent_work_dir) / "sessions" / session_id / "state.json"
-    data = _read_session_json(state_path)
-    if data is None:
-        return json.dumps({"error": f"Session not found: {session_id}"})
-
-    memory = data.get("memory", {})
-    data["memory_keys"] = list(memory.keys()) if isinstance(memory, dict) else []
-    data["memory_size"] = len(memory) if isinstance(memory, dict) else 0
-    data.pop("memory", None)
-
-    return json.dumps(data, indent=2, default=str)
-
-
-@mcp.tool()
-def get_agent_session_memory(
-    agent_work_dir: Annotated[str, "Path to the agent's working directory"],
-    session_id: Annotated[str, "The session ID"],
-    key: Annotated[str, "Specific memory key to retrieve. Empty for all."] = "",
-) -> str:
-    """
-    Get memory contents from a session.
-
-    Memory stores intermediate results passed between nodes. Use this
-    to inspect what data was produced during execution.
-
-    If key is provided, returns only that memory key's value.
-    If key is empty, returns all memory keys and their values.
-    """
-    state_path = Path(agent_work_dir) / "sessions" / session_id / "state.json"
-    data = _read_session_json(state_path)
-    if data is None:
-        return json.dumps({"error": f"Session not found: {session_id}"})
-
-    memory = data.get("memory", {})
-    if not isinstance(memory, dict):
-        memory = {}
-
-    if key:
-        if key not in memory:
-            return json.dumps(
-                {
-                    "error": f"Memory key not found: '{key}'",
-                    "available_keys": list(memory.keys()),
-                }
-            )
-        value = memory[key]
-        return json.dumps(
-            {
-                "session_id": session_id,
-                "key": key,
-                "value": value,
-                "value_type": type(value).__name__,
-            },
-            indent=2,
-            default=str,
-        )
-
-    return json.dumps(
-        {"session_id": session_id, "memory": memory, "total_keys": len(memory)},
-        indent=2,
-        default=str,
     )
 
 

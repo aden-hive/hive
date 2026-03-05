@@ -68,6 +68,7 @@ class TestFrameworkModule:
             [sys.executable, "-m", "framework", "--help"],
             capture_output=True,
             text=True,
+            encoding="utf-8",
             cwd=str(project_root / "core"),
         )
         assert result.returncode == 0
@@ -79,6 +80,7 @@ class TestFrameworkModule:
             [sys.executable, "-m", "framework", "list", "--help"],
             capture_output=True,
             text=True,
+            encoding="utf-8",
             cwd=str(project_root / "core"),
         )
         assert result.returncode == 0
@@ -104,6 +106,7 @@ class TestHiveEntryPoint:
             ["hive", "--help"],
             capture_output=True,
             text=True,
+            encoding="utf-8",
         )
         assert result.returncode == 0
         assert "run" in result.stdout.lower()
@@ -115,6 +118,7 @@ class TestHiveEntryPoint:
             ["hive", "list", "--help"],
             capture_output=True,
             text=True,
+            encoding="utf-8",
         )
         assert result.returncode == 0
 
@@ -124,5 +128,6 @@ class TestHiveEntryPoint:
             ["hive", "run", "nonexistent_agent_xyz"],
             capture_output=True,
             text=True,
+            encoding="utf-8",
         )
         assert result.returncode != 0
