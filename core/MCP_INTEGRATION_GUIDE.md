@@ -147,6 +147,14 @@ Tools from MCP servers can be referenced in your agent.json just like built-in t
 }
 ```
 
+### Search Default for New Agents
+
+For internet search in new agents, use `web_search` (not `exa_search`) unless you explicitly need Exa API-only capabilities.
+
+- `web_search` is Exa MCP keyless-first in `provider="auto"` mode
+- Falls back to Brave/Google only if fallback credentials are configured
+- Keeps agents runnable without mandatory search API keys
+
 ## Available Tools from tools
 
 When you register the `tools` MCP server, the following tools become available:
@@ -171,7 +179,8 @@ runner.register_mcp_server(
     args=["-m", "aden_tools.mcp_server", "--stdio"],
     cwd="../tools",
     env={
-        "BRAVE_SEARCH_API_KEY": os.environ["BRAVE_SEARCH_API_KEY"]
+        # Optional fallback only. Exa MCP keyless path works without search keys.
+        "BRAVE_SEARCH_API_KEY": os.environ.get("BRAVE_SEARCH_API_KEY", "")
     }
 )
 ```
@@ -187,9 +196,7 @@ runner.register_mcp_server(
       "command": "python",
       "args": ["-m", "aden_tools.mcp_server", "--stdio"],
       "cwd": "../tools",
-      "env": {
-        "BRAVE_SEARCH_API_KEY": "${BRAVE_SEARCH_API_KEY}"
-      }
+      "env": {}
     }
   ]
 }

@@ -106,7 +106,7 @@ set_output("job_listings", "<JSON array of 10 job objects with title, company, l
 
 Focus on finding REAL, current job postings with actual URLs the user can visit.
 """,
-    tools=["web_scrape"],
+    tools=["web_search", "web_scrape"],
 )
 
 # Node 3: Job Review (client-facing)
@@ -161,7 +161,7 @@ Only include the jobs the user explicitly selected.
 customize_node = NodeSpec(
     id="customize",
     name="Customize",
-    description="For each selected job, generate resume customization list and cold outreach email, create Gmail drafts",
+    description="For each selected job, generate resume customization list and cold outreach email, and deliver as HTML report",
     node_type="event_loop",
     client_facing=True,
     max_node_visits=1,
@@ -169,7 +169,7 @@ customize_node = NodeSpec(
     output_keys=["application_materials"],
     success_criteria=(
         "Resume customization list and cold outreach email generated "
-        "for each selected job, saved as HTML, and Gmail drafts created in user's inbox."
+        "for each selected job and saved as an HTML report."
     ),
     system_prompt="""\
 You are a career coach creating personalized application materials.
@@ -226,25 +226,8 @@ append_data(filename="application_materials.html", data="</body>\\n</html>")
 Call serve_file_to_user(filename="application_materials.html")
 Print the file_path from the result so the user can access it later.
 
-**Step 5 — Create Gmail Drafts (in batches of 5):**
-IMPORTANT: Do NOT create all drafts in one turn. Create at most 5 gmail_create_draft calls \
-per turn to stay within tool call limits. If there are more than 5 jobs, create the first 5 \
-drafts, then create the remaining drafts in the next turn.
-
-For each selected job, call gmail_create_draft with:
-- to: hiring manager email if available, otherwise "hiring@company-domain.com"
-- subject: the cold email subject line
-- body: the cold email body as plain text
-- draft: true (create as draft, not send immediately)
-
-If gmail_create_draft errors (e.g. credentials not configured), skip ALL remaining drafts and tell the user:
-"Gmail drafts could not be created (Gmail not connected). You can copy the emails from the HTML report instead."
-
-**Step 6 — Confirm Gmail Drafts Created:**
-After all drafts are created, tell the user: "✓ Created {N} draft emails in your Gmail inbox. You can review and send them when ready."
-
-**Step 7 — Finish:**
-Call set_output("application_materials", "Created application_materials.html with materials for {N} jobs and {N} Gmail drafts")
+**Step 5 — Finish:**
+Call set_output("application_materials", "Created application_materials.html with materials for {N} jobs")
 
 **IMPORTANT:**
 - Only suggest truthful resume changes — enhance presentation, never fabricate
@@ -253,7 +236,7 @@ Call set_output("application_materials", "Created application_materials.html wit
 - If a save_data or append_data call fails with a truncation error, you are writing too much \
 in one call. Break it into smaller chunks.
 """,
-    tools=["save_data", "append_data", "serve_file_to_user", "gmail_create_draft"],
+    tools=["save_data", "append_data", "serve_file_to_user"],
 )
 
 __all__ = [

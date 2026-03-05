@@ -20,7 +20,7 @@ extract-contacts → sheets-sync → (loop back to extract-contacts)
 
 ## Tools used
 
-- **Exa** — `exa_search`, `exa_get_contents` for web scraping
+- **Web Discovery (Exa MCP keyless-first)** — `web_search`, `web_scrape`
 - **Google Sheets** — `google_sheets_create_spreadsheet`, `google_sheets_update_values`, `google_sheets_append_values`, `google_sheets_get_values`
 - **Browser (GCU)** — automated Google Maps browsing
 

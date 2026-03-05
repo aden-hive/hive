@@ -141,34 +141,41 @@ github_monitor_node: NodeSpec = NodeSpec(
     output_keys=["github_findings"],
     system_prompt="""\
 You are a GitHub intelligence agent. For each competitor that has a GitHub
-organization or username, check their recent public activity.
+organization or username, check recent public activity using web search + scrape
+(no GitHub API dependency).
 
 **Process for each competitor with a GitHub handle:**
-1. Use github_get_repo or github_list_repos to find their main repositories.
-2. Note key metrics:
-   - New repositories created recently
-   - Star count changes (if you have historical data)
-   - Recent commit activity (last 7 days)
-   - Open issues/PRs count
-   - Any new releases or tags
+1. Identify the org/user profile URL:
+   - If competitor.github is present, use `https://github.com/{competitor.github}`
+   - Otherwise search with web_search: "{competitor_name} github"
+2. Use web_search and web_scrape to gather activity signals from:
+   - Org/user profile page
+   - Top repository pages
+   - Releases pages
+   - Changelog / tagged releases pages
+3. Capture notable signals:
+   - New repositories / active repos
+   - Recent release/tag activity
+   - Visible commit/activity indicators
+   - Open-source momentum (stars/forks where visible)
 
 3. For each notable finding, note:
    - competitor: which competitor
    - category: github_activity / new_repo / release / open_source
-   - update: what you found (e.g. "3 new commits to main repo", "Released v2.1")
+   - update: what you found
    - source: GitHub URL
-   - date: date of activity
+   - date: date of activity (or "unknown")
 
 **Important:**
 - Only process competitors that have a non-null "github" field
 - Focus on activity that signals product direction or engineering investment
 - If a competitor has many repos, focus on the most starred / most active ones
-- If no GitHub tool is available or auth fails, set output with an empty list
+- If data is sparse, return an empty list rather than fabricating
 
 When done, call:
 - set_output("github_findings", <JSON list of finding objects>)
 """,
-    tools=["github_list_repos", "github_get_repo", "github_search_repos"],
+    tools=["web_search", "web_scrape"],
 )
 
 # Node 5: Aggregator

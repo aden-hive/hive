@@ -12,6 +12,10 @@ from dataclasses import dataclass
 
 logger = logging.getLogger(__name__)
 
+# Tools that should not trigger preflight credential blocking.
+# `web_search` is keyless-first in current agent templates.
+KEYLESS_PREFLIGHT_TOOLS = {"web_search"}
+
 
 def ensure_credential_key_env() -> None:
     """Load bootstrap credentials into ``os.environ``.
@@ -350,6 +354,9 @@ def validate_agent_credentials(
 
     # Check tool credentials
     for tool_name in sorted(required_tools):
+        if tool_name in KEYLESS_PREFLIGHT_TOOLS:
+            continue
+
         cred_names = tool_to_creds.get(tool_name)
         if cred_names is None:
             continue

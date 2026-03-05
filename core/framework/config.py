@@ -103,12 +103,15 @@ def get_gcu_enabled() -> bool:
 
 
 def get_api_base() -> str | None:
-    """Return the api_base URL for OpenAI-compatible endpoints, if configured."""
+    """Return API base URL for OpenAI-compatible endpoints, if configured.
+
+    Supports both ``api_base`` (canonical) and ``base_url`` (legacy/compat alias).
+    """
     llm = get_hive_config().get("llm", {})
     if llm.get("use_codex_subscription"):
         # Codex subscription routes through the ChatGPT backend, not api.openai.com.
         return "https://chatgpt.com/backend-api/codex"
-    return llm.get("api_base")
+    return llm.get("api_base") or llm.get("base_url")
 
 
 def get_llm_extra_kwargs() -> dict[str, Any]:

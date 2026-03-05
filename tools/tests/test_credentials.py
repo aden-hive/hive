@@ -83,7 +83,7 @@ class TestCredentialStoreAdapter:
         spec = creds.get_spec("brave_search")
 
         assert spec.env_var == "BRAVE_SEARCH_API_KEY"
-        assert "web_search" in spec.tools
+        assert spec.tools == ["web_search"]
 
     def test_get_spec_raises_for_unknown(self):
         """get_spec() raises KeyError for unknown credential."""
@@ -303,7 +303,7 @@ class TestCredentialSpecs:
 
         spec = CREDENTIAL_SPECS["brave_search"]
         assert spec.env_var == "BRAVE_SEARCH_API_KEY"
-        assert "web_search" in spec.tools
+        assert spec.tools == ["web_search"]
         assert spec.required is True
         assert spec.startup_required is False
         assert "brave.com" in spec.help_url
