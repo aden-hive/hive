@@ -79,11 +79,11 @@ export default function Home() {
   };
 
   return (
-    <div className="min-h-screen bg-background flex flex-col">
+    <div className="h-screen bg-background flex flex-col overflow-hidden">
       <TopBar />
 
       {/* Main content */}
-      <div className="flex-1 flex flex-col items-center justify-center p-6">
+      <div className="flex-1 flex flex-col items-center p-6 overflow-y-auto pt-[15vh]">
         <div className="w-full max-w-2xl">
           {/* Queen Bee greeting */}
           <div className="text-center mb-8">
