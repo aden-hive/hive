@@ -211,4 +211,4 @@ If both start without errors, the config is fine.
 
 - [Cursor IDE support](../README.md#cursor-ide-support) – Same MCP servers and skills for Cursor
 - [MCP Integration Guide](../core/MCP_INTEGRATION_GUIDE.md) – How the framework MCP works
-- [Environment setup](../ENVIRONMENT_SETUP.md) – Repo and Python setup
+- [Environment setup](environment-setup.md) – Repo and Python setup
