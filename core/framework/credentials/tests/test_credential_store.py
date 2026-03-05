@@ -332,14 +332,16 @@ class TestCompositeStorage:
         primary = InMemoryStorage()
         primary.save(
             CredentialObject(
-                id="test", keys={"k": CredentialKey(name="k", value=SecretStr("primary"))}
+                id="test",
+                keys={"k": CredentialKey(name="k", value=SecretStr("primary"))},
             )
         )
 
         fallback = InMemoryStorage()
         fallback.save(
             CredentialObject(
-                id="test", keys={"k": CredentialKey(name="k", value=SecretStr("fallback"))}
+                id="test",
+                keys={"k": CredentialKey(name="k", value=SecretStr("fallback"))},
             )
         )
 
@@ -355,7 +357,8 @@ class TestCompositeStorage:
         fallback = InMemoryStorage()
         fallback.save(
             CredentialObject(
-                id="test", keys={"k": CredentialKey(name="k", value=SecretStr("fallback"))}
+                id="test",
+                keys={"k": CredentialKey(name="k", value=SecretStr("fallback"))},
             )
         )
 
@@ -634,6 +637,42 @@ class TestCredentialStore:
         # Should not find in cache now
         assert store.get_credential("test") is None
 
+    def test_refresh_credential_failure_raises(self):
+        """Test that refresh failure raises CredentialRefreshError instead of returning stale."""
+        from unittest.mock import MagicMock
+
+        from core.framework.credentials.provider import (
+            CredentialProvider,
+            CredentialRefreshError,
+        )
+
+        # 1. Setup expired credential
+        past = datetime.now(UTC) - timedelta(hours=1)
+        cred = CredentialObject(
+            id="test_cred",
+            credential_type=CredentialType.CUSTOM,
+            keys={
+                "token": CredentialKey(name="token", value=SecretStr("test-value"), expires_at=past)
+            },
+            auto_refresh=True,
+            provider_id="mock",
+        )
+
+        # 2. Setup mock provider that fails
+        mock_provider = MagicMock(spec=CredentialProvider)
+        mock_provider.provider_id = "mock"
+        mock_provider.refresh.side_effect = CredentialRefreshError("Refresh failed")
+        mock_provider.should_refresh.return_value = True
+        mock_provider.can_handle.return_value = True
+
+        # 3. Setup store
+        store = CredentialStore(storage=InMemoryStorage({"test_cred": cred}))
+        store.register_provider(mock_provider)
+
+        # 4. Verify it raises instead of returning stale
+        with pytest.raises(CredentialRefreshError, match="Refresh failed"):
+            store.get_credential("test_cred")
+
 
 class TestOAuth2Module:
     """Tests for OAuth2 module."""
@@ -687,7 +726,9 @@ class TestOAuth2Module:
 
         # Valid config
         config = OAuth2Config(
-            token_url="https://example.com/token", client_id="id", client_secret="secret"
+            token_url="https://example.com/token",
+            client_id="id",
+            client_secret="secret",
         )
         assert config.token_url == "https://example.com/token"
 
