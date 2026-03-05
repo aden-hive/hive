@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
-import { Crown, Mail, Briefcase, Shield, Search, Newspaper, ArrowRight, Hexagon, Send, Bot } from "lucide-react";
+import { Crown, Mail, Briefcase, Shield, Search, Newspaper, ArrowRight, Hexagon, Send, Bot, Radar, Reply, DollarSign, MapPin, Calendar, UserPlus, Twitter } from "lucide-react";
 import TopBar from "@/components/TopBar";
 import type { LucideIcon } from "lucide-react";
 import { agentsApi } from "@/api/agents";
@@ -14,6 +14,13 @@ const AGENT_ICONS: Record<string, LucideIcon> = {
   vulnerability_assessment: Shield,
   deep_research_agent: Search,
   tech_news_reporter: Newspaper,
+  competitive_intel_agent: Radar,
+  email_reply_agent: Reply,
+  hubspot_revenue_leak_detector: DollarSign,
+  local_business_extractor: MapPin,
+  meeting_scheduler: Calendar,
+  sdr_agent: UserPlus,
+  twitter_news_agent: Twitter,
 };
 
 const AGENT_COLORS: Record<string, string> = {
@@ -22,6 +29,13 @@ const AGENT_COLORS: Record<string, string> = {
   vulnerability_assessment: "hsl(15,70%,52%)",
   deep_research_agent: "hsl(210,70%,55%)",
   tech_news_reporter: "hsl(270,60%,55%)",
+  competitive_intel_agent: "hsl(190,70%,45%)",
+  email_reply_agent: "hsl(45,80%,55%)",
+  hubspot_revenue_leak_detector: "hsl(145,60%,42%)",
+  local_business_extractor: "hsl(350,65%,55%)",
+  meeting_scheduler: "hsl(220,65%,55%)",
+  sdr_agent: "hsl(165,55%,45%)",
+  twitter_news_agent: "hsl(200,85%,55%)",
 };
 
 function agentSlug(path: string): string {
@@ -79,14 +93,12 @@ export default function Home() {
   };
 
   return (
-    <div className="min-h-screen h-screen bg-background flex flex-col overflow-hidden">
+    <div className="min-h-screen bg-background flex flex-col">
       <TopBar />
 
-      {/* Body: main */}
-      <div className="flex flex-1 min-h-0">
-        {/* Main content */}
-        <div className="flex-1 flex flex-col items-center justify-center p-6 overflow-y-auto">
-          <div className="w-full max-w-2xl">
+      {/* Main content */}
+      <div className="flex-1 flex flex-col items-center justify-center p-6">
+        <div className="w-full max-w-2xl">
           {/* Queen Bee greeting */}
           <div className="text-center mb-8">
             <div

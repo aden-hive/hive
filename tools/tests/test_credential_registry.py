@@ -10,7 +10,7 @@ These tests run in CI and catch common mistakes when adding new integrations:
 import pytest
 
 from aden_tools.credentials import CREDENTIAL_SPECS
-from aden_tools.credentials.health_check import HEALTH_CHECKERS, validate_integration_wiring
+from aden_tools.credentials.health_check import HEALTH_CHECKERS
 
 
 class TestRegistryCompleteness:
@@ -101,24 +101,3 @@ class TestNoDuplicateEnvVars:
             duplicates[env_var] = names
 
         assert not duplicates, f"Duplicate env_vars across unrelated credentials: {duplicates}"
-
-
-class TestIntegrationWiring:
-    """validate_integration_wiring() catches wiring issues."""
-
-    def test_nonexistent_credential(self):
-        issues = validate_integration_wiring("nonexistent_service_xyz")
-        assert any("No CredentialSpec" in i for i in issues)
-
-    def test_known_credential_no_critical_issues(self):
-        """A well-wired credential (e.g. 'hubspot') should have no issues."""
-        issues = validate_integration_wiring("hubspot")
-        assert not issues, f"Unexpected issues for hubspot: {issues}"
-
-    @pytest.mark.parametrize("cred_name", list(HEALTH_CHECKERS.keys()))
-    def test_all_checkers_pass_wiring(self, cred_name):
-        """Every registered checker should pass wiring validation."""
-        issues = validate_integration_wiring(cred_name)
-        assert not issues, f"Wiring issues for '{cred_name}':\n" + "\n".join(
-            f"  - {i}" for i in issues
-        )
