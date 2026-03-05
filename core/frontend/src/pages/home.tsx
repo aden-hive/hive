@@ -79,12 +79,14 @@ export default function Home() {
   };
 
   return (
-    <div className="min-h-screen bg-background flex flex-col">
+    <div className="min-h-screen h-screen bg-background flex flex-col overflow-hidden">
       <TopBar />
 
-      {/* Main content */}
-      <div className="flex-1 flex flex-col items-center justify-center p-6">
-        <div className="w-full max-w-2xl">
+      {/* Body: main */}
+      <div className="flex flex-1 min-h-0">
+        {/* Main content */}
+        <div className="flex-1 flex flex-col items-center justify-center p-6 overflow-y-auto">
+          <div className="w-full max-w-2xl">
           {/* Queen Bee greeting */}
           <div className="text-center mb-8">
             <div
@@ -244,6 +246,7 @@ export default function Home() {
               )}
             </div>
           )}
+        </div>
         </div>
       </div>
     </div>
