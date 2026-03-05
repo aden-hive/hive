@@ -73,21 +73,17 @@ cd exports/my_agent
 PYTHONPATH=exports uv run python -m my_agent validate
 ```
 
-### Option 3: Manual Code-First (Minimal Example)
+### Option 3: Explore via the TUI (Interactive)
 
-If you prefer to start with code rather than CLI wizards, check out the manual agent example:
+Launch the TUI dashboard to browse and run example agents interactively:
 
 ```bash
-# View the minimal example
-cat core/examples/manual_agent.py
-
-# Run it (no API keys required)
-uv run python core/examples/manual_agent.py
+./hive tui
 ```
 
-This demonstrates the core runtime loop using pure Python functions, skipping the complexity of LLM setup and file-based configuration.
+When the launcher opens, choose **Test and run example agents** to try pre-built agents from `examples/templates/`. Use **Tab** to switch between Your Agents, Framework, and Examples; press **Enter** to select and run an agent.
 
-For more examples (including MCP integration), see [core/examples/README.md](../core/examples/README.md).
+For a full walkthrough of TUI navigation and optional command-line examples, see [core/examples/README.md](../core/examples/README.md).
 
 ## Project Structure
 
