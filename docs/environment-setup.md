@@ -250,6 +250,62 @@ This step verifies that the agent meets its goals before production use.
 
 ## Troubleshooting
 
+### Windows-Specific Issues
+
+#### "uv: command not found"
+
+**Cause:** The `uv` package manager is not installed or not in your system PATH.
+
+**Solution:** Install it via PowerShell and verify:
+
+```powershell
+irm https://astral.sh/uv/install.ps1 | iex
+uv --version
+```
+
+#### PowerShell: "running scripts is disabled on this system"
+
+**Cause:** PowerShell's default execution policy restricts running scripts like `quickstart.ps1`.
+
+**Solution:** Run this command once per session to bypass the restriction:
+
+```powershell
+Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
+```
+
+#### PYTHONPATH Path Separator Issues
+
+**Cause:** Windows uses a semicolon (`;`) to separate paths in environment variables, unlike macOS/Linux which uses a colon (`:`).
+
+**Solution:** When setting `PYTHONPATH` manually in PowerShell, use a semicolon:
+
+```powershell
+$env:PYTHONPATH="core;exports"
+```
+
+#### Line Ending Issues (.sh scripts in Git Bash)
+
+**Cause:** Git for Windows may checkout files with CRLF line endings, causing `\r: command not found` errors when running `.sh` scripts in WSL or Git Bash.
+
+**Solution:** Force the script to use Unix line endings (LF):
+
+```bash
+sed -i 's/\r$//' quickstart.sh
+./quickstart.sh
+```
+
+#### Virtual Environment Activation Failures
+
+**Cause:** The activation command differs between PowerShell and Unix shells.
+
+**Solution:** Ensure you use the correct path for Windows:
+
+```powershell
+.venv\Scripts\activate
+```
+
+---
+
 ### "externally-managed-environment" error (PEP 668)
 
 **Cause:** Python 3.12+ on macOS/Homebrew, WSL, or some Linux distros prevents system-wide pip installs.
