@@ -519,7 +519,7 @@ def register_file_tools(
                 text=True,
                 timeout=30,
                 encoding="utf-8",
-                stdin=subprocess.DEVNULL
+                stdin=subprocess.DEVNULL,
             )
             if rg_result.returncode <= 1:
                 output = rg_result.stdout.strip()
