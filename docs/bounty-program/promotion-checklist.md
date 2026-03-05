@@ -67,7 +67,7 @@ Formal criteria for promoting a tool from **unverified** to **verified**. A tool
 2. **PR description** includes links to: the tool README, the health checker, the test report(s)
 3. **Maintainer reviews** the checklist — every required item must be verified
 4. **Maintainer moves** the tool registration from `_register_unverified()` to `_register_verified()` in `tools/__init__.py`
-5. **Maintainer adds the `bounty:promote` label** to the PR — this triggers the GitHub Action to award 50 XP via Lurkr and post a Discord notification
+5. **Maintainer adds the `bounty:code` label** to the PR — this triggers the GitHub Action to award XP via Lurkr and post a Discord notification
 6. **Announcement** auto-posted in `#integrations-announcements` on Discord
 
 ## Current Status
@@ -94,6 +94,6 @@ yahoo_finance, youtube, youtube_transcript, zendesk, zoho_crm, zoom
 | Gap | Count | Bounty Type |
 |-----|-------|-------------|
 | Missing README | ~41 | `bounty:docs` |
-| Missing health_check_endpoint | ~40 | `bounty:health-check` |
-| Missing HealthChecker class | ~40 | `bounty:health-check` |
-| No community test report | 55 | `bounty:agent-test` |
+| Missing health_check_endpoint | ~40 | `bounty:code` |
+| Missing HealthChecker class | ~40 | `bounty:code` |
+| No community test report | 55 | `bounty:test` |

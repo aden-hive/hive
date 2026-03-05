@@ -68,13 +68,10 @@ interface LeaderboardEntry {
 // ---------------------------------------------------------------------------
 
 const POINTS: Record<string, number> = {
-  "bounty:smoke-test": 10,
-  "bounty:agent-test": 30,
+  "bounty:test": 20,
   "bounty:docs": 20,
-  "bounty:health-check": 25,
-  "bounty:bug-fix": 40,
+  "bounty:code": 30,
   "bounty:new-tool": 75,
-  "bounty:promote": 50,
 };
 
 // ---------------------------------------------------------------------------
@@ -275,13 +272,10 @@ function formatBountyNotification(bounty: BountyResult): string {
     : `**${bounty.contributor}**`;
 
   const typeEmoji: Record<string, string> = {
-    "smoke-test": "\u{1F9EA}",
-    "agent-test": "\u{1F916}",
+    test: "\u{1F9EA}",
     docs: "\u{1F4DD}",
-    "health-check": "\u{1FA7A}",
-    "bug-fix": "\u{1F41B}",
-    "new-tool": "\u{1F527}",
-    promote: "\u{2B50}",
+    code: "\u{1F527}",
+    "new-tool": "\u{2B50}",
   };
 
   const emoji = typeEmoji[bounty.bountyType] ?? "\u{1F3AF}";

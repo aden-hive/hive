@@ -16,14 +16,9 @@ body:
     attributes:
       label: Bounty Type
       options:
-        - "Smoke Test (10 pts)"
-        - "Agent Test Report (30 pts)"
-        - "Edge Case Report (15 pts)"
-        - "Write README (20 pts)"
-        - "Add Health Checker (25 pts)"
-        - "Add Health Check Endpoint (10 pts)"
-        - "Bug Fix (40 pts)"
-        - "Complete Promotion Checklist (50 pts)"
+        - "Test a Tool (20 pts)"
+        - "Write Docs (20 pts)"
+        - "Code Contribution (30 pts)"
         - "New Integration (75 pts)"
     validations:
       required: true
