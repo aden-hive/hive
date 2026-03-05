@@ -19,9 +19,12 @@ git clone https://github.com/adenhq/hive.git
 cd hive
 
 # 2. Run automated setup
+# On macOS/Linux:
 ./quickstart.sh
+# On Windows (PowerShell):
+.\quickstart.ps1
 
-# 3. Verify installation (optional, quickstart.sh already verifies)
+# 3. Verify installation (optional, quickstart already verifies)
 uv run python -c "import framework; import aden_tools; print('✓ Setup complete')"
 ```
 
