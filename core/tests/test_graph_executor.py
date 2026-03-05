@@ -13,6 +13,8 @@ from framework.graph.node import NodeResult, NodeSpec
 
 # ---- Dummy runtime (no real logging) ----
 class DummyRuntime:
+    execution_id = ""
+
     def start_run(self, **kwargs):
         return "run-1"
 

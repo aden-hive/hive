@@ -43,7 +43,7 @@ Dedicated tool server providing:
 - **File I/O**: `read_file` (with line numbers, offset/limit), `write_file` (auto-mkdir), `edit_file` (9-strategy fuzzy matching ported from opencode), `list_directory`, `search_files` (regex)
 - **Shell**: `run_command` (timeout, cwd, output truncation)
 - **Git**: `undo_changes` (snapshot-based rollback)
-- **Meta-agent**: `discover_mcp_tools`, `list_agents`, `list_agent_sessions`, `get_agent_session_state`, `get_agent_session_memory`, `list_agent_checkpoints`, `get_agent_checkpoint`, `run_agent_tests`
+- **Meta-agent**: `discover_mcp_tools`, `list_agents`, `list_agent_sessions`, `list_agent_checkpoints`, `get_agent_checkpoint`, `run_agent_tests`
 
 All file operations sandboxed to a configurable project root.
 
