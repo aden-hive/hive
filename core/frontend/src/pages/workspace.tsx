@@ -518,6 +518,10 @@ export default function Workspace() {
   // --- Agent loading: loadAgentForType ---
   const loadingRef = useRef(new Set<string>());
   const loadAgentForType = useCallback(async (agentType: string) => {
+    // Ref-based guard: prevents double-load from React StrictMode (must be first check)
+    if (loadingRef.current.has(agentType)) return;
+    loadingRef.current.add(agentType);
+
     if (agentType === "new-agent" || agentType.startsWith("new-agent-")) {
       // Create a queen-only session (no worker) for agent building
       updateAgentState(agentType, { loading: true, error: null, ready: false, sessionId: null });
@@ -591,10 +595,6 @@ export default function Workspace() {
       }
       return;
     }
-
-    // Ref-based guard: prevents double-load from React StrictMode
-    if (loadingRef.current.has(agentType)) return;
-    loadingRef.current.add(agentType);
 
     updateAgentState(agentType, { loading: true, error: null, ready: false, sessionId: null });
 
