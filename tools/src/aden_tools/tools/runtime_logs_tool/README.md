@@ -77,7 +77,7 @@ Returns complete execution trace:
 |-----------|------|----------|-------------|
 | agent_work_dir | str | Yes | Path to agent working directory |
 | limit | int | No | Max runs to return (default: 20) |
-| status | str | No | Filter by "success" or "failure" |
+| status | str | No | Filter: "success", "failure", "degraded", "in_progress", "needs_attention" |
 
 ### query_runtime_log_details
 
@@ -85,6 +85,7 @@ Returns complete execution trace:
 |-----------|------|----------|-------------|
 | agent_work_dir | str | Yes | Path to agent working directory |
 | run_id | str | Yes | Run ID from Level 1 query |
+| needs_attention_only | bool | No | If true, only return flagged nodes (default: false) |
 | node_id | str | No | Filter to specific node |
 
 ### query_runtime_log_raw
@@ -94,24 +95,23 @@ Returns complete execution trace:
 | agent_work_dir | str | Yes | Path to agent working directory |
 | run_id | str | Yes | Run ID from Level 1 query |
 | node_id | str | No | Filter to specific node |
-| step_type | str | No | Filter by step type (llm_call, tool_call, etc.) |
+| step_index | int | No | Specific step index, or -1 for all steps (default: -1) |
 
 ## Log Storage Locations
 ```
 {agent_work_dir}/
 ├── sessions/{session_id}/logs/    # New location
 │   ├── summary.json               # L1: Run summary
-│   ├── nodes.jsonl                # L2: Node details
-│   └── steps.jsonl                # L3: Raw steps
+│   ├── details.jsonl              # L2: Node details
+│   └── tool_logs.jsonl            # L3: Raw steps
 └── runtime_logs/runs/{run_id}/    # Legacy location (deprecated)
 ```
 
 ## Error Handling
 ```python
-{"error": "Agent work directory not found"}
-{"error": "Run ID not found: run_xyz"}
-{"error": "No logs available for this run"}
-{"error": "Failed to parse log file"}
+{"runs": [], "total": 0, "message": "No runtime logs found"}
+{"error": "No details found for run <run_id>"}
+{"error": "No tool logs found for run <run_id>"}
 ```
 
 ## Use Cases
