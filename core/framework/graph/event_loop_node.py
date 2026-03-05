@@ -4058,4 +4058,3 @@ class EventLoopNode(NodeProtocol):
                 content=json.dumps(result_json, indent=2),
                 is_error=True,
             )
-
