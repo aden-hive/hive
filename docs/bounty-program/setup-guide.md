@@ -160,19 +160,26 @@ Check that role rewards are configured:
 /levels role-rewards
 ```
 
-## Step 8: Seed the First Bounty Issues (ongoing)
+## Step 8: Seed the 55-Tool Blitz (Day 1)
 
-Use the bounty issue template in GitHub to create issues. Start with the easiest batch:
+Post all bounties at once on launch day. Use the bounty issue template for each:
 
-### Phase 1 (Week 1): Documentation bounties
-
-For each unverified tool missing a README, create an issue:
+**Documentation bounties (41 issues):**
 - Title: `[Bounty]: Write README for {tool_name}`
-- Bounty type: `Write README (20 pts)`
-- Difficulty: `Easy`
+- Bounty type: `Write README (20 pts)`, Difficulty: `Easy`
 - Labels: `bounty:docs`, `difficulty:easy`
 
-### Quick list of tools missing READMEs
+**Health check bounties (40 issues):**
+- Title: `[Bounty]: Add health checker for {tool_name}`
+- Bounty type: `Add Health Checker (25 pts)`, Difficulty: `Medium`
+- Labels: `bounty:health-check`, `difficulty:medium`
+
+**Agent test bounties (55 issues):**
+- Title: `[Bounty]: Agent test for {tool_name}`
+- Bounty type: `Agent Test Report (30 pts)`, Difficulty: `Medium`
+- Labels: `bounty:agent-test`, `difficulty:medium`
+
+### Tools missing READMEs
 
 ```
 azure_sql, cloudinary, confluence, databricks, docker_hub, duckduckgo,

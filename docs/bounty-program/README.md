@@ -171,32 +171,29 @@ Tracking is done via GitHub labels on merged PRs and closed issues. Maintainers 
 
 ## Launch Plan: The 55-Tool Blitz
 
-The initial launch targets the 55 unverified tools that need testing, documentation, and health checks.
+A 2-week sprint to get all 55 unverified tools tested, documented, and health-checked. All phases overlap — everything drops at once and runs in parallel.
 
-### Phase 1: Doc Sprint (Week 1-2)
+### Day 1: Launch Everything
 
-- Post 41 `bounty:docs` issues for tools missing READMEs
-- `difficulty:easy`, 20 points each
-- Provide the [tool README template](templates/tool-readme-template.md) so contributors fill in the blanks
+Post all bounties simultaneously:
 
-### Phase 2: Health Check Sprint (Week 2-3)
+- **41 `bounty:docs` issues** — tools missing READMEs, `difficulty:easy`, 20 pts each. Provide the [tool README template](templates/tool-readme-template.md)
+- **40 `bounty:health-check` issues** — tools missing health checkers, `difficulty:medium`, 25 pts each. Include example health checker code
+- **55 `bounty:agent-test` issues** — one per unverified tool, `difficulty:medium`, 30 pts each. Provide a template agent to swap tools into
 
-- Post 40 `bounty:health-check` issues for tools missing health check endpoints
-- `difficulty:medium`, 25 points each
-- Provide example health checker code in each issue
+### Week 1: Blitz Week
 
-### Phase 3: Agent Test Sprint (Week 3-5)
+- All bounty types are open — contributors self-select based on skill and interest
+- Daily progress updates in `#integrations-announcements` ("12 READMEs done, 38 to go")
+- **Mid-week milestone:** if 20+ docs are merged, announce "Health Check Bonus Weekend" — 1.5x points on `bounty:health-check` for Sat/Sun
 
-- Post 55 `bounty:agent-test` issues — one per unverified tool
-- `difficulty:medium`, 30 points each
-- Provide a template agent that contributors can swap their tool into
-
-### Phase 4: Promotion Sprint (Week 5-8)
+### Week 2: Promotion Push
 
 - Post `bounty:promote` issues for tools that have completed docs + health checks + testing
 - `difficulty:hard`, 50 points each
 - The contributor who completes the final checklist item gets the promotion bonus
 - Each promoted tool gets an announcement in `#integrations-announcements`
+- **Day 14 wrap-up:** final leaderboard, shoutouts for top contributors, recap of tools promoted
 
 ## Automation
 
