@@ -380,19 +380,18 @@ tools — merge them into nodes that do real work.
 - Node has NO tools (pure LLM reasoning) → merge into predecessor/successor
 - Node sets only 1 trivial output → collapse into predecessor
 - Multiple consecutive autonomous nodes → combine into one rich node
-- A "report" or "summary" node → merge into the client-facing node
+- A "report" or "summary" node → merge into a processing node and return results to queen
 - A "confirm" or "schedule" node that calls no external service → remove
 
 **SEPARATE nodes only when:**
-- Client-facing vs autonomous (different interaction models)
 - Fundamentally different tool sets
 - Fan-out parallelism (parallel branches MUST be separate)
 
-**Typical patterns (queen manages intake — NO client-facing intake node):**
-- 2 nodes: `process (autonomous) → review (client-facing) → process`
-- 1 node: `process (autonomous)` — simplest; queen handles all interaction
+**Typical patterns (queen manages all user interaction):**
+- 2 nodes: `process (autonomous) → validate (autonomous) → process`
+- 1 node: `process (autonomous)` — simplest; queen handles intake/review
 - WRONG: 7 nodes where half have no tools and just do LLM reasoning
-- WRONG: Intake node that asks the user for requirements — the queen does intake
+- WRONG: Any worker node with `client_facing=True`
 
 Read reference agents before designing:
   list_agents()
@@ -405,16 +404,16 @@ use box-drawing characters and clear flow arrows:
 
 ```
 ┌─────────────────────────┐
-│  process (autonomous)    │
-│  in:  user_request       │
-│  tools: web_search,      │
-│         save_data        │
+│  process                │
+│  in:  user_request      │
+│  tools: web_search,     │
+│         save_data       │
 └────────────┬────────────┘
              │ on_success
              ▼
 ┌─────────────────────────┐
-│  review (client-facing)  │
-│  tools: set_output       │
+│  review                 │
+│  tools: set_output      │
 └────────────┬────────────┘
              │ on_success
              └──────► back to process
@@ -423,8 +422,8 @@ use box-drawing characters and clear flow arrows:
 The queen owns intake: she gathers user requirements, then calls \
 `run_agent_with_input(task)` with a structured task description. \
 When building the agent, design the entry node's `input_keys` to \
-match what the queen will provide at run time. No client-facing \
-intake node in the worker.
+match what the queen will provide at run time. Worker nodes should \
+use `escalate_to_coder` for blockers.
 
 Follow the graph with a brief summary of each node's purpose. \
 Get user approval before implementing.
@@ -752,37 +751,33 @@ interacting with the old version.
 # -- RUNNING phase behavior --
 
 _queen_behavior_running = """
-## When worker is running — GO SILENT
+## When worker is running — queen is the only user interface
 
-Once you call start_worker(), your job is DONE. Do NOT call ask_user, \
-do NOT call get_worker_status(), do NOT emit any text. Just stop. \
-The worker owns the conversation now — it has its own client-facing \
-nodes that talk to the user directly.
+After run_agent_with_input(task), the worker should run autonomously and \
+talk to YOU (queen) via escalate_to_coder when blocked. The worker should \
+NOT ask the user directly.
 
-**After start_worker, your ENTIRE response should be ONE short \
-confirmation sentence with NO tool calls.** Example: \
-"Started the vulnerability assessment." — that's it. No ask_user, \
-no get_worker_status, no follow-up questions.
-
-You only wake up again when:
-- The user explicitly addresses you (not answering a worker question)
-- A worker question is forwarded to you for relay
+You wake up when:
+- The user explicitly addresses you
+- A worker escalation arrives (`[WORKER_ESCALATION_REQUEST]`)
 - An escalation ticket arrives from the judge
 - The worker finishes
 
-If the user explicitly asks about progress, call get_worker_status() \
-ONCE and report. Do NOT poll or check proactively.
+If the user asks for progress, call get_worker_status() ONCE and report.
 
-For escalation tickets: low/transient → acknowledge silently. \
+## Handling worker escalations
+
+When a worker escalation arrives:
+1. Read reason/context from the escalation message.
+2. Call get_worker_status() if you need extra details.
+3. Decide the next action:
+   - Quick unblock guidance → inject_worker_message(...)
+   - Requires worker code/graph changes → stop_worker_and_edit()
+   - Requires user decision/business input → ask_user(...), then relay via inject_worker_message(...)
+4. Keep the user loop on queen. Do not instruct the worker to ask the user directly.
+
+For judge escalation tickets: low/transient → acknowledge silently. \
 High/critical → notify the user with a brief analysis.
-
-## When the worker asks the user a question:
-- The user's answer is routed to you with context: \
-[Worker asked: "...", Options: ...] User answered: "...".
-- If the user is answering the worker's question normally, relay it \
-using inject_worker_message(answer_text). Then go silent again.
-- If the user is rejecting the approach, asking to stop, or giving \
-you an instruction, handle it yourself — do NOT relay.
 
 ## Showing or describing the loaded worker
 

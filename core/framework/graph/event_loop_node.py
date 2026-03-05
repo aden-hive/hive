@@ -488,13 +488,16 @@ class EventLoopNode(NodeProtocol):
         # 2b. Restore spill counter from existing files (resume safety)
         self._restore_spill_counter()
 
-        # 3. Build tool list: node tools + synthetic set_output + ask_user + delegate tools
+        # 3. Build tool list: node tools + synthetic framework tools + delegate tools
         tools = list(ctx.available_tools)
         set_output_tool = self._build_set_output_tool(ctx.node_spec.output_keys)
         if set_output_tool:
             tools.append(set_output_tool)
         if ctx.node_spec.client_facing and not ctx.event_triggered:
             tools.append(self._build_ask_user_tool())
+        # Workers/subagents can escalate blockers to the queen.
+        if stream_id not in ("queen", "judge"):
+            tools.append(self._build_escalate_to_coder_tool())
 
         # Add delegate_to_sub_agent tool if:
         # - Node has sub_agents defined
@@ -578,6 +581,7 @@ class EventLoopNode(NodeProtocol):
                 _synthetic_names = {
                     "set_output",
                     "ask_user",
+                    "escalate_to_coder",
                     "delegate_to_sub_agent",
                     "report_to_parent",
                 }
@@ -990,7 +994,7 @@ class EventLoopNode(NodeProtocol):
             mcp_tool_calls = [
                 tc
                 for tc in logged_tool_calls
-                if tc.get("tool_name") not in ("set_output", "ask_user")
+                if tc.get("tool_name") not in ("set_output", "ask_user", "escalate_to_coder")
             ]
             if mcp_tool_calls:
                 fps = self._fingerprint_tool_calls(mcp_tool_calls)
@@ -1015,7 +1019,25 @@ class EventLoopNode(NodeProtocol):
                         "same tool calls with identical arguments. "
                         "Try a different approach or different arguments."
                     )
-                    if ctx.node_spec.client_facing and not ctx.event_triggered:
+                    if (
+                        ctx.node_spec.client_facing
+                        and not ctx.event_triggered
+                        and stream_id not in ("queen", "judge")
+                        and self._event_bus is not None
+                    ):
+                        await self._event_bus.emit_escalation_requested(
+                            stream_id=stream_id,
+                            node_id=node_id,
+                            reason="Tool doom loop detected",
+                            context=doom_desc,
+                            execution_id=execution_id,
+                        )
+                        await conversation.add_user_message(
+                            "[SYSTEM] Escalated tool doom loop to queen for intervention."
+                        )
+                        recent_tool_fingerprints.clear()
+                        recent_responses.clear()
+                    elif ctx.node_spec.client_facing and not ctx.event_triggered:
                         await conversation.add_user_message(warning_msg)
                         await self._await_user_input(ctx, prompt=doom_desc)
                         recent_tool_fingerprints.clear()
@@ -1607,7 +1629,8 @@ class EventLoopNode(NodeProtocol):
         user_input_requested, ask_user_prompt, ask_user_options, system_prompt, messages).
 
         ``real_tool_results`` contains only results from actual tools (web_search,
-        etc.), NOT from the synthetic ``set_output`` or ``ask_user`` tools.
+        etc.), NOT from synthetic framework tools such as ``set_output``,
+        ``ask_user``, or ``escalate_to_coder``.
         ``outputs_set`` lists the output keys written via ``set_output`` during
         this turn.  ``user_input_requested`` is True if the LLM called
         ``ask_user`` during this turn.  This separation lets the caller treat
@@ -1926,6 +1949,49 @@ class EventLoopNode(NodeProtocol):
                     )
                     results_by_id[tc.tool_use_id] = result
 
+                elif tc.tool_name == "escalate_to_coder":
+                    # --- Framework-level escalate_to_coder handling ---
+                    reason = str(tc.tool_input.get("reason", "")).strip()
+                    context = str(tc.tool_input.get("context", "")).strip()
+
+                    if stream_id in ("queen", "judge"):
+                        result = ToolResult(
+                            tool_use_id=tc.tool_use_id,
+                            content=(
+                                "ERROR: escalate_to_coder is only available to worker "
+                                "nodes/sub-agents, not queen/judge streams."
+                            ),
+                            is_error=True,
+                        )
+                        results_by_id[tc.tool_use_id] = result
+                        continue
+
+                    if self._event_bus is None:
+                        result = ToolResult(
+                            tool_use_id=tc.tool_use_id,
+                            content=(
+                                "ERROR: EventBus unavailable. Could not emit escalation request."
+                            ),
+                            is_error=True,
+                        )
+                        results_by_id[tc.tool_use_id] = result
+                        continue
+
+                    await self._event_bus.emit_escalation_requested(
+                        stream_id=stream_id,
+                        node_id=node_id,
+                        reason=reason,
+                        context=context,
+                        execution_id=execution_id,
+                    )
+
+                    result = ToolResult(
+                        tool_use_id=tc.tool_use_id,
+                        content="Escalation requested to hive_coder (queen).",
+                        is_error=False,
+                    )
+                    results_by_id[tc.tool_use_id] = result
+
                 elif tc.tool_name == "delegate_to_sub_agent":
                     # --- Framework-level subagent delegation ---
                     # Queue for parallel execution in Phase 2
@@ -2121,6 +2187,7 @@ class EventLoopNode(NodeProtocol):
                 if tc.tool_name not in (
                     "set_output",
                     "ask_user",
+                    "escalate_to_coder",
                     "delegate_to_sub_agent",
                     "report_to_parent",
                 ):
@@ -2248,7 +2315,7 @@ class EventLoopNode(NodeProtocol):
             # Tool calls processed -- loop back to stream with updated conversation
 
     # -------------------------------------------------------------------
-    # Synthetic tools: set_output, ask_user
+    # Synthetic tools: set_output, ask_user, escalate_to_coder
     # -------------------------------------------------------------------
 
     def _build_ask_user_tool(self) -> Tool:
@@ -2330,6 +2397,33 @@ class EventLoopNode(NodeProtocol):
                     },
                 },
                 "required": ["key", "value"],
+            },
+        )
+
+    def _build_escalate_to_coder_tool(self) -> Tool:
+        """Build the synthetic escalate_to_coder tool for worker -> queen handoff."""
+        return Tool(
+            name="escalate_to_coder",
+            description=(
+                "Escalate to the Hive Coder queen when blocked by errors, missing "
+                "credentials, or ambiguous constraints that require supervisor "
+                "guidance. Include a concise reason and optional context."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "reason": {
+                        "type": "string",
+                        "description": (
+                            "Short reason for escalation (e.g. 'Tool repeatedly failing')."
+                        ),
+                    },
+                    "context": {
+                        "type": "string",
+                        "description": "Optional diagnostic details for the queen.",
+                    },
+                },
+                "required": ["reason"],
             },
         )
 

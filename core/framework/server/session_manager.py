@@ -45,6 +45,7 @@ class Session:
     # Judge (active when worker is loaded)
     judge_task: asyncio.Task | None = None
     escalation_sub: str | None = None
+    worker_handoff_sub: str | None = None
 
 
 class SessionManager:
@@ -374,6 +375,12 @@ class SessionManager:
 
         # Stop judge
         self._stop_judge(session)
+        if session.worker_handoff_sub is not None:
+            try:
+                session.event_bus.unsubscribe(session.worker_handoff_sub)
+            except Exception:
+                pass
+            session.worker_handoff_sub = None
 
         # Stop queen
         if session.queen_task is not None:
@@ -599,6 +606,36 @@ class SessionManager:
                 session.event_bus.subscribe(
                     event_types=[_ET.EXECUTION_COMPLETED, _ET.EXECUTION_FAILED],
                     handler=_on_worker_done,
+                )
+
+                # Worker handoff: worker/subagent -> queen via synthetic escalate_to_coder.
+                async def _on_worker_handoff(event):
+                    if event.stream_id in ("queen", "judge"):
+                        return
+
+                    reason = str(event.data.get("reason", "")).strip()
+                    context = str(event.data.get("context", "")).strip()
+                    node_label = event.node_id or "unknown_node"
+                    stream_label = event.stream_id or "unknown_stream"
+
+                    handoff = (
+                        "[WORKER_ESCALATION_REQUEST]\n"
+                        f"stream_id: {stream_label}\n"
+                        f"node_id: {node_label}\n"
+                        f"reason: {reason or 'unspecified'}\n"
+                    )
+                    if context:
+                        handoff += f"context:\n{context}\n"
+
+                    node = executor.node_registry.get("queen")
+                    if node is not None and hasattr(node, "inject_event"):
+                        await node.inject_event(handoff, is_client_input=False)
+                    else:
+                        logger.warning("Worker handoff received but queen node not ready")
+
+                session.worker_handoff_sub = session.event_bus.subscribe(
+                    event_types=[_ET.ESCALATION_REQUESTED],
+                    handler=_on_worker_handoff,
                 )
 
                 logger.info(

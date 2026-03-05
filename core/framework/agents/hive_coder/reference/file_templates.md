@@ -84,35 +84,36 @@ Work in phases:
     tools=["web_search", "web_scrape", "save_data", "load_data", "list_data_files"],
 )
 
-# Node 3: Review (client-facing)
-review_node = NodeSpec(
-    id="review",
-    name="Review",
-    description="Present results for user approval",
+# Node 2: Handoff (autonomous)
+handoff_node = NodeSpec(
+    id="handoff",
+    name="Handoff",
+    description="Prepare worker results for queen review",
     node_type="event_loop",
-    client_facing=True,
+    client_facing=False,
     max_node_visits=0,
     input_keys=["results", "user_request"],
-    output_keys=["next_action", "feedback"],
-    nullable_output_keys=["feedback"],
-    success_criteria="User has reviewed and decided next steps.",
+    output_keys=["next_action", "feedback", "worker_summary"],
+    nullable_output_keys=["feedback", "worker_summary"],
+    success_criteria="Results are packaged for queen decision-making.",
     system_prompt="""\
-Present the results to the user.
+Do NOT talk to the user directly. The queen is the only user interface.
 
-**STEP 1 — Present (text only, NO tool calls):**
-1. Summary of work done
-2. Key results
-3. Ask: satisfied, or want changes?
+If blocked by tool failures, missing credentials, or unclear constraints, call:
+- escalate_to_coder(reason, context)
+Then set:
+- set_output("next_action", "escalated")
+- set_output("feedback", "what help is needed")
 
-**STEP 2 — After user responds, call set_output:**
-- set_output("next_action", "done")        — if satisfied
-- set_output("next_action", "revise")      — if changes needed
-- set_output("feedback", "what to change") — only if revising
+Otherwise summarize findings for queen and set:
+- set_output("worker_summary", "short summary for queen")
+- set_output("next_action", "done") or set_output("next_action", "revise")
+- set_output("feedback", "what to revise") only when revising
 """,
     tools=[],
 )
 
-__all__ = ["process_node", "review_node"]
+__all__ = ["process_node", "handoff_node"]
 ```
 
 ## agent.py
@@ -132,7 +133,7 @@ from framework.runtime.agent_runtime import AgentRuntime, create_agent_runtime
 from framework.runtime.execution_stream import EntryPointSpec
 
 from .config import default_config, metadata
-from .nodes import process_node, review_node
+from .nodes import process_node, handoff_node
 
 # Goal definition
 goal = Goal(
@@ -149,18 +150,22 @@ goal = Goal(
 )
 
 # Node list
-nodes = [process_node, review_node]
+nodes = [process_node, handoff_node]
 
 # Edge definitions
 edges = [
-    EdgeSpec(id="process-to-review", source="process", target="review",
+    EdgeSpec(id="process-to-handoff", source="process", target="handoff",
              condition=EdgeCondition.ON_SUCCESS, priority=1),
     # Feedback loop — revise results
-    EdgeSpec(id="review-to-process", source="review", target="process",
+    EdgeSpec(id="handoff-to-process", source="handoff", target="process",
              condition=EdgeCondition.CONDITIONAL,
              condition_expr="str(next_action).lower() == 'revise'", priority=2),
-    # Loop back for next task (queen sends new input)
-    EdgeSpec(id="review-done", source="review", target="process",
+    # Escalation loop — queen injects guidance and worker retries
+    EdgeSpec(id="handoff-escalated", source="handoff", target="process",
+             condition=EdgeCondition.CONDITIONAL,
+             condition_expr="str(next_action).lower() == 'escalated'", priority=3),
+    # Loop back for next task after queen decision
+    EdgeSpec(id="handoff-done", source="handoff", target="process",
              condition=EdgeCondition.CONDITIONAL,
              condition_expr="str(next_action).lower() == 'done'", priority=1),
 ]
