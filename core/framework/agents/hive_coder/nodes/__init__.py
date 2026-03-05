@@ -452,7 +452,7 @@ start_agent("{name}")           # triggers default entry point
 
 _queen_tools_docs = """
 
-## Operating Modes
+## Queen Operating Phases
 
 You operate in one of three phases. Your available tools change based on the \
 phase. The system notifies you when a phase change occurs.
@@ -495,7 +495,7 @@ If you need to modify the agent, call stop_worker_and_edit() to switch back \
 to BUILDING phase. To stop the worker and ask the user what to do next, call \
 stop_worker() to return to STAGING phase.
 
-### Mode transitions
+### Phase transitions
 - load_built_agent(path) → switches to STAGING phase
 - run_agent_with_input(task) → starts worker, switches to RUNNING phase
 - stop_worker() → stops worker, switches to STAGING phase (ask user: re-run or edit?)
