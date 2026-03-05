@@ -114,8 +114,11 @@ if litellm is not None:
     _patch_litellm_anthropic_oauth()
     _patch_litellm_metadata_nonetype()
 
-RATE_LIMIT_MAX_RETRIES = 10
-RATE_LIMIT_BACKOFF_BASE = 2  # seconds
+# Retry policy for rate limits / stealth quota errors.
+# We treat this as "max additional retries" beyond the initial attempt, so the
+# default is 1 initial try + 4 retries = 5 total attempts.
+RATE_LIMIT_MAX_RETRIES = 4
+RATE_LIMIT_BACKOFF_BASE = 2  # seconds (2, 4, 8, 16, ...)
 RATE_LIMIT_MAX_DELAY = 120  # seconds - cap to prevent absurd waits
 
 # Empty-stream retries use a short fixed delay, not the rate-limit backoff.
@@ -344,10 +347,19 @@ class LiteLLMProvider(LLMProvider):
     def _completion_with_rate_limit_retry(
         self, max_retries: int | None = None, **kwargs: Any
     ) -> Any:
-        """Call litellm.completion with retry on 429 rate limit errors and empty responses."""
+        """Call litellm.completion with retry on 429/empty responses.
+
+        Behaviour:
+        - Always performs at least one attempt.
+        - Retries up to ``max_retries`` additional times (default: RATE_LIMIT_MAX_RETRIES).
+        - Uses exponential backoff (2, 4, 8, 16, ...) unless the server provides
+          a Retry-After header, in which case that value wins.
+        """
         model = kwargs.get("model", self.model)
-        retries = max_retries if max_retries is not None else RATE_LIMIT_MAX_RETRIES
-        for attempt in range(retries + 1):
+        retry_limit = max_retries if max_retries is not None else RATE_LIMIT_MAX_RETRIES
+        max_attempts = retry_limit + 1  # initial attempt + retry_limit retries
+
+        for attempt in range(max_attempts):
             try:
                 response = litellm.completion(**kwargs)  # type: ignore[union-attr]
 
@@ -402,22 +414,27 @@ class LiteLLMProvider(LLMProvider):
                         )
                         return response
 
-                    if attempt == retries:
+                    if attempt == max_attempts - 1:
                         logger.error(
-                            f"[retry] GAVE UP on {model} after {retries + 1} "
-                            f"attempts — empty response "
-                            f"(finish_reason={finish_reason}, "
-                            f"choices={len(response.choices) if response.choices else 0})"
+                            "[LLM] Gave up after %d attempts for %s — empty response "
+                            "(finish_reason=%s, choices=%s)",
+                            max_attempts,
+                            model,
+                            finish_reason,
+                            len(response.choices) if response.choices else 0,
                         )
                         return response
                     wait = _compute_retry_delay(attempt)
                     logger.warning(
-                        f"[retry] {model} returned empty response "
-                        f"(finish_reason={finish_reason}, "
-                        f"choices={len(response.choices) if response.choices else 0}) — "
-                        f"likely rate limited or quota exceeded. "
-                        f"Retrying in {wait}s "
-                        f"(attempt {attempt + 1}/{retries})"
+                        "[LLM] Empty response from %s "
+                        "(finish_reason=%s, choices=%s) — likely rate limited or quota "
+                        "exceeded. Retrying in %.1fs (attempt %d/%d)",
+                        model,
+                        finish_reason,
+                        len(response.choices) if response.choices else 0,
+                        wait,
+                        attempt + 2,  # human-readable "next attempt"
+                        max_attempts,
                     )
                     time.sleep(wait)
                     continue
@@ -433,21 +450,31 @@ class LiteLLMProvider(LLMProvider):
                     error_type="rate_limit",
                     attempt=attempt,
                 )
-                if attempt == retries:
+                if attempt == max_attempts - 1:
                     logger.error(
-                        f"[retry] GAVE UP on {model} after {retries + 1} "
-                        f"attempts — rate limit error: {e!s}. "
-                        f"~{token_count} tokens ({token_method}). "
-                        f"Full request dumped to: {dump_path}"
+                        "[LLM] Gave up after %d attempts for %s — rate limit error: %s. "
+                        "Approx tokens=%d (%s). Dumped request to: %s",
+                        max_attempts,
+                        model,
+                        e,
+                        token_count,
+                        token_method,
+                        dump_path,
                     )
                     raise
                 wait = _compute_retry_delay(attempt, exception=e)
                 logger.warning(
-                    f"[retry] {model} rate limited (429): {e!s}. "
-                    f"~{token_count} tokens ({token_method}). "
-                    f"Full request dumped to: {dump_path}. "
-                    f"Retrying in {wait}s "
-                    f"(attempt {attempt + 1}/{retries})"
+                    "[LLM] Rate limit detected for %s (429): %s. "
+                    "Approx tokens=%d (%s). Dumped request to: %s. "
+                    "Retrying in %.1fs (attempt %d/%d)",
+                    model,
+                    e,
+                    token_count,
+                    token_method,
+                    dump_path,
+                    wait,
+                    attempt + 2,
+                    max_attempts,
                 )
                 time.sleep(wait)
         # unreachable, but satisfies type checker
@@ -519,25 +546,32 @@ class LiteLLMProvider(LLMProvider):
         # Make the call
         response = self._completion_with_rate_limit_retry(max_retries=max_retries, **kwargs)
 
-        # Extract content
-        content = response.choices[0].message.content or ""
+        # Extract content with defensive guards for malformed provider responses.
+        try:
+            first_choice = response.choices[0]
+            content = first_choice.message.content or ""
+            finish_reason = first_choice.finish_reason or ""
+        except Exception as exc:  # pragma: no cover - extremely rare, but must be safe
+            logger.error(
+                "[LLM] Malformed response object from provider %s: %s",
+                getattr(response, "model", self.model),
+                exc,
+                exc_info=True,
+            )
+            content = ""
+            finish_reason = "error:malformed_response"
 
-        # Get usage info.
-        # NOTE: completion_tokens includes reasoning/thinking tokens for models
-        # that use them (o1, gpt-5-mini, etc.). LiteLLM does not reliably expose
-        # usage.completion_tokens_details.reasoning_tokens across all providers.
-        # This means output_tokens may be inflated for reasoning models.
-        # Compaction is unaffected — it uses prompt_tokens (input-side only).
-        usage = response.usage
-        input_tokens = usage.prompt_tokens if usage else 0
-        output_tokens = usage.completion_tokens if usage else 0
+        # Get usage info (best-effort).
+        usage = getattr(response, "usage", None)
+        input_tokens = getattr(usage, "prompt_tokens", 0) if usage else 0
+        output_tokens = getattr(usage, "completion_tokens", 0) if usage else 0
 
         return LLMResponse(
             content=content,
-            model=response.model or self.model,
+            model=getattr(response, "model", None) or self.model,
             input_tokens=input_tokens,
             output_tokens=output_tokens,
-            stop_reason=response.choices[0].finish_reason or "",
+            stop_reason=finish_reason,
             raw_response=response,
         )
 
@@ -553,8 +587,10 @@ class LiteLLMProvider(LLMProvider):
         Uses litellm.acompletion and asyncio.sleep instead of blocking calls.
         """
         model = kwargs.get("model", self.model)
-        retries = max_retries if max_retries is not None else RATE_LIMIT_MAX_RETRIES
-        for attempt in range(retries + 1):
+        retry_limit = max_retries if max_retries is not None else RATE_LIMIT_MAX_RETRIES
+        max_attempts = retry_limit + 1  # initial attempt + retry_limit retries
+
+        for attempt in range(max_attempts):
             try:
                 response = await litellm.acompletion(**kwargs)  # type: ignore[union-attr]
 
@@ -603,22 +639,27 @@ class LiteLLMProvider(LLMProvider):
                         )
                         return response
 
-                    if attempt == retries:
+                    if attempt == max_attempts - 1:
                         logger.error(
-                            f"[async-retry] GAVE UP on {model} after {retries + 1} "
-                            f"attempts — empty response "
-                            f"(finish_reason={finish_reason}, "
-                            f"choices={len(response.choices) if response.choices else 0})"
+                            "[LLM] Gave up after %d attempts for %s — empty response "
+                            "(finish_reason=%s, choices=%s)",
+                            max_attempts,
+                            model,
+                            finish_reason,
+                            len(response.choices) if response.choices else 0,
                         )
                         return response
                     wait = _compute_retry_delay(attempt)
                     logger.warning(
-                        f"[async-retry] {model} returned empty response "
-                        f"(finish_reason={finish_reason}, "
-                        f"choices={len(response.choices) if response.choices else 0}) — "
-                        f"likely rate limited or quota exceeded. "
-                        f"Retrying in {wait}s "
-                        f"(attempt {attempt + 1}/{retries})"
+                        "[LLM] Empty async response from %s "
+                        "(finish_reason=%s, choices=%s) — likely rate limited or quota "
+                        "exceeded. Retrying in %.1fs (attempt %d/%d)",
+                        model,
+                        finish_reason,
+                        len(response.choices) if response.choices else 0,
+                        wait,
+                        attempt + 2,
+                        max_attempts,
                     )
                     await asyncio.sleep(wait)
                     continue
@@ -633,21 +674,31 @@ class LiteLLMProvider(LLMProvider):
                     error_type="rate_limit",
                     attempt=attempt,
                 )
-                if attempt == retries:
+                if attempt == max_attempts - 1:
                     logger.error(
-                        f"[async-retry] GAVE UP on {model} after {retries + 1} "
-                        f"attempts — rate limit error: {e!s}. "
-                        f"~{token_count} tokens ({token_method}). "
-                        f"Full request dumped to: {dump_path}"
+                        "[LLM] Gave up after %d attempts for %s — rate limit error: %s. "
+                        "Approx tokens=%d (%s). Dumped request to: %s",
+                        max_attempts,
+                        model,
+                        e,
+                        token_count,
+                        token_method,
+                        dump_path,
                     )
                     raise
                 wait = _compute_retry_delay(attempt, exception=e)
                 logger.warning(
-                    f"[async-retry] {model} rate limited (429): {e!s}. "
-                    f"~{token_count} tokens ({token_method}). "
-                    f"Full request dumped to: {dump_path}. "
-                    f"Retrying in {wait}s "
-                    f"(attempt {attempt + 1}/{retries})"
+                    "[LLM] Rate limit detected for %s (async, 429): %s. "
+                    "Approx tokens=%d (%s). Dumped request to: %s. "
+                    "Retrying in %.1fs (attempt %d/%d)",
+                    model,
+                    e,
+                    token_count,
+                    token_method,
+                    dump_path,
+                    wait,
+                    attempt + 2,
+                    max_attempts,
                 )
                 await asyncio.sleep(wait)
         raise RuntimeError("Exhausted rate limit retries")
@@ -813,7 +864,8 @@ class LiteLLMProvider(LLMProvider):
             kwargs.pop("max_tokens", None)
             kwargs.pop("stream_options", None)
 
-        for attempt in range(RATE_LIMIT_MAX_RETRIES + 1):
+        max_attempts = RATE_LIMIT_MAX_RETRIES + 1
+        for attempt in range(max_attempts):
             # Post-stream events (ToolCall, TextEnd, Finish) are buffered
             # because they depend on the full stream.  TextDeltaEvents are
             # yielded immediately so callers see tokens in real time.
@@ -987,12 +1039,16 @@ class LiteLLMProvider(LLMProvider):
                 return
 
             except RateLimitError as e:
-                if attempt < RATE_LIMIT_MAX_RETRIES:
+                if attempt < max_attempts - 1:
                     wait = _compute_retry_delay(attempt, exception=e)
                     logger.warning(
-                        f"[stream-retry] {self.model} rate limited (429): {e!s}. "
-                        f"Retrying in {wait:.1f}s "
-                        f"(attempt {attempt + 1}/{RATE_LIMIT_MAX_RETRIES})"
+                        "[LLM] Streaming rate limit detected for %s (429): %s. "
+                        "Retrying in %.1fs (attempt %d/%d)",
+                        self.model,
+                        e,
+                        wait,
+                        attempt + 2,
+                        max_attempts,
                     )
                     await asyncio.sleep(wait)
                     continue
@@ -1000,13 +1056,17 @@ class LiteLLMProvider(LLMProvider):
                 return
 
             except Exception as e:
-                if _is_stream_transient_error(e) and attempt < RATE_LIMIT_MAX_RETRIES:
+                if _is_stream_transient_error(e) and attempt < max_attempts - 1:
                     wait = _compute_retry_delay(attempt, exception=e)
                     logger.warning(
-                        f"[stream-retry] {self.model} transient error "
-                        f"({type(e).__name__}): {e!s}. "
-                        f"Retrying in {wait:.1f}s "
-                        f"(attempt {attempt + 1}/{RATE_LIMIT_MAX_RETRIES})"
+                        "[LLM] Streaming transient error for %s (%s): %s. "
+                        "Retrying in %.1fs (attempt %d/%d)",
+                        self.model,
+                        type(e).__name__,
+                        e,
+                        wait,
+                        attempt + 2,
+                        max_attempts,
                     )
                     await asyncio.sleep(wait)
                     continue

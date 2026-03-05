@@ -369,6 +369,11 @@ class GraphExecutor:
                 )
                 summary = response.content
             except Exception as e:
+                # Compaction is an optimisation step only — it should never cause
+                # the main agent execution to fail. Handle errors conservatively:
+                # - Context-too-large: recursively split and try again once.
+                # - Any other provider / network error: log and fall back to the
+                #   un-compacted conversation text.
                 if _is_context_too_large_error(e) and len(messages) > 1:
                     summary = await self._phase_llm_compact_split(
                         conversation,
@@ -377,7 +382,13 @@ class GraphExecutor:
                         _depth,
                     )
                 else:
-                    raise
+                    logger.warning(
+                        "Phase-level LLM compaction failed, falling back to raw "
+                        "conversation (node=%s, error=%s)",
+                        next_spec.id,
+                        str(e),
+                    )
+                    summary = formatted
 
         # Append tool history at top level only
         if _depth == 0:
