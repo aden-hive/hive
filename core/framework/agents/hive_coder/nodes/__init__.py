@@ -46,6 +46,7 @@ _SHARED_TOOLS = [
     "read_file",
     "write_file",
     "edit_file",
+    "hashline_edit",
     "list_directory",
     "search_files",
     "run_command",
@@ -138,12 +139,17 @@ errors yourself. Don't declare success until validation passes.
 The project root is implicit.
 
 ## File I/O
-- read_file(path, offset?, limit?) — read with line numbers
+- read_file(path, offset?, limit?, hashline?) — read with line numbers; \
+hashline=True for N:hhhh|content anchors (use with hashline_edit)
 - write_file(path, content) — create/overwrite, auto-mkdir
 - edit_file(path, old_text, new_text, replace_all?) — fuzzy-match edit
+- hashline_edit(path, edits, auto_cleanup?, encoding?) — anchor-based \
+editing using N:hhhh refs from read_file(hashline=True). Ops: set_line, \
+replace_lines, insert_after, insert_before, replace, append
 - list_directory(path, recursive?) — list contents
-- search_files(pattern, path?, include?) — regex search
-- run_command(command, cwd?, timeout?) — shell execution.
+- search_files(pattern, path?, include?, hashline?) — regex search; \
+hashline=True for anchors in results
+- run_command(command, cwd?, timeout?) — shell execution
 - undo_changes(path?) — restore from git snapshot
 
 ## Meta-Agent
