@@ -13,12 +13,16 @@ from __future__ import annotations
 import json
 import logging
 import os
+import threading
 from abc import ABC, abstractmethod
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from filelock import FileLock
 from pydantic import SecretStr
+
+from framework.utils.io import atomic_write
 
 from .models import CredentialDecryptionError, CredentialKey, CredentialObject, CredentialType
 
@@ -160,6 +164,8 @@ class EncryptedFileStorage(CredentialStorage):
                 )
 
         self._fernet = Fernet(self._key)
+        self._lock = threading.RLock()
+        self._index_lock_path = self.base_path / "metadata" / "index.lock"
 
     def _ensure_dirs(self) -> None:
         """Create directory structure."""
@@ -181,9 +187,9 @@ class EncryptedFileStorage(CredentialStorage):
         # Encrypt
         encrypted = self._fernet.encrypt(json_bytes)
 
-        # Write to file
+        # Write to file atomically (tmp + fsync + rename — no truncation crash window)
         cred_path = self._cred_path(credential.id)
-        with open(cred_path, "wb") as f:
+        with atomic_write(cred_path, mode="wb") as f:
             f.write(encrypted)
 
         # Update index
@@ -215,21 +221,32 @@ class EncryptedFileStorage(CredentialStorage):
     def delete(self, credential_id: str) -> bool:
         """Delete a credential file."""
         cred_path = self._cred_path(credential_id)
-        if cred_path.exists():
-            cred_path.unlink()
-            self._update_index(credential_id, "delete")
-            logger.debug(f"Deleted credential '{credential_id}'")
-            return True
-        return False
+        if not cred_path.exists():
+            return False
+        with self._lock:
+            with FileLock(self._index_lock_path):
+                # Remove from index before unlinking the .enc file.
+                # If unlink later fails, the index is already correct (no ghost entry).
+                self._update_index_locked(credential_id, "delete")
+                cred_path.unlink()
+        logger.debug(f"Deleted credential '{credential_id}'")
+        return True
 
     def list_all(self) -> list[str]:
         """List all credential IDs."""
         index_path = self.base_path / "metadata" / "index.json"
         if not index_path.exists():
             return []
-        with open(index_path, encoding="utf-8-sig") as f:
-            index = json.load(f)
-        return list(index.get("credentials", {}).keys())
+        try:
+            with open(index_path) as f:
+                index = json.load(f)
+            return list(index.get("credentials", {}).keys())
+        except (json.JSONDecodeError, OSError):
+            logger.warning(
+                "index.json is corrupt or unreadable; scanning credential files for recovery"
+            )
+            cred_dir = self.base_path / "credentials"
+            return [p.stem for p in cred_dir.glob("*.enc")]
 
     def exists(self, credential_id: str) -> bool:
         """Check if credential exists."""
@@ -264,12 +281,32 @@ class EncryptedFileStorage(CredentialStorage):
         operation: str,
         credential_type: str | None = None,
     ) -> None:
-        """Update the metadata index."""
+        """Acquire both locks then update the metadata index."""
+        with self._lock:
+            with FileLock(self._index_lock_path):
+                self._update_index_locked(credential_id, operation, credential_type)
+
+    def _update_index_locked(
+        self,
+        credential_id: str,
+        operation: str,
+        credential_type: str | None = None,
+    ) -> None:
+        """
+        Update the metadata index.
+
+        Caller MUST hold both self._lock and FileLock(self._index_lock_path)
+        before calling this method.
+        """
         index_path = self.base_path / "metadata" / "index.json"
 
         if index_path.exists():
-            with open(index_path, encoding="utf-8-sig") as f:
-                index = json.load(f)
+            try:
+                with open(index_path) as f:
+                    index = json.load(f)
+            except (json.JSONDecodeError, OSError):
+                logger.warning("index.json corrupt during update; resetting to empty index")
+                index = {"credentials": {}, "version": "1.0"}
         else:
             index = {"credentials": {}, "version": "1.0"}
 
@@ -283,7 +320,7 @@ class EncryptedFileStorage(CredentialStorage):
 
         index["last_modified"] = datetime.now(UTC).isoformat()
 
-        with open(index_path, "w", encoding="utf-8") as f:
+        with atomic_write(index_path) as f:
             json.dump(index, f, indent=2)
 
 
