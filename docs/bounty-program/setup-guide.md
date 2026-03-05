@@ -111,7 +111,7 @@ Repo Settings > Secrets and variables > Actions:
 
 ```bash
 GITHUB_TOKEN=$(gh auth token) \
-GITHUB_REPOSITORY_OWNER=adenhq-hive \
+GITHUB_REPOSITORY_OWNER=aden-hive \
 GITHUB_REPOSITORY_NAME=hive \
 bun run scripts/bounty-tracker.ts leaderboard
 ```
