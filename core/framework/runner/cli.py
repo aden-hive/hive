@@ -963,6 +963,7 @@ def cmd_shell(args: argparse.Namespace) -> int:
     session_memory = {}
     conversation_history = []
     agent_session_state = None  # Track paused agent state
+    session_has_failure = False  # Track if any execution failed in this session
 
     while True:
         try:
@@ -1068,6 +1069,8 @@ def cmd_shell(args: argparse.Namespace) -> int:
         result = asyncio.run(runner.run(run_context, session_state=agent_session_state))
 
         status_str = "SUCCESS" if result.success else "FAILED"
+        if not result.success:
+            session_has_failure = True
         print(f"\nStatus: {status_str}")
         print(f"Steps executed: {result.steps_executed}")
         print(f"Path: {' → '.join(result.path)}")
@@ -1129,7 +1132,7 @@ def cmd_shell(args: argparse.Namespace) -> int:
         print()
 
     runner.cleanup()
-    return 0
+    return 1 if session_has_failure else 0
 
 
 def cmd_tui(args: argparse.Namespace) -> int:
@@ -1500,6 +1503,8 @@ def _interactive_multi(agents_dir: Path) -> int:
     print("Multi-Agent Interactive Mode")
     print(f"Registered {agent_count} agents")
     print(f"{'=' * 60}")
+    
+    session_has_failure = False
     print("\nCommands:")
     print("  /agents  - List registered agents")
     print("  /quit    - Exit")
@@ -1549,6 +1554,8 @@ def _interactive_multi(agents_dir: Path) -> int:
         result = asyncio.run(orchestrator.dispatch(context, intent=intent))
 
         print(f"\nSuccess: {result.success}")
+        if not result.success:
+            session_has_failure = True
         print(f"Handled by: {', '.join(result.handled_by) or 'none'}")
 
         if result.error:
@@ -1570,7 +1577,7 @@ def _interactive_multi(agents_dir: Path) -> int:
         print()
 
     orchestrator.cleanup()
-    return 0
+    return 1 if session_has_failure else 0
 
 
 def cmd_sessions_list(args: argparse.Namespace) -> int:
