@@ -132,6 +132,12 @@ errors yourself. Don't declare success until validation passes.
 
 # Tools
 
+## Paths (MANDATORY)
+**Always use RELATIVE paths**
+(e.g. `exports/agent_name/config.py`, `exports/agent_name/nodes/__init__.py`).
+**Never use absolute paths** like `/mnt/data/...` or `/workspace/...` — they fail.
+The project root is implicit.
+
 ## File I/O
 - read_file(path, offset?, limit?, hashline?) — read with line numbers; \
 hashline=True for N:hhhh|content anchors (use with hashline_edit)

@@ -351,19 +351,31 @@ def register_file_tools(
             content: Complete file content to write.
         """
         resolved = _resolve(path)
+        resolved_path = Path(resolved)
 
         try:
+            # Create parent dirs first (before git snapshot) so structure exists
+            resolved_path.parent.mkdir(parents=True, exist_ok=True)
             if before_write:
-                before_write()
+                try:
+                    before_write()
+                except Exception:
+                    # Don't block the write if git snapshot fails. Do NOT log here —
+                    # logging writes to stderr and can deadlock the MCP stdio pipe.
+                    pass
 
-            existed = os.path.isfile(resolved)
-            os.makedirs(os.path.dirname(resolved), exist_ok=True)
-            with open(resolved, "w", encoding="utf-8") as f:
-                f.write(content)
+            existed = resolved_path.is_file()
+            content_str = content if content is not None else ""
+            with open(resolved_path, "w", encoding="utf-8") as f:
+                f.write(content_str)
+                f.flush()
+                os.fsync(f.fileno())
 
-            line_count = content.count("\n") + (1 if content and not content.endswith("\n") else 0)
+            line_count = content_str.count("\n") + (
+                1 if content_str and not content_str.endswith("\n") else 0
+            )
             action = "Updated" if existed else "Created"
-            return f"{action} {path} ({len(content):,} bytes, {line_count} lines)"
+            return f"{action} {path} ({len(content_str):,} bytes, {line_count} lines)"
         except Exception as e:
             return f"Error writing file: {e}"
 
@@ -539,6 +551,7 @@ def register_file_tools(
                 text=True,
                 timeout=30,
                 encoding="utf-8",
+                stdin=subprocess.DEVNULL,
             )
             if rg_result.returncode <= 1:
                 output = rg_result.stdout.strip()
@@ -556,6 +569,23 @@ def register_file_tools(
                             content = parts[2]
                             h = compute_line_hash(content)
                             line = f"{parts[0]}:{parts[1]}:{h}|{content}"
+                    else:
+                        # Platform-agnostic relativization: ripgrep may output
+                        # forward or backslash paths; normalize before relpath (Windows).
+                        match = re.match(r"^(.+):(\d+):", line)
+                        if match:
+                            path_part, line_num, rest = (
+                                match.group(1),
+                                match.group(2),
+                                line[match.end() :],
+                            )
+                            path_part = os.path.normpath(path_part.replace("/", os.sep))
+                            proj_norm = os.path.normpath(project_root.replace("/", os.sep))
+                            try:
+                                rel = os.path.relpath(path_part, proj_norm)
+                                line = f"{rel}:{line_num}:{rest}"
+                            except ValueError:
+                                pass
                     if len(line) > MAX_LINE_LENGTH:
                         line = line[:MAX_LINE_LENGTH] + "..."
                     lines.append(line)
@@ -583,7 +613,14 @@ def register_file_tools(
                     if include and not fnmatch.fnmatch(fname, include):
                         continue
                     fpath = os.path.join(root, fname)
-                    display_path = os.path.relpath(fpath, project_root) if project_root else fpath
+                    if project_root:
+                        proj_norm = os.path.normpath(project_root.replace("/", os.sep))
+                        try:
+                            display_path = os.path.relpath(fpath, proj_norm)
+                        except ValueError:
+                            display_path = fpath
+                    else:
+                        display_path = fpath
                     try:
                         with open(fpath, encoding="utf-8", errors="ignore") as f:
                             for i, line in enumerate(f, 1):

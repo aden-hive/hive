@@ -2899,6 +2899,7 @@ def run_tests(
             text=True,
             timeout=600,  # 10 minute timeout
             env=env,
+            stdin=subprocess.DEVNULL,
         )
     except subprocess.TimeoutExpired:
         return json.dumps(
@@ -3091,6 +3092,7 @@ def debug_test(
             text=True,
             timeout=120,  # 2 minute timeout for single test
             env=env,
+            stdin=subprocess.DEVNULL,
         )
     except subprocess.TimeoutExpired:
         return json.dumps(
