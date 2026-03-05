@@ -65,7 +65,7 @@ class CleansingConfig:
     """Configuration for output cleansing."""
 
     enabled: bool = True
-    fast_model: str = "cerebras/llama-3.3-70b"  # Fast, cheap model for cleaning
+    fast_model: str | None = None  # No default model to prevent silent egress
     max_retries: int = 2
     cache_successful_patterns: bool = True
     fallback_to_raw: bool = True  # If cleaning fails, pass raw output
@@ -106,28 +106,29 @@ class OutputCleaner:
         # Initialize LLM provider for cleaning
         if llm_provider:
             self.llm = llm_provider
-        elif config.enabled:
-            # Create dedicated fast LLM provider for cleaning
+        elif config.enabled and config.fast_model:
+            # Create dedicated fast LLM provider for cleaning ONLY if model is explicit
             try:
-                import os
-
                 from framework.llm.litellm import LiteLLMProvider
 
-                api_key = os.environ.get("CEREBRAS_API_KEY")
-                if api_key:
-                    self.llm = LiteLLMProvider(
-                        api_key=api_key,
-                        model=config.fast_model,
-                    )
-                    logger.info(f"✓ Initialized OutputCleaner with {config.fast_model}")
-                else:
-                    logger.warning("⚠ CEREBRAS_API_KEY not found, output cleaning will be disabled")
-                    self.llm = None
-            except ImportError:
-                logger.warning("⚠ LiteLLMProvider not available, output cleaning disabled")
+                # Note: LiteLLMProvider will check for the appropriate API key
+                # based on the model name (e.g. CEREBRAS_API_KEY for cerebras/*)
+                self.llm = LiteLLMProvider(
+                    model=config.fast_model,
+                )
+                logger.info(f"✓ Initialized OutputCleaner with {config.fast_model}")
+            except Exception as e:
+                logger.warning(
+                    f"⚠ Failed to initialize LLM provider for cleansing: {e}"
+                )
                 self.llm = None
         else:
             self.llm = None
+
+        if config.enabled and not self.llm:
+            logger.info(
+                "ℹ LLM-based output cleaning is disabled (no repair model configured)"
+            )
 
     def validate_output(
         self,
@@ -181,7 +182,10 @@ class OutputCleaner:
                         )
 
             # Check 3: Type validation (if schema provided)
-            if hasattr(target_node_spec, "input_schema") and target_node_spec.input_schema:
+            if (
+                hasattr(target_node_spec, "input_schema")
+                and target_node_spec.input_schema
+            ):
                 expected_schema = target_node_spec.input_schema.get(key)
                 if expected_schema:
                     expected_type = expected_schema.get("type")
@@ -318,7 +322,9 @@ Return ONLY valid JSON matching the expected schema. No explanations, no markdow
                 if self.config.fallback_to_raw:
                     return output
                 else:
-                    raise ValueError(f"Cleaning produced {type(cleaned)}, expected dict")
+                    raise ValueError(
+                        f"Cleaning produced {type(cleaned)}, expected dict"
+                    )
 
         except json.JSONDecodeError as e:
             logger.error(f"✗ Failed to parse cleaned JSON: {e}")
