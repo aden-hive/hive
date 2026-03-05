@@ -122,5 +122,38 @@ def test():
     click.echo("✓ All basic tests passed")
 
 
+@cli.command()
+@click.option("--no-performance", is_flag=True, help="Skip performance benchmarks")
+@click.option("--output-dir", type=click.Path(), help="Output directory for test results")
+def test_full():
+    """Run comprehensive test suite with benchmarks and reports."""
+    from .run_tests import TestRunner
+
+    agent_dir = Path(__file__).parent
+    runner = TestRunner(agent_dir)
+
+    click.echo("🚀 Starting Comprehensive Test Suite...")
+
+    # Override output directory if specified
+    if output_dir:
+        runner.results_dir = Path(output_dir)
+        runner.results_dir.mkdir(exist_ok=True)
+
+    try:
+        results = runner.run_all_tests(include_performance=not no_performance)
+
+        if results["summary"]["overall_success"]:
+            click.echo("🎉 All tests passed! Agent is ready for production.")
+            exit(0)
+        else:
+            failed_count = results["summary"]["total_suites"] - results["summary"]["successful_suites"]
+            click.echo(f"❌ {failed_count} test suite(s) failed. Check the report for details.")
+            exit(1)
+
+    except Exception as e:
+        click.echo(f"❌ Test execution failed: {str(e)}")
+        exit(1)
+
+
 if __name__ == "__main__":
     cli()
