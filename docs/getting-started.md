@@ -47,7 +47,7 @@ This is the recommended way to create your first agent.
 # Setup already done via quickstart.sh above
 
 # Start Claude Code and build an agent
-claude> /hive
+Use the agent-builder workflow
 ```
 
 Follow the interactive prompts to:
@@ -115,18 +115,10 @@ hive/
 │           └── file_system_toolkits/
 │
 ├── exports/                # Agent Packages (user-generated, not in repo)
-│   └── your_agent/         # Your agents created via /hive
+│   └── your_agent/         # Your agents created via agent-builder workflow
 │
 ├── examples/
 │   └── templates/          # Pre-built template agents
-│
-├── .claude/                # Claude Code Skills
-│   └── skills/
-│       ├── hive/
-│       ├── hive-create/
-│       ├── hive-concepts/
-│       ├── hive-patterns/
-│       └── hive-test/
 │
 └── docs/                   # Documentation
 ```
@@ -165,10 +157,7 @@ Get your API keys:
 ## Testing Your Agent
 
 ```bash
-# Using Claude Code
-claude> /hive-test
-
-# Or manually
+# Run tests
 PYTHONPATH=exports uv run python -m my_agent test
 
 # Run with specific test type
@@ -181,7 +170,7 @@ PYTHONPATH=exports uv run python -m my_agent test --type success
 1. **TUI Dashboard**: Run `hive tui` to explore agents interactively
 2. **Detailed Setup**: See [environment-setup.md](./environment-setup.md)
 3. **Developer Guide**: See [developer-guide.md](./developer-guide.md)
-4. **Build Agents**: Use `/hive` skill in Claude Code
+4. **Build Agents**: Use agent-builder workflow in Claude Code
 5. **Custom Tools**: Learn to integrate MCP servers
 6. **Join Community**: [Discord](https://discord.com/invite/MXE49hrKDk)
 
@@ -224,4 +213,4 @@ pip uninstall -y framework tools
 - **Documentation**: Check the `/docs` folder
 - **Issues**: [github.com/adenhq/hive/issues](https://github.com/adenhq/hive/issues)
 - **Discord**: [discord.com/invite/MXE49hrKDk](https://discord.com/invite/MXE49hrKDk)
-- **Build Agents**: Use `/hive` skill to create agents
+- **Build Agents**: Use agent-builder workflow to create agents

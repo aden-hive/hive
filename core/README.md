@@ -145,7 +145,7 @@ uv run python -m framework test-debug <agent_path> <test_name>
 uv run python -m framework test-list <agent_path>
 ```
 
-For detailed testing workflows, see the [hive-test skill](../.claude/skills/hive-test/SKILL.md).
+For detailed testing workflows, see [developer-guide.md](../docs/developer-guide.md).
 
 ### Analyzing Agent Behavior with Builder
 

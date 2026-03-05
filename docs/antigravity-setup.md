@@ -25,7 +25,7 @@ Done. For details, prerequisites, and troubleshooting, read on.
 
 - **agent-builder** – Create and manage agents (goals, nodes, edges).
 - **tools** – File operations, web search, and other agent tools.
-- **Skills** – Guided docs for building and testing agents (in `.agent/skills/` or `.claude/skills/`).
+- **Documentation** – Guided docs for building and testing agents.
 
 ---
 
@@ -80,18 +80,9 @@ That writes `~/.claude/mcp.json` as well.
 
 **Prefer to do it manually?** See [Manual MCP config](#manual-mcp-config-template) below. You’ll create `~/.gemini/mcp.json` (or `~/.claude/mcp.json`) with absolute paths to your repo’s `core` and `tools` folders.
 
-### Step 3: Use skills
+### Step 3: Use MCP tools + docs
 
-Skills are guides (workflow, building, testing) in `.agent/skills/` (they point to `.claude/skills/`). If Antigravity doesn’t show a “skills” UI, open those folders in the project and use the files as reference while you use the MCP tools.
-
-| Skill | What it's for |
-|-------|----------------|
-| **hive** | End-to-end workflow for building and testing agents |
-| **hive-concepts** | Core ideas for goal-driven agents |
-| **hive-create** | Step-by-step agent construction |
-| **hive-patterns** | Patterns and best practices |
-| **hive-test** | Goal-based evaluation and testing |
-| **hive-credentials** | Set up and manage agent credentials |
+Use the `agent-builder` and `tools` MCP servers in Antigravity, and use docs in `docs/` for workflow guidance.
 
 ---
 
@@ -100,7 +91,6 @@ Skills are guides (workflow, building, testing) in `.agent/skills/` (they point 
 ```
 .agent/
 ├── mcp_config.json   # Template for MCP servers (agent-builder, tools)
-└── skills/           # Symlinks to .claude/skills/
 ```
 
 The **setup script** writes your **user** config (`~/.gemini/antigravity/mcp_config.json`) using paths from **this repo**. The file in `.agent/` is the template; Antigravity itself uses the file in your home directory.
@@ -123,24 +113,24 @@ The **setup script** writes your **user** config (`~/.gemini/antigravity/mcp_con
 - Open the **repo root** as the project in the IDE (the folder that has `core/` and `tools/`).
 - If you edited `~/.gemini/antigravity/mcp_config.json` by hand, make sure `--directory` paths are **absolute** (e.g. `/Users/you/hive/core` and `/Users/you/hive/tools`).
 
-**Skills don’t show up in the UI**
+**MCP tools don’t show up in the UI**
 
-- Antigravity may not have a dedicated “skills” panel. Use the files in `.claude/skills/` or `.agent/skills/` as docs; the MCP tools (agent-builder, tools) still work.
+- Antigravity may need a restart. Use the files in `docs/` as documentation; the MCP tools (`agent-builder`, `tools`) are the required integration point.
 
 ---
 
 ## Verification prompt (optional)
 
-Paste this into Antigravity to check that MCP and skills are set up. It doesn’t use your machine’s paths; anyone can use it.
+Paste this into Antigravity to check that MCP is set up. It doesn’t use your machine’s paths; anyone can use it.
 
 ```
 Check the Hive + Antigravity integration:
 
 1. MCP: List available MCP servers/tools. Confirm that "agent-builder" and "tools" (or equivalent) are connected. If not, tell the user to run ./scripts/setup-antigravity-mcp.sh from the hive repo root, then restart Antigravity (see docs/antigravity-setup.md).
 
-2. Skills: Confirm that the project has .agent/skills/ (or .claude/skills/) with: hive, hive-concepts, hive-create, hive-patterns, hive-test, hive-credentials.
+2. Docs: Confirm that the project has `docs/` with setup/developer guides for the workflow.
 
-3. Result: Reply with PASS (MCP + skills OK), PARTIAL (only skills or only MCP), or FAIL (neither), and one line on what to fix if not PASS.
+3. Result: Reply with PASS (MCP OK), PARTIAL (some MCP tools missing), or FAIL (MCP unavailable), and one line on what to fix if not PASS.
 ```
 
 If you get **PARTIAL** (e.g. MCP not connected), run `./scripts/setup-antigravity-mcp.sh` from the repo root and restart Antigravity.
@@ -178,13 +168,10 @@ Make sure `uv` is installed and available in your PATH. Note: Use `--directory` 
 
 From the **repo root**:
 
-**Check that config and skills exist**
+**Check that config exists**
 
 ```bash
 test -f .agent/mcp_config.json && echo "OK: mcp_config.json" || echo "MISSING"
-for s in hive hive-concepts hive-create hive-patterns hive-test hive-credentials; do
-  test -L .agent/skills/$s && test -d .agent/skills/$s && echo "OK: $s" || echo "BROKEN: $s"
-done
 ```
 
 **Check that the config is valid JSON**

@@ -38,7 +38,7 @@
 
 | File | Action |
 |---|---|
-| `.claude/skills/hive-create/SKILL.md` | Remove `"function"` from node type table (~L495, L856) |
+| `docs/developer-guide.md` | Remove `"function"` from node type table (~L495, L856) |
 | `docs/developer-guide.md` | Remove `"function"` node type reference (~L613) |
 | `core/MCP_SERVER_GUIDE.md` | Audit for `"function"` references |
 | `docs/why-conditional-edge-priority.md` | Remove or repurpose (entire doc framed around function nodes) |

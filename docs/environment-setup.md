@@ -112,7 +112,7 @@ uv run python -c "import litellm; print('✓ litellm OK')"
 
 ### API Keys
 
-We recommend using quickstart.sh for LLM API credential setup and /hive-credentials for the tools credentials
+We recommend using `quickstart.sh` for LLM API credential setup and the credentials UI/tooling for tool credentials.
 
 ## Running Agents
 
@@ -165,33 +165,27 @@ Build and run an agent using Claude Code CLI with the agent building skills:
 ./quickstart.sh
 ```
 
-This verifies agent-related Claude Code skills are available:
-
-- `/hive` - Complete workflow for building agents
-- `/hive-create` - Step-by-step build guide
-- `/hive-concepts` - Fundamental concepts
-- `/hive-patterns` - Best practices
-- `/hive-test` - Test and validate agents
+This sets up agent-builder and tools MCP workflows.
 
 ### Cursor IDE Support
 
-Skills are also available in Cursor. To enable:
+MCP tools are also available in Cursor. To enable:
 
 1. Open Command Palette (`Cmd+Shift+P` / `Ctrl+Shift+P`)
 2. Run `MCP: Enable` to enable MCP servers
 3. Restart Cursor to load the MCP servers from `.cursor/mcp.json`
-4. Type `/` in Agent chat and search for skills (e.g., `/hive-create`)
+4. Open Agent chat and verify MCP tools are available
 
 ### 2. Build an Agent
 
 **Claude Code:**
 ```
-claude> /hive
+Use the agent-builder workflow
 ```
 
 **Codex CLI:**
 ```
-codex> use hive
+Start Codex in the repo root and use the configured MCP tools
 ```
 
 Follow the prompts to:
@@ -206,7 +200,7 @@ This step creates the initial agent structure required for further development.
 ### 3. Define Agent Logic
 
 ```
-claude> /hive-concepts
+claude> architecture guidance
 ```
 
 Follow the prompts to:
@@ -221,7 +215,7 @@ This step establishes the core concepts and rules needed before building an agen
 ### 4. Apply Agent Patterns
 
 ```
-claude> /hive-patterns
+claude> pattern guidance
 ```
 
 Follow the prompts to:
@@ -236,7 +230,7 @@ This step helps optimize agent design before final testing.
 ### 5. Test Your Agent
 
 ```
-claude> /hive-test
+claude> test workflow
 ```
 
 Follow the prompts to:
@@ -367,7 +361,7 @@ hive/
 │   └── pyproject.toml
 │
 ├── exports/                 # Agent packages (user-created, gitignored)
-│   └── your_agent_name/     # Created via /hive-create
+│   └── your_agent_name/     # Created via agent-builder workflow
 │
 └── examples/
     └── templates/           # Pre-built template agents
@@ -459,7 +453,7 @@ This design allows agents in `exports/` to be:
 ### 2. Build Agent (Claude Code)
 
 ```
-claude> /hive
+Use the agent-builder workflow
 Enter goal: "Build an agent that processes customer support tickets"
 ```
 
@@ -472,7 +466,7 @@ PYTHONPATH=exports uv run python -m your_agent_name validate
 ### 4. Test Agent
 
 ```
-claude> /hive-test
+claude> test workflow
 ```
 
 ### 5. Run Agent
@@ -545,18 +539,17 @@ Run the quickstart script in the root directory:
 [OpenAI Codex CLI](https://github.com/openai/codex) (v0.101.0+) is supported with project-level config:
 
 - `.codex/config.toml` — MCP server configuration (`agent-builder`)
-- `.agents/skills/` — Symlinks to Hive skills
 
 These files are tracked in git and available on clone. To use Codex with Hive:
 
 1. Run `codex` in the repo root
-2. Type `use hive` to start the agent workflow
+2. Start the configured MCP-assisted workflow
 
 Quick verification:
 
 ```bash
 test -f .codex/config.toml && echo "OK: Codex config" || echo "MISSING: .codex/config.toml"
-test -d .agents/skills/hive && echo "OK: Skills" || echo "MISSING: .agents/skills/"
+echo "OK: .codex/config.toml and MCP tools configured"
 ```
 
 ## Additional Resources
@@ -564,8 +557,8 @@ test -d .agents/skills/hive && echo "OK: Skills" || echo "MISSING: .agents/skill
 - **Framework Documentation:** [core/README.md](../core/README.md)
 - **Tools Documentation:** [tools/README.md](../tools/README.md)
 - **Example Agents:** [examples/](../examples/)
-- **Agent Building Guide:** [.claude/skills/hive-create/SKILL.md](../.claude/skills/hive-create/SKILL.md)
-- **Testing Guide:** [.claude/skills/hive-test/SKILL.md](../.claude/skills/hive-test/SKILL.md)
+- **Agent Building Guide:** [docs/developer-guide.md](./developer-guide.md)
+- **Testing Guide:** [core/README.md](../core/README.md)
 
 ## Contributing
 
@@ -574,7 +567,7 @@ When contributing agent packages:
 1. Place agents in `exports/agent_name/`
 2. Follow the standard agent structure (see existing agents)
 3. Include README.md with usage instructions
-4. Add tests if using `/hive-test`
+4. Add tests if using `test workflow`
 5. Document required environment variables
 
 ## Support

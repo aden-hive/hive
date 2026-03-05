@@ -22,7 +22,7 @@ template_name/
 
 ### Option 1: Build from template (recommended)
 
-Use the `/hive-create` skill and select "From a template" to interactively pick a template, customize the goal/nodes/graph, and export a new agent.
+Use the agent-builder workflow and select "From a template" to interactively pick a template, customize the goal/nodes/graph, and export a new agent.
 
 ### Option 2: Manual copy
 
