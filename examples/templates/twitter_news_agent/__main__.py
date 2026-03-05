@@ -31,7 +31,13 @@ def cli():
 
 
 @cli.command()
-@click.option("--handles", "-h", type=str, default=None, help="Comma-separated Twitter handles to monitor")
+@click.option(
+    "--handles",
+    "-h",
+    type=str,
+    default=None,
+    help="Comma-separated Twitter handles to monitor",
+)
 @click.option("--quiet", is_flag=True, help="Only output result JSON")
 @click.option("--verbose", "-v", is_flag=True, help="Show execution details")
 @click.option("--debug", is_flag=True, help="Show debug logging")
@@ -125,7 +131,7 @@ async def _interactive_shell(verbose=False):
                 result = await agent.run({"user_request": query})
 
                 if result.success:
-                    click.echo(f"\nDigest complete\n")
+                    click.echo("\nDigest complete\n")
                 else:
                     click.echo(f"\nDigest failed: {result.error}\n")
 

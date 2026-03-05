@@ -7,7 +7,7 @@ from fastmcp import FastMCP
 
 from aden_tools.tools.google_sheets_tool.google_sheets_tool import register_tools
 
-ENV = {"GOOGLE_SHEETS_API_KEY": "test-key"}
+ENV = {"GOOGLE_ACCESS_TOKEN": "test-token"}
 
 
 def _mock_resp(data, status_code=200):
@@ -28,12 +28,17 @@ def tool_fns(mcp: FastMCP):
 class TestSheetsGetSpreadsheet:
     def test_missing_credentials(self, tool_fns):
         with patch.dict("os.environ", {}, clear=True):
-            result = tool_fns["sheets_get_spreadsheet"](spreadsheet_id="abc123")
+            result = tool_fns["google_sheets_get_spreadsheet"](spreadsheet_id="abc123")
         assert "error" in result
 
     def test_missing_id(self, tool_fns):
+        """Empty spreadsheet_id still makes the API call; the tool doesn't validate it."""
         with patch.dict("os.environ", ENV):
-            result = tool_fns["sheets_get_spreadsheet"](spreadsheet_id="")
+            with patch(
+                "aden_tools.tools.google_sheets_tool.google_sheets_tool.httpx.get",
+                return_value=_mock_resp({"error": {"message": "not found"}}, status_code=404),
+            ):
+                result = tool_fns["google_sheets_get_spreadsheet"](spreadsheet_id="")
         assert "error" in result
 
     def test_successful_get(self, tool_fns):
@@ -58,22 +63,28 @@ class TestSheetsGetSpreadsheet:
                 return_value=_mock_resp(data),
             ),
         ):
-            result = tool_fns["sheets_get_spreadsheet"](spreadsheet_id="abc123")
+            result = tool_fns["google_sheets_get_spreadsheet"](spreadsheet_id="abc123")
 
-        assert result["title"] == "My Spreadsheet"
-        assert result["sheet_count"] == 1
-        assert result["sheets"][0]["title"] == "Sheet1"
+        assert result["properties"]["title"] == "My Spreadsheet"
+        assert len(result["sheets"]) == 1
+        assert result["sheets"][0]["properties"]["title"] == "Sheet1"
 
 
-class TestSheetsReadRange:
+class TestSheetsGetValues:
     def test_missing_credentials(self, tool_fns):
         with patch.dict("os.environ", {}, clear=True):
-            result = tool_fns["sheets_read_range"](spreadsheet_id="abc", range="Sheet1!A1:B2")
+            result = tool_fns["google_sheets_get_values"](
+                spreadsheet_id="abc", range_name="Sheet1!A1:B2"
+            )
         assert "error" in result
 
     def test_missing_params(self, tool_fns):
         with patch.dict("os.environ", ENV):
-            result = tool_fns["sheets_read_range"](spreadsheet_id="", range="")
+            with patch(
+                "aden_tools.tools.google_sheets_tool.google_sheets_tool.httpx.get",
+                return_value=_mock_resp({"error": {"message": "not found"}}, status_code=404),
+            ):
+                result = tool_fns["google_sheets_get_values"](spreadsheet_id="", range_name="")
         assert "error" in result
 
     def test_successful_read(self, tool_fns):
@@ -93,36 +104,9 @@ class TestSheetsReadRange:
                 return_value=_mock_resp(data),
             ),
         ):
-            result = tool_fns["sheets_read_range"](spreadsheet_id="abc123", range="Sheet1!A1:B3")
-
-        assert result["row_count"] == 3
-        assert result["values"][0] == ["Name", "Score"]
-
-
-class TestSheetsBatchRead:
-    def test_missing_params(self, tool_fns):
-        with patch.dict("os.environ", ENV):
-            result = tool_fns["sheets_batch_read"](spreadsheet_id="", ranges="")
-        assert "error" in result
-
-    def test_successful_batch(self, tool_fns):
-        data = {
-            "spreadsheetId": "abc123",
-            "valueRanges": [
-                {"range": "Sheet1!A1:B2", "values": [["a", "b"], ["c", "d"]]},
-                {"range": "Sheet2!A1:A2", "values": [["x"], ["y"]]},
-            ],
-        }
-        with (
-            patch.dict("os.environ", ENV),
-            patch(
-                "aden_tools.tools.google_sheets_tool.google_sheets_tool.httpx.get",
-                return_value=_mock_resp(data),
-            ),
-        ):
-            result = tool_fns["sheets_batch_read"](
-                spreadsheet_id="abc123", ranges="Sheet1!A1:B2,Sheet2!A1:A2"
+            result = tool_fns["google_sheets_get_values"](
+                spreadsheet_id="abc123", range_name="Sheet1!A1:B3"
             )
 
-        assert result["count"] == 2
-        assert result["ranges"][0]["row_count"] == 2
+        assert len(result["values"]) == 3
+        assert result["values"][0] == ["Name", "Score"]

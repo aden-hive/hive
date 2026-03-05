@@ -31,7 +31,13 @@ def cli():
 
 
 @cli.command()
-@click.option("--query", "-q", type=str, required=True, help="Search query (e.g. 'bakeries in San Francisco')")
+@click.option(
+    "--query",
+    "-q",
+    type=str,
+    required=True,
+    help="Search query (e.g. 'bakeries in San Francisco')",
+)
 @click.option("--quiet", is_flag=True, help="Only output result JSON")
 @click.option("--verbose", "-v", is_flag=True, help="Show execution details")
 @click.option("--debug", is_flag=True, help="Show debug logging")
@@ -123,7 +129,7 @@ async def _interactive_shell(verbose=False):
                 result = await agent.run({"user_request": query})
 
                 if result.success:
-                    click.echo(f"\nExtraction complete\n")
+                    click.echo("\nExtraction complete\n")
                 else:
                     click.echo(f"\nExtraction failed: {result.error}\n")
 
