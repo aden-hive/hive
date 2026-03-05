@@ -69,7 +69,7 @@ def save_credential_key(key: str) -> Path:
     # Restrict the secrets directory itself
     path.parent.chmod(stat.S_IRWXU)  # 0o700
 
-    path.write_text(key)
+    path.write_text(key, encoding="utf-8")
     path.chmod(stat.S_IRUSR | stat.S_IWUSR)  # 0o600
 
     os.environ[CREDENTIAL_KEY_ENV_VAR] = key

@@ -20,7 +20,15 @@ class TestRegistryCompleteness:
     # - google_cse: shares google_search checker (same credential_group)
     # - razorpay/razorpay_secret: requires HTTP Basic auth with TWO credentials,
     #   which the single-value health check dispatcher can't support
-    KNOWN_EXCEPTIONS = {"google_cse", "razorpay", "razorpay_secret"}
+    # - plaid_client_id/plaid_secret: requires POST with both client_id and
+    #   secret in JSON body, can't validate with a single credential value
+    KNOWN_EXCEPTIONS = {
+        "google_cse",
+        "razorpay",
+        "razorpay_secret",
+        "plaid_client_id",
+        "plaid_secret",
+    }
 
     def test_specs_with_endpoint_have_checkers(self):
         """Every CredentialSpec with health_check_endpoint has a HEALTH_CHECKERS entry."""

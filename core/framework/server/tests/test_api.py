@@ -74,6 +74,7 @@ class MockStream:
     is_awaiting_input: bool = False
     _execution_tasks: dict = field(default_factory=dict)
     _active_executors: dict = field(default_factory=dict)
+    active_execution_ids: set = field(default_factory=set)
 
     async def cancel_execution(self, execution_id: str) -> bool:
         return execution_id in self._execution_tasks
@@ -116,6 +117,9 @@ class MockRuntime:
 
     async def inject_input(self, node_id, content, graph_id=None, *, is_client_input=False):
         return True
+
+    def pause_timers(self):
+        pass
 
     async def get_goal_progress(self):
         return {"progress": 0.5, "criteria": []}
@@ -537,18 +541,8 @@ class TestExecution:
             assert resp.status == 400
 
     @pytest.mark.asyncio
-    async def test_pause_not_found(self):
-        session = _make_session()
-        app = _make_app_with_session(session)
-        async with TestClient(TestServer(app)) as client:
-            resp = await client.post(
-                "/api/sessions/test_agent/pause",
-                json={"execution_id": "nonexistent"},
-            )
-            assert resp.status == 404
-
-    @pytest.mark.asyncio
-    async def test_pause_missing_execution_id(self):
+    async def test_pause_no_active_executions(self):
+        """Pause with no active executions returns stopped=False."""
         session = _make_session()
         app = _make_app_with_session(session)
         async with TestClient(TestServer(app)) as client:
@@ -556,7 +550,26 @@ class TestExecution:
                 "/api/sessions/test_agent/pause",
                 json={},
             )
-            assert resp.status == 400
+            assert resp.status == 200
+            data = await resp.json()
+            assert data["stopped"] is False
+            assert data["cancelled"] == []
+            assert data["timers_paused"] is True
+
+    @pytest.mark.asyncio
+    async def test_pause_does_not_cancel_queen(self):
+        """Pause should stop the worker but leave the queen running."""
+        session = _make_session()
+        app = _make_app_with_session(session)
+        async with TestClient(TestServer(app)) as client:
+            resp = await client.post(
+                "/api/sessions/test_agent/pause",
+                json={},
+            )
+            assert resp.status == 200
+            # Queen's cancel_current_turn should NOT have been called
+            queen_node = session.queen_executor.node_registry["queen"]
+            queen_node.cancel_current_turn.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_goal_progress(self):

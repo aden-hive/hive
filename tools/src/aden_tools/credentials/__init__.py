@@ -33,7 +33,6 @@ Usage:
     })
 
 Credential categories:
-- llm.py: LLM provider credentials (anthropic, openai, etc.)
 - search.py: Search tool credentials (brave_search, google_search, etc.)
 - email.py: Email provider credentials (resend, google/gmail)
 - apollo.py: Apollo.io API credentials
@@ -96,7 +95,6 @@ from .jira import JIRA_CREDENTIALS
 from .kafka import KAFKA_CREDENTIALS
 from .langfuse import LANGFUSE_CREDENTIALS
 from .linear import LINEAR_CREDENTIALS
-from .llm import LLM_CREDENTIALS
 from .lusha import LUSHA_CREDENTIALS
 from .microsoft_graph import MICROSOFT_GRAPH_CREDENTIALS
 from .mongodb import MONGODB_CREDENTIALS
@@ -147,6 +145,10 @@ from .zoom import ZOOM_CREDENTIALS
 # Merged registry of all credentials
 CREDENTIAL_SPECS = {
     **AIRTABLE_CREDENTIALS,
+    **NEWS_CREDENTIALS,
+    **SEARCH_CREDENTIALS,
+    **EMAIL_CREDENTIALS,
+    **GCP_VISION_CREDENTIALS,
     **APIFY_CREDENTIALS,
     **APOLLO_CREDENTIALS,
     **ASANA_CREDENTIALS,
