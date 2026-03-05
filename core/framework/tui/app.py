@@ -1449,8 +1449,11 @@ class AdenTUI(App):
                 self.chat_repl.handle_constraint_violation(event.data)
             elif et == EventType.GOAL_ADJUSTMENT_NEEDED:
                 # Goal adjustment needed — notify queen
+                reason = event.data.get(
+                    "reason", "Goal adjustment recommended by evaluator."
+                )
                 self._inject_worker_status_into_queen(
-                    f"Goal adjustment needed: {event.data.get('reason', 'Goal adjustment recommended by evaluator.')}"
+                    f"Goal adjustment needed: {reason}"
                 )
 
             # --- Graph view events ---
