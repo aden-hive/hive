@@ -6,9 +6,7 @@ Earn XP, Discord roles, and eventually real money by testing and building integr
 
 ### 1. Link your GitHub and Discord
 
-Open a [Link Discord Account](https://github.com/aden-hive/hive/issues/new?template=link-discord.yml) issue — just paste your Discord ID and submit. A GitHub Action will automatically add you to `contributors.yml` and close the issue.
-
-To find your Discord ID: Discord Settings > Advanced > Enable **Developer Mode**, then right-click your name > **Copy User ID**.
+Type `/link-github <your-github-username>` in any Discord channel. The bot verifies your GitHub account and links it automatically.
 
 Without this link, Lurkr can't push XP to your Discord account.
 

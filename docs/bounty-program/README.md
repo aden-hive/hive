@@ -105,7 +105,7 @@ See the [Setup Guide](setup-guide.md) for full configuration (Lurkr, webhooks, s
 
 ### Identity Linking
 
-Contributors link GitHub ↔ Discord by opening a [Link Discord Account](https://github.com/aden-hive/hive/issues/new?template=link-discord.yml) issue. A GitHub Action auto-adds them to `contributors.yml` and closes the issue.
+Contributors link GitHub ↔ Discord by typing `/link-github <username>` in Discord. The bounty bot verifies the GitHub account and stores the mapping in MongoDB.
 
 Without this link, bounties are still tracked but Lurkr can't push XP to your Discord account.
 
@@ -120,7 +120,7 @@ Without this link, bounties are still tracked but Lurkr can't push XP to your Di
 | Agent Builder role       | Lurkr bot                  | Auto-assigned at level 5                        |
 | OSS Contributor role     | Lurkr bot                  | Auto-assigned at level 15                       |
 | Core Contributor role    | Maintainer                 | Manual (involves money)                         |
-| Identity linking         | contributors.yml           | PR-based, reviewed by maintainers               |
+| Identity linking         | Bounty bot + MongoDB       | `/link-github` in Discord                       |
 
 ## Guides
 
@@ -142,4 +142,5 @@ Without this link, bounties are still tracked but Lurkr can't push XP to your Di
 - `.github/workflows/weekly-leaderboard.yml` — Monday leaderboard post
 - `scripts/bounty-tracker.ts` — Point calculation, Lurkr API, Discord formatting
 - `scripts/setup-bounty-labels.sh` — One-time label setup
-- `contributors.yml` — GitHub ↔ Discord identity mapping
+- `scripts/contributors-db.ts` — MongoDB-backed GitHub ↔ Discord identity store
+- `contributors.yml` — Fallback identity mapping (deprecated, prefer MongoDB)

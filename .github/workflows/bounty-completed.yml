@@ -34,4 +34,5 @@ jobs:
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_BOUNTY_WEBHOOK_URL }}
           LURKR_API_KEY: ${{ secrets.LURKR_API_KEY }}
           LURKR_GUILD_ID: ${{ secrets.LURKR_GUILD_ID }}
+          MONGODB_URI: ${{ secrets.MONGODB_URI }}
           PR_NUMBER: ${{ github.event.pull_request.number }}

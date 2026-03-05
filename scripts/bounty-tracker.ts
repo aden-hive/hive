@@ -19,6 +19,7 @@
 
 import { readFileSync } from "fs";
 import { join } from "path";
+import { getDb, closeDb, loadContributorMap } from "./contributors-db";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -181,11 +182,10 @@ function parseContributorsYaml(raw: string): Contributor[] {
   return contributors;
 }
 
-function loadContributors(): Map<string, Contributor> {
+function loadContributorsFromYaml(): Map<string, Contributor> {
   const map = new Map<string, Contributor>();
 
   try {
-    // Resolve path relative to the script location (scripts/ dir → repo root)
     const scriptDir = new URL(".", import.meta.url).pathname;
     const raw = readFileSync(
       join(scriptDir, "..", "contributors.yml"),
@@ -201,6 +201,20 @@ function loadContributors(): Map<string, Contributor> {
   }
 
   return map;
+}
+
+async function loadContributors(): Promise<Map<string, Contributor>> {
+  if (process.env.MONGODB_URI) {
+    try {
+      const db = await getDb();
+      const map = await loadContributorMap(db);
+      console.log(`Loaded ${map.size} contributors from MongoDB`);
+      return map;
+    } catch (err) {
+      console.warn(`MongoDB load failed, falling back to YAML: ${err}`);
+    }
+  }
+  return loadContributorsFromYaml();
 }
 
 function resolveDiscord(
@@ -285,7 +299,7 @@ function formatBountyNotification(bounty: BountyResult): string {
   msg += `PR: ${bounty.pr.html_url}\n`;
 
   if (!bounty.discordId) {
-    msg += `\n_\u{1F517} @${bounty.contributor}: link your Discord in \`contributors.yml\` to get pinged!_`;
+    msg += `\n_\u{1F517} @${bounty.contributor}: use \`/link-github\` in Discord to get pinged!_`;
   }
 
   return msg;
@@ -454,7 +468,7 @@ async function main() {
     process.exit(1);
   }
 
-  const contributors = loadContributors();
+  const contributors = await loadContributors();
 
   if (mode === "notify") {
     // Single bounty notification
@@ -523,10 +537,12 @@ async function main() {
 }
 
 // Run if invoked directly
-main().catch((err) => {
-  console.error(err);
-  process.exit(1);
-});
+main()
+  .catch((err) => {
+    console.error(err);
+    process.exit(1);
+  })
+  .finally(() => closeDb());
 
 // Export for testing
 export {
@@ -535,6 +551,7 @@ export {
   formatBountyNotification,
   formatLeaderboard,
   loadContributors,
+  loadContributorsFromYaml,
   resolveDiscord,
   awardLurkrXP,
   lurkrAddXP,
