@@ -8,7 +8,6 @@ from framework.graph import NodeSpec
 # No voluntary read_file() calls needed — the LLM gets everything upfront.
 _ref_dir = Path(__file__).parent.parent / "reference"
 _framework_guide = (_ref_dir / "framework_guide.md").read_text(encoding="utf-8")
-_file_templates = (_ref_dir / "file_templates.md").read_text(encoding="utf-8")
 _anti_patterns = (_ref_dir / "anti_patterns.md").read_text(encoding="utf-8")
 _gcu_guide_path = _ref_dir / "gcu_guide.md"
 _gcu_guide = _gcu_guide_path.read_text(encoding="utf-8") if _gcu_guide_path.exists() else ""
@@ -27,8 +26,6 @@ def _build_appendices() -> str:
     parts = (
         "\n\n# Appendix: Framework Reference\n\n"
         + _framework_guide
-        + "\n\n# Appendix: File Templates\n\n"
-        + _file_templates
         + "\n\n# Appendix: Anti-Patterns\n\n"
         + _anti_patterns
     )
@@ -60,6 +57,7 @@ _SHARED_TOOLS = [
     "list_agent_checkpoints",
     "get_agent_checkpoint",
     "run_agent_tests",
+    "initialize_agent_package",
 ]
 
 # Queen mode-specific tool sets.
@@ -347,163 +345,19 @@ Get user approval before implementing.
 
 ## 4. Implement
 
-Consult the **File Templates** and **Anti-Patterns** appendices below.
+Call `initialize_agent_package` to generate all package files from your \
+graph session. The tool creates: config.py, nodes/__init__.py, agent.py, \
+__init__.py, __main__.py, mcp_servers.json, tests/conftest.py, \
+agent.json, README.md.
 
-Write files in order:
-1. mkdir -p exports/{name}/nodes exports/{name}/tests
-2. config.py — RuntimeConfig + AgentMetadata
-3. nodes/__init__.py — NodeSpec definitions with system prompts
-4. agent.py — Goal, edges, graph, agent class
-5. __init__.py — package exports
-6. __main__.py — CLI with click
-7. mcp_servers.json — tool server config
-8. tests/ — fixtures
+After initialization, review and customize if needed:
+- System prompts in nodes/__init__.py
+- CLI options in __main__.py
+- Identity prompt in agent.py
+- For async entry points (timers/webhooks), add AsyncEntryPointSpec \
+and AgentRuntimeConfig to agent.py manually
 
-### Critical Rules
-
-**Imports** (must match exactly — only import what you use):
-```python
-from framework.graph import (
-    NodeSpec, EdgeSpec, EdgeCondition,
-    Goal, SuccessCriterion, Constraint,
-)
-from framework.graph.edge import GraphSpec
-from framework.graph.executor import ExecutionResult
-from framework.graph.checkpoint_config import CheckpointConfig
-from framework.llm import LiteLLMProvider
-from framework.runner.tool_registry import ToolRegistry
-from framework.runtime.agent_runtime import (
-    AgentRuntime, create_agent_runtime,
-)
-from framework.runtime.execution_stream import EntryPointSpec
-```
-For agents with async entry points (timers, webhooks, events), also add:
-```python
-from framework.graph.edge import GraphSpec, AsyncEntryPointSpec
-from framework.runtime.agent_runtime import (
-    AgentRuntime, AgentRuntimeConfig, create_agent_runtime,
-)
-```
-NEVER `from core.framework...` — PYTHONPATH includes core/.
-
-**__init__.py MUST re-export ALL module-level variables** \
-(THIS IS THE #1 SOURCE OF AGENT LOAD FAILURES):
-The runner imports the package (__init__.py), NOT agent.py. It reads \
-goal, nodes, edges, entry_node, entry_points, pause_nodes, \
-terminal_nodes, conversation_mode, identity_prompt, loop_config via \
-getattr(). If ANY are missing from __init__.py, they silently default \
-to None or {} — causing "must define goal, nodes, edges" or "node X \
-is unreachable" errors. The __init__.py MUST import and re-export \
-ALL of these from .agent:
-```python
-from .agent import (
-    MyAgent, default_agent, goal, nodes, edges,
-    entry_node, entry_points, pause_nodes, terminal_nodes,
-    conversation_mode, identity_prompt, loop_config,
-)
-```
-
-**entry_points**: `{"start": "first-node-id"}`
-The first node should be an autonomous processing node (NOT a \
-client-facing intake). For agents with multiple entry points, \
-add them: `{"start": "process", "reminder": "check"}`
-
-**conversation_mode** — ONLY two valid values:
-- `"continuous"` — recommended for interactive agents (context carries \
-across node transitions)
-- Omit entirely — for isolated per-node conversations
-NEVER use: "client_facing", "interactive", "adaptive", or any other \
-value. These DO NOT EXIST.
-
-**loop_config** — ONLY three valid keys:
-```python
-loop_config = {
-    "max_iterations": 100,
-    "max_tool_calls_per_turn": 30,
-    "max_history_tokens": 32000,
-}
-```
-NEVER add: "strategy", "mode", "timeout", or other keys.
-
-**mcp_servers.json**:
-```json
-{
-  "hive-tools": {
-    "transport": "stdio",
-    "command": "uv",
-    "args": ["run", "python", "mcp_server.py", "--stdio"],
-    "cwd": "../../tools"
-  }
-}
-```
-NO "mcpServers" wrapper. cwd "../../tools". command "uv".
-
-**Storage**: `Path.home() / ".hive" / "agents" / "{name}"`
-
-**Client-facing system prompts** (review/approval nodes only, NOT intake) \
-— STEP 1/STEP 2 pattern:
-```
-STEP 1 — Present to user (text only, NO tool calls):
-[instructions]
-
-STEP 2 — After user responds, call set_output:
-[set_output calls]
-```
-The queen manages intake. Workers should NOT have a client-facing node \
-that asks for requirements. Use client_facing=True only for review or \
-approval checkpoints mid-execution.
-
-**Autonomous system prompts** — set_output in SEPARATE turn.
-
-**Tools** — NEVER fabricate tool names. Common hallucinations: \
-csv_read, csv_write, csv_append, file_upload, database_query. \
-If list_agent_tools() shows these don't exist, use alternatives \
-(e.g. save_data/load_data for data persistence).
-
-**Node rules**:
-- **NO intake nodes.** The queen owns intake. She defines the entry \
-node's input_keys at build time and fills them via \
-`run_agent_with_input(task)` at run time.
-- Don't abuse nodes without tools — merge them into a node that does work.
-- A node with 0 tools is NOT a real node — merge it.
-- node_type "event_loop" for all regular graph nodes. Use "gcu" ONLY for
-  browser automation subagents (see GCU appendix). GCU nodes MUST be in a
-  parent node's sub_agents list, NEVER connected via edges, and NEVER used
-  as entry/terminal nodes.
-- max_node_visits default is 0 (unbounded) — correct for forever-alive. \
-Only set >0 in one-shot agents with bounded feedback loops.
-- Feedback inputs: nullable_output_keys
-- terminal_nodes=[] for forever-alive (the default)
-- Every node MUST have at least one outgoing edge (no dead ends)
-- Agents are forever-alive unless user explicitly asks for one-shot
-
-**Agent class**: CamelCase name, default_agent at module level. \
-Constructor takes `config=None`. Follow the exact pattern in \
-file_templates.md — do NOT invent constructor params like \
-`llm_provider` or `tool_registry`.
-
-**Module-level variables** (read by AgentRunner.load()):
-goal, nodes, edges, entry_node, entry_points, pause_nodes,
-terminal_nodes, conversation_mode, identity_prompt, loop_config
-
-For agents with async triggers, also export:
-async_entry_points, runtime_config
-
-**Async entry points** (timers, webhooks, events):
-When an agent needs scheduled tasks, webhook reactions, or event-driven \
-triggers, use `AsyncEntryPointSpec` (from framework.graph.edge) and \
-`AgentRuntimeConfig` (from framework.runtime.agent_runtime):
-- Timer (cron): `trigger_type="timer"`, \
-`trigger_config={"cron": "0 9 * * *"}` — standard 5-field cron expression \
-(e.g. `"0 9 * * MON-FRI"` weekdays 9am, `"*/30 * * * *"` every 30 min)
-- Timer (interval): `trigger_type="timer"`, \
-`trigger_config={"interval_minutes": 20, "run_immediately": False}`
-- Event (for webhooks): `trigger_type="event"`, \
-`trigger_config={"event_types": ["webhook_received"]}`
-- `isolation_level="shared"` so async runs can read primary session memory
-- `runtime_config = AgentRuntimeConfig(webhook_routes=[...])` for HTTP webhooks
-- Reference: `exports/gmail_inbox_guardian/agent.py`
-- Full docs: see **Framework Reference** appendix (Async Entry Points section)
+Do NOT manually write these files from scratch — always use the tool.
 
 ## 5. Verify
 

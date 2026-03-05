@@ -1878,6 +1878,739 @@ def export_graph() -> str:
     )
 
 
+def _snake_to_camel(name: str) -> str:
+    """Convert snake_case to CamelCase.  e.g. 'twitter_outreach_agent' -> 'TwitterOutreachAgent'."""
+    return "".join(word.capitalize() for word in name.split("_"))
+
+
+def _node_var_name(node_id: str) -> str:
+    """Convert node id to a Python variable name.  e.g. 'check-inbox' -> 'check_inbox_node'."""
+    return node_id.replace("-", "_") + "_node"
+
+
+def _generate_config_py(session: BuildSession) -> str:
+    """Generate config.py content."""
+    goal_name = session.goal.name if session.goal else session.name
+    goal_desc = session.goal.description if session.goal else ""
+    return f'''\
+"""Runtime configuration."""
+
+import json
+from dataclasses import dataclass, field
+from pathlib import Path
+
+
+def _load_preferred_model() -> str:
+    """Load preferred model from ~/.hive/configuration.json."""
+    config_path = Path.home() / ".hive" / "configuration.json"
+    if config_path.exists():
+        try:
+            with open(config_path) as f:
+                config = json.load(f)
+            llm = config.get("llm", {{}})
+            if llm.get("provider") and llm.get("model"):
+                return f"{{llm[\'provider\']}}/{{llm[\'model\']}}"
+        except Exception:
+            pass
+    return "anthropic/claude-sonnet-4-20250514"
+
+
+@dataclass
+class RuntimeConfig:
+    model: str = field(default_factory=_load_preferred_model)
+    temperature: float = 0.7
+    max_tokens: int = 40000
+    api_key: str | None = None
+    api_base: str | None = None
+
+
+default_config = RuntimeConfig()
+
+
+@dataclass
+class AgentMetadata:
+    name: str = {json.dumps(goal_name)}
+    version: str = "1.0.0"
+    description: str = {json.dumps(goal_desc)}
+    intro_message: str = {json.dumps(f"{goal_name} ready.")}
+
+
+metadata = AgentMetadata()
+'''
+
+
+def _generate_nodes_init_py(session: BuildSession) -> str:
+    """Generate nodes/__init__.py content."""
+    lines = ['"""Node definitions."""\n', "from framework.graph import NodeSpec\n"]
+
+    var_names = []
+    for node in session.nodes:
+        var = _node_var_name(node.id)
+        var_names.append(var)
+
+        # Build NodeSpec kwargs
+        kwargs_parts = [
+            f"    id={json.dumps(node.id)},",
+            f"    name={json.dumps(node.name)},",
+            f"    description={json.dumps(node.description)},",
+            f"    node_type={json.dumps(node.node_type)},",
+            f"    client_facing={node.client_facing!r},",
+            f"    max_node_visits={node.max_node_visits},",
+            f"    input_keys={json.dumps(node.input_keys)},",
+            f"    output_keys={json.dumps(node.output_keys)},",
+        ]
+        if node.nullable_output_keys:
+            kwargs_parts.append(f"    nullable_output_keys={json.dumps(node.nullable_output_keys)},")
+        if node.success_criteria:
+            kwargs_parts.append(f"    success_criteria={json.dumps(node.success_criteria)},")
+        if node.routes:
+            kwargs_parts.append(f"    routes={json.dumps(node.routes)},")
+        if node.sub_agents:
+            kwargs_parts.append(f"    sub_agents={json.dumps(node.sub_agents)},")
+
+        # System prompt — use triple-quoted string for readability
+        sp = node.system_prompt or ""
+        kwargs_parts.append(f"    system_prompt={json.dumps(sp)},")
+
+        kwargs_parts.append(f"    tools={json.dumps(node.tools)},")
+
+        lines.append(f"\n{var} = NodeSpec(\n")
+        lines.append("\n".join(kwargs_parts))
+        lines.append("\n)\n")
+
+    lines.append(f"\n__all__ = {json.dumps(var_names)}\n")
+    return "".join(lines)
+
+
+def _generate_agent_py(
+    session: BuildSession,
+    entry_node: str,
+    entry_points: dict,
+    terminal_nodes: list,
+    pause_nodes: list,
+    has_async: bool,
+) -> str:
+    """Generate agent.py content."""
+    class_name = _snake_to_camel(session.name)
+    agent_name = session.name
+    goal = session.goal
+
+    # Build node variable imports
+    node_vars = [_node_var_name(n.id) for n in session.nodes]
+    node_imports = ", ".join(node_vars)
+
+    # Imports block
+    imports = [
+        '"""Agent graph construction."""\n',
+        "from pathlib import Path\n",
+        "from framework.graph import EdgeSpec, EdgeCondition, Goal, SuccessCriterion, Constraint",
+    ]
+    if has_async:
+        imports.append("from framework.graph.edge import GraphSpec, AsyncEntryPointSpec")
+        imports.append(
+            "from framework.runtime.agent_runtime import (\n"
+            "    AgentRuntime, AgentRuntimeConfig, create_agent_runtime,\n"
+            ")"
+        )
+    else:
+        imports.append("from framework.graph.edge import GraphSpec")
+        imports.append(
+            "from framework.runtime.agent_runtime import (\n"
+            "    AgentRuntime, create_agent_runtime,\n"
+            ")"
+        )
+    imports.append("from framework.graph.executor import ExecutionResult")
+    imports.append("from framework.graph.checkpoint_config import CheckpointConfig")
+    imports.append("from framework.llm import LiteLLMProvider")
+    imports.append("from framework.runner.tool_registry import ToolRegistry")
+    imports.append("from framework.runtime.execution_stream import EntryPointSpec")
+    imports.append(f"\nfrom .config import default_config, metadata")
+    imports.append(f"from .nodes import {node_imports}")
+
+    out = "\n".join(imports) + "\n\n"
+
+    # Goal definition
+    out += "# Goal definition\n"
+    out += "goal = Goal(\n"
+    out += f"    id={json.dumps(goal.id)},\n"
+    out += f"    name={json.dumps(goal.name)},\n"
+    out += f"    description={json.dumps(goal.description)},\n"
+
+    if goal.success_criteria:
+        out += "    success_criteria=[\n"
+        for sc in goal.success_criteria:
+            sc_dict = sc.model_dump() if hasattr(sc, "model_dump") else sc
+            out += "        SuccessCriterion(\n"
+            out += f"            id={json.dumps(sc_dict['id'])},\n"
+            out += f"            description={json.dumps(sc_dict['description'])},\n"
+            out += f"            metric={json.dumps(sc_dict.get('metric', ''))},\n"
+            out += f"            target={json.dumps(sc_dict.get('target', ''))},\n"
+            out += f"            weight={sc_dict.get('weight', 1.0)},\n"
+            out += "        ),\n"
+        out += "    ],\n"
+
+    if goal.constraints:
+        out += "    constraints=[\n"
+        for c in goal.constraints:
+            c_dict = c.model_dump() if hasattr(c, "model_dump") else c
+            out += "        Constraint(\n"
+            out += f"            id={json.dumps(c_dict['id'])},\n"
+            out += f"            description={json.dumps(c_dict['description'])},\n"
+            out += f"            constraint_type={json.dumps(c_dict.get('constraint_type', 'hard'))},\n"
+            out += f"            category={json.dumps(c_dict.get('category', 'quality'))},\n"
+            out += "        ),\n"
+        out += "    ],\n"
+
+    out += ")\n\n"
+
+    # Nodes list
+    out += f"# Node list\nnodes = [{node_imports}]\n\n"
+
+    # Edges
+    out += "# Edge definitions\nedges = [\n"
+    for edge in session.edges:
+        out += "    EdgeSpec(\n"
+        out += f"        id={json.dumps(edge.id)},\n"
+        out += f"        source={json.dumps(edge.source)},\n"
+        out += f"        target={json.dumps(edge.target)},\n"
+        out += f"        condition=EdgeCondition.{edge.condition.name},\n"
+        if edge.condition_expr:
+            out += f"        condition_expr={json.dumps(edge.condition_expr)},\n"
+        out += f"        priority={edge.priority},\n"
+        out += "    ),\n"
+    out += "]\n\n"
+
+    # Graph config
+    out += "# Graph configuration\n"
+    out += f"entry_node = {json.dumps(entry_node)}\n"
+    out += f"entry_points = {json.dumps(entry_points)}\n"
+    out += f"pause_nodes = {json.dumps(pause_nodes)}\n"
+    out += f"terminal_nodes = {json.dumps(terminal_nodes)}\n\n"
+
+    # Async entry points placeholder (if has_async, emit a TODO skeleton)
+    if has_async:
+        out += "# Async entry points — customize triggers as needed\n"
+        out += "async_entry_points = []\n\n"
+        out += "# Runtime config for webhooks (optional)\n"
+        out += "runtime_config = AgentRuntimeConfig(\n"
+        out += '    webhook_host="127.0.0.1",\n'
+        out += "    webhook_port=8080,\n"
+        out += "    webhook_routes=[],\n"
+        out += ")\n\n"
+
+    # Module-level vars
+    out += "# Module-level vars read by AgentRunner.load()\n"
+    out += 'conversation_mode = "continuous"\n'
+
+    identity = f"You are {goal.name}. {goal.description}"
+    if len(identity) > 200:
+        identity = identity[:197] + "..."
+    out += f"identity_prompt = {json.dumps(identity)}\n"
+
+    loop_cfg = session.loop_config or {
+        "max_iterations": 100,
+        "max_tool_calls_per_turn": 30,
+        "max_history_tokens": 32000,
+    }
+    out += f"loop_config = {json.dumps(loop_cfg)}\n\n"
+
+    # Agent class
+    graph_id = f"{agent_name}-graph"
+    out += f"\nclass {class_name}:\n"
+    out += "    def __init__(self, config=None):\n"
+    out += "        self.config = config or default_config\n"
+    out += "        self.goal = goal\n"
+    out += "        self.nodes = nodes\n"
+    out += "        self.edges = edges\n"
+    out += "        self.entry_node = entry_node\n"
+    out += "        self.entry_points = entry_points\n"
+    out += "        self.pause_nodes = pause_nodes\n"
+    out += "        self.terminal_nodes = terminal_nodes\n"
+    out += "        self._graph = None\n"
+    out += "        self._agent_runtime = None\n"
+    out += "        self._tool_registry = None\n"
+    out += "        self._storage_path = None\n\n"
+
+    # _build_graph
+    out += "    def _build_graph(self):\n"
+    out += "        return GraphSpec(\n"
+    out += f"            id={json.dumps(graph_id)},\n"
+    out += "            goal_id=self.goal.id,\n"
+    out += '            version="1.0.0",\n'
+    out += "            entry_node=self.entry_node,\n"
+    out += "            entry_points=self.entry_points,\n"
+    out += "            terminal_nodes=self.terminal_nodes,\n"
+    out += "            pause_nodes=self.pause_nodes,\n"
+    out += "            nodes=self.nodes,\n"
+    out += "            edges=self.edges,\n"
+    if has_async:
+        out += "            async_entry_points=async_entry_points,\n"
+    out += "            default_model=self.config.model,\n"
+    out += "            max_tokens=self.config.max_tokens,\n"
+    out += "            loop_config=loop_config,\n"
+    out += "            conversation_mode=conversation_mode,\n"
+    out += "            identity_prompt=identity_prompt,\n"
+    out += "        )\n\n"
+
+    # _setup
+    storage = f".hive/agents/{agent_name}"
+    out += "    def _setup(self):\n"
+    out += f"        self._storage_path = Path.home() / {json.dumps(storage)}\n"
+    out += "        self._storage_path.mkdir(parents=True, exist_ok=True)\n"
+    out += "        self._tool_registry = ToolRegistry()\n"
+    out += '        mcp_config = Path(__file__).parent / "mcp_servers.json"\n'
+    out += "        if mcp_config.exists():\n"
+    out += "            self._tool_registry.load_mcp_config(mcp_config)\n"
+    out += "        llm = LiteLLMProvider(\n"
+    out += "            model=self.config.model,\n"
+    out += "            api_key=self.config.api_key,\n"
+    out += "            api_base=self.config.api_base,\n"
+    out += "        )\n"
+    out += "        tools = list(self._tool_registry.get_tools().values())\n"
+    out += "        tool_executor = self._tool_registry.get_executor()\n"
+    out += "        self._graph = self._build_graph()\n"
+    out += "        self._agent_runtime = create_agent_runtime(\n"
+    out += "            graph=self._graph,\n"
+    out += "            goal=self.goal,\n"
+    out += "            storage_path=self._storage_path,\n"
+    out += "            entry_points=[\n"
+    out += "                EntryPointSpec(\n"
+    out += '                    id="default",\n'
+    out += '                    name="Default",\n'
+    out += "                    entry_node=self.entry_node,\n"
+    out += '                    trigger_type="manual",\n'
+    out += '                    isolation_level="shared",\n'
+    out += "                ),\n"
+    out += "            ],\n"
+    if has_async:
+        out += "            runtime_config=runtime_config,\n"
+    out += "            llm=llm,\n"
+    out += "            tools=tools,\n"
+    out += "            tool_executor=tool_executor,\n"
+    out += "            checkpoint_config=CheckpointConfig(\n"
+    out += "                enabled=True,\n"
+    out += "                checkpoint_on_node_complete=True,\n"
+    out += "                checkpoint_max_age_days=7,\n"
+    out += "                async_checkpoint=True,\n"
+    out += "            ),\n"
+    out += "        )\n\n"
+
+    # start / stop / trigger_and_wait / run
+    out += "    async def start(self):\n"
+    out += "        if self._agent_runtime is None:\n"
+    out += "            self._setup()\n"
+    out += "        if not self._agent_runtime.is_running:\n"
+    out += "            await self._agent_runtime.start()\n\n"
+
+    out += "    async def stop(self):\n"
+    out += "        if self._agent_runtime and self._agent_runtime.is_running:\n"
+    out += "            await self._agent_runtime.stop()\n"
+    out += "        self._agent_runtime = None\n\n"
+
+    out += "    async def trigger_and_wait(\n"
+    out += "        self,\n"
+    out += '        entry_point="default",\n'
+    out += "        input_data=None,\n"
+    out += "        timeout=None,\n"
+    out += "        session_state=None,\n"
+    out += "    ):\n"
+    out += "        if self._agent_runtime is None:\n"
+    out += '            raise RuntimeError("Agent not started. Call start() first.")\n'
+    out += "        return await self._agent_runtime.trigger_and_wait(\n"
+    out += "            entry_point_id=entry_point,\n"
+    out += "            input_data=input_data or {},\n"
+    out += "            session_state=session_state,\n"
+    out += "        )\n\n"
+
+    out += "    async def run(self, context, session_state=None):\n"
+    out += "        await self.start()\n"
+    out += "        try:\n"
+    out += "            result = await self.trigger_and_wait(\n"
+    out += '                "default", context, session_state=session_state\n'
+    out += "            )\n"
+    out += '            return result or ExecutionResult(success=False, error="Execution timeout")\n'
+    out += "        finally:\n"
+    out += "            await self.stop()\n\n"
+
+    # info
+    out += "    def info(self):\n"
+    out += "        return {\n"
+    out += '            "name": metadata.name,\n'
+    out += '            "version": metadata.version,\n'
+    out += '            "description": metadata.description,\n'
+    out += '            "goal": {\n'
+    out += '                "name": self.goal.name,\n'
+    out += '                "description": self.goal.description,\n'
+    out += "            },\n"
+    out += '            "nodes": [n.id for n in self.nodes],\n'
+    out += '            "edges": [e.id for e in self.edges],\n'
+    out += '            "entry_node": self.entry_node,\n'
+    out += '            "entry_points": self.entry_points,\n'
+    out += '            "terminal_nodes": self.terminal_nodes,\n'
+    out += '            "client_facing_nodes": [n.id for n in self.nodes if n.client_facing],\n'
+    out += "        }\n\n"
+
+    # validate
+    out += "    def validate(self):\n"
+    out += "        errors, warnings = [], []\n"
+    out += "        node_ids = {n.id for n in self.nodes}\n"
+    out += "        for e in self.edges:\n"
+    out += "            if e.source not in node_ids:\n"
+    out += "                errors.append(f\"Edge {e.id}: source '{e.source}' not found\")\n"
+    out += "            if e.target not in node_ids:\n"
+    out += "                errors.append(f\"Edge {e.id}: target '{e.target}' not found\")\n"
+    out += "        if self.entry_node not in node_ids:\n"
+    out += "            errors.append(f\"Entry node '{self.entry_node}' not found\")\n"
+    out += "        for t in self.terminal_nodes:\n"
+    out += "            if t not in node_ids:\n"
+    out += "                errors.append(f\"Terminal node '{t}' not found\")\n"
+    out += "        for ep_id, nid in self.entry_points.items():\n"
+    out += "            if nid not in node_ids:\n"
+    out += "                errors.append(\n"
+    out += "                    f\"Entry point '{ep_id}' references unknown node '{nid}'\"\n"
+    out += "                )\n"
+    out += '        return {"valid": len(errors) == 0, "errors": errors, "warnings": warnings}\n\n\n'
+
+    out += f"default_agent = {class_name}()\n"
+    return out
+
+
+def _generate_init_py(session: BuildSession, has_async: bool) -> str:
+    """Generate __init__.py content."""
+    class_name = _snake_to_camel(session.name)
+    goal_name = session.goal.name if session.goal else session.name
+
+    agent_imports = [
+        class_name,
+        "default_agent",
+        "goal",
+        "nodes",
+        "edges",
+        "entry_node",
+        "entry_points",
+        "pause_nodes",
+        "terminal_nodes",
+        "conversation_mode",
+        "identity_prompt",
+        "loop_config",
+    ]
+    if has_async:
+        agent_imports.extend(["async_entry_points", "runtime_config"])
+
+    agent_import_str = ",\n    ".join(agent_imports)
+
+    config_imports = ["default_config", "metadata"]
+    config_import_str = ", ".join(config_imports)
+
+    all_names = agent_imports + config_imports
+    all_str = ",\n    ".join(f'"{n}"' for n in all_names)
+
+    return f'''\
+"""{goal_name}."""
+
+from .agent import (
+    {agent_import_str},
+)
+from .config import {config_import_str}
+
+__all__ = [
+    {all_str},
+]
+'''
+
+
+def _generate_main_py(session: BuildSession, has_async: bool) -> str:
+    """Generate __main__.py content."""
+    class_name = _snake_to_camel(session.name)
+    agent_name = session.name
+    goal_name = session.goal.name if session.goal else session.name
+    storage_path = f".hive/agents/{agent_name}"
+
+    out = f'''\
+"""CLI entry point for {goal_name}."""
+
+import asyncio
+import json
+import logging
+import sys
+
+import click
+
+from .agent import default_agent, {class_name}
+
+
+def setup_logging(verbose=False, debug=False):
+    if debug:
+        level, fmt = logging.DEBUG, "%(asctime)s %(name)s: %(message)s"
+    elif verbose:
+        level, fmt = logging.INFO, "%(message)s"
+    else:
+        level, fmt = logging.WARNING, "%(levelname)s: %(message)s"
+    logging.basicConfig(level=level, format=fmt, stream=sys.stderr)
+
+
+@click.group()
+@click.version_option(version="1.0.0")
+def cli():
+    """{goal_name}."""
+    pass
+
+
+@cli.command()
+@click.option("--verbose", "-v", is_flag=True)
+def run(verbose):
+    """Execute the agent."""
+    setup_logging(verbose=verbose)
+    result = asyncio.run(default_agent.run({{}}))
+    click.echo(
+        json.dumps(
+            {{"success": result.success, "output": result.output}}, indent=2, default=str
+        )
+    )
+    sys.exit(0 if result.success else 1)
+
+
+@cli.command()
+def tui():
+    """Launch TUI dashboard."""
+    from pathlib import Path
+
+    from framework.runtime.agent_runtime import create_agent_runtime
+    from framework.runtime.execution_stream import EntryPointSpec
+    from framework.tui.app import AdenTUI
+
+    async def run_tui():
+        agent = {class_name}()
+        storage = Path.home() / {json.dumps(storage_path)}
+        storage.mkdir(parents=True, exist_ok=True)
+        agent._setup()
+        runtime = agent._agent_runtime
+        app = AdenTUI(runtime)
+        await app.run_async()
+        await runtime.stop()
+
+    asyncio.run(run_tui())
+
+
+@cli.command()
+def info():
+    """Show agent info."""
+    data = default_agent.info()
+    click.echo(f"Agent: {{data[\'name\']}}\\nVersion: {{data[\'version\']}}")
+    click.echo(f"Description: {{data[\'description\']}}")
+    click.echo(f"Nodes: {{', '.join(data[\'nodes\'])}}")
+    click.echo(
+        f"Client-facing: {{', '.join(data[\'client_facing_nodes\'])}}"
+    )
+
+
+@cli.command()
+def validate():
+    """Validate agent structure."""
+    v = default_agent.validate()
+    if v["valid"]:
+        click.echo("Agent is valid")
+    else:
+        click.echo("Errors:")
+        for e in v["errors"]:
+            click.echo(f"  {{e}}")
+    sys.exit(0 if v["valid"] else 1)
+
+
+if __name__ == "__main__":
+    cli()
+'''
+    return out
+
+
+def _generate_conftest_py() -> str:
+    """Generate tests/conftest.py content — pure boilerplate."""
+    return '''\
+"""Test fixtures."""
+
+import sys
+from pathlib import Path
+
+import pytest
+
+_repo_root = Path(__file__).resolve().parents[3]
+for _p in ["exports", "core"]:
+    _path = str(_repo_root / _p)
+    if _path not in sys.path:
+        sys.path.insert(0, _path)
+
+AGENT_PATH = str(Path(__file__).resolve().parents[1])
+
+
+@pytest.fixture(scope="session")
+def agent_module():
+    """Import the agent package for structural validation."""
+    import importlib
+
+    return importlib.import_module(Path(AGENT_PATH).name)
+
+
+@pytest.fixture(scope="session")
+def runner_loaded():
+    """Load the agent through AgentRunner (structural only, no LLM needed)."""
+    from framework.runner.runner import AgentRunner
+
+    return AgentRunner.load(AGENT_PATH)
+'''
+
+
+def _generate_mcp_servers_json(session: BuildSession) -> str | None:
+    """Generate mcp_servers.json in flat dict format.  Returns None if no servers."""
+    if not session.mcp_servers:
+        return None
+    flat: dict[str, dict] = {}
+    for server in session.mcp_servers:
+        name = server.get("name", "unnamed")
+        entry: dict = {}
+        for key in ("transport", "command", "args", "cwd", "env", "url", "headers", "description"):
+            if key in server and server[key]:
+                entry[key] = server[key]
+        # Default cwd for stdio servers
+        if entry.get("transport") == "stdio" and "cwd" not in entry:
+            entry["cwd"] = "../../tools"
+        flat[name] = entry
+    return json.dumps(flat, indent=2)
+
+
+@mcp.tool()
+def initialize_agent_package() -> str:
+    """
+    Generate the full Python agent package from the current build session.
+
+    Creates all files needed for a runnable agent in exports/{name}/:
+    config.py, nodes/__init__.py, agent.py, __init__.py, __main__.py,
+    mcp_servers.json, tests/conftest.py, agent.json, README.md.
+
+    Call this INSTEAD of manually writing package files. Requires a valid
+    graph (goal, nodes, edges). Uses the same validation as export_graph.
+    """
+    from pathlib import Path
+
+    session = get_session()
+
+    # Validate first
+    validation = json.loads(validate_graph())
+    if not validation["valid"]:
+        return json.dumps({"success": False, "errors": validation["errors"]})
+
+    entry_node = validation["entry_node"]
+    terminal_nodes = validation["terminal_nodes"]
+    pause_nodes = validation.get("pause_nodes", [])
+    resume_entry_points = validation.get("resume_entry_points", [])
+
+    # Build entry_points dict (same logic as export_graph)
+    entry_points: dict[str, str] = {}
+    if entry_node:
+        entry_points["start"] = entry_node
+
+    if pause_nodes and resume_entry_points:
+        pause_to_resume: dict[str, str] = {}
+        for pause_node_id in pause_nodes:
+            pause_node = next((n for n in session.nodes if n.id == pause_node_id), None)
+            if not pause_node:
+                continue
+            for resume_node_id in resume_entry_points:
+                resume_node = next((n for n in session.nodes if n.id == resume_node_id), None)
+                if not resume_node:
+                    continue
+                shared_keys = set(pause_node.output_keys) & set(resume_node.input_keys)
+                if shared_keys:
+                    pause_to_resume[pause_node_id] = resume_node_id
+                    break
+        unmatched_pause = [p for p in pause_nodes if p not in pause_to_resume]
+        unmatched_resume = [r for r in resume_entry_points if r not in pause_to_resume.values()]
+        for pause_id, resume_id in zip(unmatched_pause, unmatched_resume, strict=False):
+            pause_to_resume[pause_id] = resume_id
+        for pause_id, resume_id in pause_to_resume.items():
+            entry_points[f"{pause_id}_resume"] = resume_id
+
+    # Detect whether this agent needs async entry points
+    has_async = False  # Placeholder; the coder can customize after generation
+
+    # Create directory structure
+    exports_dir = Path("exports") / session.name
+    nodes_dir = exports_dir / "nodes"
+    tests_dir = exports_dir / "tests"
+    nodes_dir.mkdir(parents=True, exist_ok=True)
+    tests_dir.mkdir(parents=True, exist_ok=True)
+
+    files_written: dict[str, dict] = {}
+
+    def _write(rel_path: str, content: str) -> None:
+        full = exports_dir / rel_path
+        full.parent.mkdir(parents=True, exist_ok=True)
+        with atomic_write(full) as f:
+            f.write(content)
+        files_written[rel_path] = {
+            "path": str(full),
+            "size_bytes": full.stat().st_size,
+        }
+
+    # 1. config.py
+    _write("config.py", _generate_config_py(session))
+
+    # 2. nodes/__init__.py
+    _write("nodes/__init__.py", _generate_nodes_init_py(session))
+
+    # 3. agent.py
+    _write(
+        "agent.py",
+        _generate_agent_py(session, entry_node, entry_points, terminal_nodes, pause_nodes, has_async),
+    )
+
+    # 4. __init__.py
+    _write("__init__.py", _generate_init_py(session, has_async))
+
+    # 5. __main__.py
+    _write("__main__.py", _generate_main_py(session, has_async))
+
+    # 6. mcp_servers.json
+    mcp_content = _generate_mcp_servers_json(session)
+    if mcp_content is not None:
+        _write("mcp_servers.json", mcp_content)
+
+    # 7. tests/conftest.py
+    _write("tests/conftest.py", _generate_conftest_py())
+
+    # 8. agent.json + README.md — reuse export_graph logic
+    export_result = json.loads(export_graph())
+    if export_result.get("success"):
+        for key in ("agent_json", "readme", "mcp_servers"):
+            if key in export_result.get("files_written", {}):
+                info = export_result["files_written"][key]
+                # Map to relative path
+                rel = str(Path(info["path"]).relative_to(exports_dir)) if exports_dir.as_posix() in info["path"] else info["path"]
+                files_written[rel] = info
+
+    return json.dumps(
+        {
+            "success": True,
+            "agent_name": session.name,
+            "class_name": _snake_to_camel(session.name),
+            "files_written": files_written,
+            "file_count": len(files_written),
+            "node_count": len(session.nodes),
+            "edge_count": len(session.edges),
+            "has_async": has_async,
+            "entry_node": entry_node,
+            "entry_points": entry_points,
+            "summary": (
+                f"Agent package '{session.name}' initialized at exports/{session.name}/. "
+                f"Generated {len(files_written)} files. "
+                f"Review and customize system prompts in nodes/__init__.py, "
+                f"then run validation."
+            ),
+        },
+        default=str,
+        indent=2,
+    )
+
+
 @mcp.tool()
 def import_from_export(
     agent_json_path: Annotated[str, "Path to the agent.json file to import"],
