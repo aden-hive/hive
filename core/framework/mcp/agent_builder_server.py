@@ -496,7 +496,13 @@ def _validate_tool_credentials(tools_list: list[str]) -> dict | None:
         # Find missing credentials
         cred_errors = []
         checked: set[str] = set()
+        # Tools that should not be blocked at build-time for missing credentials.
+        # `web_search` is keyless-first in current Hive MCP templates.
+        keyless_build_tools = {"web_search"}
+
         for tool_name in tools_list:
+            if tool_name in keyless_build_tools:
+                continue
             cred_name = tool_to_cred.get(tool_name)
             if cred_name is None or cred_name in checked:
                 continue
