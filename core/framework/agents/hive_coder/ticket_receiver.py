@@ -18,7 +18,7 @@ TICKET_RECEIVER_ENTRY_POINT = AsyncEntryPointSpec(
     entry_node="ticket_triage",
     trigger_type="event",
     trigger_config={
-        "event_types": ["worker_escalation_ticket"],
+        "event_types": ["worker_escalation_ticket", "goal_adjustment_needed"],
         # Do not fire on our own graph's events (prevents loops if queen
         # somehow emits a worker_escalation_ticket for herself)
         "exclude_own_graph": True,

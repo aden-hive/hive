@@ -79,7 +79,9 @@ class StatusBar(Container):
             parts.append(node_str)
 
         if self._state == "running" and self._start_time:
-            parts.append(f"[dim]{self._format_elapsed(time.time() - self._start_time)}[/dim]")
+            parts.append(
+                f"[dim]{self._format_elapsed(time.time() - self._start_time)}[/dim]"
+            )
         elif self._final_elapsed is not None:
             parts.append(f"[dim]{self._format_elapsed(self._final_elapsed)}[/dim]")
 
@@ -267,7 +269,9 @@ class AdenTUI(App):
                 text = widget.copy_selection()
                 if text:
                     widget.clear_selection()
-                    self.notify("Copied to clipboard", severity="information", timeout=2)
+                    self.notify(
+                        "Copied to clipboard", severity="information", timeout=2
+                    )
                     return
 
         self.notify("Press [b]q[/b] to quit", severity="warning", timeout=3)
@@ -393,7 +397,9 @@ class AdenTUI(App):
                 else:
                     accounts = []
             except Exception as e:
-                self.notify(f"Failed to list accounts: {e}", severity="error", timeout=10)
+                self.notify(
+                    f"Failed to list accounts: {e}", severity="error", timeout=10
+                )
                 accounts = []
             if accounts:
                 self._show_account_selection(runner, accounts)
@@ -434,11 +440,15 @@ class AdenTUI(App):
         if self.runtime and not self.runtime.is_running:
             try:
                 agent_loop = self.chat_repl._agent_loop
-                future = asyncio.run_coroutine_threadsafe(self.runtime.start(), agent_loop)
+                future = asyncio.run_coroutine_threadsafe(
+                    self.runtime.start(), agent_loop
+                )
                 await asyncio.wrap_future(future)
             except Exception as e:
                 self.status_bar.set_graph_id("")
-                self.notify(f"Failed to start runtime: {e}", severity="error", timeout=10)
+                self.notify(
+                    f"Failed to start runtime: {e}", severity="error", timeout=10
+                )
                 return
 
         await self._init_runtime_connection()
@@ -479,7 +489,9 @@ class AdenTUI(App):
             QueenModeState,
             register_queen_lifecycle_tools,
         )
-        from framework.tools.worker_monitoring_tools import register_worker_monitoring_tools
+        from framework.tools.worker_monitoring_tools import (
+            register_worker_monitoring_tools,
+        )
 
         log = logging.getLogger("tui.queen")
 
@@ -570,9 +582,15 @@ class AdenTUI(App):
             building_names = set(_QUEEN_BUILDING_TOOLS)
             staging_names = set(_QUEEN_STAGING_TOOLS)
             running_names = set(_QUEEN_RUNNING_TOOLS)
-            mode_state.building_tools = [t for t in queen_tools if t.name in building_names]
-            mode_state.staging_tools = [t for t in queen_tools if t.name in staging_names]
-            mode_state.running_tools = [t for t in queen_tools if t.name in running_names]
+            mode_state.building_tools = [
+                t for t in queen_tools if t.name in building_names
+            ]
+            mode_state.staging_tools = [
+                t for t in queen_tools if t.name in staging_names
+            ]
+            mode_state.running_tools = [
+                t for t in queen_tools if t.name in running_names
+            ]
 
             # Build worker profile for queen's system prompt.
             from framework.tools.queen_lifecycle_tools import build_worker_profile
@@ -592,7 +610,9 @@ class AdenTUI(App):
             node_updates: dict = {}
             if set(available_tools) != set(declared_tools):
                 missing = sorted(set(declared_tools) - registered_tool_names)
-                log.warning("Queen: tools not available (MCP may have failed): %s", missing)
+                log.warning(
+                    "Queen: tools not available (MCP may have failed): %s", missing
+                )
                 node_updates["tools"] = available_tools
             # Always inject worker identity into system prompt.
             base_prompt = _orig_queen_node.system_prompt or ""
@@ -796,11 +816,16 @@ class AdenTUI(App):
 
     def _show_agent_picker_initial(self) -> None:
         """Show the agent picker on initial startup (no agent loaded)."""
-        from framework.tui.screens.agent_picker import AgentPickerScreen, discover_agents
+        from framework.tui.screens.agent_picker import (
+            AgentPickerScreen,
+            discover_agents,
+        )
 
         agents = discover_agents()
         if not agents:
-            self.notify("No agents found in exports/ or examples/", severity="error", timeout=5)
+            self.notify(
+                "No agents found in exports/ or examples/", severity="error", timeout=5
+            )
             self.set_timer(2.0, self.exit)
             return
 
@@ -835,7 +860,10 @@ class AdenTUI(App):
 
     def _show_agent_picker_tab(self, tab_id: str) -> None:
         """Show the agent picker focused on a specific tab (no Get Started)."""
-        from framework.tui.screens.agent_picker import AgentPickerScreen, discover_agents
+        from framework.tui.screens.agent_picker import (
+            AgentPickerScreen,
+            discover_agents,
+        )
 
         agents = discover_agents()
         if not agents:
@@ -879,7 +907,10 @@ class AdenTUI(App):
 
     def action_show_agent_picker(self) -> None:
         """Open the agent picker (Ctrl+A or /agents)."""
-        from framework.tui.screens.agent_picker import AgentPickerScreen, discover_agents
+        from framework.tui.screens.agent_picker import (
+            AgentPickerScreen,
+            discover_agents,
+        )
 
         agents = discover_agents()
         if not agents:
@@ -1000,7 +1031,9 @@ class AdenTUI(App):
         if not coder_runtime.is_running:
             try:
                 agent_loop = self.chat_repl._agent_loop
-                future = asyncio.run_coroutine_threadsafe(coder_runtime.start(), agent_loop)
+                future = asyncio.run_coroutine_threadsafe(
+                    coder_runtime.start(), agent_loop
+                )
                 await asyncio.wrap_future(future)
             except Exception as e:
                 self.notify(f"Failed to start coder runtime: {e}", severity="error")
@@ -1038,7 +1071,9 @@ class AdenTUI(App):
         )
         self.refresh_bindings()
 
-    def _build_escalation_input(self, reason: str, context: str, worker_path: str) -> str:
+    def _build_escalation_input(
+        self, reason: str, context: str, worker_path: str
+    ) -> str:
         """Compose the user_request string for hive_coder."""
         parts = []
         if worker_path:
@@ -1102,7 +1137,9 @@ class AdenTUI(App):
         # 5. Show return in chat (deferred — widgets need a tick to mount)
         def _show_return():
             if self.chat_repl:
-                self.chat_repl._write_history("[bold cyan]Returned from Hive Coder.[/bold cyan]")
+                self.chat_repl._write_history(
+                    "[bold cyan]Returned from Hive Coder.[/bold cyan]"
+                )
                 if summary:
                     self.chat_repl._write_history(f"[dim]{summary}[/dim]")
 
@@ -1188,6 +1225,7 @@ class AdenTUI(App):
         EventType.GOAL_PROGRESS,
         EventType.GOAL_ACHIEVED,
         EventType.CONSTRAINT_VIOLATION,
+        EventType.GOAL_ADJUSTMENT_NEEDED,
         EventType.STATE_CHANGED,
         EventType.NODE_INPUT_BLOCKED,
         EventType.CONTEXT_COMPACTED,
@@ -1297,7 +1335,9 @@ class AdenTUI(App):
                         return
                     elif et == EventType.EXECUTION_FAILED:
                         error = event.data.get("error", "Unknown error")[:200]
-                        self._inject_worker_status_into_queen(f"Worker execution failed: {error}")
+                        self._inject_worker_status_into_queen(
+                            f"Worker execution failed: {error}"
+                        )
                         return
                     elif et in (
                         EventType.LLM_TEXT_DELTA,
@@ -1367,7 +1407,9 @@ class AdenTUI(App):
             elif et == EventType.EXECUTION_COMPLETED:
                 self.chat_repl.handle_execution_completed(event.data.get("output", {}))
             elif et == EventType.EXECUTION_FAILED:
-                self.chat_repl.handle_execution_failed(event.data.get("error", "Unknown error"))
+                self.chat_repl.handle_execution_failed(
+                    event.data.get("error", "Unknown error")
+                )
             elif et == EventType.CLIENT_INPUT_REQUESTED:
                 self.chat_repl.handle_input_requested(
                     event.node_id or event.data.get("node_id", ""),
@@ -1405,6 +1447,11 @@ class AdenTUI(App):
                 self.chat_repl.handle_goal_achieved(event.data)
             elif et == EventType.CONSTRAINT_VIOLATION:
                 self.chat_repl.handle_constraint_violation(event.data)
+            elif et == EventType.GOAL_ADJUSTMENT_NEEDED:
+                # Goal adjustment needed — notify queen
+                self._inject_worker_status_into_queen(
+                    f"Goal adjustment needed: {event.data.get('reason', 'Goal adjustment recommended by evaluator.')}"
+                )
 
             # --- Graph view events ---
             if self.graph_view is not None:
@@ -1470,13 +1517,17 @@ class AdenTUI(App):
                 name = node.name if node else _ext_names.get(nid, nid)
                 self.status_bar.set_active_node(name, "thinking...")
             elif et == EventType.NODE_LOOP_ITERATION:
-                self.status_bar.set_node_detail(f"step {event.data.get('iteration', '?')}")
+                self.status_bar.set_node_detail(
+                    f"step {event.data.get('iteration', '?')}"
+                )
             elif et == EventType.TOOL_CALL_STARTED:
                 self.status_bar.set_node_detail(f"{event.data.get('tool_name', '')}...")
             elif et == EventType.TOOL_CALL_COMPLETED:
                 self.status_bar.set_node_detail("thinking...")
             elif et == EventType.NODE_STALLED:
-                self.status_bar.set_node_detail(f"stalled: {event.data.get('reason', '')}")
+                self.status_bar.set_node_detail(
+                    f"stalled: {event.data.get('reason', '')}"
+                )
             elif et == EventType.CONTEXT_COMPACTED:
                 before = event.data.get("usage_before", "?")
                 after = event.data.get("usage_after", "?")

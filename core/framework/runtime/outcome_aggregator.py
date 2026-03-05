@@ -177,7 +177,9 @@ class OutcomeAggregator:
             else:
                 self._failed_outcomes += 1
 
-            logger.debug(f"Recorded outcome for {decision_id}: success={outcome.success}")
+            logger.debug(
+                f"Recorded outcome for {decision_id}: success={outcome.success}"
+            )
 
     def record_constraint_violation(
         self,
@@ -291,7 +293,9 @@ class OutcomeAggregator:
                     / max(1, self._successful_outcomes + self._failed_outcomes)
                 ),
                 "streams_active": len({d.stream_id for d in self._decisions}),
-                "executions_total": len({(d.stream_id, d.execution_id) for d in self._decisions}),
+                "executions_total": len(
+                    {(d.stream_id, d.execution_id) for d in self._decisions}
+                ),
             }
 
             # Determine recommendation
@@ -307,6 +311,17 @@ class OutcomeAggregator:
                         progress=result["overall_progress"],
                         criteria_status=result["criteria_status"],
                     )
+
+                    # Check for goal adjustment recommendation
+                    if result.get("recommendation") == "adjust":
+                        await self._event_bus.emit_goal_adjustment_needed(
+                            stream_id=list(stream_ids)[0],
+                            progress=result["overall_progress"],
+                            reason=result.get(
+                                "analysis", "Goal adjustment recommended by evaluator."
+                            ),
+                            criteria_status=result["criteria_status"],
+                        )
 
             return result
 
@@ -388,7 +403,9 @@ class OutcomeAggregator:
         violations = result["constraint_violations"]
 
         # Check for hard constraint violations
-        hard_violations = [v for v in violations if self._is_hard_constraint(v["constraint_id"])]
+        hard_violations = [
+            v for v in violations if self._is_hard_constraint(v["constraint_id"])
+        ]
 
         if hard_violations:
             return "adjust"  # Must address violations

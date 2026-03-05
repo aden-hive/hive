@@ -31,6 +31,7 @@ EVENT_FORMAT: dict[EventType, tuple[str, str]] = {
     EventType.GOAL_PROGRESS: ("%%", "blue"),
     EventType.GOAL_ACHIEVED: ("**", "bold green"),
     EventType.CONSTRAINT_VIOLATION: ("!!", "bold red"),
+    EventType.GOAL_ADJUSTMENT_NEEDED: ("!!", "bold yellow"),
     EventType.STATE_CHANGED: ("~~", "dim"),
     EventType.CLIENT_INPUT_REQUESTED: ("??", "magenta"),
 }
@@ -84,6 +85,8 @@ def extract_event_text(event: AgentEvent) -> str:
         return "Goal achieved"
     elif et == EventType.CONSTRAINT_VIOLATION:
         return f"Constraint violated: {data.get('description', 'unknown')}"
+    elif et == EventType.GOAL_ADJUSTMENT_NEEDED:
+        return f"Goal adjustment needed: {data.get('reason', 'unknown')}"
     elif et == EventType.STATE_CHANGED:
         return f"State changed: {data.get('key', 'unknown')}"
     elif et == EventType.CLIENT_INPUT_REQUESTED:

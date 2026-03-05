@@ -73,6 +73,7 @@ class EventType(StrEnum):
     # Goal tracking
     GOAL_PROGRESS = "goal_progress"
     GOAL_ACHIEVED = "goal_achieved"
+    GOAL_ADJUSTMENT_NEEDED = "goal_adjustment_needed"
     CONSTRAINT_VIOLATION = "constraint_violation"
 
     # Stream lifecycle
@@ -348,7 +349,10 @@ class EventBus:
             return False
 
         # Check execution filter
-        if subscription.filter_execution and subscription.filter_execution != event.execution_id:
+        if (
+            subscription.filter_execution
+            and subscription.filter_execution != event.execution_id
+        ):
             return False
 
         # Check graph filter
@@ -372,7 +376,9 @@ class EventBus:
                     logger.error(f"Handler error for {event.type}: {e}")
 
         # Run all handlers concurrently
-        await asyncio.gather(*[run_handler(h) for h in handlers], return_exceptions=True)
+        await asyncio.gather(
+            *[run_handler(h) for h in handlers], return_exceptions=True
+        )
 
     # === CONVENIENCE PUBLISHERS ===
 
@@ -443,6 +449,26 @@ class EventBus:
                 stream_id=stream_id,
                 data={
                     "progress": progress,
+                    "criteria_status": criteria_status,
+                },
+            )
+        )
+
+    async def emit_goal_adjustment_needed(
+        self,
+        stream_id: str,
+        progress: float,
+        reason: str,
+        criteria_status: dict[str, Any],
+    ) -> None:
+        """Emit goal adjustment needed event."""
+        await self.publish(
+            AgentEvent(
+                type=EventType.GOAL_ADJUSTMENT_NEEDED,
+                stream_id=stream_id,
+                data={
+                    "progress": progress,
+                    "reason": reason,
                     "criteria_status": criteria_status,
                 },
             )
