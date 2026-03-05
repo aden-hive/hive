@@ -271,12 +271,6 @@ After listening, present a **concrete picture** of what you think they need. Mak
 >
 > Before I start — [1-2 specific questions you genuinely can't infer]."
 
-Why this works:
-- **Proves you were listening** — they don't feel like they have to repeat themselves
-- **Shows competence** — you're already thinking in systems
-- **Fast to correct** — "no, it's more like X" takes 10 seconds vs. answering 15 questions
-- **Creates momentum** — heading toward building, not more talking
-
 ---
 
 ### 1.4: Ask Only What You Cannot Infer
