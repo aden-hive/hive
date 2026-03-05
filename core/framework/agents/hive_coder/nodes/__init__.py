@@ -194,8 +194,8 @@ After writing agent code, validate structurally AND run tests:
 ## Debugging Built Agents
 When a user says "my agent is failing" or "debug this agent":
 1. list_agent_sessions("{agent_name}") — find the session
-2. get_worker_status
-4. list_agent_checkpoints / get_agent_checkpoint — trace execution
+2. get_worker_status(focus="issues") — check for problems
+3. list_agent_checkpoints / get_agent_checkpoint — trace execution
 
 # Agent Building Workflow
 
@@ -584,7 +584,7 @@ _queen_tools_staging = """
 The agent is loaded and ready to run. You can inspect it and launch it:
 - Read-only: read_file, list_directory, search_files, run_command
 - list_credentials(credential_id?) — Verify credentials are configured
-- get_worker_status() — Check the loaded worker
+- get_worker_status(focus?) — Brief status. Drill in with focus: memory, tools, issues, progress
 - run_agent_with_input(task) — Start the worker and switch to RUNNING phase
 - stop_worker_and_edit() — Go back to BUILDING phase
 
@@ -597,7 +597,7 @@ _queen_tools_running = """
 
 The worker is running. You have monitoring and lifecycle tools:
 - Read-only: read_file, list_directory, search_files, run_command
-- get_worker_status() — Check worker status (idle, running, waiting)
+- get_worker_status(focus?) — Brief status. Drill in: activity, memory, tools, issues, progress
 - inject_worker_message(content) — Send a message to the running worker
 - get_worker_health_summary() — Read the latest health data
 - notify_operator(ticket_id, analysis, urgency) — Alert the user (use sparingly)
@@ -763,13 +763,14 @@ You wake up when:
 - An escalation ticket arrives from the judge
 - The worker finishes
 
-If the user asks for progress, call get_worker_status() ONCE and report.
+If the user asks for progress, call get_worker_status() ONCE and report. \
+If the summary mentions issues, follow up with get_worker_status(focus="issues").
 
 ## Handling worker escalations
 
 When a worker escalation arrives:
 1. Read reason/context from the escalation message.
-2. Call get_worker_status() if you need extra details.
+2. Call get_worker_status(focus="issues") or get_worker_status(focus="activity") for details.
 3. Decide the next action:
    - Quick unblock guidance → inject_worker_message(...)
    - Requires worker code/graph changes → stop_worker_and_edit()
