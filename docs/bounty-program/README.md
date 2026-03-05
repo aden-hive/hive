@@ -123,7 +123,7 @@ Without this link, bounties are still tracked but Lurkr can't push XP to your Di
 | Bounty point calculation | GitHub Actions | `bounty-completed.yml` reads PR labels |
 | XP push to Discord | GitHub Actions → Lurkr API | `PATCH /levels/{guild}/users/{user}` |
 | Discord engagement XP | Lurkr bot | Native message XP (configurable per-channel) |
-| Leaderboard | Lurkr bot + GitHub Actions | `/levels leaderboard` + weekly webhook post |
+| Leaderboard | Lurkr bot + GitHub Actions | `/leaderboard` in Discord + weekly webhook post |
 | Agent Builder role | Lurkr bot | Auto-assigned at level 5 |
 | OSS Contributor role | Lurkr bot | Auto-assigned at level 15 |
 | Core Contributor role | Maintainer | Manual (involves money) |

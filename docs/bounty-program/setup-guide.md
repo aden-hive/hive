@@ -28,6 +28,7 @@ Category: Private
 ```
 
 **Permissions:**
+
 - `#integrations-announcements`: Everyone reads, only bots + admins post
 - `#bounty-payouts`: Core Contributor role only
 
@@ -35,11 +36,11 @@ Category: Private
 
 Order matters — higher = more prestigious:
 
-| Role | Color | Hoisted | Mentionable |
-|------|-------|---------|-------------|
-| Core Contributor | Gold `#F1C40F` | Yes | Yes |
-| Open Source Contributor | Purple `#9B59B6` | Yes | No |
-| Agent Builder | Green `#2ECC71` | Yes | No |
+| Role                    | Color            | Hoisted | Mentionable |
+| ----------------------- | ---------------- | ------- | ----------- |
+| Core Contributor        | Gold `#F1C40F`   | Yes     | Yes         |
+| Open Source Contributor | Purple `#9B59B6` | Yes     | No          |
+| Agent Builder           | Green `#2ECC71`  | Yes     | No          |
 
 ## Step 4: Install and Configure Lurkr (10 min)
 
@@ -47,27 +48,41 @@ Order matters — higher = more prestigious:
 
 Go to https://lurkr.gg/ and invite the bot. Grant requested permissions.
 
-### 4b. Enable Leveling and Configure XP
+### 4b. Enable Leveling
+
+In Discord, run:
 
 ```
-/levels enable
-/levels set-xp min:15 max:25
-/levels set-cooldown seconds:60
-/levels multiplier channel:#integrations-help multiplier:2
-/levels ignore channel:#integrations-announcements
-/levels ignore channel:#bounty-payouts
+/config toggle option:Leveling System
 ```
 
-### 4c. Configure Role Rewards
+### 4c. Configure XP and Cooldown (Dashboard)
 
-```
-/levels role-reward add level:5 role:@Agent Builder
-/levels role-reward add level:15 role:@Open Source Contributor
-```
+Lurkr configures XP range and cooldown through the web dashboard, not slash commands.
+
+1. Go to https://lurkr.gg/dashboard and select your server
+2. Open the **Leveling** category
+3. Set **XP range** to min 15, max 25
+4. Set **Cooldown** to 60 seconds
+
+### 4d. Configure Channel Settings
+
+Set `#integrations-help` as a leveling channel with a 2x multiplier, and exclude announcement/payout channels:
+
+1. In the Lurkr dashboard **Leveling** settings, add `#integrations-help` as a leveling channel
+2. Set a **channel multiplier** of 2x for `#integrations-help` using `/config set` (channel multiplier option)
+3. Do NOT add `#integrations-announcements` or `#bounty-payouts` as leveling channels
+
+### 4e. Configure Role Rewards
+
+Use `/config set` to add role rewards:
+
+1. Set `@Agent Builder` as a role reward at **level 5**
+2. Set `@Open Source Contributor` as a role reward at **level 15**
 
 Do NOT auto-assign Core Contributor — that's maintainer-only.
 
-### 4d. Generate Lurkr API Key
+### 4f. Generate Lurkr API Key
 
 1. Go to https://lurkr.gg/ and log in
 2. Profile > API settings > Create API Key
@@ -84,19 +99,19 @@ Do NOT auto-assign Core Contributor — that's maintainer-only.
 
 Repo Settings > Secrets and variables > Actions:
 
-| Secret | Value |
-|--------|-------|
-| `DISCORD_BOUNTY_WEBHOOK_URL` | Webhook URL from Step 5 |
-| `LURKR_API_KEY` | Lurkr API key from Step 4d |
-| `LURKR_GUILD_ID` | Your Discord server ID* |
+| Secret                       | Value                      |
+| ---------------------------- | -------------------------- |
+| `DISCORD_BOUNTY_WEBHOOK_URL` | Webhook URL from Step 5    |
+| `LURKR_API_KEY`              | Lurkr API key from Step 4f |
+| `LURKR_GUILD_ID`             | Your Discord server ID\*   |
 
-*Enable Developer Mode in Discord, right-click server name > Copy Server ID.
+\*Enable Developer Mode in Discord, right-click server name > Copy Server ID.
 
 ## Step 7: Test the Pipeline (5 min)
 
 ```bash
 GITHUB_TOKEN=$(gh auth token) \
-GITHUB_REPOSITORY_OWNER=adenhq \
+GITHUB_REPOSITORY_OWNER=adenhq-hive \
 GITHUB_REPOSITORY_NAME=hive \
 bun run scripts/bounty-tracker.ts leaderboard
 ```
@@ -127,7 +142,7 @@ powerbi, redis
 
 - [ ] Labels exist (`bounty:*` and `difficulty:*`)
 - [ ] Discord channels and roles created
-- [ ] Lurkr installed, XP configured, role rewards set
+- [ ] Lurkr installed, leveling enabled, XP/cooldown configured in dashboard, role rewards set
 - [ ] All 3 GitHub secrets added
 - [ ] Both workflows enabled (`bounty-completed.yml`, `weekly-leaderboard.yml`)
 - [ ] Test PR + merge triggers Discord notification
@@ -139,4 +154,4 @@ powerbi, redis
 
 **Lurkr XP not awarded:** Confirm API key is Read/Write, contributor is in `contributors.yml`, check Action logs for `Lurkr XP push failed`.
 
-**Role not assigned:** Verify `/levels role-rewards` config. Lurkr's role must be above the roles it assigns in server hierarchy.
+**Role not assigned:** Verify role rewards in the Lurkr dashboard or via `/config set`. Lurkr's role must be above the roles it assigns in server hierarchy.
