@@ -345,8 +345,8 @@ class TestTelegramClient:
         call_kwargs = mock_post.call_args.kwargs
         assert "message_id" not in call_kwargs["json"]
 
-    @patch("aden_tools.tools.telegram_tool.telegram_tool.httpx.get")
-    def test_get_chat(self, mock_get):
+    @patch("aden_tools.tools.telegram_tool.telegram_tool.httpx.post")
+    def test_get_chat(self, mock_post):
         mock_response = MagicMock()
         mock_response.status_code = 200
         mock_response.json.return_value = {
@@ -358,12 +358,12 @@ class TestTelegramClient:
                 "description": "A test group",
             },
         }
-        mock_get.return_value = mock_response
+        mock_post.return_value = mock_response
 
         result = self.client.get_chat(chat_id="-1001234567890")
 
-        mock_get.assert_called_once()
-        assert "getChat" in mock_get.call_args.args[0]
+        mock_post.assert_called_once()
+        assert "getChat" in mock_post.call_args.args[0]
         assert result["ok"] is True
         assert result["result"]["type"] == "supergroup"
 
@@ -485,7 +485,7 @@ class TestNewToolOperations:
         tools = self._get_tools()
         result = tools["telegram_delete_message"].fn(chat_id="123", message_id=456)
 
-        assert result["success"] is True
+        assert result["ok"] is True
 
     @patch("aden_tools.tools.telegram_tool.telegram_tool.httpx.post")
     @patch("os.getenv", return_value="test_token")
@@ -535,7 +535,7 @@ class TestNewToolOperations:
         tools = self._get_tools()
         result = tools["telegram_send_chat_action"].fn(chat_id="123", action="typing")
 
-        assert result["success"] is True
+        assert result["ok"] is True
 
     def test_send_chat_action_invalid_action(self):
         """Invalid action should return error without making API call."""
@@ -549,9 +549,9 @@ class TestNewToolOperations:
         assert "Invalid action" in result["error"]
         assert "help" in result
 
-    @patch("aden_tools.tools.telegram_tool.telegram_tool.httpx.get")
+    @patch("aden_tools.tools.telegram_tool.telegram_tool.httpx.post")
     @patch("os.getenv", return_value="test_token")
-    def test_get_chat_success(self, mock_getenv, mock_get):
+    def test_get_chat_success(self, mock_getenv, mock_post):
         mock_response = MagicMock()
         mock_response.status_code = 200
         mock_response.json.return_value = {
@@ -562,7 +562,7 @@ class TestNewToolOperations:
                 "type": "supergroup",
             },
         }
-        mock_get.return_value = mock_response
+        mock_post.return_value = mock_response
 
         register_tools(self.mcp, credentials=None)
         tools = self._get_tools()
@@ -583,7 +583,7 @@ class TestNewToolOperations:
         tools = self._get_tools()
         result = tools["telegram_pin_message"].fn(chat_id="123", message_id=456)
 
-        assert result["success"] is True
+        assert result["ok"] is True
 
     @patch("aden_tools.tools.telegram_tool.telegram_tool.httpx.post")
     @patch("os.getenv", return_value="test_token")
@@ -597,7 +597,7 @@ class TestNewToolOperations:
         tools = self._get_tools()
         result = tools["telegram_unpin_message"].fn(chat_id="123", message_id=456)
 
-        assert result["success"] is True
+        assert result["ok"] is True
 
     @patch("aden_tools.tools.telegram_tool.telegram_tool.httpx.post")
     @patch("os.getenv", return_value="test_token")
@@ -612,7 +612,7 @@ class TestNewToolOperations:
         tools = self._get_tools()
         result = tools["telegram_unpin_message"].fn(chat_id="123", message_id=0)
 
-        assert result["success"] is True
+        assert result["ok"] is True
         # Verify message_id was NOT included in the API call
         call_kwargs = mock_post.call_args.kwargs
         assert "message_id" not in call_kwargs["json"]
@@ -788,12 +788,12 @@ class TestNewOperationsErrorHandling:
         assert "error" in result
         assert "network" in result["error"].lower() or "connection" in result["error"].lower()
 
-    @patch("aden_tools.tools.telegram_tool.telegram_tool.httpx.get")
+    @patch("aden_tools.tools.telegram_tool.telegram_tool.httpx.post")
     @patch("os.getenv", return_value="test_token")
-    def test_get_chat_timeout(self, mock_getenv, mock_get):
+    def test_get_chat_timeout(self, mock_getenv, mock_post):
         import httpx
 
-        mock_get.side_effect = httpx.TimeoutException("Request timed out")
+        mock_post.side_effect = httpx.TimeoutException("Request timed out")
 
         register_tools(self.mcp, credentials=None)
         tools = self._get_tools()

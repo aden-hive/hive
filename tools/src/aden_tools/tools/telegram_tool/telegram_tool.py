@@ -251,9 +251,9 @@ class _TelegramClient:
         chat_id: str,
     ) -> dict[str, Any]:
         """Get information about a chat."""
-        response = httpx.get(
+        response = httpx.post(
             f"{self._base_url}/getChat",
-            params={"chat_id": chat_id},
+            json={"chat_id": chat_id},
             timeout=30.0,
         )
         return self._handle_response(response)
@@ -429,20 +429,17 @@ def register_tools(
             message_id: ID of the message to delete
 
         Returns:
-            Dict with success status or error dict on failure.
+            Raw Telegram API response or error dict on failure.
         """
         client = _get_client()
         if isinstance(client, dict):
             return client
 
         try:
-            result = client.delete_message(
+            return client.delete_message(
                 chat_id=chat_id,
                 message_id=message_id,
             )
-            if isinstance(result, dict) and "error" in result:
-                return result
-            return {"success": True}
         except httpx.TimeoutException:
             return {"error": "Telegram request timed out"}
         except httpx.RequestError as e:
@@ -545,7 +542,7 @@ def register_tools(
                 "find_location", "choose_sticker".
 
         Returns:
-            Dict with success status or error dict on failure.
+            Raw Telegram API response or error dict on failure.
         """
         valid_actions = {
             "typing",
@@ -569,13 +566,10 @@ def register_tools(
             return client
 
         try:
-            result = client.send_chat_action(
+            return client.send_chat_action(
                 chat_id=chat_id,
                 action=action,
             )
-            if isinstance(result, dict) and "error" in result:
-                return result
-            return {"success": True}
         except httpx.TimeoutException:
             return {"error": "Telegram request timed out"}
         except httpx.RequestError as e:
@@ -627,21 +621,18 @@ def register_tools(
             disable_notification: If True, pins silently without notifying members.
 
         Returns:
-            Dict with success status or error dict on failure.
+            Raw Telegram API response or error dict on failure.
         """
         client = _get_client()
         if isinstance(client, dict):
             return client
 
         try:
-            result = client.pin_chat_message(
+            return client.pin_chat_message(
                 chat_id=chat_id,
                 message_id=message_id,
                 disable_notification=disable_notification,
             )
-            if isinstance(result, dict) and "error" in result:
-                return result
-            return {"success": True}
         except httpx.TimeoutException:
             return {"error": "Telegram request timed out"}
         except httpx.RequestError as e:
@@ -663,20 +654,17 @@ def register_tools(
             message_id: ID of the message to unpin. Use 0 to unpin the most recent.
 
         Returns:
-            Dict with success status or error dict on failure.
+            Raw Telegram API response or error dict on failure.
         """
         client = _get_client()
         if isinstance(client, dict):
             return client
 
         try:
-            result = client.unpin_chat_message(
+            return client.unpin_chat_message(
                 chat_id=chat_id,
                 message_id=message_id if message_id != 0 else None,
             )
-            if isinstance(result, dict) and "error" in result:
-                return result
-            return {"success": True}
         except httpx.TimeoutException:
             return {"error": "Telegram request timed out"}
         except httpx.RequestError as e:
