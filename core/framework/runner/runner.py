@@ -956,14 +956,11 @@ class AgentRunner:
 
         # Fallback: load from agent.json (legacy JSON-based agents)
         agent_json_path = agent_path / "agent.json"
-        if not agent_json_path.is_file():
+        if not agent_json_path.exists():
             raise FileNotFoundError(f"No agent.py or agent.json found in {agent_path}")
 
-        content = agent_json_path.read_text(encoding="utf-8").strip()
-        if not content:
-            raise FileNotFoundError(f"agent.json is empty: {agent_json_path}")
-
-        graph, goal = load_agent_export(content)
+        with open(agent_json_path, encoding="utf-8") as f:
+            graph, goal = load_agent_export(f.read())
 
         return cls(
             agent_path=agent_path,
@@ -1307,6 +1304,8 @@ class AgentRunner:
             return "REPLICATE_API_KEY"
         elif model_lower.startswith("together/"):
             return "TOGETHER_API_KEY"
+        elif model_lower.startswith("minimax/") or model_lower.startswith("minimax-"):
+            return "MINIMAX_API_KEY"
         else:
             # Default: assume OpenAI-compatible
             return "OPENAI_API_KEY"
@@ -1325,6 +1324,8 @@ class AgentRunner:
         cred_id = None
         if model_lower.startswith("anthropic/") or model_lower.startswith("claude"):
             cred_id = "anthropic"
+        elif model_lower.startswith("minimax/") or model_lower.startswith("minimax-"):
+            cred_id = "minimax"
         # Add more mappings as providers are added to LLM_CREDENTIALS
 
         if cred_id is None:
