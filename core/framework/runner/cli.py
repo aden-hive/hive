@@ -522,9 +522,10 @@ def cmd_run(args: argparse.Namespace) -> int:
         except (FileNotFoundError, json.JSONDecodeError) as e:
             print(f"Error reading input file: {e}", file=sys.stderr)
             return 1
-     # Validate --output path before execution begins (fail fast, before agent loads)
+    # Validate --output path before execution begins (fail fast, before agent loads)
     if args.output:
         import os
+
         output_parent = Path(args.output).parent
         if not output_parent.exists():
             print(
