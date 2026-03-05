@@ -1,0 +1,37 @@
+name: Bounty completed
+description: Awards points and notifies Discord when a bounty PR is merged
+
+on:
+  pull_request:
+    types: [closed]
+
+jobs:
+  bounty-notify:
+    if: >
+      github.event.pull_request.merged == true &&
+      contains(join(github.event.pull_request.labels.*.name, ','), 'bounty:')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: read
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Award XP and notify Discord
+        run: bun run scripts/bounty-tracker.ts notify
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY_OWNER: ${{ github.repository_owner }}
+          GITHUB_REPOSITORY_NAME: ${{ github.event.repository.name }}
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_BOUNTY_WEBHOOK_URL }}
+          LURKR_API_KEY: ${{ secrets.LURKR_API_KEY }}
+          LURKR_GUILD_ID: ${{ secrets.LURKR_GUILD_ID }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}

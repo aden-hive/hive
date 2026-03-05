@@ -1,0 +1,94 @@
+name: Integration Bounty
+description: A bounty task for the integration contribution program
+title: "[Bounty]: "
+labels: []
+body:
+  - type: markdown
+    attributes:
+      value: |
+        ## Integration Bounty
+
+        This issue is part of the [Integration Bounty Program](../../docs/integration-bounty-program.md).
+        **Claim this bounty** by commenting below — a maintainer will assign you within 24 hours.
+
+  - type: dropdown
+    id: bounty-type
+    attributes:
+      label: Bounty Type
+      options:
+        - "Smoke Test (10 pts)"
+        - "Agent Test Report (30 pts)"
+        - "Edge Case Report (15 pts)"
+        - "Write README (20 pts)"
+        - "Add Health Checker (25 pts)"
+        - "Add Health Check Endpoint (10 pts)"
+        - "Bug Fix (40 pts)"
+        - "Complete Promotion Checklist (50 pts)"
+        - "New Integration (75 pts)"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: difficulty
+    attributes:
+      label: Difficulty
+      options:
+        - Easy
+        - Medium
+        - Hard
+    validations:
+      required: true
+
+  - type: input
+    id: tool-name
+    attributes:
+      label: Tool Name
+      description: The integration this bounty targets (e.g., `airtable`, `salesforce`)
+      placeholder: e.g., airtable
+    validations:
+      required: true
+
+  - type: textarea
+    id: description
+    attributes:
+      label: Description
+      description: What needs to be done to complete this bounty.
+      placeholder: |
+        Describe the specific task, including:
+        - What the contributor needs to do
+        - Links to relevant files in the repo
+        - Any setup requirements (API keys, accounts, etc.)
+    validations:
+      required: true
+
+  - type: textarea
+    id: acceptance-criteria
+    attributes:
+      label: Acceptance Criteria
+      description: What "done" looks like. The PR or report must meet all criteria.
+      placeholder: |
+        - [ ] Criterion 1
+        - [ ] Criterion 2
+        - [ ] CI passes
+    validations:
+      required: true
+
+  - type: textarea
+    id: relevant-files
+    attributes:
+      label: Relevant Files
+      description: Links to tool directory, credential spec, health check file, etc.
+      placeholder: |
+        - Tool: `tools/src/aden_tools/tools/{tool_name}/`
+        - Credential spec: `tools/src/aden_tools/credentials/{category}.py`
+        - Health checks: `tools/src/aden_tools/credentials/health_check.py`
+
+  - type: textarea
+    id: resources
+    attributes:
+      label: Resources
+      description: Links to API docs, examples, or guides that will help the contributor.
+      placeholder: |
+        - [Building Tools Guide](../../tools/BUILDING_TOOLS.md)
+        - [Tool README Template](../../docs/templates/tool-readme-template.md)
+        - API docs: https://...
