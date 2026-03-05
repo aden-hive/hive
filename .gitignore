@@ -79,3 +79,4 @@ core/tests/*dumps/*
 
 screenshots/*
 
+exports/document_intake_agent/__main__.py
