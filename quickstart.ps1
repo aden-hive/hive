@@ -1042,7 +1042,7 @@ if ($DefaultChoice) {
 
 while ($true) {
     if ($DefaultChoice) {
-        $raw = Read-Host "Enter choice (1-9) [$DefaultChoice]"
+        $raw = Read-Host "Enter choice (1-10) [$DefaultChoice]"
         if ([string]::IsNullOrWhiteSpace($raw)) { $raw = $DefaultChoice }
     } else {
         $raw = Read-Host "Enter choice (1-10)"

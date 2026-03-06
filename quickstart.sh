@@ -960,8 +960,8 @@ if [ -n "$DEFAULT_CHOICE" ]; then
 fi
 
 while true; do
-    read -r -p "Enter choice (1-9): " choice || true
-    if [[ "$choice" =~ ^[0-9]+$ ]] && [ "$choice" -ge 1 ] && [ "$choice" -le 9 ]; then
+    read -r -p "Enter choice (1-10): " choice || true
+    if [[ "$choice" =~ ^[0-9]+$ ]] && [ "$choice" -ge 1 ] && [ "$choice" -le 10 ]; then
         break
     fi
     echo -e "${RED}Invalid choice. Please enter 1-10${NC}"
