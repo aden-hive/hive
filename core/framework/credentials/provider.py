@@ -271,7 +271,7 @@ class BearerTokenProvider(CredentialProvider):
         refresh() will fail. This allows the store to know the
         credential needs attention.
         """
-        buffer = timedelta(minutes=5)
+                buffer = timedelta(seconds=getattr(self, "refresh_buffer_seconds", 300))
         now = datetime.now(UTC)
 
         for key_name in ["access_token", "token"]:
