@@ -13,6 +13,8 @@ This guide will help you set up the Aden Agent Framework and build your first ag
 
 The fastest way to get started:
 
+**macOS / Linux:**
+
 ```bash
 # 1. Clone the repository
 git clone https://github.com/adenhq/hive.git
@@ -24,6 +26,22 @@ cd hive
 # 3. Verify installation (optional, quickstart.sh already verifies)
 uv run python -c "import framework; import aden_tools; print('✓ Setup complete')"
 ```
+
+**Windows (PowerShell):**
+
+```powershell
+# 1. Clone the repository
+git clone https://github.com/adenhq/hive.git
+cd hive
+
+# 2. Run automated setup
+.\quickstart.ps1
+
+# 3. Verify installation (optional, quickstart.ps1 already verifies)
+uv run python -c "import framework; import aden_tools; print('✓ Setup complete')"
+```
+
+> **Note for Windows Users:** It is strongly recommended to use **PowerShell 5.1+** to run `quickstart.ps1`. If you prefer a Unix-like environment, WSL (Windows Subsystem for Linux) or Git Bash also work with `quickstart.sh`.
 
 ## Building Your First Agent
 
