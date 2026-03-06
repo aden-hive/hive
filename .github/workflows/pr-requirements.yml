@@ -47,7 +47,7 @@ jobs:
               const message = `## PR Requirements Warning
 
             This PR does not meet the contribution requirements.
-            If the issue is not fixed within ~2 hours, it may be automatically closed.
+            If the issue is not fixed within ~24 hours, it may be automatically closed.
 
             **Missing:** No linked issue found.
 
@@ -69,13 +69,14 @@ jobs:
 
             **Why is this required?** See #472 for details.`;
 
-              const comments = await github.rest.issues.listComments({
+              const comments = await github.paginate(github.rest.issues.listComments, {
                 owner: context.repo.owner,
                 repo: context.repo.repo,
                 issue_number: prNumber,
+                per_page: 100,
               });
 
-              const botComment = comments.data.find(
+              const botComment = comments.find(
                 (c) => c.user.type === 'Bot' && c.body.includes('PR Requirements Warning')
               );
 
@@ -88,12 +89,29 @@ jobs:
                 });
               }
 
-              await github.rest.issues.addLabels({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                issue_number: prNumber,
-                labels: ['pr-requirements-warning'],
-              });
+              try {
+                await github.rest.issues.addLabels({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: prNumber,
+                  labels: ['pr-requirements-warning'],
+                });
+              } catch (error) {
+                if (error.status === 422) {
+                  await github.rest.issues.createLabel({
+                    owner: context.repo.owner,
+                    repo: context.repo.repo,
+                    name: 'pr-requirements-warning',
+                    color: 'e11d48',
+                  });
+                  await github.rest.issues.addLabels({
+                    owner: context.repo.owner,
+                    repo: context.repo.repo,
+                    issue_number: prNumber,
+                    labels: ['pr-requirements-warning'],
+                  });
+                }
+              }
 
               core.setFailed('PR must reference an issue');
               return;
@@ -137,7 +155,7 @@ jobs:
               const message = `## PR Requirements Warning
 
             This PR does not meet the contribution requirements.
-            If the issue is not fixed within ~2 hours, it may be automatically closed.
+            If the issue is not fixed within ~24 hours, it may be automatically closed.
 
             **PR Author:** @${prAuthor}
             **Found issues:** ${issueList}
@@ -160,13 +178,14 @@ jobs:
 
             **Why is this required?** See #472 for details.`;
 
-              const comments = await github.rest.issues.listComments({
+              const comments = await github.paginate(github.rest.issues.listComments, {
                 owner: context.repo.owner,
                 repo: context.repo.repo,
                 issue_number: prNumber,
+                per_page: 100,
               });
 
-              const botComment = comments.data.find(
+              const botComment = comments.find(
                 (c) => c.user.type === 'Bot' && c.body.includes('PR Requirements Warning')
               );
 
@@ -179,12 +198,29 @@ jobs:
                 });
               }
 
-              await github.rest.issues.addLabels({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                issue_number: prNumber,
-                labels: ['pr-requirements-warning'],
-              });
+              try {
+                await github.rest.issues.addLabels({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: prNumber,
+                  labels: ['pr-requirements-warning'],
+                });
+              } catch (error) {
+                if (error.status === 422) {
+                  await github.rest.issues.createLabel({
+                    owner: context.repo.owner,
+                    repo: context.repo.repo,
+                    name: 'pr-requirements-warning',
+                    color: 'e11d48',
+                  });
+                  await github.rest.issues.addLabels({
+                    owner: context.repo.owner,
+                    repo: context.repo.repo,
+                    issue_number: prNumber,
+                    labels: ['pr-requirements-warning'],
+                  });
+                }
+              }
 
               core.setFailed('PR author must be assigned to the linked issue');
             } else {
