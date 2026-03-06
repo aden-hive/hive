@@ -45,6 +45,12 @@ def _patch_litellm_anthropic_oauth() -> None:
         from litellm.llms.anthropic.common_utils import AnthropicModelInfo
         from litellm.types.llms.anthropic import ANTHROPIC_OAUTH_TOKEN_PREFIX
     except ImportError:
+        logger.warning(
+            "Could not apply litellm Anthropic OAuth patch — litellm internals may have "
+            "changed. Anthropic OAuth tokens (Claude Code subscriptions) may fail with 401. "
+            "See BerriAI/litellm#19618. Current litellm version: %s",
+            getattr(litellm, "__version__", "unknown"),
+        )
         return
 
     original = AnthropicModelInfo.validate_environment
@@ -86,10 +92,12 @@ def _patch_litellm_metadata_nonetype() -> None:
     """
     import functools
 
+    patched_count = 0
     for fn_name in ("completion", "acompletion", "responses", "aresponses"):
         original = getattr(litellm, fn_name, None)
         if original is None:
             continue
+        patched_count += 1
         if asyncio.iscoroutinefunction(original):
 
             @functools.wraps(original)
@@ -108,6 +116,14 @@ def _patch_litellm_metadata_nonetype() -> None:
                 return _orig(*args, **kwargs)
 
             setattr(litellm, fn_name, _sync_wrapper)
+
+    if patched_count == 0:
+        logger.warning(
+            "Could not apply litellm metadata=None patch — none of the expected entry "
+            "points (completion, acompletion, responses, aresponses) were found. "
+            "metadata=None TypeError may occur. Current litellm version: %s",
+            getattr(litellm, "__version__", "unknown"),
+        )
 
 
 if litellm is not None:
