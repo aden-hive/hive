@@ -523,7 +523,9 @@ class SessionManager:
             _queen_behavior_building,
             _queen_behavior_running,
             _queen_behavior_staging,
-            _queen_identity,
+            _queen_identity_building,
+            _queen_identity_running,
+            _queen_identity_staging,
             _queen_phase_7,
             _queen_style,
             _queen_tools_building,
@@ -562,7 +564,7 @@ class SessionManager:
 
         # Compose phase-specific prompts
         phase_state.prompt_building = (
-            _queen_identity
+            _queen_identity_building
             + _agent_builder_knowledge
             + _queen_tools_building
             + _queen_behavior_always
@@ -573,7 +575,7 @@ class SessionManager:
             + worker_identity
         )
         phase_state.prompt_staging = (
-            _queen_identity
+            _queen_identity_staging
             + _queen_tools_staging
             + _queen_behavior_always
             + _queen_behavior_staging
@@ -581,7 +583,7 @@ class SessionManager:
             + worker_identity
         )
         phase_state.prompt_running = (
-            _queen_identity
+            _queen_identity_running
             + _queen_tools_running
             + _queen_behavior_always
             + _queen_behavior_running
