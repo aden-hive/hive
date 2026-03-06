@@ -74,7 +74,7 @@ jobs:
               });
 
               const botComment = comments.data.find(
-                (c) => c.user.type === 'Bot' && c.body.includes('PR Closed - Requirements Not Met')
+                (c) => c.user.type === 'Bot' && c.body.includes('PR Requirements Warning')
               );
 
               if (!botComment) {
@@ -86,12 +86,7 @@ jobs:
                 });
               }
 
-              await github.rest.pulls.update({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                pull_number: prNumber,
-                state: 'closed',
-              });
+              
 
               core.setFailed('PR must reference an issue');
               return;
@@ -132,7 +127,11 @@ jobs:
                 `#${i.number} (assignees: ${i.assignees.length > 0 ? i.assignees.join(', ') : 'none'})`
               ).join(', ');
 
-              const message = `## PR Closed - Requirements Not Met
+              const message =  `## ⚠️ PR Requirements Warning
+
+             This PR does not meet the repository requirements yet.
+             Please fix the issues below to proceed.
+              `;
 
             This PR has been automatically closed because it doesn't meet the requirements.
 
@@ -176,14 +175,8 @@ jobs:
                 });
               }
 
-              await github.rest.pulls.update({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                pull_number: prNumber,
-                state: 'closed',
-              });
+             
 
-              core.setFailed('PR author must be assigned to the linked issue');
-            } else {
-              console.log(`PR requirements met! Issue #${issueWithAuthorAssigned} has ${prAuthor} as assignee.`);
-            }
+              const botComment = comments.data.find(
+                (c) => c.user.type === 'Bot' && c.body.includes('PR Closed - Requirements Not Met')
+              );
