@@ -618,11 +618,14 @@ class GraphExecutor:
         # node doesn't restore a filled OutputAccumulator from the previous
         # webhook run (which would cause the judge to accept immediately).
         # The conversation history is preserved (continuous memory).
+        # Exclude cold restores — those need to continue the conversation
+        # naturally without a "start fresh" marker.
         _is_fresh_shared = bool(
             session_state
             and session_state.get("resume_session_id")
             and not session_state.get("paused_at")
             and not session_state.get("resume_from_checkpoint")
+            and not session_state.get("cold_restore")
         )
         if _is_fresh_shared and is_continuous and self._storage_path:
             try:

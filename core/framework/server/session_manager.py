@@ -46,6 +46,11 @@ class Session:
     judge_task: asyncio.Task | None = None
     escalation_sub: str | None = None
     worker_handoff_sub: str | None = None
+    # Session directory resumption:
+    # When set, _start_queen writes queen conversations to this existing session's
+    # directory instead of creating a new one.  This lets cold-restores accumulate
+    # all messages in the original session folder so history is never fragmented.
+    queen_resume_from: str | None = None
 
 
 class SessionManager:
@@ -115,18 +120,25 @@ class SessionManager:
         session_id: str | None = None,
         model: str | None = None,
         initial_prompt: str | None = None,
+        queen_resume_from: str | None = None,
     ) -> Session:
         """Create a new session with a queen but no worker.
 
-        The queen starts immediately with MCP coding tools.
-        A worker can be loaded later via load_worker().
+        When ``queen_resume_from`` is set the queen writes conversation messages
+        to that existing session's directory instead of creating a new one.
+        This preserves full conversation history across server restarts.
         """
         session = await self._create_session_core(session_id=session_id, model=model)
+        session.queen_resume_from = queen_resume_from
 
         # Start queen immediately (queen-only, no worker tools yet)
         await self._start_queen(session, worker_identity=None, initial_prompt=initial_prompt)
 
-        logger.info("Session '%s' created (queen-only)", session.id)
+        logger.info(
+            "Session '%s' created (queen-only, resume_from=%s)",
+            session.id,
+            queen_resume_from,
+        )
         return session
 
     async def create_session_with_worker(
@@ -135,15 +147,12 @@ class SessionManager:
         agent_id: str | None = None,
         model: str | None = None,
         initial_prompt: str | None = None,
+        queen_resume_from: str | None = None,
     ) -> Session:
         """Create a session and load a worker in one step.
 
-        Backward-compatible with the old POST /api/agents flow.
-        Loads the worker FIRST so the queen starts with full lifecycle
-        and monitoring tools available.
-
-        The session gets an auto-generated unique ID. The agent name
-        becomes the worker_id (used by the frontend as backendAgentId).
+        When ``queen_resume_from`` is set the queen writes conversation messages
+        to that existing session's directory instead of creating a new one.
         """
         from framework.tools.queen_lifecycle_tools import build_worker_profile
 
@@ -152,6 +161,7 @@ class SessionManager:
 
         # Auto-generate session ID (not the agent name)
         session = await self._create_session_core(model=model)
+        session.queen_resume_from = queen_resume_from
         try:
             # Load worker FIRST (before queen) so queen gets full tools
             await self._load_worker_core(
@@ -170,10 +180,6 @@ class SessionManager:
             await self._start_queen(
                 session, worker_identity=worker_identity, initial_prompt=initial_prompt
             )
-
-            # Health judge disabled for simplicity.
-            # if agent_path.name != "hive_coder" and session.worker_runtime:
-            #     await self._start_judge(session, session.runner._storage_path)
 
         except Exception:
             # If anything fails, tear down the session
@@ -449,7 +455,12 @@ class SessionManager:
         worker_identity: str | None,
         initial_prompt: str | None = None,
     ) -> None:
-        """Start the queen executor for a session."""
+        """Start the queen executor for a session.
+
+        When ``session.queen_resume_from`` is set, queen conversation messages
+        are written to the ORIGINAL session's directory so the full conversation
+        history accumulates in one place across server restarts.
+        """
         from framework.agents.hive_coder.agent import (
             queen_goal,
             queen_graph as _queen_graph,
@@ -459,8 +470,40 @@ class SessionManager:
         from framework.runtime.core import Runtime
 
         hive_home = Path.home() / ".hive"
-        queen_dir = hive_home / "queen" / "session" / session.id
+
+        # Determine which session directory to use for queen storage.
+        # When queen_resume_from is set we write to the ORIGINAL session's
+        # directory so that all messages accumulate in one place.
+        storage_session_id = session.queen_resume_from or session.id
+        queen_dir = hive_home / "queen" / "session" / storage_session_id
         queen_dir.mkdir(parents=True, exist_ok=True)
+
+        # Always write/update session metadata so history sidebar has correct
+        # agent name, path, and last-active timestamp (important so the original
+        # session directory sorts as "most recent" after a cold-restore resume).
+        _meta_path = queen_dir / "meta.json"
+        try:
+            _agent_name = (
+                session.worker_info.name
+                if session.worker_info
+                else (
+                    str(session.worker_path.name).replace("_", " ").title()
+                    if session.worker_path
+                    else None
+                )
+            )
+            _meta_path.write_text(
+                json.dumps(
+                    {
+                        "agent_name": _agent_name,
+                        "agent_path": str(session.worker_path) if session.worker_path else None,
+                        "created_at": time.time(),
+                    }
+                ),
+                encoding="utf-8",
+            )
+        except OSError:
+            pass
 
         # Register MCP coding tools
         queen_registry = ToolRegistry()
@@ -921,6 +964,166 @@ class SessionManager:
 
     def list_sessions(self) -> list[Session]:
         return list(self._sessions.values())
+
+    # ------------------------------------------------------------------
+    # Cold session helpers (disk-only, no live runtime required)
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def get_cold_session_info(session_id: str) -> dict | None:
+        """Return disk metadata for a session that is no longer live in memory.
+
+        Checks whether queen conversation files exist at
+        ~/.hive/queen/session/{session_id}/conversations/.  Returns None when
+        no data is found so callers can fall through to a 404.
+        """
+        queen_dir = Path.home() / ".hive" / "queen" / "session" / session_id
+        convs_dir = queen_dir / "conversations"
+        if not convs_dir.exists():
+            return None
+
+        # Check whether any message part files are actually present
+        has_messages = False
+        try:
+            for node_dir in convs_dir.iterdir():
+                if not node_dir.is_dir():
+                    continue
+                parts_dir = node_dir / "parts"
+                if parts_dir.exists() and any(f.suffix == ".json" for f in parts_dir.iterdir()):
+                    has_messages = True
+                    break
+        except OSError:
+            pass
+
+        try:
+            created_at = queen_dir.stat().st_ctime
+        except OSError:
+            created_at = 0.0
+
+        # Read extra metadata written at session start
+        agent_name: str | None = None
+        agent_path: str | None = None
+        meta_path = queen_dir / "meta.json"
+        if meta_path.exists():
+            try:
+                meta = json.loads(meta_path.read_text(encoding="utf-8"))
+                agent_name = meta.get("agent_name")
+                agent_path = meta.get("agent_path")
+                created_at = meta.get("created_at") or created_at
+            except (json.JSONDecodeError, OSError):
+                pass
+
+        return {
+            "session_id": session_id,
+            "cold": True,
+            "live": False,
+            "has_messages": has_messages,
+            "created_at": created_at,
+            "agent_name": agent_name,
+            "agent_path": agent_path,
+        }
+
+    @staticmethod
+    def list_cold_sessions() -> list[dict]:
+        """Return metadata for every queen session directory on disk, newest first."""
+        queen_sessions_dir = Path.home() / ".hive" / "queen" / "session"
+        if not queen_sessions_dir.exists():
+            return []
+
+        results: list[dict] = []
+        try:
+            entries = sorted(
+                queen_sessions_dir.iterdir(),
+                key=lambda p: p.stat().st_mtime,
+                reverse=True,
+            )
+        except OSError:
+            return []
+
+        for d in entries:
+            if not d.is_dir():
+                continue
+            try:
+                created_at = d.stat().st_ctime
+            except OSError:
+                created_at = 0.0
+            agent_name: str | None = None
+            agent_path: str | None = None
+            meta_path = d / "meta.json"
+            if meta_path.exists():
+                try:
+                    meta = json.loads(meta_path.read_text(encoding="utf-8"))
+                    agent_name = meta.get("agent_name")
+                    agent_path = meta.get("agent_path")
+                    created_at = meta.get("created_at") or created_at
+                except (json.JSONDecodeError, OSError):
+                    pass
+
+            # Build a quick preview of the last human/assistant exchange.
+            # We read all conversation parts, filter to client-facing messages,
+            # and return the last assistant message content as a snippet.
+            last_message: str | None = None
+            message_count: int = 0
+            convs_dir = d / "conversations"
+            if convs_dir.exists():
+                try:
+                    all_parts: list[dict] = []
+                    for node_dir in convs_dir.iterdir():
+                        if not node_dir.is_dir():
+                            continue
+                        parts_dir = node_dir / "parts"
+                        if not parts_dir.exists():
+                            continue
+                        for part_file in sorted(parts_dir.iterdir()):
+                            if part_file.suffix != ".json":
+                                continue
+                            try:
+                                part = json.loads(part_file.read_text(encoding="utf-8"))
+                                part.setdefault("created_at", part_file.stat().st_mtime)
+                                all_parts.append(part)
+                            except (json.JSONDecodeError, OSError):
+                                continue
+                    # Filter to client-facing messages only
+                    client_msgs = [
+                        p
+                        for p in all_parts
+                        if not p.get("is_transition_marker")
+                        and p.get("role") != "tool"
+                        and not (p.get("role") == "assistant" and p.get("tool_calls"))
+                    ]
+                    client_msgs.sort(key=lambda m: m.get("created_at", m.get("seq", 0)))
+                    message_count = len(client_msgs)
+                    # Last assistant message as preview snippet
+                    for msg in reversed(client_msgs):
+                        content = msg.get("content") or ""
+                        if isinstance(content, list):
+                            # Anthropic-style content blocks
+                            content = " ".join(
+                                b.get("text", "")
+                                for b in content
+                                if isinstance(b, dict) and b.get("type") == "text"
+                            )
+                        if content and msg.get("role") == "assistant":
+                            last_message = content[:120].strip()
+                            break
+                except OSError:
+                    pass
+
+            results.append(
+                {
+                    "session_id": d.name,
+                    "cold": True,  # caller overrides for live sessions
+                    "live": False,
+                    "has_messages": convs_dir.exists() and message_count > 0,
+                    "created_at": created_at,
+                    "agent_name": agent_name,
+                    "agent_path": agent_path,
+                    "last_message": last_message,
+                    "message_count": message_count,
+                }
+            )
+
+        return results
 
     async def shutdown_all(self) -> None:
         """Gracefully stop all sessions. Called on server shutdown."""

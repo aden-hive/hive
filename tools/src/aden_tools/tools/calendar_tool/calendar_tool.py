@@ -8,7 +8,7 @@ Supports:
 
 Requires OAuth 2.0 credentials:
 - Aden: Use aden_provider_name="google-calendar" for managed OAuth (recommended)
-- Direct: Set GOOGLE_CALENDAR_ACCESS_TOKEN with token from OAuth Playground
+- Direct: Set GOOGLE_ACCESS_TOKEN with token from OAuth Playground
 """
 
 from __future__ import annotations
@@ -65,7 +65,7 @@ def register_tools(
         if lifecycle_manager:
             logger.info("Google Calendar OAuth auto-refresh enabled")
 
-    def _get_token(account: str = "") -> str | None:
+    def _get_token() -> str | None:
         """
         Get OAuth token, refreshing if needed.
 
@@ -82,22 +82,17 @@ def register_tools(
 
         # Fall back to credential store adapter
         if credentials is not None:
-            if account:
-                return credentials.get_by_alias(
-                    "google_calendar_oauth",
-                    account,
-                )
-            return credentials.get("google_calendar_oauth")
+            return credentials.get("google")
 
         # Fall back to environment variable
-        return os.getenv("GOOGLE_CALENDAR_ACCESS_TOKEN")
+        return os.getenv("GOOGLE_ACCESS_TOKEN")
 
-    def _get_headers(account: str = "") -> dict[str, str]:
+    def _get_headers() -> dict[str, str]:
         """Get authorization headers for API requests.
 
         Note: Callers must use _check_credentials() first to ensure token exists.
         """
-        token = _get_token(account)
+        token = _get_token()
         if token is None:
             token = ""  # Will fail auth but prevents "Bearer None" in logs
         return {
@@ -105,13 +100,13 @@ def register_tools(
             "Content-Type": "application/json",
         }
 
-    def _check_credentials(account: str = "") -> dict | None:
+    def _check_credentials() -> dict | None:
         """Check if credentials are configured. Returns error dict if not."""
-        token = _get_token(account)
+        token = _get_token()
         if not token:
             return {
                 "error": "Calendar credentials not configured",
-                "help": "Set GOOGLE_CALENDAR_ACCESS_TOKEN environment variable",
+                "help": "Set GOOGLE_ACCESS_TOKEN environment variable",
             }
         return None
 
@@ -182,7 +177,6 @@ def register_tools(
         time_max: str | None = None,
         max_results: int = 10,
         query: str | None = None,
-        account: str = "",
         # Tracking parameters (injected by framework, ignored by tool)
         workspace_id: str | None = None,
         agent_id: str | None = None,
@@ -204,7 +198,7 @@ def register_tools(
         Returns:
             Dict with list of events or error message
         """
-        cred_error = _check_credentials(account)
+        cred_error = _check_credentials()
         if cred_error:
             return cred_error
 
@@ -230,7 +224,7 @@ def register_tools(
         try:
             response = httpx.get(
                 f"{CALENDAR_API_BASE}/calendars/{_encode_id(calendar_id)}/events",
-                headers=_get_headers(account),
+                headers=_get_headers(),
                 params=params,
                 timeout=30.0,
             )
@@ -274,7 +268,6 @@ def register_tools(
     def calendar_get_event(
         event_id: str,
         calendar_id: str = "primary",
-        account: str = "",
         # Tracking parameters (injected by framework, ignored by tool)
         workspace_id: str | None = None,
         agent_id: str | None = None,
@@ -293,7 +286,7 @@ def register_tools(
         Returns:
             Dict with event details or error message
         """
-        cred_error = _check_credentials(account)
+        cred_error = _check_credentials()
         if cred_error:
             return cred_error
 
@@ -303,7 +296,7 @@ def register_tools(
         try:
             response = httpx.get(
                 f"{CALENDAR_API_BASE}/calendars/{_encode_id(calendar_id)}/events/{_encode_id(event_id)}",
-                headers=_get_headers(account),
+                headers=_get_headers(),
                 timeout=30.0,
             )
             return _handle_response(response)
@@ -325,7 +318,6 @@ def register_tools(
         send_notifications: bool = True,
         timezone: str | None = None,
         all_day: bool = False,
-        account: str = "",
         # Tracking parameters (injected by framework, ignored by tool)
         workspace_id: str | None = None,
         agent_id: str | None = None,
@@ -355,7 +347,7 @@ def register_tools(
         Returns:
             Dict with created event details or error message
         """
-        cred_error = _check_credentials(account)
+        cred_error = _check_credentials()
         if cred_error:
             return cred_error
 
@@ -420,7 +412,7 @@ def register_tools(
         try:
             response = httpx.post(
                 f"{CALENDAR_API_BASE}/calendars/{_encode_id(calendar_id)}/events",
-                headers=_get_headers(account),
+                headers=_get_headers(),
                 json=event_body,
                 params=params,
                 timeout=30.0,
@@ -447,7 +439,6 @@ def register_tools(
         timezone: str | None = None,
         all_day: bool = False,
         add_meet_link: bool = False,
-        account: str = "",
         # Tracking parameters (injected by framework, ignored by tool)
         workspace_id: str | None = None,
         agent_id: str | None = None,
@@ -479,7 +470,7 @@ def register_tools(
         Returns:
             Dict with updated event details or error message
         """
-        cred_error = _check_credentials(account)
+        cred_error = _check_credentials()
         if cred_error:
             return cred_error
 
@@ -507,7 +498,7 @@ def register_tools(
             try:
                 get_response = httpx.get(
                     f"{CALENDAR_API_BASE}/calendars/{_encode_id(calendar_id)}/events/{_encode_id(event_id)}",
-                    headers=_get_headers(account),
+                    headers=_get_headers(),
                     timeout=30.0,
                 )
                 event_data = _handle_response(get_response)
@@ -574,7 +565,7 @@ def register_tools(
         try:
             response = httpx.patch(
                 f"{CALENDAR_API_BASE}/calendars/{_encode_id(calendar_id)}/events/{_encode_id(event_id)}",
-                headers=_get_headers(account),
+                headers=_get_headers(),
                 json=patch_body,
                 params=params,
                 timeout=30.0,
@@ -591,7 +582,6 @@ def register_tools(
         event_id: str,
         calendar_id: str = "primary",
         send_notifications: bool = True,
-        account: str = "",
         # Tracking parameters (injected by framework, ignored by tool)
         workspace_id: str | None = None,
         agent_id: str | None = None,
@@ -611,7 +601,7 @@ def register_tools(
         Returns:
             Dict with success status or error message
         """
-        cred_error = _check_credentials(account)
+        cred_error = _check_credentials()
         if cred_error:
             return cred_error
 
@@ -623,7 +613,7 @@ def register_tools(
         try:
             response = httpx.delete(
                 f"{CALENDAR_API_BASE}/calendars/{_encode_id(calendar_id)}/events/{_encode_id(event_id)}",
-                headers=_get_headers(account),
+                headers=_get_headers(),
                 params=params,
                 timeout=30.0,
             )
@@ -641,7 +631,6 @@ def register_tools(
     @mcp.tool()
     def calendar_list_calendars(
         max_results: int = 100,
-        account: str = "",
         # Tracking parameters (injected by framework, ignored by tool)
         workspace_id: str | None = None,
         agent_id: str | None = None,
@@ -659,7 +648,7 @@ def register_tools(
         Returns:
             Dict with list of calendars or error message
         """
-        cred_error = _check_credentials(account)
+        cred_error = _check_credentials()
         if cred_error:
             return cred_error
 
@@ -669,7 +658,7 @@ def register_tools(
         try:
             response = httpx.get(
                 f"{CALENDAR_API_BASE}/users/me/calendarList",
-                headers=_get_headers(account),
+                headers=_get_headers(),
                 params={"maxResults": max_results},
                 timeout=30.0,
             )
@@ -704,7 +693,6 @@ def register_tools(
     @mcp.tool()
     def calendar_get_calendar(
         calendar_id: str,
-        account: str = "",
         # Tracking parameters (injected by framework, ignored by tool)
         workspace_id: str | None = None,
         agent_id: str | None = None,
@@ -722,7 +710,7 @@ def register_tools(
         Returns:
             Dict with calendar details or error message
         """
-        cred_error = _check_credentials(account)
+        cred_error = _check_credentials()
         if cred_error:
             return cred_error
 
@@ -732,7 +720,7 @@ def register_tools(
         try:
             response = httpx.get(
                 f"{CALENDAR_API_BASE}/calendars/{_encode_id(calendar_id)}",
-                headers=_get_headers(account),
+                headers=_get_headers(),
                 timeout=30.0,
             )
             return _handle_response(response)
@@ -742,20 +730,110 @@ def register_tools(
         except httpx.RequestError as e:
             return {"error": f"Network error: {_sanitize_error(e)}"}
 
+    def _parse_event_dt(dt_str: str) -> datetime:
+        """Parse an ISO 8601 datetime string into a timezone-aware datetime."""
+        dt = datetime.fromisoformat(dt_str)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=UTC)
+        return dt
+
+    def _compute_busy_free_conflicts(
+        events: list[dict], window_start: datetime, window_end: datetime
+    ) -> tuple[list[dict], list[dict], list[dict]]:
+        """Compute merged busy blocks, free slots, and conflicts from events.
+
+        Returns (busy, free_slots, conflicts).
+        """
+        # Build intervals from events, skipping transparent/cancelled
+        intervals: list[tuple[datetime, datetime, str]] = []
+        for ev in events:
+            if ev.get("transparency") == "transparent" or ev.get("status") == "cancelled":
+                continue
+            start_str = ev.get("start")
+            end_str = ev.get("end")
+            if not start_str or not end_str:
+                continue
+            # Skip all-day events (date-only strings) for time-based availability
+            if _DATE_ONLY_RE.match(start_str) or _DATE_ONLY_RE.match(end_str):
+                continue
+            intervals.append(
+                (
+                    _parse_event_dt(start_str),
+                    _parse_event_dt(end_str),
+                    ev.get("summary", "(No title)"),
+                )
+            )
+
+        intervals.sort(key=lambda x: x[0])
+
+        # Merge overlapping intervals into busy blocks and detect conflicts
+        busy: list[dict] = []
+        conflicts: list[dict] = []
+        if intervals:
+            cur_start, cur_end, cur_name = intervals[0]
+            cur_names = [cur_name]
+            for iv_start, iv_end, iv_name in intervals[1:]:
+                if iv_start < cur_end:
+                    # Overlap detected
+                    cur_names.append(iv_name)
+                    if iv_end > cur_end:
+                        cur_end = iv_end
+                else:
+                    # No overlap — flush current block
+                    if len(cur_names) > 1:
+                        conflicts.append(
+                            {
+                                "events": cur_names,
+                                "overlap_start": cur_start.isoformat(),
+                                "overlap_end": cur_end.isoformat(),
+                            }
+                        )
+                    busy.append({"start": cur_start.isoformat(), "end": cur_end.isoformat()})
+                    cur_start, cur_end = iv_start, iv_end
+                    cur_names = [iv_name]
+            # Flush last block
+            if len(cur_names) > 1:
+                conflicts.append(
+                    {
+                        "events": cur_names,
+                        "overlap_start": cur_start.isoformat(),
+                        "overlap_end": cur_end.isoformat(),
+                    }
+                )
+            busy.append({"start": cur_start.isoformat(), "end": cur_end.isoformat()})
+
+        # Compute free slots as gaps between busy blocks within the window
+        free_slots: list[dict] = []
+        cursor = window_start
+        for block in busy:
+            block_start = _parse_event_dt(block["start"])
+            if block_start > cursor:
+                free_slots.append({"start": cursor.isoformat(), "end": block_start.isoformat()})
+            block_end = _parse_event_dt(block["end"])
+            if block_end > cursor:
+                cursor = block_end
+        if cursor < window_end:
+            free_slots.append({"start": cursor.isoformat(), "end": window_end.isoformat()})
+
+        return busy, free_slots, conflicts
+
     @mcp.tool()
     def calendar_check_availability(
         time_min: str,
         time_max: str,
         calendars: list[str] | None = None,
         timezone: str = "UTC",
-        account: str = "",
         # Tracking parameters (injected by framework, ignored by tool)
         workspace_id: str | None = None,
         agent_id: str | None = None,
         session_id: str | None = None,
     ) -> dict:
         """
-        Check free/busy availability for scheduling.
+        Check availability by listing actual events in the time range.
+
+        Returns individual events, merged busy blocks, free slots, and any
+        scheduling conflicts (overlapping events). Uses the Events API instead
+        of FreeBusy for accurate per-event visibility.
 
         Args:
             time_min: Start of time range (ISO 8601 format)
@@ -767,9 +845,9 @@ def register_tools(
             session_id: Tracking parameter (injected by framework)
 
         Returns:
-            Dict with busy periods for each calendar or error message
+            Dict with events, busy periods, free slots, and conflicts
         """
-        cred_error = _check_credentials(account)
+        cred_error = _check_credentials()
         if cred_error:
             return cred_error
 
@@ -781,43 +859,67 @@ def register_tools(
         if calendars is None:
             calendars = ["primary"]
 
-        request_body = {
-            "timeMin": time_min,
-            "timeMax": time_max,
-            "timeZone": timezone,
-            "items": [{"id": cal_id} for cal_id in calendars],
-        }
+        formatted_calendars = {}
 
-        try:
-            response = httpx.post(
-                f"{CALENDAR_API_BASE}/freeBusy",
-                headers=_get_headers(account),
-                json=request_body,
-                timeout=30.0,
-            )
-            result = _handle_response(response)
-
-            if "error" in result:
-                return result
-
-            # Format the response for easier consumption
-            formatted_calendars = {}
-            for cal_id, cal_data in result.get("calendars", {}).items():
-                if "errors" in cal_data:
-                    formatted_calendars[cal_id] = {
-                        "error": cal_data["errors"][0].get("reason", "Unknown error")
-                    }
-                else:
-                    formatted_calendars[cal_id] = {"busy": cal_data.get("busy", [])}
-
-            return {
-                "time_min": time_min,
-                "time_max": time_max,
-                "timezone": timezone,
-                "calendars": formatted_calendars,
+        for cal_id in calendars:
+            params: dict = {
+                "timeMin": time_min,
+                "timeMax": time_max,
+                "singleEvents": "true",
+                "orderBy": "startTime",
+                "maxResults": 250,
             }
 
-        except httpx.TimeoutException:
-            return {"error": "Request timed out"}
-        except httpx.RequestError as e:
-            return {"error": f"Network error: {_sanitize_error(e)}"}
+            try:
+                response = httpx.get(
+                    f"{CALENDAR_API_BASE}/calendars/{_encode_id(cal_id)}/events",
+                    headers=_get_headers(),
+                    params=params,
+                    timeout=30.0,
+                )
+                result = _handle_response(response)
+
+                if "error" in result:
+                    formatted_calendars[cal_id] = {"error": result["error"]}
+                    continue
+
+                # Format events
+                events = []
+                for item in result.get("items", []):
+                    start = item.get("start", {})
+                    end = item.get("end", {})
+                    events.append(
+                        {
+                            "summary": item.get("summary", "(No title)"),
+                            "start": start.get("dateTime") or start.get("date"),
+                            "end": end.get("dateTime") or end.get("date"),
+                            "status": item.get("status", "confirmed"),
+                            "transparency": item.get("transparency", "opaque"),
+                        }
+                    )
+
+                # Compute busy/free/conflicts
+                window_start = _parse_event_dt(time_min)
+                window_end = _parse_event_dt(time_max)
+                busy, free_slots, conflicts = _compute_busy_free_conflicts(
+                    events, window_start, window_end
+                )
+
+                formatted_calendars[cal_id] = {
+                    "events": events,
+                    "busy": busy,
+                    "free_slots": free_slots,
+                    "conflicts": conflicts,
+                }
+
+            except httpx.TimeoutException:
+                formatted_calendars[cal_id] = {"error": "Request timed out"}
+            except httpx.RequestError as e:
+                formatted_calendars[cal_id] = {"error": f"Network error: {_sanitize_error(e)}"}
+
+        return {
+            "time_min": time_min,
+            "time_max": time_max,
+            "timezone": timezone,
+            "calendars": formatted_calendars,
+        }

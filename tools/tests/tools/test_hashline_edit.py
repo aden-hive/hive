@@ -2,6 +2,7 @@
 
 import json
 import os
+import sys
 from unittest.mock import patch
 
 import pytest
@@ -962,6 +963,9 @@ class TestAtomicityWithReplace:
 class TestAtomicWrite:
     """Tests for atomic write behavior."""
 
+    @pytest.mark.skipif(
+        sys.platform == "win32", reason="chmod on directories not supported on Windows"
+    )
     def test_atomic_write_preserves_original_on_write_failure(
         self, hashline_edit_fn, mock_workspace, mock_secure_path, tmp_path
     ):
@@ -1283,6 +1287,9 @@ class TestAllowMultiple:
 class TestPermissionsPreservation:
     """Tests for file permissions preservation during atomic write."""
 
+    @pytest.mark.skipif(
+        sys.platform == "win32", reason="POSIX permissions not supported on Windows"
+    )
     @pytest.mark.parametrize("mode", [0o755, 0o644])
     def test_permissions_preserved_after_edit(
         self, hashline_edit_fn, mock_workspace, mock_secure_path, tmp_path, mode

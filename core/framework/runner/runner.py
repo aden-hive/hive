@@ -956,11 +956,14 @@ class AgentRunner:
 
         # Fallback: load from agent.json (legacy JSON-based agents)
         agent_json_path = agent_path / "agent.json"
-        if not agent_json_path.exists():
+        if not agent_json_path.is_file():
             raise FileNotFoundError(f"No agent.py or agent.json found in {agent_path}")
 
-        with open(agent_json_path, encoding="utf-8") as f:
-            graph, goal = load_agent_export(f.read())
+        content = agent_json_path.read_text(encoding="utf-8").strip()
+        if not content:
+            raise FileNotFoundError(f"agent.json is empty: {agent_json_path}")
+
+        graph, goal = load_agent_export(content)
 
         return cls(
             agent_path=agent_path,

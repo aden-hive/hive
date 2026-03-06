@@ -41,11 +41,11 @@ export default function MyAgents() {
   const idleCount = agents.length - activeCount;
 
   return (
-    <div className="min-h-screen bg-background flex flex-col">
+    <div className="h-screen bg-background flex flex-col overflow-hidden">
       <TopBar />
 
       {/* Content */}
-      <div className="flex-1 p-6 md:p-10 max-w-5xl mx-auto w-full">
+      <div className="flex-1 p-6 md:p-10 max-w-5xl mx-auto w-full overflow-y-auto">
         <div className="flex items-center justify-between mb-8">
           <div>
             <h1 className="text-xl font-semibold text-foreground">My Agents</h1>

@@ -4,6 +4,7 @@ import asyncio
 import logging
 
 from aiohttp import web
+from aiohttp.client_exceptions import ClientConnectionResetError as _AiohttpConnReset
 
 from framework.runtime.event_bus import EventType
 from framework.server.app import resolve_session
@@ -168,8 +169,15 @@ async def handle_events(request: web.Request) -> web.StreamResponse:
                         "SSE first event: session='%s', type='%s'", session.id, data.get("type")
                     )
             except TimeoutError:
-                await sse.send_keepalive()
-            except (ConnectionResetError, ConnectionError):
+                try:
+                    await sse.send_keepalive()
+                except (ConnectionResetError, ConnectionError, _AiohttpConnReset):
+                    close_reason = "client_disconnected"
+                    break
+                except Exception as exc:
+                    close_reason = f"keepalive_error: {exc}"
+                    break
+            except (ConnectionResetError, ConnectionError, _AiohttpConnReset):
                 close_reason = "client_disconnected"
                 break
             except RuntimeError as exc:
