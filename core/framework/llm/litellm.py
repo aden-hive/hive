@@ -117,6 +117,7 @@ if litellm is not None:
 RATE_LIMIT_MAX_RETRIES = 10
 RATE_LIMIT_BACKOFF_BASE = 2  # seconds
 RATE_LIMIT_MAX_DELAY = 120  # seconds - cap to prevent absurd waits
+MINIMAX_API_BASE = "https://api.minimax.io/v1"
 
 # Empty-stream retries use a short fixed delay, not the rate-limit backoff.
 # Conversation-structure issues are deterministic — long waits don't help.
@@ -324,11 +325,13 @@ class LiteLLMProvider(LLMProvider):
         """
         self.model = model
         self.api_key = api_key
-        self.api_base = api_base
+        self.api_base = api_base or self._default_api_base_for_model(model)
         self.extra_kwargs = kwargs
         # The Codex ChatGPT backend (chatgpt.com/backend-api/codex) rejects
         # several standard OpenAI params: max_output_tokens, stream_options.
-        self._codex_backend = bool(api_base and "chatgpt.com/backend-api/codex" in api_base)
+        self._codex_backend = bool(
+            self.api_base and "chatgpt.com/backend-api/codex" in self.api_base
+        )
 
         if litellm is None:
             raise ImportError(
@@ -340,6 +343,14 @@ class LiteLLMProvider(LLMProvider):
         # correctly marks codex models with mode="responses", so we do NOT
         # override the mode.  The responses_api_bridge in litellm handles
         # converting Chat Completions requests to Responses API format.
+
+    @staticmethod
+    def _default_api_base_for_model(model: str) -> str | None:
+        """Return provider-specific default API base when required."""
+        model_lower = model.lower()
+        if model_lower.startswith("minimax/") or model_lower.startswith("minimax-"):
+            return MINIMAX_API_BASE
+        return None
 
     def _completion_with_rate_limit_retry(
         self, max_retries: int | None = None, **kwargs: Any

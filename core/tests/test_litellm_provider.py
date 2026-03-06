@@ -58,6 +58,20 @@ class TestLiteLLMProviderInit:
         )
         assert provider.api_base == "https://my-proxy.com/v1"
 
+    def test_init_minimax_defaults_api_base(self):
+        """MiniMax should default to the official OpenAI-compatible endpoint."""
+        provider = LiteLLMProvider(model="minimax/MiniMax-M2.1", api_key="my-key")
+        assert provider.api_base == "https://api.minimax.io/v1"
+
+    def test_init_minimax_keeps_custom_api_base(self):
+        """Explicit api_base should win over MiniMax defaults."""
+        provider = LiteLLMProvider(
+            model="minimax/MiniMax-M2.1",
+            api_key="my-key",
+            api_base="https://proxy.example/v1",
+        )
+        assert provider.api_base == "https://proxy.example/v1"
+
     def test_init_ollama_no_key_needed(self):
         """Test that Ollama models don't require API key."""
         with patch.dict(os.environ, {}, clear=True):
