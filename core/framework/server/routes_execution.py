@@ -3,6 +3,7 @@
 import asyncio
 import json
 import logging
+from typing import Any
 
 from aiohttp import web
 
@@ -131,7 +132,19 @@ async def handle_chat(request: web.Request) -> web.Response:
                 }
             )
 
-    return web.json_response({"error": "Queen not available"}, status=503)
+    # Queen is dead — try to revive her
+    manager: Any = request.app["manager"]
+    try:
+        await manager.revive_queen(session, initial_prompt=message)
+        return web.json_response(
+            {
+                "status": "queen_revived",
+                "delivered": True,
+            }
+        )
+    except Exception as e:
+        logger.error("Failed to revive queen: %s", e)
+        return web.json_response({"error": "Queen not available"}, status=503)
 
 
 async def handle_queen_context(request: web.Request) -> web.Response:
@@ -159,6 +172,20 @@ async def handle_queen_context(request: web.Request) -> web.Response:
         if node is not None and hasattr(node, "inject_event"):
             await node.inject_event(message, is_client_input=False)
             return web.json_response({"status": "queued", "delivered": True})
+
+    # Queen is dead — try to revive her
+    manager: Any = request.app["manager"]
+    try:
+        await manager.revive_queen(session)
+        # After revival, deliver the message
+        queen_executor = session.queen_executor
+        if queen_executor is not None:
+            node = queen_executor.node_registry.get("queen")
+            if node is not None and hasattr(node, "inject_event"):
+                await node.inject_event(message, is_client_input=False)
+                return web.json_response({"status": "queued_revived", "delivered": True})
+    except Exception as e:
+        logger.error("Failed to revive queen for context: %s", e)
 
     return web.json_response({"error": "Queen not available"}, status=503)
 

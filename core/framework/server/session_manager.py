@@ -837,6 +837,27 @@ class SessionManager:
             "Handle all tasks directly using your coding tools."
         )
 
+    async def revive_queen(self, session: Session, initial_prompt: str | None = None) -> None:
+        """Revive a dead queen executor on an existing session.
+
+        Restarts the queen with the same session context (worker profile, tools, etc.).
+        """
+        from framework.tools.queen_lifecycle_tools import build_worker_profile
+
+        # Build worker identity if worker is loaded
+        worker_identity = (
+            build_worker_profile(session.worker_runtime, agent_path=session.worker_path)
+            if session.worker_runtime
+            else None
+        )
+
+        # Start queen with existing session context
+        await self._start_queen(
+            session, worker_identity=worker_identity, initial_prompt=initial_prompt
+        )
+
+        logger.info("Queen revived for session '%s'", session.id)
+
     # ------------------------------------------------------------------
     # Lookups
     # ------------------------------------------------------------------
