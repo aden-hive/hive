@@ -16,6 +16,11 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+# VERSION GUARD: These patches target litellm internals that may change across versions.
+# If litellm is upgraded and patches fail silently, LLM calls may break.
+# See: https://github.com/aden-hive/hive/issues/5948
+# TODO(fix/litellm-patch-version-guards): Add importlib.metadata version check and
+# logger.warning() when patch targets don't exist or version is outside known-working range.
 try:
     import litellm
     from litellm.exceptions import RateLimitError
