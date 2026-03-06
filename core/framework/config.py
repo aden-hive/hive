@@ -19,7 +19,10 @@ from framework.graph.edge import DEFAULT_MAX_TOKENS
 # ---------------------------------------------------------------------------
 
 HIVE_CONFIG_FILE = Path.home() / ".hive" / "configuration.json"
+GITHUB_TOKEN_FILE = Path.home() / ".hive" / "github_token"
+
 logger = logging.getLogger(__name__)
+
 
 
 def get_hive_config() -> dict[str, Any]:
@@ -48,6 +51,11 @@ def get_preferred_model() -> str:
     llm = get_hive_config().get("llm", {})
     if llm.get("provider") and llm.get("model"):
         return f"{llm['provider']}/{llm['model']}"
+
+    # Default model for GitHub Token
+    if llm.get("use_github_token"):
+        return "azure_ai_inference/gpt-4o"
+
     return "anthropic/claude-sonnet-4-20250514"
 
 
@@ -57,14 +65,16 @@ def get_max_tokens() -> int:
 
 
 def get_api_key() -> str | None:
-    """Return the API key, supporting env var, Claude Code subscription, Codex, and ZAI Code.
+    """Return the API key, supporting env var, Claude Code subscription, Codex, and GitHub token.
 
     Priority:
     1. Claude Code subscription (``use_claude_code_subscription: true``)
        reads the OAuth token from ``~/.claude/.credentials.json``.
     2. Codex subscription (``use_codex_subscription: true``)
        reads the OAuth token from macOS Keychain or ``~/.codex/auth.json``.
-    3. Environment variable named in ``api_key_env_var``.
+    3. GitHub Token (``use_github_token: true``)
+       reads the token from ``~/.hive/github_token``.
+    4. Environment variable named in ``api_key_env_var``.
     """
     llm = get_hive_config().get("llm", {})
 
@@ -90,6 +100,17 @@ def get_api_key() -> str | None:
         except ImportError:
             pass
 
+    # GitHub Token: read from ~/.hive/github_token
+    if llm.get("use_github_token"):
+        try:
+            from framework.runner.runner import get_github_token
+
+            token = get_github_token()
+            if token:
+                return token
+        except ImportError:
+            pass
+
     # Standard env-var path (covers ZAI Code and all API-key providers)
     api_key_env_var = llm.get("api_key_env_var")
     if api_key_env_var:
@@ -103,8 +124,16 @@ def get_gcu_enabled() -> bool:
 
 
 def get_api_base() -> str | None:
-    """Return the api_base URL for OpenAI-compatible endpoints, if configured."""
+    """Return the api_base URL for OpenAI-compatible endpoints, if configured.
+
+    If ``use_github_token`` is true, returns the Azure Inference URL.
+    """
     llm = get_hive_config().get("llm", {})
+
+    # GitHub Token uses Azure Inference URL
+    if llm.get("use_github_token"):
+        return "https://models.inference.ai.azure.com"
+
     if llm.get("use_codex_subscription"):
         # Codex subscription routes through the ChatGPT backend, not api.openai.com.
         return "https://chatgpt.com/backend-api/codex"
@@ -148,6 +177,13 @@ def get_llm_extra_kwargs() -> dict[str, Any]:
                 "extra_headers": headers,
                 "store": False,
                 "allowed_openai_params": ["store"],
+            }
+    if llm.get("use_github_token"):
+        api_key = get_api_key()
+        if api_key:
+            return {
+                "api_key": api_key,
+                "api_base": "https://models.inference.ai.azure.com",
             }
     return {}
 

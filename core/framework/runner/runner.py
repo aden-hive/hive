@@ -517,6 +517,47 @@ def get_codex_account_id() -> str | None:
     return None
 
 
+# ---------------------------------------------------------------------------
+# GitHub Token helpers
+# ---------------------------------------------------------------------------
+
+
+def get_github_token() -> str | None:
+    """Get the GitHub Token from ~/.hive/github_token or GITHUB_TOKEN env var.
+
+    Returns:
+        The token if available, None otherwise.
+    """
+    import os
+
+    # Priority 1: ~/.hive/github_token
+    github_token_file = Path.home() / ".hive" / "github_token"
+    if github_token_file.exists():
+        try:
+            return github_token_file.read_text(encoding="utf-8").strip()
+        except OSError:
+            pass
+
+    # Priority 2: GITHUB_TOKEN env var
+    return os.environ.get("GITHUB_TOKEN")
+
+
+def save_github_token(token: str) -> bool:
+    """Save a GitHub Token locally to ~/.hive/github_token.
+
+    Returns:
+        True if saved successfully, False otherwise.
+    """
+    try:
+        github_token_file = Path.home() / ".hive" / "github_token"
+        github_token_file.parent.mkdir(parents=True, exist_ok=True)
+        github_token_file.write_text(token.strip(), encoding="utf-8")
+        return True
+    except OSError as exc:
+        logger.debug("Failed to save GitHub token: %s", exc)
+        return False
+
+
 @dataclass
 class AgentInfo:
     """Information about an exported agent."""

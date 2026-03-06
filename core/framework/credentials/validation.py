@@ -26,7 +26,7 @@ def ensure_credential_key_env() -> None:
 
     Remaining LLM/tool API keys still load from shell config.
     """
-    from .key_storage import load_aden_api_key, load_credential_key
+    from .key_storage import load_aden_api_key, load_credential_key, load_github_token
 
     # Step 1: HIVE_CREDENTIAL_KEY (must come first — encrypted store depends on it)
     load_credential_key()
@@ -34,7 +34,10 @@ def ensure_credential_key_env() -> None:
     # Step 2: ADEN_API_KEY (uses encrypted store, then shell config fallback)
     load_aden_api_key()
 
-    # Step 3: Load remaining LLM/tool API keys from shell config
+    # Step 3: GITHUB_TOKEN (uses file storage, then shell config fallback)
+    load_github_token()
+
+    # Step 4: Load remaining LLM/tool API keys from shell config
     try:
         from aden_tools.credentials.shell_config import check_env_var_in_shell_config
     except ImportError:

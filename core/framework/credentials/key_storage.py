@@ -22,6 +22,8 @@ CREDENTIAL_KEY_PATH = Path.home() / ".hive" / "secrets" / "credential_key"
 CREDENTIAL_KEY_ENV_VAR = "HIVE_CREDENTIAL_KEY"
 ADEN_CREDENTIAL_ID = "aden_api_key"
 ADEN_ENV_VAR = "ADEN_API_KEY"
+GITHUB_TOKEN_PATH = Path.home() / ".hive" / "github_token"
+GITHUB_TOKEN_ENV_VAR = "GITHUB_TOKEN"
 
 
 # ---------------------------------------------------------------------------
@@ -153,6 +155,41 @@ def delete_aden_api_key() -> None:
         logger.debug("Could not delete %s from encrypted store", ADEN_CREDENTIAL_ID)
 
     os.environ.pop(ADEN_ENV_VAR, None)
+
+
+# ---------------------------------------------------------------------------
+# GITHUB_TOKEN
+# ---------------------------------------------------------------------------
+
+
+def load_github_token() -> str | None:
+    """Load GITHUB_TOKEN with priority: env > file > shell config.
+
+    Sets ``os.environ["GITHUB_TOKEN"]`` as a side-effect when found.
+    Returns the token string, or ``None`` if unavailable everywhere.
+    """
+    # 1. Already in environment (set by parent process, CI, etc.)
+    token = os.environ.get(GITHUB_TOKEN_ENV_VAR)
+    if token:
+        return token
+
+    # 2. Dedicated token file (~/.hive/github_token)
+    if GITHUB_TOKEN_PATH.exists():
+        try:
+            token = GITHUB_TOKEN_PATH.read_text(encoding="utf-8").strip()
+            if token:
+                os.environ[GITHUB_TOKEN_ENV_VAR] = token
+                return token
+        except OSError:
+            pass
+
+    # 3. Shell config fallback
+    token = _read_from_shell_config(GITHUB_TOKEN_ENV_VAR)
+    if token:
+        os.environ[GITHUB_TOKEN_ENV_VAR] = token
+        return token
+
+    return None
 
 
 # ---------------------------------------------------------------------------

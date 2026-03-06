@@ -733,7 +733,7 @@ prompt_model_selection() {
 }
 
 # Function to save configuration
-# Args: provider_id env_var model max_tokens [use_claude_code_sub] [api_base] [use_codex_sub]
+# Args: provider_id env_var model max_tokens [use_claude_code_sub] [api_base] [use_codex_sub] [use_github_token]
 save_configuration() {
     local provider_id="$1"
     local env_var="$2"
@@ -742,6 +742,7 @@ save_configuration() {
     local use_claude_code_sub="${5:-}"
     local api_base="${6:-}"
     local use_codex_sub="${7:-}"
+    local use_github_token="${8:-}"
 
     # Fallbacks if not provided
     if [ -z "$model" ]; then
@@ -762,7 +763,7 @@ config = {
         'max_tokens': $max_tokens,
         'api_key_env_var': '$env_var'
     },
-    'created_at': '$(date -u +"%Y-%m-%dT%H:%M:%S+00:00")'
+    'created_at': '$(date -u +\"%Y-%m-%dT%H:%M:%S+00:00\")'
 }
 if '$use_claude_code_sub' == 'true':
     config['llm']['use_claude_code_subscription'] = True
@@ -771,6 +772,10 @@ if '$use_claude_code_sub' == 'true':
 if '$use_codex_sub' == 'true':
     config['llm']['use_codex_subscription'] = True
     # No api_key_env_var needed for Codex subscription
+    config['llm'].pop('api_key_env_var', None)
+if '$use_github_token' == 'true':
+    config['llm']['use_github_token'] = True
+    # No api_key_env_var needed for GitHub token
     config['llm'].pop('api_key_env_var', None)
 if '$api_base':
     config['llm']['api_base'] = '$api_base'
@@ -816,6 +821,10 @@ ZAI_CRED_DETECTED=false
 if [ -n "${ZAI_API_KEY:-}" ]; then
     ZAI_CRED_DETECTED=true
 fi
+
+GITHUB_TOKEN_DETECTED=false
+if [ -f "$HOME/.hive/github_token" ]; then GITHUB_TOKEN_DETECTED=true; fi
+if [ "$GITHUB_TOKEN_DETECTED" = false ] && [ -n "${GITHUB_TOKEN:-}" ]; then GITHUB_TOKEN_DETECTED=true; fi
 
 # Detect API key providers
 if [ "$USE_ASSOC_ARRAYS" = true ]; then
@@ -919,14 +928,21 @@ else
     echo -e "  ${CYAN}3)${NC} OpenAI Codex Subscription  ${DIM}(use your Codex/ChatGPT Plus plan)${NC}"
 fi
 
+# 4) GitHub Models (Azure Inference)
+if [ "$GITHUB_TOKEN_DETECTED" = true ]; then
+    echo -e "  ${CYAN}4)${NC} GitHub Models (Free)        ${GREEN}(credential detected)${NC}"
+else
+    echo -e "  ${CYAN}4)${NC} GitHub Models (Free)        ${DIM}(use your GitHub token)${NC}"
+fi
+
 echo ""
 echo -e "  ${CYAN}${BOLD}API key providers:${NC}"
 
-# 4-8) API key providers — show (credential detected) if key already set
+# 5-9) API key providers — show (credential detected) if key already set
 PROVIDER_MENU_ENVS=(ANTHROPIC_API_KEY OPENAI_API_KEY GEMINI_API_KEY GROQ_API_KEY CEREBRAS_API_KEY)
 PROVIDER_MENU_NAMES=("Anthropic (Claude) - Recommended" "OpenAI (GPT)" "Google Gemini - Free tier available" "Groq - Fast, free tier" "Cerebras - Fast, free tier")
 for idx in 0 1 2 3 4; do
-    num=$((idx + 4))
+    num=$((idx + 5))
     env_var="${PROVIDER_MENU_ENVS[$idx]}"
     if [ -n "${!env_var}" ]; then
         echo -e "  ${CYAN}$num)${NC} ${PROVIDER_MENU_NAMES[$idx]}  ${GREEN}(credential detected)${NC}"
@@ -935,7 +951,7 @@ for idx in 0 1 2 3 4; do
     fi
 done
 
-echo -e "  ${CYAN}9)${NC} Skip for now"
+echo -e "  ${CYAN}10)${NC} Skip for now"
 echo ""
 
 if [ -n "$DEFAULT_CHOICE" ]; then
@@ -944,16 +960,11 @@ if [ -n "$DEFAULT_CHOICE" ]; then
 fi
 
 while true; do
-    if [ -n "$DEFAULT_CHOICE" ]; then
-        read -r -p "Enter choice (1-9) [$DEFAULT_CHOICE]: " choice || true
-        choice="${choice:-$DEFAULT_CHOICE}"
-    else
-        read -r -p "Enter choice (1-9): " choice || true
-    fi
-    if [[ "$choice" =~ ^[0-9]+$ ]] && [ "$choice" -ge 1 ] && [ "$choice" -le 9 ]; then
+    read -r -p "Enter choice (1-10): " choice || true
+    if [[ "$choice" =~ ^[0-9]+$ ]] && [ "$choice" -ge 1 ] && [ "$choice" -le 10 ]; then
         break
     fi
-    echo -e "${RED}Invalid choice. Please enter 1-9${NC}"
+    echo -e "${RED}Invalid choice. Please enter 1-10${NC}"
 done
 
 case $choice in
@@ -1017,36 +1028,65 @@ case $choice in
         fi
         ;;
     4)
+        # GitHub Models (Azure Inference)
+        SUBSCRIPTION_MODE="github_token"
+        SELECTED_PROVIDER_ID="azure_ai_inference"
+        SELECTED_MODEL="azure_ai_inference/gpt-4o"
+        SELECTED_MAX_TOKENS=8192
+        echo ""
+        echo -e "${GREEN}⬢${NC} Using GitHub Models (Azure Inference)"
+
+        if [ "$GITHUB_TOKEN_DETECTED" = false ]; then
+            echo ""
+            echo -e "Get your GitHub token from: ${CYAN}https://github.com/settings/tokens${NC}"
+            echo ""
+            read -r -p "Paste your GitHub token (or press Enter to skip): " GITHUB_TOKEN_INPUT
+
+            if [ -n "$GITHUB_TOKEN_INPUT" ]; then
+                mkdir -p "$HOME/.hive"
+                echo "$GITHUB_TOKEN_INPUT" > "$HOME/.hive/github_token"
+                echo ""
+                echo -e "${GREEN}⬢${NC} GitHub token saved to ~/.hive/github_token"
+                GITHUB_TOKEN_DETECTED=true
+            else
+                echo ""
+                echo -e "${YELLOW}Skipped.${NC} You'll need to set the GITHUB_TOKEN environment variable."
+                SELECTED_PROVIDER_ID=""
+                SUBSCRIPTION_MODE=""
+            fi
+        fi
+        ;;
+    5)
         SELECTED_ENV_VAR="ANTHROPIC_API_KEY"
         SELECTED_PROVIDER_ID="anthropic"
         PROVIDER_NAME="Anthropic"
         SIGNUP_URL="https://console.anthropic.com/settings/keys"
         ;;
-    5)
+    6)
         SELECTED_ENV_VAR="OPENAI_API_KEY"
         SELECTED_PROVIDER_ID="openai"
         PROVIDER_NAME="OpenAI"
         SIGNUP_URL="https://platform.openai.com/api-keys"
         ;;
-    6)
+    7)
         SELECTED_ENV_VAR="GEMINI_API_KEY"
         SELECTED_PROVIDER_ID="gemini"
         PROVIDER_NAME="Google Gemini"
         SIGNUP_URL="https://aistudio.google.com/apikey"
         ;;
-    7)
+    8)
         SELECTED_ENV_VAR="GROQ_API_KEY"
         SELECTED_PROVIDER_ID="groq"
         PROVIDER_NAME="Groq"
         SIGNUP_URL="https://console.groq.com/keys"
         ;;
-    8)
+    9)
         SELECTED_ENV_VAR="CEREBRAS_API_KEY"
         SELECTED_PROVIDER_ID="cerebras"
         PROVIDER_NAME="Cerebras"
         SIGNUP_URL="https://cloud.cerebras.ai/"
         ;;
-    9)
+    10)
         echo ""
         echo -e "${YELLOW}Skipped.${NC} An LLM API key is required to test and use worker agents."
         echo -e "Add your API key later by running:"
@@ -1196,9 +1236,11 @@ if [ -n "$SELECTED_PROVIDER_ID" ]; then
     echo ""
     echo -n "  Saving configuration... "
     if [ "$SUBSCRIPTION_MODE" = "claude_code" ]; then
-        save_configuration "$SELECTED_PROVIDER_ID" "" "$SELECTED_MODEL" "$SELECTED_MAX_TOKENS" "true" "" > /dev/null
+        save_configuration "$SELECTED_PROVIDER_ID" "" "$SELECTED_MODEL" "$SELECTED_MAX_TOKENS" "true" "" "" "" > /dev/null
     elif [ "$SUBSCRIPTION_MODE" = "codex" ]; then
-        save_configuration "$SELECTED_PROVIDER_ID" "" "$SELECTED_MODEL" "$SELECTED_MAX_TOKENS" "" "" "true" > /dev/null
+        save_configuration "$SELECTED_PROVIDER_ID" "" "$SELECTED_MODEL" "$SELECTED_MAX_TOKENS" "" "" "true" "" > /dev/null
+    elif [ "$SUBSCRIPTION_MODE" = "github_token" ]; then
+        save_configuration "$SELECTED_PROVIDER_ID" "" "$SELECTED_MODEL" "$SELECTED_MAX_TOKENS" "" "" "" "true" > /dev/null
     elif [ "$SUBSCRIPTION_MODE" = "zai_code" ]; then
         save_configuration "$SELECTED_PROVIDER_ID" "$SELECTED_ENV_VAR" "$SELECTED_MODEL" "$SELECTED_MAX_TOKENS" "" "https://api.z.ai/api/coding/paas/v4" > /dev/null
     else
