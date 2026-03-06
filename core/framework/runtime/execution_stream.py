@@ -423,6 +423,30 @@ class ExecutionStream:
                 return True
         return False
 
+    async def inject_trigger(
+        self,
+        node_id: str,
+        trigger: Any,
+    ) -> bool:
+        """Inject a trigger event into a running queen EventLoopNode.
+
+        Searches active executors for a node matching ``node_id`` and calls
+        its ``inject_trigger()`` method to wake the queen.
+
+        Args:
+            node_id: The queen EventLoopNode ID.
+            trigger: A ``TriggerEvent`` instance (typed as Any to avoid
+                circular imports with graph layer).
+
+        Returns True if the trigger was delivered, False otherwise.
+        """
+        for executor in self._active_executors.values():
+            node = executor.node_registry.get(node_id)
+            if node is not None and hasattr(node, "inject_trigger"):
+                await node.inject_trigger(trigger)
+                return True
+        return False
+
     async def execute(
         self,
         input_data: dict[str, Any],

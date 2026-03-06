@@ -143,6 +143,13 @@ class EventType(StrEnum):
     # Subagent reports (one-way progress updates from sub-agents)
     SUBAGENT_REPORT = "subagent_report"
 
+    # Trigger lifecycle (queen-level triggers / heartbeats)
+    TRIGGER_AVAILABLE = "trigger_available"
+    TRIGGER_ACTIVATED = "trigger_activated"
+    TRIGGER_DEACTIVATED = "trigger_deactivated"
+    TRIGGER_FIRED = "trigger_fired"
+    TRIGGER_REMOVED = "trigger_removed"
+
 
 @dataclass
 class AgentEvent:

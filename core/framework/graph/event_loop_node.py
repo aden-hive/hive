@@ -36,6 +36,21 @@ from framework.runtime.llm_debug_logger import log_llm_turn
 
 logger = logging.getLogger(__name__)
 
+
+@dataclass
+class TriggerEvent:
+    """A framework-level trigger signal (timer tick or webhook hit).
+
+    Triggers are queued separately from user messages / external events
+    and drained atomically so the LLM sees all pending triggers at once.
+    """
+
+    trigger_type: str  # "timer" | "webhook"
+    source_id: str  # entry point ID or webhook route ID
+    payload: dict[str, Any] = field(default_factory=dict)
+    timestamp: float = field(default_factory=time.time)
+
+
 # Pattern for detecting context-window-exceeded errors across LLM providers.
 _CONTEXT_TOO_LARGE_RE = re.compile(
     r"context.{0,20}(length|window|limit|size)|"
@@ -306,6 +321,7 @@ class EventLoopNode(NodeProtocol):
         self._tool_executor = tool_executor
         self._conversation_store = conversation_store
         self._injection_queue: asyncio.Queue[tuple[str, bool]] = asyncio.Queue()
+        self._trigger_queue: asyncio.Queue[TriggerEvent] = asyncio.Queue()
         # Client-facing input blocking state
         self._input_ready = asyncio.Event()
         self._awaiting_input = False
@@ -576,6 +592,8 @@ class EventLoopNode(NodeProtocol):
 
             # 6b. Drain injection queue
             await self._drain_injection_queue(conversation)
+            # 6b1. Drain trigger queue (framework-level signals)
+            await self._drain_trigger_queue(conversation)
 
             # 6b2. Dynamic tool refresh (mode switching)
             if ctx.dynamic_tools_provider is not None:
@@ -1648,6 +1666,15 @@ class EventLoopNode(NodeProtocol):
         await self._injection_queue.put((content, is_client_input))
         self._input_ready.set()
 
+    async def inject_trigger(self, trigger: TriggerEvent) -> None:
+        """Inject a framework-level trigger into the running queen loop.
+
+        Triggers are queued separately from user messages and drained
+        atomically via _drain_trigger_queue().
+        """
+        await self._trigger_queue.put(trigger)
+        self._input_ready.set()
+
     def signal_shutdown(self) -> None:
         """Signal the node to exit its loop cleanly.
 
@@ -1693,9 +1720,9 @@ class EventLoopNode(NodeProtocol):
 
         Returns True if input arrived, False if shutdown was signaled.
         """
-        # If messages arrived while the LLM was processing, skip blocking
-        # entirely — the next _drain_injection_queue() will pick them up.
-        if not self._injection_queue.empty():
+        # If messages or triggers arrived while the LLM was processing, skip
+        # blocking — the next drain pass will pick them up.
+        if not self._injection_queue.empty() or not self._trigger_queue.empty():
             return True
 
         # Clear BEFORE emitting so that synchronous handlers (e.g. the
@@ -3791,6 +3818,32 @@ class EventLoopNode(NodeProtocol):
             except asyncio.QueueEmpty:
                 break
         return count
+
+    async def _drain_trigger_queue(self, conversation: NodeConversation) -> int:
+        """Drain all pending trigger events as a single batched user message.
+
+        Multiple triggers are merged so the LLM sees them atomically and can
+        reason about all pending triggers before acting.
+        """
+        triggers: list[TriggerEvent] = []
+        while not self._trigger_queue.empty():
+            try:
+                triggers.append(self._trigger_queue.get_nowait())
+            except asyncio.QueueEmpty:
+                break
+
+        if not triggers:
+            return 0
+
+        parts: list[str] = []
+        for t in triggers:
+            payload_str = json.dumps(t.payload, default=str)
+            parts.append(f"[TRIGGER: {t.trigger_type}/{t.source_id}]\n{payload_str}")
+
+        combined = "\n\n".join(parts)
+        logger.info("[drain] %d trigger(s): %s", len(triggers), combined[:200])
+        await conversation.add_user_message(combined)
+        return len(triggers)
 
     async def _check_pause(
         self,

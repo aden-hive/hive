@@ -322,7 +322,11 @@ class AsyncEntryPointSpec(BaseModel):
 
     id: str = Field(description="Unique identifier for this entry point")
     name: str = Field(description="Human-readable name")
-    entry_node: str = Field(description="Node ID to start execution from")
+    entry_node: str = Field(
+        default="",
+        description="Deprecated: Node ID to start execution from. "
+        "Triggers are graph-level; worker always enters at GraphSpec.entry_node.",
+    )
     trigger_type: str = Field(
         default="manual",
         description="How this entry point is triggered: webhook, api, timer, event, manual",

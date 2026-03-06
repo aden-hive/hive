@@ -141,6 +141,9 @@ class SessionState(BaseModel):
     checkpoint_enabled: bool = False
     latest_checkpoint_id: str | None = None
 
+    # Trigger activation state (IDs of triggers the queen/user turned on)
+    active_triggers: list[str] = Field(default_factory=list)
+
     model_config = {"extra": "allow"}
 
     @computed_field
