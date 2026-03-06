@@ -24,6 +24,9 @@ def _heuristic_repair(text: str) -> dict | None:
     - Markdown code blocks
     - Python booleans/None (True -> true)
     - Single quotes instead of double quotes
+    - Trailing commas before closing brackets
+    - Truncated JSON (unclosed brackets/braces from streaming cutoffs)
+    - Unescaped control characters in string values
     """
     if not isinstance(text, str):
         return None
@@ -35,29 +38,126 @@ def _heuristic_repair(text: str) -> dict | None:
 
     # 2. Find outermost JSON-like structure (greedy match)
     match = re.search(r"(\{.*\}|\[.*\])", text, re.DOTALL)
-    if match:
+    if not match:
+        # No complete JSON structure found — check for truncated JSON
+        match = re.search(r"(\{.*|\[.*)", text, re.DOTALL)
+        if not match:
+            return None
+        candidate = match.group(1)
+        candidate = _repair_truncated_json(candidate)
+    else:
         candidate = match.group(1)
 
-        # 3. Common fixes
-        # Fix Python constants
-        candidate = re.sub(r"\bTrue\b", "true", candidate)
-        candidate = re.sub(r"\bFalse\b", "false", candidate)
-        candidate = re.sub(r"\bNone\b", "null", candidate)
+    # 3. Common fixes
+    # Fix Python constants
+    candidate = re.sub(r"\bTrue\b", "true", candidate)
+    candidate = re.sub(r"\bFalse\b", "false", candidate)
+    candidate = re.sub(r"\bNone\b", "null", candidate)
 
-        # 4. Attempt load
+    # 4. Remove trailing commas before closing brackets/braces
+    candidate = re.sub(r",\s*([}\]])", r"\1", candidate)
+
+    # 5. Fix unescaped control characters inside JSON string values
+    candidate = _fix_unescaped_control_chars(candidate)
+
+    # 6. Attempt load
+    try:
+        return json.loads(candidate)
+    except json.JSONDecodeError:
+        # 7. Advanced: Try swapping single quotes if double quotes fail
+        # This is risky but effective for simple dicts
         try:
-            return json.loads(candidate)
+            if "'" in candidate and '"' not in candidate:
+                candidate_swapped = candidate.replace("'", '"')
+                return json.loads(candidate_swapped)
         except json.JSONDecodeError:
-            # 5. Advanced: Try swapping single quotes if double quotes fail
-            # This is risky but effective for simple dicts
-            try:
-                if "'" in candidate and '"' not in candidate:
-                    candidate_swapped = candidate.replace("'", '"')
-                    return json.loads(candidate_swapped)
-            except json.JSONDecodeError:
-                pass
+            pass
 
     return None
+
+
+def _repair_truncated_json(text: str) -> str:
+    """
+    Attempt to close unclosed brackets/braces in truncated JSON.
+
+    Handles streaming cutoffs where the LLM response was interrupted
+    mid-output, leaving unclosed structures like: {"key": "value", "nested": {"a": 1
+    """
+    # Track open brackets/braces (ignoring those inside strings)
+    stack = []
+    in_string = False
+    escape_next = False
+
+    for char in text:
+        if escape_next:
+            escape_next = False
+            continue
+        if char == "\\":
+            if in_string:
+                escape_next = True
+            continue
+        if char == '"' and not escape_next:
+            in_string = not in_string
+            continue
+        if in_string:
+            continue
+        if char in "{[":
+            stack.append("}" if char == "{" else "]")
+        elif char in "}]":
+            if stack and stack[-1] == char:
+                stack.pop()
+
+    # Close any remaining open structures in reverse order
+    # First, ensure we're not mid-string by closing any open string
+    if in_string:
+        text += '"'
+
+    # Remove any trailing incomplete key-value pair (e.g., trailing comma or colon)
+    text = re.sub(r',\s*"[^"]*"\s*:\s*$', "", text)
+    text = re.sub(r',\s*$', "", text)
+
+    # Close remaining brackets
+    text += "".join(reversed(stack))
+    return text
+
+
+def _fix_unescaped_control_chars(text: str) -> str:
+    """
+    Fix unescaped control characters (tabs, newlines) inside JSON string values.
+
+    LLMs sometimes output literal newlines or tabs within JSON strings
+    instead of their escaped forms (\\n, \\t).
+    """
+    result = []
+    in_string = False
+    escape_next = False
+
+    for char in text:
+        if escape_next:
+            result.append(char)
+            escape_next = False
+            continue
+        if char == "\\" and in_string:
+            result.append(char)
+            escape_next = True
+            continue
+        if char == '"':
+            in_string = not in_string
+            result.append(char)
+            continue
+        if in_string:
+            if char == "\n":
+                result.append("\\n")
+                continue
+            if char == "\t":
+                result.append("\\t")
+                continue
+            if char == "\r":
+                result.append("\\r")
+                continue
+        result.append(char)
+
+    return "".join(result)
 
 
 @dataclass
