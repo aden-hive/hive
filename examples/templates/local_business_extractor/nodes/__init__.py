@@ -47,7 +47,7 @@ extract_contacts_node = NodeSpec(
 1. Call delegate_to_sub_agent(agent_id="map-search-worker", task=user_request)
 2. Receive "business_list" from memory.
 3. For each business in the list:
-   - Use exa_get_contents or exa_search to find:
+   - Use web_search and web_scrape to find:
      - Contact emails and phone numbers.
      - Business hours.
      - Customer reviews or ratings summary.
@@ -55,7 +55,7 @@ extract_contacts_node = NodeSpec(
 4. Format the data into a comprehensive report for each business.
 5. set_output("business_data", enriched_business_list)
 """,
-    tools=["exa_get_contents", "exa_search"],
+    tools=["web_search", "web_scrape"],
 )
 
 # Google Sheets Sync Node

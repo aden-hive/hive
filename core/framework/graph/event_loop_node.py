@@ -602,6 +602,7 @@ class EventLoopNode(NodeProtocol):
             )
             _stream_retry_count = 0
             _turn_cancelled = False
+            _turn_succeeded = False
             while True:
                 try:
                     (
@@ -652,6 +653,7 @@ class EventLoopNode(NodeProtocol):
                         tool_results=real_tool_results,
                         token_counts=turn_tokens,
                     )
+                    _turn_succeeded = True
                     break  # success — exit retry loop
 
                 except TurnCancelled:
@@ -784,6 +786,12 @@ class EventLoopNode(NodeProtocol):
                 if ctx.node_spec.client_facing and not ctx.event_triggered:
                     await self._await_user_input(ctx, prompt="")
                 continue  # back to top of for-iteration loop
+
+            # If turn failed in a client-facing node, we intentionally
+            # waited for user input and broke out of retry loop without
+            # producing turn outputs/tokens. Start next outer iteration.
+            if not _turn_succeeded:
+                continue
 
             # 6e'. Feed actual API token count back for accurate estimation
             turn_input = turn_tokens.get("input", 0)

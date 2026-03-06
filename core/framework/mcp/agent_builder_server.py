@@ -496,7 +496,13 @@ def _validate_tool_credentials(tools_list: list[str]) -> dict | None:
         # Find missing credentials
         cred_errors = []
         checked: set[str] = set()
+        # Tools that should not be blocked at build-time for missing credentials.
+        # `web_search` is keyless-first in current Hive MCP templates.
+        keyless_build_tools = {"web_search"}
+
         for tool_name in tools_list:
+            if tool_name in keyless_build_tools:
+                continue
             cred_name = tool_to_cred.get(tool_name)
             if cred_name is None or cred_name in checked:
                 continue
@@ -539,6 +545,40 @@ def _validate_tool_credentials(tools_list: list[str]) -> dict | None:
         }
 
     return None
+
+
+def _normalize_tools_for_keyless_search(tools_list: list[str]) -> tuple[list[str], list[str]]:
+    """
+    Normalize tool lists so newly built agents default to keyless web search.
+
+    Current normalization:
+    - exa_search -> web_search (Exa MCP keyless-first path)
+
+    Returns:
+        (normalized_tools, warnings)
+    """
+    if not tools_list:
+        return tools_list, []
+
+    normalized: list[str] = []
+    warnings: list[str] = []
+    replaced_exa_search = False
+
+    for tool_name in tools_list:
+        if tool_name == "exa_search":
+            if "web_search" not in normalized:
+                normalized.append("web_search")
+            replaced_exa_search = True
+            continue
+        if tool_name not in normalized:
+            normalized.append(tool_name)
+
+    if replaced_exa_search:
+        warnings.append(
+            "Replaced tool 'exa_search' with 'web_search' for Exa MCP keyless-first behavior."
+        )
+
+    return normalized, warnings
 
 
 def _validate_agent_path(agent_path: str) -> tuple[Path | None, str | None]:
@@ -643,6 +683,9 @@ def add_node(
             }
         )
 
+    # Normalize search tools for keyless Exa MCP-first behavior.
+    tools_list, normalization_warnings = _normalize_tools_for_keyless_search(tools_list)
+
     # Validate credentials for tools BEFORE adding the node
     cred_error = _validate_tool_credentials(tools_list)
     if cred_error:
@@ -671,7 +714,7 @@ def add_node(
 
     # Validate
     errors = []
-    warnings = []
+    warnings = list(normalization_warnings)
 
     if not node_id:
         errors.append("Node must have an id")
@@ -905,6 +948,10 @@ def update_node(
             }
         )
 
+    normalization_warnings: list[str] = []
+    if tools_list is not None:
+        tools_list, normalization_warnings = _normalize_tools_for_keyless_search(tools_list)
+
     # Validate credentials for new tools BEFORE updating
     if tools_list:
         cred_error = _validate_tool_credentials(tools_list)
@@ -937,7 +984,7 @@ def update_node(
 
     # Validate
     errors = []
-    warnings = []
+    warnings = list(normalization_warnings)
 
     # Reject removed node types
     if node.node_type in ("function", "llm_tool_use", "llm_generate"):

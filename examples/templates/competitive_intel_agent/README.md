@@ -1,13 +1,13 @@
 # Competitive Intelligence Agent (Community) 
 ## Built by https://github.com/nafiyad
 
-An autonomous agent that monitors competitor websites, news sources, and GitHub repositories to deliver structured digests with key insights and trend analysis.
+An autonomous agent that monitors competitor websites, news sources, and public GitHub activity pages to deliver structured digests with key insights and trend analysis.
 
 ## Prerequisites
 
 - **Python 3.11+** with `uv`
 - **ANTHROPIC_API_KEY** — set in your `.env` or environment
-- **GITHUB_TOKEN** *(optional)* — for GitHub activity monitoring
+- No additional search API keys required for web discovery (uses `web_search` Exa MCP keyless-first path).
 
 ## Quick Start
 
@@ -53,7 +53,7 @@ intake → web-scraper → news-search → github-monitor → aggregator → ana
 | **intake** | Collect competitor list & focus areas | — | ✅ |
 | **web-scraper** | Scrape competitor websites | web_search, web_scrape | |
 | **news-search** | Search news & press releases | web_search, web_scrape | |
-| **github-monitor** | Track public GitHub activity | github_* | |
+| **github-monitor** | Track public GitHub activity | web_search, web_scrape | |
 | **aggregator** | Merge, deduplicate, persist | save_data, load_data | |
 | **analysis** | Extract insights & trends | load_data, save_data | |
 | **report** | Generate HTML digest | save_data, serve_file | ✅ |

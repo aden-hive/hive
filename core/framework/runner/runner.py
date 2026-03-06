@@ -1099,7 +1099,8 @@ class AgentRunner:
             llm_config = config.get("llm", {})
             use_claude_code = llm_config.get("use_claude_code_subscription", False)
             use_codex = llm_config.get("use_codex_subscription", False)
-            api_base = llm_config.get("api_base")
+            # Accept both api_base (canonical) and base_url (legacy/compat alias)
+            api_base = llm_config.get("api_base") or llm_config.get("base_url")
 
             api_key = None
             if use_claude_code:

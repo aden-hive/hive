@@ -123,9 +123,8 @@
         "output_schema": {},
         "system_prompt": null,
         "tools": [
-          "github_list_repos",
-          "github_get_repo",
-          "github_search_repos"
+          "web_search",
+          "web_scrape"
         ],
         "model": null,
         "function": null,
@@ -385,10 +384,7 @@
     "updated_at": "2026-02-22 21:09:31.601240"
   },
   "required_tools": [
-    "github_get_repo",
-    "github_search_repos",
     "list_data_files",
-    "github_list_repos",
     "serve_file_to_user",
     "save_data",
     "web_search",
