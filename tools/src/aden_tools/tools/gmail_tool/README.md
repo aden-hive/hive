@@ -11,6 +11,10 @@ Read, modify, and manage Gmail messages using the Gmail API v1.
 | `gmail_trash_message` | Move a message to trash |
 | `gmail_modify_message` | Add/remove labels on a single message |
 | `gmail_batch_modify_messages` | Add/remove labels on multiple messages |
+| `gmail_batch_get_messages` | Fetch multiple messages in a single batch request |
+| `gmail_create_draft` | Create a draft email in Gmail |
+| `gmail_list_labels` | List all labels in the mailbox |
+| `gmail_create_label` | Create a new custom label |
 
 ## Setup
 

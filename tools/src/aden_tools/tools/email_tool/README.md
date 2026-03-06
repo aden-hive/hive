@@ -1,28 +1,43 @@
 # Email Tool
 
-Send emails using multiple providers. Supports Gmail (via Google OAuth2) and Resend.
+Multi-provider email support with automatic provider detection.
 
-The `provider` parameter is required — you must explicitly choose `"gmail"` or `"resend"`.
+## Providers
+
+| Provider | Send | Read | Setup |
+|----------|------|------|-------|
+| Gmail    | Yes  | Yes  | Connect via hive.adenhq.com (OAuth2) |
+| Outlook  | Yes  | Yes  | Connect via hive.adenhq.com (OAuth2) |
+| Resend   | Yes  | No   | Set `RESEND_API_KEY` env var |
+
+Auto-detection order for send: Gmail > Outlook > Resend.
+Auto-detection order for read: Gmail > Outlook.
 
 ## Tools
 
-### `send_email`
-Send a general-purpose email.
+### Send
+- `send_email` - Send an email (auto-detects provider or specify one)
+- `gmail_reply_email` - Reply to a Gmail message in-thread with threading headers
 
-**Parameters:**
-- `to` (str | list[str]) - Recipient email address(es)
-- `subject` (str) - Email subject line (1-998 chars per RFC 2822)
-- `html` (str) - Email body as HTML
-- `provider` ("gmail" | "resend") - Provider to use. Required.
-- `from_email` (str, optional) - Sender address. Falls back to `EMAIL_FROM` env var. Optional for Gmail (defaults to the authenticated user's address)
-- `cc` (str | list[str], optional) - CC recipient(s)
-- `bcc` (str | list[str], optional) - BCC recipient(s)
+### Read
+- `email_list` - List messages in a folder (INBOX, SENT, DRAFTS, TRASH, SPAM)
+- `email_read` - Read a full message by ID
+- `email_search` - Search messages (Gmail search syntax or Outlook full-text)
+- `email_labels` - List available labels/folders
+
+### Write Operations
+- `email_mark_read` - Mark a message as read or unread
+- `email_delete` - Delete or trash a message
+- `email_reply` - Reply to a message (supports reply-all)
+- `email_forward` - Forward a message
+- `email_move` - Move a message to a different folder
+- `email_bulk_delete` - Bulk delete or trash multiple messages
 
 ## Setup
 
-### Gmail (via Aden OAuth2)
+### Gmail / Outlook (via Aden OAuth2)
 
-Connect Gmail through hive.adenhq.com. The `GOOGLE_ACCESS_TOKEN` is provided automatically at runtime via the `CredentialStoreAdapter`.
+Connect through hive.adenhq.com. Tokens are provided automatically at runtime via `CredentialStoreAdapter`.
 
 ### Resend
 
@@ -32,11 +47,11 @@ export EMAIL_FROM=notifications@yourdomain.com
 ```
 
 - `RESEND_API_KEY` - Get an API key at: https://resend.com/api-keys
-- `EMAIL_FROM` - Default sender address. Must be from a domain verified in your email provider. Required for Resend, optional for Gmail.
+- `EMAIL_FROM` - Default sender address. Must be from a verified domain. Required for Resend, optional for Gmail/Outlook.
 
 ### Testing override
 
-Set `EMAIL_OVERRIDE_TO` to redirect all outbound mail to a single address. The original recipients are prepended to the subject line for traceability.
+Set `EMAIL_OVERRIDE_TO` to redirect all outbound mail to a single address. Original recipients are prepended to the subject for traceability.
 
 ```bash
 export EMAIL_OVERRIDE_TO=you@example.com
@@ -45,6 +60,6 @@ export EMAIL_OVERRIDE_TO=you@example.com
 ## Adding a New Provider
 
 1. Add a `_send_via_<provider>` function in `email_tool.py`
-2. Add the provider's credential key to `_get_credential()`
+2. Add the provider's credential key to `_get_credentials()`
 3. Extend the `provider` Literal type in `_send_email_impl()`
 4. Add tests for the new provider

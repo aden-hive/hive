@@ -114,8 +114,19 @@ python mcp_server.py
 
 | Tool | Description |
 | ---- | ----------- |
+| `send_email` | Send emails (Gmail, Outlook, or Resend) |
+| `email_list` | List emails in a folder (Gmail or Outlook) |
+| `email_read` | Read a full email by ID (Gmail or Outlook) |
+| `email_search` | Search emails (Gmail or Outlook) |
+| `email_labels` | List email labels/folders (Gmail or Outlook) |
+| `email_mark_read` | Mark emails as read/unread (Gmail or Outlook) |
+| `email_delete` | Delete or trash emails (Gmail or Outlook) |
+| `email_reply` | Reply or reply-all to emails (Gmail or Outlook) |
+| `email_forward` | Forward emails (Gmail or Outlook) |
+| `email_move` | Move emails between folders (Gmail or Outlook) |
+| `email_bulk_delete` | Bulk delete/trash emails (Gmail or Outlook) |
 | `gmail_*` | Read, reply, draft, and manage Gmail messages |
-| `send_email` | Send email via SMTP |
+| `outlook_*` | Categories, focused inbox, drafts, and batch operations for Outlook |
 | `slack_*` | Send messages, manage channels, users, and files in Slack |
 | `discord_send_message`, `discord_get_messages`, `discord_list_channels`, `discord_list_guilds` | Send and read Discord messages |
 | `telegram_send_message`, `telegram_send_document` | Send messages and documents via Telegram Bot API |
