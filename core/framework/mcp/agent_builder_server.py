@@ -2715,23 +2715,8 @@ def initialize_agent_package(
                 )
                 files_written[rel] = info
 
-    # 9. Generate validation commands
+    # 9. Generate next validation step
     agent_name = session.name
-    _validate_cmd = (
-        f"uv run python -c 'from {agent_name} import default_agent;"
-        " print(default_agent.validate())'"
-    )
-    _runner_cmd = (
-        "uv run python -c 'from framework.runner.runner import AgentRunner;"
-        f' r = AgentRunner.load(\\"exports/{agent_name}\\");'
-        ' print(\\"AgentRunner.load: OK\\")\''
-    )
-    validation_commands = [
-        f'run_command("{_validate_cmd}")',
-        f'run_command("{_runner_cmd}")',
-        f'validate_agent_tools("exports/{agent_name}")',
-        f'run_agent_tests("{agent_name}")',
-    ]
 
     # 10. Generate node design warnings
     design_warnings = []
@@ -2829,13 +2814,13 @@ def initialize_agent_package(
             "has_async": has_async,
             "entry_node": entry_node,
             "entry_points": entry_points,
-            "validation_commands": validation_commands,
+            "next_step": f'validate_agent_package("{agent_name}")',
             "design_warnings": design_warnings,
             "summary": (
                 f"Agent package '{session.name}' initialized at exports/{session.name}/. "
                 f"Generated {len(files_written)} files. "
                 f"Review and customize system prompts in nodes/__init__.py, "
-                f"then run validation commands."
+                f"then run validate_agent_package(\"{session.name}\")."
             ),
         },
         default=str,

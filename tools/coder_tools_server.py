@@ -539,51 +539,40 @@ def list_agent_tools(
 # ── Meta-agent: Agent tool validation ─────────────────────────────────────
 
 
-@mcp.tool()
-def validate_agent_tools(agent_path: str) -> str:
+def _validate_agent_tools_impl(agent_path: str) -> dict:
     """Validate that all tools declared in an agent's nodes exist in its MCP servers.
 
-    Connects to the agent's configured MCP servers, discovers available tools,
-    then checks every node's declared tools against what actually exists.
-    Use this after building an agent to catch hallucinated or misspelled tool names.
-
-    Args:
-        agent_path: Path to agent directory (e.g. "exports/my_agent")
-
-    Returns:
-        JSON with validation result: pass/fail, missing tools per node, available tools
+    Returns a dict with validation result: pass/fail, missing tools per node, available tools.
     """
     try:
         resolved = _resolve_path(agent_path)
     except ValueError:
-        return json.dumps({"error": "Access denied: path is outside the project root."})
+        return {"error": "Access denied: path is outside the project root."}
 
     # Restrict to allowed directories to prevent arbitrary code execution
     # via importlib.import_module() below.
     try:
         from framework.server.app import validate_agent_path
     except ImportError:
-        return json.dumps({"error": "Cannot validate agent path: framework package not available"})
+        return {"error": "Cannot validate agent path: framework package not available"}
 
     try:
         resolved = str(validate_agent_path(resolved))
     except ValueError:
-        return json.dumps(
-            {
-                "error": "agent_path must be inside an allowed directory "
-                "(exports/, examples/, or ~/.hive/agents/)"
-            }
-        )
+        return {
+            "error": "agent_path must be inside an allowed directory "
+            "(exports/, examples/, or ~/.hive/agents/)"
+        }
 
     if not os.path.isdir(resolved):
-        return json.dumps({"error": f"Agent directory not found: {agent_path}"})
+        return {"error": f"Agent directory not found: {agent_path}"}
 
     agent_dir = resolved  # Keep path; 'resolved' is reused for MCP config in loop
 
     # --- Discover available tools from agent's MCP servers ---
     mcp_config_path = os.path.join(agent_dir, "mcp_servers.json")
     if not os.path.isfile(mcp_config_path):
-        return json.dumps({"error": f"No mcp_servers.json found in {agent_path}"})
+        return {"error": f"No mcp_servers.json found in {agent_path}"}
 
     try:
         from pathlib import Path
@@ -591,7 +580,7 @@ def validate_agent_tools(agent_path: str) -> str:
         from framework.runner.mcp_client import MCPClient, MCPServerConfig
         from framework.runner.tool_registry import ToolRegistry
     except ImportError:
-        return json.dumps({"error": "Cannot import MCPClient"})
+        return {"error": "Cannot import MCPClient"}
 
     available_tools: set[str] = set()
     discovery_errors = []
@@ -601,7 +590,7 @@ def validate_agent_tools(agent_path: str) -> str:
         with open(mcp_config_path, encoding="utf-8") as f:
             servers_config = json.load(f)
     except (json.JSONDecodeError, OSError) as e:
-        return json.dumps({"error": f"Failed to read mcp_servers.json: {e}"})
+        return {"error": f"Failed to read mcp_servers.json: {e}"}
 
     for server_name, server_conf in servers_config.items():
         resolved = ToolRegistry.resolve_mcp_stdio_config(
@@ -629,7 +618,7 @@ def validate_agent_tools(agent_path: str) -> str:
     # --- Load agent nodes and extract declared tools ---
     agent_py = os.path.join(agent_dir, "agent.py")
     if not os.path.isfile(agent_py):
-        return json.dumps({"error": f"No agent.py found in {agent_path}"})
+        return {"error": f"No agent.py found in {agent_path}"}
 
     import importlib
     import importlib.util
@@ -643,11 +632,11 @@ def validate_agent_tools(agent_path: str) -> str:
     try:
         agent_module = importlib.import_module(package_name)
     except Exception as e:
-        return json.dumps({"error": f"Failed to import agent: {e}"})
+        return {"error": f"Failed to import agent: {e}"}
 
     nodes = getattr(agent_module, "nodes", None)
     if not nodes:
-        return json.dumps({"error": "Agent module has no 'nodes' attribute"})
+        return {"error": "Agent module has no 'nodes' attribute"}
 
     # --- Validate declared vs available ---
     missing_by_node: dict[str, list[str]] = {}
@@ -678,7 +667,24 @@ def validate_agent_tools(agent_path: str) -> str:
     if discovery_errors:
         result["discovery_errors"] = discovery_errors
 
-    return json.dumps(result, indent=2)
+    return result
+
+
+@mcp.tool()
+def validate_agent_tools(agent_path: str) -> str:
+    """Validate that all tools declared in an agent's nodes exist in its MCP servers.
+
+    Connects to the agent's configured MCP servers, discovers available tools,
+    then checks every node's declared tools against what actually exists.
+    Use this after building an agent to catch hallucinated or misspelled tool names.
+
+    Args:
+        agent_path: Path to agent directory (e.g. "exports/my_agent")
+
+    Returns:
+        JSON with validation result: pass/fail, missing tools per node, available tools
+    """
+    return json.dumps(_validate_agent_tools_impl(agent_path), indent=2)
 
 
 # ── Meta-agent: Agent inventory ───────────────────────────────────────────
@@ -1008,25 +1014,14 @@ def get_agent_checkpoint(
 # ── Meta-agent: Test execution ────────────────────────────────────────────
 
 
-@mcp.tool()
-def run_agent_tests(
+def _run_agent_tests_impl(
     agent_name: str,
     test_types: str = "all",
     fail_fast: bool = False,
-) -> str:
+) -> dict:
     """Run pytest on an agent's test suite with structured result parsing.
 
-    Automatically sets PYTHONPATH so framework and agent packages are
-    importable. Parses pytest output into structured pass/fail results.
-
-    Args:
-        agent_name: Agent package name (e.g. 'deep_research_agent')
-        test_types: Comma-separated test types: 'constraint', 'success',
-            'edge_case', 'all' (default: 'all')
-        fail_fast: Stop on first failure (default: False)
-
-    Returns:
-        JSON with summary counts, per-test results, and failure details
+    Returns a dict with summary counts, per-test results, and failure details.
     """
     agent_path = Path(PROJECT_ROOT) / "exports" / agent_name
     if not agent_path.is_dir():
@@ -1035,39 +1030,32 @@ def run_agent_tests(
     tests_dir = agent_path / "tests"
 
     if not agent_path.is_dir():
-        return json.dumps(
-            {
-                "error": f"Agent not found: {agent_name}",
-                "hint": "Use list_agents() to see available agents.",
-            }
-        )
+        return {
+            "error": f"Agent not found: {agent_name}",
+            "hint": "Use list_agents() to see available agents.",
+        }
 
     if not tests_dir.exists():
-        return json.dumps(
-            {
-                "error": f"No tests directory: exports/{agent_name}/tests/",
-                "hint": "Create test files in the tests/ directory first.",
-            }
-        )
+        return {
+            "error": f"No tests directory: exports/{agent_name}/tests/",
+            "hint": "Create test files in the tests/ directory first.",
+        }
 
     # Parse test types
     types_list = [t.strip() for t in test_types.split(",")]
 
     # Guard: pytest must be available as a subprocess command.
-    # Install with: pip install 'framework[testing]'
     import shutil
 
     if shutil.which("pytest") is None:
-        return json.dumps(
-            {
-                "error": (
-                    "pytest is not installed or not on PATH. "
-                    "Hive's test runner requires pytest at runtime. "
-                    "Install it with: pip install 'framework[testing]' "
-                    "or: uv pip install 'framework[testing]'"
-                ),
-            }
-        )
+        return {
+            "error": (
+                "pytest is not installed or not on PATH. "
+                "Hive's test runner requires pytest at runtime. "
+                "Install it with: pip install 'framework[testing]' "
+                "or: uv pip install 'framework[testing]'"
+            ),
+        }
 
     # Build pytest command
     cmd = ["pytest"]
@@ -1113,21 +1101,17 @@ def run_agent_tests(
             encoding="utf-8",
         )
     except subprocess.TimeoutExpired:
-        return json.dumps(
-            {
-                "error": "Tests timed out after 120 seconds. A test may be hanging "
-                "(e.g. a client-facing node waiting for stdin). Use mock mode "
-                "or add timeouts to async tests.",
-                "command": " ".join(cmd),
-            }
-        )
+        return {
+            "error": "Tests timed out after 120 seconds. A test may be hanging "
+            "(e.g. a client-facing node waiting for stdin). Use mock mode "
+            "or add timeouts to async tests.",
+            "command": " ".join(cmd),
+        }
     except Exception as e:
-        return json.dumps(
-            {
-                "error": f"Failed to run pytest: {e}",
-                "command": " ".join(cmd),
-            }
-        )
+        return {
+            "error": f"Failed to run pytest: {e}",
+            "command": " ".join(cmd),
+        }
 
     output = result.stdout + "\n" + result.stderr
 
@@ -1189,20 +1173,177 @@ def run_agent_tests(
                     }
                 )
 
+    return {
+        "agent_name": agent_name,
+        "summary": summary_text,
+        "passed": passed,
+        "failed": failed,
+        "skipped": skipped,
+        "errors": errors,
+        "total": total,
+        "test_results": test_results,
+        "failures": failures,
+        "exit_code": result.returncode,
+    }
+
+
+@mcp.tool()
+def run_agent_tests(
+    agent_name: str,
+    test_types: str = "all",
+    fail_fast: bool = False,
+) -> str:
+    """Run pytest on an agent's test suite with structured result parsing.
+
+    Automatically sets PYTHONPATH so framework and agent packages are
+    importable. Parses pytest output into structured pass/fail results.
+
+    Args:
+        agent_name: Agent package name (e.g. 'deep_research_agent')
+        test_types: Comma-separated test types: 'constraint', 'success',
+            'edge_case', 'all' (default: 'all')
+        fail_fast: Stop on first failure (default: False)
+
+    Returns:
+        JSON with summary counts, per-test results, and failure details
+    """
+    return json.dumps(_run_agent_tests_impl(agent_name, test_types, fail_fast), indent=2)
+
+
+# ── Meta-agent: Unified agent validation ───────────────────────────────────
+
+
+@mcp.tool()
+def validate_agent_package(agent_name: str) -> str:
+    """Run all validation checks on a built agent package in one call.
+
+    Executes 4 steps and reports all results (does not stop on first failure):
+      1. Class validation — checks graph structure and entry_points contract
+      2. Runner load — checks package export contract (same path the UI uses)
+      3. Tool validation — checks declared tools exist in MCP servers
+      4. Tests — runs the agent's pytest suite
+
+    Args:
+        agent_name: Agent package name (e.g. 'my_agent'). Must exist in exports/.
+
+    Returns:
+        JSON with per-step results and overall pass/fail summary
+    """
+    agent_path = f"exports/{agent_name}"
+    steps: dict[str, dict] = {}
+
+    # Set up env for subprocess calls
+    env = os.environ.copy()
+    core_path = os.path.join(PROJECT_ROOT, "core")
+    exports_path = os.path.join(PROJECT_ROOT, "exports")
+    fw_agents_path = os.path.join(PROJECT_ROOT, "core", "framework", "agents")
+    pythonpath = env.get("PYTHONPATH", "")
+    path_parts = [core_path, exports_path, fw_agents_path, PROJECT_ROOT]
+    if pythonpath:
+        path_parts.append(pythonpath)
+    env["PYTHONPATH"] = os.pathsep.join(path_parts)
+
+    # Step A: Class validation (subprocess for import isolation)
+    try:
+        proc = subprocess.run(
+            [
+                "uv", "run", "python", "-c",
+                f"from {agent_name} import default_agent; print(default_agent.validate())",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=30,
+            env=env,
+            cwd=PROJECT_ROOT,
+            stdin=subprocess.DEVNULL,
+        )
+        passed = proc.returncode == 0
+        steps["class_validation"] = {
+            "passed": passed,
+            "output": (proc.stdout.strip() or proc.stderr.strip())[:2000],
+        }
+        if not passed:
+            steps["class_validation"]["error"] = proc.stderr.strip()[:2000]
+    except Exception as e:
+        steps["class_validation"] = {"passed": False, "error": str(e)}
+
+    # Step B: Runner load test (subprocess for import isolation)
+    try:
+        proc = subprocess.run(
+            [
+                "uv", "run", "python", "-c",
+                f'from framework.runner.runner import AgentRunner; '
+                f'r = AgentRunner.load("exports/{agent_name}"); '
+                f'print("AgentRunner.load: OK")',
+            ],
+            capture_output=True,
+            text=True,
+            timeout=30,
+            env=env,
+            cwd=PROJECT_ROOT,
+            stdin=subprocess.DEVNULL,
+        )
+        passed = proc.returncode == 0
+        steps["runner_load"] = {
+            "passed": passed,
+            "output": (proc.stdout.strip() or proc.stderr.strip())[:2000],
+        }
+        if not passed:
+            steps["runner_load"]["error"] = proc.stderr.strip()[:2000]
+    except Exception as e:
+        steps["runner_load"] = {"passed": False, "error": str(e)}
+
+    # Step C: Tool validation (direct call)
+    try:
+        tool_result = _validate_agent_tools_impl(agent_path)
+        if "error" in tool_result:
+            steps["tool_validation"] = {"passed": False, "error": tool_result["error"]}
+        else:
+            steps["tool_validation"] = {
+                "passed": tool_result.get("valid", False),
+                "output": tool_result.get("message", ""),
+            }
+            if tool_result.get("missing_tools"):
+                steps["tool_validation"]["missing_tools"] = tool_result["missing_tools"]
+    except Exception as e:
+        steps["tool_validation"] = {"passed": False, "error": str(e)}
+
+    # Step D: Tests (direct call)
+    try:
+        test_result = _run_agent_tests_impl(agent_name)
+        if "error" in test_result:
+            steps["tests"] = {"passed": False, "error": test_result["error"]}
+        else:
+            all_passed = test_result.get("failed", 0) == 0 and test_result.get("errors", 0) == 0
+            steps["tests"] = {
+                "passed": all_passed,
+                "summary": test_result.get("summary", "unknown"),
+            }
+            if not all_passed and test_result.get("failures"):
+                steps["tests"]["failures"] = test_result["failures"]
+    except Exception as e:
+        steps["tests"] = {"passed": False, "error": str(e)}
+
+    # Build summary
+    failed_steps = [name for name, step in steps.items() if not step.get("passed")]
+    total = len(steps)
+    passed_count = total - len(failed_steps)
+    valid = len(failed_steps) == 0
+
+    if valid:
+        summary = f"PASS: All {total} steps passed"
+    else:
+        summary = f"FAIL: {len(failed_steps)} of {total} steps failed ({', '.join(failed_steps)})"
+
     return json.dumps(
         {
+            "valid": valid,
             "agent_name": agent_name,
-            "summary": summary_text,
-            "passed": passed,
-            "failed": failed,
-            "skipped": skipped,
-            "errors": errors,
-            "total": total,
-            "test_results": test_results,
-            "failures": failures,
-            "exit_code": result.returncode,
+            "steps": steps,
+            "summary": summary,
         },
         indent=2,
+        default=str,
     )
 
 
