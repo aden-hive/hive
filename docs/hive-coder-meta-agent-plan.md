@@ -32,7 +32,7 @@ Scan `exports/` for agent packages and `~/.hive/agents/` for runtime data. Retur
 
 ### 3-7. Session & Checkpoint Inspection
 
-Ported from `agent_builder_server.py` lines 3484-3856. Pure filesystem reads — JSON + pathlib, zero framework imports.
+Ported from the former `agent_builder_server.py`. Pure filesystem reads — JSON + pathlib, zero framework imports.
 
 | Tool | Purpose |
 |------|---------|
@@ -40,13 +40,13 @@ Ported from `agent_builder_server.py` lines 3484-3856. Pure filesystem reads —
 | `list_agent_checkpoints(agent_name, session_id)` | List checkpoints for debugging |
 | `get_agent_checkpoint(agent_name, session_id, checkpoint_id?)` | Load a checkpoint's full state |
 
-**Key difference from agent-builder:** These tools accept `agent_name` (e.g. `"deep_research_agent"`) instead of raw `agent_work_dir` paths. They resolve to `~/.hive/agents/{agent_name}/` internally. Friendlier for the LLM.
+**Key difference from the old agent-builder server:** These tools accept `agent_name` (e.g. `"deep_research_agent"`) instead of raw `agent_work_dir` paths. They resolve to `~/.hive/agents/{agent_name}/` internally. Friendlier for the LLM.
 
 ### 8. Test Execution
 
 **`run_agent_tests(agent_name, test_types?, fail_fast?)`**
 
-Ported from `agent_builder_server.py` lines 2756-2920. Runs pytest on an agent's test suite, sets PYTHONPATH automatically, parses output into structured results (passed/failed/skipped counts, per-test status, failure details).
+Ported from the former `agent_builder_server.py`. Runs pytest on an agent's test suite, sets PYTHONPATH automatically, parses output into structured results (passed/failed/skipped counts, per-test status, failure details).
 
 ---
 

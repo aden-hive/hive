@@ -113,7 +113,7 @@ _QUEEN_RUNNING_TOOLS = [
 # additions.
 # ---------------------------------------------------------------------------
 
-_agent_builder_knowledge = """\
+_package_builder_knowledge = """\
 **A responsible engineer doesn't jump into building. First, \
 understand the problem and be transparent about what the framework can and cannot do.**
 
@@ -880,7 +880,7 @@ coder_node = NodeSpec(
     system_prompt=(
         "You are Hive Coder, the best agent-building coding agent. You build "
         "production-ready Hive agent packages from natural language.\n"
-        + _agent_builder_knowledge
+        + _package_builder_knowledge
         + _coder_completion
         + _appendices
     ),
@@ -962,7 +962,7 @@ queen_node = NodeSpec(
     system_prompt=(
         _queen_identity_building
         + _queen_style
-        + _agent_builder_knowledge
+        + _package_builder_knowledge
         + _gcu_building_section  # GCU as first-class citizen (not appendix)
         + _queen_tools_docs
         + _queen_behavior
@@ -995,7 +995,7 @@ __all__ = [
     "_queen_behavior_running",
     "_queen_phase_7",
     "_queen_style",
-    "_agent_builder_knowledge",
+    "_package_builder_knowledge",
     "_appendices",
     "_gcu_building_section",
 ]
