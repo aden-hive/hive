@@ -1,3 +1,9 @@
+"""Deprecated terminal UI for Hive.
+
+This module is legacy and no longer actively maintained.
+Use the browser-based interface (`hive open`) instead.
+"""
+
 import logging
 import platform
 import subprocess
