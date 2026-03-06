@@ -106,7 +106,7 @@ edges = []
 entry_node = "coder"
 entry_points = {"start": "coder"}
 pause_nodes = []
-terminal_nodes = ["coder"]  # Coder node has output_keys and can terminate
+terminal_nodes = []  # Coder node has output_keys and can terminate
 
 # No async entry points needed — the queen is now an independent executor,
 # not a secondary graph receiving events via add_graph().
