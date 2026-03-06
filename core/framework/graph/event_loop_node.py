@@ -2527,11 +2527,10 @@ class EventLoopNode(NodeProtocol):
                     return JudgeVerdict(
                         action="RETRY",
                         feedback=(
-                            "STOP describing what you will do. "
-                            "You have FULL access to all tools — file creation, "
-                            "shell commands, MCP tools — and you CAN call them "
-                            "directly in your response. Respond ONLY with tool "
-                            "calls, no prose. Execute the task now."
+                            "Continúa la interacción con el usuario. "
+                            "Tienes acceso TOTAL a todas las herramientas si es necesario, "
+                            "pero asegúrate siempre de proporcionar una respuesta clara, "
+                            "amigable y en ESPAÑOL."
                         ),
                     )
 

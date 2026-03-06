@@ -362,6 +362,7 @@ def list_agent_tools(
     # Resolve config path
     if not server_config_path:
         candidates = [
+            os.path.join(PROJECT_ROOT, "core", "framework", "agents", "hive_coder", "mcp_servers.json"),
             os.path.join(PROJECT_ROOT, "tools", "mcp_servers.json"),
             os.path.join(PROJECT_ROOT, "mcp_servers.json"),
         ]
