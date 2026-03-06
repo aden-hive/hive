@@ -1403,6 +1403,19 @@ def validate_graph() -> str:
                     f"must be a subset of output_keys {node.output_keys}"
                 )
 
+    # Node count warning (prefer 3-6 nodes)
+    node_count = len(session.nodes)
+    if node_count < 3:
+        warnings.append(
+            f"Agent has only {node_count} node(s). "
+            "Consider adding nodes for better separation of concerns (recommend 3-6)."
+        )
+    elif node_count > 6:
+        warnings.append(
+            f"Agent has {node_count} nodes. "
+            "Consider consolidating to 3-6 nodes for simpler architecture."
+        )
+
     # Worker nodes should be autonomous; queen owns user interaction.
     el_nodes = [n for n in session.nodes if n.node_type == "event_loop"]
     cf_el_nodes = [n for n in el_nodes if n.client_facing]
@@ -2777,28 +2790,28 @@ def initialize_agent_package(
                 }
             )
 
-    # Warn about node count (prefer 2-5 nodes)
+    # Warn about node count (prefer 3-6 nodes)
     node_count = len(session.nodes)
-    if node_count < 2:
+    if node_count < 3:
         design_warnings.append(
             {
                 "node_id": None,
                 "type": "too_few_nodes",
                 "message": (
-                    f"Agent has only {node_count} node. "
-                    "Consider adding nodes for better separation of concerns."
+                    f"Agent has only {node_count} node(s). "
+                    "Consider adding nodes for better separation of concerns (recommend 3-6)."
                 ),
                 "severity": "warning",
             }
         )
-    elif node_count > 5:
+    elif node_count > 6:
         design_warnings.append(
             {
                 "node_id": None,
                 "type": "too_many_nodes",
                 "message": (
                     f"Agent has {node_count} nodes. "
-                    "Consider consolidating to 2-5 nodes for simpler architecture."
+                    "Consider consolidating to 3-6 nodes for simpler architecture."
                 ),
                 "severity": "warning",
             }
