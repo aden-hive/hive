@@ -51,7 +51,7 @@ class RuntimeLogger:
         self._goal_id = ""
         self._started_at = ""
         self._logged_node_ids: set[str] = set()
-        self._lock = threading.Lock()
+        self._lock = threading.RLock()
 
     def start_run(self, goal_id: str = "", session_id: str = "") -> str:
         """Start a new run. Called by GraphExecutor at graph start. Returns run_id.
@@ -249,22 +249,29 @@ class RuntimeLogger:
         Called by executor after each node returns. If node_id already
         appears in _logged_node_ids (because the node called log_node_complete
         itself), this is a no-op. Otherwise appends a basic NodeDetail.
+
+        The check and the write are performed inside a single contiguous lock
+        scope to eliminate the TOCTOU window that existed when the two
+        operations used separate, non-contiguous ``with self._lock`` blocks.
+        ``self._lock`` is an RLock so that the re-entrant acquisition inside
+        ``log_node_complete()`` (line 232) does not deadlock.
         """
         with self._lock:
             if node_id in self._logged_node_ids:
                 return  # Already logged by the node itself
 
-        # Not yet logged — create a basic entry
-        self.log_node_complete(
-            node_id=node_id,
-            node_name=node_name,
-            node_type=node_type,
-            success=success,
-            error=error,
-            stacktrace=stacktrace,
-            tokens_used=tokens_used,
-            latency_ms=latency_ms,
-        )
+            # Not yet logged — create a basic entry.
+            # log_node_complete() re-acquires self._lock (RLock allows same-thread re-entry).
+            self.log_node_complete(
+                node_id=node_id,
+                node_name=node_name,
+                node_type=node_type,
+                success=success,
+                error=error,
+                stacktrace=stacktrace,
+                tokens_used=tokens_used,
+                latency_ms=latency_ms,
+            )
 
     async def end_run(
         self,
