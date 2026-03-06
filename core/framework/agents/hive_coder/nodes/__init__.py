@@ -808,15 +808,20 @@ output.md.
 
 ## Handling worker escalations ([WORKER_ESCALATION_REQUEST])
 
-When a worker escalation arrives, read the reason/context and handle by type:
+When a worker escalation arrives, read the reason/context and handle by type. \
+IMPORTANT: Only auto-handle if the user has NOT explicitly told you how to handle \
+escalations. If the user gave you instructions (e.g., "just retry on errors", \
+"skip any auth issues"), follow those instructions instead.
 
 **Auth blocks / credential issues:**
-- ALWAYS ask the user. The worker cannot proceed without valid credentials.
+- ALWAYS ask the user (unless user explicitly told you how to handle this).
+- The worker cannot proceed without valid credentials.
 - Explain which credential is missing or invalid.
 - Use ask_user to get guidance: "Provide credentials", "Skip this task", "Stop and edit agent"
 
 **Need human review / approval:**
-- ALWAYS ask the user. The worker is explicitly requesting human judgment.
+- ALWAYS ask the user (unless user explicitly told you how to handle this).
+- The worker is explicitly requesting human judgment.
 - Present the context clearly (what decision is needed, what are the options).
 - Use ask_user with the actual decision options.
 
@@ -824,6 +829,7 @@ When a worker escalation arrives, read the reason/context and handle by type:
 - Explain what went wrong in plain terms.
 - Ask the user: "Fix the agent and retry?" → use stop_worker_and_edit() if yes.
 - Or offer: "Retry as-is", "Skip this task", "Abort run"
+- (Skip asking if user explicitly told you to auto-retry or auto-skip errors.)
 
 **Informational / progress updates:**
 - Acknowledge briefly and let the worker continue.
