@@ -2,7 +2,7 @@
 
 from pathlib import Path
 
-from framework.graph import EdgeSpec, EdgeCondition, Goal, SuccessCriterion, Constraint
+from framework.graph import EdgeCondition, EdgeSpec, Goal, SuccessCriterion, Constraint
 from framework.graph.checkpoint_config import CheckpointConfig
 from framework.graph.edge import AsyncEntryPointSpec, GraphSpec
 from framework.graph.executor import ExecutionResult, GraphExecutor
@@ -72,8 +72,11 @@ goal = Goal(
     ],
     constraints=[
         Constraint(
-            id="respect-batch-limit",
-            description="Must not process more emails than the configured max_emails parameter",
+            id="process-all-emails",
+            description=(
+                "Must loop through all inbox emails by paginating with max_emails as page size; "
+                "no emails should be silently skipped"
+            ),
             constraint_type="hard",
             category="operational",
         ),
@@ -119,11 +122,22 @@ edges = [
         condition=EdgeCondition.ON_SUCCESS,
         priority=1,
     ),
+    # Pagination loop: if next_page_token is non-empty, loop back to fetch
+    EdgeSpec(
+        id="classify-to-fetch-loop",
+        source="classify-and-act",
+        target="fetch-emails",
+        condition=EdgeCondition.CONDITIONAL,
+        condition_expr="str(next_page_token).strip() not in ('', 'None', 'null')",
+        priority=2,
+    ),
+    # Exit to report when no more pages
     EdgeSpec(
         id="classify-to-report",
         source="classify-and-act",
         target="report",
-        condition=EdgeCondition.ON_SUCCESS,
+        condition=EdgeCondition.CONDITIONAL,
+        condition_expr="str(next_page_token).strip() in ('', 'None', 'null')",
         priority=1,
     ),
     EdgeSpec(

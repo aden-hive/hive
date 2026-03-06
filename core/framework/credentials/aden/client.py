@@ -37,6 +37,8 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
 
+import json as _json
+
 import httpx
 
 logger = logging.getLogger(__name__)
@@ -260,6 +262,11 @@ class AdenCredentialClient:
         self.config = config
         self._client: httpx.Client | None = None
 
+    @staticmethod
+    def _parse_json(response: httpx.Response) -> Any:
+        """Parse JSON from response, tolerating UTF-8 BOM."""
+        return _json.loads(response.content.decode("utf-8-sig"))
+
     def _get_client(self) -> httpx.Client:
         if self._client is None:
             headers = {
@@ -295,7 +302,7 @@ class AdenCredentialClient:
                     raise AdenAuthenticationError("Agent API key is invalid or revoked")
 
                 if response.status_code == 403:
-                    data = response.json()
+                    data = self._parse_json(response)
                     raise AdenClientError(data.get("message", "Forbidden"))
 
                 if response.status_code == 404:
@@ -309,7 +316,7 @@ class AdenCredentialClient:
                     )
 
                 if response.status_code == 400:
-                    data = response.json()
+                    data = self._parse_json(response)
                     msg = data.get("message", "Bad request")
                     if data.get("error") == "refresh_failed" or "refresh" in msg.lower():
                         raise AdenRefreshError(
@@ -356,7 +363,7 @@ class AdenCredentialClient:
             alias, status, email, expires_at.
         """
         response = self._request_with_retry("GET", "/v1/credentials")
-        data = response.json()
+        data = self._parse_json(response)
         return [AdenIntegrationInfo.from_dict(item) for item in data.get("integrations", [])]
 
     # Alias
@@ -376,7 +383,7 @@ class AdenCredentialClient:
         """
         try:
             response = self._request_with_retry("GET", f"/v1/credentials/{integration_id}")
-            data = response.json()
+            data = self._parse_json(response)
             return AdenCredentialResponse.from_dict(data, integration_id=integration_id)
         except AdenNotFoundError:
             return None
@@ -394,7 +401,7 @@ class AdenCredentialClient:
             AdenCredentialResponse with new access_token.
         """
         response = self._request_with_retry("POST", f"/v1/credentials/{integration_id}/refresh")
-        data = response.json()
+        data = self._parse_json(response)
         return AdenCredentialResponse.from_dict(data, integration_id=integration_id)
 
     def validate_token(self, integration_id: str) -> dict[str, Any]:
@@ -407,7 +414,7 @@ class AdenCredentialClient:
             {"valid": bool, "status": str, "expires_at": str, "error": str|null}
         """
         response = self._request_with_retry("GET", f"/v1/credentials/{integration_id}/validate")
-        return response.json()
+        return self._parse_json(response)
 
     def health_check(self) -> dict[str, Any]:
         """Check Aden server health."""
@@ -415,7 +422,7 @@ class AdenCredentialClient:
             client = self._get_client()
             response = client.get("/health")
             if response.status_code == 200:
-                data = response.json()
+                data = self._parse_json(response)
                 data["latency_ms"] = response.elapsed.total_seconds() * 1000
                 return data
             return {"status": "degraded", "error": f"HTTP {response.status_code}"}

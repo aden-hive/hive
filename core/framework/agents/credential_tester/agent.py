@@ -210,9 +210,6 @@ def list_connected_accounts() -> list[dict]:
 skip_credential_validation = True
 """Don't validate credentials at load time — we don't know which provider yet."""
 
-skip_guardian = True
-"""Don't attach the Hive Coder guardian — this is a standalone utility agent."""
-
 requires_account_selection = True
 """Signal TUI to show account picker before starting the agent."""
 
@@ -456,7 +453,7 @@ identity_prompt = (
 )
 loop_config = {
     "max_iterations": 50,
-    "max_tool_calls_per_turn": 10,
+    "max_tool_calls_per_turn": 30,
     "max_history_tokens": 32000,
 }
 
@@ -542,7 +539,7 @@ class CredentialTesterAgent:
             max_tokens=self.config.max_tokens,
             loop_config={
                 "max_iterations": 50,
-                "max_tool_calls_per_turn": 10,
+                "max_tool_calls_per_turn": 30,
                 "max_history_tokens": 32000,
             },
             conversation_mode="continuous",

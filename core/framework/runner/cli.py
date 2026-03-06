@@ -75,11 +75,6 @@ def register_commands(subparsers: argparse._SubParsersAction) -> None:
         default=None,
         help="Resume from a specific checkpoint (requires --resume-session)",
     )
-    run_parser.add_argument(
-        "--no-guardian",
-        action="store_true",
-        help="Disable the Agent Guardian watchdog in TUI mode",
-    )
     run_parser.set_defaults(func=cmd_run)
 
     # info command
@@ -210,11 +205,6 @@ def register_commands(subparsers: argparse._SubParsersAction) -> None:
         type=str,
         default=None,
         help="LLM model to use (any LiteLLM-compatible name)",
-    )
-    tui_parser.add_argument(
-        "--no-guardian",
-        action="store_true",
-        help="Disable the Agent Guardian watchdog",
     )
     tui_parser.set_defaults(func=cmd_tui)
 
@@ -370,6 +360,84 @@ def register_commands(subparsers: argparse._SubParsersAction) -> None:
     )
     setup_creds_parser.set_defaults(func=cmd_setup_credentials)
 
+    # serve command (HTTP API server)
+    serve_parser = subparsers.add_parser(
+        "serve",
+        help="Start HTTP API server",
+        description="Start an HTTP server exposing REST + SSE APIs for agent control.",
+    )
+    serve_parser.add_argument(
+        "--host",
+        type=str,
+        default="127.0.0.1",
+        help="Host to bind (default: 127.0.0.1)",
+    )
+    serve_parser.add_argument(
+        "--port",
+        "-p",
+        type=int,
+        default=8787,
+        help="Port to listen on (default: 8787)",
+    )
+    serve_parser.add_argument(
+        "--agent",
+        "-a",
+        type=str,
+        action="append",
+        default=[],
+        help="Agent path to preload (repeatable)",
+    )
+    serve_parser.add_argument(
+        "--model",
+        "-m",
+        type=str,
+        default=None,
+        help="LLM model for preloaded agents",
+    )
+    serve_parser.add_argument(
+        "--open",
+        action="store_true",
+        help="Open dashboard in browser after server starts",
+    )
+    serve_parser.set_defaults(func=cmd_serve)
+
+    # open command (serve + auto-open browser)
+    open_parser = subparsers.add_parser(
+        "open",
+        help="Start HTTP server and open dashboard in browser",
+        description="Shortcut for 'hive serve --open'. "
+        "Starts the HTTP server and opens the dashboard.",
+    )
+    open_parser.add_argument(
+        "--host",
+        type=str,
+        default="127.0.0.1",
+        help="Host to bind (default: 127.0.0.1)",
+    )
+    open_parser.add_argument(
+        "--port",
+        "-p",
+        type=int,
+        default=8787,
+        help="Port to listen on (default: 8787)",
+    )
+    open_parser.add_argument(
+        "--agent",
+        "-a",
+        type=str,
+        action="append",
+        default=[],
+        help="Agent path to preload (repeatable)",
+    )
+    open_parser.add_argument(
+        "--model",
+        "-m",
+        type=str,
+        default=None,
+        help="LLM model for preloaded agents",
+    )
+    open_parser.set_defaults(func=cmd_open)
+
 
 def _load_resume_state(
     agent_path: str, session_id: str, checkpoint_id: str | None = None
@@ -397,7 +465,7 @@ def _load_resume_state(
         if not cp_path.exists():
             return None
         try:
-            cp_data = json.loads(cp_path.read_text())
+            cp_data = json.loads(cp_path.read_text(encoding="utf-8"))
         except (json.JSONDecodeError, OSError):
             return None
         return {
@@ -413,7 +481,7 @@ def _load_resume_state(
         if not state_path.exists():
             return None
         try:
-            state_data = json.loads(state_path.read_text())
+            state_data = json.loads(state_path.read_text(encoding="utf-8"))
         except (json.JSONDecodeError, OSError):
             return None
         progress = state_data.get("progress", {})
@@ -486,10 +554,27 @@ def cmd_run(args: argparse.Namespace) -> int:
             return 1
     elif args.input_file:
         try:
-            with open(args.input_file) as f:
+            with open(args.input_file, encoding="utf-8") as f:
                 context = json.load(f)
         except (FileNotFoundError, json.JSONDecodeError) as e:
             print(f"Error reading input file: {e}", file=sys.stderr)
+            return 1
+    # Validate --output path before execution begins (fail fast, before agent loads)
+    if args.output:
+        import os
+
+        output_parent = Path(args.output).parent
+        if not output_parent.exists():
+            print(
+                f"Error: output directory does not exist: {output_parent}/",
+                file=sys.stderr,
+            )
+            return 1
+        if not os.access(output_parent, os.W_OK):
+            print(
+                f"Error: output directory is not writable: {output_parent}/",
+                file=sys.stderr,
+            )
             return 1
 
     # Run the agent (with TUI or standard)
@@ -526,12 +611,6 @@ def cmd_run(args: argparse.Namespace) -> int:
                     except CredentialError as e:
                         print(f"\n{e}", file=sys.stderr)
                         return
-
-                # Attach hive_coder's guardian watchdog (before start)
-                if not getattr(args, "no_guardian", False) and runner._agent_runtime:
-                    from framework.agents.hive_coder.guardian import attach_guardian
-
-                    attach_guardian(runner._agent_runtime, runner._tool_registry)
 
                 # Start runtime before TUI so it's ready for user input
                 if runner._agent_runtime and not runner._agent_runtime.is_running:
@@ -634,7 +713,7 @@ def cmd_run(args: argparse.Namespace) -> int:
 
     # Output results
     if args.output:
-        with open(args.output, "w") as f:
+        with open(args.output, "w", encoding="utf-8") as f:
             json.dump(output, f, indent=2, default=str)
         if not args.quiet:
             print(f"Results written to {args.output}")
@@ -814,7 +893,7 @@ def cmd_list(args: argparse.Namespace) -> int:
 
     agents = []
     for path in directory.iterdir():
-        if path.is_dir() and (path / "agent.json").exists():
+        if _is_valid_agent_dir(path):
             try:
                 runner = AgentRunner.load(path)
                 info = runner.info()
@@ -881,14 +960,14 @@ def cmd_dispatch(args: argparse.Namespace) -> int:
         # Use specific agents
         for agent_name in args.agents:
             agent_path = agents_dir / agent_name
-            if not (agent_path / "agent.json").exists():
+            if not _is_valid_agent_dir(agent_path):
                 print(f"Agent not found: {agent_path}", file=sys.stderr)
                 return 1
             agent_paths.append((agent_name, agent_path))
     else:
         # Discover all agents
         for path in agents_dir.iterdir():
-            if path.is_dir() and (path / "agent.json").exists():
+            if _is_valid_agent_dir(path):
                 agent_paths.append((path.name, path))
 
     if not agent_paths:
@@ -1028,62 +1107,19 @@ def _interactive_approval(request):
 def _format_natural_language_to_json(
     user_input: str, input_keys: list[str], agent_description: str, session_context: dict = None
 ) -> dict:
-    """Use Haiku to convert natural language input to JSON based on agent's input schema."""
-    import os
+    """Convert natural language input to JSON based on agent's input schema.
 
-    import anthropic
+    Maps user input to the primary input field. For follow-up inputs,
+    appends to the existing value.
+    """
+    main_field = input_keys[0] if input_keys else "objective"
 
-    client = anthropic.Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY"))
-
-    # Build prompt for Haiku
-    session_info = ""
     if session_context:
-        # Extract the main field (usually 'objective') that we'll append to
-        main_field = input_keys[0] if input_keys else "objective"
         existing_value = session_context.get(main_field, "")
+        if existing_value:
+            return {main_field: f"{existing_value}\n\n{user_input}"}
 
-        session_info = (
-            f'\n\nExisting {main_field}: "{existing_value}"\n\n'
-            f"The user is providing ADDITIONAL information. Append this new "
-            f"information to the existing {main_field} to create an enriched, "
-            "more detailed version."
-        )
-
-    prompt = f"""You are formatting user input for an agent that requires specific input fields.
-
-Agent: {agent_description}
-
-Required input fields: {", ".join(input_keys)}{session_info}
-
-User input: {user_input}
-
-{"If this is a follow-up, APPEND new info to the existing field value." if session_context else ""}
-
-Output ONLY valid JSON, no explanation:"""
-
-    try:
-        message = client.messages.create(
-            model="claude-3-5-haiku-20241022",  # Fast and cheap
-            max_tokens=500,
-            messages=[{"role": "user", "content": prompt}],
-        )
-
-        json_str = message.content[0].text.strip()
-        # Remove markdown code blocks if present
-        if json_str.startswith("```"):
-            json_str = json_str.split("```")[1]
-            if json_str.startswith("json"):
-                json_str = json_str[4:]
-        json_str = json_str.strip()
-
-        return json.loads(json_str)
-    except Exception:
-        # Fallback: try to infer the main field
-        if len(input_keys) == 1:
-            return {input_keys[0]: user_input}
-        else:
-            # Put it in the first field as fallback
-            return {input_keys[0]: user_input}
+    return {main_field: user_input}
 
 
 def cmd_shell(args: argparse.Namespace) -> int:
@@ -1331,7 +1367,6 @@ def _get_framework_agents_dir() -> Path:
 def _launch_agent_tui(
     agent_path: str | Path,
     model: str | None = None,
-    no_guardian: bool = False,
 ) -> int:
     """Load an agent and launch the TUI. Shared by cmd_tui and cmd_code."""
     from framework.credentials.models import CredentialError
@@ -1358,12 +1393,6 @@ def _launch_agent_tui(
             except CredentialError as e:
                 print(f"\n{e}", file=sys.stderr)
                 return
-
-        # Attach hive_coder's guardian watchdog (before start)
-        if not no_guardian and runner._agent_runtime:
-            from framework.agents.hive_coder.guardian import attach_guardian
-
-            attach_guardian(runner._agent_runtime, runner._tool_registry)
 
         if runner._agent_runtime and not runner._agent_runtime.is_running:
             await runner._agent_runtime.start()
@@ -1395,7 +1424,6 @@ def cmd_tui(args: argparse.Namespace) -> int:
     async def run_tui():
         app = AdenTUI(
             model=args.model,
-            no_guardian=getattr(args, "no_guardian", False),
         )
         await app.run_async()
 
@@ -1500,7 +1528,7 @@ def _extract_python_agent_metadata(agent_path: Path) -> tuple[str, str]:
         return fallback_name, fallback_desc
 
     try:
-        with open(config_path) as f:
+        with open(config_path, encoding="utf-8") as f:
             tree = ast.parse(f.read())
 
         # Find AgentMetadata class definition
@@ -1647,16 +1675,7 @@ def _select_agent(agents_dir: Path) -> str | None:
         # Display agents for current page (with global numbering)
         for i, agent_path in enumerate(page_agents, start_idx + 1):
             try:
-                agent_json = agent_path / "agent.json"
-                if agent_json.exists():
-                    with open(agent_json) as f:
-                        data = json.load(f)
-                    agent_meta = data.get("agent", {})
-                    name = agent_meta.get("name", agent_path.name)
-                    desc = agent_meta.get("description", "")
-                else:
-                    # Python-based agent - extract from config.py
-                    name, desc = _extract_python_agent_metadata(agent_path)
+                name, desc = _extract_python_agent_metadata(agent_path)
                 desc = desc[:50] + "..." if len(desc) > 50 else desc
                 print(f"  {i}. {name}")
                 print(f"     {desc}")
@@ -1915,3 +1934,175 @@ def cmd_setup_credentials(args: argparse.Namespace) -> int:
 
     result = session.run_interactive()
     return 0 if result.success else 1
+
+
+def _open_browser(url: str) -> None:
+    """Open URL in the default browser (best-effort, non-blocking)."""
+    import subprocess
+
+    try:
+        if sys.platform == "darwin":
+            subprocess.Popen(
+                ["open", url],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                encoding="utf-8",
+            )
+        elif sys.platform == "win32":
+            subprocess.Popen(
+                ["cmd", "/c", "start", "", url],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+        elif sys.platform == "linux":
+            subprocess.Popen(
+                ["xdg-open", url],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                encoding="utf-8",
+            )
+    except Exception:
+        pass  # Best-effort — don't crash if browser can't open
+
+
+def _build_frontend() -> bool:
+    """Build the frontend if source is newer than dist. Returns True if dist exists."""
+    import subprocess
+
+    # Find the frontend directory relative to this file or cwd
+    candidates = [
+        Path("core/frontend"),
+        Path(__file__).resolve().parent.parent.parent / "frontend",
+    ]
+    frontend_dir: Path | None = None
+    for c in candidates:
+        if (c / "package.json").is_file():
+            frontend_dir = c.resolve()
+            break
+
+    if frontend_dir is None:
+        return False
+
+    dist_dir = frontend_dir / "dist"
+    src_dir = frontend_dir / "src"
+
+    # Skip build if dist is up-to-date (newest src file older than dist index.html)
+    index_html = dist_dir / "index.html"
+    if index_html.exists() and src_dir.is_dir():
+        dist_mtime = index_html.stat().st_mtime
+        needs_build = False
+        for f in src_dir.rglob("*"):
+            if f.is_file() and f.stat().st_mtime > dist_mtime:
+                needs_build = True
+                break
+        if not needs_build:
+            return True
+
+    # Need to build
+    print("Building frontend...")
+    try:
+        # Ensure deps are installed
+        subprocess.run(
+            ["npm", "install", "--no-fund", "--no-audit"],
+            encoding="utf-8",
+            cwd=frontend_dir,
+            check=True,
+            capture_output=True,
+        )
+        subprocess.run(
+            ["npm", "run", "build"],
+            encoding="utf-8",
+            cwd=frontend_dir,
+            check=True,
+            capture_output=True,
+        )
+        print("Frontend built.")
+        return True
+    except FileNotFoundError:
+        print("Node.js not found — skipping frontend build.")
+        return dist_dir.is_dir()
+    except subprocess.CalledProcessError as exc:
+        stderr = exc.stderr.decode(errors="replace") if exc.stderr else ""
+        print(f"Frontend build failed: {stderr[:500]}")
+        return dist_dir.is_dir()
+
+
+def cmd_serve(args: argparse.Namespace) -> int:
+    """Start the HTTP API server."""
+    import logging
+
+    from aiohttp import web
+
+    _build_frontend()
+
+    from framework.server.app import create_app
+
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+    )
+
+    model = getattr(args, "model", None)
+    app = create_app(model=model)
+
+    async def run_server():
+        manager = app["manager"]
+
+        # Preload agents specified via --agent
+        for agent_path in args.agent:
+            try:
+                session = await manager.create_session_with_worker(agent_path, model=model)
+                info = session.worker_info
+                name = info.name if info else session.worker_id
+                print(f"Loaded agent: {session.worker_id} ({name})")
+            except Exception as e:
+                print(f"Error loading {agent_path}: {e}")
+
+        # Start server using AppRunner/TCPSite (same pattern as webhook_server.py)
+        runner = web.AppRunner(app, access_log=None)
+        await runner.setup()
+        site = web.TCPSite(runner, args.host, args.port)
+        await site.start()
+
+        # Check if frontend is being served
+        dist_candidates = [
+            Path("frontend/dist"),
+            Path("core/frontend/dist"),
+        ]
+        has_frontend = any((c / "index.html").exists() for c in dist_candidates if c.is_dir())
+        dashboard_url = f"http://{args.host}:{args.port}"
+
+        print()
+        print(f"Hive API server running on {dashboard_url}")
+        if has_frontend:
+            print(f"Dashboard: {dashboard_url}")
+        print(f"Health: {dashboard_url}/api/health")
+        print(f"Agents loaded: {sum(1 for s in manager.list_sessions() if s.worker_runtime)}")
+        print()
+        print("Press Ctrl+C to stop")
+
+        # Auto-open browser if --open flag is set and frontend exists
+        if getattr(args, "open", False) and has_frontend:
+            _open_browser(dashboard_url)
+
+        # Run forever until interrupted
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            pass
+        finally:
+            await manager.shutdown_all()
+            await runner.cleanup()
+
+    try:
+        asyncio.run(run_server())
+    except KeyboardInterrupt:
+        print("\nServer stopped.")
+
+    return 0
+
+
+def cmd_open(args: argparse.Namespace) -> int:
+    """Start the HTTP API server and open the dashboard in the browser."""
+    args.open = True
+    return cmd_serve(args)

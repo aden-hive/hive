@@ -114,6 +114,8 @@ class RuntimeLogger:
                     tool_input=tc.get("tool_input", {}),
                     result=tc.get("content", ""),
                     is_error=tc.get("is_error", False),
+                    start_timestamp=tc.get("start_timestamp", ""),
+                    duration_s=tc.get("duration_s", 0.0),
                 )
             )
 

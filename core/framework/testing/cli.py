@@ -11,8 +11,33 @@ Provides commands:
 import argparse
 import ast
 import os
+import shutil
 import subprocess
+import sys
 from pathlib import Path
+
+
+def _check_pytest_available() -> bool:
+    """Check if pytest is available as a runnable command.
+
+    Returns True if pytest is found, otherwise prints an error message
+    with install instructions and returns False.
+    """
+    if shutil.which("pytest") is None:
+        print(
+            "Error: pytest is not installed or not on PATH.\n"
+            "Hive's testing commands require pytest at runtime.\n"
+            "Install it with:\n"
+            "\n"
+            "  pip install 'framework[testing]'\n"
+            "\n"
+            "or if using uv:\n"
+            "\n"
+            "  uv pip install 'framework[testing]'",
+            file=sys.stderr,
+        )
+        return False
+    return True
 
 
 def register_testing_commands(subparsers: argparse._SubParsersAction) -> None:
@@ -105,6 +130,9 @@ def register_testing_commands(subparsers: argparse._SubParsersAction) -> None:
 
 def cmd_test_run(args: argparse.Namespace) -> int:
     """Run tests for an agent using pytest subprocess."""
+    if not _check_pytest_available():
+        return 1
+
     agent_path = Path(args.agent_path)
     tests_dir = agent_path / "tests"
 
@@ -162,6 +190,7 @@ def cmd_test_run(args: argparse.Namespace) -> int:
     try:
         result = subprocess.run(
             cmd,
+            encoding="utf-8",
             env=env,
             timeout=600,  # 10 minute timeout
         )
@@ -177,7 +206,8 @@ def cmd_test_run(args: argparse.Namespace) -> int:
 
 def cmd_test_debug(args: argparse.Namespace) -> int:
     """Debug a failed test by re-running with verbose output."""
-    import subprocess
+    if not _check_pytest_available():
+        return 1
 
     agent_path = Path(args.agent_path)
     test_name = args.test_name
@@ -190,7 +220,7 @@ def cmd_test_debug(args: argparse.Namespace) -> int:
     # Find which file contains the test
     test_file = None
     for py_file in tests_dir.glob("test_*.py"):
-        content = py_file.read_text()
+        content = py_file.read_text(encoding="utf-8")
         if f"def {test_name}" in content or f"async def {test_name}" in content:
             test_file = py_file
             break
@@ -219,6 +249,7 @@ def cmd_test_debug(args: argparse.Namespace) -> int:
     try:
         result = subprocess.run(
             cmd,
+            encoding="utf-8",
             env=env,
             timeout=120,  # 2 minute timeout for single test
         )
@@ -238,7 +269,7 @@ def _scan_test_files(tests_dir: Path) -> list[dict]:
 
     for test_file in sorted(tests_dir.glob("test_*.py")):
         try:
-            content = test_file.read_text()
+            content = test_file.read_text(encoding="utf-8")
             tree = ast.parse(content)
 
             for node in ast.walk(tree):
