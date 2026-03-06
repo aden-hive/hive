@@ -29,6 +29,14 @@ jobs:
           cache-dependency-glob: "**/uv.lock"
           python-version: '3.11'
 
+      - name: Cache uv packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/uv
+          key: uv-${{ runner.os }}-${{ hashFiles('**/uv.lock') }}
+          restore-keys: |
+            uv-${{ runner.os }}-
+
       - name: Install dependencies
         run: uv sync --project core --group dev
 
