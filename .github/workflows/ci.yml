@@ -33,6 +33,13 @@ jobs:
       - name: Install dependencies
         run: uv sync --project core --group dev
 
+      - name: Debug uv cache
+        run: |
+          echo "Checking uv cache directory"
+          ls -la ~/.cache || true
+          ls -la ~/.cache/uv || true
+          du -sh ~/.cache/uv || true
+
       - name: Ruff lint
         run: |
           uv run --project core ruff check core/
