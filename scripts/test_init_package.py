@@ -3,42 +3,16 @@
 import sys
 import os
 
+# Add project paths so imports work
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "core"))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "tools"))
 
-from framework.builder.package_generator import (
-    BuildSession,
-    initialize_agent_package,
-)
-from framework.graph import EdgeCondition, EdgeSpec, Goal, NodeSpec, SuccessCriterion
-import framework.builder.package_generator as pg
+# Set PROJECT_ROOT before importing
+import tools.coder_tools_server as srv
+srv.PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 
-# Create a minimal build session
-session = BuildSession(name="richard_test2")
-session.goal = Goal(
-    id="goal_1",
-    name="Test Goal",
-    description="A simple test agent",
-    success_criteria=[
-        SuccessCriterion(id="sc_1", description="Completes successfully", metric="llm_judge", target="success")
-    ],
-    constraints=[],
-)
-session.nodes = [
-    NodeSpec(
-        id="start",
-        name="Start Node",
-        description="Entry point",
-        node_type="event_loop",
-        input_keys=[],
-        output_keys=["result"],
-        system_prompt="You are a helpful assistant.",
-    ),
-]
-session.edges = []
-
-# Set as active session (in-memory only, no disk persistence)
-pg._session = session
-
-# Now call initialize_agent_package
-result = initialize_agent_package("richard_test2")
+# Access the underlying function (FastMCP wraps it as FunctionTool)
+tool = srv.initialize_agent_package
+result = tool.fn("richard_test2", nodes=["intake", "process", "review"])
 print(result)
