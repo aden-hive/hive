@@ -62,7 +62,7 @@ async def select_expert_persona(user_message: str, llm: LLMProvider) -> str:
         response = await llm.acomplete(
             messages=[{"role": "user", "content": user_message}],
             system=_HR_SYSTEM_PROMPT,
-            max_tokens=256,
+            max_tokens=1024,
             json_mode=True,
         )
         raw = response.content.strip()
