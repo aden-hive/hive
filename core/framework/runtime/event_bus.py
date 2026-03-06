@@ -8,6 +8,7 @@ Allows streams to:
 """
 
 import asyncio
+import time
 import json
 import logging
 import os
@@ -1155,3 +1156,15 @@ class EventBus:
             return result
         finally:
             self.unsubscribe(sub_id)
+
+    def get_stats(self) -> dict:
+        """Return EventBus statistics including dropped event count."""
+        type_counts: dict[str, int] = {}
+        for event in self._event_history:
+            type_counts[event.type.value] = type_counts.get(event.type.value, 0) + 1
+        return {
+            "total_events": len(self._event_history),
+            "dropped_events": getattr(self, "_dropped_events", 0),
+            "subscriptions": len(self._subscriptions),
+            "events_by_type": type_counts,
+        }
