@@ -1739,8 +1739,9 @@ class AgentRunner:
         missing_tools = []
 
         # Validate graph structure
-        graph_errors = self.graph.validate()
-        errors.extend(graph_errors)
+        graph_result = self.graph.validate()
+        errors.extend(graph_result["errors"])
+        warnings.extend(graph_result["warnings"])
 
         # Check goal has success criteria
         if not self.goal.success_criteria:

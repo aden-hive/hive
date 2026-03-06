@@ -574,9 +574,14 @@ class GraphSpec(BaseModel):
         # Default to main entry
         return self.entry_node
 
-    def validate(self) -> list[str]:
-        """Validate the graph structure."""
+    def validate(self) -> dict[str, list[str]]:
+        """Validate the graph structure.
+
+        Returns:
+            Dict with 'errors' (blocking issues) and 'warnings' (non-blocking).
+        """
         errors = []
+        warnings = []
 
         # Check entry node exists
         if not self.get_node(self.entry_node):
@@ -618,11 +623,11 @@ class GraphSpec(BaseModel):
             if not self.get_node(term):
                 errors.append(f"Terminal node '{term}' not found")
 
-        # Require at least one terminal node (graphs must have termination points)
+        # Suggest at least one terminal node (graphs should have termination points)
         if not self.terminal_nodes:
-            errors.append(
-                "Graph must have at least one terminal node in 'terminal_nodes'. "
-                "Every graph needs a termination point where execution ends."
+            warnings.append(
+                "Graph has no terminal nodes defined in 'terminal_nodes'. "
+                "Consider adding a termination point where execution ends."
             )
 
         # Check edge references
@@ -756,4 +761,4 @@ class GraphSpec(BaseModel):
                     "GCU nodes must be declared as subagents of a parent node."
                 )
 
-        return errors
+        return {"errors": errors, "warnings": warnings}

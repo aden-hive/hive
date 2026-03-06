@@ -410,6 +410,7 @@ class GraphExecutor:
         input_data: dict[str, Any] | None = None,
         session_state: dict[str, Any] | None = None,
         checkpoint_config: "CheckpointConfig | None" = None,
+        validate_graph: bool = True,
     ) -> ExecutionResult:
         """
         Execute a graph for a goal.
@@ -419,6 +420,7 @@ class GraphExecutor:
             goal: The goal driving execution
             input_data: Initial input data
             session_state: Optional session state to resume from (with paused_at, memory, etc.)
+            validate_graph: If False, skip graph validation (for test graphs that intentionally break rules)
 
         Returns:
             ExecutionResult with output and metrics
@@ -427,12 +429,13 @@ class GraphExecutor:
         set_trace_context(agent_id=graph.id)
 
         # Validate graph
-        errors = graph.validate()
-        if errors:
-            return ExecutionResult(
-                success=False,
-                error=f"Invalid graph: {errors}",
-            )
+        if validate_graph:
+            result = graph.validate()
+            if result["errors"]:
+                return ExecutionResult(
+                    success=False,
+                    error=f"Invalid graph: {result['errors']}",
+                )
 
         # Validate tool availability
         tool_errors = self._validate_tools(graph)

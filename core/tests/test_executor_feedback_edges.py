@@ -126,7 +126,7 @@ async def test_visit_limit_skips_node(runtime, goal):
             EdgeSpec(id="a_to_b", source="a", target="b", condition=EdgeCondition.ON_SUCCESS),
             EdgeSpec(id="b_to_a", source="b", target="a", condition=EdgeCondition.ON_SUCCESS),
         ],
-        terminal_nodes=["a", "b"],  # Both nodes can terminate; max_steps is the guard
+        terminal_nodes=[],  # Neither node is terminal — max_steps is the guard
         max_steps=10,
     )
 
@@ -137,7 +137,7 @@ async def test_visit_limit_skips_node(runtime, goal):
     executor.register_node("a", a_impl)
     executor.register_node("b", b_impl)
 
-    result = await executor.execute(graph, goal, {})
+    result = await executor.execute(graph, goal, {}, validate_graph=False)
 
     # A should only execute once (all subsequent visits are skipped)
     assert a_impl.execute_count == 1
@@ -184,7 +184,7 @@ async def test_visit_limit_allows_multiple(runtime, goal):
             EdgeSpec(id="a_to_b", source="a", target="b", condition=EdgeCondition.ON_SUCCESS),
             EdgeSpec(id="b_to_a", source="b", target="a", condition=EdgeCondition.ON_SUCCESS),
         ],
-        terminal_nodes=["a", "b"],  # Both nodes can terminate; max_steps is the guard
+        terminal_nodes=[],  # Neither node is terminal — max_steps is the guard
         max_steps=10,
     )
 
@@ -195,7 +195,7 @@ async def test_visit_limit_allows_multiple(runtime, goal):
     executor.register_node("a", a_impl)
     executor.register_node("b", b_impl)
 
-    result = await executor.execute(graph, goal, {})
+    result = await executor.execute(graph, goal, {}, validate_graph=False)
 
     # A should execute exactly twice
     assert a_impl.execute_count == 2
@@ -240,7 +240,7 @@ async def test_visit_limit_zero_unlimited(runtime, goal):
             EdgeSpec(id="a_to_b", source="a", target="b", condition=EdgeCondition.ON_SUCCESS),
             EdgeSpec(id="b_to_a", source="b", target="a", condition=EdgeCondition.ON_SUCCESS),
         ],
-        terminal_nodes=["a", "b"],  # Both nodes can terminate; max_steps is the guard
+        terminal_nodes=[],  # Neither node is terminal — max_steps is the guard
         max_steps=6,  # A,B,A,B,A,B
     )
 
@@ -251,7 +251,7 @@ async def test_visit_limit_zero_unlimited(runtime, goal):
     executor.register_node("a", a_impl)
     executor.register_node("b", b_impl)
 
-    result = await executor.execute(graph, goal, {})
+    result = await executor.execute(graph, goal, {}, validate_graph=False)
 
     # With max_steps=6: A,B,A,B,A,B → each executes 3 times
     assert a_impl.execute_count == 3
