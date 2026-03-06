@@ -99,14 +99,14 @@ goal = Goal(
 # GraphExecutor with queen_node — not as part of this graph.
 nodes = [coder_node]
 
-# No edges needed — single forever-alive event_loop node
+# No edges needed — single event_loop node
 edges = []
 
 # Graph configuration
 entry_node = "coder"
 entry_points = {"start": "coder"}
 pause_nodes = []
-terminal_nodes = []  # Forever-alive: loops until user exits
+terminal_nodes = ["coder"]  # Coder node has output_keys and can terminate
 
 # No async entry points needed — the queen is now an independent executor,
 # not a secondary graph receiving events via add_graph().
@@ -154,7 +154,7 @@ queen_graph = GraphSpec(
     version="1.0.0",
     entry_node="queen",
     entry_points={"start": "queen"},
-    terminal_nodes=[],
+    terminal_nodes=["queen"],  # Queen node can terminate
     pause_nodes=[],
     nodes=[queen_node],
     edges=[],

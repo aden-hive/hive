@@ -26,7 +26,7 @@ module-level variables via `getattr()`:
 | `edges` | YES | `None` | **FATAL** — same error |
 | `entry_node` | no | `nodes[0].id` | Probably wrong node |
 | `entry_points` | no | `{}` | **Nodes unreachable** — validation fails |
-| `terminal_nodes` | no | `[]` | OK for forever-alive |
+| `terminal_nodes` | **YES** | `[]` | **FATAL** — graph must have at least one terminal node |
 | `pause_nodes` | no | `[]` | OK |
 | `conversation_mode` | no | not passed | Isolated mode (no context carryover) |
 | `identity_prompt` | no | not passed | No agent-level identity |
@@ -165,8 +165,9 @@ review_node = NodeSpec(
 )
 ```
 
-### Forever-Alive Pattern
-`terminal_nodes=[]` — every node has outgoing edges, graph loops until user exits.
+### Continuous Loop Pattern
+Mark the primary event_loop node as terminal: `terminal_nodes=["process"]`.
+The node has `output_keys` and can complete when the agent finishes its work.
 Use `conversation_mode="continuous"` to preserve context across transitions.
 
 ### set_output
@@ -192,16 +193,16 @@ condition_expr examples:
 
 | Pattern | terminal_nodes | When |
 |---------|---------------|------|
-| **Forever-alive** | `[]` | **DEFAULT for all agents** |
-| Linear | `["last-node"]` | Only if user explicitly requests one-shot/batch |
+| **Continuous loop** | `["node-with-output-keys"]` | **DEFAULT for all agents** |
+| Linear | `["last-node"]` | One-shot/batch agents |
 
-**Forever-alive is the default.** Always use `terminal_nodes=[]`.
-The framework default for `max_node_visits` is 0 (unbounded), so
-nodes work correctly in forever-alive loops without explicit override.
-Only set `max_node_visits > 0` in one-shot agents with feedback loops.
-Every node must have at least one outgoing edge — no dead ends. The
-user exits by closing the TUI. Only use terminal nodes if the user
-explicitly asks for a batch/one-shot agent that runs once and exits.
+**Every graph must have at least one terminal node.** Terminal nodes
+define where execution ends. For interactive agents that loop continuously,
+mark the primary event_loop node as terminal (it has `output_keys` and can
+complete at any point). The framework default for `max_node_visits` is 0
+(unbounded), so nodes work correctly in continuous loops without explicit
+override. Only set `max_node_visits > 0` in one-shot agents with feedback loops.
+Every node must have at least one outgoing edge — no dead ends.
 
 ## Continuous Conversation Mode
 

@@ -406,7 +406,8 @@ nodes = [
         client_facing=True,
         max_node_visits=0,
         input_keys=[],
-        output_keys=[],
+        output_keys=["test_result"],
+        nullable_output_keys=["test_result"],
         tools=["get_account_info"],
         system_prompt="""\
 You are a credential tester. Your job is to help the user verify that their \
@@ -444,7 +445,7 @@ edges = []
 entry_node = "tester"
 entry_points = {"start": "tester"}
 pause_nodes = []
-terminal_nodes = []  # Forever-alive: loops until user exits
+terminal_nodes = ["tester"]  # Tester node can terminate
 
 conversation_mode = "continuous"
 identity_prompt = (
@@ -531,7 +532,7 @@ class CredentialTesterAgent:
             version="1.0.0",
             entry_node="tester",
             entry_points={"start": "tester"},
-            terminal_nodes=[],
+            terminal_nodes=["tester"],  # Tester node can terminate
             pause_nodes=[],
             nodes=[tester_node],
             edges=[],

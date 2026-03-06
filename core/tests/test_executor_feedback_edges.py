@@ -126,7 +126,7 @@ async def test_visit_limit_skips_node(runtime, goal):
             EdgeSpec(id="a_to_b", source="a", target="b", condition=EdgeCondition.ON_SUCCESS),
             EdgeSpec(id="b_to_a", source="b", target="a", condition=EdgeCondition.ON_SUCCESS),
         ],
-        terminal_nodes=[],  # No terminal — max_steps is the guard
+        terminal_nodes=["a", "b"],  # Both nodes can terminate; max_steps is the guard
         max_steps=10,
     )
 
@@ -184,7 +184,7 @@ async def test_visit_limit_allows_multiple(runtime, goal):
             EdgeSpec(id="a_to_b", source="a", target="b", condition=EdgeCondition.ON_SUCCESS),
             EdgeSpec(id="b_to_a", source="b", target="a", condition=EdgeCondition.ON_SUCCESS),
         ],
-        terminal_nodes=[],
+        terminal_nodes=["a", "b"],  # Both nodes can terminate; max_steps is the guard
         max_steps=10,
     )
 
@@ -240,7 +240,7 @@ async def test_visit_limit_zero_unlimited(runtime, goal):
             EdgeSpec(id="a_to_b", source="a", target="b", condition=EdgeCondition.ON_SUCCESS),
             EdgeSpec(id="b_to_a", source="b", target="a", condition=EdgeCondition.ON_SUCCESS),
         ],
-        terminal_nodes=[],
+        terminal_nodes=["a", "b"],  # Both nodes can terminate; max_steps is the guard
         max_steps=6,  # A,B,A,B,A,B
     )
 

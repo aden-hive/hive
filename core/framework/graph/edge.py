@@ -618,6 +618,13 @@ class GraphSpec(BaseModel):
             if not self.get_node(term):
                 errors.append(f"Terminal node '{term}' not found")
 
+        # Require at least one terminal node (graphs must have termination points)
+        if not self.terminal_nodes:
+            errors.append(
+                "Graph must have at least one terminal node in 'terminal_nodes'. "
+                "Every graph needs a termination point where execution ends."
+            )
+
         # Check edge references
         for edge in self.edges:
             if not self.get_node(edge.source):

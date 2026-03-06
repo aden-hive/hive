@@ -363,9 +363,9 @@ Design the agent architecture:
 - Goal: id, name, description, 3-5 success criteria, 2-4 constraints
 - Nodes: **2-5 nodes** (warn if <2 or >5)
 - Edges: on_success for linear, conditional for routing
-- Lifecycle: ALWAYS forever-alive (`terminal_nodes=[]`) unless the user \
-explicitly requests a one-shot/batch agent. Forever-alive agents loop \
-continuously — the user exits by closing the TUI. This is the standard \
+- Lifecycle: ALWAYS mark the primary event_loop node as terminal \
+(`terminal_nodes=["process"]`). The node has `output_keys` and can \
+complete when the agent finishes its work. This is the standard \
 pattern for all interactive agents.
 
 ### Node Design Rules
@@ -498,15 +498,15 @@ run_agent_tests("{name}")
 
 If anything fails: read error, fix with edit_file, re-validate. Up to 3x.
 
-**CRITICAL: Testing forever-alive agents**
-Most agents use `terminal_nodes=[]` (forever-alive). This means \
-`runner.run()` NEVER returns — it hangs forever waiting for a \
-terminal node that doesn't exist. Agent tests MUST be structural:
+**CRITICAL: Testing continuous-loop agents**
+Most agents mark the primary event_loop node as terminal \
+(`terminal_nodes=["process"]`). This means the agent can complete \
+when it finishes its work. Agent tests MUST be structural:
 - Validate graph, node specs, edges, tools, prompts
 - Check goal/constraints/success criteria definitions
 - Test `AgentRunner.load()` succeeds (structural, no API key needed)
 - NEVER call `runner.run()` or `trigger_and_wait()` in tests for \
-forever-alive agents — they will hang and time out.
+interactive agents — they run indefinitely waiting for user input.
 When you restructure an agent (change nodes/edges), always update \
 the tests to match. Stale tests referencing old node names will fail.
 
@@ -965,8 +965,8 @@ queen_node = NodeSpec(
     client_facing=True,
     max_node_visits=0,
     input_keys=["greeting"],
-    output_keys=[],
-    nullable_output_keys=[],
+    output_keys=["session_status"],
+    nullable_output_keys=["session_status"],
     success_criteria=(
         "User's intent is understood, coding tasks are completed correctly, "
         "and the worker is managed effectively when delegated to."
