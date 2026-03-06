@@ -21,23 +21,22 @@ Usage:
 
     # List what's connected
     for info in client.list_integrations():
-        print(f"{info.provider}/{info.alias}: {info.status}")
+        logger.info(f"{info.provider}/{info.alias}: {info.status}")
 
     # Get an access token
     cred = client.get_credential(info.integration_id)
-    print(cred.access_token)
+    logger.info(cred.access_token)
 """
 
 from __future__ import annotations
 
+import json as _json
 import logging
 import os
 import time
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
-
-import json as _json
 
 import httpx
 
@@ -249,7 +248,7 @@ class AdenCredentialClient:
 
         # List integrations
         for info in client.list_integrations():
-            print(f"{info.provider}/{info.alias}: {info.status}")
+            logger.info(f"{info.provider}/{info.alias}: {info.status}")
 
         # Get access token (uses base64 integration_id, NOT provider name)
         cred = client.get_credential(info.integration_id)
