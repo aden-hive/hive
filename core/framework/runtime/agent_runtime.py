@@ -1750,3 +1750,10 @@ def create_agent_runtime(
         runtime.register_entry_point(spec)
 
     return runtime
+
+
+# TODO(feat/webhook-idempotency): AgentRuntime.trigger() lacks deduplication.
+# Webhook providers (Stripe, GitHub, etc.) retry on timeout/5xx, causing duplicate executions.
+# Add: idempotency_key param to trigger(), OrderedDict TTL cache (_idempotency_cache),
+# and auto-hash (method+path+body) for webhook routes that don't provide an explicit key.
+# See: https://github.com/aden-hive/hive/issues/5947
