@@ -636,12 +636,42 @@ class SessionManager:
                 phase_state.inject_notification = _inject_phase_notification
 
                 # Auto-switch to staging when worker execution finishes naturally
+                # and notify the queen about the termination
                 from framework.runtime.event_bus import EventType as _ET
 
                 async def _on_worker_done(event):
                     if event.stream_id == "queen":
                         return
                     if phase_state.phase == "running":
+                        # Build termination notification for the queen
+                        if event.type == _ET.EXECUTION_COMPLETED:
+                            output = event.data.get("output", {})
+                            output_summary = ""
+                            if output:
+                                # Summarize key outputs for the queen
+                                for key, value in output.items():
+                                    val_str = str(value)
+                                    if len(val_str) > 200:
+                                        val_str = val_str[:200] + "..."
+                                    output_summary += f"\n  {key}: {val_str}"
+                            notification = (
+                                "[WORKER_TERMINAL] Worker finished successfully.\n"
+                                f"Output:{output_summary if output_summary else ' (no output keys set)'}\n"
+                                "Report this to the user. Ask if they want to continue with another run."
+                            )
+                        else:  # EXECUTION_FAILED
+                            error = event.data.get("error", "Unknown error")
+                            notification = (
+                                "[WORKER_TERMINAL] Worker failed.\n"
+                                f"Error: {error}\n"
+                                "Report this to the user and help them troubleshoot."
+                            )
+
+                        # Inject notification to queen before phase switch
+                        node = executor.node_registry.get("queen")
+                        if node is not None and hasattr(node, "inject_event"):
+                            await node.inject_event(notification)
+
                         await phase_state.switch_to_staging(source="auto")
 
                 session.event_bus.subscribe(

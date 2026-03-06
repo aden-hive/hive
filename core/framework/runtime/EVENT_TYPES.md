@@ -52,6 +52,10 @@ A graph execution finished successfully.
 
 **Emitted by:** `ExecutionStream._run_execution()`
 
+**Queen notification:** When a worker execution completes, the session manager \
+injects a `[WORKER_TERMINAL]` notification into the queen with the output summary. \
+The queen reports to the user and asks what to do next.
+
 ---
 
 ### `execution_failed`
@@ -63,6 +67,10 @@ A graph execution failed with an error.
 | `error`    | `str` | Error message |
 
 **Emitted by:** `ExecutionStream._run_execution()`
+
+**Queen notification:** When a worker execution fails, the session manager \
+injects a `[WORKER_TERMINAL]` notification into the queen with the error. \
+The queen reports to the user and helps troubleshoot.
 
 ---
 

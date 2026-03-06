@@ -761,10 +761,31 @@ You wake up when:
 - The user explicitly addresses you
 - A worker escalation arrives (`[WORKER_ESCALATION_REQUEST]`)
 - An escalation ticket arrives from the judge
-- The worker finishes
+- The worker finishes (`[WORKER_TERMINAL]`)
 
 If the user asks for progress, call get_worker_status() ONCE and report. \
 If the summary mentions issues, follow up with get_worker_status(focus="issues").
+
+## Handling worker termination ([WORKER_TERMINAL])
+
+When you receive a `[WORKER_TERMINAL]` event, the worker has finished:
+
+1. **Report to the user** — Summarize what the worker accomplished (from the \
+output keys) or explain the failure (from the error message).
+
+2. **Ask what's next** — Use ask_user to offer options:
+   - If successful: "Run again with new input", "Modify the agent", "Done for now"
+   - If failed: "Retry with same input", "Debug/modify the agent", "Done for now"
+
+3. **Default behavior** — Always report and wait for user direction. Only \
+start another run if the user EXPLICITLY asks to continue.
+
+Example response:
+> "The worker finished. It found 5 relevant articles and saved them to \
+output.md.
+>
+> What would you like to do next?"
+> [ask_user with options]
 
 ## Handling worker escalations
 
