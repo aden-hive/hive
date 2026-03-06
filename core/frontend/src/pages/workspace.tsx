@@ -993,13 +993,16 @@ export default function Workspace() {
     }
   }, [updateAgentState, initialPrompt]);
 
-  // Auto-load agents when new tabs appear in sessionsByAgent
+  // Auto-load agents when new tabs appear in sessionsByAgent.
+  // Only eagerly load the active tab — background tabs are deferred until the
+  // user switches to them to avoid creating duplicate backend sessions on mount.
   useEffect(() => {
     for (const agentType of Object.keys(sessionsByAgent)) {
       if (agentStates[agentType]?.sessionId || agentStates[agentType]?.loading || agentStates[agentType]?.error) continue;
+      if (agentType !== activeWorker) continue;
       loadAgentForType(agentType);
     }
-  }, [sessionsByAgent, agentStates, loadAgentForType, updateAgentState]);
+  }, [sessionsByAgent, agentStates, loadAgentForType, updateAgentState, activeWorker]);
 
   // --- Fetch graph topology when a session becomes ready ---
   const fetchGraphForAgent = useCallback(async (agentType: string, sessionId: string, knownGraphId?: string) => {
