@@ -27,10 +27,10 @@ def print_running_prompt(worker_identity: str | None = None) -> None:
 
     prompt = (
         _queen_identity_running
+        + _queen_style
         + _queen_tools_running
         + _queen_behavior_always
         + _queen_behavior_running
-        + _queen_style
         + worker_identity
     )
 
@@ -61,12 +61,12 @@ def print_building_prompt(worker_identity: str | None = None) -> None:
 
     prompt = (
         _queen_identity_building
-        + _agent_builder_knowledge
+        + _queen_style
         + _queen_tools_building
         + _queen_behavior_always
         + _queen_behavior_building
+        + _agent_builder_knowledge
         + _queen_phase_7
-        + _queen_style
         + _appendices
         + worker_identity
     )
@@ -96,10 +96,10 @@ def print_staging_prompt(worker_identity: str | None = None) -> None:
 
     prompt = (
         _queen_identity_staging
+        + _queen_style
         + _queen_tools_staging
         + _queen_behavior_always
         + _queen_behavior_staging
-        + _queen_style
         + worker_identity
     )
 
