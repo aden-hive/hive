@@ -94,13 +94,18 @@ Use Hive when you need:
 > Please use the quickstart script below to set up the environment.
 
 ```bash
+# Install uv first (required)
+pip install uv
+
 # Clone the repository
 git clone https://github.com/aden-hive/hive.git
 cd hive
 
-
-# Run quickstart setup
+# Run quickstart setup (Linux/macOS)
 ./quickstart.sh
+
+# On Windows, use PowerShell instead:
+# .\quickstart.ps1
 ```
 
 This sets up:
