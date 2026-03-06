@@ -312,11 +312,11 @@ Ship essential framework utilities: Node validation, HITL (Human-in-the-loop pau
     - [x] Pause/approve workflow
     - [x] State saved to checkpoint
     - [x] Resume with HITLResponse merged into context
-- [x] **TUI Integration**
-    - [x] Chat REPL with streaming support (tui/app.py)
-    - [x] Multi-graph session management
-    - [x] User presence detection
-    - [x] Real-time log viewing
+- [x] **TUI Integration (deprecated — replaced by browser UI)**
+    - [x] Legacy chat REPL with streaming support (tui/app.py)
+    - [x] Legacy multi-graph session management
+    - [x] Legacy user presence detection
+    - [x] Legacy real-time log viewing
 - [x] **Node Lifecycle Management**
     - [x] Start/stop/pause/resume in execution stream
     - [x] State persistence via checkpoint store
@@ -538,11 +538,11 @@ Release CLI tools specifically for rapid memory management and credential store 
     - [x] test-run, test-debug, test-list, test-stats (testing/cli.py)
     - [x] Pytest integration
     - [x] Test categorization
-- [x] **TUI (Terminal UI)**
-    - [x] Interactive chat with streaming (tui/app.py)
-    - [x] Multi-graph management UI
-    - [x] Log pane for real-time output
-    - [x] Keyboard shortcuts (Ctrl+C, Ctrl+D, etc.)
+- [x] **TUI (Terminal UI, deprecated)**
+    - [x] Legacy interactive chat with streaming (tui/app.py)
+    - [x] Legacy multi-graph management UI
+    - [x] Legacy log pane for real-time output
+    - [x] Legacy keyboard shortcuts (Ctrl+C, Ctrl+D, etc.)
 - [ ] **Memory Management CLI**
     - [ ] Memory inspection commands
     - [ ] Memory cleanup utilities
@@ -774,9 +774,9 @@ Implement an interactive, drag-and-drop canvas (using libraries like React Flow)
     - [ ] Edge traversal animation
 
 ### TUI to GUI Upgrade
-Port the existing Terminal User Interface (TUI) into a rich web application, allowing users to interact directly with the Queen Bee / Coding Agent via a browser chat interface.
+Replace the legacy Terminal User Interface (TUI) into a rich web application, allowing users to interact directly with the Queen Bee / Coding Agent via a browser chat interface. The TUI foundation in `tui/app.py` is legacy code being replaced, not extended.
 
-- [x] **TUI Foundation**
+- [x] **TUI Foundation (legacy, deprecated)**
     - [x] Terminal chat interface (tui/app.py)
     - [x] Streaming support
     - [x] Multi-graph management
