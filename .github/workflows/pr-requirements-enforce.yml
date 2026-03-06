@@ -4,7 +4,6 @@ name: PR Requirements Enforcement
 on:
   schedule:
     - cron: "0 0 * * *"   # runs every day once at midnight 
-  workflow_dispatch:
 jobs:
   enforce:
     name: Close PRs still failing contribution requirements
