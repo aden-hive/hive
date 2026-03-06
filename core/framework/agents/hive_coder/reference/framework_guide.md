@@ -309,7 +309,7 @@ list_agent_tools(group="gmail", output_schema="full")  # then drill into a categ
 list_agent_tools("exports/my_agent/mcp_servers.json")  # specific agent's tools
 ```
 
-After building, validate tools exist: `validate_agent_tools("exports/{name}")`
+After building, run `validate_agent_package("{name}")` to check everything at once.
 
 Common tool categories (verify via list_agent_tools):
 - **Web**: search, scrape, PDF

@@ -6,7 +6,7 @@
 3. **Missing module-level exports in `__init__.py`** — The runner reads `goal`, `nodes`, `edges`, `entry_node`, `entry_points`, `terminal_nodes`, `conversation_mode`, `identity_prompt`, `loop_config` via `getattr()`. ALL module-level variables from agent.py must be re-exported in `__init__.py`.
 
 ## Value Errors
-4. **Fabricating tools** — Always verify via `list_agent_tools()` before designing and `validate_agent_tools()` after building.
+4. **Fabricating tools** — Always verify via `list_agent_tools()` before designing and `validate_agent_package()` after building.
 
 ## Design Errors
 5. **Adding framework gating for LLM behavior** — Don't add output rollback or premature rejection. Fix with better prompts or custom judges.

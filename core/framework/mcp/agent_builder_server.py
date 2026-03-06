@@ -2557,7 +2557,16 @@ def runner_loaded():
 def _generate_mcp_servers_json(session: BuildSession) -> str | None:
     """Generate mcp_servers.json in flat dict format.  Returns None if no servers."""
     if not session.mcp_servers:
-        return None
+        # Default: every agent needs hive-tools
+        return json.dumps({
+            "hive-tools": {
+                "transport": "stdio",
+                "command": "uv",
+                "args": ["run", "python", "mcp_server.py", "--stdio"],
+                "cwd": "../../tools",
+                "description": "Hive tools MCP server"
+            }
+        }, indent=2)
     flat: dict[str, dict] = {}
     for server in session.mcp_servers:
         name = server.get("name", "unnamed")

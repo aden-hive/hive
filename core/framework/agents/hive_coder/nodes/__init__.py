@@ -56,13 +56,11 @@ _SHARED_TOOLS = [
     "undo_changes",
     # Meta-agent
     "list_agent_tools",
-    "validate_agent_tools",
     "validate_agent_package",
     "list_agents",
     "list_agent_sessions",
     "list_agent_checkpoints",
     "get_agent_checkpoint",
-    "run_agent_tests",
     "initialize_agent_package",
 ]
 
@@ -160,13 +158,12 @@ hashline=True for anchors in results
 available tools grouped by category. output_schema: "simple" (default) or \
 "full" (includes input_schema). group: "all" (default) or a prefix like \
 "gmail". Call FIRST before designing.
-- validate_agent_tools(agent_path) — validate that all tools declared \
-in an agent's nodes actually exist. Call after building.
+- validate_agent_package(agent_name) — run ALL validation checks in one call \
+(class validation, runner load, tool validation, tests). Call after building.
 - list_agents() — list all agent packages in exports/ with session counts
 - list_agent_sessions(agent_name, status?, limit?) — list sessions
 - list_agent_checkpoints(agent_name, session_id) — list checkpoints
 - get_agent_checkpoint(agent_name, session_id, checkpoint_id?) — load checkpoint
-- run_agent_tests(agent_name, test_types?, fail_fast?) — run pytest with parsing
 
 # Meta-Agent Capabilities
 
@@ -185,11 +182,11 @@ NEVER guess or fabricate tool names from memory.
 NEVER skip the first call. Always start with the full list \
 so you know what categories and tools exist before drilling in.
 
-## Post-Build Testing
-After writing agent code, validate structurally AND run tests:
-  run_command("uv run python -c 'from {name} import default_agent; \\
-    print(default_agent.validate())'")
-  run_agent_tests("{name}")
+## Post-Build Validation
+After writing agent code, run a single comprehensive check:
+  validate_agent_package("{name}")
+This runs class validation, runner load, tool validation, and tests \
+in one call. Do NOT run these steps individually.
 
 ## Debugging Built Agents
 When a user says "my agent is failing" or "debug this agent":
@@ -438,6 +435,9 @@ The tool creates: config.py, nodes/__init__.py, agent.py, \
 __init__.py, __main__.py, mcp_servers.json, tests/conftest.py, \
 agent.json, README.md.
 
+`mcp_servers.json` is auto-generated with hive-tools as the default. \
+Do NOT manually create or overwrite `mcp_servers.json`.
+
 After initialization, review and customize if needed:
 - System prompts in nodes/__init__.py
 - CLI options in __main__.py
@@ -532,9 +532,9 @@ _queen_tools_building = """
 You have full coding tools for building and modifying agents:
 - File I/O: read_file, write_file, edit_file, list_directory, search_files, \
 run_command, undo_changes
-- Meta-agent: list_agent_tools, validate_agent_tools, \
+- Meta-agent: list_agent_tools, validate_agent_package, \
 list_agents, list_agent_sessions, \
-list_agent_checkpoints, get_agent_checkpoint, run_agent_tests
+list_agent_checkpoints, get_agent_checkpoint
 - load_built_agent(agent_path) — Load the agent and switch to STAGING phase
 - list_credentials(credential_id?) — List authorized credentials
 
