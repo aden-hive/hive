@@ -13,6 +13,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import threading
 from abc import ABC, abstractmethod
 from datetime import UTC, datetime
 from pathlib import Path
@@ -160,6 +161,7 @@ class EncryptedFileStorage(CredentialStorage):
                 )
 
         self._fernet = Fernet(self._key)
+        self._index_lock = threading.Lock()
 
     def _ensure_dirs(self) -> None:
         """Create directory structure."""
@@ -174,6 +176,8 @@ class EncryptedFileStorage(CredentialStorage):
 
     def save(self, credential: CredentialObject) -> None:
         """Encrypt and save credential."""
+        from framework.utils.io import atomic_write
+
         # Serialize credential
         data = self._serialize_credential(credential)
         json_bytes = json.dumps(data, default=str).encode()
@@ -181,9 +185,9 @@ class EncryptedFileStorage(CredentialStorage):
         # Encrypt
         encrypted = self._fernet.encrypt(json_bytes)
 
-        # Write to file
+        # Write to file atomically (prevents corruption on crash)
         cred_path = self._cred_path(credential.id)
-        with open(cred_path, "wb") as f:
+        with atomic_write(cred_path, mode="wb") as f:
             f.write(encrypted)
 
         # Update index
@@ -264,27 +268,30 @@ class EncryptedFileStorage(CredentialStorage):
         operation: str,
         credential_type: str | None = None,
     ) -> None:
-        """Update the metadata index."""
+        """Update the metadata index atomically with thread safety."""
+        from framework.utils.io import atomic_write
+
         index_path = self.base_path / "metadata" / "index.json"
 
-        if index_path.exists():
-            with open(index_path, encoding="utf-8-sig") as f:
-                index = json.load(f)
-        else:
-            index = {"credentials": {}, "version": "1.0"}
+        with self._index_lock:
+            if index_path.exists():
+                with open(index_path, encoding="utf-8-sig") as f:
+                    index = json.load(f)
+            else:
+                index = {"credentials": {}, "version": "1.0"}
 
-        if operation == "save":
-            index["credentials"][credential_id] = {
-                "updated_at": datetime.now(UTC).isoformat(),
-                "type": credential_type,
-            }
-        elif operation == "delete":
-            index["credentials"].pop(credential_id, None)
+            if operation == "save":
+                index["credentials"][credential_id] = {
+                    "updated_at": datetime.now(UTC).isoformat(),
+                    "type": credential_type,
+                }
+            elif operation == "delete":
+                index["credentials"].pop(credential_id, None)
 
-        index["last_modified"] = datetime.now(UTC).isoformat()
+            index["last_modified"] = datetime.now(UTC).isoformat()
 
-        with open(index_path, "w", encoding="utf-8") as f:
-            json.dump(index, f, indent=2)
+            with atomic_write(index_path) as f:
+                json.dump(index, f, indent=2)
 
 
 class EnvVarStorage(CredentialStorage):

@@ -7,7 +7,10 @@ from pathlib import Path
 def atomic_write(path: Path, mode: str = "w", encoding: str = "utf-8"):
     tmp_path = path.with_suffix(path.suffix + ".tmp")
     try:
-        with open(tmp_path, mode, encoding=encoding) as f:
+        kwargs = {"mode": mode}
+        if "b" not in mode:
+            kwargs["encoding"] = encoding
+        with open(tmp_path, **kwargs) as f:
             yield f
             f.flush()
             os.fsync(f.fileno())
