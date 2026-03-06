@@ -172,6 +172,12 @@ async def handle_events(request: web.Request) -> web.StreamResponse:
             except (ConnectionResetError, ConnectionError):
                 close_reason = "client_disconnected"
                 break
+            except RuntimeError as exc:
+                if "closing transport" in str(exc).lower():
+                    close_reason = "client_disconnected"
+                else:
+                    close_reason = f"error: {exc}"
+                break
             except Exception as exc:
                 close_reason = f"error: {exc}"
                 break
