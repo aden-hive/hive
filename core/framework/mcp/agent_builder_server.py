@@ -1975,7 +1975,8 @@ def _generate_nodes_init_py(session: BuildSession) -> str:
             node.client_facing if node.client_facing else (False if is_gcu else node.client_facing)
         )
         max_node_visits = (
-            node.max_node_visits if node.max_node_visits != 0
+            node.max_node_visits
+            if node.max_node_visits != 0
             else (1 if is_gcu else node.max_node_visits)
         )
         output_keys = (
@@ -2333,8 +2334,7 @@ def _generate_agent_py(
     out += "                    errors.append(\n"
     out += '                        f"Invalid entry_points key {ep_id!r} "\n'
     out += (
-        '                        f"({type(ep_id).__name__}).'
-        ' Entry point names must be strings."\n'
+        '                        f"({type(ep_id).__name__}). Entry point names must be strings."\n'
     )
     out += "                    )\n"
     out += "                    continue\n"
@@ -2586,14 +2586,16 @@ def initialize_agent_package(
 
     # Validate agent name (must be valid snake_case for Python package)
     if not re.match(r"^[a-z][a-z0-9_]*$", agent_name):
-        return json.dumps({
-            "success": False,
-            "errors": [
-                f"Invalid agent_name '{agent_name}'. Must be snake_case: "
-                "lowercase letters, numbers, underscores. "
-                "Must start with a letter. Examples: 'my_agent', 'research_bot', 'data_processor'"
-            ],
-        })
+        return json.dumps(
+            {
+                "success": False,
+                "errors": [
+                    f"Invalid agent_name '{agent_name}'. Must be snake_case: "
+                    "lowercase letters, numbers, underscores. "
+                    "Must start with a letter. Examples: 'my_agent', 'research_bot', 'data_processor'"
+                ],
+            }
+        )
 
     # Update session name
     session.name = agent_name
@@ -2722,72 +2724,84 @@ def initialize_agent_package(
     for node in session.nodes:
         # Warn about nodes with no tools
         if not node.tools and node.node_type == "event_loop":
-            design_warnings.append({
-                "node_id": node.id,
-                "type": "no_tools",
-                "message": (
-                    f"Node '{node.id}' has no tools. "
-                    "Consider merging into another node or adding tools."
-                ),
-                "severity": "warning",
-            })
+            design_warnings.append(
+                {
+                    "node_id": node.id,
+                    "type": "no_tools",
+                    "message": (
+                        f"Node '{node.id}' has no tools. "
+                        "Consider merging into another node or adding tools."
+                    ),
+                    "severity": "warning",
+                }
+            )
         # Warn about client-facing nodes that aren't entry nodes
         if node.client_facing and node.id != entry_node:
-            design_warnings.append({
-                "node_id": node.id,
-                "type": "client_facing_not_entry",
-                "message": (
-                    f"Node '{node.id}' is client_facing but not the entry node. "
-                    "Worker agents should not have client-facing nodes "
-                    "(queen handles user interaction)."
-                ),
-                "severity": "warning",
-            })
+            design_warnings.append(
+                {
+                    "node_id": node.id,
+                    "type": "client_facing_not_entry",
+                    "message": (
+                        f"Node '{node.id}' is client_facing but not the entry node. "
+                        "Worker agents should not have client-facing nodes "
+                        "(queen handles user interaction)."
+                    ),
+                    "severity": "warning",
+                }
+            )
         # GCU nodes should not be client_facing
         if node.node_type == "gcu" and node.client_facing:
-            design_warnings.append({
-                "node_id": node.id,
-                "type": "gcu_client_facing",
-                "message": (
-                    f"GCU node '{node.id}' is client_facing. "
-                    "GCU nodes should be autonomous subagents (client_facing=False)."
-                ),
-                "severity": "warning",
-            })
+            design_warnings.append(
+                {
+                    "node_id": node.id,
+                    "type": "gcu_client_facing",
+                    "message": (
+                        f"GCU node '{node.id}' is client_facing. "
+                        "GCU nodes should be autonomous subagents (client_facing=False)."
+                    ),
+                    "severity": "warning",
+                }
+            )
         # GCU nodes should have max_node_visits=1
         if node.node_type == "gcu" and node.max_node_visits != 1:
-            design_warnings.append({
-                "node_id": node.id,
-                "type": "gcu_max_visits",
-                "message": (
-                    f"GCU node '{node.id}' should have max_node_visits=1 "
-                    "(single execution per delegation)."
-                ),
-                "severity": "info",
-            })
+            design_warnings.append(
+                {
+                    "node_id": node.id,
+                    "type": "gcu_max_visits",
+                    "message": (
+                        f"GCU node '{node.id}' should have max_node_visits=1 "
+                        "(single execution per delegation)."
+                    ),
+                    "severity": "info",
+                }
+            )
 
     # Warn about node count (prefer 2-5 nodes)
     node_count = len(session.nodes)
     if node_count < 2:
-        design_warnings.append({
-            "node_id": None,
-            "type": "too_few_nodes",
-            "message": (
-                f"Agent has only {node_count} node. "
-                "Consider adding nodes for better separation of concerns."
-            ),
-            "severity": "warning",
-        })
+        design_warnings.append(
+            {
+                "node_id": None,
+                "type": "too_few_nodes",
+                "message": (
+                    f"Agent has only {node_count} node. "
+                    "Consider adding nodes for better separation of concerns."
+                ),
+                "severity": "warning",
+            }
+        )
     elif node_count > 5:
-        design_warnings.append({
-            "node_id": None,
-            "type": "too_many_nodes",
-            "message": (
-                f"Agent has {node_count} nodes. "
-                "Consider consolidating to 2-5 nodes for simpler architecture."
-            ),
-            "severity": "warning",
-        })
+        design_warnings.append(
+            {
+                "node_id": None,
+                "type": "too_many_nodes",
+                "message": (
+                    f"Agent has {node_count} nodes. "
+                    "Consider consolidating to 2-5 nodes for simpler architecture."
+                ),
+                "severity": "warning",
+            }
+        )
 
     return json.dumps(
         {

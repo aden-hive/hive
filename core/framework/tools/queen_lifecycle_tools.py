@@ -650,9 +650,7 @@ def register_queen_lifecycle_tools(
         bus = _get_event_bus()
         if bus:
             if preamble["status"] == "waiting_for_input":
-                input_events = bus.get_history(
-                    event_type=EventType.CLIENT_INPUT_REQUESTED, limit=1
-                )
+                input_events = bus.get_history(event_type=EventType.CLIENT_INPUT_REQUESTED, limit=1)
                 if input_events:
                     prompt = input_events[0].data.get("prompt", "")
                     if prompt:
@@ -710,9 +708,7 @@ def register_queen_lifecycle_tools(
             parts.append(node_part)
 
         if red_flags:
-            parts.append(
-                f"{red_flags} issue type(s) detected — use focus='issues' for details"
-            )
+            parts.append(f"{red_flags} issue type(s) detected — use focus='issues' for details")
         else:
             parts.append("No issues detected")
 
@@ -773,9 +769,7 @@ def register_queen_lifecycle_tools(
             return "No active execution found."
 
         exec_id = exec_ids[0]
-        memory = runtime.state_manager.create_memory(
-            exec_id, stream_id, IsolationLevel.SHARED
-        )
+        memory = runtime.state_manager.create_memory(exec_id, stream_id, IsolationLevel.SHARED)
         state = await memory.read_all()
 
         if not state:
@@ -793,9 +787,7 @@ def register_queen_lifecycle_tools(
             for change in reversed(changes):  # most recent first
                 from datetime import datetime
 
-                ago = _format_time_ago(
-                    datetime.fromtimestamp(change.timestamp, tz=UTC)
-                )
+                ago = _format_time_ago(datetime.fromtimestamp(change.timestamp, tz=UTC))
                 if change.old_value is None:
                     lines.append(f"  {change.key} set ({ago})")
                 else:
@@ -810,22 +802,15 @@ def register_queen_lifecycle_tools(
         lines = []
 
         # Running tools (started but not yet completed)
-        tool_started = bus.get_history(
-            event_type=EventType.TOOL_CALL_STARTED, limit=last_n * 2
-        )
-        tool_completed = bus.get_history(
-            event_type=EventType.TOOL_CALL_COMPLETED, limit=last_n * 2
-        )
+        tool_started = bus.get_history(event_type=EventType.TOOL_CALL_STARTED, limit=last_n * 2)
+        tool_completed = bus.get_history(event_type=EventType.TOOL_CALL_COMPLETED, limit=last_n * 2)
         completed_ids = {
-            evt.data.get("tool_use_id")
-            for evt in tool_completed
-            if evt.data.get("tool_use_id")
+            evt.data.get("tool_use_id") for evt in tool_completed if evt.data.get("tool_use_id")
         }
         running = [
             evt
             for evt in tool_started
-            if evt.data.get("tool_use_id")
-            and evt.data.get("tool_use_id") not in completed_ids
+            if evt.data.get("tool_use_id") and evt.data.get("tool_use_id") not in completed_ids
         ]
 
         if running:
@@ -999,22 +984,15 @@ def register_queen_lifecycle_tools(
                 result[key] = preamble[key]
 
         # Running + completed tool calls
-        tool_started = bus.get_history(
-            event_type=EventType.TOOL_CALL_STARTED, limit=last_n * 2
-        )
-        tool_completed = bus.get_history(
-            event_type=EventType.TOOL_CALL_COMPLETED, limit=last_n * 2
-        )
+        tool_started = bus.get_history(event_type=EventType.TOOL_CALL_STARTED, limit=last_n * 2)
+        tool_completed = bus.get_history(event_type=EventType.TOOL_CALL_COMPLETED, limit=last_n * 2)
         completed_ids = {
-            evt.data.get("tool_use_id")
-            for evt in tool_completed
-            if evt.data.get("tool_use_id")
+            evt.data.get("tool_use_id") for evt in tool_completed if evt.data.get("tool_use_id")
         }
         running = [
             evt
             for evt in tool_started
-            if evt.data.get("tool_use_id")
-            and evt.data.get("tool_use_id") not in completed_ids
+            if evt.data.get("tool_use_id") and evt.data.get("tool_use_id") not in completed_ids
         ]
         if running:
             result["running_tools"] = [
@@ -1113,9 +1091,7 @@ def register_queen_lifecycle_tools(
             }
 
         # Execution outcomes
-        exec_completed = bus.get_history(
-            event_type=EventType.EXECUTION_COMPLETED, limit=5
-        )
+        exec_completed = bus.get_history(event_type=EventType.EXECUTION_COMPLETED, limit=5)
         exec_failed = bus.get_history(event_type=EventType.EXECUTION_FAILED, limit=5)
         if exec_completed or exec_failed:
             result["execution_outcomes"] = []
@@ -1252,15 +1228,12 @@ def register_queen_lifecycle_tools(
                 "focus": {
                     "type": "string",
                     "enum": ["activity", "memory", "tools", "issues", "progress", "full"],
-                    "description": (
-                        "Aspect to inspect. Omit for a brief summary."
-                    ),
+                    "description": ("Aspect to inspect. Omit for a brief summary."),
                 },
                 "last_n": {
                     "type": "integer",
                     "description": (
-                        "Recent events per category (default 20). "
-                        "Only for activity, tools, full."
+                        "Recent events per category (default 20). Only for activity, tools, full."
                     ),
                 },
             },

@@ -38,9 +38,10 @@ _appendices = _build_appendices()
 # GCU first-class section for building phase (when GCU is enabled).
 # This is placed prominently in the main prompt body, not as an appendix.
 _gcu_building_section = (
-    "\n\n# GCU Nodes — Browser Automation\n\n"
-    + _gcu_guide
-) if _is_gcu_enabled() and _gcu_guide else ""
+    ("\n\n# GCU Nodes — Browser Automation\n\n" + _gcu_guide)
+    if _is_gcu_enabled() and _gcu_guide
+    else ""
+)
 
 # Tools available to both coder (worker) and queen.
 _SHARED_TOOLS = [

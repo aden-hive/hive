@@ -841,9 +841,7 @@ class TestEscalateToCoder:
         assert kwargs["is_client_input"] is False
 
     @pytest.mark.asyncio
-    async def test_escalate_waits_for_queen_input_and_skips_judge(
-        self, runtime, node_spec, memory
-    ):
+    async def test_escalate_waits_for_queen_input_and_skips_judge(self, runtime, node_spec, memory):
         """wait_for_response=true should block for queen input before judge evaluation."""
         node_spec.output_keys = ["result"]
         llm = MockStreamingLLM(

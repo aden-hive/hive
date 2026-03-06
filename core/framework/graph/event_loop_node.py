@@ -980,7 +980,7 @@ class EventLoopNode(NodeProtocol):
                     success=False,
                     error=(
                         f"Node stalled: {self._config.stall_detection_threshold} similar "
-                        f"responses ({self._config.stall_similarity_threshold*100:.0f}+ threshold)"
+                        f"responses ({self._config.stall_similarity_threshold * 100:.0f}+ threshold)"
                     ),
                     output=accumulator.to_dict(),
                     tokens_used=total_input_tokens + total_output_tokens,
@@ -1262,9 +1262,14 @@ class EventLoopNode(NodeProtocol):
                         _cf_text_only_streak = 0
                         _continue_count += 1
                         self._log_skip_judge(
-                            ctx, node_id, iteration,
+                            ctx,
+                            node_id,
+                            iteration,
                             "Blocked for ask_user input (skip judge)",
-                            logged_tool_calls, assistant_text, turn_tokens, iter_start,
+                            logged_tool_calls,
+                            assistant_text,
+                            turn_tokens,
+                            iter_start,
                         )
                         continue
                     # All outputs set -- fall through to judge
@@ -1282,9 +1287,14 @@ class EventLoopNode(NodeProtocol):
                     latency_ms = int((time.time() - start_time) * 1000)
                     _continue_count += 1
                     self._log_skip_judge(
-                        ctx, node_id, iteration,
+                        ctx,
+                        node_id,
+                        iteration,
                         "Shutdown signaled (waiting for queen input)",
-                        logged_tool_calls, assistant_text, turn_tokens, iter_start,
+                        logged_tool_calls,
+                        assistant_text,
+                        turn_tokens,
+                        iter_start,
                     )
                     if ctx.runtime_logger:
                         ctx.runtime_logger.log_node_complete(
@@ -1315,7 +1325,9 @@ class EventLoopNode(NodeProtocol):
                 got_input = await self._await_user_input(ctx, prompt="", emit_client_request=False)
                 logger.info(
                     "[%s] iter=%d: queen wait unblocked, got_input=%s",
-                    node_id, iteration, got_input,
+                    node_id,
+                    iteration,
+                    got_input,
                 )
                 if not got_input:
                     # Blocked by missing user input - emit escalation before returning
@@ -1325,8 +1337,7 @@ class EventLoopNode(NodeProtocol):
                             node_id=node_id,
                             reason="Blocked waiting for queen guidance - no input received",
                             context=(
-                                "Worker escalated but received no queen"
-                                " guidance before shutdown"
+                                "Worker escalated but received no queen guidance before shutdown"
                             ),
                             execution_id=execution_id,
                         )
@@ -1336,9 +1347,14 @@ class EventLoopNode(NodeProtocol):
                     latency_ms = int((time.time() - start_time) * 1000)
                     _continue_count += 1
                     self._log_skip_judge(
-                        ctx, node_id, iteration,
+                        ctx,
+                        node_id,
+                        iteration,
                         "No queen input received (shutdown during wait)",
-                        logged_tool_calls, assistant_text, turn_tokens, iter_start,
+                        logged_tool_calls,
+                        assistant_text,
+                        turn_tokens,
+                        iter_start,
                     )
                     if ctx.runtime_logger:
                         ctx.runtime_logger.log_node_complete(
@@ -1369,9 +1385,14 @@ class EventLoopNode(NodeProtocol):
                 _cf_text_only_streak = 0
                 _continue_count += 1
                 self._log_skip_judge(
-                    ctx, node_id, iteration,
+                    ctx,
+                    node_id,
+                    iteration,
                     "Blocked for queen input (skip judge)",
-                    logged_tool_calls, assistant_text, turn_tokens, iter_start,
+                    logged_tool_calls,
+                    assistant_text,
+                    turn_tokens,
+                    iter_start,
                 )
                 continue
 
@@ -1387,9 +1408,14 @@ class EventLoopNode(NodeProtocol):
                 # Gap C: unjudged iteration — log as CONTINUE
                 _continue_count += 1
                 self._log_skip_judge(
-                    ctx, node_id, iteration,
+                    ctx,
+                    node_id,
+                    iteration,
                     "Unjudged (judge_every_n_turns skip)",
-                    logged_tool_calls, assistant_text, turn_tokens, iter_start,
+                    logged_tool_calls,
+                    assistant_text,
+                    turn_tokens,
+                    iter_start,
                 )
                 continue
 
@@ -2861,8 +2887,9 @@ class EventLoopNode(NodeProtocol):
         Returns 0.0-1.0, where 1.0 is exact match.
         Fast: O(len(s) + len(s2)) using set operations.
         """
+
         def _ngrams(s: str) -> set[str]:
-            return {s[i:i+n] for i in range(len(s) - n + 1) if s.strip()}
+            return {s[i : i + n] for i in range(len(s) - n + 1) if s.strip()}
 
         if not s1 or not s2:
             return 0.0

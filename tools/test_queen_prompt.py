@@ -8,17 +8,17 @@ from pathlib import Path
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root / "core"))
 
-from framework.agents.hive_coder.nodes import (
-    _queen_identity,
+from framework.agents.hive_coder.nodes import (  # noqa: E402
     _agent_builder_knowledge,
+    _appendices,
     _gcu_building_section,
-    _queen_tools_docs,
+    _is_gcu_enabled,
     _queen_behavior,
+    _queen_identity,
     _queen_phase_7,
     _queen_style,
-    _appendices,
+    _queen_tools_docs,
     queen_node,
-    _is_gcu_enabled,
 )
 
 
@@ -48,7 +48,9 @@ def analyze_prompt():
     # Show GCU status
     gcu_enabled = _is_gcu_enabled()
     print(f"GCU Enabled: {gcu_enabled}")
-    print(f"GCU Section Length: {len(_gcu_building_section)} chars, {count_lines(_gcu_building_section)} lines")
+    gcu_len = len(_gcu_building_section)
+    gcu_lines = count_lines(_gcu_building_section)
+    print(f"GCU Section Length: {gcu_len} chars, {gcu_lines} lines")
 
     # Build the full prompt
     full_prompt = (
@@ -131,21 +133,14 @@ if __name__ == "__main__":
     import argparse
 
     parser = argparse.ArgumentParser(description="Analyze Queen's building phase prompt")
+    parser.add_argument("--full", "-f", action="store_true", help="Print the full system prompt")
+    parser.add_argument("--gcu", "-g", action="store_true", help="Print just the GCU section")
     parser.add_argument(
-        "--full", "-f",
-        action="store_true",
-        help="Print the full system prompt"
-    )
-    parser.add_argument(
-        "--gcu", "-g",
-        action="store_true",
-        help="Print just the GCU section"
-    )
-    parser.add_argument(
-        "--structure", "-s",
+        "--structure",
+        "-s",
         action="store_true",
         default=True,
-        help="Show prompt structure analysis (default)"
+        help="Show prompt structure analysis (default)",
     )
 
     args = parser.parse_args()
