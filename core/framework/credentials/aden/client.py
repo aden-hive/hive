@@ -38,8 +38,6 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
 
-import json as _json
-
 import httpx
 
 logger = logging.getLogger(__name__)
