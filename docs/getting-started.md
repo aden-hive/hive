@@ -168,16 +168,19 @@ Get your API keys:
 ## Testing Your Agent
 
 ```bash
-# Using Claude Code
+# With Claude Code (recommended)
 claude> /hive-test
 
-# Or manually
+# Manual testing (no Claude Code required)
 PYTHONPATH=exports uv run python -m my_agent test
-
-# Run with specific test type
 PYTHONPATH=exports uv run python -m my_agent test --type constraint
 PYTHONPATH=exports uv run python -m my_agent test --type success
+
+# Run without API calls (mock mode)
+PYTHONPATH=exports uv run python -m my_agent run --mock --input '{"task": "example"}'
 ```
+
+See [Testing Guide](testing.md) for writing custom tests and advanced workflows.
 
 ## Next Steps
 

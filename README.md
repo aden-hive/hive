@@ -133,6 +133,32 @@ Now you can run an agent by selectiing the agent (either an existing agent or ex
 
 <img width="2500" height="1214" alt="Image" src="https://github.com/user-attachments/assets/71c38206-2ad5-49aa-bde8-6698d0bc55f5" />
 
+### Test Your Agent
+
+You can test agents with or without Claude Code.
+
+**With Claude Code (recommended):**
+
+```bash
+claude> /hive-test
+```
+
+**Manual testing (no Claude Code required):**
+
+```bash
+# Run all tests
+PYTHONPATH=exports uv run python -m my_agent test
+
+# Test specific criteria
+PYTHONPATH=exports uv run python -m my_agent test --type success
+PYTHONPATH=exports uv run python -m my_agent test --type constraint
+
+# Run agent without API calls (mock mode)
+PYTHONPATH=exports uv run python -m my_agent run --mock --input '{"task": "example"}'
+```
+
+Replace `my_agent` with your agent's package name. See [Testing Guide](docs/testing.md) for writing custom tests and advanced workflows.
+
 ## Features
 
 - **Browser-Use** - Control the browser on your computer to achieve hard tasks
@@ -212,6 +238,7 @@ flowchart LR
 
 - **[Developer Guide](docs/developer-guide.md)** - Comprehensive guide for developers
 - [Getting Started](docs/getting-started.md) - Quick setup instructions
+- [Testing Guide](docs/testing.md) - Test agents with or without Claude Code
 - [Configuration Guide](docs/configuration.md) - All configuration options
 - [Architecture Overview](docs/architecture/README.md) - System design and structure
 
