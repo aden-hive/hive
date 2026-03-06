@@ -2592,7 +2592,8 @@ def initialize_agent_package(
                 "errors": [
                     f"Invalid agent_name '{agent_name}'. Must be snake_case: "
                     "lowercase letters, numbers, underscores. "
-                    "Must start with a letter. Examples: 'my_agent', 'research_bot', 'data_processor'"
+                    "Must start with a letter. Examples: 'my_agent', 'research_bot',"
+                    " 'data_processor'"
                 ],
             }
         )

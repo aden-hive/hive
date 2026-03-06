@@ -980,7 +980,8 @@ class EventLoopNode(NodeProtocol):
                     success=False,
                     error=(
                         f"Node stalled: {self._config.stall_detection_threshold} similar "
-                        f"responses ({self._config.stall_similarity_threshold * 100:.0f}+ threshold)"
+                        f"responses ({self._config.stall_similarity_threshold * 100:.0f}+"
+                        " threshold)"
                     ),
                     output=accumulator.to_dict(),
                     tokens_used=total_input_tokens + total_output_tokens,
