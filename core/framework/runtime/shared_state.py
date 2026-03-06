@@ -497,3 +497,9 @@ class StreamMemory:
             result = {k: v for k, v in result.items() if k in self._allowed_read}
 
         return result
+
+
+# TODO(fix/atomic-write-batch): write_batch() under SYNCHRONIZED isolation should acquire
+# all per-key locks atomically (sorted to prevent deadlock) before writing any values.
+# See: https://github.com/aden-hive/hive/issues/5946
+# A _write_batch_atomic() method should be added in a follow-up PR.
