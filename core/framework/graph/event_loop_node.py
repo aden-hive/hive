@@ -1315,6 +1315,15 @@ class EventLoopNode(NodeProtocol):
                 got_input = await self._await_user_input(ctx, prompt="", emit_client_request=False)
                 logger.info("[%s] iter=%d: queen wait unblocked, got_input=%s", node_id, iteration, got_input)
                 if not got_input:
+                    # Blocked by missing user input - emit escalation before returning
+                    if self._event_bus:
+                        await self._event_bus.emit_escalation_requested(
+                            stream_id=stream_id,
+                            node_id=node_id,
+                            reason="Blocked waiting for queen guidance - no input received",
+                            context="Worker escalated but received no queen guidance before shutdown",
+                            execution_id=execution_id,
+                        )
                     await self._publish_loop_completed(
                         stream_id, node_id, iteration + 1, execution_id
                     )
@@ -2038,7 +2047,8 @@ class EventLoopNode(NodeProtocol):
                     # --- Framework-level escalate_to_coder handling ---
                     reason = str(tc.tool_input.get("reason", "")).strip()
                     context = str(tc.tool_input.get("context", "")).strip()
-                    wait_for_response = bool(tc.tool_input.get("wait_for_response", True))
+                    # Always wait for queen guidance (wait_for_response is no longer optional)
+                    wait_for_response = True
 
                     if stream_id in ("queen", "judge"):
                         result = ToolResult(
@@ -2070,16 +2080,11 @@ class EventLoopNode(NodeProtocol):
                         context=context,
                         execution_id=execution_id,
                     )
-                    if wait_for_response:
-                        queen_input_requested = True
+                    queen_input_requested = True
 
                     result = ToolResult(
                         tool_use_id=tc.tool_use_id,
-                        content=(
-                            "Escalation requested to hive_coder (queen); waiting for guidance."
-                            if wait_for_response
-                            else "Escalation requested to hive_coder (queen)."
-                        ),
+                        content="Escalation requested to hive_coder (queen); waiting for guidance.",
                         is_error=False,
                     )
                     results_by_id[tc.tool_use_id] = result
@@ -2499,10 +2504,11 @@ class EventLoopNode(NodeProtocol):
         return Tool(
             name="escalate_to_coder",
             description=(
-                "Escalate to the Hive Coder queen when blocked by errors, missing "
+                "Escalate to the Hive Coder queen when requesting user input, "
+                "blocked by errors, missing "
                 "credentials, or ambiguous constraints that require supervisor "
-                "guidance. Include a concise reason and optional context. Set "
-                "wait_for_response=true to pause until the queen injects guidance."
+                "guidance. Include a concise reason and optional context. "
+                "The node will pause until the queen injects guidance."
             ),
             parameters={
                 "type": "object",
@@ -2516,14 +2522,6 @@ class EventLoopNode(NodeProtocol):
                     "context": {
                         "type": "string",
                         "description": "Optional diagnostic details for the queen.",
-                    },
-                    "wait_for_response": {
-                        "type": "boolean",
-                        "description": (
-                            "When true (default), block this node until queen guidance "
-                            "arrives via injected input."
-                        ),
-                        "default": True,
                     },
                 },
                 "required": ["reason"],
