@@ -861,9 +861,9 @@ class GraphExecutor:
                     input_data=input_data or {},
                     max_tokens=graph.max_tokens,
                     continuous_mode=is_continuous,
-                    inherited_conversation=continuous_conversation if is_continuous else None,
+                    inherited_conversation=(continuous_conversation if is_continuous else None),
                     override_tools=cumulative_tools if is_continuous else None,
-                    cumulative_output_keys=cumulative_output_keys if is_continuous else None,
+                    cumulative_output_keys=(cumulative_output_keys if is_continuous else None),
                     event_triggered=_event_triggered,
                     node_registry=node_registry,
                     identity_prompt=getattr(graph, "identity_prompt", ""),
@@ -1249,9 +1249,11 @@ class GraphExecutor:
                                     stream_id=self._stream_id,
                                     source_node=current_node_id,
                                     target_node=edge.target,
-                                    edge_condition=edge.condition.value
-                                    if hasattr(edge.condition, "value")
-                                    else str(edge.condition),
+                                    edge_condition=(
+                                        edge.condition.value
+                                        if hasattr(edge.condition, "value")
+                                        else str(edge.condition)
+                                    ),
                                     execution_id=self._execution_id,
                                 )
 
@@ -1830,7 +1832,7 @@ class GraphExecutor:
             raise RuntimeError(
                 f"Node type '{node_spec.node_type}' was removed in v0.5. "
                 f"Migrate node '{node_spec.id}' to '{replacement}'. "
-                f"See https://github.com/adenhq/hive/issues/4753 for migration guide."
+                f"See https://github.com/aden-hive/hive/issues/4753 for migration guide."
             )
 
         # Validate node type
@@ -1909,8 +1911,8 @@ class GraphExecutor:
                 memory=memory.read_all(),
                 llm=self.llm,
                 goal=goal,
-                source_node_name=current_node_spec.name if current_node_spec else current_node_id,
-                target_node_name=target_node_spec.name if target_node_spec else edge.target,
+                source_node_name=(current_node_spec.name if current_node_spec else current_node_id),
+                target_node_name=(target_node_spec.name if target_node_spec else edge.target),
             ):
                 # Validate and clean output before mapping inputs.
                 # Use full memory state (not just result.output) because
@@ -1993,8 +1995,8 @@ class GraphExecutor:
                 memory=memory.read_all(),
                 llm=self.llm,
                 goal=goal,
-                source_node_name=current_node_spec.name if current_node_spec else current_node_id,
-                target_node_name=target_node_spec.name if target_node_spec else edge.target,
+                source_node_name=(current_node_spec.name if current_node_spec else current_node_id),
+                target_node_name=(target_node_spec.name if target_node_spec else edge.target),
             ):
                 traversable.append(edge)
 
@@ -2126,7 +2128,7 @@ class GraphExecutor:
                     mem_snapshot = memory.read_all()
                     validation = self.output_cleaner.validate_output(
                         output=mem_snapshot,
-                        source_node_id=source_node_spec.id if source_node_spec else "unknown",
+                        source_node_id=(source_node_spec.id if source_node_spec else "unknown"),
                         target_node_spec=node_spec,
                     )
 
@@ -2137,7 +2139,7 @@ class GraphExecutor:
                         )
                         cleaned_output = await self.output_cleaner.clean_output(
                             output=mem_snapshot,
-                            source_node_id=source_node_spec.id if source_node_spec else "unknown",
+                            source_node_id=(source_node_spec.id if source_node_spec else "unknown"),
                             target_node_spec=node_spec,
                             validation_errors=validation.errors,
                         )

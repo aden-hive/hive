@@ -73,7 +73,7 @@ Hive は以下が必要な場合に使用してください：
 - **[セルフホスティングガイド](https://docs.adenhq.com/getting-started/quickstart)** - インフラストラクチャへの Hive デプロイ
 - **[変更履歴](https://github.com/aden-hive/hive/releases)** - 最新の更新とリリース
 - **[ロードマップ](../roadmap.md)** - 今後の機能と計画
-- **[問題を報告](https://github.com/adenhq/hive/issues)** - バグレポートと機能リクエスト
+- **[問題を報告](https://github.com/aden-hive/hive/issues)** - バグレポートと機能リクエスト
 - **[貢献](../../CONTRIBUTING.md)** - 貢献方法と PR の提出方法
 
 ## クイックスタート

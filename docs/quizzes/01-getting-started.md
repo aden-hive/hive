@@ -13,7 +13,7 @@ Welcome to Aden! This challenge will help you get familiar with our project and 
 ### Task 1.1: Star the Repository ⭐
 Show your support by starring our repo!
 
-1. Go to [github.com/adenhq/hive](https://github.com/adenhq/hive)
+1. Go to [github.com/aden-hive/hive](https://github.com/aden-hive/hive)
 2. Click the **Star** button in the top right
 3. **Screenshot** your starred repo (showing the star count)
 

@@ -558,6 +558,6 @@ Planned for future releases:
 ## Support
 
 For issues or questions:
-- [GitHub Issues](https://github.com/adenhq/hive/issues)
+- [GitHub Issues](https://github.com/aden-hive/hive/issues)
 - [Discord Community](https://discord.com/invite/MXE49hrKDk)
 - Documentation: `/docs`

@@ -62,7 +62,7 @@ git --version       # Any recent version
 
 ```bash
 # 1. Clone the repository
-git clone https://github.com/adenhq/hive.git
+git clone https://github.com/aden-hive/hive.git
 cd hive
 
 # 2. Run automated setup
@@ -699,7 +699,7 @@ echo $ANTHROPIC_API_KEY
 ## Getting Help
 
 - **Documentation**: Check the `/docs` folder
-- **Issues**: Search [existing issues](https://github.com/adenhq/hive/issues)
+- **Issues**: Search [existing issues](https://github.com/aden-hive/hive/issues)
 - **Discord**: Join our [community](https://discord.com/invite/MXE49hrKDk)
 - **Code Review**: Tag a maintainer on your PR
 

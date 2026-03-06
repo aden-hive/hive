@@ -171,7 +171,7 @@ def register_tools(mcp: FastMCP) -> None:
             try:
                 # Start the Stream
                 # stream=True prevents loading the entire file into memory
-                headers = {"User-Agent": "Hive-Agent/1.0 (https://github.com/adenhq/hive)"}
+                headers = {"User-Agent": "Hive-Agent/1.0 (https://github.com/aden-hive/hive)"}
 
                 # No rate limiting needed for PDF download.
                 # The 3-second rule only applies to the metadata API (export.arxiv.org/api/query),

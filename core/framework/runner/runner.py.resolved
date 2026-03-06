@@ -1,0 +1,25 @@
+        # Fallback: load from agent.json (legacy JSON-based agents)
+        agent_json_path = agent_path / "agent.json"
+        if not agent_json_path.exists():
+            raise FileNotFoundError(f"No agent.py or agent.json found in {agent_path}")
+
+        if not agent_json_path.is_file():
+            raise ValueError("agent.json is not a file")
+
+        content = agent_json_path.read_text(encoding="utf-8").strip()
+        if not content:
+            raise ValueError("agent.json is empty")
+
+        graph, goal = load_agent_export(content)
+
+        return cls(
+            agent_path=agent_path,
+            graph=graph,
+            goal=goal,
+            mock_mode=mock_mode,
+            storage_path=storage_path,
+            model=model,
+            interactive=interactive,
+            skip_credential_validation=skip_credential_validation or False,
+            credential_store=credential_store,
+        )

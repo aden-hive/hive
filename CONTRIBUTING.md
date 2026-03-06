@@ -1,6 +1,6 @@
 # Contributing to Aden Agent Framework
 
-Thank you for your interest in contributing to the Aden Agent Framework! This document provides guidelines and information for contributors. We’re especially looking for help building tools, integrations ([check #2805](https://github.com/adenhq/hive/issues/2805)), and example agents for the framework. If you’re interested in extending its functionality, this is the perfect place to start. 
+Thank you for your interest in contributing to the Aden Agent Framework! This document provides guidelines and information for contributors. We’re especially looking for help building tools, integrations ([check #2805](https://github.com/aden-hive/hive/issues/2805)), and example agents for the framework. If you’re interested in extending its functionality, this is the perfect place to start. 
 
 ## Code of Conduct
 
@@ -35,7 +35,7 @@ You may submit PRs without prior assignment for:
 
 1. Fork the repository
 2. Clone your fork: `git clone https://github.com/YOUR_USERNAME/hive.git`
-3. Add the upstream repository: `git remote add upstream https://github.com/adenhq/hive.git`
+3. Add the upstream repository: `git remote add upstream https://github.com/aden-hive/hive.git`
 4. Sync with upstream to ensure you're starting from the latest code:
    ```bash
    git fetch upstream
@@ -152,6 +152,11 @@ cd tools && uv run pytest tests/ -v
 # Run tests for a specific agent
 PYTHONPATH=exports uv run python -m agent_name test
 ```
+
+> **Tip:** Installations check can also be done via:
+> ```bash
+> uv run python -c "import framework; import aden_tools; print('✓ Setup complete')"
+> ```
 
 > **CI also validates** that all exported agent JSON files (`exports/*/agent.json`) are well-formed JSON. Ensure your agent exports are valid before submitting.
 
