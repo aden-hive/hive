@@ -288,8 +288,6 @@ class ChatRepl(Vertical):
   [bold]/recover[/bold] <session_id> <cp_id> - Recover from specific checkpoint
   [bold]/pause[/bold]                      - Pause current execution (Ctrl+Z)
   [bold]/agents[/bold]                     - Browse and switch agents (Ctrl+A)
-  [bold]/coder[/bold] [reason]             - Escalate to Hive Coder for code changes
-  [bold]/back[/bold] [summary]             - Return from Hive Coder to worker agent
   [bold]/graphs[/bold]                     - List loaded graphs and their status
   [bold]/graph[/bold] <id>                 - Switch active graph focus
   [bold]/load[/bold] <path>                - Load an agent graph into the session
@@ -379,12 +377,6 @@ class ChatRepl(Vertical):
                 self._write_history("[bold red]Usage:[/bold red] /unload <graph_id>")
             else:
                 await self._cmd_unload_graph(parts[1].strip())
-        elif cmd == "/coder":
-            reason = " ".join(parts[1:]) if len(parts) > 1 else ""
-            await self._cmd_coder(reason)
-        elif cmd == "/back":
-            summary = " ".join(parts[1:]) if len(parts) > 1 else ""
-            await self._cmd_back(summary)
         else:
             self._write_history(
                 f"[bold red]Unknown command:[/bold red] {cmd}\n"
@@ -879,49 +871,6 @@ class ChatRepl(Vertical):
             self._write_history("  Resume later with: [bold]/resume[/bold]")
         else:
             self._write_history("[bold yellow]No active executions[/bold yellow]")
-
-    async def _cmd_coder(self, reason: str = "") -> None:
-        """User-initiated escalation to Hive Coder."""
-        app = self.app
-        if not hasattr(app, "_do_escalate"):
-            self._write_history("[bold red]Escalation not available[/bold red]")
-            return
-
-        context_parts = []
-        if self._active_node_id:
-            context_parts.append(f"Active node: {self._active_node_id}")
-        if self._streaming_snapshot:
-            snippet = self._streaming_snapshot[:500]
-            context_parts.append(f"Last agent output: {snippet}")
-        context = "\n".join(context_parts)
-
-        if not reason:
-            reason = "User-initiated escalation via /coder"
-
-        self._write_history("[bold cyan]Escalating to Hive Coder...[/bold cyan]")
-
-        node_id = self._input_node_id or self._active_node_id or ""
-        app._do_escalate(
-            reason=reason,
-            context=context,
-            node_id=node_id,
-        )
-
-    async def _cmd_back(self, summary: str = "") -> None:
-        """Return from Hive Coder to the worker agent."""
-        app = self.app
-        if not hasattr(app, "_escalation_stack"):
-            self._write_history("[bold yellow]Not in an escalation.[/bold yellow]")
-            return
-        if not app._escalation_stack:
-            self._write_history(
-                "[bold yellow]Not in an escalation.[/bold yellow] "
-                "/back is only available after /coder or agent escalation."
-            )
-            return
-
-        self._write_history("[bold cyan]Returning to worker agent...[/bold cyan]")
-        await app._return_from_escalation(summary)
 
     def _cmd_graphs(self) -> None:
         """List all loaded graphs and their status."""
@@ -1536,17 +1485,6 @@ class ChatRepl(Vertical):
         chat_input.disabled = False
         chat_input.placeholder = "Enter input for agent..."
         chat_input.focus()
-
-    def handle_escalation_requested(self, data: dict) -> None:
-        """Display escalation request from the worker agent."""
-        if self._streaming_snapshot:
-            self._write_history(f"{self._node_label()} {self._streaming_snapshot}")
-            self._clear_streaming()
-
-        reason = data.get("reason", "")
-        self._write_history("[bold yellow]Agent is escalating to Hive Coder[/bold yellow]")
-        if reason:
-            self._write_history(f"[dim]Reason: {reason}[/dim]")
 
     def handle_input_requested(self, node_id: str, graph_id: str | None = None) -> None:
         """Handle a client-facing node requesting user input.

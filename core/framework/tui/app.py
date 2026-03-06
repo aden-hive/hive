@@ -213,8 +213,6 @@ class AdenTUI(App):
         Binding("ctrl+z", "pause_execution", "Pause", show=True, priority=True),
         Binding("ctrl+r", "show_sessions", "Sessions", show=True, priority=True),
         Binding("ctrl+a", "show_agent_picker", "Agents", show=True, priority=True),
-        Binding("ctrl+e", "escalate", "Coder", show=True, priority=True),
-        Binding("ctrl+e", "return_from_coder", "← Back", show=True, priority=True),
         Binding("ctrl+q", "connect_to_queen", "Queen", show=True, priority=True),
         Binding("tab", "focus_next", "Next Panel", show=True),
         Binding("shift+tab", "focus_previous", "Previous Panel", show=False),
@@ -234,9 +232,6 @@ class AdenTUI(App):
         self._resume_session = resume_session
         self._resume_checkpoint = resume_checkpoint
         self._runner = None  # AgentRunner — needed for cleanup on swap
-
-        # Escalation stack: stores worker state when coder is in foreground
-        self._escalation_stack: list[dict] = []
 
         # Health judge + queen monitoring graphs (loaded alongside worker agents)
         self._queen_graph_id: str | None = None
@@ -897,229 +892,6 @@ class AdenTUI(App):
         """Worker wrapper for _load_and_switch_agent."""
         await self._load_and_switch_agent(agent_path)
 
-    # -- Escalation to Hive Coder --
-
-    @work(exclusive=True, group="escalation")
-    async def _do_escalate(
-        self,
-        reason: str = "",
-        context: str = "",
-        node_id: str = "",
-    ) -> None:
-        """Push current agent onto stack and load hive_coder."""
-        from pathlib import Path
-
-        from framework.credentials.models import CredentialError
-        from framework.runner import AgentRunner
-        from framework.tools.session_graph_tools import register_graph_tools
-
-        if self.runtime is None:
-            self.notify("No active agent to escalate from", severity="error")
-            return
-
-        # 1. Save current state (do NOT cleanup — worker stays alive)
-        saved = {
-            "runner": self._runner,
-            "runtime": self.runtime,
-            "blocked_node_id": node_id,
-        }
-        self._escalation_stack.append(saved)
-
-        # Unsubscribe from worker events
-        if hasattr(self, "_subscription_id"):
-            try:
-                self.runtime.unsubscribe_from_events(self._subscription_id)
-            except Exception:
-                pass
-            del self._subscription_id
-
-        # Remember worker agent path for coder context
-        worker_path = ""
-        if self._runner and hasattr(self._runner, "agent_path"):
-            worker_path = str(self._runner.agent_path.resolve())
-
-        # 2. Remove worker widgets (they get destroyed)
-        workspace = self.query_one("#agent-workspace", Horizontal)
-        for child in list(workspace.children):
-            child.remove()
-        self.graph_view = None
-        self.chat_repl = None
-
-        # 3. Show loading state
-        self.status_bar.set_graph_id("Loading Hive Coder...")
-        self.notify("Escalating to Hive Coder...", timeout=3)
-
-        # 4. Load hive_coder
-        framework_agents_dir = Path(__file__).resolve().parent.parent / "agents"
-        hive_coder_path = framework_agents_dir / "hive_coder"
-
-        import asyncio
-        import functools
-
-        loop = asyncio.get_event_loop()
-        try:
-            load_fn = functools.partial(
-                AgentRunner.load,
-                str(hive_coder_path),
-                model=self._model,
-                interactive=False,
-            )
-            runner = await loop.run_in_executor(None, load_fn)
-            if runner._agent_runtime is None:
-                await loop.run_in_executor(None, runner._setup)
-
-            coder_runtime = runner._agent_runtime
-            coder_runtime._graph_id = "hive_coder"
-            coder_runtime._active_graph_id = "hive_coder"
-
-            # Register graph lifecycle tools
-            register_graph_tools(runner._tool_registry, coder_runtime)
-            coder_runtime._tools = list(runner._tool_registry.get_tools().values())
-            coder_runtime._tool_executor = runner._tool_registry.get_executor()
-
-            self._runner = runner
-            self.runtime = coder_runtime
-        except CredentialError as e:
-            self.status_bar.set_graph_id("")
-            self._show_credential_setup(
-                str(hive_coder_path),
-                on_cancel=self._restore_from_escalation_stack,
-                credential_error=e,
-            )
-            return
-        except Exception as e:
-            self.status_bar.set_graph_id("")
-            self.notify(f"Failed to load coder: {e}", severity="error", timeout=10)
-            self._restore_from_escalation_stack()
-            return
-
-        # 5. Mount coder widgets and subscribe
-        self._mount_agent_widgets()
-
-        # Start runtime on the agent loop (same pattern as _finish_agent_load)
-        if not coder_runtime.is_running:
-            try:
-                agent_loop = self.chat_repl._agent_loop
-                future = asyncio.run_coroutine_threadsafe(coder_runtime.start(), agent_loop)
-                await asyncio.wrap_future(future)
-            except Exception as e:
-                self.notify(f"Failed to start coder runtime: {e}", severity="error")
-                self._restore_from_escalation_stack()
-                return
-
-        await self._init_runtime_connection()
-
-        self.status_bar.set_graph_id("hive_coder (escalated)")
-
-        # 6. Auto-trigger coder with escalation context
-        escalation_input = self._build_escalation_input(reason, context, worker_path)
-        try:
-            import asyncio
-
-            entry_points = self.runtime.get_entry_points()
-            if entry_points:
-                ep = entry_points[0]
-                future = asyncio.run_coroutine_threadsafe(
-                    self.runtime.trigger(
-                        entry_point_id=ep.id,
-                        input_data={"user_request": escalation_input},
-                    ),
-                    self.chat_repl._agent_loop,
-                )
-                exec_id = await asyncio.wrap_future(future)
-                self.chat_repl._current_exec_id = exec_id
-        except Exception as e:
-            self.notify(f"Error starting coder: {e}", severity="error")
-
-        self.notify(
-            "Hive Coder loaded. Ctrl+E or /back to return.",
-            severity="information",
-            timeout=5,
-        )
-        self.refresh_bindings()
-
-    def _build_escalation_input(self, reason: str, context: str, worker_path: str) -> str:
-        """Compose the user_request string for hive_coder."""
-        parts = []
-        if worker_path:
-            parts.append(
-                f"Modify the agent at: {worker_path}\n"
-                f"Do NOT ask which agent to modify — it is the path above."
-            )
-        if reason:
-            parts.append(f"Problem: {reason}")
-        if context:
-            parts.append(f"Context:\n{context}")
-        if not parts:
-            parts.append("The user needs help modifying their agent.")
-        return "\n\n".join(parts)
-
-    async def _return_from_escalation(self, summary: str = "") -> None:
-        """Pop escalation stack and restore the worker agent."""
-        if not self._escalation_stack:
-            self.notify("No escalation to return from", severity="warning")
-            return
-
-        # 1. Tear down coder
-        self._unmount_agent_widgets()
-        if self._runner is not None:
-            try:
-                await self._runner.cleanup_async()
-            except Exception:
-                pass
-
-        # 2. Restore worker
-        saved = self._escalation_stack.pop()
-        self._runner = saved["runner"]
-        self.runtime = saved["runtime"]
-
-        # 3. Mount fresh widgets for the worker runtime
-        self._mount_agent_widgets()
-        await self._init_runtime_connection()
-
-        graph_id = self.runtime.graph.id if self.runtime else ""
-        self.status_bar.set_graph_id(graph_id)
-
-        # 4. Inject return message to unblock the worker node
-        blocked_node_id = saved.get("blocked_node_id", "")
-        return_msg = summary or "Coder session completed. Continuing."
-        if blocked_node_id:
-            try:
-                import asyncio
-
-                future = asyncio.run_coroutine_threadsafe(
-                    self.runtime.inject_input(blocked_node_id, return_msg),
-                    self.chat_repl._agent_loop,
-                )
-                await asyncio.wrap_future(future)
-            except Exception as e:
-                self.notify(
-                    f"Could not resume worker: {e}",
-                    severity="warning",
-                    timeout=5,
-                )
-
-        # 5. Show return in chat (deferred — widgets need a tick to mount)
-        def _show_return():
-            if self.chat_repl:
-                self.chat_repl._write_history("[bold cyan]Returned from Hive Coder.[/bold cyan]")
-                if summary:
-                    self.chat_repl._write_history(f"[dim]{summary}[/dim]")
-
-        self.call_later(_show_return)
-        self.notify("Returned to worker agent", severity="information", timeout=3)
-        self.refresh_bindings()
-
-    def _restore_from_escalation_stack(self) -> None:
-        """Emergency restore when coder loading fails."""
-        if not self._escalation_stack:
-            return
-        saved = self._escalation_stack.pop()
-        self._runner = saved["runner"]
-        self.runtime = saved["runtime"]
-        self._mount_agent_widgets()
-        self.call_later(self._init_runtime_connection)
-
     # -- Logging --
 
     def _setup_logging_queue(self) -> None:
@@ -1372,13 +1144,6 @@ class AdenTUI(App):
                 self.chat_repl.handle_input_requested(
                     event.node_id or event.data.get("node_id", ""),
                     graph_id=event.graph_id,
-                )
-            elif et == EventType.ESCALATION_REQUESTED:
-                self.chat_repl.handle_escalation_requested(event.data)
-                self._do_escalate(
-                    reason=event.data.get("reason", ""),
-                    context=event.data.get("context", ""),
-                    node_id=event.node_id or "",
                 )
             elif et == EventType.NODE_LOOP_STARTED:
                 self.chat_repl.handle_node_started(event.node_id or "")
@@ -1681,17 +1446,7 @@ class AdenTUI(App):
             )
 
     def check_action(self, action: str, parameters: tuple[object, ...]) -> bool | None:
-        """Control which bindings are shown in the footer.
-
-        Both escalate and return_from_coder are bound to Ctrl+E.
-        check_action toggles which one is active based on escalation state,
-        so the footer shows "Coder" or "← Back" accordingly.
-        connect_to_queen is only shown when a queen monitoring graph is active.
-        """
-        if action == "escalate":
-            return not self._escalation_stack
-        if action == "return_from_coder":
-            return bool(self._escalation_stack)
+        """Control which bindings are shown in the footer."""
         if action == "connect_to_queen":
             return bool(self._queen_graph_id and self.runtime is not None)
         return True
@@ -1706,18 +1461,6 @@ class AdenTUI(App):
             self.action_switch_graph(self.runtime.graph_id)
         else:
             self.action_switch_graph(self._queen_graph_id)
-
-    def action_escalate(self) -> None:
-        """Escalate to Hive Coder (bound to Ctrl+E)."""
-        if self.runtime is None:
-            self.notify("No active agent to escalate from", severity="error")
-            return
-        # _do_escalate is already @work-decorated; calling it starts the worker.
-        self._do_escalate(reason="User-initiated escalation")
-
-    async def action_return_from_coder(self) -> None:
-        """Return from Hive Coder to worker agent (Ctrl+E toggles)."""
-        await self._return_from_escalation()
 
     async def on_unmount(self) -> None:
         """Cleanup on app shutdown - cancel execution which will save state."""
