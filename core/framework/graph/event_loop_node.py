@@ -165,6 +165,7 @@ class LoopConfig:
     max_tool_calls_per_turn: int = 30
     judge_every_n_turns: int = 1
     stall_detection_threshold: int = 3
+    stall_similarity_threshold: float = 0.7
     max_history_tokens: int = 32_000
     store_prefix: str = ""
 
@@ -978,8 +979,8 @@ class EventLoopNode(NodeProtocol):
                 return NodeResult(
                     success=False,
                     error=(
-                        f"Node stalled: {self._config.stall_detection_threshold} "
-                        "consecutive identical responses"
+                        f"Node stalled: {self._config.stall_detection_threshold} similar "
+                        f"responses ({self._config.stall_similarity_threshold*100:.0f}+ threshold)"
                     ),
                     output=accumulator.to_dict(),
                     tokens_used=total_input_tokens + total_output_tokens,
@@ -2850,13 +2851,46 @@ class EventLoopNode(NodeProtocol):
         skip = set(nullable_keys) if nullable_keys else set()
         return [k for k in output_keys if k not in skip and accumulator.get(k) is None]
 
+    @staticmethod
+    def _ngram_similarity(s1: str, s2: str, n: int = 2) -> float:
+        """Jaccard similarity of n-gram sets.
+
+        Returns 0.0-1.0, where 1.0 is exact match.
+        Fast: O(len(s) + len(s2)) using set operations.
+        """
+        def _ngrams(s: str) -> set[str]:
+            return {s[i:i+n] for i in range(len(s) - n + 1) if s.strip()}
+
+        if not s1 or not s2:
+            return 0.0
+
+        ngrams1, ngrams2 = _ngrams(s1.lower()), _ngrams(s2.lower())
+        if not ngrams1 or not ngrams2:
+            return 0.0
+
+        intersection = len(ngrams1 & ngrams2)
+        union = len(ngrams1 | ngrams2)
+        return intersection / union if union else 0.0
+
     def _is_stalled(self, recent_responses: list[str]) -> bool:
-        """Detect stall: N consecutive identical non-empty responses."""
+        """Detect stall using n-gram similarity.
+
+        Detects when N consecutive responses have similarity >= threshold.
+        This catches phrases like "I'm still stuck" vs "I'm stuck".
+        """
         if len(recent_responses) < self._config.stall_detection_threshold:
             return False
         if not recent_responses[0]:
             return False
-        return all(r == recent_responses[0] for r in recent_responses)
+
+        threshold = self._config.stall_similarity_threshold
+        # Check similarity against all recent responses (excluding self)
+        for i, resp in enumerate(recent_responses):
+            # Compare against all previous responses
+            for prev in recent_responses[:i]:
+                if self._ngram_similarity(resp, prev) >= threshold:
+                    return True
+        return False
 
     @staticmethod
     def _is_transient_error(exc: BaseException) -> bool:
@@ -2935,7 +2969,10 @@ class EventLoopNode(NodeProtocol):
         self,
         recent_tool_fingerprints: list[list[tuple[str, str]]],
     ) -> tuple[bool, str]:
-        """Detect doom loop: N consecutive turns with identical tool calls.
+        """Detect doom loop using n-gram similarity on tool inputs.
+
+        Detects when N consecutive turns have similar tool calls.
+        Similarity applies to the canonicalized tool input strings.
 
         Returns (is_doom_loop, description).
         """
@@ -2944,15 +2981,24 @@ class EventLoopNode(NodeProtocol):
         threshold = self._config.tool_doom_loop_threshold
         if len(recent_tool_fingerprints) < threshold:
             return False, ""
-        # All entries must be non-empty and identical
         first = recent_tool_fingerprints[0]
         if not first:
             return False, ""
-        if all(fp == first for fp in recent_tool_fingerprints):
-            tool_names = [name for name, _ in first]
+
+        # Check similarity against all recent fingerprints
+        similarity_threshold = self._config.stall_similarity_threshold
+        similar_count = sum(
+            1
+            for fp in recent_tool_fingerprints
+            # Compare canonicalized tool input strings using n-gram similarity
+            if self._ngram_similarity(fp[1], first[1]) >= similarity_threshold
+        )
+
+        if similar_count >= threshold:
+            tool_names = [name for name, _ in recent_tool_fingerprints]
             desc = (
-                f"Doom loop detected: {threshold} consecutive identical "
-                f"tool calls ({', '.join(tool_names)})"
+                f"Doom loop detected: {similar_count}/{len(recent_tool_fingerprints)} "
+                f"consecutive similar tool calls ({', '.join(tool_names)})"
             )
             return True, desc
         return False, ""
@@ -3883,7 +3929,7 @@ class EventLoopNode(NodeProtocol):
             await self._event_bus.emit_node_stalled(
                 stream_id=stream_id,
                 node_id=node_id,
-                reason="Consecutive identical responses detected",
+                reason="Consecutive similar responses detected",
                 execution_id=execution_id,
             )
 
