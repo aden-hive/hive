@@ -1,10 +1,11 @@
 """
-MCP Server for Agent Building Tools
+Package Generator for Agent Building Tools
 
-Exposes tools for building goal-driven agents via the Model Context Protocol.
+Generates agent packages from build sessions. Extracted from the MCP server
+so it can be used as a standalone CLI or imported as a library.
 
 Usage:
-    uv run python -m framework.mcp.agent_builder_server
+    uv run python -m framework.builder.package_generator <agent_name> <agent_json_path>
 """
 
 import json
@@ -14,9 +15,8 @@ import shutil
 import sys
 from datetime import datetime
 from pathlib import Path
-from typing import Annotated
 
-# Project root resolution.  This file lives at core/framework/mcp/agent_builder_server.py,
+# Project root resolution.  This file lives at core/framework/builder/package_generator.py,
 # so the project root (where exports/ lives) is four parents up.
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent.parent
 
@@ -26,7 +26,6 @@ if _exports_dir.is_dir() and str(_exports_dir) not in sys.path:
     sys.path.insert(0, str(_exports_dir))
 del _exports_dir
 
-from mcp.server import FastMCP  # noqa: E402
 from pydantic import ValidationError  # noqa: E402
 
 from framework.graph import (  # noqa: E402
@@ -43,9 +42,6 @@ from framework.testing.prompts import (  # noqa: E402
     PYTEST_TEST_FILE_HEADER,
 )
 from framework.utils.io import atomic_write  # noqa: E402
-
-# Initialize MCP server
-mcp = FastMCP("agent-builder")
 
 
 # Session persistence directory
@@ -199,12 +195,11 @@ def get_session() -> BuildSession:
 
 
 # =============================================================================
-# MCP TOOLS
+# TOOLS
 # =============================================================================
 
 
-@mcp.tool()
-def create_session(name: Annotated[str, "Name for the agent being built"]) -> str:
+def create_session(name: str) -> str:
     """Create a new agent building session. Call this first before building an agent."""
     global _session
     _session = BuildSession(name)
@@ -219,7 +214,6 @@ def create_session(name: Annotated[str, "Name for the agent being built"]) -> st
     )
 
 
-@mcp.tool()
 def list_sessions() -> str:
     """List all saved agent building sessions."""
     _ensure_sessions_dir()
@@ -263,8 +257,7 @@ def list_sessions() -> str:
     )
 
 
-@mcp.tool()
-def load_session_by_id(session_id: Annotated[str, "ID of the session to load"]) -> str:
+def load_session_by_id(session_id: str) -> str:
     """Load a previously saved agent building session by its ID."""
     global _session
 
@@ -292,8 +285,7 @@ def load_session_by_id(session_id: Annotated[str, "ID of the session to load"]) 
         return json.dumps({"success": False, "error": str(e)})
 
 
-@mcp.tool()
-def delete_session(session_id: Annotated[str, "ID of the session to delete"]) -> str:
+def delete_session(session_id: str) -> str:
     """Delete a saved agent building session."""
     global _session
 
@@ -326,17 +318,12 @@ def delete_session(session_id: Annotated[str, "ID of the session to delete"]) ->
         return json.dumps({"success": False, "error": str(e)})
 
 
-@mcp.tool()
 def set_goal(
-    goal_id: Annotated[str, "Unique identifier for the goal"],
-    name: Annotated[str, "Human-readable name"],
-    description: Annotated[str, "What the agent should accomplish"],
-    success_criteria: Annotated[
-        str, "JSON array of success criteria objects with id, description, metric, target, weight"
-    ],
-    constraints: Annotated[
-        str, "JSON array of constraint objects with id, description, constraint_type, category"
-    ] = "[]",
+    goal_id: str,
+    name: str,
+    description: str,
+    success_criteria: str,
+    constraints: str = "[]",
 ) -> str:
     """Define the goal for the agent. Goals define what success looks like."""
     session = get_session()
@@ -593,35 +580,19 @@ def _validate_agent_path(agent_path: str) -> tuple[Path | None, str | None]:
     return path, None
 
 
-@mcp.tool()
 def add_node(
-    node_id: Annotated[str, "Unique identifier for the node"],
-    name: Annotated[str, "Human-readable name"],
-    description: Annotated[str, "What this node does"],
-    node_type: Annotated[
-        str,
-        "Type: event_loop (recommended), gcu (browser automation), router.",
-    ],
-    input_keys: Annotated[str, "JSON array of keys this node reads from shared memory"],
-    output_keys: Annotated[str, "JSON array of keys this node writes to shared memory"],
-    system_prompt: Annotated[str, "Instructions for LLM nodes"] = "",
-    tools: Annotated[str, "JSON array of tool names for event_loop nodes"] = "[]",
-    routes: Annotated[
-        str, "JSON object mapping conditions to target node IDs for router nodes"
-    ] = "{}",
-    client_facing: Annotated[
-        bool,
-        "Workers should be autonomous: set False. client_facing=True routes user-facing "
-        "conversation to the node; this architecture requires worker->queen handoff "
-        "instead via escalate when blocked.",
-    ] = False,
-    nullable_output_keys: Annotated[
-        str, "JSON array of output keys that may remain unset (for mutually exclusive outputs)"
-    ] = "[]",
-    max_node_visits: Annotated[
-        int,
-        "Max times this node executes per graph run. Set >1 for feedback loop targets. 0=unlimited",
-    ] = 1,
+    node_id: str,
+    name: str,
+    description: str,
+    node_type: str,
+    input_keys: str,
+    output_keys: str,
+    system_prompt: str = "",
+    tools: str = "[]",
+    routes: str = "{}",
+    client_facing: bool = False,
+    nullable_output_keys: str = "[]",
+    max_node_visits: int = 1,
 ) -> str:
     """Add a node to the agent graph. Nodes process inputs and produce outputs."""
     session = get_session()
@@ -754,16 +725,13 @@ def add_node(
     )
 
 
-@mcp.tool()
 def add_edge(
-    edge_id: Annotated[str, "Unique identifier for the edge"],
-    source: Annotated[str, "Source node ID"],
-    target: Annotated[str, "Target node ID"],
-    condition: Annotated[
-        str, "When to traverse: always, on_success, on_failure, conditional"
-    ] = "on_success",
-    condition_expr: Annotated[str, "Python expression for conditional edges"] = "",
-    priority: Annotated[int, "Priority when multiple edges match (higher = first)"] = 0,
+    edge_id: str,
+    source: str,
+    target: str,
+    condition: str = "on_success",
+    condition_expr: str = "",
+    priority: int = 0,
 ) -> str:
     """Connect two nodes with an edge. Edges define how execution flows between nodes."""
     session = get_session()
@@ -850,27 +818,19 @@ def add_edge(
     )
 
 
-@mcp.tool()
 def update_node(
-    node_id: Annotated[str, "ID of the node to update"],
-    name: Annotated[str, "Updated human-readable name"] = "",
-    description: Annotated[str, "Updated description"] = "",
-    node_type: Annotated[
-        str,
-        "Updated type: event_loop (recommended), router.",
-    ] = "",
-    input_keys: Annotated[str, "Updated JSON array of input keys"] = "",
-    output_keys: Annotated[str, "Updated JSON array of output keys"] = "",
-    system_prompt: Annotated[str, "Updated instructions for LLM nodes"] = "",
-    tools: Annotated[str, "Updated JSON array of tool names"] = "",
-    routes: Annotated[str, "Updated JSON object mapping conditions to target node IDs"] = "",
-    client_facing: Annotated[
-        str, "Updated client-facing flag ('true'/'false', empty=no change)"
-    ] = "",
-    nullable_output_keys: Annotated[
-        str, "Updated JSON array of nullable output keys (empty=no change)"
-    ] = "",
-    max_node_visits: Annotated[int, "Updated max node visits per graph run. 0=no change"] = 0,
+    node_id: str,
+    name: str = "",
+    description: str = "",
+    node_type: str = "",
+    input_keys: str = "",
+    output_keys: str = "",
+    system_prompt: str = "",
+    tools: str = "",
+    routes: str = "",
+    client_facing: str = "",
+    nullable_output_keys: str = "",
+    max_node_visits: int = 0,
 ) -> str:
     """Update an existing node in the agent graph. Only provided fields will be updated."""
     session = get_session()
@@ -994,9 +954,8 @@ def update_node(
     )
 
 
-@mcp.tool()
 def delete_node(
-    node_id: Annotated[str, "ID of the node to delete"],
+    node_id: str,
 ) -> str:
     """Delete a node from the agent graph. Also removes all edges connected to this node."""
     session = get_session()
@@ -1033,9 +992,8 @@ def delete_node(
     )
 
 
-@mcp.tool()
 def delete_edge(
-    edge_id: Annotated[str, "ID of the edge to delete"],
+    edge_id: str,
 ) -> str:
     """Delete an edge from the agent graph."""
     session = get_session()
@@ -1066,7 +1024,6 @@ def delete_edge(
     )
 
 
-@mcp.tool()
 def validate_graph() -> str:
     """Validate the graph. Checks for unreachable nodes and context flow."""
     session = get_session()
@@ -1654,7 +1611,6 @@ Terminal nodes: {", ".join(f"`{t}`" for t in export_data["graph"]["terminal_node
     return readme
 
 
-@mcp.tool()
 def export_graph() -> str:
     """
     Export the validated graph as a GraphSpec for GraphExecutor.
@@ -2581,11 +2537,8 @@ def _generate_mcp_servers_json(session: BuildSession) -> str | None:
     return json.dumps(flat, indent=2)
 
 
-@mcp.tool()
 def initialize_agent_package(
-    agent_name: Annotated[
-        str, "Name for the agent package. Must be snake_case (e.g., 'my_research_agent')."
-    ],
+    agent_name: str,
 ) -> str:
     """
     Generate the full Python agent package from the current build session.
@@ -2837,9 +2790,8 @@ def initialize_agent_package(
     )
 
 
-@mcp.tool()
 def import_from_export(
-    agent_json_path: Annotated[str, "Path to the agent.json file to import"],
+    agent_json_path: str,
 ) -> str:
     """
     Import an agent definition from an exported agent.json file into the current build session.
@@ -2916,7 +2868,6 @@ def import_from_export(
     )
 
 
-@mcp.tool()
 def get_session_status() -> str:
     """Get the current status of the build session."""
     session = get_session()
@@ -2939,22 +2890,12 @@ def get_session_status() -> str:
     )
 
 
-@mcp.tool()
 def configure_loop(
-    max_iterations: Annotated[int, "Maximum loop iterations per node execution (default 50)"] = 50,
-    max_tool_calls_per_turn: Annotated[int, "Maximum tool calls per LLM turn (default 30)"] = 30,
-    stall_detection_threshold: Annotated[
-        int, "Consecutive identical responses before stall detection triggers (default 3)"
-    ] = 3,
-    max_history_tokens: Annotated[
-        int, "Maximum conversation history tokens before compaction (default 32000)"
-    ] = 32000,
-    tool_call_overflow_margin: Annotated[
-        float,
-        "Overflow margin for max_tool_calls_per_turn. "
-        "Tool calls are only discarded when count exceeds "
-        "max_tool_calls_per_turn * (1 + margin). Default 0.5 (50% wiggle room)",
-    ] = 0.5,
+    max_iterations: int = 50,
+    max_tool_calls_per_turn: int = 30,
+    stall_detection_threshold: int = 3,
+    max_history_tokens: int = 32000,
+    tool_call_overflow_margin: float = 0.5,
 ) -> str:
     """Configure event loop parameters for EventLoopNode execution.
 
@@ -2985,17 +2926,16 @@ def configure_loop(
     )
 
 
-@mcp.tool()
 def add_mcp_server(
-    name: Annotated[str, "Unique name for the MCP server"],
-    transport: Annotated[str, "Transport type: 'stdio' or 'http'"],
-    command: Annotated[str, "Command to run (for stdio transport)"] = "",
-    args: Annotated[str, "JSON array of command arguments (for stdio)"] = "[]",
-    cwd: Annotated[str, "Working directory (for stdio)"] = "",
-    env: Annotated[str, "JSON object of environment variables (for stdio)"] = "{}",
-    url: Annotated[str, "Server URL (for http transport)"] = "",
-    headers: Annotated[str, "JSON object of HTTP headers (for http)"] = "{}",
-    description: Annotated[str, "Description of the MCP server"] = "",
+    name: str,
+    transport: str,
+    command: str = "",
+    args: str = "[]",
+    cwd: str = "",
+    env: str = "{}",
+    url: str = "",
+    headers: str = "{}",
+    description: str = "",
 ) -> str:
     """
     Register an MCP server as a tool source for this agent.
@@ -3120,7 +3060,6 @@ def add_mcp_server(
         )
 
 
-@mcp.tool()
 def list_mcp_servers() -> str:
     """List all registered MCP servers for this agent."""
     session = get_session()
@@ -3143,9 +3082,8 @@ def list_mcp_servers() -> str:
     )
 
 
-@mcp.tool()
 def list_mcp_tools(
-    server_name: Annotated[str, "Name of the MCP server to list tools from"] = "",
+    server_name: str = "",
 ) -> str:
     """
     List tools available from registered MCP servers.
@@ -3211,9 +3149,8 @@ def list_mcp_tools(
     )
 
 
-@mcp.tool()
 def remove_mcp_server(
-    name: Annotated[str, "Name of the MCP server to remove"],
+    name: str,
 ) -> str:
     """Remove a registered MCP server."""
     session = get_session()
@@ -3229,13 +3166,10 @@ def remove_mcp_server(
     return json.dumps({"success": False, "error": f"MCP server '{name}' not found"})
 
 
-@mcp.tool()
 def test_node(
-    node_id: Annotated[str, "ID of the node to test"],
-    test_input: Annotated[str, "JSON object with test input data for the node"],
-    mock_llm_response: Annotated[
-        str, "Mock LLM response to simulate (for testing without API calls)"
-    ] = "",
+    node_id: str,
+    test_input: str,
+    mock_llm_response: str = "",
 ) -> str:
     """
     Test a single node with sample inputs. Use this during HITL approval to show
@@ -3323,11 +3257,10 @@ def test_node(
     )
 
 
-@mcp.tool()
 def test_graph(
-    test_input: Annotated[str, "JSON object with initial input data for the graph"],
-    max_steps: Annotated[int, "Maximum steps to execute (default 10)"] = 10,
-    dry_run: Annotated[bool, "If true, simulate without actual LLM calls"] = True,
+    test_input: str,
+    max_steps: int = 10,
+    dry_run: bool = True,
 ) -> str:
     """
     Test the complete agent graph with sample inputs. Use this during final approval
@@ -3551,19 +3484,10 @@ async def test_success_{criteria_id}_{scenario}(runner, auto_responder, mock_mod
 '''
 
 
-@mcp.tool()
 def generate_constraint_tests(
-    goal_id: Annotated[str, "ID of the goal to generate tests for"],
-    goal_json: Annotated[
-        str,
-        """JSON string of the Goal object. Constraint fields:
-- id: string (required)
-- description: string (required)
-- constraint_type: "hard" or "soft" (required)
-- category: string (optional, default: "general")
-- check: string (optional, how to validate: "llm_judge", expression, or function name)""",
-    ],
-    agent_path: Annotated[str, "Path to agent export folder (e.g., 'exports/my_agent')"] = "",
+    goal_id: str,
+    goal_json: str,
+    agent_path: str = "",
 ) -> str:
     """
     Get constraint test guidelines for a goal.
@@ -3645,13 +3569,12 @@ def generate_constraint_tests(
     )
 
 
-@mcp.tool()
 def generate_success_tests(
-    goal_id: Annotated[str, "ID of the goal to generate tests for"],
-    goal_json: Annotated[str, "JSON string of the Goal object"],
-    node_names: Annotated[str, "Comma-separated list of agent node names"] = "",
-    tool_names: Annotated[str, "Comma-separated list of available tool names"] = "",
-    agent_path: Annotated[str, "Path to agent export folder (e.g., 'exports/my_agent')"] = "",
+    goal_id: str,
+    goal_json: str,
+    node_names: str = "",
+    tool_names: str = "",
+    agent_path: str = "",
 ) -> str:
     """
     Get success criteria test guidelines for a goal.
@@ -3745,18 +3668,13 @@ def generate_success_tests(
     )
 
 
-@mcp.tool()
 def run_tests(
-    goal_id: Annotated[str, "ID of the goal to test"],
-    agent_path: Annotated[str, "Path to the agent export folder"],
-    test_types: Annotated[
-        str, 'JSON array of test types: ["constraint", "success", "edge_case", "all"]'
-    ] = '["all"]',
-    parallel: Annotated[
-        int, "Number of parallel workers (-1 for auto/CPU count, 0 to disable)"
-    ] = -1,
-    fail_fast: Annotated[bool, "Stop on first failure (-x flag)"] = False,
-    verbose: Annotated[bool, "Verbose output (-v flag)"] = True,
+    goal_id: str,
+    agent_path: str,
+    test_types: str = '["all"]',
+    parallel: int = -1,
+    fail_fast: bool = False,
+    verbose: bool = True,
 ) -> str:
     """
     Run pytest on agent test files.
@@ -3963,11 +3881,10 @@ def run_tests(
     )
 
 
-@mcp.tool()
 def debug_test(
-    goal_id: Annotated[str, "ID of the goal"],
-    test_name: Annotated[str, "Name of the test function (e.g., test_constraint_foo)"],
-    agent_path: Annotated[str, "Path to agent export folder (e.g., 'exports/my_agent')"] = "",
+    goal_id: str,
+    test_name: str,
+    agent_path: str = "",
 ) -> str:
     """
     Run a specific test with verbose output for debugging.
@@ -4129,10 +4046,9 @@ def debug_test(
     )
 
 
-@mcp.tool()
 def list_tests(
-    goal_id: Annotated[str, "ID of the goal"],
-    agent_path: Annotated[str, "Path to agent export folder (e.g., 'exports/my_agent')"] = "",
+    goal_id: str,
+    agent_path: str = "",
 ) -> str:
     """
     List tests for an agent by scanning Python test files.
@@ -4269,9 +4185,8 @@ def _get_credential_store():
         return CredentialStore(storage=storage)
 
 
-@mcp.tool()
 def check_missing_credentials(
-    agent_path: Annotated[str, "Path to the exported agent directory (e.g., 'exports/my-agent')"],
+    agent_path: str,
 ) -> str:
     """
     Detect missing credentials for an agent by inspecting its tools and node types.
@@ -4363,21 +4278,12 @@ def check_missing_credentials(
         return json.dumps({"error": str(e)})
 
 
-@mcp.tool()
 def store_credential(
-    credential_name: Annotated[
-        str, "Logical credential name (e.g., 'hubspot', 'brave_search', 'anthropic')"
-    ],
-    credential_value: Annotated[str, "The secret value to store (API key, token, etc.)"],
-    alias: Annotated[
-        str,
-        "Named alias for this account (e.g., 'work', 'personal'). Defaults to 'default'. "
-        "Use aliases to store multiple accounts for the same service.",
-    ] = "default",
-    key_name: Annotated[
-        str, "Key name within the credential (e.g., 'api_key', 'access_token')"
-    ] = "api_key",
-    display_name: Annotated[str, "Human-readable name (e.g., 'HubSpot Access Token')"] = "",
+    credential_name: str,
+    credential_value: str,
+    alias: str = "default",
+    key_name: str = "api_key",
+    display_name: str = "",
 ) -> str:
     """
     Store a credential securely in the local encrypted store at ~/.hive/credentials.
@@ -4423,7 +4329,6 @@ def store_credential(
         return json.dumps({"success": False, "error": str(e)})
 
 
-@mcp.tool()
 def list_stored_credentials() -> str:
     """
     List all credentials currently stored in the local encrypted store.
@@ -4463,13 +4368,9 @@ def list_stored_credentials() -> str:
         return json.dumps({"error": str(e)})
 
 
-@mcp.tool()
 def delete_stored_credential(
-    credential_name: Annotated[str, "Logical credential name to delete (e.g., 'hubspot')"],
-    alias: Annotated[
-        str,
-        "Alias of the account to delete (e.g., 'work', 'personal'). Defaults to 'default'.",
-    ] = "default",
+    credential_name: str,
+    alias: str = "default",
 ) -> str:
     """
     Delete a credential from the local encrypted store.
@@ -4495,15 +4396,9 @@ def delete_stored_credential(
         return json.dumps({"success": False, "error": str(e)})
 
 
-@mcp.tool()
 def validate_credential(
-    credential_name: Annotated[
-        str, "Logical credential name to validate (e.g., 'brave_search', 'github')"
-    ],
-    alias: Annotated[
-        str,
-        "Alias of the account to validate (e.g., 'work', 'personal'). Defaults to 'default'.",
-    ] = "default",
+    credential_name: str,
+    alias: str = "default",
 ) -> str:
     """
     Re-run health check for a stored credential and update its status.
@@ -4535,9 +4430,8 @@ def validate_credential(
         return json.dumps({"success": False, "error": str(e)})
 
 
-@mcp.tool()
 def verify_credentials(
-    agent_path: Annotated[str, "Path to the exported agent directory (e.g., 'exports/my-agent')"],
+    agent_path: str,
 ) -> str:
     """
     Verify that all required credentials are configured for an agent.
@@ -4609,18 +4503,11 @@ def _truncate_value(value: object, max_len: int = _MAX_DIFF_VALUE_LEN) -> object
     return {"_truncated": True, "_preview": s[:max_len] + "...", "_length": len(s)}
 
 
-@mcp.tool()
 def list_agent_sessions(
-    agent_work_dir: Annotated[
-        str,
-        "Path to the agent's working directory (e.g., ~/.hive/agents/my_agent)",
-    ],
-    status: Annotated[
-        str,
-        "Filter by status: 'active', 'paused', 'completed', 'failed', 'cancelled'. Empty for all.",
-    ] = "",
-    limit: Annotated[int, "Maximum number of results (default 20)"] = 20,
-    offset: Annotated[int, "Number of sessions to skip for pagination"] = 0,
+    agent_work_dir: str,
+    status: str = "",
+    limit: int = 20,
+    offset: int = 0,
 ) -> str:
     """
     List sessions for an agent with optional status filter.
@@ -4675,15 +4562,11 @@ def list_agent_sessions(
     )
 
 
-@mcp.tool()
 def list_agent_checkpoints(
-    agent_work_dir: Annotated[str, "Path to the agent's working directory"],
-    session_id: Annotated[str, "The session ID to list checkpoints for"],
-    checkpoint_type: Annotated[
-        str,
-        "Filter by type: 'node_start', 'node_complete', 'loop_iteration'. Empty for all.",
-    ] = "",
-    is_clean: Annotated[str, "Filter by clean status: 'true', 'false', or empty for all."] = "",
+    agent_work_dir: str,
+    session_id: str,
+    checkpoint_type: str = "",
+    is_clean: str = "",
 ) -> str:
     """
     List checkpoints for a specific session.
@@ -4754,11 +4637,10 @@ def list_agent_checkpoints(
     )
 
 
-@mcp.tool()
 def get_agent_checkpoint(
-    agent_work_dir: Annotated[str, "Path to the agent's working directory"],
-    session_id: Annotated[str, "The session ID"],
-    checkpoint_id: Annotated[str, "Specific checkpoint ID, or empty for latest"] = "",
+    agent_work_dir: str,
+    session_id: str,
+    checkpoint_id: str = "",
 ) -> str:
     """
     Load a specific checkpoint with full state data.
@@ -4791,12 +4673,11 @@ def get_agent_checkpoint(
     return json.dumps(data, indent=2, default=str)
 
 
-@mcp.tool()
 def compare_agent_checkpoints(
-    agent_work_dir: Annotated[str, "Path to the agent's working directory"],
-    session_id: Annotated[str, "The session ID"],
-    checkpoint_id_before: Annotated[str, "The earlier checkpoint ID"],
-    checkpoint_id_after: Annotated[str, "The later checkpoint ID"],
+    agent_work_dir: str,
+    session_id: str,
+    checkpoint_id_before: str,
+    checkpoint_id_after: str,
 ) -> str:
     """
     Compare memory state between two checkpoints.
@@ -4874,4 +4755,19 @@ def compare_agent_checkpoints(
 # =============================================================================
 
 if __name__ == "__main__":
-    mcp.run(transport="stdio")
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument("agent_name")
+    parser.add_argument("agent_json_path")
+    args = parser.parse_args()
+
+    # Import from export to load session
+    result = import_from_export(args.agent_json_path)
+    import_data = json.loads(result)
+    if not import_data.get("success"):
+        print(result)
+        sys.exit(1)
+
+    # Generate package
+    result = initialize_agent_package(args.agent_name)
+    print(result)

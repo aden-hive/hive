@@ -321,7 +321,7 @@ echo ""
 IMPORT_ERRORS=0
 
 # Batch check all imports in single process (reduces subprocess spawning overhead)
-CHECK_RESULT=$(uv run python scripts/check_requirements.py framework aden_tools litellm framework.mcp.agent_builder_server 2>/dev/null)
+CHECK_RESULT=$(uv run python scripts/check_requirements.py framework aden_tools litellm 2>/dev/null)
 CHECK_EXIT=$?
 
 # Parse and display results
@@ -337,8 +337,7 @@ try:
     modules = [
         ('framework', 'framework imports OK', True),
         ('aden_tools', 'aden_tools imports OK', True),
-        ('litellm', 'litellm imports OK', False),
-        ('framework.mcp.agent_builder_server', 'MCP server module OK', True)
+        ('litellm', 'litellm imports OK', False)
     ]
     import_errors = 0
     for mod, label, required in modules:

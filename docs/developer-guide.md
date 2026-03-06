@@ -101,7 +101,7 @@ Get API keys:
 ./quickstart.sh
 ```
 
-This sets up agent-builder and tools MCP workflows.
+This sets up the MCP tools and workflows for building agents.
 
 ### Cursor IDE Support
 
@@ -117,7 +117,7 @@ MCP tools are also available in Cursor. To enable:
 Hive supports [OpenAI Codex CLI](https://github.com/openai/codex) (v0.101.0+).
 
 Configuration files are tracked in git:
-- `.codex/config.toml` — MCP server config (`agent-builder`)
+- `.codex/config.toml` — MCP server config
 
 To use Codex with Hive:
 1. Run `codex` in the repo root
@@ -136,7 +136,7 @@ To enable Opencode integration:
 2. Configure MCP servers in `.opencode/mcp.json`
 3. Restart Opencode to load the MCP servers
 4. Switch to the Hive agent
-* **Tools:** Accesses `agent-builder` and standard `tools` via standard MCP protocols over stdio.
+* **Tools:** Accesses `coder-tools` and standard `tools` via standard MCP protocols over stdio.
 
 ### Verify Setup
 
@@ -146,7 +146,7 @@ uv run python -c "import framework; print('✓ framework OK')"
 uv run python -c "import aden_tools; print('✓ aden_tools OK')"
 uv run python -c "import litellm; print('✓ litellm OK')"
 
-# Run an agent (after building one with agent-builder)
+# Run an agent (after building one with coder-tools)
 PYTHONPATH=exports uv run python -m your_agent_name validate
 ```
 
@@ -206,7 +206,7 @@ hive/                                    # Repository root
 │   └── README.md                        # Tools documentation
 │
 ├── exports/                             # AGENT PACKAGES (user-created, gitignored)
-│   └── your_agent_name/                 # Created via agent-builder workflow
+│   └── your_agent_name/                 # Created via coder-tools workflow
 │
 ├── examples/                            # Example agents
 │   └── templates/                       # Pre-built template agents
@@ -235,7 +235,7 @@ hive/                                    # Repository root
 
 ## Building Agents
 
-### Using Agent Builder Workflow
+### Using Coder Tools Workflow
 
 The fastest way to build agents is with the configured MCP workflow:
 
@@ -244,7 +244,7 @@ The fastest way to build agents is with the configured MCP workflow:
 ./quickstart.sh
 
 # Build a new agent
-Use the agent-builder MCP tools from your IDE agent chat
+Use the coder-tools MCP tools from your IDE agent chat (e.g., initialize_agent_package)
 ```
 
 ### Agent Development Workflow
@@ -252,7 +252,7 @@ Use the agent-builder MCP tools from your IDE agent chat
 1. **Define Your Goal**
 
    ```
-   Use the agent-builder workflow
+   Use the coder-tools initialize_agent_package tool
    Enter goal: "Build an agent that processes customer support tickets"
    ```
 
@@ -555,7 +555,7 @@ uv add <package>
 
 ```bash
 # Option 1: Use Claude Code skill (recommended)
-Use the agent-builder workflow
+Use the coder-tools initialize_agent_package tool
 
 # Option 2: Create manually
 # Note: exports/ is initially empty (gitignored). Create your agent directory:
@@ -563,7 +563,7 @@ mkdir -p exports/my_new_agent
 cd exports/my_new_agent
 # Create agent.json, tools.py, README.md (see Agent Package Structure below)
 
-# Option 3: Use the agent builder MCP tools (advanced)
+# Option 3: Use the coder-tools MCP tools (advanced)
 # See core/MCP_BUILDER_TOOLS_GUIDE.md
 ```
 

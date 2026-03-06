@@ -1347,6 +1347,70 @@ def validate_agent_package(agent_name: str) -> str:
     )
 
 
+# ── Meta-agent: Package initialization ─────────────────────────────────────
+
+
+@mcp.tool()
+def initialize_agent_package(agent_name: str, agent_json_path: str) -> str:
+    """Generate a full Python agent package from an exported agent.json file.
+
+    Reads the agent.json (goal, nodes, edges), validates the graph, and
+    generates all files needed for a runnable agent in exports/{agent_name}/:
+    config.py, nodes/__init__.py, agent.py, __init__.py, __main__.py,
+    mcp_servers.json, tests/conftest.py, agent.json, README.md.
+
+    Call this INSTEAD of manually writing package files.
+
+    Args:
+        agent_name: Name for the agent package. Must be snake_case (e.g. 'my_agent').
+        agent_json_path: Path to the exported agent.json file to import.
+
+    Returns:
+        JSON with files written, validation warnings, and next steps.
+    """
+    resolved = _resolve_path(agent_json_path)
+    if not os.path.isfile(resolved):
+        return json.dumps({"success": False, "error": f"File not found: {agent_json_path}"})
+
+    env = os.environ.copy()
+    core_path = os.path.join(PROJECT_ROOT, "core")
+    exports_path = os.path.join(PROJECT_ROOT, "exports")
+    fw_agents_path = os.path.join(PROJECT_ROOT, "core", "framework", "agents")
+    pythonpath = env.get("PYTHONPATH", "")
+    path_parts = [core_path, exports_path, fw_agents_path, PROJECT_ROOT]
+    if pythonpath:
+        path_parts.append(pythonpath)
+    env["PYTHONPATH"] = os.pathsep.join(path_parts)
+
+    try:
+        proc = subprocess.run(
+            [
+                "uv", "run", "python", "-m",
+                "framework.builder.package_generator",
+                agent_name,
+                resolved,
+            ],
+            capture_output=True,
+            text=True,
+            timeout=60,
+            env=env,
+            cwd=PROJECT_ROOT,
+            stdin=subprocess.DEVNULL,
+        )
+        if proc.returncode == 0:
+            return proc.stdout.strip() or json.dumps({"success": True})
+        else:
+            return json.dumps({
+                "success": False,
+                "error": proc.stderr.strip()[:3000],
+                "stdout": proc.stdout.strip()[:1000],
+            })
+    except subprocess.TimeoutExpired:
+        return json.dumps({"success": False, "error": "Package generation timed out (60s)"})
+    except Exception as e:
+        return json.dumps({"success": False, "error": str(e)})
+
+
 # ── Main ──────────────────────────────────────────────────────────────────
 
 
