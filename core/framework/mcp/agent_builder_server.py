@@ -613,7 +613,7 @@ def add_node(
         bool,
         "Workers should be autonomous: set False. client_facing=True routes user-facing "
         "conversation to the node; this architecture requires worker->queen handoff "
-        "instead via escalate_to_coder when blocked.",
+        "instead via escalate when blocked.",
     ] = False,
     nullable_output_keys: Annotated[
         str, "JSON array of output keys that may remain unset (for mutually exclusive outputs)"
@@ -707,7 +707,7 @@ def add_node(
     if node_type in ("event_loop", "gcu") and client_facing:
         errors.append(
             f"Node '{node_id}' has client_facing=True. Worker nodes must use "
-            "client_facing=False and escalate_to_coder for blockers/errors."
+            "client_facing=False and escalate for blockers/errors."
         )
 
     # nullable_output_keys must be a subset of output_keys
@@ -1410,7 +1410,7 @@ def validate_graph() -> str:
         errors.append(
             "event_loop nodes must not be client_facing in worker graphs. "
             f"Set client_facing=False for: {[n.id for n in cf_el_nodes]} and use "
-            "escalate_to_coder for handoff to queen."
+            "escalate for handoff to queen."
         )
 
     # Collect summary info

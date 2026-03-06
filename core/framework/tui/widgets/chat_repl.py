@@ -883,7 +883,7 @@ class ChatRepl(Vertical):
     async def _cmd_coder(self, reason: str = "") -> None:
         """User-initiated escalation to Hive Coder."""
         app = self.app
-        if not hasattr(app, "_do_escalate_to_coder"):
+        if not hasattr(app, "_do_escalate"):
             self._write_history("[bold red]Escalation not available[/bold red]")
             return
 
@@ -901,7 +901,7 @@ class ChatRepl(Vertical):
         self._write_history("[bold cyan]Escalating to Hive Coder...[/bold cyan]")
 
         node_id = self._input_node_id or self._active_node_id or ""
-        app._do_escalate_to_coder(
+        app._do_escalate(
             reason=reason,
             context=context,
             node_id=node_id,

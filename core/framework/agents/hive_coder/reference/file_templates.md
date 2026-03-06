@@ -100,7 +100,7 @@ handoff_node = NodeSpec(
 Do NOT talk to the user directly. The queen is the only user interface.
 
 If blocked by tool failures, missing credentials, or unclear constraints, call:
-- escalate_to_coder(reason, context)
+- escalate(reason, context)
 Then set:
 - set_output("next_action", "escalated")
 - set_output("feedback", "what help is needed")

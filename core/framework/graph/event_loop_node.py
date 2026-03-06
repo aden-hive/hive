@@ -498,7 +498,7 @@ class EventLoopNode(NodeProtocol):
             tools.append(self._build_ask_user_tool())
         # Workers/subagents can escalate blockers to the queen.
         if stream_id not in ("queen", "judge"):
-            tools.append(self._build_escalate_to_coder_tool())
+            tools.append(self._build_escalate_tool())
 
         # Add delegate_to_sub_agent tool if:
         # - Node has sub_agents defined
@@ -582,7 +582,7 @@ class EventLoopNode(NodeProtocol):
                 _synthetic_names = {
                     "set_output",
                     "ask_user",
-                    "escalate_to_coder",
+                    "escalate",
                     "delegate_to_sub_agent",
                     "report_to_parent",
                 }
@@ -998,7 +998,7 @@ class EventLoopNode(NodeProtocol):
             mcp_tool_calls = [
                 tc
                 for tc in logged_tool_calls
-                if tc.get("tool_name") not in ("set_output", "ask_user", "escalate_to_coder")
+                if tc.get("tool_name") not in ("set_output", "ask_user", "escalate")
             ]
             if mcp_tool_calls:
                 fps = self._fingerprint_tool_calls(mcp_tool_calls)
@@ -1752,13 +1752,13 @@ class EventLoopNode(NodeProtocol):
 
         ``real_tool_results`` contains only results from actual tools (web_search,
         etc.), NOT from synthetic framework tools such as ``set_output``,
-        ``ask_user``, or ``escalate_to_coder``.
+        ``ask_user``, or ``escalate``.
         ``outputs_set`` lists the output keys written via ``set_output`` during
         this turn.  ``user_input_requested`` is True if the LLM called
         ``ask_user`` during this turn.  This separation lets the caller treat
         synthetic tools as framework concerns rather than tool-execution concerns.
         ``queen_input_requested`` is True when the worker called
-        ``escalate_to_coder(wait_for_response=true)`` and should wait for
+        ``escalate(wait_for_response=true)`` and should wait for
         queen guidance before judge evaluation.
 
         ``logged_tool_calls`` accumulates ALL tool calls across inner iterations
@@ -2076,8 +2076,8 @@ class EventLoopNode(NodeProtocol):
                     )
                     results_by_id[tc.tool_use_id] = result
 
-                elif tc.tool_name == "escalate_to_coder":
-                    # --- Framework-level escalate_to_coder handling ---
+                elif tc.tool_name == "escalate":
+                    # --- Framework-level escalate handling ---
                     reason = str(tc.tool_input.get("reason", "")).strip()
                     context = str(tc.tool_input.get("context", "")).strip()
                     # Always wait for queen guidance
@@ -2086,7 +2086,7 @@ class EventLoopNode(NodeProtocol):
                         result = ToolResult(
                             tool_use_id=tc.tool_use_id,
                             content=(
-                                "ERROR: escalate_to_coder is only available to worker "
+                                "ERROR: escalate is only available to worker "
                                 "nodes/sub-agents, not queen/judge streams."
                             ),
                             is_error=True,
@@ -2316,7 +2316,7 @@ class EventLoopNode(NodeProtocol):
                 if tc.tool_name not in (
                     "set_output",
                     "ask_user",
-                    "escalate_to_coder",
+                    "escalate",
                     "delegate_to_sub_agent",
                     "report_to_parent",
                 ):
@@ -2446,7 +2446,9 @@ class EventLoopNode(NodeProtocol):
             # Tool calls processed -- loop back to stream with updated conversation
 
     # -------------------------------------------------------------------
-    # Synthetic tools: set_output, ask_user, escalate_to_coder
+    # Synthetic tools: set_output, ask_user, escalate
+    # ask_user is used by queen
+    # escalate is used by worker
     # -------------------------------------------------------------------
 
     def _build_ask_user_tool(self) -> Tool:
@@ -2531,10 +2533,10 @@ class EventLoopNode(NodeProtocol):
             },
         )
 
-    def _build_escalate_to_coder_tool(self) -> Tool:
-        """Build the synthetic escalate_to_coder tool for worker -> queen handoff."""
+    def _build_escalate_tool(self) -> Tool:
+        """Build the synthetic escalate tool for worker -> queen handoff."""
         return Tool(
-            name="escalate_to_coder",
+            name="escalate",
             description=(
                 "Escalate to the Hive Coder queen when requesting user input, "
                 "blocked by errors, missing "

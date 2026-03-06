@@ -449,7 +449,7 @@ The queen owns intake: she gathers user requirements, then calls \
 `run_agent_with_input(task)` with a structured task description. \
 When building the agent, design the entry node's `input_keys` to \
 match what the queen will provide at run time. Worker nodes should \
-use `escalate_to_coder` for blockers.
+use `escalate` for blockers.
 
 Follow the graph with a brief summary of each node's purpose. \
 Get user approval before implementing.

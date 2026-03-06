@@ -441,14 +441,14 @@ Note: `node_id` is not set on this event; `stream_id` is the webhook source ID.
 
 ### `escalation_requested`
 
-An agent has requested handoff to the Hive Coder (via the `escalate_to_coder` synthetic tool).
+An agent has requested handoff to the Hive Coder (via the `escalate` synthetic tool).
 
 | Data Field | Type  | Description                     |
 | ---------- | ----- | ------------------------------- |
 | `reason`   | `str` | Why escalation is needed        |
 | `context`  | `str` | Additional context for the coder|
 
-**Emitted by:** `EventLoopNode` when the LLM calls `escalate_to_coder`.
+**Emitted by:** `EventLoopNode` when the LLM calls `escalate`.
 
 ---
 

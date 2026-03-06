@@ -213,7 +213,7 @@ class AdenTUI(App):
         Binding("ctrl+z", "pause_execution", "Pause", show=True, priority=True),
         Binding("ctrl+r", "show_sessions", "Sessions", show=True, priority=True),
         Binding("ctrl+a", "show_agent_picker", "Agents", show=True, priority=True),
-        Binding("ctrl+e", "escalate_to_coder", "Coder", show=True, priority=True),
+        Binding("ctrl+e", "escalate", "Coder", show=True, priority=True),
         Binding("ctrl+e", "return_from_coder", "← Back", show=True, priority=True),
         Binding("ctrl+q", "connect_to_queen", "Queen", show=True, priority=True),
         Binding("tab", "focus_next", "Next Panel", show=True),
@@ -900,7 +900,7 @@ class AdenTUI(App):
     # -- Escalation to Hive Coder --
 
     @work(exclusive=True, group="escalation")
-    async def _do_escalate_to_coder(
+    async def _do_escalate(
         self,
         reason: str = "",
         context: str = "",
@@ -1375,7 +1375,7 @@ class AdenTUI(App):
                 )
             elif et == EventType.ESCALATION_REQUESTED:
                 self.chat_repl.handle_escalation_requested(event.data)
-                self._do_escalate_to_coder(
+                self._do_escalate(
                     reason=event.data.get("reason", ""),
                     context=event.data.get("context", ""),
                     node_id=event.node_id or "",
@@ -1683,12 +1683,12 @@ class AdenTUI(App):
     def check_action(self, action: str, parameters: tuple[object, ...]) -> bool | None:
         """Control which bindings are shown in the footer.
 
-        Both escalate_to_coder and return_from_coder are bound to Ctrl+E.
+        Both escalate and return_from_coder are bound to Ctrl+E.
         check_action toggles which one is active based on escalation state,
         so the footer shows "Coder" or "← Back" accordingly.
         connect_to_queen is only shown when a queen monitoring graph is active.
         """
-        if action == "escalate_to_coder":
+        if action == "escalate":
             return not self._escalation_stack
         if action == "return_from_coder":
             return bool(self._escalation_stack)
@@ -1707,13 +1707,13 @@ class AdenTUI(App):
         else:
             self.action_switch_graph(self._queen_graph_id)
 
-    def action_escalate_to_coder(self) -> None:
+    def action_escalate(self) -> None:
         """Escalate to Hive Coder (bound to Ctrl+E)."""
         if self.runtime is None:
             self.notify("No active agent to escalate from", severity="error")
             return
-        # _do_escalate_to_coder is already @work-decorated; calling it starts the worker.
-        self._do_escalate_to_coder(reason="User-initiated escalation")
+        # _do_escalate is already @work-decorated; calling it starts the worker.
+        self._do_escalate(reason="User-initiated escalation")
 
     async def action_return_from_coder(self) -> None:
         """Return from Hive Coder to worker agent (Ctrl+E toggles)."""

@@ -720,8 +720,8 @@ class TestClientFacingBlocking:
             assert "ask_user" not in tool_names
 
     @pytest.mark.asyncio
-    async def test_escalate_to_coder_available_for_worker_stream(self, runtime, memory):
-        """Workers should receive escalate_to_coder synthetic tool."""
+    async def test_escalate_available_for_worker_stream(self, runtime, memory):
+        """Workers should receive escalate synthetic tool."""
         spec = NodeSpec(
             id="internal",
             name="Internal",
@@ -737,11 +737,11 @@ class TestClientFacingBlocking:
 
         assert llm._call_index >= 1
         tool_names = [t.name for t in (llm.stream_calls[0]["tools"] or [])]
-        assert "escalate_to_coder" in tool_names
+        assert "escalate" in tool_names
 
     @pytest.mark.asyncio
-    async def test_escalate_to_coder_not_available_for_queen_stream(self, runtime, memory):
-        """Queen stream should not receive escalate_to_coder tool."""
+    async def test_escalate_not_available_for_queen_stream(self, runtime, memory):
+        """Queen stream should not receive escalate tool."""
         spec = NodeSpec(
             id="queen",
             name="Queen",
@@ -757,18 +757,18 @@ class TestClientFacingBlocking:
 
         assert llm._call_index >= 1
         tool_names = [t.name for t in (llm.stream_calls[0]["tools"] or [])]
-        assert "escalate_to_coder" not in tool_names
+        assert "escalate" not in tool_names
 
 
-class TestEscalateToCoder:
+class TestEscalate:
     @pytest.mark.asyncio
-    async def test_escalate_to_coder_emits_event(self, runtime, node_spec, memory):
-        """escalate_to_coder() should publish ESCALATION_REQUESTED."""
+    async def test_escalate_emits_event(self, runtime, node_spec, memory):
+        """escalate() should publish ESCALATION_REQUESTED."""
         node_spec.output_keys = []
         llm = MockStreamingLLM(
             scenarios=[
                 tool_call_scenario(
-                    "escalate_to_coder",
+                    "escalate",
                     {
                         "reason": "tool failure",
                         "context": "HTTP 401 from upstream",
@@ -798,13 +798,13 @@ class TestEscalateToCoder:
         assert "HTTP 401" in received[0].data["context"]
 
     @pytest.mark.asyncio
-    async def test_escalate_to_coder_handoff_reaches_queen(self, runtime, node_spec, memory):
+    async def test_escalate_handoff_reaches_queen(self, runtime, node_spec, memory):
         """Worker escalation should be routed to queen via SessionManager handoff sub."""
         node_spec.output_keys = []
         llm = MockStreamingLLM(
             scenarios=[
                 tool_call_scenario(
-                    "escalate_to_coder",
+                    "escalate",
                     {
                         "reason": "blocked",
                         "context": "dependency missing",
@@ -847,7 +847,7 @@ class TestEscalateToCoder:
         llm = MockStreamingLLM(
             scenarios=[
                 tool_call_scenario(
-                    "escalate_to_coder",
+                    "escalate",
                     {
                         "reason": "need direction",
                         "context": "conflicting constraints",
