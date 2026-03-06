@@ -380,7 +380,7 @@ class GraphBuilder:
             if not any(e.target == node.id for e in self.session.edges):
                 entry_candidates.append(node.id)
 
-        if len(entry_candidates) == 0 and self.session.nodes:
+        if not entry_candidates and self.session.nodes:
             errors.append("No entry node found (all nodes have incoming edges)")
         elif len(entry_candidates) > 1:
             warnings.append(f"Multiple entry candidates: {entry_candidates}. Specify one.")
