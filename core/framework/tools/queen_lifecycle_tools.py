@@ -37,6 +37,7 @@ import asyncio
 import json
 import logging
 from dataclasses import dataclass, field
+from datetime import UTC
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -573,11 +574,11 @@ def register_queen_lifecycle_tools(
 
     def _format_time_ago(ts) -> str:
         """Format a datetime as relative time ago."""
-        from datetime import datetime, timezone
+        from datetime import datetime
 
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         if ts.tzinfo is None:
-            ts = ts.replace(tzinfo=timezone.utc)
+            ts = ts.replace(tzinfo=UTC)
         delta = (now - ts).total_seconds()
         if delta < 60:
             return f"{int(delta)}s ago"
@@ -601,7 +602,7 @@ def register_queen_lifecycle_tools(
         return s
 
     def _build_preamble(
-        runtime: "AgentRuntime",
+        runtime: AgentRuntime,
     ) -> dict[str, Any]:
         """Build the lightweight preamble: status, node, elapsed, iteration.
 
@@ -669,7 +670,7 @@ def register_queen_lifecycle_tools(
 
         return preamble
 
-    def _detect_red_flags(bus: "EventBus") -> int:
+    def _detect_red_flags(bus: EventBus) -> int:
         """Count issue categories with cheap limit=1 queries."""
         count = 0
         for evt_type in (
@@ -717,7 +718,7 @@ def register_queen_lifecycle_tools(
 
         return ". ".join(parts) + "."
 
-    def _format_activity(bus: "EventBus", preamble: dict[str, Any], last_n: int) -> str:
+    def _format_activity(bus: EventBus, preamble: dict[str, Any], last_n: int) -> str:
         """Format current activity: node, iteration, transitions, LLM output."""
         lines = []
 
@@ -754,7 +755,7 @@ def register_queen_lifecycle_tools(
 
         return "\n".join(lines)
 
-    async def _format_memory(runtime: "AgentRuntime") -> str:
+    async def _format_memory(runtime: AgentRuntime) -> str:
         """Format the worker's shared memory snapshot and recent changes."""
         from framework.runtime.shared_state import IsolationLevel
 
@@ -790,10 +791,10 @@ def register_queen_lifecycle_tools(
             lines.append("")
             lines.append(f"Recent changes (last {len(changes)}):")
             for change in reversed(changes):  # most recent first
-                from datetime import datetime, timezone
+                from datetime import datetime
 
                 ago = _format_time_ago(
-                    datetime.fromtimestamp(change.timestamp, tz=timezone.utc)
+                    datetime.fromtimestamp(change.timestamp, tz=UTC)
                 )
                 if change.old_value is None:
                     lines.append(f"  {change.key} set ({ago})")
@@ -804,7 +805,7 @@ def register_queen_lifecycle_tools(
 
         return "\n".join(lines)
 
-    def _format_tools(bus: "EventBus", last_n: int) -> str:
+    def _format_tools(bus: EventBus, last_n: int) -> str:
         """Format running and recent tool calls."""
         lines = []
 
@@ -858,7 +859,7 @@ def register_queen_lifecycle_tools(
 
         return "\n".join(lines)
 
-    def _format_issues(bus: "EventBus") -> str:
+    def _format_issues(bus: EventBus) -> str:
         """Format retries, stalls, doom loops, and constraint violations."""
         lines = []
         total = 0
@@ -914,7 +915,7 @@ def register_queen_lifecycle_tools(
         header = f"{total} issue(s) detected."
         return header + "\n\n" + "\n".join(lines)
 
-    async def _format_progress(runtime: "AgentRuntime", bus: "EventBus") -> str:
+    async def _format_progress(runtime: AgentRuntime, bus: EventBus) -> str:
         """Format goal progress, token consumption, and execution outcomes."""
         lines = []
 
@@ -970,13 +971,12 @@ def register_queen_lifecycle_tools(
         return "\n".join(lines)
 
     def _build_full_json(
-        runtime: "AgentRuntime",
-        bus: "EventBus",
+        runtime: AgentRuntime,
+        bus: EventBus,
         preamble: dict[str, Any],
         last_n: int,
     ) -> dict[str, Any]:
         """Build the legacy full JSON response (backward compat for focus='full')."""
-        from datetime import datetime
 
         graph_id = runtime.graph_id
         goal = runtime.goal

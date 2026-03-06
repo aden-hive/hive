@@ -656,10 +656,12 @@ class SessionManager:
                                     if len(val_str) > 200:
                                         val_str = val_str[:200] + "..."
                                     output_summary += f"\n  {key}: {val_str}"
+                            _out = output_summary or " (no output keys set)"
                             notification = (
                                 "[WORKER_TERMINAL] Worker finished successfully.\n"
-                                f"Output:{output_summary if output_summary else ' (no output keys set)'}\n"
-                                "Report this to the user. Ask if they want to continue with another run."
+                                f"Output:{_out}\n"
+                                "Report this to the user. "
+                                "Ask if they want to continue with another run."
                             )
                         else:  # EXECUTION_FAILED
                             error = event.data.get("error", "Unknown error")

@@ -420,7 +420,8 @@ class GraphExecutor:
             goal: The goal driving execution
             input_data: Initial input data
             session_state: Optional session state to resume from (with paused_at, memory, etc.)
-            validate_graph: If False, skip graph validation (for test graphs that intentionally break rules)
+            validate_graph: If False, skip graph validation (for test graphs that
+                intentionally break rules)
 
         Returns:
             ExecutionResult with output and metrics

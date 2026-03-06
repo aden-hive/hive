@@ -1971,9 +1971,16 @@ def _generate_nodes_init_py(session: BuildSession) -> str:
 
         # GCU auto-configuration: set sensible defaults for GCU nodes
         is_gcu = node.node_type == "gcu"
-        client_facing = node.client_facing if node.client_facing else (False if is_gcu else node.client_facing)
-        max_node_visits = node.max_node_visits if node.max_node_visits != 0 else (1 if is_gcu else node.max_node_visits)
-        output_keys = node.output_keys if node.output_keys else (["result"] if is_gcu else node.output_keys)
+        client_facing = (
+            node.client_facing if node.client_facing else (False if is_gcu else node.client_facing)
+        )
+        max_node_visits = (
+            node.max_node_visits if node.max_node_visits != 0
+            else (1 if is_gcu else node.max_node_visits)
+        )
+        output_keys = (
+            node.output_keys if node.output_keys else (["result"] if is_gcu else node.output_keys)
+        )
 
         # Build NodeSpec kwargs
         kwargs_parts = [
@@ -1987,7 +1994,9 @@ def _generate_nodes_init_py(session: BuildSession) -> str:
             f"    output_keys={json.dumps(output_keys)},",
         ]
         if node.nullable_output_keys:
-            kwargs_parts.append(f"    nullable_output_keys={json.dumps(node.nullable_output_keys)},")
+            kwargs_parts.append(
+                f"    nullable_output_keys={json.dumps(node.nullable_output_keys)},"
+            )
         if node.success_criteria:
             kwargs_parts.append(f"    success_criteria={json.dumps(node.success_criteria)},")
         if node.routes:
@@ -2054,7 +2063,7 @@ def _generate_agent_py(
     imports.append("from framework.llm import LiteLLMProvider")
     imports.append("from framework.runner.tool_registry import ToolRegistry")
     imports.append("from framework.runtime.execution_stream import EntryPointSpec")
-    imports.append(f"\nfrom .config import default_config, metadata")
+    imports.append("\nfrom .config import default_config, metadata")
     imports.append(f"from .nodes import {node_imports}")
 
     out = "\n".join(imports) + "\n\n"
@@ -2086,7 +2095,8 @@ def _generate_agent_py(
             out += "        Constraint(\n"
             out += f"            id={json.dumps(c_dict['id'])},\n"
             out += f"            description={json.dumps(c_dict['description'])},\n"
-            out += f"            constraint_type={json.dumps(c_dict.get('constraint_type', 'hard'))},\n"
+            ct = json.dumps(c_dict.get("constraint_type", "hard"))
+            out += f"            constraint_type={ct},\n"
             out += f"            category={json.dumps(c_dict.get('category', 'quality'))},\n"
             out += "        ),\n"
         out += "    ],\n"
@@ -2258,7 +2268,9 @@ def _generate_agent_py(
     out += "            result = await self.trigger_and_wait(\n"
     out += '                "default", context, session_state=session_state\n'
     out += "            )\n"
-    out += '            return result or ExecutionResult(success=False, error="Execution timeout")\n'
+    out += (
+        '            return result or ExecutionResult(success=False, error="Execution timeout")\n'
+    )
     out += "        finally:\n"
     out += "            await self.stop()\n\n"
 
@@ -2297,9 +2309,9 @@ def _generate_agent_py(
     out += "                errors.append(f\"Terminal node '{t}' not found\")\n"
     out += "        if not isinstance(self.entry_points, dict):\n"
     out += "            errors.append(\n"
-    out += "                \"Invalid entry_points: expected dict[str, str] like \"\n"
+    out += '                "Invalid entry_points: expected dict[str, str] like "\n'
     out += "                \"{'start': '<entry-node-id>'}. \"\n"
-    out += "                f\"Got {type(self.entry_points).__name__}. \"\n"
+    out += '                f"Got {type(self.entry_points).__name__}. "\n'
     out += "                \"Fix agent.py: set entry_points = {'start': '<entry-node-id>'}.\"\n"
     out += "            )\n"
     out += "        else:\n"
@@ -2314,27 +2326,32 @@ def _generate_agent_py(
     out += "                    errors.append(\n"
     out += "                        f\"entry_points['start'] points to '{start_node}' \"\n"
     out += "                        f\"but entry_node is '{self.entry_node}'. \"\n"
-    out += "                        \"Keep these aligned.\"\n"
+    out += '                        "Keep these aligned."\n'
     out += "                    )\n"
     out += "            for ep_id, nid in self.entry_points.items():\n"
     out += "                if not isinstance(ep_id, str):\n"
     out += "                    errors.append(\n"
-    out += "                        f\"Invalid entry_points key {ep_id!r} \"\n"
-    out += "                        f\"({type(ep_id).__name__}). Entry point names must be strings.\"\n"
+    out += '                        f"Invalid entry_points key {ep_id!r} "\n'
+    out += (
+        '                        f"({type(ep_id).__name__}).'
+        ' Entry point names must be strings."\n'
+    )
     out += "                    )\n"
     out += "                    continue\n"
     out += "                if not isinstance(nid, str):\n"
     out += "                    errors.append(\n"
     out += "                        f\"Invalid entry_points['{ep_id}']={nid!r} \"\n"
-    out += "                        f\"({type(nid).__name__}). Node ids must be strings.\"\n"
+    out += '                        f"({type(nid).__name__}). Node ids must be strings."\n'
     out += "                    )\n"
     out += "                    continue\n"
     out += "                if nid not in node_ids:\n"
     out += "                    errors.append(\n"
     out += "                        f\"Entry point '{ep_id}' references unknown node '{nid}'. \"\n"
-    out += "                        f\"Known nodes: {sorted(node_ids)}\"\n"
+    out += '                        f"Known nodes: {sorted(node_ids)}"\n'
     out += "                    )\n"
-    out += '        return {"valid": len(errors) == 0, "errors": errors, "warnings": warnings}\n\n\n'
+    out += (
+        '        return {"valid": len(errors) == 0, "errors": errors, "warnings": warnings}\n\n\n'
+    )
 
     out += f"default_agent = {class_name}()\n"
     return out
@@ -2544,7 +2561,9 @@ def _generate_mcp_servers_json(session: BuildSession) -> str | None:
 
 @mcp.tool()
 def initialize_agent_package(
-    agent_name: Annotated[str, "Name for the agent package. Must be snake_case (e.g., 'my_research_agent')."],
+    agent_name: Annotated[
+        str, "Name for the agent package. Must be snake_case (e.g., 'my_research_agent')."
+    ],
 ) -> str:
     """
     Generate the full Python agent package from the current build session.
@@ -2560,18 +2579,19 @@ def initialize_agent_package(
         agent_name: Name for the agent. Must be valid snake_case for Python package.
                     Examples: 'my_agent', 'research_bot', 'data_processor'
     """
-    from pathlib import Path
     import re
+    from pathlib import Path
 
     session = get_session()
 
     # Validate agent name (must be valid snake_case for Python package)
-    if not re.match(r'^[a-z][a-z0-9_]*$', agent_name):
+    if not re.match(r"^[a-z][a-z0-9_]*$", agent_name):
         return json.dumps({
             "success": False,
             "errors": [
-                f"Invalid agent_name '{agent_name}'. Must be snake_case: lowercase letters, numbers, underscores. "
-                f"Must start with a letter. Examples: 'my_agent', 'research_bot', 'data_processor'"
+                f"Invalid agent_name '{agent_name}'. Must be snake_case: "
+                "lowercase letters, numbers, underscores. "
+                "Must start with a letter. Examples: 'my_agent', 'research_bot', 'data_processor'"
             ],
         })
 
@@ -2646,7 +2666,9 @@ def initialize_agent_package(
     # 3. agent.py
     _write(
         "agent.py",
-        _generate_agent_py(session, entry_node, entry_points, terminal_nodes, pause_nodes, has_async),
+        _generate_agent_py(
+            session, entry_node, entry_points, terminal_nodes, pause_nodes, has_async
+        ),
     )
 
     # 4. __init__.py
@@ -2670,14 +2692,27 @@ def initialize_agent_package(
             if key in export_result.get("files_written", {}):
                 info = export_result["files_written"][key]
                 # Map to relative path
-                rel = str(Path(info["path"]).relative_to(exports_dir)) if exports_dir.as_posix() in info["path"] else info["path"]
+                rel = (
+                    str(Path(info["path"]).relative_to(exports_dir))
+                    if exports_dir.as_posix() in info["path"]
+                    else info["path"]
+                )
                 files_written[rel] = info
 
     # 9. Generate validation commands
     agent_name = session.name
+    _validate_cmd = (
+        f"uv run python -c 'from {agent_name} import default_agent;"
+        " print(default_agent.validate())'"
+    )
+    _runner_cmd = (
+        "uv run python -c 'from framework.runner.runner import AgentRunner;"
+        f' r = AgentRunner.load(\\"exports/{agent_name}\\");'
+        ' print(\\"AgentRunner.load: OK\\")\''
+    )
     validation_commands = [
-        f'run_command("uv run python -c \'from {agent_name} import default_agent; print(default_agent.validate())\'")',
-        f'run_command("uv run python -c \'from framework.runner.runner import AgentRunner; r = AgentRunner.load(\\"exports/{agent_name}\\"); print(\\"AgentRunner.load: OK\\")\'")',
+        f'run_command("{_validate_cmd}")',
+        f'run_command("{_runner_cmd}")',
         f'validate_agent_tools("exports/{agent_name}")',
         f'run_agent_tests("{agent_name}")',
     ]
@@ -2690,7 +2725,10 @@ def initialize_agent_package(
             design_warnings.append({
                 "node_id": node.id,
                 "type": "no_tools",
-                "message": f"Node '{node.id}' has no tools. Consider merging into another node or adding tools.",
+                "message": (
+                    f"Node '{node.id}' has no tools. "
+                    "Consider merging into another node or adding tools."
+                ),
                 "severity": "warning",
             })
         # Warn about client-facing nodes that aren't entry nodes
@@ -2698,7 +2736,11 @@ def initialize_agent_package(
             design_warnings.append({
                 "node_id": node.id,
                 "type": "client_facing_not_entry",
-                "message": f"Node '{node.id}' is client_facing but not the entry node. Worker agents should not have client-facing nodes (queen handles user interaction).",
+                "message": (
+                    f"Node '{node.id}' is client_facing but not the entry node. "
+                    "Worker agents should not have client-facing nodes "
+                    "(queen handles user interaction)."
+                ),
                 "severity": "warning",
             })
         # GCU nodes should not be client_facing
@@ -2706,7 +2748,10 @@ def initialize_agent_package(
             design_warnings.append({
                 "node_id": node.id,
                 "type": "gcu_client_facing",
-                "message": f"GCU node '{node.id}' is client_facing. GCU nodes should be autonomous subagents (client_facing=False).",
+                "message": (
+                    f"GCU node '{node.id}' is client_facing. "
+                    "GCU nodes should be autonomous subagents (client_facing=False)."
+                ),
                 "severity": "warning",
             })
         # GCU nodes should have max_node_visits=1
@@ -2714,7 +2759,10 @@ def initialize_agent_package(
             design_warnings.append({
                 "node_id": node.id,
                 "type": "gcu_max_visits",
-                "message": f"GCU node '{node.id}' should have max_node_visits=1 (single execution per delegation).",
+                "message": (
+                    f"GCU node '{node.id}' should have max_node_visits=1 "
+                    "(single execution per delegation)."
+                ),
                 "severity": "info",
             })
 
@@ -2724,14 +2772,20 @@ def initialize_agent_package(
         design_warnings.append({
             "node_id": None,
             "type": "too_few_nodes",
-            "message": f"Agent has only {node_count} node. Consider adding nodes for better separation of concerns.",
+            "message": (
+                f"Agent has only {node_count} node. "
+                "Consider adding nodes for better separation of concerns."
+            ),
             "severity": "warning",
         })
     elif node_count > 5:
         design_warnings.append({
             "node_id": None,
             "type": "too_many_nodes",
-            "message": f"Agent has {node_count} nodes. Consider consolidating to 2-5 nodes for simpler architecture.",
+            "message": (
+                f"Agent has {node_count} nodes. "
+                "Consider consolidating to 2-5 nodes for simpler architecture."
+            ),
             "severity": "warning",
         })
 

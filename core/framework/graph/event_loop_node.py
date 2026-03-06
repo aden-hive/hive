@@ -1313,7 +1313,10 @@ class EventLoopNode(NodeProtocol):
 
                 logger.info("[%s] iter=%d: waiting for queen input...", node_id, iteration)
                 got_input = await self._await_user_input(ctx, prompt="", emit_client_request=False)
-                logger.info("[%s] iter=%d: queen wait unblocked, got_input=%s", node_id, iteration, got_input)
+                logger.info(
+                    "[%s] iter=%d: queen wait unblocked, got_input=%s",
+                    node_id, iteration, got_input,
+                )
                 if not got_input:
                     # Blocked by missing user input - emit escalation before returning
                     if self._event_bus:
@@ -1321,7 +1324,10 @@ class EventLoopNode(NodeProtocol):
                             stream_id=stream_id,
                             node_id=node_id,
                             reason="Blocked waiting for queen guidance - no input received",
-                            context="Worker escalated but received no queen guidance before shutdown",
+                            context=(
+                                "Worker escalated but received no queen"
+                                " guidance before shutdown"
+                            ),
                             execution_id=execution_id,
                         )
                     await self._publish_loop_completed(
@@ -2047,8 +2053,7 @@ class EventLoopNode(NodeProtocol):
                     # --- Framework-level escalate_to_coder handling ---
                     reason = str(tc.tool_input.get("reason", "")).strip()
                     context = str(tc.tool_input.get("context", "")).strip()
-                    # Always wait for queen guidance (wait_for_response is no longer optional)
-                    wait_for_response = True
+                    # Always wait for queen guidance
 
                     if stream_id in ("queen", "judge"):
                         result = ToolResult(
