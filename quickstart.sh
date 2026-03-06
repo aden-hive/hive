@@ -1543,6 +1543,9 @@ else
     echo -e "  You can start an example agent or an agent built by yourself:"
     echo -e "     ${CYAN}hive open${NC}"
     echo ""
+    echo -e "${YELLOW}  ⚠ 'hive tui' is deprecated and no longer maintained.${NC}"
+    echo -e "  Use the browser-based interface instead: ${CYAN}hive open${NC}"
+    echo ""
     echo -e "${DIM}Run ./quickstart.sh again to reconfigure.${NC}"
     echo ""
 fi
