@@ -154,9 +154,10 @@ hashline=True for anchors in results
 
 ## Meta-Agent
 - list_agent_tools(server_config_path?, output_schema?, group?) — discover \
-available tools grouped by category. output_schema: "simple" (default) or \
-"full" (includes input_schema). group: "all" (default) or a prefix like \
-"gmail". Call FIRST before designing.
+available tools grouped by category. output_schema: "simple" (default, \
+descriptions truncated to ~200 chars) or "full" (complete descriptions + \
+input_schema). group: "all" (default) or a provider like "google". \
+Call FIRST before designing.
 - validate_agent_package(agent_name) — run ALL validation checks in one call \
 (class validation, runner load, tool validation, tests). Call after building.
 - list_agents() — list all agent packages in exports/ with session counts
@@ -175,11 +176,13 @@ to see ALL available tools (names + descriptions, grouped by category). \
 ONLY use tools from this list in your node definitions. \
 NEVER guess or fabricate tool names from memory.
 
-  list_agent_tools()                                    # ALWAYS call this first
-  list_agent_tools(group="gmail", output_schema="full") # then drill into a category
+  list_agent_tools()                                    # ALWAYS call this first (simple mode, truncated descriptions)
+  list_agent_tools(group="google", output_schema="full") # then drill into a provider for full descriptions + input_schema
 
 NEVER skip the first call. Always start with the full list \
-so you know what categories and tools exist before drilling in.
+so you know what providers and tools exist before drilling in. \
+Simple mode truncates long descriptions — use group + "full" to \
+get the complete description and input_schema for the tools you need.
 
 ## Post-Build Validation
 After writing agent code, run a single comprehensive check:

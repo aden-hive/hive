@@ -480,9 +480,12 @@ def list_agent_tools(
             if not providers:
                 providers = ["no_provider"]
 
+            desc = t["description"]
+            if output_schema == "simple" and desc and len(desc) > 200:
+                desc = desc[:200].rsplit(" ", 1)[0] + "..."
             tool_payload = {
                 "name": t["name"],
-                "description": t["description"],
+                "description": desc,
             }
             if output_schema == "full":
                 tool_payload["server"] = t["server"]
