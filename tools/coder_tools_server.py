@@ -1743,6 +1743,34 @@ class {class_name}:
         for ep_id, nid in self.entry_points.items():
             if nid not in node_ids:
                 errors.append(f"Entry point '{{ep_id}}' references unknown node '{{nid}}'")
+
+        # Check for nodes defined in nodes/ but not included in the graph
+        import importlib
+        _nodes_mod = importlib.import_module(".nodes", self.__class__.__module__.rsplit(".", 1)[0])
+        defined_nodes = {{}}
+        for attr in dir(_nodes_mod):
+            obj = getattr(_nodes_mod, attr)
+            if hasattr(obj, "id") and hasattr(obj, "node_type"):
+                defined_nodes[obj.id] = attr
+        orphaned = set(defined_nodes.keys()) - node_ids
+        for nid in orphaned:
+            errors.append(
+                f"Node '{{nid}}' ({{defined_nodes[nid]}}) is defined in nodes/ "
+                f"but not included in the nodes list"
+            )
+
+        # GCU nodes must be referenced as sub_agents
+        sub_agent_refs = set()
+        for n in self.nodes:
+            for sa in getattr(n, "sub_agents", []) or []:
+                sub_agent_refs.add(sa)
+        for n in self.nodes:
+            if n.node_type == "gcu" and n.id not in sub_agent_refs:
+                errors.append(
+                    f"GCU node '{{n.id}}' is not referenced in any node's "
+                    f"sub_agents list"
+                )
+
         return {{"valid": len(errors) == 0, "errors": errors, "warnings": warnings}}
 
 
