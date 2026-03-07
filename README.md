@@ -43,6 +43,43 @@ Visit [adenhq.com](https://adenhq.com) for complete documentation, examples, and
 
 [![Hive Demo](https://img.youtube.com/vi/XDOG9fOaLjU/maxresdefault.jpg)](https://www.youtube.com/watch?v=XDOG9fOaLjU)
 
+## Architecture Overview
+
+Hive follows a **multi-agent architecture** designed to coordinate specialized AI agents to complete complex tasks collaboratively.
+
+### Core Components
+
+**Queen Agent**  
+The Queen agent acts as the central orchestrator. It plans tasks, coordinates worker agents, and manages the overall workflow.
+
+**Worker Agents**  
+Worker agents execute individual tasks such as reasoning, retrieving data, calling tools, or processing results.
+
+**Tools**  
+Tools allow agents to interact with external systems such as APIs, browsers, databases, or file systems.
+
+**Memory**  
+Hive maintains shared and local memory so agents can store context, intermediate results, and system state during execution.
+
+**Workflows**  
+Workflows define how tasks move between agents, tools, and memory during execution.
+
+### Example Execution Flow
+
+User Request  
+↓  
+Queen Agent (task planning)  
+↓  
+Task Decomposition  
+↓  
+Worker Agents  
+↓  
+Tool / API Execution  
+↓  
+Memory Update  
+↓  
+Final Result
+
 ## Who Is Hive For?
 
 Hive is designed for developers and teams who want to build **production-grade AI agents** without manually wiring complex workflows.
