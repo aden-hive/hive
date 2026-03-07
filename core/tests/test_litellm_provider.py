@@ -79,6 +79,51 @@ class TestLiteLLMProviderInit:
             provider = LiteLLMProvider(model="ollama/llama3")
             assert provider.model == "ollama/llama3"
 
+    def test_init_with_malformed_key_whitespace(self):
+        """Test that whitespace-only API keys raise ValueError."""
+        with pytest.raises(ValueError, match="cannot be empty or whitespace-only"):
+            LiteLLMProvider(api_key="   ")
+
+        with pytest.raises(ValueError, match="cannot be empty or whitespace-only"):
+            LiteLLMProvider(api_key="")
+
+    def test_init_with_malformed_key_control_chars(self):
+        """Test that API keys with any control characters raise ValueError."""
+        # Newline / carriage return
+        with pytest.raises(ValueError, match="invalid control characters"):
+            LiteLLMProvider(api_key="sk-proj-1234\n")
+
+        with pytest.raises(ValueError, match="invalid control characters"):
+            LiteLLMProvider(api_key="sk-proj-1234\r")
+
+        # Tab
+        with pytest.raises(ValueError, match="invalid control characters"):
+            LiteLLMProvider(api_key="sk-proj-1234\t")
+
+        # NUL byte
+        with pytest.raises(ValueError, match="invalid control characters"):
+            LiteLLMProvider(api_key="sk-proj-1234\x00")
+
+        # DEL (0x7F)
+        with pytest.raises(ValueError, match="invalid control characters"):
+            LiteLLMProvider(api_key="sk-proj-1234\x7f")
+
+    def test_init_with_malformed_key_quotes(self):
+        """Test that accidentally quoted API keys raise ValueError."""
+        # Exact quote wrapping
+        with pytest.raises(ValueError, match="quoted"):
+            LiteLLMProvider(api_key='"sk-proj-1234"')
+
+        with pytest.raises(ValueError, match="quoted"):
+            LiteLLMProvider(api_key="'sk-proj-1234'")
+
+        # Whitespace-padded quotes
+        with pytest.raises(ValueError, match="quoted"):
+            LiteLLMProvider(api_key=' "sk-proj-1234" ')
+
+        with pytest.raises(ValueError, match="quoted"):
+            LiteLLMProvider(api_key=" 'sk-proj-1234' ")
+
 
 class TestLiteLLMProviderComplete:
     """Test LiteLLMProvider.complete() method."""
