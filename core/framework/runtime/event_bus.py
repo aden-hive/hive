@@ -237,6 +237,7 @@ class EventBus:
         self._subscriptions: dict[str, Subscription] = {}
         self._event_history: list[AgentEvent] = []
         self._max_history = max_history
+        self._events_dropped: int = 0
         self._semaphore = asyncio.Semaphore(max_concurrent_handlers)
         self._subscription_counter = 0
         self._lock = asyncio.Lock()
@@ -309,6 +310,13 @@ class EventBus:
         async with self._lock:
             self._event_history.append(event)
             if len(self._event_history) > self._max_history:
+                dropped = len(self._event_history) - self._max_history
+                self._events_dropped += dropped
+                if self._events_dropped == dropped:  # first overflow — warn once
+                    logger.warning(
+                        "EventBus history buffer full (%d). Oldest events will be dropped.",
+                        self._max_history,
+                    )
                 self._event_history = self._event_history[-self._max_history :]
 
         # Write event to JSONL file (gated by HIVE_DEBUG_EVENTS env var)
@@ -1098,6 +1106,7 @@ class EventBus:
 
         return {
             "total_events": len(self._event_history),
+            "events_dropped": self._events_dropped,
             "subscriptions": len(self._subscriptions),
             "events_by_type": type_counts,
         }
