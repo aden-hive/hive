@@ -1361,7 +1361,7 @@ def _node_var_name(node_id: str) -> str:
 
 
 @mcp.tool()
-def initialize_agent_package(agent_name: str, nodes: list[str] | None = None) -> str:
+def initialize_agent_package(agent_name: str, nodes: str | None = None) -> str:
     """Scaffold a new agent package with placeholder files.
 
     Creates exports/{agent_name}/ with all files needed for a runnable agent:
@@ -1375,9 +1375,9 @@ def initialize_agent_package(agent_name: str, nodes: list[str] | None = None) ->
 
     Args:
         agent_name: Name for the agent package. Must be snake_case (e.g. 'my_agent').
-        nodes: Optional list of node names (snake_case or kebab-case).
+        nodes: Comma-separated node names (snake_case or kebab-case).
                If omitted, a single 'start' node is created.
-               Example: ['intake', 'process', 'review']
+               Example: 'intake,process,review'
 
     Returns:
         JSON with files written and next steps.
@@ -1393,12 +1393,11 @@ def initialize_agent_package(agent_name: str, nodes: list[str] | None = None) ->
             ),
         })
 
-    if not nodes:
-        nodes = ["start"]
+    node_list = [n.strip() for n in nodes.split(",") if n.strip()] if nodes else ["start"]
 
     class_name = _snake_to_camel(agent_name)
     human_name = agent_name.replace("_", " ").title()
-    entry_node = nodes[0]
+    entry_node = node_list[0]
 
     exports_dir = os.path.join(PROJECT_ROOT, "exports", agent_name)
     nodes_dir = os.path.join(exports_dir, "nodes")
@@ -1468,7 +1467,7 @@ metadata = AgentMetadata()
     # -- nodes/__init__.py --
     node_specs = []
     node_var_names = []
-    for node_id in nodes:
+    for node_id in node_list:
         var = _node_var_name(node_id)
         node_var_names.append(var)
         is_first = (node_id == entry_node)
@@ -1506,8 +1505,8 @@ __all__ = {node_var_names!r}
     nodes_list = ", ".join(node_var_names)
 
     edge_defs = []
-    for i in range(len(nodes) - 1):
-        src, tgt = nodes[i], nodes[i + 1]
+    for i in range(len(node_list) - 1):
+        src, tgt = node_list[i], node_list[i + 1]
         edge_defs.append(f'''\
     EdgeSpec(
         id="{src}-to-{tgt}",
@@ -1892,7 +1891,7 @@ def runner_loaded():
         "agent_name": agent_name,
         "class_name": class_name,
         "entry_node": entry_node,
-        "nodes": nodes,
+        "nodes": node_list,
         "files_written": files_written,
         "file_count": len(files_written),
         "next_steps": [

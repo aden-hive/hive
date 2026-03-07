@@ -14,5 +14,5 @@ srv.PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..")
 
 # Access the underlying function (FastMCP wraps it as FunctionTool)
 tool = srv.initialize_agent_package
-result = tool.fn("richard_test2", nodes=["intake", "process", "review"])
+result = tool.fn("richard_test2", nodes="intake,process,review")
 print(result)
