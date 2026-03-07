@@ -116,10 +116,10 @@ MCP (Model Context Protocol) servers are configured in `.mcp.json` at the projec
 ```json
 {
   "mcpServers": {
-    "agent-builder": {
+    "coder-tools": {
       "command": "uv",
-      "args": ["run", "-m", "framework.mcp.agent_builder_server"],
-      "cwd": "core"
+      "args": ["run", "coder_tools_server.py", "--stdio"],
+      "cwd": "tools"
     },
     "tools": {
       "command": "uv",
@@ -130,7 +130,7 @@ MCP (Model Context Protocol) servers are configured in `.mcp.json` at the projec
 }
 ```
 
-The tools MCP server exposes tools including web search, PDF reading, CSV processing, and file system operations.
+The `coder-tools` server provides agent scaffolding via `initialize_agent_package` and related tools. The `tools` MCP server exposes tools including web search, PDF reading, CSV processing, and file system operations.
 
 ## Storage
 

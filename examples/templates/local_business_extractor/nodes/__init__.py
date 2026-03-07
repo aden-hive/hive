@@ -19,7 +19,8 @@ You are a browser agent. Your job: Search Google Maps for the provided query and
 ## Workflow
 1. browser_start
 2. browser_open(url="https://www.google.com/maps")
-3. Use browser_type or browser_click to search for the "query" in memory.
+3. use the url query to search for the keyword
+3.1 alternatively, use browser_type or browser_click to search for the "query" in memory.'
 4. browser_wait(seconds=3)
 5. browser_snapshot to find the list of results.
 6. For each relevant result, extract:

@@ -1,10 +1,5 @@
 {
   "mcpServers": {
-    "agent-builder": {
-      "command": "python",
-      "args": ["-m", "framework.mcp.agent_builder_server"],
-      "cwd": "core"
-    },
     "tools": {
       "command": "python",
       "args": ["-m", "aden_tools.mcp_server", "--stdio"],

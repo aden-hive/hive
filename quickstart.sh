@@ -321,7 +321,7 @@ echo ""
 IMPORT_ERRORS=0
 
 # Batch check all imports in single process (reduces subprocess spawning overhead)
-CHECK_RESULT=$(uv run python scripts/check_requirements.py framework aden_tools litellm framework.mcp.agent_builder_server 2>/dev/null)
+CHECK_RESULT=$(uv run python scripts/check_requirements.py framework aden_tools litellm 2>/dev/null)
 CHECK_EXIT=$?
 
 # Parse and display results
@@ -337,8 +337,7 @@ try:
     modules = [
         ('framework', 'framework imports OK', True),
         ('aden_tools', 'aden_tools imports OK', True),
-        ('litellm', 'litellm imports OK', False),
-        ('framework.mcp.agent_builder_server', 'MCP server module OK', True)
+        ('litellm', 'litellm imports OK', False)
     ]
     import_errors = 0
     for mod, label, required in modules:
@@ -1386,41 +1385,7 @@ else
     echo -e "${YELLOW}--${NC}"
 fi
 
-echo -n "  ⬡ skills... "
-if [ -d "$SCRIPT_DIR/.claude/skills" ]; then
-    SKILL_COUNT=$(ls -1d "$SCRIPT_DIR/.claude/skills"/*/ 2>/dev/null | wc -l)
-    echo -e "${GREEN}${SKILL_COUNT} found${NC}"
-else
-    echo -e "${YELLOW}--${NC}"
-fi
 
-echo -n "  ⬡ codex CLI... "
-if command -v codex > /dev/null 2>&1; then
-    CODEX_VERSION=$(codex --version 2>/dev/null | head -1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' || echo "0.0.0")
-    # Compare version >= 0.101.0
-    CODEX_MAJOR=$(echo "$CODEX_VERSION" | cut -d. -f1)
-    CODEX_MINOR=$(echo "$CODEX_VERSION" | cut -d. -f2)
-    if [ "$CODEX_MAJOR" -gt 0 ] 2>/dev/null || { [ "$CODEX_MAJOR" -eq 0 ] && [ "$CODEX_MINOR" -ge 101 ]; } 2>/dev/null; then
-        echo -e "${GREEN}${CODEX_VERSION}${NC}"
-        CODEX_AVAILABLE=true
-    else
-        echo -e "${YELLOW}${CODEX_VERSION} (upgrade to 0.101.0+)${NC}"
-        CODEX_AVAILABLE=false
-    fi
-else
-    echo -e "${YELLOW}--${NC}"
-    CODEX_AVAILABLE=false
-fi
-
-echo -n "  ⬡ local settings... "
-if [ -f "$SCRIPT_DIR/.claude/settings.local.json" ]; then
-    echo -e "${GREEN}ok${NC}"
-elif [ -f "$SCRIPT_DIR/.claude/settings.local.json.example" ]; then
-    cp "$SCRIPT_DIR/.claude/settings.local.json.example" "$SCRIPT_DIR/.claude/settings.local.json"
-    echo -e "${GREEN}copied from example${NC}"
-else
-    echo -e "${YELLOW}--${NC}"
-fi
 
 echo -n "  ⬡ credential store... "
 if [ -n "$HIVE_CREDENTIAL_KEY" ] && [ -d "$HOME/.hive/credentials/credentials" ]; then

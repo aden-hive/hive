@@ -40,11 +40,12 @@ class Session:
     runner: Any | None = None  # AgentRunner
     worker_runtime: Any | None = None  # AgentRuntime
     worker_info: Any | None = None  # AgentInfo
-    # Queen mode state (building/staging/running)
-    mode_state: Any = None  # QueenModeState
+    # Queen phase state (building/staging/running)
+    phase_state: Any = None  # QueenPhaseState
     # Judge (active when worker is loaded)
     judge_task: asyncio.Task | None = None
     escalation_sub: str | None = None
+    worker_handoff_sub: str | None = None
     # Session directory resumption:
     # When set, _start_queen writes queen conversations to this existing session's
     # directory instead of creating a new one.  This lets cold-restores accumulate
@@ -380,6 +381,12 @@ class SessionManager:
 
         # Stop judge
         self._stop_judge(session)
+        if session.worker_handoff_sub is not None:
+            try:
+                session.event_bus.unsubscribe(session.worker_handoff_sub)
+            except Exception:
+                pass
+            session.worker_handoff_sub = None
 
         # Stop queen
         if session.queen_task is not None:
@@ -400,6 +407,47 @@ class SessionManager:
     # ------------------------------------------------------------------
     # Queen startup
     # ------------------------------------------------------------------
+
+    async def _handle_worker_handoff(self, session: Session, executor: Any, event: Any) -> None:
+        """Route worker escalation events into the queen conversation."""
+        if event.stream_id in ("queen", "judge"):
+            return
+
+        reason = str(event.data.get("reason", "")).strip()
+        context = str(event.data.get("context", "")).strip()
+        node_label = event.node_id or "unknown_node"
+        stream_label = event.stream_id or "unknown_stream"
+
+        handoff = (
+            "[WORKER_ESCALATION_REQUEST]\n"
+            f"stream_id: {stream_label}\n"
+            f"node_id: {node_label}\n"
+            f"reason: {reason or 'unspecified'}\n"
+        )
+        if context:
+            handoff += f"context:\n{context}\n"
+
+        node = executor.node_registry.get("queen")
+        if node is not None and hasattr(node, "inject_event"):
+            await node.inject_event(handoff, is_client_input=False)
+        else:
+            logger.warning("Worker handoff received but queen node not ready")
+
+    def _subscribe_worker_handoffs(self, session: Session, executor: Any) -> None:
+        """Subscribe queen to worker/subagent escalation handoff events."""
+        from framework.runtime.event_bus import EventType as _ET
+
+        if session.worker_handoff_sub is not None:
+            session.event_bus.unsubscribe(session.worker_handoff_sub)
+            session.worker_handoff_sub = None
+
+        async def _on_worker_handoff(event):
+            await self._handle_worker_handoff(session, executor, event)
+
+        session.worker_handoff_sub = session.event_bus.subscribe(
+            event_types=[_ET.ESCALATION_REQUESTED],
+            handler=_on_worker_handoff,
+        )
 
     async def _start_queen(
         self,
@@ -470,16 +518,16 @@ class SessionManager:
             except Exception:
                 logger.warning("Queen: MCP config failed to load", exc_info=True)
 
-        # Mode state for building/running mode switching
+        # Phase state for building/running phase switching
         from framework.tools.queen_lifecycle_tools import (
-            QueenModeState,
+            QueenPhaseState,
             register_queen_lifecycle_tools,
         )
 
         # Start in staging when the caller provided an agent, building otherwise.
-        initial_mode = "staging" if worker_identity else "building"
-        mode_state = QueenModeState(mode=initial_mode, event_bus=session.event_bus)
-        session.mode_state = mode_state
+        initial_phase = "staging" if worker_identity else "building"
+        phase_state = QueenPhaseState(phase=initial_phase, event_bus=session.event_bus)
+        session.phase_state = phase_state
 
         # Always register lifecycle tools — they check session.worker_runtime
         # at call time, so they work even if no worker is loaded yet.
@@ -489,7 +537,7 @@ class SessionManager:
             session_id=session.id,
             session_manager=self,
             manager_session_id=session.id,
-            mode_state=mode_state,
+            phase_state=phase_state,
         )
 
         # Monitoring tools need concrete worker paths — only register when present
@@ -507,11 +555,26 @@ class SessionManager:
         queen_tools = list(queen_registry.get_tools().values())
         queen_tool_executor = queen_registry.get_executor()
 
-        # Partition tools into mode-specific sets
+        # Partition tools into phase-specific sets and import prompt segments
         from framework.agents.hive_coder.nodes import (
             _QUEEN_BUILDING_TOOLS,
             _QUEEN_RUNNING_TOOLS,
             _QUEEN_STAGING_TOOLS,
+            _appendices,
+            _gcu_building_section,
+            _package_builder_knowledge,
+            _queen_behavior_always,
+            _queen_behavior_building,
+            _queen_behavior_running,
+            _queen_behavior_staging,
+            _queen_identity_building,
+            _queen_identity_running,
+            _queen_identity_staging,
+            _queen_phase_7,
+            _queen_style,
+            _queen_tools_building,
+            _queen_tools_running,
+            _queen_tools_staging,
         )
 
         building_names = set(_QUEEN_BUILDING_TOOLS)
@@ -529,13 +592,12 @@ class SessionManager:
             )
         logger.info("Queen: registered tools: %s", sorted(registered_names))
 
-        mode_state.building_tools = [t for t in queen_tools if t.name in building_names]
-        mode_state.staging_tools = [t for t in queen_tools if t.name in staging_names]
-        mode_state.running_tools = [t for t in queen_tools if t.name in running_names]
+        phase_state.building_tools = [t for t in queen_tools if t.name in building_names]
+        phase_state.staging_tools = [t for t in queen_tools if t.name in staging_names]
+        phase_state.running_tools = [t for t in queen_tools if t.name in running_names]
 
         # Build queen graph with adjusted prompt + tools
         _orig_node = _queen_graph.nodes[0]
-        base_prompt = _orig_node.system_prompt or ""
 
         if worker_identity is None:
             worker_identity = (
@@ -544,12 +606,67 @@ class SessionManager:
                 "Handle all tasks directly using your coding tools."
             )
 
+        # Compose phase-specific prompts.
+        _building_body = (
+            _queen_style
+            + _queen_tools_building
+            + _queen_behavior_always
+            + _queen_behavior_building
+            + _package_builder_knowledge
+            + _gcu_building_section
+            + _queen_phase_7
+            + _appendices
+            + worker_identity
+        )
+        phase_state.prompt_building = _queen_identity_building + _building_body
+        phase_state.prompt_staging = (
+            _queen_identity_staging
+            + _queen_style
+            + _queen_tools_staging
+            + _queen_behavior_always
+            + _queen_behavior_staging
+            + worker_identity
+        )
+        phase_state.prompt_running = (
+            _queen_identity_running
+            + _queen_style
+            + _queen_tools_running
+            + _queen_behavior_always
+            + _queen_behavior_running
+            + worker_identity
+        )
+
+        # Build the session_start hook: selects the best-fit expert persona
+        # from the user's opening message and replaces the identity prefix.
+        from framework.agents.hive_coder.nodes.thinking_hook import select_expert_persona
+        from framework.graph.event_loop_node import HookContext, HookResult
+        from framework.runtime.event_bus import AgentEvent, EventType
+
+        _session_llm = session.llm
+        _session_event_bus = session.event_bus
+
+        async def _persona_hook(ctx: HookContext) -> HookResult | None:
+            persona = await select_expert_persona(ctx.trigger or "", _session_llm)
+            if not persona:
+                return None
+            if _session_event_bus is not None:
+                await _session_event_bus.publish(
+                    AgentEvent(
+                        type=EventType.QUEEN_PERSONA_SELECTED,
+                        stream_id="queen",
+                        data={"persona": persona},
+                    )
+                )
+            return HookResult(system_prompt=persona + "\n\n" + _building_body)
+
+        initial_prompt_text = phase_state.get_current_prompt()
+
         registered_tool_names = set(queen_registry.get_tools().keys())
         declared_tools = _orig_node.tools or []
         available_tools = [t for t in declared_tools if t in registered_tool_names]
 
         node_updates: dict = {
-            "system_prompt": base_prompt + worker_identity,
+            "system_prompt": initial_prompt_text,
         }
         if set(available_tools) != set(declared_tools):
             missing = sorted(set(declared_tools) - registered_tool_names)
@@ -558,7 +675,13 @@ class SessionManager:
             node_updates["tools"] = available_tools
 
         adjusted_node = _orig_node.model_copy(update=node_updates)
-        queen_graph = _queen_graph.model_copy(update={"nodes": [adjusted_node]})
+        _queen_loop_config = {
+            **(_queen_graph.loop_config or {}),
+            "hooks": {"session_start": [_persona_hook]},
+        }
+        queen_graph = _queen_graph.model_copy(
+            update={"nodes": [adjusted_node], "loop_config": _queen_loop_config}
+        )
 
         queen_runtime = Runtime(hive_home / "queen")
 
@@ -572,39 +695,73 @@ class SessionManager:
                     event_bus=session.event_bus,
                     stream_id="queen",
                     storage_path=queen_dir,
-                    loop_config=queen_graph.loop_config,
+                    loop_config=_queen_loop_config,
                     execution_id=session.id,
-                    dynamic_tools_provider=mode_state.get_current_tools,
+                    dynamic_tools_provider=phase_state.get_current_tools,
+                    dynamic_prompt_provider=phase_state.get_current_prompt,
                 )
                 session.queen_executor = executor
 
-                # Wire inject_notification so mode switches notify the queen LLM
-                async def _inject_mode_notification(content: str) -> None:
+                # Wire inject_notification so phase switches notify the queen LLM
+                async def _inject_phase_notification(content: str) -> None:
                     node = executor.node_registry.get("queen")
                     if node is not None and hasattr(node, "inject_event"):
                         await node.inject_event(content)
 
-                mode_state.inject_notification = _inject_mode_notification
+                phase_state.inject_notification = _inject_phase_notification
 
                 # Auto-switch to staging when worker execution finishes naturally
+                # and notify the queen about the termination
                 from framework.runtime.event_bus import EventType as _ET
 
                 async def _on_worker_done(event):
                     if event.stream_id == "queen":
                         return
-                    if mode_state.mode == "running":
-                        await mode_state.switch_to_staging(source="auto")
+                    if phase_state.phase == "running":
+                        # Build termination notification for the queen
+                        if event.type == _ET.EXECUTION_COMPLETED:
+                            output = event.data.get("output", {})
+                            output_summary = ""
+                            if output:
+                                # Summarize key outputs for the queen
+                                for key, value in output.items():
+                                    val_str = str(value)
+                                    if len(val_str) > 200:
+                                        val_str = val_str[:200] + "..."
+                                    output_summary += f"\n  {key}: {val_str}"
+                            _out = output_summary or " (no output keys set)"
+                            notification = (
+                                "[WORKER_TERMINAL] Worker finished successfully.\n"
+                                f"Output:{_out}\n"
+                                "Report this to the user. "
+                                "Ask if they want to continue with another run."
+                            )
+                        else:  # EXECUTION_FAILED
+                            error = event.data.get("error", "Unknown error")
+                            notification = (
+                                "[WORKER_TERMINAL] Worker failed.\n"
+                                f"Error: {error}\n"
+                                "Report this to the user and help them troubleshoot."
+                            )
+
+                        # Inject notification to queen before phase switch
+                        node = executor.node_registry.get("queen")
+                        if node is not None and hasattr(node, "inject_event"):
+                            await node.inject_event(notification)
+
+                        await phase_state.switch_to_staging(source="auto")
 
                 session.event_bus.subscribe(
                     event_types=[_ET.EXECUTION_COMPLETED, _ET.EXECUTION_FAILED],
                     handler=_on_worker_done,
                 )
+                self._subscribe_worker_handoffs(session, executor)
 
                 logger.info(
-                    "Queen starting in %s mode with %d tools: %s",
-                    mode_state.mode,
-                    len(mode_state.get_current_tools()),
-                    [t.name for t in mode_state.get_current_tools()],
+                    "Queen starting in %s phase with %d tools: %s",
+                    phase_state.phase,
+                    len(phase_state.get_current_tools()),
+                    [t.name for t in phase_state.get_current_tools()],
                 )
                 result = await executor.execute(
                     graph=queen_graph,
@@ -786,6 +943,27 @@ class SessionManager:
             "[SYSTEM] Worker unloaded. You are now operating independently. "
             "Handle all tasks directly using your coding tools."
         )
+
+    async def revive_queen(self, session: Session, initial_prompt: str | None = None) -> None:
+        """Revive a dead queen executor on an existing session.
+
+        Restarts the queen with the same session context (worker profile, tools, etc.).
+        """
+        from framework.tools.queen_lifecycle_tools import build_worker_profile
+
+        # Build worker identity if worker is loaded
+        worker_identity = (
+            build_worker_profile(session.worker_runtime, agent_path=session.worker_path)
+            if session.worker_runtime
+            else None
+        )
+
+        # Start queen with existing session context
+        await self._start_queen(
+            session, worker_identity=worker_identity, initial_prompt=initial_prompt
+        )
+
+        logger.info("Queen revived for session '%s'", session.id)
 
     # ------------------------------------------------------------------
     # Lookups
