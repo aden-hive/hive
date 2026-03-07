@@ -165,7 +165,7 @@ Build and run an agent using Claude Code CLI with the agent building skills:
 ./quickstart.sh
 ```
 
-This sets up agent-builder and tools MCP workflows.
+This sets up the MCP tools and workflows for building agents.
 
 ### Cursor IDE Support
 
@@ -180,7 +180,7 @@ MCP tools are also available in Cursor. To enable:
 
 **Claude Code:**
 ```
-Use the agent-builder workflow
+Use the coder-tools initialize_agent_package tool to scaffold a new agent
 ```
 
 **Codex CLI:**
@@ -361,7 +361,7 @@ hive/
 │   └── pyproject.toml
 │
 ├── exports/                 # Agent packages (user-created, gitignored)
-│   └── your_agent_name/     # Created via agent-builder workflow
+│   └── your_agent_name/     # Created via coder-tools workflow
 │
 └── examples/
     └── templates/           # Pre-built template agents
@@ -413,10 +413,10 @@ The `.mcp.json` at project root configures MCP servers to run through `uv run` i
 ```json
 {
   "mcpServers": {
-    "agent-builder": {
+    "coder-tools": {
       "command": "uv",
-      "args": ["run", "-m", "framework.mcp.agent_builder_server"],
-      "cwd": "core"
+      "args": ["run", "coder_tools_server.py", "--stdio"],
+      "cwd": "tools"
     },
     "tools": {
       "command": "uv",
@@ -453,7 +453,7 @@ This design allows agents in `exports/` to be:
 ### 2. Build Agent (Claude Code)
 
 ```
-Use the agent-builder workflow
+Use the coder-tools initialize_agent_package tool
 Enter goal: "Build an agent that processes customer support tickets"
 ```
 
@@ -538,7 +538,7 @@ Run the quickstart script in the root directory:
 
 [OpenAI Codex CLI](https://github.com/openai/codex) (v0.101.0+) is supported with project-level config:
 
-- `.codex/config.toml` — MCP server configuration (`agent-builder`)
+- `.codex/config.toml` — MCP server configuration
 
 These files are tracked in git and available on clone. To use Codex with Hive:
 

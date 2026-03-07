@@ -560,7 +560,7 @@ class SessionManager:
             _QUEEN_BUILDING_TOOLS,
             _QUEEN_RUNNING_TOOLS,
             _QUEEN_STAGING_TOOLS,
-            _agent_builder_knowledge,
+            _package_builder_knowledge,
             _appendices,
             _queen_behavior_always,
             _queen_behavior_building,
@@ -612,7 +612,7 @@ class SessionManager:
             + _queen_tools_building
             + _queen_behavior_always
             + _queen_behavior_building
-            + _agent_builder_knowledge
+            + _package_builder_knowledge
             + _queen_phase_7
             + _appendices
             + worker_identity

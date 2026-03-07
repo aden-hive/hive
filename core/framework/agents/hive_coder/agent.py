@@ -7,7 +7,7 @@ from .nodes import coder_node, queen_node
 
 # Goal definition
 goal = Goal(
-    id="agent-builder",
+    id="hive-coder",
     name="Hive Agent Builder",
     description=(
         "Build complete, validated Hive agent packages from natural language "

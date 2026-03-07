@@ -7,7 +7,6 @@ This script installs the framework and configures the MCP server.
 
 import json
 import logging
-import os
 import subprocess
 import sys
 from pathlib import Path
@@ -75,12 +74,12 @@ def main():
 
     # Get script directory
     script_dir = Path(__file__).parent.absolute()
-    os.chdir(script_dir)
 
     # Step 1: Install framework package
     log_step("Step 1: Installing framework package...")
     if not run_command(
-        [sys.executable, "-m", "pip", "install", "-e", "."], "Failed to install framework package"
+        [sys.executable, "-m", "pip", "install", "-e", str(script_dir)],
+        "Failed to install framework package",
     ):
         sys.exit(1)
     log_success("Framework package installed")
@@ -96,7 +95,7 @@ def main():
     log_success("MCP dependencies installed")
     logger.info("")
 
-    # Step 3: Verify/create MCP configuration
+    # Step 3: Verify MCP configuration
     log_step("Step 3: Verifying MCP server configuration...")
     mcp_config_path = script_dir / ".mcp.json"
 
@@ -107,39 +106,22 @@ def main():
             config = json.load(f)
             logger.info(json.dumps(config, indent=2))
     else:
-        log_error("No .mcp.json found")
-        logger.info("Creating default MCP configuration...")
-
-        config = {
-            "mcpServers": {
-                "agent-builder": {
-                    "command": "python",
-                    "args": ["-m", "framework.mcp.agent_builder_server"],
-                    "cwd": str(script_dir),
-                }
-            }
-        }
-
-        with open(mcp_config_path, "w", encoding="utf-8") as f:
-            json.dump(config, f, indent=2)
-
-        log_success("Created .mcp.json")
+        log_success("No .mcp.json needed (MCP servers configured at repo root)")
     logger.info("")
 
-    # Step 4: Test MCP server
-    log_step("Step 4: Testing MCP server...")
+    # Step 4: Test framework import
+    log_step("Step 4: Testing framework import...")
     try:
-        # Try importing the MCP server module
         subprocess.run(
-            [sys.executable, "-c", "from framework.mcp import agent_builder_server"],
+            [sys.executable, "-c", "import framework; print('OK')"],
             check=True,
             capture_output=True,
             text=True,
             encoding="utf-8",
         )
-        log_success("MCP server module verified")
+        log_success("Framework module verified")
     except subprocess.CalledProcessError as e:
-        log_error("Failed to import MCP server module")
+        log_error("Failed to import framework module")
         logger.error(f"Error: {e.stderr}")
         sys.exit(1)
     logger.info("")
@@ -147,28 +129,10 @@ def main():
     # Success summary
     logger.info(f"{Colors.GREEN}=== Setup Complete ==={Colors.NC}")
     logger.info("")
-    logger.info("The MCP server is now ready to use!")
-    logger.info("")
-    logger.info(f"{Colors.BLUE}To start the MCP server manually:{Colors.NC}")
-    logger.info("  uv run python -m framework.mcp.agent_builder_server")
+    logger.info("The framework is now ready to use!")
     logger.info("")
     logger.info(f"{Colors.BLUE}MCP Configuration location:{Colors.NC}")
     logger.info(f"  {mcp_config_path}")
-    logger.info("")
-    logger.info(f"{Colors.BLUE}To use with Claude Desktop or other MCP clients,{Colors.NC}")
-    logger.info(f"{Colors.BLUE}add the following to your MCP client configuration:{Colors.NC}")
-    logger.info("")
-
-    example_config = {
-        "mcpServers": {
-            "agent-builder": {
-                "command": "python",
-                "args": ["-m", "framework.mcp.agent_builder_server"],
-                "cwd": str(script_dir),
-            }
-        }
-    }
-    logger.info(json.dumps(example_config, indent=2))
     logger.info("")
 
 

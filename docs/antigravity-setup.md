@@ -13,7 +13,7 @@ Use the Hive agent framework (MCP servers and skills) inside [Antigravity IDE](h
    ```bash
    ./scripts/setup-antigravity-mcp.sh
    ```
-3. **Restart Antigravity IDE.** You should see **agent-builder** and **tools** as available MCP servers.
+3. **Restart Antigravity IDE.** You should see **coder-tools** and **tools** as available MCP servers.
 
 > **Important:** Always restart/refresh Antigravity IDE after running the setup script or making any changes to MCP configuration. The IDE only loads MCP servers on startup.
 
@@ -23,7 +23,7 @@ Done. For details, prerequisites, and troubleshooting, read on.
 
 ## What you get after setup
 
-- **agent-builder** – Create and manage agents (goals, nodes, edges).
+- **coder-tools** – Create and manage agents (scaffolding via `initialize_agent_package`, file I/O, tool discovery).
 - **tools** – File operations, web search, and other agent tools.
 - **Documentation** – Guided docs for building and testing agents.
 
@@ -68,7 +68,7 @@ The script finds the repo root, writes `~/.gemini/antigravity/mcp_config.json` w
 
 > **Important:** Always restart/refresh Antigravity IDE after running the setup script. MCP servers are only loaded on IDE startup.
 
-The **agent-builder** and **tools** servers should show up after restart.
+The **coder-tools** and **tools** servers should show up after restart.
 
 **Using Claude Code instead?** Run:
 
@@ -82,7 +82,7 @@ That writes `~/.claude/mcp.json` as well.
 
 ### Step 3: Use MCP tools + docs
 
-Use the `agent-builder` and `tools` MCP servers in Antigravity, and use docs in `docs/` for workflow guidance.
+Use the `coder-tools` and `tools` MCP servers in Antigravity, and use docs in `docs/` for workflow guidance.
 
 ---
 
@@ -90,7 +90,7 @@ Use the `agent-builder` and `tools` MCP servers in Antigravity, and use docs in 
 
 ```
 .agent/
-├── mcp_config.json   # Template for MCP servers (agent-builder, tools)
+├── mcp_config.json   # Template for MCP servers (coder-tools, tools)
 ```
 
 The **setup script** writes your **user** config (`~/.gemini/antigravity/mcp_config.json`) using paths from **this repo**. The file in `.agent/` is the template; Antigravity itself uses the file in your home directory.
@@ -104,7 +104,7 @@ The **setup script** writes your **user** config (`~/.gemini/antigravity/mcp_con
 - Run the setup script again from the hive repo root: `./scripts/setup-antigravity-mcp.sh`, then restart Antigravity.
 - Make sure Python and deps are installed: from repo root run `./quickstart.sh`.
 - Check that the servers can start: from repo root run
-  `cd core && uv run -m framework.mcp.agent_builder_server` (Ctrl+C to stop), and in another terminal
+  `cd tools && uv run coder_tools_server.py --stdio` (Ctrl+C to stop), and in another terminal
   `cd tools && uv run mcp_server.py --stdio` (Ctrl+C to stop).
   If those fail, fix the errors first (e.g. install deps with `uv sync`).
 
@@ -115,7 +115,7 @@ The **setup script** writes your **user** config (`~/.gemini/antigravity/mcp_con
 
 **MCP tools don’t show up in the UI**
 
-- Antigravity may need a restart. Use the files in `docs/` as documentation; the MCP tools (`agent-builder`, `tools`) are the required integration point.
+- Antigravity may need a restart. Use the files in `docs/` as documentation; the MCP tools (`coder-tools`, `tools`) are the required integration point.
 
 ---
 
@@ -126,7 +126,7 @@ Paste this into Antigravity to check that MCP is set up. It doesn’t use your m
 ```
 Check the Hive + Antigravity integration:
 
-1. MCP: List available MCP servers/tools. Confirm that "agent-builder" and "tools" (or equivalent) are connected. If not, tell the user to run ./scripts/setup-antigravity-mcp.sh from the hive repo root, then restart Antigravity (see docs/antigravity-setup.md).
+1. MCP: List available MCP servers/tools. Confirm that "coder-tools" and "tools" (or equivalent) are connected. If not, tell the user to run ./scripts/setup-antigravity-mcp.sh from the hive repo root, then restart Antigravity (see docs/antigravity-setup.md).
 
 2. Docs: Confirm that the project has `docs/` with setup/developer guides for the workflow.
 
@@ -146,9 +146,9 @@ Save as `~/.gemini/antigravity/mcp_config.json` (Antigravity) or `~/.claude/mcp.
 ```json
 {
   "mcpServers": {
-    "agent-builder": {
+    "coder-tools": {
       "command": "uv",
-      "args": ["run", "--directory", "/path/to/hive/core", "-m", "framework.mcp.agent_builder_server"],
+      "args": ["run", "--directory", "/path/to/hive/tools", "coder_tools_server.py", "--stdio"],
       "disabled": false
     },
     "tools": {
@@ -184,7 +184,7 @@ python3 -c "import json; json.load(open('.agent/mcp_config.json')); print('OK: v
 
 ```bash
 # Terminal 1
-cd core && uv run -m framework.mcp.agent_builder_server
+cd tools && uv run coder_tools_server.py --stdio
 
 # Terminal 2
 cd tools && uv run mcp_server.py --stdio
