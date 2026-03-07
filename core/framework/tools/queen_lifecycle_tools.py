@@ -88,11 +88,6 @@ class QueenPhaseState:
     prompt_staging: str = ""
     prompt_running: str = ""
 
-    # Thinking hook — set by session_manager to enrich the building prompt
-    # with a domain-specific expert persona on session start.
-    thinking_hook: Any = None  # async (str) -> str
-    base_prompt_building: str = ""  # building prompt body without the identity prefix
-
     def get_current_tools(self) -> list:
         """Return tools for the current phase."""
         if self.phase == "running":
@@ -108,31 +103,6 @@ class QueenPhaseState:
         if self.phase == "staging":
             return self.prompt_staging
         return self.prompt_building
-
-    async def apply_thinking_hook(self, trigger_message: str) -> None:
-        """Run the thinking hook and enrich prompt_building with an expert persona.
-
-        Called once at session start (initial_prompt as trigger). The selected
-        persona replaces the default "Solution Architect" identity prefix while
-        keeping all tool docs, behavior rules, and appendices intact.
-
-        No-ops silently if thinking_hook is not set, trigger_message is empty,
-        or the classifier returns an empty string (falls back to default identity).
-        """
-        if not self.thinking_hook or not trigger_message.strip():
-            return
-        persona_prefix = await self.thinking_hook(trigger_message)
-        if not persona_prefix:
-            return
-        self.prompt_building = persona_prefix + "\n\n" + self.base_prompt_building
-        if self.event_bus is not None:
-            await self.event_bus.publish(
-                AgentEvent(
-                    type=EventType.QUEEN_PERSONA_SELECTED,
-                    stream_id="queen",
-                    data={"persona": persona_prefix},
-                )
-            )
 
     async def _emit_phase_event(self) -> None:
         """Publish a QUEEN_PHASE_CHANGED event so the frontend updates the tag."""
