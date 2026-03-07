@@ -133,6 +133,36 @@ Now you can run an agent by selectiing the agent (either an existing agent or ex
 
 <img width="2500" height="1214" alt="Image" src="https://github.com/user-attachments/assets/71c38206-2ad5-49aa-bde8-6698d0bc55f5" />
 
+## Frontend
+
+Hive includes a browser-based web workspace (introduced in v0.6.0) built with **React + TypeScript** and served via Vite. It provides a graphical interface for agent management and real-time monitoring.
+
+### Launch the Web Interface
+
+After running the quickstart setup, the dashboard opens automatically in your browser. To reopen it later:
+
+```bash
+hive open
+```
+
+To start the development server directly (requires Node.js 20+):
+
+```bash
+cd core/frontend
+npm install
+npm run dev
+```
+
+### Capabilities
+
+- **Agent Management** — Browse, create, and configure agents from the home screen
+- **Template Library** — Launch sample agents or build on top of existing templates
+- **Real-time Monitoring** — Live execution tracking, logs, and node-to-node communication
+- **Interactive Chat** — Communicate with the Queen agent directly from the browser
+- **Graph Visualization** — Visual representation of the generated agent workflow graph
+
+> **Note:** The frontend is built automatically by the quickstart script if Node.js 20+ is detected. If the build step was skipped, run `npm install && npm run build` inside `core/frontend/` before using `hive open`.
+
 ## Features
 
 - **Browser-Use** - Control the browser on your computer to achieve hard tasks
