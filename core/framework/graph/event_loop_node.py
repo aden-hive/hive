@@ -3023,17 +3023,20 @@ class EventLoopNode(NodeProtocol):
         if not first:
             return False, ""
 
-        # Check similarity against all recent fingerprints
+        # Convert a turn's list of (name, args) pairs to a single comparable string.
+        def _turn_sig(fp: list[tuple[str, str]]) -> str:
+            return "|".join(f"{name}:{args}" for name, args in fp)
+
+        first_sig = _turn_sig(first)
         similarity_threshold = self._config.stall_similarity_threshold
         similar_count = sum(
             1
             for fp in recent_tool_fingerprints
-            # Compare canonicalized tool input strings using n-gram similarity
-            if self._ngram_similarity(fp[1], first[1]) >= similarity_threshold
+            if self._ngram_similarity(_turn_sig(fp), first_sig) >= similarity_threshold
         )
 
         if similar_count >= threshold:
-            tool_names = [name for name, _ in recent_tool_fingerprints]
+            tool_names = [name for fp in recent_tool_fingerprints for name, _ in fp]
             desc = (
                 f"Doom loop detected: {similar_count}/{len(recent_tool_fingerprints)} "
                 f"consecutive similar tool calls ({', '.join(tool_names)})"
