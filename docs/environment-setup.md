@@ -572,6 +572,6 @@ When contributing agent packages:
 
 ## Support
 
-- **Issues:** https://github.com/adenhq/hive/issues
+- **Issues:** https://github.com/aden-hive/hive/issues
 - **Discord:** https://discord.com/invite/MXE49hrKDk
 - **Documentation:** https://docs.adenhq.com/
