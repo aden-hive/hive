@@ -884,6 +884,7 @@ coder_node = NodeSpec(
         "You are Hive Coder, the best agent-building coding agent. You build "
         "production-ready Hive agent packages from natural language.\n"
         + _package_builder_knowledge
+        + _gcu_building_section
         + _coder_completion
         + _appendices
     ),
