@@ -84,6 +84,10 @@ _QUEEN_STAGING_TOOLS = [
     # Launch or go back
     "run_agent_with_input",
     "stop_worker_and_edit",
+    # Trigger management
+    "set_trigger",
+    "remove_trigger",
+    "list_triggers",
 ]
 
 # Running phase: worker is executing — monitor and control.
@@ -103,6 +107,10 @@ _QUEEN_RUNNING_TOOLS = [
     # Monitoring
     "get_worker_health_summary",
     "notify_operator",
+    # Trigger management
+    "set_trigger",
+    "remove_trigger",
+    "list_triggers",
 ]
 
 
@@ -555,6 +563,9 @@ The agent is loaded and ready to run. You can inspect it and launch it:
 - get_worker_status(focus?) — Brief status. Drill in with focus: memory, tools, issues, progress
 - run_agent_with_input(task) — Start the worker and switch to RUNNING phase
 - stop_worker_and_edit() — Go back to BUILDING phase
+- set_trigger(trigger_id, trigger_type?, trigger_config?) — Activate a trigger (timer)
+- remove_trigger(trigger_id) — Deactivate a trigger
+- list_triggers() — List all triggers and their active/inactive status
 
 You do NOT have write tools. If you need to modify the agent, \
 call stop_worker_and_edit() to go back to BUILDING phase.
@@ -571,6 +582,9 @@ The worker is running. You have monitoring and lifecycle tools:
 - notify_operator(ticket_id, analysis, urgency) — Alert the user (use sparingly)
 - stop_worker() — Stop the worker and return to STAGING phase, then ask the user what to do next
 - stop_worker_and_edit() — Stop the worker and switch back to BUILDING phase
+- set_trigger(trigger_id, trigger_type?, trigger_config?) — Activate a trigger (timer)
+- remove_trigger(trigger_id) — Deactivate a trigger
+- list_triggers() — List all triggers and their active/inactive status
 
 You do NOT have write tools or agent construction tools. \
 If you need to modify the agent, call stop_worker_and_edit() to switch back \
@@ -711,6 +725,13 @@ When the user asks to change, modify, or update the loaded worker \
 
 1. Call stop_worker_and_edit() — this stops the worker and gives you \
 coding tools (switches to BUILDING phase).
+
+## Trigger Management
+
+Use list_triggers() to see available triggers from the loaded worker.
+Use set_trigger(trigger_id) to activate a timer before or after starting \
+the worker. Triggers fire periodically and inject [TRIGGER: ...] messages \
+into your conversation so you can decide whether to start_worker().
 """
 
 # -- RUNNING phase behavior --
@@ -801,6 +822,21 @@ When the user asks to change, modify, or update the loaded worker \
 
 1. Call stop_worker_and_edit() — this stops the worker and gives you \
 coding tools (switches to BUILDING phase).
+
+## Trigger Handling
+
+You will receive [TRIGGER: ...] messages when a scheduled timer fires. \
+These are framework-level signals, not user messages.
+
+Rules:
+- Check get_worker_status() before calling start_worker(). If the worker \
+is already RUNNING, decide: skip this trigger, or note it for after completion.
+- When multiple [TRIGGER] messages arrive at once, read them all before acting. \
+Batch your response — do not call start_worker() once per trigger.
+- If a trigger fires but the task no longer makes sense (e.g., user changed \
+config since last run), skip it and inform the user.
+- Never disable a trigger without telling the user. Use remove_trigger() only \
+when explicitly asked or when the trigger is clearly obsolete.
 """
 
 # -- Backward-compatible composed versions (used by queen_node.system_prompt default) --

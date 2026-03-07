@@ -36,8 +36,9 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import time
 from dataclasses import dataclass, field
-from datetime import UTC
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -240,6 +241,121 @@ def build_worker_profile(runtime: AgentRuntime, agent_path: Path | str | None = 
 
     lines.append("\nStatus at session start: idle (not started).")
     return "\n".join(lines)
+
+
+async def _start_trigger_timer(session: Any, trigger_id: str, trigger_def: Any) -> None:
+    """Start an asyncio timer task that fires triggers into the queen node.
+
+    The task is stored in ``session.active_timer_tasks[trigger_id]`` and can
+    be cancelled via ``task.cancel()``.
+    """
+    from framework.graph.event_loop_node import TriggerEvent
+
+    tc = trigger_def.trigger_config
+    cron_expr = tc.get("cron")
+    interval_minutes = tc.get("interval_minutes")
+
+    async def _timer_loop():
+        try:
+            if cron_expr:
+                from croniter import croniter
+
+                # Wait for first fire
+                cron = croniter(cron_expr, datetime.now())
+                next_dt = cron.get_next(datetime)
+                sleep_secs = (next_dt - datetime.now()).total_seconds()
+                await asyncio.sleep(max(0, sleep_secs))
+
+                while True:
+                    # Fire trigger
+                    queen_node = _get_queen_node(session)
+                    if queen_node is not None:
+                        trigger = TriggerEvent(
+                            trigger_type="timer",
+                            source_id=trigger_id,
+                            payload={"schedule": cron_expr, "time": datetime.now(UTC).isoformat()},
+                            timestamp=time.time(),
+                        )
+                        await session.event_bus.publish(
+                            AgentEvent(
+                                type=EventType.TRIGGER_FIRED,
+                                stream_id="queen",
+                                data={"trigger_id": trigger_id, "trigger_type": "timer", "payload": trigger.payload},
+                            )
+                        )
+                        await queen_node.inject_trigger(trigger)
+                        logger.info("Trigger '%s' fired (cron: %s)", trigger_id, cron_expr)
+                    else:
+                        logger.warning("Trigger '%s': queen node not available, skipping tick", trigger_id)
+
+                    # Compute next fire
+                    cron = croniter(cron_expr, datetime.now())
+                    next_dt = cron.get_next(datetime)
+                    sleep_secs = (next_dt - datetime.now()).total_seconds()
+                    await asyncio.sleep(max(0, sleep_secs))
+
+            elif interval_minutes:
+                sleep_secs = interval_minutes * 60
+                await asyncio.sleep(sleep_secs)
+
+                while True:
+                    queen_node = _get_queen_node(session)
+                    if queen_node is not None:
+                        trigger = TriggerEvent(
+                            trigger_type="timer",
+                            source_id=trigger_id,
+                            payload={"interval_minutes": interval_minutes, "time": datetime.now(UTC).isoformat()},
+                            timestamp=time.time(),
+                        )
+                        await session.event_bus.publish(
+                            AgentEvent(
+                                type=EventType.TRIGGER_FIRED,
+                                stream_id="queen",
+                                data={"trigger_id": trigger_id, "trigger_type": "timer", "payload": trigger.payload},
+                            )
+                        )
+                        await queen_node.inject_trigger(trigger)
+                        logger.info("Trigger '%s' fired (interval: %dm)", trigger_id, interval_minutes)
+                    else:
+                        logger.warning("Trigger '%s': queen node not available, skipping tick", trigger_id)
+
+                    await asyncio.sleep(sleep_secs)
+        except asyncio.CancelledError:
+            logger.info("Trigger timer '%s' cancelled", trigger_id)
+        except Exception:
+            logger.error("Trigger timer '%s' failed", trigger_id, exc_info=True)
+
+    task = asyncio.create_task(_timer_loop(), name=f"trigger-timer-{trigger_id}")
+    session.active_timer_tasks[trigger_id] = task
+
+
+def _get_queen_node(session: Any):
+    """Get the queen EventLoopNode from the session's executor."""
+    executor = getattr(session, "queen_executor", None)
+    if executor is None:
+        return None
+    registry = getattr(executor, "node_registry", None)
+    if registry is None:
+        return None
+    return registry.get("queen")
+
+
+async def _persist_active_triggers(session: Any, session_id: str | None) -> None:
+    """Persist active trigger IDs to the worker's session state."""
+    runtime = getattr(session, "worker_runtime", None)
+    if runtime is None or session_id is None:
+        return
+    try:
+        store = runtime._session_store
+        state = await store.read_state(session_id)
+        if state is None:
+            from framework.schemas.session_state import SessionState
+
+            state = SessionState()
+        state.active_triggers = list(session.active_trigger_ids)
+        await store.write_state(session_id, state)
+    except Exception as e:
+        logger.warning("Failed to persist active triggers: %s", e)
 
 
 def register_queen_lifecycle_tools(
@@ -1605,6 +1721,204 @@ def register_queen_lifecycle_tools(
     registry.register(
         "run_agent_with_input", _run_input_tool, lambda inputs: run_agent_with_input(**inputs)
     )
+    tools_registered += 1
+
+    # --- set_trigger -----------------------------------------------------------
+
+    async def set_trigger(
+        trigger_id: str,
+        trigger_type: str | None = None,
+        trigger_config: dict | None = None,
+    ) -> str:
+        """Activate a trigger so it fires periodically into the queen."""
+        if trigger_id in getattr(session, "active_trigger_ids", set()):
+            return json.dumps({"error": f"Trigger '{trigger_id}' is already active."})
+
+        # Look up existing or create new
+        available = getattr(session, "available_triggers", {})
+        tdef = available.get(trigger_id)
+
+        if tdef is None:
+            if trigger_type and trigger_config:
+                from framework.runtime.triggers import TriggerDefinition
+
+                tdef = TriggerDefinition(
+                    id=trigger_id,
+                    trigger_type=trigger_type,
+                    trigger_config=trigger_config,
+                )
+                available[trigger_id] = tdef
+            else:
+                return json.dumps({
+                    "error": f"Trigger '{trigger_id}' not found. Provide trigger_type and trigger_config to create a custom trigger."
+                })
+
+        # Use provided overrides if given
+        t_type = trigger_type or tdef.trigger_type
+        t_config = trigger_config or tdef.trigger_config
+        if trigger_type:
+            tdef.trigger_type = t_type
+        if trigger_config:
+            tdef.trigger_config = t_config
+
+        # Validate
+        if t_type == "webhook":
+            return json.dumps({"error": "Webhook triggers are not yet supported at the queen level."})
+        if t_type != "timer":
+            return json.dumps({"error": f"Unsupported trigger type: {t_type}"})
+
+        cron_expr = t_config.get("cron")
+        interval = t_config.get("interval_minutes")
+        if cron_expr:
+            try:
+                from croniter import croniter
+
+                if not croniter.is_valid(cron_expr):
+                    return json.dumps({"error": f"Invalid cron expression: {cron_expr}"})
+            except ImportError:
+                return json.dumps({"error": "croniter package not installed — cannot validate cron expression."})
+        elif interval:
+            if not isinstance(interval, (int, float)) or interval <= 0:
+                return json.dumps({"error": f"interval_minutes must be > 0, got {interval}"})
+        else:
+            return json.dumps({"error": "Timer trigger needs 'cron' or 'interval_minutes' in trigger_config."})
+
+        # Start timer
+        try:
+            await _start_trigger_timer(session, trigger_id, tdef)
+        except Exception as e:
+            return json.dumps({"error": f"Failed to start trigger timer: {e}"})
+
+        tdef.active = True
+        session.active_trigger_ids.add(trigger_id)
+
+        # Persist
+        await _persist_active_triggers(session, session_id)
+
+        # Emit event
+        bus = getattr(session, "event_bus", None)
+        if bus:
+            await bus.publish(
+                AgentEvent(
+                    type=EventType.TRIGGER_ACTIVATED,
+                    stream_id="queen",
+                    data={"trigger_id": trigger_id, "trigger_type": t_type, "trigger_config": t_config},
+                )
+            )
+
+        return json.dumps({
+            "status": "activated",
+            "trigger_id": trigger_id,
+            "trigger_type": t_type,
+            "trigger_config": t_config,
+        })
+
+    _set_trigger_tool = Tool(
+        name="set_trigger",
+        description=(
+            "Activate a trigger (timer) so it fires periodically. "
+            "Use trigger_id of an available trigger, or provide trigger_type + trigger_config to create a custom one."
+        ),
+        parameters={
+            "type": "object",
+            "properties": {
+                "trigger_id": {
+                    "type": "string",
+                    "description": "ID of the trigger to activate (from list_triggers) or a new custom ID",
+                },
+                "trigger_type": {
+                    "type": "string",
+                    "description": "Type of trigger ('timer'). Only needed for custom triggers.",
+                },
+                "trigger_config": {
+                    "type": "object",
+                    "description": "Config for the trigger. Timer: {cron: '*/5 * * * *'} or {interval_minutes: 5}. Only needed for custom triggers.",
+                },
+            },
+            "required": ["trigger_id"],
+        },
+    )
+    registry.register("set_trigger", _set_trigger_tool, lambda inputs: set_trigger(**inputs))
+    tools_registered += 1
+
+    # --- remove_trigger --------------------------------------------------------
+
+    async def remove_trigger(trigger_id: str) -> str:
+        """Deactivate an active trigger."""
+        if trigger_id not in getattr(session, "active_trigger_ids", set()):
+            return json.dumps({"error": f"Trigger '{trigger_id}' is not active."})
+
+        # Cancel timer task
+        task = session.active_timer_tasks.pop(trigger_id, None)
+        if task and not task.done():
+            task.cancel()
+
+        session.active_trigger_ids.discard(trigger_id)
+
+        # Mark inactive
+        available = getattr(session, "available_triggers", {})
+        tdef = available.get(trigger_id)
+        if tdef:
+            tdef.active = False
+
+        # Persist
+        await _persist_active_triggers(session, session_id)
+
+        # Emit event
+        bus = getattr(session, "event_bus", None)
+        if bus:
+            await bus.publish(
+                AgentEvent(
+                    type=EventType.TRIGGER_DEACTIVATED,
+                    stream_id="queen",
+                    data={"trigger_id": trigger_id},
+                )
+            )
+
+        return json.dumps({"status": "deactivated", "trigger_id": trigger_id})
+
+    _remove_trigger_tool = Tool(
+        name="remove_trigger",
+        description="Deactivate an active trigger. The trigger stops firing but remains available for re-activation.",
+        parameters={
+            "type": "object",
+            "properties": {
+                "trigger_id": {
+                    "type": "string",
+                    "description": "ID of the trigger to deactivate",
+                },
+            },
+            "required": ["trigger_id"],
+        },
+    )
+    registry.register("remove_trigger", _remove_trigger_tool, lambda inputs: remove_trigger(**inputs))
+    tools_registered += 1
+
+    # --- list_triggers ---------------------------------------------------------
+
+    async def list_triggers() -> str:
+        """List all available triggers and their status."""
+        available = getattr(session, "available_triggers", {})
+        triggers = []
+        for tdef in available.values():
+            triggers.append({
+                "id": tdef.id,
+                "trigger_type": tdef.trigger_type,
+                "trigger_config": tdef.trigger_config,
+                "description": tdef.description,
+                "active": tdef.active,
+            })
+        return json.dumps({"triggers": triggers})
+
+    _list_triggers_tool = Tool(
+        name="list_triggers",
+        description="List all available triggers (from the loaded worker) and their active/inactive status.",
+        parameters={
+            "type": "object",
+            "properties": {},
+        },
+    )
+    registry.register("list_triggers", _list_triggers_tool, lambda inputs: list_triggers())
     tools_registered += 1
 
     logger.info("Registered %d queen lifecycle tools", tools_registered)

@@ -50,6 +50,9 @@ class Session:
     worker_handoff_sub: str | None = None
     # Trigger definitions hoisted from worker (available but inactive)
     available_triggers: dict[str, TriggerDefinition] = field(default_factory=dict)
+    # Active trigger tracking (IDs currently firing + their asyncio tasks)
+    active_trigger_ids: set[str] = field(default_factory=set)
+    active_timer_tasks: dict[str, asyncio.Task] = field(default_factory=dict)
     # Session directory resumption:
     # When set, _start_queen writes queen conversations to this existing session's
     # directory instead of creating a new one.  This lets cold-restores accumulate
@@ -359,6 +362,29 @@ class SessionManager:
             # await self._start_judge(session, session.runner._storage_path)
             await self._notify_queen_worker_loaded(session)
 
+        # Restore previously active triggers from persisted session state
+        if session.available_triggers and session.worker_runtime:
+            try:
+                store = session.worker_runtime._session_store
+                state = await store.read_state(session_id)
+                if state and state.active_triggers:
+                    from framework.tools.queen_lifecycle_tools import _start_trigger_timer
+
+                    for tid in state.active_triggers:
+                        tdef = session.available_triggers.get(tid)
+                        if tdef:
+                            tdef.active = True
+                            session.active_trigger_ids.add(tid)
+                            await _start_trigger_timer(session, tid, tdef)
+                            logger.info("Restored trigger timer '%s'", tid)
+                        else:
+                            logger.warning(
+                                "Saved trigger '%s' not found in worker entry points, skipping",
+                                tid,
+                            )
+            except Exception as e:
+                logger.warning("Failed to restore active triggers: %s", e)
+
         # Emit SSE event so the frontend can update UI
         await self._emit_worker_loaded(session)
 
@@ -381,6 +407,13 @@ class SessionManager:
                 await session.runner.cleanup_async()
             except Exception as e:
                 logger.error("Error cleaning up worker '%s': %s", session.worker_id, e)
+
+        # Cancel active trigger timers
+        for tid, task in session.active_timer_tasks.items():
+            task.cancel()
+            logger.info("Cancelled trigger timer '%s' on unload", tid)
+        session.active_timer_tasks.clear()
+        session.active_trigger_ids.clear()
 
         # Clean up hoisted triggers
         if session.available_triggers:
@@ -426,6 +459,11 @@ class SessionManager:
             session.queen_task.cancel()
             session.queen_task = None
         session.queen_executor = None
+
+        # Cancel active trigger timers
+        for task in session.active_timer_tasks.values():
+            task.cancel()
+        session.active_timer_tasks.clear()
 
         # Cleanup worker
         if session.runner:
