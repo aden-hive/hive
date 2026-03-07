@@ -264,6 +264,7 @@ async def _start_trigger_timer(session: Any, trigger_id: str, trigger_def: Any) 
                 cron = croniter(cron_expr, datetime.now())
                 next_dt = cron.get_next(datetime)
                 sleep_secs = (next_dt - datetime.now()).total_seconds()
+                session.trigger_next_fire[trigger_id] = time.monotonic() + max(0, sleep_secs)
                 await asyncio.sleep(max(0, sleep_secs))
 
                 while True:
@@ -292,10 +293,12 @@ async def _start_trigger_timer(session: Any, trigger_id: str, trigger_def: Any) 
                     cron = croniter(cron_expr, datetime.now())
                     next_dt = cron.get_next(datetime)
                     sleep_secs = (next_dt - datetime.now()).total_seconds()
+                    session.trigger_next_fire[trigger_id] = time.monotonic() + max(0, sleep_secs)
                     await asyncio.sleep(max(0, sleep_secs))
 
             elif interval_minutes:
                 sleep_secs = interval_minutes * 60
+                session.trigger_next_fire[trigger_id] = time.monotonic() + sleep_secs
                 await asyncio.sleep(sleep_secs)
 
                 while True:
@@ -319,8 +322,10 @@ async def _start_trigger_timer(session: Any, trigger_id: str, trigger_def: Any) 
                     else:
                         logger.warning("Trigger '%s': queen node not available, skipping tick", trigger_id)
 
+                    session.trigger_next_fire[trigger_id] = time.monotonic() + sleep_secs
                     await asyncio.sleep(sleep_secs)
         except asyncio.CancelledError:
+            session.trigger_next_fire.pop(trigger_id, None)
             logger.info("Trigger timer '%s' cancelled", trigger_id)
         except Exception:
             logger.error("Trigger timer '%s' failed", trigger_id, exc_info=True)
@@ -349,9 +354,14 @@ async def _persist_active_triggers(session: Any, session_id: str | None) -> None
         store = runtime._session_store
         state = await store.read_state(session_id)
         if state is None:
-            from framework.schemas.session_state import SessionState
+            from framework.schemas.session_state import SessionState, SessionTimestamps
 
-            state = SessionState()
+            now = datetime.now().isoformat()
+            state = SessionState(
+                session_id=session_id,
+                goal_id="",
+                timestamps=SessionTimestamps(started_at=now, updated_at=now),
+            )
         state.active_triggers = list(session.active_trigger_ids)
         await store.write_state(session_id, state)
     except Exception as e:
@@ -1852,6 +1862,7 @@ def register_queen_lifecycle_tools(
         task = session.active_timer_tasks.pop(trigger_id, None)
         if task and not task.done():
             task.cancel()
+        getattr(session, "trigger_next_fire", {}).pop(trigger_id, None)
 
         session.active_trigger_ids.discard(trigger_id)
 

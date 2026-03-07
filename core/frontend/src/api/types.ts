@@ -276,7 +276,12 @@ export type EventTypeName =
   | "worker_loaded"
   | "credentials_required"
   | "queen_phase_changed"
-  | "subagent_report";
+  | "subagent_report"
+  | "trigger_available"
+  | "trigger_activated"
+  | "trigger_deactivated"
+  | "trigger_fired"
+  | "trigger_removed";
 
 export interface AgentEvent {
   type: EventTypeName;

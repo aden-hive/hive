@@ -1834,6 +1834,54 @@ export default function Workspace() {
           break;
         }
 
+        case "trigger_activated": {
+          const triggerId = event.data?.trigger_id as string;
+          if (triggerId) {
+            updateGraphNodeStatus(agentType, `__trigger_${triggerId}`, "running");
+          }
+          break;
+        }
+
+        case "trigger_deactivated": {
+          const triggerId = event.data?.trigger_id as string;
+          if (triggerId) {
+            // Clear next_fire_in so countdown hides when inactive
+            setSessionsByAgent(prev => {
+              const sessions = prev[agentType] || [];
+              const activeId = activeSessionRef.current[agentType] || sessions[0]?.id;
+              return {
+                ...prev,
+                [agentType]: sessions.map(s => {
+                  if (s.id !== activeId) return s;
+                  return {
+                    ...s,
+                    graphNodes: s.graphNodes.map(n => {
+                      if (n.id !== `__trigger_${triggerId}`) return n;
+                      const { next_fire_in: _, ...restConfig } = (n.triggerConfig || {}) as Record<string, unknown> & { next_fire_in?: unknown };
+                      return { ...n, status: "pending" as const, triggerConfig: restConfig };
+                    }),
+                  };
+                }),
+              };
+            });
+          }
+          break;
+        }
+
+        case "trigger_fired": {
+          const triggerId = event.data?.trigger_id as string;
+          if (triggerId) {
+            const nodeId = `__trigger_${triggerId}`;
+            updateGraphNodeStatus(agentType, nodeId, "complete");
+            setTimeout(() => updateGraphNodeStatus(agentType, nodeId, "running"), 1500);
+          }
+          break;
+        }
+
+        case "trigger_available":
+        case "trigger_removed":
+          break;
+
         default:
           break;
       }
@@ -1861,6 +1909,10 @@ export default function Workspace() {
   const currentGraph = activeSession
     ? { nodes: activeSession.graphNodes, title: activeAgentState?.displayName || formatAgentDisplayName(baseAgentType(activeWorker)) }
     : { nodes: [] as GraphNode[], title: "" };
+
+  // Keep selectedNode in sync with live graphNodes (trigger status updates via SSE)
+  const liveSelectedNode = selectedNode && currentGraph.nodes.find(n => n.id === selectedNode.id);
+  const resolvedSelectedNode = liveSelectedNode || selectedNode;
 
   // Build a flat list of all agent-type tabs for the tab bar
   const agentTabs = Object.entries(sessionsByAgent)
@@ -2450,20 +2502,32 @@ export default function Workspace() {
               />
             )}
           </div>
-          {selectedNode && (
+          {resolvedSelectedNode && (
             <div className="w-[480px] min-w-[400px] flex-shrink-0">
-              {selectedNode.nodeType === "trigger" ? (
+              {resolvedSelectedNode.nodeType === "trigger" ? (
                 <div className="flex flex-col h-full border-l border-border/40 bg-card/20 animate-in slide-in-from-right">
                   <div className="px-4 pt-4 pb-3 border-b border-border/30 flex items-start justify-between gap-2">
                     <div className="flex items-start gap-3 min-w-0">
                       <div className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 mt-0.5 bg-[hsl(210,40%,55%)]/15 border border-[hsl(210,40%,55%)]/25">
                         <span className="text-sm" style={{ color: "hsl(210,40%,55%)" }}>
-                          {{ "webhook": "\u26A1", "timer": "\u23F1", "api": "\u2192", "event": "\u223F" }[selectedNode.triggerType || ""] || "\u26A1"}
+                          {{ "webhook": "\u26A1", "timer": "\u23F1", "api": "\u2192", "event": "\u223F" }[resolvedSelectedNode.triggerType || ""] || "\u26A1"}
                         </span>
                       </div>
                       <div className="min-w-0">
-                        <h3 className="text-sm font-semibold text-foreground leading-tight">{selectedNode.label}</h3>
-                        <p className="text-[11px] text-muted-foreground mt-0.5 capitalize">{selectedNode.triggerType} trigger</p>
+                        <h3 className="text-sm font-semibold text-foreground leading-tight">{resolvedSelectedNode.label}</h3>
+                        <p className="text-[11px] text-muted-foreground mt-0.5 capitalize flex items-center gap-1.5">
+                          {resolvedSelectedNode.triggerType} trigger
+                          <span className={`inline-block w-1.5 h-1.5 rounded-full ${
+                            resolvedSelectedNode.status === "running" || resolvedSelectedNode.status === "complete"
+                              ? "bg-emerald-400" : "bg-muted-foreground/40"
+                          }`} />
+                          <span className={`text-[10px] ${
+                            resolvedSelectedNode.status === "running" || resolvedSelectedNode.status === "complete"
+                              ? "text-emerald-400" : "text-muted-foreground/60"
+                          }`}>
+                            {resolvedSelectedNode.status === "running" || resolvedSelectedNode.status === "complete" ? "active" : "inactive"}
+                          </span>
+                        </p>
                       </div>
                     </div>
                     <button onClick={() => setSelectedNode(null)} className="p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors flex-shrink-0">
@@ -2472,7 +2536,7 @@ export default function Workspace() {
                   </div>
                   <div className="px-4 py-4 flex flex-col gap-3">
                     {(() => {
-                      const tc = selectedNode.triggerConfig as Record<string, unknown> | undefined;
+                      const tc = resolvedSelectedNode.triggerConfig as Record<string, unknown> | undefined;
                       const cron = tc?.cron as string | undefined;
                       const interval = tc?.interval_minutes as number | undefined;
                       const eventTypes = tc?.event_types as string[] | undefined;
@@ -2493,7 +2557,7 @@ export default function Workspace() {
                       ) : null;
                     })()}
                     {(() => {
-                      const nfi = (selectedNode.triggerConfig as Record<string, unknown> | undefined)?.next_fire_in as number | undefined;
+                      const nfi = (resolvedSelectedNode.triggerConfig as Record<string, unknown> | undefined)?.next_fire_in as number | undefined;
                       return nfi != null ? (
                         <div>
                           <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider mb-1.5">Next run</p>
@@ -2506,22 +2570,45 @@ export default function Workspace() {
                     <div>
                       <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider mb-1.5">Fires into</p>
                       <p className="text-xs text-foreground/80 font-mono bg-muted/30 rounded-lg px-3 py-2 border border-border/20">
-                        {selectedNode.next?.[0]?.split("-").map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(" ") || "—"}
+                        {resolvedSelectedNode.next?.[0]?.split("-").map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(" ") || "—"}
                       </p>
                     </div>
+                    {activeAgentState?.queenPhase !== "building" && (() => {
+                      const triggerIsActive = resolvedSelectedNode.status === "running" || resolvedSelectedNode.status === "complete";
+                      const triggerId = resolvedSelectedNode.id.replace("__trigger_", "");
+                      return (
+                        <div className="pt-1">
+                          <button
+                            onClick={async () => {
+                              const sessionId = activeAgentState?.sessionId;
+                              if (!sessionId) return;
+                              const action = triggerIsActive ? "Disable" : "Enable";
+                              await executionApi.chat(sessionId, `${action} trigger ${triggerId}`);
+                            }}
+                            className={`w-full text-xs px-3 py-2 rounded-lg border transition-colors ${
+                              triggerIsActive
+                                ? "border-red-500/30 text-red-400 hover:bg-red-500/10"
+                                : "border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/10"
+                            }`}
+                          >
+                            {triggerIsActive ? "Disable Trigger" : "Enable Trigger"}
+                          </button>
+                        </div>
+                      );
+                    })()}
                   </div>
                 </div>
               ) : (
                 <NodeDetailPanel
-                  node={selectedNode}
-                  nodeSpec={activeAgentState?.nodeSpecs.find(n => n.id === selectedNode.id) ?? null}
+                  node={resolvedSelectedNode}
+                  nodeSpec={activeAgentState?.nodeSpecs.find(n => n.id === resolvedSelectedNode.id) ?? null}
                   allNodeSpecs={activeAgentState?.nodeSpecs}
                   subagentReports={activeAgentState?.subagentReports}
                   sessionId={activeAgentState?.sessionId || undefined}
                   graphId={activeAgentState?.graphId || undefined}
                   workerSessionId={null}
-                  nodeLogs={activeAgentState?.nodeLogs[selectedNode.id] || []}
-                  actionPlan={activeAgentState?.nodeActionPlans[selectedNode.id]}
+                  nodeLogs={activeAgentState?.nodeLogs[resolvedSelectedNode.id] || []}
+                  actionPlan={activeAgentState?.nodeActionPlans[resolvedSelectedNode.id]}
                   onClose={() => setSelectedNode(null)}
                 />
               )}

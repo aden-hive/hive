@@ -53,6 +53,8 @@ class Session:
     # Active trigger tracking (IDs currently firing + their asyncio tasks)
     active_trigger_ids: set[str] = field(default_factory=set)
     active_timer_tasks: dict[str, asyncio.Task] = field(default_factory=dict)
+    # Monotonic timestamps for next trigger fire (mirrors AgentRuntime._timer_next_fire)
+    trigger_next_fire: dict[str, float] = field(default_factory=dict)
     # Session directory resumption:
     # When set, _start_queen writes queen conversations to this existing session's
     # directory instead of creating a new one.  This lets cold-restores accumulate

@@ -2,6 +2,7 @@
 
 import json
 import logging
+import time
 
 from aiohttp import web
 
@@ -116,6 +117,19 @@ async def handle_list_nodes(request: web.Request) -> web.Response:
         }
         for ep in reg.entry_points.values()
     ]
+    # Append hoisted triggers (stripped from worker runtime, stored on session)
+    for t in getattr(session, "available_triggers", {}).values():
+        entry = {
+            "id": t.id,
+            "name": t.description or t.id,
+            "entry_node": graph.entry_node,
+            "trigger_type": t.trigger_type,
+            "trigger_config": t.trigger_config,
+        }
+        mono = getattr(session, "trigger_next_fire", {}).get(t.id)
+        if mono is not None:
+            entry["next_fire_in"] = max(0.0, mono - time.monotonic())
+        entry_points.append(entry)
     return web.json_response(
         {
             "nodes": nodes,

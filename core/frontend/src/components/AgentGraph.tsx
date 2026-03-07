@@ -131,6 +131,14 @@ const triggerColors = {
   icon: "hsl(210,40%,55%)",
 };
 
+// Active trigger — brighter, more saturated blue
+const activeTriggerColors = {
+  bg: "hsl(210,30%,18%)",
+  border: "hsl(210,50%,50%)",
+  text: "hsl(210,40%,75%)",
+  icon: "hsl(210,60%,65%)",
+};
+
 const triggerIcons: Record<string, string> = {
   webhook: "\u26A1",  // lightning bolt
   timer: "\u23F1",    // stopwatch
@@ -417,10 +425,12 @@ export default function AgentGraph({ nodes, title: _title, onNodeClick, onRun, o
     const triggerAvailW = nodeW - 38;
     const triggerDisplayLabel = truncateLabel(node.label, triggerAvailW, triggerFontSize);
     const nextFireIn = node.triggerConfig?.next_fire_in as number | undefined;
+    const isActive = node.status === "running" || node.status === "complete";
+    const colors = isActive ? activeTriggerColors : triggerColors;
 
     // Format countdown for display below node
     let countdownLabel: string | null = null;
-    if (nextFireIn != null && nextFireIn > 0) {
+    if (isActive && nextFireIn != null && nextFireIn > 0) {
       const h = Math.floor(nextFireIn / 3600);
       const m = Math.floor((nextFireIn % 3600) / 60);
       const s = Math.floor(nextFireIn % 60);
@@ -429,24 +439,28 @@ export default function AgentGraph({ nodes, title: _title, onNodeClick, onRun, o
         : `next in ${m}m ${String(s).padStart(2, "0")}s`;
     }
 
+    // Status label below countdown
+    const statusLabel = isActive ? "active" : "inactive";
+    const statusColor = isActive ? "hsl(140,40%,50%)" : "hsl(210,20%,40%)";
+
     return (
       <g key={node.id} onClick={() => onNodeClick?.(node)} style={{ cursor: onNodeClick ? "pointer" : "default" }}>
         <title>{node.label}</title>
-        {/* Pill-shaped background with dashed border */}
+        {/* Pill-shaped background — solid border when active, dashed when inactive */}
         <rect
           x={pos.x} y={pos.y}
           width={nodeW} height={NODE_H}
           rx={NODE_H / 2}
-          fill={triggerColors.bg}
-          stroke={triggerColors.border}
-          strokeWidth={1}
-          strokeDasharray="4 2"
+          fill={colors.bg}
+          stroke={colors.border}
+          strokeWidth={isActive ? 1.5 : 1}
+          strokeDasharray={isActive ? undefined : "4 2"}
         />
 
         {/* Trigger type icon */}
         <text
           x={pos.x + 18} y={pos.y + NODE_H / 2}
-          fill={triggerColors.icon} fontSize={13}
+          fill={colors.icon} fontSize={13}
           textAnchor="middle" dominantBaseline="middle"
         >
           {icon}
@@ -455,7 +469,7 @@ export default function AgentGraph({ nodes, title: _title, onNodeClick, onRun, o
         {/* Label */}
         <text
           x={pos.x + 32} y={pos.y + NODE_H / 2}
-          fill={triggerColors.text}
+          fill={colors.text}
           fontSize={triggerFontSize}
           fontWeight={500}
           dominantBaseline="middle"
@@ -474,6 +488,15 @@ export default function AgentGraph({ nodes, title: _title, onNodeClick, onRun, o
             {countdownLabel}
           </text>
         )}
+
+        {/* Status label */}
+        <text
+          x={pos.x + nodeW / 2} y={pos.y + NODE_H + (countdownLabel ? 25 : 13)}
+          fill={statusColor} fontSize={9}
+          textAnchor="middle" opacity={0.8}
+        >
+          {statusLabel}
+        </text>
       </g>
     );
   };

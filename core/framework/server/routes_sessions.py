@@ -228,6 +228,21 @@ async def handle_get_live_session(request: web.Request) -> web.Response:
             }
             for ep in rt.get_entry_points()
         ]
+        # Append hoisted triggers (stripped from worker runtime, stored on session)
+        runner = getattr(session, "runner", None)
+        graph_entry = runner.graph.entry_node if runner else ""
+        for t in getattr(session, "available_triggers", {}).values():
+            entry = {
+                "id": t.id,
+                "name": t.description or t.id,
+                "entry_node": graph_entry,
+                "trigger_type": t.trigger_type,
+                "trigger_config": t.trigger_config,
+            }
+            mono = getattr(session, "trigger_next_fire", {}).get(t.id)
+            if mono is not None:
+                entry["next_fire_in"] = max(0.0, mono - time.monotonic())
+            data["entry_points"].append(entry)
         data["graphs"] = session.worker_runtime.list_graphs()
 
     return web.json_response(data)
@@ -351,25 +366,37 @@ async def handle_session_entry_points(request: web.Request) -> web.Response:
 
     rt = session.worker_runtime
     eps = rt.get_entry_points() if rt else []
-    return web.json_response(
+    entry_points = [
         {
-            "entry_points": [
-                {
-                    "id": ep.id,
-                    "name": ep.name,
-                    "entry_node": ep.entry_node,
-                    "trigger_type": ep.trigger_type,
-                    "trigger_config": ep.trigger_config,
-                    **(
-                        {"next_fire_in": nf}
-                        if rt and (nf := rt.get_timer_next_fire_in(ep.id)) is not None
-                        else {}
-                    ),
-                }
-                for ep in eps
-            ]
+            "id": ep.id,
+            "name": ep.name,
+            "entry_node": ep.entry_node,
+            "trigger_type": ep.trigger_type,
+            "trigger_config": ep.trigger_config,
+            **(
+                {"next_fire_in": nf}
+                if rt and (nf := rt.get_timer_next_fire_in(ep.id)) is not None
+                else {}
+            ),
         }
-    )
+        for ep in eps
+    ]
+    # Append hoisted triggers (stripped from worker runtime, stored on session)
+    runner = getattr(session, "runner", None)
+    graph_entry = runner.graph.entry_node if runner else ""
+    for t in getattr(session, "available_triggers", {}).values():
+        entry = {
+            "id": t.id,
+            "name": t.description or t.id,
+            "entry_node": graph_entry,
+            "trigger_type": t.trigger_type,
+            "trigger_config": t.trigger_config,
+        }
+        mono = getattr(session, "trigger_next_fire", {}).get(t.id)
+        if mono is not None:
+            entry["next_fire_in"] = max(0.0, mono - time.monotonic())
+        entry_points.append(entry)
+    return web.json_response({"entry_points": entry_points})
 
 
 async def handle_session_graphs(request: web.Request) -> web.Response:

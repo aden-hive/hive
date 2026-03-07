@@ -40,6 +40,11 @@ DEFAULT_EVENT_TYPES = [
     EventType.CREDENTIALS_REQUIRED,
     EventType.SUBAGENT_REPORT,
     EventType.QUEEN_PHASE_CHANGED,
+    EventType.TRIGGER_AVAILABLE,
+    EventType.TRIGGER_ACTIVATED,
+    EventType.TRIGGER_DEACTIVATED,
+    EventType.TRIGGER_FIRED,
+    EventType.TRIGGER_REMOVED,
 ]
 
 # Keepalive interval in seconds
