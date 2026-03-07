@@ -182,6 +182,12 @@ NEVER guess or fabricate tool names from memory.
 NEVER skip the first call. Always start with the full list \
 so you know what categories and tools exist before drilling in.
 
+## Synthetic Tools (NEVER put in tools=[])
+`set_output` and `escalate` are injected by the framework at runtime. \
+They are available to every node automatically. NEVER include them \
+in a NodeSpec's `tools` list — they are not MCP tools and will fail \
+validation. Only list tools discovered via list_agent_tools().
+
 ## Post-Build Validation
 After writing agent code, run a single comprehensive check:
   validate_agent_package("{name}")
@@ -389,21 +395,21 @@ use box-drawing characters and clear flow arrows:
 │  subagent: gcu_search   │
 │  input:  user_request   │
 │  tools: web_search,     │
-│         escalate        │
+│         write_file      │
 └────────────┬────────────┘
              │ on_success
              ▼
 ┌─────────────────────────┐
 │  work                   │
 │  subagent: gcu_interact │
-│  tools: save_data,      │
+│  tools: read_file,      │
 │         write_file      │
 └────────────┬────────────┘
              │ on_success
              ▼
 ┌─────────────────────────┐
 │  review                 │
-│  tools: set_output      │
+│  tools: write_file      │
 └────────────┬────────────┘
              │ on_failure
              └──────► back to gather
