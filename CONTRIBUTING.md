@@ -12,7 +12,7 @@ To prevent duplicate work and respect contributors' time, we require issue assig
 
 ### How to Claim an Issue
 
-1. **Find an Issue:** Browse existing issues or create a new one
+1. **Find an Issue:** Browse existing issues or create a new one (look for labels like `good-first-issue` if you're new)
 2. **Claim It:** Leave a comment (e.g., *"I'd like to work on this!"*)
 3. **Wait for Assignment:** A maintainer will assign you within 24 hours. Issues with reproducible steps or proposals are prioritized.
 4. **Submit Your PR:** Once assigned, you're ready to contribute
@@ -51,6 +51,8 @@ You may submit PRs without prior assignment for:
    ```
 8. Commit your changes following our commit conventions
 9. Push to your fork and submit a Pull Request
+
+If this is your first time, start with a documentation or micro-fix PR (see Exceptions section above).
 
 ## Development Setup
 
@@ -161,6 +163,6 @@ By submitting a Pull Request, you agree that your contributions will be licensed
 
 ## Questions?
 
-Feel free to open an issue for questions or join our [Discord community](https://discord.com/invite/MXE49hrKDk).
+If you're stuck or have questions, open an issue or join our [Discord community](https://discord.com/invite/MXE49hrKDk). First-timers welcome.
 
 Thank you for contributing!
