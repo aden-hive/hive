@@ -215,6 +215,15 @@ flowchart LR
 - [Configuration Guide](docs/configuration.md) - All configuration options
 - [Architecture Overview](docs/architecture/README.md) - System design and structure
 
+## Project Structure
+
+The Hive repository is organized into several main directories that support the multi-agent framework:
+
+- **core/** – Core runtime for the Hive multi-agent framework and graph executor
+- **tools/** – MCP tool integrations used by agents
+- **docs/** – Framework documentation, architecture, and developer guides
+- **scripts/** – Development and setup scripts used during installation and maintenance
+
 ## Roadmap
 
 Aden Hive Agent Framework aims to help developers build outcome-oriented, self-adaptive agents. See [roadmap.md](docs/roadmap.md) for details.
