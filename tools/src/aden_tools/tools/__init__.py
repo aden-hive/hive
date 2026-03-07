@@ -126,6 +126,7 @@ from .tech_stack_detector import register_tools as register_tech_stack_detector
 from .telegram_tool import register_tools as register_telegram
 from .terraform_tool import register_tools as register_terraform
 from .time_tool import register_tools as register_time
+from .ip_geolocation_tool import register_tools as register_ip_geolocation
 from .tines_tool import register_tools as register_tines
 from .trello_tool import register_tools as register_trello
 from .twilio_tool import register_tools as register_twilio
@@ -153,6 +154,7 @@ def _register_verified(
     register_web_scrape(mcp)
     register_pdf_read(mcp)
     register_time(mcp)
+    register_ip_geolocation(mcp)
     register_runtime_logs(mcp)
     register_wikipedia(mcp)
     register_arxiv(mcp)
