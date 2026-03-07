@@ -180,13 +180,15 @@ class BuilderQuery:
 
         # Find the first failed decision
         failed_decisions = [d for d in run.decisions if not d.was_successful]
+        root_cause = "Unknown"
         if not failed_decisions:
             failure_point = "Unknown - no decision marked as failed"
             root_cause = "Run failed but all decisions succeeded (external cause?)"
         else:
             first_failure = failed_decisions[0]
             failure_point = first_failure.summary_for_builder()
-            root_cause = first_failure.outcome.error if first_failure.outcome else "Unknown"
+            if first_failure.outcome and first_failure.outcome.error:
+                root_cause = first_failure.outcome.error
 
         # Build the decision chain leading to failure
         decision_chain = []
@@ -250,10 +252,14 @@ class BuilderQuery:
                     error = decision.outcome.error or "Unknown error"
                     failure_counts[error] += 1
 
-        common_failures = sorted(failure_counts.items(), key=lambda x: x[1], reverse=True)[:5]
+        common_failures = sorted(
+            failure_counts.items(), key=lambda x: x[1], reverse=True
+        )[:5]
 
         # Find problematic nodes
-        node_stats: dict[str, dict[str, int]] = defaultdict(lambda: {"total": 0, "failed": 0})
+        node_stats: dict[str, dict[str, int]] = defaultdict(
+            lambda: {"total": 0, "failed": 0}
+        )
         for run in runs:
             for decision in run.decisions:
                 node_stats[decision.node_id]["total"] += 1
@@ -389,8 +395,12 @@ class BuilderQuery:
         return {
             "node_id": node_id,
             "total_decisions": total_decisions,
-            "success_rate": successful_decisions / total_decisions if total_decisions > 0 else 0,
-            "avg_latency_ms": total_latency / total_decisions if total_decisions > 0 else 0,
+            "success_rate": (
+                successful_decisions / total_decisions if total_decisions > 0 else 0
+            ),
+            "avg_latency_ms": (
+                total_latency / total_decisions if total_decisions > 0 else 0
+            ),
             "total_tokens": total_tokens,
             "decision_type_distribution": dict(decision_types),
         }
@@ -409,7 +419,9 @@ class BuilderQuery:
             # Check if there were alternatives
             if len(decision.options) > 1:
                 chosen = decision.chosen_option
-                alternatives = [o for o in decision.options if o.id != decision.chosen_option_id]
+                alternatives = [
+                    o for o in decision.options if o.id != decision.chosen_option_id
+                ]
                 if alternatives:
                     alt_desc = alternatives[0].description
                     chosen_desc = chosen.description if chosen else "unknown"
@@ -427,7 +439,9 @@ class BuilderQuery:
             # Check for constraint issues
             if decision.active_constraints:
                 constraints = ", ".join(decision.active_constraints)
-                suggestions.append(f"Review constraints: {constraints} - may be too restrictive")
+                suggestions.append(
+                    f"Review constraints: {constraints} - may be too restrictive"
+                )
 
         # Check for reported problems with suggestions
         for problem in run.problems:
@@ -476,7 +490,9 @@ class BuilderQuery:
 
         # Decision count difference
         if len(run1.decisions) != len(run2.decisions):
-            differences.append(f"Decision count: {len(run1.decisions)} vs {len(run2.decisions)}")
+            differences.append(
+                f"Decision count: {len(run1.decisions)} vs {len(run2.decisions)}"
+            )
 
         # Find first divergence point
         for i, (d1, d2) in enumerate(zip(run1.decisions, run2.decisions, strict=False)):
