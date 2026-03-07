@@ -88,29 +88,12 @@ jobs:
                 });
               }
 
-              try {
-                await github.rest.issues.addLabels({
-                  owner: context.repo.owner,
-                  repo: context.repo.repo,
-                  issue_number: prNumber,
-                  labels: ['pr-requirements-warning'],
-                });
-              } catch (error) {
-                if (error.status === 422) {
-                  await github.rest.issues.createLabel({
-                    owner: context.repo.owner,
-                    repo: context.repo.repo,
-                    name: 'pr-requirements-warning',
-                    color: 'e11d48',
-                  });
-                  await github.rest.issues.addLabels({
-                    owner: context.repo.owner,
-                    repo: context.repo.repo,
-                    issue_number: prNumber,
-                    labels: ['pr-requirements-warning'],
-                  });
-                }
-              }
+              await github.rest.issues.addLabels({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: prNumber,
+                labels: ['pr-requirements-warning'],
+              });
 
               core.setFailed('PR must reference an issue');
               return;
@@ -197,29 +180,12 @@ jobs:
                 });
               }
 
-              try {
-                await github.rest.issues.addLabels({
-                  owner: context.repo.owner,
-                  repo: context.repo.repo,
-                  issue_number: prNumber,
-                  labels: ['pr-requirements-warning'],
-                });
-              } catch (error) {
-                if (error.status === 422) {
-                  await github.rest.issues.createLabel({
-                    owner: context.repo.owner,
-                    repo: context.repo.repo,
-                    name: 'pr-requirements-warning',
-                    color: 'e11d48',
-                  });
-                  await github.rest.issues.addLabels({
-                    owner: context.repo.owner,
-                    repo: context.repo.repo,
-                    issue_number: prNumber,
-                    labels: ['pr-requirements-warning'],
-                  });
-                }
-              }
+              await github.rest.issues.addLabels({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: prNumber,
+                labels: ['pr-requirements-warning'],
+              });
 
               core.setFailed('PR author must be assigned to the linked issue');
             } else {
