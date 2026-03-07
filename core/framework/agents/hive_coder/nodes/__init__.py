@@ -286,44 +286,21 @@ Never ask what you could answer yourself.
 
 ---
 
-## 2: Capability Assessment
+## 2: Capability Assessment & Gap Analysis
 
-**After the user responds, analyze the fit.** Present this assessment honestly:
+**After the user responds, assess fit and gaps together.** Be honest and specific. \
+Reference tools from list_agent_tools() AND built-in capabilities:
+- **GCU browser automation** (`node_type="gcu"`) provides full Playwright-based \
+browser control (navigation, clicking, typing, scrolling, JS-rendered pages, \
+multi-tab). Do NOT list browser automation as missing — use GCU nodes.
 
-> **Framework Fit Assessment**
->
-> Based on what you've described, here's my honest assessment of how well \
-this framework fits your use case:
->
-> **What Works Well (The Good):**
-> - [List 2-4 things the framework handles well for this use case]
-> - Examples: multi-turn conversations, human-in-the-loop review, \
-tool orchestration, structured outputs
->
-> **Limitations to Be Aware Of (The Bad):**
-> - [List 2-3 limitations that apply but are workable]
-> - Examples: LLM latency means not suitable for sub-second responses, \
-context window limits for very large documents, cost per run for heavy tool usage
->
-> **Potential Deal-Breakers (The Ugly):**
-> - [List any significant challenges or missing capabilities — be honest]
-> - Examples: no tool available for X, would require custom MCP server, framework not designed for Y
+Present a short **Framework Fit Assessment**:
+- **Works well**: 2-4 strengths for this use case
+- **Limitations**: 2-3 workable constraints (e.g., LLM latency, context limits)
+- **Gaps/Deal-breakers**: Only list genuinely missing capabilities after checking \
+both list_agent_tools() and built-in features like GCU
 
-**Be specific.** Reference the actual tools discovered in Step 1. If the user needs \
-`send_email` but it's not available, say so. If they need real-time streaming from a \
-database, explain that's not how the framework works.
-
-## 3: Gap Analysis
-
-**Identify specific gaps** between what user wants and what you can deliver:
-
-**Examples of gaps to identify:**
-- Missing tools (user needs X, but only Y and Z are available)
-- Scope issues (user wants to process 10,000 items, but LLM rate limits apply)
-- Data flow issues (user needs to persist state across runs, but sessions are isolated)
-- Latency requirements (user needs instant responses, but LLM calls take seconds)
-
-## 4: Design Graph and Propose
+## 3: Design Graph and Propose
 
 Act like an experienced AI solution architect Design the agent architecture:
 - Goal: id, name, description, 3-5 success criteria, 2-4 constraints
@@ -396,7 +373,7 @@ use `escalate` for blockers.
 Follow the graph with a brief summary of each node's purpose. \
 Get user approval before implementing.
 
-## 5: Get User Confirmation by ask_user
+## 4: Get User Confirmation by ask_user
 
 **WAIT for user response.**
 - If **Proceed**: Move to next implementing
@@ -405,7 +382,7 @@ Get user approval before implementing.
 - If **Reconsider**: Discuss alternatives. If they decide to proceed anyway, \
 that's their informed choice
 
-## 6. Implement
+## 5. Implement
 
 Call `initialize_agent_package(agent_name)` to generate all package files \
 from your graph session. The agent_name must be snake_case (e.g., "my_agent").
@@ -425,7 +402,7 @@ and AgentRuntimeConfig to agent.py manually
 
 Do NOT manually write these files from scratch — always use the tool.
 
-## 7. Verify and Load
+## 6. Verify and Load
 
 Call `validate_agent_package("{name}")` after initialization. \
 It runs structural checks (class validation, graph validation, tool \
@@ -436,43 +413,6 @@ When validation passes, immediately call \
 `load_built_agent("exports/{name}")` to load the agent into the \
 session. This switches to STAGING phase and shows the graph in the \
 visualizer. Do NOT wait for user input between validation and loading.
-
-## 8. Present
-
-Show the user what you built: agent name, goal summary, graph (same \
-ASCII style as Design), files created, validation status. The agent \
-is already loaded — offer to run it, revise, or build another.
-"""
-
-
-# ---------------------------------------------------------------------------
-# Coder-specific: set_output after presentation + standalone phase 7
-# ---------------------------------------------------------------------------
-
-_coder_completion = """
-After user confirms satisfaction:
-  set_output("agent_name", "the_agent_name")
-  set_output("validation_result", "valid")
-
-If building another agent, just start the loop again — no need to \
-set_output until the user is done.
-
-## 7. Live Test (optional)
-
-After the user approves, offer to load and run the agent in-session.
-
-If running with a queen (server/frontend):
-```
-load_built_agent("exports/{name}")  # loads as the session worker
-```
-The frontend updates automatically — the user sees the agent's graph, \
-the tab renames, and you can delegate via start_worker(task).
-
-If running standalone (TUI):
-```
-load_agent("exports/{name}")   # registers as secondary graph
-start_agent("{name}")           # triggers default entry point
-```
 """
 
 
@@ -483,7 +423,7 @@ start_agent("{name}")           # triggers default entry point
 # -- Phase-specific identities --
 
 _queen_identity_building = """\
-You are an experienced Solution Architect. "Queen" is the internal alias.\
+You are an experienced, responsible and curious Solution Architect. "Queen" is the internal alias.\
 You design and build production-ready agent systems \
 from natural language requirements. You understand the Hive framework at the \
 source code level and create agents that are robust, well-tested, and follow \
@@ -872,7 +812,6 @@ coder_node = NodeSpec(
         "production-ready Hive agent packages from natural language.\n"
         + _package_builder_knowledge
         + _gcu_building_section
-        + _coder_completion
         + _appendices
     ),
 )
