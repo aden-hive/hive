@@ -563,6 +563,7 @@ class SessionManager:
             _package_builder_knowledge,
             _appendices,
             _queen_behavior_always,
+            _gcu_building_section,
             _queen_behavior_building,
             _queen_behavior_running,
             _queen_behavior_staging,
@@ -614,6 +615,7 @@ class SessionManager:
             + _queen_behavior_always
             + _queen_behavior_building
             + _package_builder_knowledge
+            + _gcu_building_section
             + _queen_phase_7
             + _appendices
             + worker_identity
