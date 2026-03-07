@@ -148,8 +148,16 @@ def _dump_failed_request(
     error_type: str,
     attempt: int,
 ) -> str:
-    """Dump failed request to a file for debugging. Returns the file path."""
-    FAILED_REQUESTS_DIR.mkdir(parents=True, exist_ok=True)
+    """Dump failed request to a file for debugging. Returns the file path.
+
+    Gracefully handles read-only filesystems and permission errors —
+    the agent must never crash just because a debug dump cannot be written.
+    """
+    try:
+        FAILED_REQUESTS_DIR.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        logger.debug("Cannot create failed-requests dir %s: %s", FAILED_REQUESTS_DIR, exc)
+        return f"<unavailable: {exc}>"
 
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
     filename = f"{error_type}_{model.replace('/', '_')}_{timestamp}.json"
@@ -170,8 +178,13 @@ def _dump_failed_request(
         "temperature": kwargs.get("temperature"),
     }
 
-    with open(filepath, "w", encoding="utf-8") as f:
-        json.dump(dump_data, f, indent=2, default=str)
+    try:
+        with open(filepath, "w", encoding="utf-8") as f:
+            json.dump(dump_data, f, indent=2, default=str)
+    except OSError as exc:
+        # Read-only FS, disk full, permission denied — log and move on
+        logger.debug("Cannot write failed-request dump to %s: %s", filepath, exc)
+        return f"<unavailable: {exc}>"
 
     return str(filepath)
 
