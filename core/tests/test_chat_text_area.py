@@ -1,6 +1,9 @@
 """Tests for ChatTextArea key handling (Enter submits, Shift+Enter / Ctrl+J insert newlines)."""
 
 import pytest
+
+pytest.importorskip("textual")
+
 from textual.app import App, ComposeResult
 
 from framework.tui.widgets.chat_repl import ChatTextArea
