@@ -67,6 +67,21 @@ Use Hive when you need:
 - Multi-agent coordination
 - A framework that evolves with your goals
 
+## Who Should Use Hive?
+
+Hive is best suited for:
+
+- Developers building **production-grade AI agents**
+- Teams that need **self-healing, goal-driven systems**
+- Engineers who want to avoid hardcoding workflows
+- Organizations that require **observability, cost control, and reliability**
+
+Hive may NOT be ideal if you:
+
+- Only need simple prompt chaining
+- Want a lightweight scripting tool
+- Prefer fully manual agent orchestration
+
 ## Quick Links
 
 - **[Documentation](https://docs.adenhq.com/)** - Complete guides and API reference
