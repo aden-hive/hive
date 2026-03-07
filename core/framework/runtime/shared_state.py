@@ -322,9 +322,44 @@ class SharedStateManager:
         isolation: IsolationLevel,
         scope: StateScope = StateScope.EXECUTION,
     ) -> None:
-        """Write multiple values atomically."""
-        for key, value in updates.items():
-            await self.write(key, value, execution_id, stream_id, isolation, scope)
+        """Write multiple values atomically.
+
+        Under SYNCHRONIZED isolation, all keys are written under a single
+        lock acquisition so that concurrent readers never see a partial
+        batch.  ISOLATED and SHARED writes remain lock-free (matching the
+        single-key ``write()`` behaviour).
+        """
+        if isolation == IsolationLevel.SYNCHRONIZED and scope != StateScope.EXECUTION:
+            # Acquire all per-key locks in sorted order to avoid deadlocks,
+            # then perform every write while holding all of them.
+            locks = [
+                self._get_lock(scope, key, stream_id)
+                for key in sorted(updates)
+            ]
+            # Acquire sequentially in deterministic order
+            for lock in locks:
+                await lock.acquire()
+            try:
+                for key, value in updates.items():
+                    old_value = await self.read(key, execution_id, stream_id, isolation)
+                    await self._write_direct(key, value, execution_id, stream_id, scope)
+                    self._record_change(
+                        StateChange(
+                            key=key,
+                            old_value=old_value,
+                            new_value=value,
+                            scope=scope,
+                            execution_id=execution_id,
+                            stream_id=stream_id,
+                        )
+                    )
+            finally:
+                for lock in locks:
+                    lock.release()
+        else:
+            # Non-synchronized — sequential writes (no atomicity guarantee needed)
+            for key, value in updates.items():
+                await self.write(key, value, execution_id, stream_id, isolation, scope)
 
     # === UTILITY ===
 
