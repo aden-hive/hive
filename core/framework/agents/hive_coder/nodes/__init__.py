@@ -244,10 +244,6 @@ use them as your starting mental model and let their specifics override your def
 If they say "I need to monitor files and alert me," you know this probably involves: \
 watch patterns, triggers, notifications, and state tracking.
 
-**The key move**: Take your general knowledge of the domain and merge it with the \
-specifics they've given you. The result is a draft understanding that's 60-80% right \
-before you've asked a single question. Your questions close the remaining 20-40%.
-
 ---
 
 ### 1.3: Play Back a Proposed Model (Not a List of Questions)
@@ -353,7 +349,8 @@ database, explain that's not how the framework works.
 
 Act like an experienced AI solution architect Design the agent architecture:
 - Goal: id, name, description, 3-5 success criteria, 2-4 constraints
-- Nodes: **3-6 nodes** (warn if <3 or >6). \
+- Nodes: **3-6 nodes** (HARD RULE: never fewer than 3, never more than 6). \
+2 nodes is ALWAYS wrong — it means you under-decomposed the task. \
 Use as many nodes as the use case requires, but don't create nodes without \
 tools — merge them into nodes that do real work.
 - Edges: on_success for linear, conditional for routing
@@ -362,16 +359,19 @@ tools — merge them into nodes that do real work.
 **MERGE nodes when:**
 - Node has NO tools (pure LLM reasoning) → merge into predecessor/successor
 - Node sets only 1 trivial output → collapse into predecessor
-- Multiple consecutive autonomous nodes → combine into one rich node
-- A "report" or "summary" node → merge into a processing node and return results to queen
-- A "confirm" or "schedule" node that calls no external service → remove
 
-**SEPARATE nodes only when:**
-- Fundamentally different tool sets
+**SEPARATE nodes when:**
+- Fundamentally different tool sets (e.g., search vs. write vs. validate)
 - Fan-out parallelism (parallel branches MUST be separate)
+- Different failure/retry semantics (e.g., gather can retry, transform cannot)
+- Distinct phases of work (e.g., research, transform, validate, deliver)
+- A node would need more than ~5 tools — split by responsibility
 
 **Typical patterns (queen manages all user interaction):**
-- 3 nodes: `gather → work → review` (review loops back to gather if not satisfied)
+- 3 nodes: `gather → work → review`
+- 4 nodes: `gather → analyze → transform → review`
+- 5 nodes: `gather → research → transform → validate → deliver`
+- WRONG: 2 nodes where everything is crammed into one giant node
 - WRONG: 7 nodes where half have no tools and just do LLM reasoning
 
 Read reference agents before designing:
@@ -447,18 +447,23 @@ and AgentRuntimeConfig to agent.py manually
 
 Do NOT manually write these files from scratch — always use the tool.
 
-## 7. Verify
+## 7. Verify and Load
 
 Call `validate_agent_package("{name}")` after initialization. \
-It runs all checks (class validation, runner load, tool validation, \
-tests) and returns a consolidated result. If anything fails: read \
-the error, fix with edit_file, re-validate. Up to 3x.
+It runs structural checks (class validation, graph validation, tool \
+validation, tests) and returns a consolidated result. If anything \
+fails: read the error, fix with edit_file, re-validate. Up to 3x.
 
-## 6. Present
+When validation passes, immediately call \
+`load_built_agent("exports/{name}")` to load the agent into the \
+session. This switches to STAGING phase and shows the graph in the \
+visualizer. Do NOT wait for user input between validation and loading.
+
+## 8. Present
 
 Show the user what you built: agent name, goal summary, graph (same \
-ASCII style as Design), files created, validation status. Offer to \
-revise or build another.
+ASCII style as Design), files created, validation status. The agent \
+is already loaded — offer to run it, revise, or build another.
 """
 
 
@@ -825,13 +830,11 @@ _queen_behavior = (
 )
 
 _queen_phase_7 = """
-## 7. Load into Session
+## Running the Agent
 
-After building and verifying, load the agent into the current session:
-  load_built_agent("exports/{name}")
-This switches to STAGING phase — the user sees the agent's graph and \
-the tab name updates. Then call run_agent_with_input(task) to start it. \
-Do NOT tell the user to run `python -m {name} run` — load and run it here.
+After validation passes and load_built_agent succeeds (STAGING phase), \
+offer to run the agent. Call run_agent_with_input(task) to start it. \
+Do NOT tell the user to run `python -m {name} run` — run it here.
 """
 
 _queen_style = """
@@ -881,6 +884,7 @@ coder_node = NodeSpec(
         "You are Hive Coder, the best agent-building coding agent. You build "
         "production-ready Hive agent packages from natural language.\n"
         + _package_builder_knowledge
+        + _gcu_building_section
         + _coder_completion
         + _appendices
     ),
@@ -952,8 +956,8 @@ queen_node = NodeSpec(
     client_facing=True,
     max_node_visits=0,
     input_keys=["greeting"],
-    output_keys=["session_status"],
-    nullable_output_keys=["session_status"],
+    output_keys=[], # Queen should never have this
+    nullable_output_keys=[], # Queen should never have this
     success_criteria=(
         "User's intent is understood, coding tasks are completed correctly, "
         "and the worker is managed effectively when delegated to."
