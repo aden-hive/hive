@@ -51,7 +51,8 @@ The key is pre-injected into the session environment and tools read it automatic
         client_facing=True,
         max_node_visits=0,
         input_keys=[],
-        output_keys=[],
+        output_keys=["test_result"],
+        nullable_output_keys=["test_result"],
         tools=tools,
         system_prompt=f"""\
 You are a credential tester for the {account_label}: {provider}/{alias}{detail}

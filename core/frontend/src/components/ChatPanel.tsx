@@ -38,8 +38,8 @@ interface ChatPanelProps {
   onQuestionSubmit?: (answer: string, isOther: boolean) => void;
   /** Called when user dismisses the pending question without answering */
   onQuestionDismiss?: () => void;
-  /** Queen operating mode — shown as a tag on queen messages */
-  queenMode?: "building" | "staging" | "running";
+  /** Queen operating phase — shown as a tag on queen messages */
+  queenPhase?: "building" | "staging" | "running";
 }
 
 const queenColor = "hsl(45,95%,58%)";
@@ -144,7 +144,7 @@ function ToolActivityRow({ content }: { content: string }) {
   );
 }
 
-const MessageBubble = memo(function MessageBubble({ msg, queenMode }: { msg: ChatMessage; queenMode?: "building" | "staging" | "running" }) {
+const MessageBubble = memo(function MessageBubble({ msg, queenPhase }: { msg: ChatMessage; queenPhase?: "building" | "staging" | "running" }) {
   const isUser = msg.type === "user";
   const isQueen = msg.role === "queen";
   const color = getColor(msg.agent, msg.role);
@@ -200,11 +200,11 @@ const MessageBubble = memo(function MessageBubble({ msg, queenMode }: { msg: Cha
             }`}
           >
             {isQueen
-              ? queenMode === "running"
-                ? "running mode"
-                : queenMode === "staging"
-                  ? "staging mode"
-                  : "building mode"
+              ? queenPhase === "running"
+                ? "running phase"
+                : queenPhase === "staging"
+                  ? "staging phase"
+                  : "building phase"
               : "Worker"}
           </span>
         </div>
@@ -218,9 +218,9 @@ const MessageBubble = memo(function MessageBubble({ msg, queenMode }: { msg: Cha
       </div>
     </div>
   );
-}, (prev, next) => prev.msg.id === next.msg.id && prev.msg.content === next.msg.content && prev.queenMode === next.queenMode);
+}, (prev, next) => prev.msg.id === next.msg.id && prev.msg.content === next.msg.content && prev.queenPhase === next.queenPhase);
 
-export default function ChatPanel({ messages, onSend, isWaiting, isWorkerWaiting, isBusy, activeThread, disabled, onCancel, pendingQuestion, pendingOptions, onQuestionSubmit, onQuestionDismiss, queenMode }: ChatPanelProps) {
+export default function ChatPanel({ messages, onSend, isWaiting, isWorkerWaiting, isBusy, activeThread, disabled, onCancel, pendingQuestion, pendingOptions, onQuestionSubmit, onQuestionDismiss, queenPhase }: ChatPanelProps) {
   const [input, setInput] = useState("");
   const [readMap, setReadMap] = useState<Record<string, number>>({});
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -280,11 +280,12 @@ export default function ChatPanel({ messages, onSend, isWaiting, isWorkerWaiting
       <div ref={scrollRef} onScroll={handleScroll} className="flex-1 overflow-auto px-5 py-4 space-y-3">
         {threadMessages.map((msg) => (
           <div key={msg.id}>
-            <MessageBubble msg={msg} queenMode={queenMode} />
+            <MessageBubble msg={msg} queenPhase={queenPhase} />
           </div>
         ))}
 
-        {isWaiting && (
+        {/* Show typing indicator while waiting for first queen response (disabled + empty chat) */}
+        {(isWaiting || (disabled && threadMessages.length === 0)) && (
           <div className="flex gap-3">
             <div
               className="flex-shrink-0 w-9 h-9 rounded-xl flex items-center justify-center"

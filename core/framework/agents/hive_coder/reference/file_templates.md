@@ -84,35 +84,36 @@ Work in phases:
     tools=["web_search", "web_scrape", "save_data", "load_data", "list_data_files"],
 )
 
-# Node 3: Review (client-facing)
-review_node = NodeSpec(
-    id="review",
-    name="Review",
-    description="Present results for user approval",
+# Node 2: Handoff (autonomous)
+handoff_node = NodeSpec(
+    id="handoff",
+    name="Handoff",
+    description="Prepare worker results for queen review",
     node_type="event_loop",
-    client_facing=True,
+    client_facing=False,
     max_node_visits=0,
     input_keys=["results", "user_request"],
-    output_keys=["next_action", "feedback"],
-    nullable_output_keys=["feedback"],
-    success_criteria="User has reviewed and decided next steps.",
+    output_keys=["next_action", "feedback", "worker_summary"],
+    nullable_output_keys=["feedback", "worker_summary"],
+    success_criteria="Results are packaged for queen decision-making.",
     system_prompt="""\
-Present the results to the user.
+Do NOT talk to the user directly. The queen is the only user interface.
 
-**STEP 1 — Present (text only, NO tool calls):**
-1. Summary of work done
-2. Key results
-3. Ask: satisfied, or want changes?
+If blocked by tool failures, missing credentials, or unclear constraints, call:
+- escalate(reason, context)
+Then set:
+- set_output("next_action", "escalated")
+- set_output("feedback", "what help is needed")
 
-**STEP 2 — After user responds, call set_output:**
-- set_output("next_action", "done")        — if satisfied
-- set_output("next_action", "revise")      — if changes needed
-- set_output("feedback", "what to change") — only if revising
+Otherwise summarize findings for queen and set:
+- set_output("worker_summary", "short summary for queen")
+- set_output("next_action", "done") or set_output("next_action", "revise")
+- set_output("feedback", "what to revise") only when revising
 """,
     tools=[],
 )
 
-__all__ = ["process_node", "review_node"]
+__all__ = ["process_node", "handoff_node"]
 ```
 
 ## agent.py
@@ -132,7 +133,7 @@ from framework.runtime.agent_runtime import AgentRuntime, create_agent_runtime
 from framework.runtime.execution_stream import EntryPointSpec
 
 from .config import default_config, metadata
-from .nodes import process_node, review_node
+from .nodes import process_node, handoff_node
 
 # Goal definition
 goal = Goal(
@@ -149,18 +150,22 @@ goal = Goal(
 )
 
 # Node list
-nodes = [process_node, review_node]
+nodes = [process_node, handoff_node]
 
 # Edge definitions
 edges = [
-    EdgeSpec(id="process-to-review", source="process", target="review",
+    EdgeSpec(id="process-to-handoff", source="process", target="handoff",
              condition=EdgeCondition.ON_SUCCESS, priority=1),
     # Feedback loop — revise results
-    EdgeSpec(id="review-to-process", source="review", target="process",
+    EdgeSpec(id="handoff-to-process", source="handoff", target="process",
              condition=EdgeCondition.CONDITIONAL,
              condition_expr="str(next_action).lower() == 'revise'", priority=2),
-    # Loop back for next task (queen sends new input)
-    EdgeSpec(id="review-done", source="review", target="process",
+    # Escalation loop — queen injects guidance and worker retries
+    EdgeSpec(id="handoff-escalated", source="handoff", target="process",
+             condition=EdgeCondition.CONDITIONAL,
+             condition_expr="str(next_action).lower() == 'escalated'", priority=3),
+    # Loop back for next task after queen decision
+    EdgeSpec(id="handoff-done", source="handoff", target="process",
              condition=EdgeCondition.CONDITIONAL,
              condition_expr="str(next_action).lower() == 'done'", priority=1),
 ]
@@ -267,16 +272,60 @@ class MyAgent:
         }
 
     def validate(self):
+        """Validate graph wiring and entry-point contract."""
         errors, warnings = [], []
         node_ids = {n.id for n in self.nodes}
         for e in self.edges:
-            if e.source not in node_ids: errors.append(f"Edge {e.id}: source '{e.source}' not found")
-            if e.target not in node_ids: errors.append(f"Edge {e.id}: target '{e.target}' not found")
-        if self.entry_node not in node_ids: errors.append(f"Entry node '{self.entry_node}' not found")
+            if e.source not in node_ids:
+                errors.append(f"Edge {e.id}: source '{e.source}' not found")
+            if e.target not in node_ids:
+                errors.append(f"Edge {e.id}: target '{e.target}' not found")
+        if self.entry_node not in node_ids:
+            errors.append(f"Entry node '{self.entry_node}' not found")
         for t in self.terminal_nodes:
-            if t not in node_ids: errors.append(f"Terminal node '{t}' not found")
-        for ep_id, nid in self.entry_points.items():
-            if nid not in node_ids: errors.append(f"Entry point '{ep_id}' references unknown node '{nid}'")
+            if t not in node_ids:
+                errors.append(f"Terminal node '{t}' not found")
+
+        if not isinstance(self.entry_points, dict):
+            errors.append(
+                "Invalid entry_points: expected dict[str, str] like "
+                "{'start': '<entry-node-id>'}. "
+                f"Got {type(self.entry_points).__name__}. "
+                "Fix agent.py: set entry_points = {'start': '<entry-node-id>'}."
+            )
+        else:
+            if "start" not in self.entry_points:
+                errors.append(
+                    "entry_points must include 'start' mapped to entry_node. "
+                    "Example: {'start': '<entry-node-id>'}."
+                )
+            else:
+                start_node = self.entry_points.get("start")
+                if start_node != self.entry_node:
+                    errors.append(
+                        f"entry_points['start'] points to '{start_node}' "
+                        f"but entry_node is '{self.entry_node}'. Keep these aligned."
+                    )
+
+            for ep_id, nid in self.entry_points.items():
+                if not isinstance(ep_id, str):
+                    errors.append(
+                        f"Invalid entry_points key {ep_id!r} "
+                        f"({type(ep_id).__name__}). Entry point names must be strings."
+                    )
+                    continue
+                if not isinstance(nid, str):
+                    errors.append(
+                        f"Invalid entry_points['{ep_id}']={nid!r} "
+                        f"({type(nid).__name__}). Node ids must be strings."
+                    )
+                    continue
+                if nid not in node_ids:
+                    errors.append(
+                        f"Entry point '{ep_id}' references unknown node '{nid}'. "
+                        f"Known nodes: {sorted(node_ids)}"
+                    )
+
         return {"valid": len(errors) == 0, "errors": errors, "warnings": warnings}
 
 
@@ -509,6 +558,9 @@ if __name__ == "__main__":
 ```
 
 ## mcp_servers.json
+
+> **Auto-generated.** `initialize_agent_package` creates this file with hive-tools
+> as the default. Only edit manually to add additional MCP servers.
 
 ```json
 {

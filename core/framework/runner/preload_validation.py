@@ -40,8 +40,10 @@ def validate_graph_structure(graph: GraphSpec) -> list[str]:
 
     Delegates to GraphSpec.validate() which checks entry/terminal nodes,
     edge references, reachability, fan-out rules, and GCU constraints.
+    Returns only errors (warnings are not blocking).
     """
-    return graph.validate()
+    result = graph.validate()
+    return result["errors"]
 
 
 def validate_credentials(
