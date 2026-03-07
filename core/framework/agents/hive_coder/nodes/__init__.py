@@ -955,8 +955,8 @@ queen_node = NodeSpec(
     client_facing=True,
     max_node_visits=0,
     input_keys=["greeting"],
-    output_keys=["session_status"],
-    nullable_output_keys=["session_status"],
+    output_keys=[], # Queen should never have this
+    nullable_output_keys=[], # Queen should never have this
     success_criteria=(
         "User's intent is understood, coding tasks are completed correctly, "
         "and the worker is managed effectively when delegated to."
