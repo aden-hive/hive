@@ -26,7 +26,6 @@ from framework.graph.node import (
     NodeSpec,
     SharedMemory,
 )
-from framework.graph.output_cleaner import CleansingConfig, OutputCleaner
 from framework.graph.validator import OutputValidator
 from framework.llm.provider import LLMProvider, Tool
 from framework.observability import set_trace_context
@@ -126,7 +125,6 @@ class GraphExecutor:
         tool_executor: Callable | None = None,
         node_registry: dict[str, NodeProtocol] | None = None,
         approval_callback: Callable | None = None,
-        cleansing_config: CleansingConfig | None = None,
         enable_parallel_execution: bool = True,
         parallel_config: ParallelExecutionConfig | None = None,
         event_bus: Any | None = None,
@@ -139,6 +137,7 @@ class GraphExecutor:
         accounts_data: list[dict] | None = None,
         tool_provider_map: dict[str, str] | None = None,
         dynamic_tools_provider: Callable | None = None,
+        dynamic_prompt_provider: Callable | None = None,
     ):
         """
         Initialize the executor.
@@ -150,7 +149,6 @@ class GraphExecutor:
             tool_executor: Function to execute tools
             node_registry: Custom node implementations by ID
             approval_callback: Optional callback for human-in-the-loop approval
-            cleansing_config: Optional output cleansing configuration
             enable_parallel_execution: Enable parallel fan-out execution (default True)
             parallel_config: Configuration for parallel execution behavior
             event_bus: Optional event bus for emitting node lifecycle events
@@ -163,6 +161,8 @@ class GraphExecutor:
             tool_provider_map: Tool name to provider name mapping for account routing
             dynamic_tools_provider: Optional callback returning current
                 tool list (for mode switching)
+            dynamic_prompt_provider: Optional callback returning current
+                system prompt (for phase switching)
         """
         self.runtime = runtime
         self.llm = llm
@@ -182,14 +182,7 @@ class GraphExecutor:
         self.accounts_data = accounts_data
         self.tool_provider_map = tool_provider_map
         self.dynamic_tools_provider = dynamic_tools_provider
-
-        # Initialize output cleaner — uses its own dedicated fast model (CEREBRAS_API_KEY),
-        # never the main agent LLM. Passing the main LLM here would cause expensive
-        # Anthropic calls for output cleaning whenever ANTHROPIC_API_KEY is set.
-        self.cleansing_config = cleansing_config or CleansingConfig()
-        self.output_cleaner = OutputCleaner(
-            config=self.cleansing_config,
-        )
+        self.dynamic_prompt_provider = dynamic_prompt_provider
 
         # Parallel execution settings
         self.enable_parallel_execution = enable_parallel_execution
@@ -417,6 +410,7 @@ class GraphExecutor:
         input_data: dict[str, Any] | None = None,
         session_state: dict[str, Any] | None = None,
         checkpoint_config: "CheckpointConfig | None" = None,
+        validate_graph: bool = True,
     ) -> ExecutionResult:
         """
         Execute a graph for a goal.
@@ -426,6 +420,8 @@ class GraphExecutor:
             goal: The goal driving execution
             input_data: Initial input data
             session_state: Optional session state to resume from (with paused_at, memory, etc.)
+            validate_graph: If False, skip graph validation (for test graphs that
+                intentionally break rules)
 
         Returns:
             ExecutionResult with output and metrics
@@ -434,12 +430,13 @@ class GraphExecutor:
         set_trace_context(agent_id=graph.id)
 
         # Validate graph
-        errors = graph.validate()
-        if errors:
-            return ExecutionResult(
-                success=False,
-                error=f"Invalid graph: {errors}",
-            )
+        if validate_graph:
+            result = graph.validate()
+            if result["errors"]:
+                return ExecutionResult(
+                    success=False,
+                    error=f"Invalid graph: {result['errors']}",
+                )
 
         # Validate tool availability
         tool_errors = self._validate_tools(graph)
@@ -1801,6 +1798,7 @@ class GraphExecutor:
             all_tools=list(self.tools),  # Full catalog for subagent tool resolution
             shared_node_registry=self.node_registry,  # For subagent escalation routing
             dynamic_tools_provider=self.dynamic_tools_provider,
+            dynamic_prompt_provider=self.dynamic_prompt_provider,
         )
 
     VALID_NODE_TYPES = {
@@ -1877,6 +1875,7 @@ class GraphExecutor:
                     max_history_tokens=lc.get("max_history_tokens", 32000),
                     max_tool_result_chars=lc.get("max_tool_result_chars", 30_000),
                     spillover_dir=spillover,
+                    hooks=lc.get("hooks", {}),
                 ),
                 tool_executor=self.tool_executor,
                 conversation_store=conv_store,
@@ -1912,52 +1911,6 @@ class GraphExecutor:
                 source_node_name=current_node_spec.name if current_node_spec else current_node_id,
                 target_node_name=target_node_spec.name if target_node_spec else edge.target,
             ):
-                # Validate and clean output before mapping inputs.
-                # Use full memory state (not just result.output) because
-                # target input_keys may come from earlier nodes in the
-                # graph, not only from the immediate source node.
-                if self.cleansing_config.enabled and target_node_spec:
-                    output_to_validate = memory.read_all()
-
-                    validation = self.output_cleaner.validate_output(
-                        output=output_to_validate,
-                        source_node_id=current_node_id,
-                        target_node_spec=target_node_spec,
-                    )
-
-                    if not validation.valid:
-                        self.logger.warning(f"⚠ Output validation failed: {validation.errors}")
-
-                        # Clean the output
-                        cleaned_output = await self.output_cleaner.clean_output(
-                            output=output_to_validate,
-                            source_node_id=current_node_id,
-                            target_node_spec=target_node_spec,
-                            validation_errors=validation.errors,
-                        )
-
-                        # Update result with cleaned output
-                        result.output = cleaned_output
-
-                        # Write cleaned output back to memory (skip validation for LLM output)
-                        for key, value in cleaned_output.items():
-                            memory.write(key, value, validate=False)
-
-                        # Revalidate
-                        revalidation = self.output_cleaner.validate_output(
-                            output=cleaned_output,
-                            source_node_id=current_node_id,
-                            target_node_spec=target_node_spec,
-                        )
-
-                        if revalidation.valid:
-                            self.logger.info("✓ Output cleaned and validated successfully")
-                        else:
-                            self.logger.error(
-                                f"✗ Cleaning failed, errors remain: {revalidation.errors}"
-                            )
-                            # Continue anyway if fallback_to_raw is True
-
                 # Map inputs (skip validation for processed LLM output)
                 mapped = edge.map_inputs(result.output, memory.read_all())
                 for key, value in mapped.items():
@@ -2119,32 +2072,6 @@ class GraphExecutor:
             branch.status = "running"
 
             try:
-                # Validate and clean output before mapping inputs (same as _follow_edges).
-                # Use full memory state since target input_keys may come
-                # from earlier nodes, not just the immediate source.
-                if self.cleansing_config.enabled and node_spec:
-                    mem_snapshot = memory.read_all()
-                    validation = self.output_cleaner.validate_output(
-                        output=mem_snapshot,
-                        source_node_id=source_node_spec.id if source_node_spec else "unknown",
-                        target_node_spec=node_spec,
-                    )
-
-                    if not validation.valid:
-                        self.logger.warning(
-                            f"⚠ Output validation failed for branch "
-                            f"{branch.node_id}: {validation.errors}"
-                        )
-                        cleaned_output = await self.output_cleaner.clean_output(
-                            output=mem_snapshot,
-                            source_node_id=source_node_spec.id if source_node_spec else "unknown",
-                            target_node_spec=node_spec,
-                            validation_errors=validation.errors,
-                        )
-                        # Write cleaned output to memory
-                        for key, value in cleaned_output.items():
-                            await memory.write_async(key, value)
-
                 # Map inputs via edge
                 mapped = branch.edge.map_inputs(source_result.output, memory.read_all())
                 for key, value in mapped.items():

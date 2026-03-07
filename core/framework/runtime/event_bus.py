@@ -137,8 +137,11 @@ class EventType(StrEnum):
     WORKER_LOADED = "worker_loaded"
     CREDENTIALS_REQUIRED = "credentials_required"
 
-    # Queen mode changes (building ↔ running)
-    QUEEN_MODE_CHANGED = "queen_mode_changed"
+    # Queen phase changes (building <-> staging <-> running)
+    QUEEN_PHASE_CHANGED = "queen_phase_changed"
+
+    # Queen thinking hook — persona selected for the current building session
+    QUEEN_PERSONA_SELECTED = "queen_persona_selected"
 
     # Subagent reports (one-way progress updates from sub-agents)
     SUBAGENT_REPORT = "subagent_report"

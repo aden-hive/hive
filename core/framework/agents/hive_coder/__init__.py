@@ -7,9 +7,7 @@ from natural language specifications.
 """
 
 from .agent import (
-    HiveCoderAgent,
     conversation_mode,
-    default_agent,
     edges,
     entry_node,
     entry_points,
@@ -25,8 +23,6 @@ from .config import AgentMetadata, RuntimeConfig, default_config, metadata
 __version__ = "1.0.0"
 
 __all__ = [
-    "HiveCoderAgent",
-    "default_agent",
     "goal",
     "nodes",
     "edges",

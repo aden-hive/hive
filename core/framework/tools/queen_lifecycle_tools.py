@@ -37,6 +37,7 @@ import asyncio
 import json
 import logging
 from dataclasses import dataclass, field
+from datetime import UTC
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -67,64 +68,77 @@ class WorkerSessionAdapter:
 
 
 @dataclass
-class QueenModeState:
-    """Mutable state container for queen operating mode.
+class QueenPhaseState:
+    """Mutable state container for queen operating phase.
 
-    Three modes: building → staging → running.
+    Three phases: building → staging → running.
     Shared between the dynamic_tools_provider callback and tool handlers
-    that trigger mode transitions.
+    that trigger phase transitions.
     """
 
-    mode: str = "building"  # "building", "staging", or "running"
+    phase: str = "building"  # "building", "staging", or "running"
     building_tools: list = field(default_factory=list)  # list[Tool]
     staging_tools: list = field(default_factory=list)  # list[Tool]
     running_tools: list = field(default_factory=list)  # list[Tool]
     inject_notification: Any = None  # async (str) -> None
-    event_bus: Any = None  # EventBus — for emitting QUEEN_MODE_CHANGED events
+    event_bus: Any = None  # EventBus — for emitting QUEEN_PHASE_CHANGED events
+
+    # Phase-specific prompts (set by session_manager after construction)
+    prompt_building: str = ""
+    prompt_staging: str = ""
+    prompt_running: str = ""
 
     def get_current_tools(self) -> list:
-        """Return tools for the current mode."""
-        if self.mode == "running":
+        """Return tools for the current phase."""
+        if self.phase == "running":
             return list(self.running_tools)
-        if self.mode == "staging":
+        if self.phase == "staging":
             return list(self.staging_tools)
         return list(self.building_tools)
 
-    async def _emit_mode_event(self) -> None:
-        """Publish a QUEEN_MODE_CHANGED event so the frontend updates the tag."""
+    def get_current_prompt(self) -> str:
+        """Return the system prompt for the current phase."""
+        if self.phase == "running":
+            return self.prompt_running
+        if self.phase == "staging":
+            return self.prompt_staging
+        return self.prompt_building
+
+    async def _emit_phase_event(self) -> None:
+        """Publish a QUEEN_PHASE_CHANGED event so the frontend updates the tag."""
         if self.event_bus is not None:
             await self.event_bus.publish(
                 AgentEvent(
-                    type=EventType.QUEEN_MODE_CHANGED,
+                    type=EventType.QUEEN_PHASE_CHANGED,
                     stream_id="queen",
-                    data={"mode": self.mode},
+                    data={"phase": self.phase},
                 )
             )
 
     async def switch_to_running(self, source: str = "tool") -> None:
-        """Switch to running mode and notify the queen.
+        """Switch to running phase and notify the queen.
 
         Args:
             source: Who triggered the switch — "tool" (queen LLM),
                 "frontend" (user clicked Run), or "auto" (system).
         """
-        if self.mode == "running":
+        if self.phase == "running":
             return
-        self.mode = "running"
+        self.phase = "running"
         tool_names = [t.name for t in self.running_tools]
-        logger.info("Queen mode → running (source=%s, tools: %s)", source, tool_names)
-        await self._emit_mode_event()
+        logger.info("Queen phase → running (source=%s, tools: %s)", source, tool_names)
+        await self._emit_phase_event()
         if self.inject_notification:
             if source == "frontend":
                 msg = (
-                    "[MODE CHANGE] The user clicked Run in the UI. Switched to RUNNING mode. "
+                    "[PHASE CHANGE] The user clicked Run in the UI. Switched to RUNNING phase. "
                     "Worker is now executing. You have monitoring/lifecycle tools: "
                     + ", ".join(tool_names)
                     + "."
                 )
             else:
                 msg = (
-                    "[MODE CHANGE] Switched to RUNNING mode. "
+                    "[PHASE CHANGE] Switched to RUNNING phase. "
                     "Worker is executing. You now have monitoring/lifecycle tools: "
                     + ", ".join(tool_names)
                     + "."
@@ -132,33 +146,33 @@ class QueenModeState:
             await self.inject_notification(msg)
 
     async def switch_to_staging(self, source: str = "tool") -> None:
-        """Switch to staging mode and notify the queen.
+        """Switch to staging phase and notify the queen.
 
         Args:
             source: Who triggered the switch — "tool", "frontend", or "auto".
         """
-        if self.mode == "staging":
+        if self.phase == "staging":
             return
-        self.mode = "staging"
+        self.phase = "staging"
         tool_names = [t.name for t in self.staging_tools]
-        logger.info("Queen mode → staging (source=%s, tools: %s)", source, tool_names)
-        await self._emit_mode_event()
+        logger.info("Queen phase → staging (source=%s, tools: %s)", source, tool_names)
+        await self._emit_phase_event()
         if self.inject_notification:
             if source == "frontend":
                 msg = (
-                    "[MODE CHANGE] The user stopped the worker from the UI. "
-                    "Switched to STAGING mode. Agent is still loaded. "
+                    "[PHASE CHANGE] The user stopped the worker from the UI. "
+                    "Switched to STAGING phase. Agent is still loaded. "
                     "Available tools: " + ", ".join(tool_names) + "."
                 )
             elif source == "auto":
                 msg = (
-                    "[MODE CHANGE] Worker execution completed. Switched to STAGING mode. "
+                    "[PHASE CHANGE] Worker execution completed. Switched to STAGING phase. "
                     "Agent is still loaded. Call run_agent_with_input(task) to run again. "
                     "Available tools: " + ", ".join(tool_names) + "."
                 )
             else:
                 msg = (
-                    "[MODE CHANGE] Switched to STAGING mode. "
+                    "[PHASE CHANGE] Switched to STAGING phase. "
                     "Agent loaded and ready. Call run_agent_with_input(task) to start, "
                     "or stop_worker_and_edit() to go back to building. "
                     "Available tools: " + ", ".join(tool_names) + "."
@@ -166,20 +180,20 @@ class QueenModeState:
             await self.inject_notification(msg)
 
     async def switch_to_building(self, source: str = "tool") -> None:
-        """Switch to building mode and notify the queen.
+        """Switch to building phase and notify the queen.
 
         Args:
             source: Who triggered the switch — "tool", "frontend", or "auto".
         """
-        if self.mode == "building":
+        if self.phase == "building":
             return
-        self.mode = "building"
+        self.phase = "building"
         tool_names = [t.name for t in self.building_tools]
-        logger.info("Queen mode → building (source=%s, tools: %s)", source, tool_names)
-        await self._emit_mode_event()
+        logger.info("Queen phase → building (source=%s, tools: %s)", source, tool_names)
+        await self._emit_phase_event()
         if self.inject_notification:
             await self.inject_notification(
-                "[MODE CHANGE] Switched to BUILDING mode. "
+                "[PHASE CHANGE] Switched to BUILDING phase. "
                 "Lifecycle tools removed. Full coding tools restored. "
                 "Call load_built_agent(path) when ready to stage."
             )
@@ -240,7 +254,7 @@ def register_queen_lifecycle_tools(
     session_manager: Any = None,
     manager_session_id: str | None = None,
     # Mode switching
-    mode_state: QueenModeState | None = None,
+    phase_state: QueenPhaseState | None = None,
 ) -> int:
     """Register queen lifecycle tools.
 
@@ -257,9 +271,9 @@ def register_queen_lifecycle_tools(
             for ``load_built_agent`` to hot-load a worker.
         manager_session_id: (Server only) The session's ID in the manager,
             used with ``session_manager.load_worker()``.
-        mode_state: (Optional) Mutable mode state for building/running
-            mode switching. When provided, load_built_agent switches to
-            running mode and stop_worker_and_edit switches to building mode.
+        phase_state: (Optional) Mutable phase state for building/running
+            phase switching. When provided, load_built_agent switches to
+            running phase and stop_worker_and_edit switches to building phase.
 
     Returns the number of tools registered.
     """
@@ -470,17 +484,17 @@ def register_queen_lifecycle_tools(
     # --- stop_worker_and_edit -------------------------------------------------
 
     async def stop_worker_and_edit() -> str:
-        """Stop the worker and switch to building mode for editing the agent."""
+        """Stop the worker and switch to building phase for editing the agent."""
         stop_result = await stop_worker()
 
-        # Switch to building mode
-        if mode_state is not None:
-            await mode_state.switch_to_building()
+        # Switch to building phase
+        if phase_state is not None:
+            await phase_state.switch_to_building()
 
         result = json.loads(stop_result)
-        result["mode"] = "building"
+        result["phase"] = "building"
         result["message"] = (
-            "Worker stopped. You are now in building mode. "
+            "Worker stopped. You are now in building phase. "
             "Use your coding tools to modify the agent, then call "
             "load_built_agent(path) to stage it again."
         )
@@ -489,7 +503,7 @@ def register_queen_lifecycle_tools(
     _stop_edit_tool = Tool(
         name="stop_worker_and_edit",
         description=(
-            "Stop the running worker and switch to building mode. "
+            "Stop the running worker and switch to building phase. "
             "Use this when you need to modify the agent's code, nodes, or configuration. "
             "After editing, call load_built_agent(path) to reload and run."
         ),
@@ -503,22 +517,22 @@ def register_queen_lifecycle_tools(
     # --- stop_worker (Running → Staging) -------------------------------------
 
     async def stop_worker_to_staging() -> str:
-        """Stop the running worker and switch to staging mode.
+        """Stop the running worker and switch to staging phase.
 
         After stopping, ask the user whether they want to:
         1. Re-run the agent with new input → call run_agent_with_input(task)
-        2. Edit the agent code → call stop_worker_and_edit() to go to building mode
+        2. Edit the agent code → call stop_worker_and_edit() to go to building phase
         """
         stop_result = await stop_worker()
 
-        # Switch to staging mode
-        if mode_state is not None:
-            await mode_state.switch_to_staging()
+        # Switch to staging phase
+        if phase_state is not None:
+            await phase_state.switch_to_staging()
 
         result = json.loads(stop_result)
-        result["mode"] = "staging"
+        result["phase"] = "staging"
         result["message"] = (
-            "Worker stopped. You are now in staging mode. "
+            "Worker stopped. You are now in staging phase. "
             "Ask the user: would they like to re-run with new input, "
             "or edit the agent code?"
         )
@@ -527,7 +541,7 @@ def register_queen_lifecycle_tools(
     _stop_worker_tool = Tool(
         name="stop_worker",
         description=(
-            "Stop the running worker and switch to staging mode. "
+            "Stop the running worker and switch to staging phase. "
             "After stopping, ask the user whether they want to re-run "
             "with new input or edit the agent code."
         ),
@@ -542,58 +556,72 @@ def register_queen_lifecycle_tools(
         """Get the session's event bus for querying history."""
         return getattr(session, "event_bus", None)
 
-    _status_last_called: dict[str, float] = {}  # {"ts": monotonic time}
-    _STATUS_COOLDOWN = 30.0  # seconds between full status checks
+    # Tiered cooldowns: summary is free, detail has short cooldown, full keeps 30s
+    _COOLDOWN_FULL = 30.0
+    _COOLDOWN_DETAIL = 10.0
+    _status_last_called: dict[str, float] = {}  # tier -> monotonic time
 
-    async def get_worker_status(last_n: int = 20) -> str:
-        """Comprehensive worker status: state, execution details, and recent activity.
+    def _format_elapsed(seconds: float) -> str:
+        """Format seconds as human-readable duration."""
+        s = int(seconds)
+        if s < 60:
+            return f"{s}s"
+        m, rem = divmod(s, 60)
+        if m < 60:
+            return f"{m}m {rem}s"
+        h, m = divmod(m, 60)
+        return f"{h}h {m}m"
 
-        Returns everything the queen needs in a single call:
-        - Identity and high-level state (idle / running / waiting_for_input)
-        - Active execution details (elapsed time, current node, iteration)
-        - Running tool calls (started but not yet completed)
-        - Recent completed tool calls (name, success/error)
-        - Node transitions (execution path)
-        - Retries, stalls, and constraint violations
-        - Goal progress and token consumption
+    def _format_time_ago(ts) -> str:
+        """Format a datetime as relative time ago."""
+        from datetime import datetime
 
-        Args:
-            last_n: Number of recent events to include per category (default 20).
+        now = datetime.now(UTC)
+        if ts.tzinfo is None:
+            ts = ts.replace(tzinfo=UTC)
+        delta = (now - ts).total_seconds()
+        if delta < 60:
+            return f"{int(delta)}s ago"
+        if delta < 3600:
+            return f"{int(delta / 60)}m ago"
+        return f"{int(delta / 3600)}h ago"
+
+    def _preview_value(value: Any, max_len: int = 120) -> str:
+        """Format a memory value for display, truncating if needed."""
+        if value is None:
+            return "null (not yet set)"
+        if isinstance(value, list):
+            preview = str(value)[:max_len]
+            return f"[{len(value)} items] {preview}"
+        if isinstance(value, dict):
+            preview = str(value)[:max_len]
+            return f"{{{len(value)} keys}} {preview}"
+        s = str(value)
+        if len(s) > max_len:
+            return s[:max_len] + "..."
+        return s
+
+    def _build_preamble(
+        runtime: AgentRuntime,
+    ) -> dict[str, Any]:
+        """Build the lightweight preamble: status, node, elapsed, iteration.
+
+        Always cheap to compute. Returns a dict with:
+        - status: idle / running / waiting_for_input
+        - current_node, current_iteration, elapsed_seconds (when applicable)
+        - pending_question (when waiting)
+        - _active_execs (internal, stripped before return)
         """
-        import time as _time
-
-        now = _time.monotonic()
-        last = _status_last_called.get("ts", 0.0)
-        if now - last < _STATUS_COOLDOWN:
-            remaining = int(_STATUS_COOLDOWN - (now - last))
-            return json.dumps(
-                {
-                    "status": "cooldown",
-                    "message": (
-                        f"Status was checked {int(now - last)}s ago. "
-                        f"Wait {remaining}s before checking again. "
-                        "Do NOT call this tool in a loop — wait for user input instead."
-                    ),
-                }
-            )
-        _status_last_called["ts"] = now
-
-        runtime = _get_runtime()
-        if runtime is None:
-            return json.dumps({"status": "not_loaded", "message": "No worker loaded."})
+        from datetime import datetime
 
         graph_id = runtime.graph_id
-        goal = runtime.goal
         reg = runtime.get_graph_registration(graph_id)
         if reg is None:
-            return json.dumps({"status": "not_loaded"})
+            return {"status": "not_loaded"}
 
-        result: dict[str, Any] = {
-            "worker_graph_id": graph_id,
-            "worker_goal": getattr(goal, "name", graph_id),
-        }
+        preamble: dict[str, Any] = {}
 
-        # --- Execution state ---
+        # Execution state
         active_execs = []
         for ep_id, stream in reg.streams.items():
             for exec_id in stream.active_execution_ids:
@@ -603,214 +631,610 @@ def register_queen_lifecycle_tools(
                 }
                 ctx = stream.get_context(exec_id)
                 if ctx:
-                    from datetime import datetime
-
                     elapsed = (datetime.now() - ctx.started_at).total_seconds()
                     exec_info["elapsed_seconds"] = round(elapsed, 1)
-                    exec_info["exec_status"] = ctx.status
                 active_execs.append(exec_info)
+        preamble["_active_execs"] = active_execs
 
         if not active_execs:
-            result["status"] = "idle"
-            result["message"] = "Worker has no active executions."
+            preamble["status"] = "idle"
         else:
             waiting_nodes = []
             for _ep_id, stream in reg.streams.items():
                 waiting_nodes.extend(stream.get_waiting_nodes())
+            preamble["status"] = "waiting_for_input" if waiting_nodes else "running"
+            if active_execs:
+                preamble["elapsed_seconds"] = active_execs[0].get("elapsed_seconds", 0)
 
-            result["status"] = "waiting_for_input" if waiting_nodes else "running"
-            result["active_executions"] = active_execs
-            if waiting_nodes:
-                result["waiting_node_id"] = waiting_nodes[0]["node_id"]
-
-        result["agent_idle_seconds"] = round(runtime.agent_idle_seconds, 1)
-
-        # --- EventBus enrichment ---
+        # Enrich with EventBus basics (cheap limit=1 queries)
         bus = _get_event_bus()
-        if not bus:
-            return json.dumps(result)
-
-        try:
-            # Pending user question (from ask_user tool)
-            if result.get("status") == "waiting_for_input":
+        if bus:
+            if preamble["status"] == "waiting_for_input":
                 input_events = bus.get_history(event_type=EventType.CLIENT_INPUT_REQUESTED, limit=1)
                 if input_events:
                     prompt = input_events[0].data.get("prompt", "")
                     if prompt:
-                        result["pending_question"] = prompt
-            # Current node
+                        preamble["pending_question"] = prompt[:200]
+
             edge_events = bus.get_history(event_type=EventType.EDGE_TRAVERSED, limit=1)
             if edge_events:
                 target = edge_events[0].data.get("target_node")
                 if target:
-                    result["current_node"] = target
+                    preamble["current_node"] = target
 
-            # Current iteration
             iter_events = bus.get_history(event_type=EventType.NODE_LOOP_ITERATION, limit=1)
             if iter_events:
-                result["current_iteration"] = iter_events[0].data.get("iteration")
+                preamble["current_iteration"] = iter_events[0].data.get("iteration")
 
-            # Running tool calls (started but not yet completed)
-            tool_started = bus.get_history(event_type=EventType.TOOL_CALL_STARTED, limit=last_n * 2)
-            tool_completed = bus.get_history(
-                event_type=EventType.TOOL_CALL_COMPLETED, limit=last_n * 2
+        return preamble
+
+    def _detect_red_flags(bus: EventBus) -> int:
+        """Count issue categories with cheap limit=1 queries."""
+        count = 0
+        for evt_type in (
+            EventType.NODE_STALLED,
+            EventType.NODE_TOOL_DOOM_LOOP,
+            EventType.CONSTRAINT_VIOLATION,
+        ):
+            if bus.get_history(event_type=evt_type, limit=1):
+                count += 1
+        return count
+
+    def _format_summary(preamble: dict[str, Any], red_flags: int) -> str:
+        """Generate a 1-2 sentence prose summary from the preamble."""
+        status = preamble["status"]
+
+        if status == "idle":
+            return "Worker is idle. No active executions."
+        if status == "not_loaded":
+            return "No worker loaded."
+        if status == "waiting_for_input":
+            q = preamble.get("pending_question", "")
+            if q:
+                return f'Worker is waiting for input: "{q}"'
+            return "Worker is waiting for input."
+
+        # Running
+        parts = []
+        elapsed = preamble.get("elapsed_seconds", 0)
+        parts.append(f"Worker is running ({_format_elapsed(elapsed)})")
+
+        node = preamble.get("current_node")
+        iteration = preamble.get("current_iteration")
+        if node:
+            node_part = f"Currently in {node}"
+            if iteration is not None:
+                node_part += f", iteration {iteration}"
+            parts.append(node_part)
+
+        if red_flags:
+            parts.append(f"{red_flags} issue type(s) detected — use focus='issues' for details")
+        else:
+            parts.append("No issues detected")
+
+        return ". ".join(parts) + "."
+
+    def _format_activity(bus: EventBus, preamble: dict[str, Any], last_n: int) -> str:
+        """Format current activity: node, iteration, transitions, LLM output."""
+        lines = []
+
+        node = preamble.get("current_node", "unknown")
+        iteration = preamble.get("current_iteration")
+        elapsed = preamble.get("elapsed_seconds", 0)
+        node_desc = f"Current node: {node}"
+        if iteration is not None:
+            node_desc += f" (iteration {iteration}, {_format_elapsed(elapsed)} elapsed)"
+        else:
+            node_desc += f" ({_format_elapsed(elapsed)} elapsed)"
+        lines.append(node_desc)
+
+        # Latest LLM output snippet
+        text_events = bus.get_history(event_type=EventType.LLM_TEXT_DELTA, limit=1)
+        if text_events:
+            snapshot = text_events[0].data.get("snapshot", "") or ""
+            snippet = snapshot[-300:].strip()
+            if snippet:
+                # Show last meaningful chunk
+                lines.append(f'Last LLM output: "{snippet}"')
+
+        # Recent node transitions
+        edges = bus.get_history(event_type=EventType.EDGE_TRAVERSED, limit=last_n)
+        if edges:
+            lines.append("")
+            lines.append("Recent transitions:")
+            for evt in edges:
+                src = evt.data.get("source_node", "?")
+                tgt = evt.data.get("target_node", "?")
+                cond = evt.data.get("edge_condition", "")
+                ago = _format_time_ago(evt.timestamp)
+                lines.append(f"  {src} -> {tgt} ({cond}, {ago})")
+
+        return "\n".join(lines)
+
+    async def _format_memory(runtime: AgentRuntime) -> str:
+        """Format the worker's shared memory snapshot and recent changes."""
+        from framework.runtime.shared_state import IsolationLevel
+
+        lines = []
+        active_streams = runtime.get_active_streams()
+
+        if not active_streams:
+            return "Worker has no active executions. No memory to inspect."
+
+        # Read memory from the first active execution
+        stream_info = active_streams[0]
+        exec_ids = stream_info.get("active_execution_ids", [])
+        stream_id = stream_info.get("stream_id", "")
+        if not exec_ids:
+            return "No active execution found."
+
+        exec_id = exec_ids[0]
+        memory = runtime.state_manager.create_memory(exec_id, stream_id, IsolationLevel.SHARED)
+        state = await memory.read_all()
+
+        if not state:
+            lines.append("Worker's shared memory is empty.")
+        else:
+            lines.append(f"Worker's shared memory ({len(state)} keys):")
+            for key, value in state.items():
+                lines.append(f"  {key}: {_preview_value(value)}")
+
+        # Recent state changes
+        changes = runtime.state_manager.get_recent_changes(limit=5)
+        if changes:
+            lines.append("")
+            lines.append(f"Recent changes (last {len(changes)}):")
+            for change in reversed(changes):  # most recent first
+                from datetime import datetime
+
+                ago = _format_time_ago(datetime.fromtimestamp(change.timestamp, tz=UTC))
+                if change.old_value is None:
+                    lines.append(f"  {change.key} set ({ago})")
+                else:
+                    old_preview = _preview_value(change.old_value, 40)
+                    new_preview = _preview_value(change.new_value, 40)
+                    lines.append(f"  {change.key}: {old_preview} -> {new_preview} ({ago})")
+
+        return "\n".join(lines)
+
+    def _format_tools(bus: EventBus, last_n: int) -> str:
+        """Format running and recent tool calls."""
+        lines = []
+
+        # Running tools (started but not yet completed)
+        tool_started = bus.get_history(event_type=EventType.TOOL_CALL_STARTED, limit=last_n * 2)
+        tool_completed = bus.get_history(event_type=EventType.TOOL_CALL_COMPLETED, limit=last_n * 2)
+        completed_ids = {
+            evt.data.get("tool_use_id") for evt in tool_completed if evt.data.get("tool_use_id")
+        }
+        running = [
+            evt
+            for evt in tool_started
+            if evt.data.get("tool_use_id") and evt.data.get("tool_use_id") not in completed_ids
+        ]
+
+        if running:
+            names = [evt.data.get("tool_name", "?") for evt in running]
+            lines.append(f"{len(running)} tool(s) running: {', '.join(names)}.")
+            for evt in running:
+                name = evt.data.get("tool_name", "?")
+                node = evt.node_id or "?"
+                ago = _format_time_ago(evt.timestamp)
+                inp = str(evt.data.get("tool_input", ""))[:150]
+                lines.append(f"  {name} ({node}, started {ago})")
+                if inp:
+                    lines.append(f"    Input: {inp}")
+        else:
+            lines.append("No tools currently running.")
+
+        # Recent completed calls
+        if tool_completed:
+            lines.append("")
+            lines.append(f"Recent calls (last {min(last_n, len(tool_completed))}):")
+            for evt in tool_completed[:last_n]:
+                name = evt.data.get("tool_name", "?")
+                node = evt.node_id or "?"
+                is_error = bool(evt.data.get("is_error"))
+                status = "error" if is_error else "ok"
+                duration = evt.data.get("duration_s")
+                dur_str = f", {duration:.1f}s" if duration else ""
+                lines.append(f"  {name} ({node}) — {status}{dur_str}")
+        else:
+            lines.append("No recent tool calls.")
+
+        return "\n".join(lines)
+
+    def _format_issues(bus: EventBus) -> str:
+        """Format retries, stalls, doom loops, and constraint violations."""
+        lines = []
+        total = 0
+
+        # Retries
+        retries = bus.get_history(event_type=EventType.NODE_RETRY, limit=20)
+        if retries:
+            total += len(retries)
+            lines.append(f"{len(retries)} retry event(s):")
+            for evt in retries[:5]:
+                node = evt.node_id or "?"
+                count = evt.data.get("retry_count", "?")
+                error = evt.data.get("error", "")[:120]
+                ago = _format_time_ago(evt.timestamp)
+                lines.append(f"  {node} (attempt {count}, {ago}): {error}")
+
+        # Stalls
+        stalls = bus.get_history(event_type=EventType.NODE_STALLED, limit=5)
+        if stalls:
+            total += len(stalls)
+            lines.append(f"{len(stalls)} stall(s):")
+            for evt in stalls:
+                node = evt.node_id or "?"
+                reason = evt.data.get("reason", "")[:150]
+                ago = _format_time_ago(evt.timestamp)
+                lines.append(f"  {node} ({ago}): {reason}")
+
+        # Doom loops
+        doom_loops = bus.get_history(event_type=EventType.NODE_TOOL_DOOM_LOOP, limit=5)
+        if doom_loops:
+            total += len(doom_loops)
+            lines.append(f"{len(doom_loops)} tool doom loop(s):")
+            for evt in doom_loops:
+                node = evt.node_id or "?"
+                desc = evt.data.get("description", "")[:150]
+                ago = _format_time_ago(evt.timestamp)
+                lines.append(f"  {node} ({ago}): {desc}")
+
+        # Constraint violations
+        violations = bus.get_history(event_type=EventType.CONSTRAINT_VIOLATION, limit=5)
+        if violations:
+            total += len(violations)
+            lines.append(f"{len(violations)} constraint violation(s):")
+            for evt in violations:
+                cid = evt.data.get("constraint_id", "?")
+                desc = evt.data.get("description", "")[:150]
+                ago = _format_time_ago(evt.timestamp)
+                lines.append(f"  {cid} ({ago}): {desc}")
+
+        if total == 0:
+            return "No issues detected. No retries, stalls, or constraint violations."
+
+        header = f"{total} issue(s) detected."
+        return header + "\n\n" + "\n".join(lines)
+
+    async def _format_progress(runtime: AgentRuntime, bus: EventBus) -> str:
+        """Format goal progress, token consumption, and execution outcomes."""
+        lines = []
+
+        # Goal progress
+        try:
+            progress = await runtime.get_goal_progress()
+            if progress:
+                criteria = progress.get("criteria_status", {})
+                if criteria:
+                    met = sum(1 for c in criteria.values() if c.get("met"))
+                    total_c = len(criteria)
+                    lines.append(f"Goal: {met}/{total_c} criteria met.")
+                    for cid, cdata in criteria.items():
+                        marker = "met" if cdata.get("met") else "not met"
+                        desc = cdata.get("description", cid)
+                        evidence = cdata.get("evidence", [])
+                        ev_str = f" — {evidence[0]}" if evidence else ""
+                        lines.append(f"  [{marker}] {desc}{ev_str}")
+                rec = progress.get("recommendation")
+                if rec:
+                    lines.append(f"Recommendation: {rec}.")
+        except Exception:
+            lines.append("Goal progress unavailable.")
+
+        # Token summary
+        llm_events = bus.get_history(event_type=EventType.LLM_TURN_COMPLETE, limit=200)
+        if llm_events:
+            total_in = sum(evt.data.get("input_tokens", 0) or 0 for evt in llm_events)
+            total_out = sum(evt.data.get("output_tokens", 0) or 0 for evt in llm_events)
+            total_tok = total_in + total_out
+            lines.append("")
+            lines.append(
+                f"Tokens: {len(llm_events)} LLM turns, "
+                f"{total_tok:,} total ({total_in:,} in + {total_out:,} out)."
             )
-            completed_ids = {
-                evt.data.get("tool_use_id") for evt in tool_completed if evt.data.get("tool_use_id")
-            }
-            running = [
-                evt
-                for evt in tool_started
-                if evt.data.get("tool_use_id") and evt.data.get("tool_use_id") not in completed_ids
+
+        # Execution outcomes
+        exec_completed = bus.get_history(event_type=EventType.EXECUTION_COMPLETED, limit=5)
+        exec_failed = bus.get_history(event_type=EventType.EXECUTION_FAILED, limit=5)
+        completed_n = len(exec_completed)
+        failed_n = len(exec_failed)
+        active_n = len(runtime.get_active_streams())
+        lines.append(
+            f"Executions: {completed_n} completed, {failed_n} failed"
+            + (f" ({active_n} active)." if active_n else ".")
+        )
+        if exec_failed:
+            for evt in exec_failed[:3]:
+                error = evt.data.get("error", "")[:150]
+                ago = _format_time_ago(evt.timestamp)
+                lines.append(f"  Failed ({ago}): {error}")
+
+        return "\n".join(lines)
+
+    def _build_full_json(
+        runtime: AgentRuntime,
+        bus: EventBus,
+        preamble: dict[str, Any],
+        last_n: int,
+    ) -> dict[str, Any]:
+        """Build the legacy full JSON response (backward compat for focus='full')."""
+
+        graph_id = runtime.graph_id
+        goal = runtime.goal
+        result: dict[str, Any] = {
+            "worker_graph_id": graph_id,
+            "worker_goal": getattr(goal, "name", graph_id),
+            "status": preamble["status"],
+        }
+
+        active_execs = preamble.get("_active_execs", [])
+        if active_execs:
+            result["active_executions"] = active_execs
+        if preamble.get("pending_question"):
+            result["pending_question"] = preamble["pending_question"]
+
+        result["agent_idle_seconds"] = round(runtime.agent_idle_seconds, 1)
+
+        for key in ("current_node", "current_iteration"):
+            if key in preamble:
+                result[key] = preamble[key]
+
+        # Running + completed tool calls
+        tool_started = bus.get_history(event_type=EventType.TOOL_CALL_STARTED, limit=last_n * 2)
+        tool_completed = bus.get_history(event_type=EventType.TOOL_CALL_COMPLETED, limit=last_n * 2)
+        completed_ids = {
+            evt.data.get("tool_use_id") for evt in tool_completed if evt.data.get("tool_use_id")
+        }
+        running = [
+            evt
+            for evt in tool_started
+            if evt.data.get("tool_use_id") and evt.data.get("tool_use_id") not in completed_ids
+        ]
+        if running:
+            result["running_tools"] = [
+                {
+                    "tool": evt.data.get("tool_name"),
+                    "node": evt.node_id,
+                    "started_at": evt.timestamp.isoformat(),
+                    "input_preview": str(evt.data.get("tool_input", ""))[:200],
+                }
+                for evt in running
             ]
-            if running:
-                result["running_tools"] = [
-                    {
-                        "tool": evt.data.get("tool_name"),
-                        "node": evt.node_id,
-                        "started_at": evt.timestamp.isoformat(),
-                        "input_preview": str(evt.data.get("tool_input", ""))[:200],
-                    }
-                    for evt in running
-                ]
+        if tool_completed:
+            result["recent_tool_calls"] = [
+                {
+                    "tool": evt.data.get("tool_name"),
+                    "error": bool(evt.data.get("is_error")),
+                    "node": evt.node_id,
+                    "time": evt.timestamp.isoformat(),
+                }
+                for evt in tool_completed[:last_n]
+            ]
 
-            # Recent completed tool calls
-            if tool_completed:
-                result["recent_tool_calls"] = [
+        # Node transitions
+        edges = bus.get_history(event_type=EventType.EDGE_TRAVERSED, limit=last_n)
+        if edges:
+            result["node_transitions"] = [
+                {
+                    "from": evt.data.get("source_node"),
+                    "to": evt.data.get("target_node"),
+                    "condition": evt.data.get("edge_condition"),
+                    "time": evt.timestamp.isoformat(),
+                }
+                for evt in edges
+            ]
+
+        # Retries
+        retries = bus.get_history(event_type=EventType.NODE_RETRY, limit=last_n)
+        if retries:
+            result["retries"] = [
+                {
+                    "node": evt.node_id,
+                    "retry_count": evt.data.get("retry_count"),
+                    "error": evt.data.get("error", "")[:200],
+                    "time": evt.timestamp.isoformat(),
+                }
+                for evt in retries
+            ]
+
+        # Stalls and doom loops
+        stalls = bus.get_history(event_type=EventType.NODE_STALLED, limit=5)
+        doom_loops = bus.get_history(event_type=EventType.NODE_TOOL_DOOM_LOOP, limit=5)
+        issues = []
+        for evt in stalls:
+            issues.append(
+                {
+                    "type": "stall",
+                    "node": evt.node_id,
+                    "reason": evt.data.get("reason", "")[:200],
+                    "time": evt.timestamp.isoformat(),
+                }
+            )
+        for evt in doom_loops:
+            issues.append(
+                {
+                    "type": "tool_doom_loop",
+                    "node": evt.node_id,
+                    "description": evt.data.get("description", "")[:200],
+                    "time": evt.timestamp.isoformat(),
+                }
+            )
+        if issues:
+            result["issues"] = issues
+
+        # Constraint violations
+        violations = bus.get_history(event_type=EventType.CONSTRAINT_VIOLATION, limit=5)
+        if violations:
+            result["constraint_violations"] = [
+                {
+                    "constraint": evt.data.get("constraint_id"),
+                    "description": evt.data.get("description", "")[:200],
+                    "time": evt.timestamp.isoformat(),
+                }
+                for evt in violations
+            ]
+
+        # Token summary
+        llm_events = bus.get_history(event_type=EventType.LLM_TURN_COMPLETE, limit=200)
+        if llm_events:
+            total_in = sum(evt.data.get("input_tokens", 0) or 0 for evt in llm_events)
+            total_out = sum(evt.data.get("output_tokens", 0) or 0 for evt in llm_events)
+            result["token_summary"] = {
+                "llm_turns": len(llm_events),
+                "input_tokens": total_in,
+                "output_tokens": total_out,
+                "total_tokens": total_in + total_out,
+            }
+
+        # Execution outcomes
+        exec_completed = bus.get_history(event_type=EventType.EXECUTION_COMPLETED, limit=5)
+        exec_failed = bus.get_history(event_type=EventType.EXECUTION_FAILED, limit=5)
+        if exec_completed or exec_failed:
+            result["execution_outcomes"] = []
+            for evt in exec_completed:
+                result["execution_outcomes"].append(
                     {
-                        "tool": evt.data.get("tool_name"),
-                        "error": bool(evt.data.get("is_error")),
-                        "node": evt.node_id,
+                        "outcome": "completed",
+                        "execution_id": evt.execution_id,
                         "time": evt.timestamp.isoformat(),
                     }
-                    for evt in tool_completed[:last_n]
-                ]
-
-            # Node transitions
-            edges = bus.get_history(event_type=EventType.EDGE_TRAVERSED, limit=last_n)
-            if edges:
-                result["node_transitions"] = [
+                )
+            for evt in exec_failed:
+                result["execution_outcomes"].append(
                     {
-                        "from": evt.data.get("source_node"),
-                        "to": evt.data.get("target_node"),
-                        "condition": evt.data.get("edge_condition"),
-                        "time": evt.timestamp.isoformat(),
-                    }
-                    for evt in edges
-                ]
-
-            # Retries
-            retries = bus.get_history(event_type=EventType.NODE_RETRY, limit=last_n)
-            if retries:
-                result["retries"] = [
-                    {
-                        "node": evt.node_id,
-                        "retry_count": evt.data.get("retry_count"),
+                        "outcome": "failed",
+                        "execution_id": evt.execution_id,
                         "error": evt.data.get("error", "")[:200],
                         "time": evt.timestamp.isoformat(),
                     }
-                    for evt in retries
-                ]
-
-            # Stalls and doom loops
-            stalls = bus.get_history(event_type=EventType.NODE_STALLED, limit=5)
-            doom_loops = bus.get_history(event_type=EventType.NODE_TOOL_DOOM_LOOP, limit=5)
-            issues = []
-            for evt in stalls:
-                issues.append(
-                    {
-                        "type": "stall",
-                        "node": evt.node_id,
-                        "reason": evt.data.get("reason", "")[:200],
-                        "time": evt.timestamp.isoformat(),
-                    }
                 )
-            for evt in doom_loops:
-                issues.append(
-                    {
-                        "type": "tool_doom_loop",
-                        "node": evt.node_id,
-                        "description": evt.data.get("description", "")[:200],
-                        "time": evt.timestamp.isoformat(),
-                    }
-                )
-            if issues:
-                result["issues"] = issues
 
-            # Constraint violations
-            violations = bus.get_history(event_type=EventType.CONSTRAINT_VIOLATION, limit=5)
-            if violations:
-                result["constraint_violations"] = [
-                    {
-                        "constraint": evt.data.get("constraint_id"),
-                        "description": evt.data.get("description", "")[:200],
-                        "time": evt.timestamp.isoformat(),
-                    }
-                    for evt in violations
-                ]
+        return result
 
-            # Goal progress
-            try:
-                progress = await runtime.get_goal_progress()
-                if progress:
-                    result["goal_progress"] = progress
-            except Exception:
-                pass
+    async def get_worker_status(focus: str | None = None, last_n: int = 20) -> str:
+        """Check on the worker with progressive disclosure.
 
-            # Token summary
-            llm_events = bus.get_history(event_type=EventType.LLM_TURN_COMPLETE, limit=200)
-            if llm_events:
-                total_in = sum(evt.data.get("input_tokens", 0) or 0 for evt in llm_events)
-                total_out = sum(evt.data.get("output_tokens", 0) or 0 for evt in llm_events)
-                result["token_summary"] = {
-                    "llm_turns": len(llm_events),
-                    "input_tokens": total_in,
-                    "output_tokens": total_out,
-                    "total_tokens": total_in + total_out,
+        Without arguments, returns a brief prose summary. Use ``focus`` to
+        drill into specifics: activity, memory, tools, issues, progress,
+        or full (JSON dump).
+
+        Args:
+            focus: Aspect to inspect (activity/memory/tools/issues/progress/full).
+                   Omit for a brief summary.
+            last_n: Recent events per category (default 20). For activity, tools, full.
+        """
+        import time as _time
+
+        # --- Tiered cooldown ---
+        now = _time.monotonic()
+        if focus == "full":
+            cooldown = _COOLDOWN_FULL
+            tier = "full"
+        elif focus is not None:
+            cooldown = _COOLDOWN_DETAIL
+            tier = "detail"
+        else:
+            cooldown = 0.0
+            tier = "summary"
+
+        elapsed_since = now - _status_last_called.get(tier, 0.0)
+        if elapsed_since < cooldown:
+            remaining = int(cooldown - elapsed_since)
+            return json.dumps(
+                {
+                    "status": "cooldown",
+                    "message": (
+                        f"Status '{focus or 'summary'}' was checked {int(elapsed_since)}s ago. "
+                        f"Wait {remaining}s or try a different focus."
+                    ),
                 }
+            )
+        _status_last_called[tier] = now
 
-            # Execution completions/failures
-            exec_completed = bus.get_history(event_type=EventType.EXECUTION_COMPLETED, limit=5)
-            exec_failed = bus.get_history(event_type=EventType.EXECUTION_FAILED, limit=5)
-            if exec_completed or exec_failed:
-                result["execution_outcomes"] = []
-                for evt in exec_completed:
-                    result["execution_outcomes"].append(
-                        {
-                            "outcome": "completed",
-                            "execution_id": evt.execution_id,
-                            "time": evt.timestamp.isoformat(),
-                        }
-                    )
-                for evt in exec_failed:
-                    result["execution_outcomes"].append(
-                        {
-                            "outcome": "failed",
-                            "execution_id": evt.execution_id,
-                            "error": evt.data.get("error", "")[:200],
-                            "time": evt.timestamp.isoformat(),
-                        }
-                    )
-        except Exception:
-            pass  # Non-critical enrichment
+        # --- Runtime check ---
+        runtime = _get_runtime()
+        if runtime is None:
+            return "No worker loaded."
 
-        return json.dumps(result, default=str, ensure_ascii=False)
+        reg = runtime.get_graph_registration(runtime.graph_id)
+        if reg is None:
+            return "No worker loaded."
+
+        # --- Build preamble (always cheap) ---
+        preamble = _build_preamble(runtime)
+
+        bus = _get_event_bus()
+
+        try:
+            if focus is None:
+                # Default: brief prose summary
+                red_flags = _detect_red_flags(bus) if bus else 0
+                return _format_summary(preamble, red_flags)
+
+            if bus is None:
+                return (
+                    f"Worker is {preamble['status']}. "
+                    "EventBus unavailable — only basic status returned."
+                )
+
+            if focus == "activity":
+                return _format_activity(bus, preamble, last_n)
+            elif focus == "memory":
+                return await _format_memory(runtime)
+            elif focus == "tools":
+                return _format_tools(bus, last_n)
+            elif focus == "issues":
+                return _format_issues(bus)
+            elif focus == "progress":
+                return await _format_progress(runtime, bus)
+            elif focus == "full":
+                result = _build_full_json(runtime, bus, preamble, last_n)
+                # Also include goal progress in full dump
+                try:
+                    progress = await runtime.get_goal_progress()
+                    if progress:
+                        result["goal_progress"] = progress
+                except Exception:
+                    pass
+                return json.dumps(result, default=str, ensure_ascii=False)
+            else:
+                return (
+                    f"Unknown focus '{focus}'. "
+                    "Valid options: activity, memory, tools, issues, progress, full."
+                )
+        except Exception as exc:
+            logger.exception("get_worker_status error")
+            return f"Error retrieving status: {exc}"
 
     _status_tool = Tool(
         name="get_worker_status",
         description=(
-            "Get comprehensive worker status: state (idle/running/waiting_for_input), "
-            "execution details (elapsed time, current node, iteration), "
-            "recent tool calls, running tools, node transitions, retries, "
-            "stalls, constraint violations, goal progress, and token consumption. "
-            "One call gives the queen a complete picture."
+            "Check on the worker. Returns a brief prose summary by default. "
+            "Use 'focus' to drill into specifics:\n"
+            "- activity: current node, transitions, latest LLM output\n"
+            "- memory: worker's accumulated knowledge and state\n"
+            "- tools: running and recent tool calls\n"
+            "- issues: retries, stalls, constraint violations\n"
+            "- progress: goal criteria, token consumption\n"
+            "- full: everything as JSON"
         ),
         parameters={
             "type": "object",
             "properties": {
+                "focus": {
+                    "type": "string",
+                    "enum": ["activity", "memory", "tools", "issues", "progress", "full"],
+                    "description": ("Aspect to inspect. Omit for a brief summary."),
+                },
                 "last_n": {
                     "type": "integer",
-                    "description": "Number of recent events per category (default 20)",
+                    "description": (
+                        "Recent events per category (default 20). Only for activity, tools, full."
+                    ),
                 },
             },
             "required": [],
@@ -825,7 +1249,7 @@ def register_queen_lifecycle_tools(
         """Send a message to the running worker agent.
 
         Injects the message into the worker's active node conversation.
-        Use this to relay user instructions or concerns to the worker.
+        Use this to relay user instructions to the worker.
         """
         runtime = _get_runtime()
         if runtime is None:
@@ -1012,18 +1436,18 @@ def register_queen_lifecycle_tools(
                 )
                 info = updated_session.worker_info
 
-                # Switch to staging mode after successful load
-                if mode_state is not None:
-                    await mode_state.switch_to_staging()
+                # Switch to staging phase after successful load
+                if phase_state is not None:
+                    await phase_state.switch_to_staging()
 
                 worker_name = info.name if info else updated_session.worker_id
                 return json.dumps(
                     {
                         "status": "loaded",
-                        "mode": "staging",
+                        "phase": "staging",
                         "message": (
                             f"Successfully loaded '{worker_name}'. "
-                            "You are now in STAGING mode. "
+                            "You are now in STAGING phase. "
                             "Call run_agent_with_input(task) to start the worker, "
                             "or stop_worker_and_edit() to go back to building."
                         ),
@@ -1069,7 +1493,7 @@ def register_queen_lifecycle_tools(
         """Run the loaded worker agent with the given task input.
 
         Performs preflight checks (credentials, MCP resync), triggers the
-        worker's default entry point, and switches to running mode.
+        worker's default entry point, and switches to running phase.
         """
         runtime = _get_runtime()
         if runtime is None:
@@ -1131,14 +1555,14 @@ def register_queen_lifecycle_tools(
                 session_state=session_state,
             )
 
-            # Switch to running mode
-            if mode_state is not None:
-                await mode_state.switch_to_running()
+            # Switch to running phase
+            if phase_state is not None:
+                await phase_state.switch_to_running()
 
             return json.dumps(
                 {
                     "status": "started",
-                    "mode": "running",
+                    "phase": "running",
                     "execution_id": exec_id,
                     "task": task,
                 }
@@ -1164,8 +1588,8 @@ def register_queen_lifecycle_tools(
         name="run_agent_with_input",
         description=(
             "Run the loaded worker agent with the given task. Validates credentials, "
-            "triggers the worker's default entry point, and switches to running mode. "
-            "Use this after loading an agent (staging mode) to start execution."
+            "triggers the worker's default entry point, and switches to running phase. "
+            "Use this after loading an agent (staging phase) to start execution."
         ),
         parameters={
             "type": "object",

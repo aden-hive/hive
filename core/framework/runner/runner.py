@@ -959,11 +959,16 @@ class AgentRunner:
         if not agent_json_path.is_file():
             raise FileNotFoundError(f"No agent.py or agent.json found in {agent_path}")
 
-        content = agent_json_path.read_text(encoding="utf-8").strip()
-        if not content:
-            raise FileNotFoundError(f"agent.json is empty: {agent_json_path}")
+        with open(agent_json_path, encoding="utf-8") as f:
+            export_data = f.read()
 
-        graph, goal = load_agent_export(content)
+        if not export_data.strip():
+            raise ValueError(f"Empty agent export file: {agent_json_path}")
+
+        try:
+            graph, goal = load_agent_export(export_data)
+        except json.JSONDecodeError as exc:
+            raise ValueError(f"Invalid JSON in agent export file: {agent_json_path}") from exc
 
         return cls(
             agent_path=agent_path,
@@ -1307,6 +1312,8 @@ class AgentRunner:
             return "REPLICATE_API_KEY"
         elif model_lower.startswith("together/"):
             return "TOGETHER_API_KEY"
+        elif model_lower.startswith("minimax/") or model_lower.startswith("minimax-"):
+            return "MINIMAX_API_KEY"
         else:
             # Default: assume OpenAI-compatible
             return "OPENAI_API_KEY"
@@ -1325,6 +1332,8 @@ class AgentRunner:
         cred_id = None
         if model_lower.startswith("anthropic/") or model_lower.startswith("claude"):
             cred_id = "anthropic"
+        elif model_lower.startswith("minimax/") or model_lower.startswith("minimax-"):
+            cred_id = "minimax"
         # Add more mappings as providers are added to LLM_CREDENTIALS
 
         if cred_id is None:
@@ -1742,8 +1751,9 @@ class AgentRunner:
         missing_tools = []
 
         # Validate graph structure
-        graph_errors = self.graph.validate()
-        errors.extend(graph_errors)
+        graph_result = self.graph.validate()
+        errors.extend(graph_result["errors"])
+        warnings.extend(graph_result["warnings"])
 
         # Check goal has success criteria
         if not self.goal.success_criteria:

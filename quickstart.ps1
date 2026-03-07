@@ -721,12 +721,11 @@ $importErrors = 0
 $imports = @(
     @{ Module = "framework";                        Label = "framework";    Required = $true },
     @{ Module = "aden_tools";                       Label = "aden_tools";   Required = $true },
-    @{ Module = "litellm";                          Label = "litellm";      Required = $false },
-    @{ Module = "framework.mcp.agent_builder_server"; Label = "MCP server module"; Required = $true }
+    @{ Module = "litellm";                          Label = "litellm";      Required = $false }
 )
 
 # Batch check all imports in single process (reduces subprocess spawning overhead)
-$modulesToCheck = @("framework", "aden_tools", "litellm", "framework.mcp.agent_builder_server")
+$modulesToCheck = @("framework", "aden_tools", "litellm")
 
 try {
     $checkOutput = & uv run python scripts/check_requirements.py @modulesToCheck 2>&1 | Out-String
