@@ -2785,6 +2785,10 @@ class EventLoopNode(NodeProtocol):
         if self._mark_complete_flag:
             return JudgeVerdict(action="ACCEPT")
 
+        # Opt-out: node explicitly disables judge (e.g. conversational queen)
+        if ctx.node_spec.skip_judge:
+            return JudgeVerdict(action="RETRY", feedback="")
+
         if self._judge is not None:
             context = {
                 "assistant_text": assistant_text,
@@ -3289,8 +3293,6 @@ class EventLoopNode(NodeProtocol):
 
     # --- Compaction -----------------------------------------------------------
 
-    # Threshold above which LLM compaction is invoked (structural handles 80-95%).
-    _LLM_COMPACT_THRESHOLD = 0.95
     # Max chars of formatted messages before proactively splitting for LLM.
     _LLM_COMPACT_CHAR_LIMIT = 240_000
     # Max recursion depth for binary-search splitting.
@@ -3305,8 +3307,11 @@ class EventLoopNode(NodeProtocol):
         """Compact conversation history to stay within token budget.
 
         1. Prune old tool results (always, free).
-        2. Structure-preserving compaction at >=80% (standard, then aggressive).
-        3. LLM compaction at >95% with recursive binary-search splitting.
+        2. Structure-preserving compaction (standard, free) — removes freeform text
+           to spillover files, retains tool-call structure.
+        3. LLM summary compaction — generates a summary and places it as the first
+           message, replacing old messages. Used whenever structural compaction
+           does not fully resolve the budget.
         4. Emergency deterministic summary only if LLM failed or unavailable.
         """
         ratio_before = conversation.usage_ratio()
@@ -3329,36 +3334,26 @@ class EventLoopNode(NodeProtocol):
             await self._log_compaction(ctx, conversation, ratio_before)
             return
 
-        # --- Step 2: Structure-preserving compaction (>=80%) ---
+        # --- Step 2: Standard structure-preserving compaction (free, no LLM) ---
+        # Removes freeform text to spillover files; keeps tool-call pairs in context.
         spill_dir = self._config.spillover_dir
         if spill_dir:
-            pre_structural = conversation.usage_ratio()
             await conversation.compact_preserving_structure(
                 spillover_dir=spill_dir,
                 keep_recent=4,
                 phase_graduated=phase_grad,
             )
-            if conversation.usage_ratio() >= 0.9 * pre_structural:
-                logger.info(
-                    "Standard structural compaction ineffective "
-                    "(%.0f%% -> %.0f%%), trying aggressive",
-                    pre_structural * 100,
-                    conversation.usage_ratio() * 100,
-                )
-                await conversation.compact_preserving_structure(
-                    spillover_dir=spill_dir,
-                    keep_recent=4,
-                    phase_graduated=phase_grad,
-                    aggressive=True,
-                )
         if not conversation.needs_compaction():
             await self._log_compaction(ctx, conversation, ratio_before)
             return
 
-        # --- Step 3: LLM compaction at >95% (recursive binary-search) ---
-        if conversation.usage_ratio() > self._LLM_COMPACT_THRESHOLD and ctx.llm is not None:
+        # --- Step 3: LLM summary compaction ---
+        # Structural compaction alone did not hit target. Generate an LLM summary
+        # and place it as the first message — more reliable for token reduction
+        # than offloading more content to files.
+        if ctx.llm is not None:
             logger.info(
-                "LLM compaction triggered (%.0f%% usage)",
+                "LLM summary compaction triggered (%.0f%% usage)",
                 conversation.usage_ratio() * 100,
             )
             try:
