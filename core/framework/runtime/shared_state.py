@@ -201,30 +201,21 @@ class SharedStateManager:
             isolation: Isolation level
             scope: Where to write (execution, stream, or global)
         """
-        # Get old value for change tracking
-        old_value = await self.read(key, execution_id, stream_id, isolation)
-
         # ISOLATED can only write to execution scope
         if isolation == IsolationLevel.ISOLATED:
             scope = StateScope.EXECUTION
 
         # SYNCHRONIZED requires locks for stream/global writes
         if isolation == IsolationLevel.SYNCHRONIZED and scope != StateScope.EXECUTION:
-            await self._write_with_lock(key, value, execution_id, stream_id, scope)
+            lock = self._get_lock(scope, key, stream_id)
+            async with lock:
+                await self._write_and_record(
+                    key, value, execution_id, stream_id, isolation, scope,
+                )
         else:
-            await self._write_direct(key, value, execution_id, stream_id, scope)
-
-        # Record change
-        self._record_change(
-            StateChange(
-                key=key,
-                old_value=old_value,
-                new_value=value,
-                scope=scope,
-                execution_id=execution_id,
-                stream_id=stream_id,
+            await self._write_and_record(
+                key, value, execution_id, stream_id, isolation, scope,
             )
-        )
 
     async def _write_direct(
         self,
@@ -262,6 +253,33 @@ class SharedStateManager:
         lock = self._get_lock(scope, key, stream_id)
         async with lock:
             await self._write_direct(key, value, execution_id, stream_id, scope)
+
+    async def _write_and_record(
+        self,
+        key: str,
+        value: Any,
+        execution_id: str,
+        stream_id: str,
+        isolation: IsolationLevel,
+        scope: StateScope,
+    ) -> None:
+        """Write a single key and record the change (no locking).
+
+        Shared helper used by both ``write()`` and the locked path
+        in ``write_batch()`` to keep write semantics in one place.
+        """
+        old_value = await self.read(key, execution_id, stream_id, isolation)
+        await self._write_direct(key, value, execution_id, stream_id, scope)
+        self._record_change(
+            StateChange(
+                key=key,
+                old_value=old_value,
+                new_value=value,
+                scope=scope,
+                execution_id=execution_id,
+                stream_id=stream_id,
+            )
+        )
 
     def _get_lock(self, scope: StateScope, key: str, stream_id: str) -> asyncio.Lock:
         """Get appropriate lock for scope and key."""
@@ -322,9 +340,41 @@ class SharedStateManager:
         isolation: IsolationLevel,
         scope: StateScope = StateScope.EXECUTION,
     ) -> None:
-        """Write multiple values atomically."""
-        for key, value in updates.items():
-            await self.write(key, value, execution_id, stream_id, isolation, scope)
+        """Write multiple values atomically.
+
+        Under SYNCHRONIZED isolation with non-EXECUTION scope, all keys
+        are written under a single lock acquisition so that concurrent
+        readers never see a partial batch.  EXECUTION-scoped writes are
+        private to a single execution and need no locking.  ISOLATED and
+        SHARED writes remain lock-free (matching the single-key
+        ``write()`` behaviour).
+        """
+        if isolation == IsolationLevel.SYNCHRONIZED and scope != StateScope.EXECUTION:
+            # Acquire all per-key locks in sorted order to avoid deadlocks,
+            # then perform every write while holding all of them.
+            locks = [
+                self._get_lock(scope, key, stream_id)
+                for key in sorted(updates)
+            ]
+            # Acquire sequentially in deterministic order.  Track which
+            # locks have been acquired so that cancellation or errors
+            # during the loop still release already-held locks.
+            acquired: list[asyncio.Lock] = []
+            try:
+                for lock in locks:
+                    await lock.acquire()
+                    acquired.append(lock)
+                for key, value in updates.items():
+                    await self._write_and_record(
+                        key, value, execution_id, stream_id, isolation, scope,
+                    )
+            finally:
+                for lock in reversed(acquired):
+                    lock.release()
+        else:
+            # Non-synchronized — sequential writes (no atomicity guarantee needed)
+            for key, value in updates.items():
+                await self.write(key, value, execution_id, stream_id, isolation, scope)
 
     # === UTILITY ===
 
