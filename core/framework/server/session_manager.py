@@ -15,10 +15,12 @@ import json
 import logging
 import time
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import Any
+
+from framework.runtime.triggers import TriggerDefinition
 
 logger = logging.getLogger(__name__)
 
@@ -46,6 +48,8 @@ class Session:
     judge_task: asyncio.Task | None = None
     escalation_sub: str | None = None
     worker_handoff_sub: str | None = None
+    # Trigger definitions hoisted from worker (available but inactive)
+    available_triggers: dict[str, TriggerDefinition] = field(default_factory=dict)
     # Session directory resumption:
     # When set, _start_queen writes queen conversations to this existing session's
     # directory instead of creating a new one.  This lets cold-restores accumulate
@@ -240,6 +244,30 @@ class SessionManager:
 
             runtime = runner._agent_runtime
 
+            # Auto-hoist: extract timer/webhook triggers from worker graph
+            # and store as available (inactive) trigger definitions on the session.
+            # Strip them from the worker runtime so it doesn't start its own loops.
+            if runtime:
+                for ep in runner.graph.async_entry_points:
+                    if ep.trigger_type in ("timer", "webhook"):
+                        session.available_triggers[ep.id] = TriggerDefinition(
+                            id=ep.id,
+                            trigger_type=ep.trigger_type,
+                            trigger_config=ep.trigger_config,
+                            description=ep.name,
+                        )
+                        runtime.unregister_entry_point(ep.id)
+                        logger.info(
+                            "Hoisted trigger '%s' (%s) from worker to queen",
+                            ep.id,
+                            ep.trigger_type,
+                        )
+
+                if session.available_triggers:
+                    await self._emit_trigger_events(
+                        session, "available", session.available_triggers
+                    )
+
             # Start runtime on event loop
             if runtime and not runtime.is_running:
                 await runtime.start()
@@ -353,6 +381,11 @@ class SessionManager:
                 await session.runner.cleanup_async()
             except Exception as e:
                 logger.error("Error cleaning up worker '%s': %s", session.worker_id, e)
+
+        # Clean up hoisted triggers
+        if session.available_triggers:
+            await self._emit_trigger_events(session, "removed", session.available_triggers)
+            session.available_triggers.clear()
 
         worker_id = session.worker_id
         session.worker_id = None
@@ -879,7 +912,18 @@ class SessionManager:
             return
 
         profile = build_worker_profile(session.worker_runtime, agent_path=session.worker_path)
-        await node.inject_event(f"[SYSTEM] Worker loaded.{profile}")
+
+        # Append available trigger info so the queen knows what's schedulable
+        trigger_lines = ""
+        if session.available_triggers:
+            parts = []
+            for t in session.available_triggers.values():
+                cfg = t.trigger_config
+                detail = cfg.get("cron") or f"every {cfg.get('interval_minutes', '?')} min"
+                parts.append(f"  - {t.id} ({t.trigger_type}: {detail})")
+            trigger_lines = "\n\nAvailable triggers (inactive — use set_trigger to activate):\n" + "\n".join(parts)
+
+        await node.inject_event(f"[SYSTEM] Worker loaded.{profile}{trigger_lines}")
 
     async def _emit_worker_loaded(self, session: Session) -> None:
         """Publish a WORKER_LOADED event so the frontend can update."""
@@ -913,6 +957,31 @@ class SessionManager:
             "[SYSTEM] Worker unloaded. You are now operating independently. "
             "Handle all tasks directly using your coding tools."
         )
+
+    async def _emit_trigger_events(
+        self,
+        session: Session,
+        kind: str,
+        triggers: dict[str, TriggerDefinition],
+    ) -> None:
+        """Emit TRIGGER_AVAILABLE or TRIGGER_REMOVED events for each trigger."""
+        from framework.runtime.event_bus import AgentEvent, EventType
+
+        event_type = (
+            EventType.TRIGGER_AVAILABLE if kind == "available" else EventType.TRIGGER_REMOVED
+        )
+        for t in triggers.values():
+            await session.event_bus.publish(
+                AgentEvent(
+                    type=event_type,
+                    stream_id="queen",
+                    data={
+                        "trigger_id": t.id,
+                        "trigger_type": t.trigger_type,
+                        "trigger_config": t.trigger_config,
+                    },
+                )
+            )
 
     async def revive_queen(self, session: Session, initial_prompt: str | None = None) -> None:
         """Revive a dead queen executor on an existing session.
