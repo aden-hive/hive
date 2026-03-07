@@ -1215,13 +1215,16 @@ def run_agent_tests(
 
 @mcp.tool()
 def validate_agent_package(agent_name: str) -> str:
-    """Run all validation checks on a built agent package in one call.
+    """Run structural validation checks on a built agent package in one call.
 
     Executes 4 steps and reports all results (does not stop on first failure):
       1. Class validation — checks graph structure and entry_points contract
-      2. Runner load — checks package export contract (same path the UI uses)
+      2. Graph validation — loads the agent graph without credential checks
       3. Tool validation — checks declared tools exist in MCP servers
       4. Tests — runs the agent's pytest suite
+
+    Note: Credential validation is intentionally skipped here (building phase).
+    Credentials are validated at run time by run_agent_with_input() preflight.
 
     Args:
         agent_name: Agent package name (e.g. 'my_agent'). Must exist in exports/.
@@ -1267,14 +1270,17 @@ def validate_agent_package(agent_name: str) -> str:
     except Exception as e:
         steps["class_validation"] = {"passed": False, "error": str(e)}
 
-    # Step B: Runner load test (subprocess for import isolation)
+    # Step B: Graph validation (subprocess for import isolation)
+    # Credentials are checked at run time (run_agent_with_input preflight),
+    # not at build time.
     try:
         proc = subprocess.run(
             [
                 "uv", "run", "python", "-c",
                 f'from framework.runner.runner import AgentRunner; '
-                f'r = AgentRunner.load("exports/{agent_name}"); '
-                f'print("AgentRunner.load: OK")',
+                f'r = AgentRunner.load("exports/{agent_name}", '
+                f'skip_credential_validation=True); '
+                f'print("AgentRunner.load (graph-only): OK")',
             ],
             capture_output=True,
             text=True,
@@ -1284,14 +1290,14 @@ def validate_agent_package(agent_name: str) -> str:
             stdin=subprocess.DEVNULL,
         )
         passed = proc.returncode == 0
-        steps["runner_load"] = {
+        steps["graph_validation"] = {
             "passed": passed,
             "output": (proc.stdout.strip() or proc.stderr.strip())[:2000],
         }
         if not passed:
-            steps["runner_load"]["error"] = proc.stderr.strip()[:2000]
+            steps["graph_validation"]["error"] = proc.stderr.strip()[:2000]
     except Exception as e:
-        steps["runner_load"] = {"passed": False, "error": str(e)}
+        steps["graph_validation"] = {"passed": False, "error": str(e)}
 
     # Step C: Tool validation (direct call)
     try:
