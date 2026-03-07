@@ -69,13 +69,14 @@ cd hive
 ./quickstart.sh
 ```
 
-The setup script performs these actions:
+The setup script performs the following steps:
 
-1. Checks Python version (3.11+)
-2. Installs `framework` package from `/core` (editable mode)
-3. Installs `aden_tools` package from `/tools` (editable mode)
-4. Fixes package compatibility (upgrades openai for litellm)
-5. Verifies all installations
+1. Checks Python version (3.11+ required)
+2. Installs workspace packages, Playwright browser, and frontend dependencies
+3. Verifies required Python modules and integrations
+4. Prompts for LLM provider configuration
+5. Initializes credential store used to encrypt API keys and secrets
+6. Performs final installation verification checks
 
 ### API Keys (Optional)
 
