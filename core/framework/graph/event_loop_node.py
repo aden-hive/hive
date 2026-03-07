@@ -206,6 +206,42 @@ class LoopConfig:
     cf_grace_turns: int = 1
     tool_doom_loop_enabled: bool = True
 
+    # --- Lifecycle hooks ---
+    # Hooks are async callables keyed by event name.  Supported events:
+    #   "session_start"    — fires once after the first user message is added,
+    #                        before the first LLM turn.  trigger = initial message.
+    #   "external_message" — fires when inject_notification() delivers a message.
+    #                        trigger = injected message text.
+    # Each hook receives a HookContext and may return a HookResult to patch
+    # the system prompt and/or inject a follow-up user message.
+    hooks: dict[str, list] = None  # dict[str, list[HookFn]]  (None → no hooks)
+
+    def __post_init__(self) -> None:
+        if self.hooks is None:
+            object.__setattr__(self, "hooks", {})
+
+
+# ---------------------------------------------------------------------------
+# Hook types
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class HookContext:
+    """Context passed to every lifecycle hook."""
+
+    event: str           # event name, e.g. "session_start"
+    trigger: str | None  # message that triggered the hook, if any
+    system_prompt: str   # current system prompt at hook invocation time
+
+
+@dataclass
+class HookResult:
+    """What a hook may return to modify node state."""
+
+    system_prompt: str | None = None  # replace current system prompt
+    inject: str | None = None         # inject an additional user message
+
 
 # ---------------------------------------------------------------------------
 # Output accumulator with write-through persistence
@@ -476,6 +512,9 @@ class EventLoopNode(NodeProtocol):
                 initial_message = self._build_initial_message(ctx)
                 if initial_message:
                     await conversation.add_user_message(initial_message)
+
+                # Fire session_start hooks (e.g. persona selection)
+                await self._run_hooks("session_start", conversation, trigger=initial_message)
 
         # 2a. Guard: ensure at least one non-system message exists.
         # A restored conversation may have 0 messages if phase_id filtering
@@ -3903,6 +3942,45 @@ class EventLoopNode(NodeProtocol):
                 )
         except Exception as e:
             logger.warning("Action plan generation failed for node '%s': %s", node_id, e)
+
+    async def _run_hooks(
+        self,
+        event: str,
+        conversation: NodeConversation,
+        trigger: str | None = None,
+    ) -> None:
+        """Run all registered hooks for *event*, applying their results.
+
+        Each hook receives a HookContext and may return a HookResult that:
+        - replaces the system prompt (result.system_prompt)
+        - injects an extra user message (result.inject)
+        Hooks run in registration order; each sees the prompt as left by the
+        previous hook.
+        """
+        hook_list = self._config.hooks.get(event, [])
+        if not hook_list:
+            return
+        for hook in hook_list:
+            ctx = HookContext(
+                event=event,
+                trigger=trigger,
+                system_prompt=conversation.system_prompt,
+            )
+            try:
+                result = await hook(ctx)
+            except Exception:
+                import logging
+
+                logging.getLogger(__name__).warning(
+                    "Hook '%s' raised an exception", event, exc_info=True
+                )
+                continue
+            if result is None:
+                continue
+            if result.system_prompt:
+                conversation.update_system_prompt(result.system_prompt)
+            if result.inject:
+                await conversation.add_user_message(result.inject)
 
     async def _publish_iteration(
         self, stream_id: str, node_id: str, iteration: int, execution_id: str = ""
