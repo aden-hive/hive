@@ -15,7 +15,7 @@ The fastest way to get started:
 
 ```bash
 # 1. Clone the repository
-git clone https://github.com/adenhq/hive.git
+git clone https://github.com/aden-hive/hive.git
 cd hive
 
 # 2. Run automated setup
@@ -214,6 +214,6 @@ pip uninstall -y framework tools
 ## Getting Help
 
 - **Documentation**: Check the `/docs` folder
-- **Issues**: [github.com/adenhq/hive/issues](https://github.com/adenhq/hive/issues)
+- **Issues**: [github.com/aden-hive/hive/issues](https://github.com/aden-hive/hive/issues)
 - **Discord**: [discord.com/invite/MXE49hrKDk](https://discord.com/invite/MXE49hrKDk)
 - **Build Agents**: Use the coder-tools workflow to create agents
