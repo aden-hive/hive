@@ -605,10 +605,11 @@ class SessionManager:
                 "Handle all tasks directly using your coding tools."
             )
 
-        # Compose phase-specific prompts
-        phase_state.prompt_building = (
-            _queen_identity_building
-            + _queen_style
+        # Compose phase-specific prompts.
+        # The building prompt body is stored separately so the thinking hook
+        # can replace the identity prefix with a domain-matched expert persona.
+        _building_body = (
+            _queen_style
             + _queen_tools_building
             + _queen_behavior_always
             + _queen_behavior_building
@@ -617,6 +618,8 @@ class SessionManager:
             + _appendices
             + worker_identity
         )
+        phase_state.base_prompt_building = _building_body
+        phase_state.prompt_building = _queen_identity_building + _building_body
         phase_state.prompt_staging = (
             _queen_identity_staging
             + _queen_style
@@ -634,7 +637,16 @@ class SessionManager:
             + worker_identity
         )
 
-        # Use the initial phase prompt as the node's system_prompt
+        # Wire up the thinking hook: fires once at session start to select
+        # the best-fit expert persona for the user's opening message.
+        from framework.agents.hive_coder.nodes.thinking_hook import select_expert_persona
+
+        _session_llm = session.llm
+        phase_state.thinking_hook = lambda msg: select_expert_persona(msg, _session_llm)
+        if initial_prompt:
+            await phase_state.apply_thinking_hook(initial_prompt)
+
+        # Use the (potentially enriched) building prompt as the node's system_prompt
         initial_prompt_text = phase_state.get_current_prompt()
 
         registered_tool_names = set(queen_registry.get_tools().keys())

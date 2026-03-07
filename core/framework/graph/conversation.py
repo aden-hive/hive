@@ -898,9 +898,11 @@ class NodeConversation:
         # Build reference message
         ref_parts: list[str] = []
         if conv_filename:
+            full_path = str((spill_path / conv_filename).resolve())
             ref_parts.append(
-                f"[Previous conversation saved to '{conv_filename}'. "
-                f"Use load_data('{conv_filename}') to review if needed.]"
+                f"[Previous conversation saved to '{full_path}'. "
+                f"Use load_data('{conv_filename}'), read_file('{full_path}'), "
+                f"or run_command('cat \"{full_path}\"') to review if needed.]"
             )
         elif not collapsed_msgs:
             ref_parts.append("[Previous freeform messages compacted.]")

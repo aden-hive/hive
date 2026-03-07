@@ -604,8 +604,10 @@ class EventLoopNode(NodeProtocol):
             await self._publish_iteration(stream_id, node_id, iteration, execution_id)
 
             # 6d. Pre-turn compaction check (tiered)
+            _compacted_this_iter = False
             if conversation.needs_compaction():
                 await self._compact(ctx, conversation, accumulator)
+                _compacted_this_iter = True
 
             # 6e. Run single LLM turn (with transient error retry)
             logger.info(
@@ -809,8 +811,11 @@ class EventLoopNode(NodeProtocol):
             if turn_input > 0:
                 conversation.update_token_count(turn_input)
 
-            # 6e''. Post-turn compaction check (catches tool-result bloat)
-            if conversation.needs_compaction():
+            # 6e''. Post-turn compaction check (catches tool-result bloat).
+            # Skip if pre-turn already compacted this iteration — two compactions
+            # in one iteration produce back-to-back spillover files and leave the
+            # agent disoriented on the very next turn.
+            if not _compacted_this_iter and conversation.needs_compaction():
                 await self._compact(ctx, conversation, accumulator)
 
             # Reset auto-block grace streak when real work happens
@@ -3637,14 +3642,24 @@ class EventLoopNode(NodeProtocol):
                     data_files = [f for f in all_files if f not in conv_files]
 
                     if conv_files:
-                        conv_list = "\n".join(f"  - {f}" for f in conv_files)
+                        conv_list = "\n".join(
+                            f"  - {f}  (full path: {data_dir / f})" for f in conv_files
+                        )
                         parts.append(
                             "CONVERSATION HISTORY (freeform messages saved during compaction — "
-                            "use load_data to review earlier dialogue):\n" + conv_list
+                            "use load_data('<filename>'), read_file('<full_path>'), "
+                            "or run_command('cat \"<full_path>\"') to review earlier dialogue):\n"
+                            + conv_list
                         )
                     if data_files:
-                        file_list = "\n".join(f"  - {f}" for f in data_files[:30])
-                        parts.append("DATA FILES (use load_data to read):\n" + file_list)
+                        file_list = "\n".join(
+                            f"  - {f}  (full path: {data_dir / f})" for f in data_files[:30]
+                        )
+                        parts.append(
+                            "DATA FILES (use load_data('<filename>'), read_file('<full_path>'), "
+                            "or run_command('cat \"<full_path>\"') to read):\n"
+                            + file_list
+                        )
                     if not all_files:
                         parts.append(
                             "NOTE: Large tool results may have been saved to files. "
