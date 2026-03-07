@@ -9,7 +9,8 @@ from .base import CredentialSpec
 EMAIL_CREDENTIALS = {
     "resend": CredentialSpec(
         env_var="RESEND_API_KEY",
-        tools=["send_email"],
+        # send_email is multi-provider (auto-detects at runtime)
+        tools=[],
         node_types=[],
         required=False,
         startup_required=False,
@@ -36,9 +37,11 @@ EMAIL_CREDENTIALS = {
     "google": CredentialSpec(
         env_var="GOOGLE_ACCESS_TOKEN",
         tools=[
-            # send_email is excluded: it's a multi-provider tool that checks
-            # credentials at runtime based on the provider parameter.
-            # Gmail tools
+            # Multi-provider tools are excluded, they auto-detect provider
+            # at runtime: send_email, email_list, email_read, email_search,
+            # email_labels, email_mark_read, email_delete, email_reply,
+            # email_forward, email_move, email_bulk_delete
+            # Gmail-specific tools (from gmail_tool module)
             "gmail_reply_email",
             "gmail_list_messages",
             "gmail_get_message",
