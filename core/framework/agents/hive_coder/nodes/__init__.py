@@ -889,10 +889,7 @@ queen_node = NodeSpec(
     input_keys=["greeting"],
     output_keys=[],  # Queen should never have this
     nullable_output_keys=[],  # Queen should never have this
-    success_criteria=(
-        "User's intent is understood, coding tasks are completed correctly, "
-        "and the worker is managed effectively when delegated to."
-    ),
+    skip_judge=True,  # Queen is a conversational agent; suppress tool-use pressure feedback
     tools=sorted(set(_QUEEN_BUILDING_TOOLS + _QUEEN_STAGING_TOOLS + _QUEEN_RUNNING_TOOLS)),
     system_prompt=(
         _queen_identity_building

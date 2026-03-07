@@ -262,6 +262,16 @@ class NodeSpec(BaseModel):
         ),
     )
 
+    # Opt out of judge evaluation entirely (no feedback injected, loop continues normally)
+    skip_judge: bool = Field(
+        default=False,
+        description=(
+            "When True, the implicit judge is bypassed entirely — no feedback is "
+            "injected and the loop continues naturally. Intended for conversational "
+            "nodes (e.g., the queen) that should never receive tool-use pressure."
+        ),
+    )
+
     model_config = {"extra": "allow", "arbitrary_types_allowed": True}
 
 
