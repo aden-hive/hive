@@ -9,12 +9,15 @@ This is designed around the questions I need to answer:
 """
 
 from collections import defaultdict
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
 from framework.schemas.decision import Decision
-from framework.schemas.run import Run, RunStatus, RunSummary
+from framework.schemas.run import Problem, Run, RunMetrics, RunStatus, RunSummary
+from framework.schemas.session_state import SessionState, SessionStatus
 from framework.storage.backend import FileStorage
+from framework.storage.session_store import SessionStore
 
 
 class FailureAnalysis:
@@ -134,37 +137,34 @@ class BuilderQuery:
     """
 
     def __init__(self, storage_path: str | Path):
-        self.storage = FileStorage(storage_path)
+        self._storage_path = Path(storage_path)
+        self.storage = FileStorage(self._storage_path)
+        self._session_store = SessionStore(self._storage_path)
 
     # === WHAT HAPPENED? ===
 
     def get_run_summary(self, run_id: str) -> RunSummary | None:
         """Get a quick summary of a run."""
-        return self.storage.load_summary(run_id)
+        run = self._load_run(run_id)
+        if run is None:
+            return None
+        return RunSummary.from_run(run)
 
     def get_full_run(self, run_id: str) -> Run | None:
         """Get the complete run with all decisions."""
-        return self.storage.load_run(run_id)
+        return self._load_run(run_id)
 
     def list_runs_for_goal(self, goal_id: str) -> list[RunSummary]:
         """Get summaries of all runs for a goal."""
-        run_ids = self.storage.get_runs_by_goal(goal_id)
-        summaries = []
-        for run_id in run_ids:
-            summary = self.storage.load_summary(run_id)
-            if summary:
-                summaries.append(summary)
-        return summaries
+        runs = [run for run in self._list_all_runs() if run.goal_id == goal_id]
+        runs.sort(key=lambda r: r.started_at, reverse=True)
+        return [RunSummary.from_run(run) for run in runs]
 
     def get_recent_failures(self, limit: int = 10) -> list[RunSummary]:
         """Get recent failed runs."""
-        run_ids = self.storage.get_runs_by_status(RunStatus.FAILED)
-        summaries = []
-        for run_id in run_ids[:limit]:
-            summary = self.storage.load_summary(run_id)
-            if summary:
-                summaries.append(summary)
-        return summaries
+        failures = [run for run in self._list_all_runs() if run.status == RunStatus.FAILED]
+        failures.sort(key=lambda r: r.completed_at or r.started_at, reverse=True)
+        return [RunSummary.from_run(run) for run in failures[:limit]]
 
     # === WHY DID IT FAIL? ===
 
@@ -174,7 +174,7 @@ class BuilderQuery:
 
         This is my primary tool for understanding what went wrong.
         """
-        run = self.storage.load_run(run_id)
+        run = self._load_run(run_id)
         if run is None or run.status != RunStatus.FAILED:
             return None
 
@@ -212,7 +212,7 @@ class BuilderQuery:
 
     def get_decision_trace(self, run_id: str) -> list[str]:
         """Get a readable trace of all decisions in a run."""
-        run = self.storage.load_run(run_id)
+        run = self._load_run(run_id)
         if run is None:
             return []
         return [d.summary_for_builder() for d in run.decisions]
@@ -225,16 +225,7 @@ class BuilderQuery:
 
         This helps me understand systemic issues vs one-off failures.
         """
-        run_ids = self.storage.get_runs_by_goal(goal_id)
-        if not run_ids:
-            return None
-
-        runs = []
-        for run_id in run_ids:
-            run = self.storage.load_run(run_id)
-            if run:
-                runs.append(run)
-
+        runs = [run for run in self._list_all_runs() if run.goal_id == goal_id]
         if not runs:
             return None
 
@@ -283,8 +274,8 @@ class BuilderQuery:
 
     def compare_runs(self, run_id_1: str, run_id_2: str) -> dict[str, Any]:
         """Compare two runs to understand what differed."""
-        run1 = self.storage.load_run(run_id_1)
-        run2 = self.storage.load_run(run_id_2)
+        run1 = self._load_run(run_id_1)
+        run2 = self._load_run(run_id_2)
 
         if run1 is None or run2 is None:
             return {"error": "One or both runs not found"}
@@ -365,26 +356,22 @@ class BuilderQuery:
 
     def get_node_performance(self, node_id: str) -> dict[str, Any]:
         """Get performance metrics for a specific node across all runs."""
-        run_ids = self.storage.get_runs_by_node(node_id)
-
         total_decisions = 0
         successful_decisions = 0
         total_latency = 0
         total_tokens = 0
         decision_types: dict[str, int] = defaultdict(int)
 
-        for run_id in run_ids:
-            run = self.storage.load_run(run_id)
-            if run:
-                for decision in run.decisions:
-                    if decision.node_id == node_id:
-                        total_decisions += 1
-                        if decision.was_successful:
-                            successful_decisions += 1
-                        if decision.outcome:
-                            total_latency += decision.outcome.latency_ms
-                            total_tokens += decision.outcome.tokens_used
-                        decision_types[decision.decision_type.value] += 1
+        for run in self._list_all_runs():
+            for decision in run.decisions:
+                if decision.node_id == node_id:
+                    total_decisions += 1
+                    if decision.was_successful:
+                        successful_decisions += 1
+                    if decision.outcome:
+                        total_latency += decision.outcome.latency_ms
+                        total_tokens += decision.outcome.tokens_used
+                    decision_types[decision.decision_type.value] += 1
 
         return {
             "node_id": node_id,
@@ -396,6 +383,138 @@ class BuilderQuery:
         }
 
     # === PRIVATE HELPERS ===
+
+    def _load_run(self, run_id: str) -> Run | None:
+        """Load a run from legacy storage or unified session state."""
+        run = self.storage.load_run(run_id)
+        if run is not None:
+            return run
+
+        state = self._load_session_state(run_id)
+        if state is None:
+            return None
+        return self._run_from_session_state(state)
+
+    def _list_all_runs(self) -> list[Run]:
+        """List runs from both legacy and unified session storage."""
+        runs_by_id: dict[str, Run] = {}
+
+        # Legacy runs
+        for run_id in self.storage.list_all_runs():
+            run = self.storage.load_run(run_id)
+            if run is not None:
+                runs_by_id[run.id] = run
+
+        # Unified sessions (only add if not already present from legacy store)
+        sessions_dir = self._session_store.sessions_dir
+        if sessions_dir.exists():
+            for session_dir in sessions_dir.iterdir():
+                if not session_dir.is_dir():
+                    continue
+                state = self._load_session_state(session_dir.name)
+                if state is None:
+                    continue
+                if state.session_id not in runs_by_id:
+                    runs_by_id[state.session_id] = self._run_from_session_state(state)
+
+        return list(runs_by_id.values())
+
+    def _load_session_state(self, session_id: str) -> SessionState | None:
+        """Load unified session state for a run/session ID."""
+        state_path = self._session_store.get_state_path(session_id)
+        if not state_path.exists():
+            return None
+        try:
+            return SessionState.model_validate_json(state_path.read_text())
+        except Exception:
+            return None
+
+    def _run_from_session_state(self, state: SessionState) -> Run:
+        """Convert SessionState back into Run shape for BuilderQuery APIs."""
+        status_mapping = {
+            SessionStatus.ACTIVE: RunStatus.RUNNING,
+            SessionStatus.PAUSED: RunStatus.RUNNING,
+            SessionStatus.COMPLETED: RunStatus.COMPLETED,
+            SessionStatus.FAILED: RunStatus.FAILED,
+            SessionStatus.CANCELLED: RunStatus.CANCELLED,
+        }
+
+        started_at = datetime.fromisoformat(state.timestamps.started_at)
+        completed_at = (
+            datetime.fromisoformat(state.timestamps.completed_at)
+            if state.timestamps.completed_at
+            else None
+        )
+
+        decisions = []
+        from framework.schemas.decision import Decision as DecisionModel
+
+        for decision in state.decisions:
+            if isinstance(decision, dict):
+                try:
+                    decisions.append(DecisionModel(**decision))
+                except Exception:
+                    continue
+            else:
+                decisions.append(decision)
+
+        problems = []
+        for problem in state.problems:
+            if isinstance(problem, dict):
+                try:
+                    problems.append(Problem(**problem))
+                except Exception:
+                    continue
+            else:
+                problems.append(problem)
+
+        successful_decisions = 0
+        failed_decisions = 0
+        for decision in decisions:
+            if decision.outcome is not None:
+                if decision.outcome.success:
+                    successful_decisions += 1
+                else:
+                    failed_decisions += 1
+
+        if successful_decisions == 0 and failed_decisions == 0:
+            failed_decisions = len(state.progress.nodes_with_failures)
+            successful_decisions = max(0, state.metrics.decision_count - failed_decisions)
+
+        total_tokens = state.metrics.total_input_tokens + state.metrics.total_output_tokens
+        if total_tokens == 0:
+            total_tokens = state.progress.total_tokens
+
+        metrics = RunMetrics(
+            total_decisions=state.metrics.decision_count,
+            successful_decisions=successful_decisions,
+            failed_decisions=failed_decisions,
+            total_tokens=total_tokens,
+            total_latency_ms=state.progress.total_latency_ms,
+            nodes_executed=state.metrics.nodes_executed,
+            edges_traversed=state.metrics.edges_traversed,
+        )
+
+        narrative = ""
+        goal_description = ""
+        if state.model_extra:
+            narrative = str(state.model_extra.get("narrative", "") or "")
+            goal_description = str(state.model_extra.get("goal_description", "") or "")
+
+        return Run(
+            id=state.session_id,
+            goal_id=state.goal_id,
+            started_at=started_at,
+            status=status_mapping.get(state.status, RunStatus.FAILED),
+            completed_at=completed_at,
+            decisions=decisions,
+            problems=problems,
+            metrics=metrics,
+            narrative=narrative,
+            goal_description=goal_description,
+            input_data=state.input_data,
+            output_data=state.result.output,
+        )
 
     def _generate_suggestions(
         self,

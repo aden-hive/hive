@@ -16,7 +16,10 @@ from typing import Any
 from framework.observability import set_trace_context
 from framework.schemas.decision import Decision, DecisionType, Option, Outcome
 from framework.schemas.run import Run, RunStatus
+from framework.schemas.session_state import SessionState
 from framework.storage.backend import FileStorage
+from framework.storage.session_store import SessionStore
+from framework.utils.io import atomic_write
 
 logger = logging.getLogger(__name__)
 
@@ -62,6 +65,8 @@ class Runtime:
             logger.warning(f"Storage path does not exist, creating: {path}")
             path.mkdir(parents=True, exist_ok=True)
 
+        self._storage_path = path
+        self._session_store = SessionStore(path)
         self.storage = FileStorage(storage_path)
         self._current_run: Run | None = None
         self._current_node: str = "unknown"
@@ -132,9 +137,30 @@ class Runtime:
         self._current_run.output_data = output_data or {}
         self._current_run.complete(status, narrative)
 
-        # Save to storage
-        self.storage.save_run(self._current_run)
+        # Persist to unified sessions/{run_id}/state.json so Runtime + BuilderQuery
+        # workflows continue to work after legacy FileStorage deprecation.
+        self._persist_current_run(self._current_run)
         self._current_run = None
+
+    def _persist_current_run(self, run: Run) -> None:
+        """Write a completed run to unified session storage."""
+        try:
+            state = SessionState.from_legacy_run(run, session_id=run.id)
+
+            # Preserve fields not represented in SessionState's explicit schema.
+            state = state.model_copy(
+                update={
+                    "narrative": run.narrative,
+                    "goal_description": run.goal_description,
+                }
+            )
+
+            state_path = self._session_store.get_state_path(run.id)
+            state_path.parent.mkdir(parents=True, exist_ok=True)
+            with atomic_write(state_path) as f:
+                f.write(state.model_dump_json(indent=2))
+        except Exception:
+            logger.exception("Failed to persist run '%s' to unified session storage", run.id)
 
     def set_node(self, node_id: str) -> None:
         """Set the current node context for subsequent decisions."""
