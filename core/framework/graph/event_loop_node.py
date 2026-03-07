@@ -230,9 +230,9 @@ class LoopConfig:
 class HookContext:
     """Context passed to every lifecycle hook."""
 
-    event: str           # event name, e.g. "session_start"
+    event: str  # event name, e.g. "session_start"
     trigger: str | None  # message that triggered the hook, if any
-    system_prompt: str   # current system prompt at hook invocation time
+    system_prompt: str  # current system prompt at hook invocation time
 
 
 @dataclass
@@ -240,7 +240,7 @@ class HookResult:
     """What a hook may return to modify node state."""
 
     system_prompt: str | None = None  # replace current system prompt
-    inject: str | None = None         # inject an additional user message
+    inject: str | None = None  # inject an additional user message
 
 
 # ---------------------------------------------------------------------------
@@ -3699,8 +3699,7 @@ class EventLoopNode(NodeProtocol):
                         )
                         parts.append(
                             "DATA FILES (use load_data('<filename>'), read_file('<full_path>'), "
-                            "or run_command('cat \"<full_path>\"') to read):\n"
-                            + file_list
+                            "or run_command('cat \"<full_path>\"') to read):\n" + file_list
                         )
                     if not all_files:
                         parts.append(

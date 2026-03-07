@@ -176,8 +176,8 @@ to see ALL available tools (names + descriptions, grouped by category). \
 ONLY use tools from this list in your node definitions. \
 NEVER guess or fabricate tool names from memory.
 
-  list_agent_tools()                                    # ALWAYS call this first (simple mode, truncated descriptions)
-  list_agent_tools(group="google", output_schema="full") # then drill into a provider for full descriptions + input_schema
+  list_agent_tools()  # ALWAYS call this first (simple mode)
+  list_agent_tools(group="google", output_schema="full")  # drill into a provider
 
 NEVER skip the first call. Always start with the full list \
 so you know what providers and tools exist before drilling in. \
@@ -541,7 +541,8 @@ on what it does from Worker Profile>."
 5. Preferred loaded example:
    local_business_extractor/*agent name*/ has been loaded. It finds local businesses on \
 Google Maps, extracts contact details, and syncs them to Google Sheets.
-   ask_user("Do you want to run it?", ["Yes, run it", "Check credentials first", "Modify the worker"])
+   ask_user("Do you want to run it?", ["Yes, run it", "Check credentials first",
+            "Modify the worker"])
 
 ## When user ask identity and responsibility
 
@@ -886,8 +887,8 @@ queen_node = NodeSpec(
     client_facing=True,
     max_node_visits=0,
     input_keys=["greeting"],
-    output_keys=[], # Queen should never have this
-    nullable_output_keys=[], # Queen should never have this
+    output_keys=[],  # Queen should never have this
+    nullable_output_keys=[],  # Queen should never have this
     success_criteria=(
         "User's intent is understood, coding tasks are completed correctly, "
         "and the worker is managed effectively when delegated to."

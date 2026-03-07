@@ -1253,7 +1253,10 @@ def validate_agent_package(agent_name: str) -> str:
     try:
         proc = subprocess.run(
             [
-                "uv", "run", "python", "-c",
+                "uv",
+                "run",
+                "python",
+                "-c",
                 f"from {agent_name} import default_agent; print(default_agent.validate())",
             ],
             capture_output=True,
@@ -1279,10 +1282,13 @@ def validate_agent_package(agent_name: str) -> str:
     try:
         proc = subprocess.run(
             [
-                "uv", "run", "python", "-c",
-                f'from framework.runner.runner import AgentRunner; '
+                "uv",
+                "run",
+                "python",
+                "-c",
+                f"from framework.runner.runner import AgentRunner; "
                 f'r = AgentRunner.load("exports/{agent_name}", '
-                f'skip_credential_validation=True); '
+                f"skip_credential_validation=True); "
                 f'print("AgentRunner.load (graph-only): OK")',
             ],
             capture_output=True,
@@ -1336,7 +1342,6 @@ def validate_agent_package(agent_name: str) -> str:
     # Build summary
     failed_steps = [name for name, step in steps.items() if not step.get("passed")]
     total = len(steps)
-    passed_count = total - len(failed_steps)
     valid = len(failed_steps) == 0
 
     if valid:
@@ -1394,13 +1399,15 @@ def initialize_agent_package(agent_name: str, nodes: str | None = None) -> str:
     import re
 
     if not re.match(r"^[a-z][a-z0-9_]*$", agent_name):
-        return json.dumps({
-            "success": False,
-            "error": (
-                f"Invalid agent_name '{agent_name}'. Must be snake_case: "
-                "lowercase letters, numbers, underscores, starting with a letter."
-            ),
-        })
+        return json.dumps(
+            {
+                "success": False,
+                "error": (
+                    f"Invalid agent_name '{agent_name}'. Must be snake_case: "
+                    "lowercase letters, numbers, underscores, starting with a letter."
+                ),
+            }
+        )
 
     node_list = [n.strip() for n in nodes.split(",") if n.strip()] if nodes else ["start"]
 
@@ -1427,7 +1434,9 @@ def initialize_agent_package(agent_name: str, nodes: str | None = None) -> str:
         }
 
     # -- config.py --
-    _write("config.py", f'''\
+    _write(
+        "config.py",
+        f'''\
 """Runtime configuration."""
 
 import json
@@ -1471,7 +1480,8 @@ class AgentMetadata:
 
 
 metadata = AgentMetadata()
-''')
+''',
+    )
 
     # -- nodes/__init__.py --
     node_specs = []
@@ -1479,7 +1489,7 @@ metadata = AgentMetadata()
     for node_id in node_list:
         var = _node_var_name(node_id)
         node_var_names.append(var)
-        is_first = (node_id == entry_node)
+        is_first = node_id == entry_node
         node_specs.append(f'''\
 {var} = NodeSpec(
     id="{node_id}",
@@ -1516,17 +1526,19 @@ __all__ = {node_var_names!r}
     edge_defs = []
     for i in range(len(node_list) - 1):
         src, tgt = node_list[i], node_list[i + 1]
-        edge_defs.append(f'''\
+        edge_defs.append(f"""\
     EdgeSpec(
         id="{src}-to-{tgt}",
         source="{src}",
         target="{tgt}",
         condition=EdgeCondition.ON_SUCCESS,
         priority=1,
-    ),''')
+    ),""")
     edges_str = "\n".join(edge_defs) if edge_defs else "    # TODO: Add edges"
 
-    _write("agent.py", f'''\
+    _write(
+        "agent.py",
+        f'''\
 """Agent graph construction for {human_name}."""
 
 from pathlib import Path
@@ -1735,10 +1747,13 @@ class {class_name}:
 
 
 default_agent = {class_name}()
-''')
+''',
+    )
 
     # -- __init__.py --
-    _write("__init__.py", f'''\
+    _write(
+        "__init__.py",
+        f'''\
 """{human_name} — TODO: Add description."""
 
 from .agent import (
@@ -1773,10 +1788,13 @@ __all__ = [
     "default_config",
     "metadata",
 ]
-''')
+''',
+    )
 
     # -- __main__.py --
-    _write("__main__.py", f'''\
+    _write(
+        "__main__.py",
+        f'''\
 """CLI entry point for {human_name}."""
 
 import asyncio
@@ -1827,7 +1845,9 @@ def info():
     """Show agent info."""
     data = default_agent.info()
     click.echo(
-        f"Agent: {{data[\'name\']}}\\nVersion: {{data[\'version\']}}\\nDescription: {{data[\'description\']}}"
+        f"Agent: {{data[\'name\']}}\n"
+        f"Version: {{data[\'version\']}}\n"
+        f"Description: {{data[\'description\']}}"
     )
     click.echo(f"Nodes: {{', '.join(data[\'nodes\'])}}")
     click.echo(f"Client-facing: {{', '.join(data[\'client_facing_nodes\'])}}")
@@ -1848,21 +1868,30 @@ def validate():
 
 if __name__ == "__main__":
     cli()
-''')
+''',
+    )
 
     # -- mcp_servers.json --
-    _write("mcp_servers.json", json.dumps({
-        "hive-tools": {
-            "transport": "stdio",
-            "command": "uv",
-            "args": ["run", "python", "mcp_server.py", "--stdio"],
-            "cwd": "../../tools",
-            "description": "Hive tools MCP server",
-        }
-    }, indent=2))
+    _write(
+        "mcp_servers.json",
+        json.dumps(
+            {
+                "hive-tools": {
+                    "transport": "stdio",
+                    "command": "uv",
+                    "args": ["run", "python", "mcp_server.py", "--stdio"],
+                    "cwd": "../../tools",
+                    "description": "Hive tools MCP server",
+                }
+            },
+            indent=2,
+        ),
+    )
 
     # -- tests/conftest.py --
-    _write("tests/conftest.py", f'''\
+    _write(
+        "tests/conftest.py",
+        '''\
 """Test fixtures."""
 
 import sys
@@ -1893,22 +1922,26 @@ def runner_loaded():
     from framework.runner.runner import AgentRunner
 
     return AgentRunner.load(AGENT_PATH)
-''')
+''',
+    )
 
-    return json.dumps({
-        "success": True,
-        "agent_name": agent_name,
-        "class_name": class_name,
-        "entry_node": entry_node,
-        "nodes": node_list,
-        "files_written": files_written,
-        "file_count": len(files_written),
-        "next_steps": [
-            f"Customize node definitions in exports/{agent_name}/nodes/__init__.py",
-            f"Define goal and edges in exports/{agent_name}/agent.py",
-            f"Run validate_agent_package(\"{agent_name}\") to check structure",
-        ],
-    }, indent=2)
+    return json.dumps(
+        {
+            "success": True,
+            "agent_name": agent_name,
+            "class_name": class_name,
+            "entry_node": entry_node,
+            "nodes": node_list,
+            "files_written": files_written,
+            "file_count": len(files_written),
+            "next_steps": [
+                f"Customize node definitions in exports/{agent_name}/nodes/__init__.py",
+                f"Define goal and edges in exports/{agent_name}/agent.py",
+                f'Run validate_agent_package("{agent_name}") to check structure',
+            ],
+        },
+        indent=2,
+    )
 
 
 # ── Main ──────────────────────────────────────────────────────────────────
