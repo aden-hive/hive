@@ -977,12 +977,19 @@ export default function Workspace() {
       // If no messages were actually restored, lift the intro suppression gate
       if (restoredMsgs.length === 0 && !coldRestoreId) suppressIntroRef.current.delete(agentType);
 
+      // Mark queenReady immediately only when resuming a session that already
+      // has messages (live resume or cold restore).  For a fresh session the
+      // queen still needs to process the thinking hook before its first
+      // response, so leave queenReady false and let the SSE handler flip it
+      // on the first queen event — this keeps the "Connecting to queen..."
+      // loading indicator visible until the queen actually responds.
+      const hasRestoredContent = restoredMsgs.length > 0 || !!coldRestoreId;
       updateAgentState(agentType, {
         sessionId: session.session_id,
         displayName,
         ready: true,
         loading: false,
-        queenReady: true,
+        queenReady: !!(isResumedSession || hasRestoredContent),
         ...(isWorkerRunning ? { workerRunState: "running" } : {}),
       });
     } catch (err: unknown) {
@@ -1272,16 +1279,17 @@ export default function Workspace() {
       // Backend event timestamp for correct queen/worker message ordering
       const eventCreatedAt = event.timestamp ? new Date(event.timestamp).getTime() : Date.now();
 
-      // Mark queen as ready on the first queen SSE event
-      if (isQueen && !agentStates[agentType]?.queenReady) {
-        updateAgentState(agentType, { queenReady: true });
-      }
+      // Mark queen as ready on the first queen SSE event.
+      // Deferred to individual event handlers below so we can batch it with
+      // other state updates (e.g. queenIsTyping) and avoid a flash frame
+      // where queenReady=true but queenIsTyping=false.
+      const shouldMarkQueenReady = isQueen && !agentStates[agentType]?.queenReady;
 
       switch (event.type) {
         case "execution_started":
           if (isQueen) {
             turnCounterRef.current[turnKey] = currentTurn + 1;
-            updateAgentState(agentType, { isTyping: true, queenIsTyping: true });
+            updateAgentState(agentType, { isTyping: true, queenIsTyping: true, ...(shouldMarkQueenReady && { queenReady: true }) });
           } else {
             // Warn if prior LLM snapshots are being dropped (edge case: execution_completed never arrived)
             const priorSnapshots = agentStates[agentType]?.llmSnapshots || {};
@@ -1835,6 +1843,8 @@ export default function Workspace() {
         }
 
         default:
+          // Fallback: ensure queenReady is set even for unexpected first events
+          if (shouldMarkQueenReady) updateAgentState(agentType, { queenReady: true });
           break;
       }
     },
