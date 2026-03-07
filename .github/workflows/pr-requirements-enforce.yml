@@ -29,7 +29,7 @@ jobs:
               const labels = pr.labels.map(l => l.name);
               if (!labels.includes("pr-requirements-warning")) continue;
               const gracePeriod = 24 * 60 * 60 * 1000;
-              const lastUpdated = new Date(pr.updated_at);
+              const lastUpdated = new Date(pr.created_at);
               const now = new Date();
               if (now - lastUpdated < gracePeriod) {
                 console.log(`Skipping PR #${pr.number} — still within grace period`);
