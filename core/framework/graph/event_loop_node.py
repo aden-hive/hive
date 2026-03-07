@@ -604,8 +604,10 @@ class EventLoopNode(NodeProtocol):
             await self._publish_iteration(stream_id, node_id, iteration, execution_id)
 
             # 6d. Pre-turn compaction check (tiered)
+            _compacted_this_iter = False
             if conversation.needs_compaction():
                 await self._compact(ctx, conversation, accumulator)
+                _compacted_this_iter = True
 
             # 6e. Run single LLM turn (with transient error retry)
             logger.info(
@@ -809,8 +811,11 @@ class EventLoopNode(NodeProtocol):
             if turn_input > 0:
                 conversation.update_token_count(turn_input)
 
-            # 6e''. Post-turn compaction check (catches tool-result bloat)
-            if conversation.needs_compaction():
+            # 6e''. Post-turn compaction check (catches tool-result bloat).
+            # Skip if pre-turn already compacted this iteration — two compactions
+            # in one iteration produce back-to-back spillover files and leave the
+            # agent disoriented on the very next turn.
+            if not _compacted_this_iter and conversation.needs_compaction():
                 await self._compact(ctx, conversation, accumulator)
 
             # Reset auto-block grace streak when real work happens
