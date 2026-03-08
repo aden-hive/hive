@@ -774,6 +774,9 @@ if '$use_codex_sub' == 'true':
     config['llm']['use_codex_subscription'] = True
     # No api_key_env_var needed for Codex subscription
     config['llm'].pop('api_key_env_var', None)
+if '$provider_id' == 'ollama':
+    # No api_key_env_var needed for local Ollama
+    config['llm'].pop('api_key_env_var', None)
 if '$api_base':
     config['llm']['api_base'] = '$api_base'
 with open('$HIVE_CONFIG_FILE', 'w') as f:
@@ -822,6 +825,11 @@ fi
 MINIMAX_CRED_DETECTED=false
 if [ -n "${MINIMAX_API_KEY:-}" ]; then
     MINIMAX_CRED_DETECTED=true
+fi
+
+OLLAMA_DETECTED=false
+if ollama list >/dev/null 2>&1; then
+    OLLAMA_DETECTED=true
 fi
 
 # Detect API key providers
@@ -876,8 +884,10 @@ if [ -n "$PREV_SUB_MODE" ] || [ -n "$PREV_PROVIDER" ]; then
         zai_code)    [ "$ZAI_CRED_DETECTED" = true ] && PREV_CRED_VALID=true ;;
         codex)       [ "$CODEX_CRED_DETECTED" = true ] && PREV_CRED_VALID=true ;;
         *)
-            # API key provider — check if the env var is set
-            if [ -n "$PREV_ENV_VAR" ] && [ -n "${!PREV_ENV_VAR}" ]; then
+            # API key provider — check if the env var is set; ollama has no credential
+            if [ "$PREV_PROVIDER" = "ollama" ]; then
+                PREV_CRED_VALID=true
+            elif [ -n "$PREV_ENV_VAR" ] && [ -n "${!PREV_ENV_VAR}" ]; then
                 PREV_CRED_VALID=true
             fi
             ;;
@@ -898,6 +908,7 @@ if [ -n "$PREV_SUB_MODE" ] || [ -n "$PREV_PROVIDER" ]; then
                 groq)      DEFAULT_CHOICE=8 ;;
                 cerebras)  DEFAULT_CHOICE=9 ;;
                 minimax)   DEFAULT_CHOICE=4 ;;
+                ollama)    DEFAULT_CHOICE=10 ;;
             esac
         fi
     fi
@@ -952,7 +963,14 @@ for idx in 0 1 2 3 4; do
     fi
 done
 
-echo -e "  ${CYAN}10)${NC} Skip for now"
+# 10) Local (Ollama)
+if [ "$OLLAMA_DETECTED" = true ]; then
+    echo -e "  ${CYAN}10)${NC} Local (Ollama) - No API key needed  ${GREEN}(ollama detected)${NC}"
+else
+    echo -e "  ${CYAN}10)${NC} Local (Ollama) - No API key needed"
+fi
+
+echo -e "  ${CYAN}11)${NC} Skip for now"
 echo ""
 
 if [ -n "$DEFAULT_CHOICE" ]; then
@@ -962,15 +980,15 @@ fi
 
 while true; do
     if [ -n "$DEFAULT_CHOICE" ]; then
-        read -r -p "Enter choice (1-10) [$DEFAULT_CHOICE]: " choice || true
+        read -r -p "Enter choice (1-11) [$DEFAULT_CHOICE]: " choice || true
         choice="${choice:-$DEFAULT_CHOICE}"
     else
-        read -r -p "Enter choice (1-10): " choice || true
+        read -r -p "Enter choice (1-11): " choice || true
     fi
-    if [[ "$choice" =~ ^[0-9]+$ ]] && [ "$choice" -ge 1 ] && [ "$choice" -le 10 ]; then
+    if [[ "$choice" =~ ^[0-9]+$ ]] && [ "$choice" -ge 1 ] && [ "$choice" -le 11 ]; then
         break
     fi
-    echo -e "${RED}Invalid choice. Please enter 1-10${NC}"
+    echo -e "${RED}Invalid choice. Please enter 1-11${NC}"
 done
 
 case $choice in
@@ -1078,6 +1096,42 @@ case $choice in
         SIGNUP_URL="https://cloud.cerebras.ai/"
         ;;
     10)
+        # Local (Ollama) — no API key; pick model from ollama list
+        SELECTED_PROVIDER_ID="ollama"
+        SELECTED_ENV_VAR=""
+        SELECTED_MAX_TOKENS=8192
+        OLLAMA_MODELS=()
+        while IFS= read -r line; do
+            [ -n "$line" ] && OLLAMA_MODELS+=("$line")
+        done < <(ollama list 2>/dev/null | tail -n +2 | awk '{print $1}')
+        if [ ${#OLLAMA_MODELS[@]} -gt 0 ]; then
+            echo ""
+            echo -e "${BOLD}Select an Ollama model:${NC}"
+            echo ""
+            for idx in "${!OLLAMA_MODELS[@]}"; do
+                num=$((idx + 1))
+                echo -e "  ${CYAN}$num)${NC} ${OLLAMA_MODELS[$idx]}"
+            done
+            echo ""
+            while true; do
+                read -r -p "Enter choice (1-${#OLLAMA_MODELS[@]}): " model_choice
+                if [[ "$model_choice" =~ ^[0-9]+$ ]] && [ "$model_choice" -ge 1 ] && [ "$model_choice" -le ${#OLLAMA_MODELS[@]} ]; then
+                    SELECTED_MODEL="${OLLAMA_MODELS[$((model_choice - 1))]}"
+                    break
+                fi
+                echo -e "${RED}Invalid choice. Please enter 1-${#OLLAMA_MODELS[@]}${NC}"
+            done
+            echo ""
+            echo -e "${GREEN}⬢${NC} Using Ollama with model ${DIM}$SELECTED_MODEL${NC}"
+        else
+            SELECTED_MODEL="llama3"
+            echo ""
+            echo -e "${YELLOW}  No Ollama models found.${NC} Using default model: ${DIM}$SELECTED_MODEL${NC}"
+            echo -e "  Run ${CYAN}ollama pull $SELECTED_MODEL${NC} (or another model), then edit ${CYAN}~/.hive/configuration.json${NC} to change the model."
+            echo ""
+        fi
+        ;;
+    11)
         echo ""
         echo -e "${YELLOW}Skipped.${NC} An LLM API key is required to test and use worker agents."
         echo -e "Add your API key later by running:"
@@ -1238,6 +1292,8 @@ if [ -n "$SELECTED_PROVIDER_ID" ]; then
         save_configuration "$SELECTED_PROVIDER_ID" "$SELECTED_ENV_VAR" "$SELECTED_MODEL" "$SELECTED_MAX_TOKENS" "" "https://api.z.ai/api/coding/paas/v4" > /dev/null
     elif [ "$SUBSCRIPTION_MODE" = "minimax_code" ]; then
         save_configuration "$SELECTED_PROVIDER_ID" "$SELECTED_ENV_VAR" "$SELECTED_MODEL" "$SELECTED_MAX_TOKENS" "" "$SELECTED_API_BASE" > /dev/null
+    elif [ "$SELECTED_PROVIDER_ID" = "ollama" ]; then
+        save_configuration "ollama" "" "$SELECTED_MODEL" "$SELECTED_MAX_TOKENS" > /dev/null
     else
         save_configuration "$SELECTED_PROVIDER_ID" "$SELECTED_ENV_VAR" "$SELECTED_MODEL" "$SELECTED_MAX_TOKENS" > /dev/null
     fi
@@ -1471,6 +1527,9 @@ if [ -n "$SELECTED_PROVIDER_ID" ]; then
     elif [ "$SUBSCRIPTION_MODE" = "minimax_code" ]; then
         echo -e "  ${GREEN}⬢${NC} MiniMax Coding Key → ${DIM}$SELECTED_MODEL${NC}"
         echo -e "  ${DIM}API: api.minimax.io/v1 (OpenAI-compatible)${NC}"
+    elif [ "$SELECTED_PROVIDER_ID" = "ollama" ]; then
+        echo -e "  ${GREEN}⬢${NC} Local (Ollama) → ${DIM}$SELECTED_MODEL${NC}"
+        echo -e "  ${DIM}No API key (runs locally)${NC}"
     else
         echo -e "  ${CYAN}$SELECTED_PROVIDER_ID${NC} → ${DIM}$SELECTED_MODEL${NC}"
     fi

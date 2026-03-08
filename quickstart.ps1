@@ -923,6 +923,12 @@ $ProviderMenuUrls     = @(
     "https://cloud.cerebras.ai/"
 )
 
+$OllamaDetected = $false
+try {
+    $null = & ollama list 2>$null
+    if ($LASTEXITCODE -eq 0) { $OllamaDetected = $true }
+} catch { }
+
 # ── Read previous configuration (if any) ──────────────────────
 $PrevProvider = ""
 $PrevModel = ""
@@ -952,7 +958,9 @@ if ($PrevSubMode -or $PrevProvider) {
         "zai_code"    { if ($ZaiCredDetected)    { $prevCredValid = $true } }
         "codex"       { if ($CodexCredDetected)  { $prevCredValid = $true } }
         default {
-            if ($PrevEnvVar) {
+            if ($PrevProvider -eq "ollama") {
+                $prevCredValid = $true
+            } elseif ($PrevEnvVar) {
                 $envVal = [System.Environment]::GetEnvironmentVariable($PrevEnvVar, "Process")
                 if (-not $envVal) { $envVal = [System.Environment]::GetEnvironmentVariable($PrevEnvVar, "User") }
                 if ($envVal) { $prevCredValid = $true }
@@ -972,6 +980,7 @@ if ($PrevSubMode -or $PrevProvider) {
                 "gemini"    { $DefaultChoice = "6" }
                 "groq"      { $DefaultChoice = "7" }
                 "cerebras"  { $DefaultChoice = "8" }
+                "ollama"    { $DefaultChoice = "9" }
             }
         }
     }
@@ -1017,8 +1026,14 @@ for ($idx = 0; $idx -lt $ProviderMenuEnvVars.Count; $idx++) {
     if ($envVal) { Write-Color -Text "  (credential detected)" -Color Green } else { Write-Host "" }
 }
 
+# 9) Local (Ollama)
 Write-Host "  " -NoNewline
 Write-Color -Text "9" -Color Cyan -NoNewline
+Write-Host ") Local (Ollama) - No API key needed" -NoNewline
+if ($OllamaDetected) { Write-Color -Text "  (ollama detected)" -Color Green } else { Write-Host "" }
+
+Write-Host "  " -NoNewline
+Write-Color -Text "10" -Color Cyan -NoNewline
 Write-Host ") Skip for now"
 Write-Host ""
 
@@ -1029,16 +1044,16 @@ if ($DefaultChoice) {
 
 while ($true) {
     if ($DefaultChoice) {
-        $raw = Read-Host "Enter choice (1-9) [$DefaultChoice]"
+        $raw = Read-Host "Enter choice (1-10) [$DefaultChoice]"
         if ([string]::IsNullOrWhiteSpace($raw)) { $raw = $DefaultChoice }
     } else {
-        $raw = Read-Host "Enter choice (1-9)"
+        $raw = Read-Host "Enter choice (1-10)"
     }
     if ($raw -match '^\d+$') {
         $num = [int]$raw
-        if ($num -ge 1 -and $num -le 9) { break }
+        if ($num -ge 1 -and $num -le 10) { break }
     }
-    Write-Color -Text "Invalid choice. Please enter 1-9" -Color Red
+    Write-Color -Text "Invalid choice. Please enter 1-10" -Color Red
 }
 
 switch ($num) {
@@ -1176,6 +1191,56 @@ switch ($num) {
         }
     }
     9 {
+        # Local (Ollama) — no API key; pick model from ollama list
+        $SelectedProviderId = "ollama"
+        $SelectedEnvVar     = ""
+        $SelectedMaxTokens = 8192
+        $ollamaListOutput = try { & ollama list 2>$null } catch { $null }
+        $OllamaModels = @()
+        if ($ollamaListOutput) {
+            $lines = @($ollamaListOutput) | Select-Object -Skip 1
+            foreach ($line in $lines) {
+                $firstCol = ($line -split '\s+')[0]
+                if ($firstCol) { $OllamaModels += $firstCol }
+            }
+        }
+        if ($OllamaModels.Count -gt 0) {
+            Write-Host ""
+            Write-Color -Text "Select an Ollama model:" -Color White
+            Write-Host ""
+            for ($i = 0; $i -lt $OllamaModels.Count; $i++) {
+                $n = $i + 1
+                Write-Host "  " -NoNewline
+                Write-Color -Text "$n" -Color Cyan -NoNewline
+                Write-Host ") $($OllamaModels[$i])"
+            }
+            Write-Host ""
+            while ($true) {
+                $modelChoice = Read-Host "Enter choice (1-$($OllamaModels.Count))"
+                if ($modelChoice -match '^\d+$') {
+                    $idx = [int]$modelChoice
+                    if ($idx -ge 1 -and $idx -le $OllamaModels.Count) {
+                        $SelectedModel = $OllamaModels[$idx - 1]
+                        break
+                    }
+                }
+                Write-Color -Text "Invalid choice. Please enter 1-$($OllamaModels.Count)" -Color Red
+            }
+            Write-Host ""
+            Write-Ok "Using Ollama with model $SelectedModel"
+        } else {
+            $SelectedModel = "llama3"
+            Write-Host ""
+            Write-Warn "No Ollama models found. Using default model: $SelectedModel"
+            Write-Host "  Run " -NoNewline
+            Write-Color -Text "ollama pull $SelectedModel" -Color Cyan -NoNewline
+            Write-Host " (or another model), then edit " -NoNewline
+            Write-Color -Text "~/.hive/configuration.json" -Color Cyan -NoNewline
+            Write-Host " to change the model."
+            Write-Host ""
+        }
+    }
+    10 {
         Write-Host ""
         Write-Warn "Skipped. An LLM API key is required to test and use worker agents."
         Write-Host "  Add your API key later by running:"
@@ -1287,6 +1352,8 @@ if ($SelectedProviderId) {
     } elseif ($SubscriptionMode -eq "zai_code") {
         $config.llm["api_base"] = "https://api.z.ai/api/coding/paas/v4"
         $config.llm["api_key_env_var"] = $SelectedEnvVar
+    } elseif ($SelectedProviderId -eq "ollama") {
+        # No api_key_env_var for local Ollama
     } else {
         $config.llm["api_key_env_var"] = $SelectedEnvVar
     }
