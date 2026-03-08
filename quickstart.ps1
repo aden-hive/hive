@@ -1035,6 +1035,12 @@ $ProviderMenuUrls     = @(
     "https://openrouter.ai/keys"
 )
 
+$OllamaDetected = $false
+try {
+    $null = & ollama list 2>$null
+    if ($LASTEXITCODE -eq 0) { $OllamaDetected = $true }
+} catch { }
+
 # ── Read previous configuration (if any) ──────────────────────
 $PrevProvider = ""
 $PrevModel = ""
@@ -1071,7 +1077,9 @@ if ($PrevSubMode -or $PrevProvider) {
         "kimi_code"   { if ($KimiCredDetected)   { $prevCredValid = $true } }
         "hive_llm"    { if ($HiveCredDetected)   { $prevCredValid = $true } }
         default {
-            if ($PrevEnvVar) {
+            if ($PrevProvider -eq "ollama") {
+                $prevCredValid = $true
+            } elseif ($PrevEnvVar) {
                 $envVal = [System.Environment]::GetEnvironmentVariable($PrevEnvVar, "Process")
                 if (-not $envVal) { $envVal = [System.Environment]::GetEnvironmentVariable($PrevEnvVar, "User") }
                 if ($envVal) { $prevCredValid = $true }

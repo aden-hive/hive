@@ -1093,8 +1093,10 @@ if [ -n "$PREV_SUB_MODE" ] || [ -n "$PREV_PROVIDER" ]; then
         hive_llm)    [ "$HIVE_CRED_DETECTED" = true ] && PREV_CRED_VALID=true ;;
         antigravity) [ "$ANTIGRAVITY_CRED_DETECTED" = true ] && PREV_CRED_VALID=true ;;
         *)
-            # API key provider — check if the env var is set
-            if [ -n "$PREV_ENV_VAR" ] && [ -n "${!PREV_ENV_VAR}" ]; then
+            # API key provider — check if the env var is set; ollama has no credential
+            if [ "$PREV_PROVIDER" = "ollama" ]; then
+                PREV_CRED_VALID=true
+            elif [ -n "$PREV_ENV_VAR" ] && [ -n "${!PREV_ENV_VAR}" ]; then
                 PREV_CRED_VALID=true
             fi
             ;;
