@@ -312,10 +312,10 @@ echo -e "${YELLOW}⬢${NC} ${BLUE}${BOLD}Step 3: Configuring LLM provider...${NC
 echo ""
 
 # ============================================================
-# Step 3: Verify Python Imports
+# Step 4: Verify Python Imports
 # ============================================================
 
-echo -e "${BLUE}Step 3: Verifying Python imports...${NC}"
+echo -e "${BLUE}Step 4: Verifying Python imports...${NC}"
 echo ""
 
 IMPORT_ERRORS=0
@@ -372,10 +372,10 @@ fi
 echo ""
 
 # ============================================================
-# Step 4: Verify Claude Code Skills
+# Step 5: Verify Claude Code Skills
 # ============================================================
 
-echo -e "${BLUE}Step 4: Verifying Claude Code skills...${NC}"
+echo -e "${BLUE}Step 5: Verifying Claude Code skills...${NC}"
 echo ""
 
 # Provider configuration - use associative arrays (Bash 4+) or indexed arrays (Bash 3.2)
@@ -1248,7 +1248,7 @@ fi
 echo ""
 
 # ============================================================
-# Step 4b: Browser Automation (GCU) — always enabled
+# Step 5b: Browser Automation (GCU) — always enabled
 # ============================================================
 
 echo -e "${GREEN}⬢${NC} Browser automation enabled"
@@ -1276,10 +1276,10 @@ fi
 echo ""
 
 # ============================================================
-# Step 5: Initialize Credential Store
+# Step 6: Initialize Credential Store
 # ============================================================
 
-echo -e "${YELLOW}⬢${NC} ${BLUE}${BOLD}Step 5: Initializing credential store...${NC}"
+echo -e "${YELLOW}⬢${NC} ${BLUE}${BOLD}Step 6: Initializing credential store...${NC}"
 echo ""
 echo -e "${DIM}The credential store encrypts API keys and secrets for your agents.${NC}"
 echo ""
@@ -1346,10 +1346,10 @@ fi
 echo ""
 
 # ============================================================
-# Step 6: Verify Setup
+# Step 7: Verify Setup
 # ============================================================
 
-echo -e "${YELLOW}⬢${NC} ${BLUE}${BOLD}Step 6: Verifying installation...${NC}"
+echo -e "${YELLOW}⬢${NC} ${BLUE}${BOLD}Step 7: Verifying installation...${NC}"
 echo ""
 
 ERRORS=0
@@ -1410,10 +1410,10 @@ if [ $ERRORS -gt 0 ]; then
 fi
 
 # ============================================================
-# Step 7: Install hive CLI globally
+# Step 8: Install hive CLI globally
 # ============================================================
 
-echo -e "${YELLOW}⬢${NC} ${BLUE}${BOLD}Step 7: Installing hive CLI...${NC}"
+echo -e "${YELLOW}⬢${NC} ${BLUE}${BOLD}Step 8: Installing hive CLI...${NC}"
 echo ""
 
 # Ensure ~/.local/bin exists and is in PATH

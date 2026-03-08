@@ -711,10 +711,10 @@ if (-not $checkResult.DefenderEnabled) {
 
 
 # ============================================================
-# Step 3: Verify Python Imports
+# Step 4: Verify Python Imports
 # ============================================================
 
-Write-Step -Number "3" -Text "Step 3: Verifying Python imports..."
+Write-Step -Number "4" -Text "Step 4: Verifying Python imports..."
 
 $importErrors = 0
 
@@ -773,10 +773,10 @@ if ($importErrors -gt 0) {
 Write-Host ""
 
 # ============================================================
-# Step 4: Verify Claude Code Skills
+# Step 5: Verify Claude Code Skills
 # ============================================================
 
-Write-Step -Number "4" -Text "Step 4: Verifying Claude Code skills..."
+Write-Step -Number "5" -Text "Step 5: Verifying Claude Code skills..."
 
 # (skills check is informational only, shown in final verification)
 
@@ -1298,7 +1298,7 @@ if ($SelectedProviderId) {
 Write-Host ""
 
 # ============================================================
-# Step 5b: Browser Automation (GCU) — always enabled
+# Step 6b: Browser Automation (GCU) — always enabled
 # ============================================================
 
 Write-Host ""
@@ -1323,10 +1323,10 @@ if (Test-Path $HiveConfigFile) {
 Write-Host ""
 
 # ============================================================
-# Step 6: Initialize Credential Store
+# Step 7: Initialize Credential Store
 # ============================================================
 
-Write-Step -Number "5" -Text "Step 5: Initializing credential store..."
+Write-Step -Number "7" -Text "Step 7: Initializing credential store..."
 Write-Color -Text "The credential store encrypts API keys and secrets for your agents." -Color DarkGray
 Write-Host ""
 
@@ -1422,10 +1422,10 @@ if ($credKey) {
 Write-Host ""
 
 # ============================================================
-# Step 6: Verify Setup
+# Step 8: Verify Setup
 # ============================================================
 
-Write-Step -Number "6" -Text "Step 6: Verifying installation..."
+Write-Step -Number "8" -Text "Step 8: Verifying installation..."
 
 $verifyErrors = 0
 
@@ -1529,10 +1529,10 @@ if ($verifyErrors -gt 0) {
 }
 
 # ============================================================
-# Step 7: Install hive CLI wrapper
+# Step 9: Install hive CLI wrapper
 # ============================================================
 
-Write-Step -Number "7" -Text "Step 7: Installing hive CLI..."
+Write-Step -Number "9" -Text "Step 9: Installing hive CLI..."
 
 # Verify hive.ps1 wrapper exists in project root
 $hivePs1Path = Join-Path $ScriptDir "hive.ps1"
