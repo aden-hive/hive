@@ -125,6 +125,7 @@ async def handle_list_nodes(request: web.Request) -> web.Response:
             "entry_node": graph.entry_node,
             "trigger_type": t.trigger_type,
             "trigger_config": t.trigger_config,
+            "task": t.task,
         }
         mono = getattr(session, "trigger_next_fire", {}).get(t.id)
         if mono is not None:

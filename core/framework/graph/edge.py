@@ -335,6 +335,10 @@ class AsyncEntryPointSpec(BaseModel):
         default_factory=dict,
         description="Trigger-specific configuration (e.g., webhook URL, timer interval)",
     )
+    task: str = Field(
+        default="",
+        description="Worker task string when this trigger fires autonomously",
+    )
     isolation_level: str = Field(
         default="shared", description="State isolation: isolated, shared, or synchronized"
     )

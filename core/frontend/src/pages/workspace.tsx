@@ -478,6 +478,8 @@ export default function Workspace() {
   const [credentialAgentPath, setCredentialAgentPath] = useState<string | null>(null);
   const [dismissedBanner, setDismissedBanner] = useState<string | null>(null);
   const [selectedNode, setSelectedNode] = useState<GraphNode | null>(null);
+  const [triggerTaskDraft, setTriggerTaskDraft] = useState("");
+  const [triggerTaskSaving, setTriggerTaskSaving] = useState(false);
   const [newTabOpen, setNewTabOpen] = useState(false);
   const newTabBtnRef = useRef<HTMLButtonElement>(null);
 
@@ -1065,19 +1067,32 @@ export default function Workspace() {
         try {
           const { entry_points } = await sessionsApi.entryPoints(state.sessionId);
           const fireMap = new Map<string, number>();
+          const taskMap = new Map<string, string>();
           for (const ep of entry_points) {
             if (ep.next_fire_in != null) {
               fireMap.set(`__trigger_${ep.id}`, ep.next_fire_in);
             }
+            if (ep.task != null) {
+              taskMap.set(`__trigger_${ep.id}`, ep.task);
+            }
           }
-          if (fireMap.size === 0) continue;
+          if (fireMap.size === 0 && taskMap.size === 0) continue;
           setSessionsByAgent((prev) => {
             const ss = prev[agentType];
             if (!ss?.length) return prev;
             const updated = ss[0].graphNodes.map((n) => {
+              if (n.nodeType !== "trigger") return n;
               const nfi = fireMap.get(n.id);
-              if (nfi == null || n.nodeType !== "trigger") return n;
-              return { ...n, triggerConfig: { ...n.triggerConfig, next_fire_in: nfi } };
+              const task = taskMap.get(n.id);
+              if (nfi == null && task == null) return n;
+              return {
+                ...n,
+                triggerConfig: {
+                  ...n.triggerConfig,
+                  ...(nfi != null ? { next_fire_in: nfi } : {}),
+                  ...(task != null ? { task } : {}),
+                },
+              };
             });
             // Skip update if nothing changed
             if (updated.every((n, idx) => n === ss[0].graphNodes[idx])) return prev;
@@ -1914,6 +1929,14 @@ export default function Workspace() {
   const liveSelectedNode = selectedNode && currentGraph.nodes.find(n => n.id === selectedNode.id);
   const resolvedSelectedNode = liveSelectedNode || selectedNode;
 
+  // Sync trigger task draft when selected trigger node changes
+  useEffect(() => {
+    if (resolvedSelectedNode?.nodeType === "trigger") {
+      const tc = resolvedSelectedNode.triggerConfig as Record<string, unknown> | undefined;
+      setTriggerTaskDraft((tc?.task as string) || "");
+    }
+  }, [resolvedSelectedNode?.id]);
+
   // Build a flat list of all agent-type tabs for the tab bar
   const agentTabs = Object.entries(sessionsByAgent)
     .filter(([, sessions]) => sessions.length > 0)
@@ -2568,6 +2591,43 @@ export default function Workspace() {
                       ) : null;
                     })()}
                     <div>
+                      <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider mb-1.5">Task</p>
+                      <textarea
+                        value={triggerTaskDraft}
+                        onChange={(e) => setTriggerTaskDraft(e.target.value)}
+                        placeholder="Describe what the worker should do when this trigger fires..."
+                        className="w-full text-xs text-foreground/80 bg-muted/30 rounded-lg px-3 py-2 border border-border/20 resize-none min-h-[60px] font-mono focus:outline-none focus:border-primary/40"
+                        rows={3}
+                      />
+                      {(() => {
+                        const currentTask = (resolvedSelectedNode.triggerConfig as Record<string, unknown> | undefined)?.task as string || "";
+                        const hasChanged = triggerTaskDraft !== currentTask;
+                        if (!hasChanged) return null;
+                        return (
+                          <button
+                            disabled={triggerTaskSaving}
+                            onClick={async () => {
+                              const sessionId = activeAgentState?.sessionId;
+                              const triggerId = resolvedSelectedNode.id.replace("__trigger_", "");
+                              if (!sessionId) return;
+                              setTriggerTaskSaving(true);
+                              try {
+                                await sessionsApi.updateTriggerTask(sessionId, triggerId, triggerTaskDraft);
+                              } finally {
+                                setTriggerTaskSaving(false);
+                              }
+                            }}
+                            className="mt-1.5 w-full text-[11px] px-3 py-1.5 rounded-lg border border-primary/30 text-primary hover:bg-primary/10 transition-colors disabled:opacity-50"
+                          >
+                            {triggerTaskSaving ? "Saving..." : "Save Task"}
+                          </button>
+                        );
+                      })()}
+                      {!triggerTaskDraft && (
+                        <p className="text-[10px] text-amber-400/80 mt-1">A task is required before enabling this trigger.</p>
+                      )}
+                    </div>
+                    <div>
                       <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider mb-1.5">Fires into</p>
                       <p className="text-xs text-foreground/80 font-mono bg-muted/30 rounded-lg px-3 py-2 border border-border/20">
                         {resolvedSelectedNode.next?.[0]?.split("-").map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(" ") || "—"}
@@ -2576,9 +2636,11 @@ export default function Workspace() {
                     {activeAgentState?.queenPhase !== "building" && (() => {
                       const triggerIsActive = resolvedSelectedNode.status === "running" || resolvedSelectedNode.status === "complete";
                       const triggerId = resolvedSelectedNode.id.replace("__trigger_", "");
+                      const taskMissing = !triggerTaskDraft;
                       return (
                         <div className="pt-1">
                           <button
+                            disabled={!triggerIsActive && taskMissing}
                             onClick={async () => {
                               const sessionId = activeAgentState?.sessionId;
                               if (!sessionId) return;
@@ -2588,11 +2650,16 @@ export default function Workspace() {
                             className={`w-full text-xs px-3 py-2 rounded-lg border transition-colors ${
                               triggerIsActive
                                 ? "border-red-500/30 text-red-400 hover:bg-red-500/10"
-                                : "border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/10"
+                                : taskMissing
+                                  ? "border-border/30 text-muted-foreground/40 cursor-not-allowed"
+                                  : "border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/10"
                             }`}
                           >
                             {triggerIsActive ? "Disable Trigger" : "Enable Trigger"}
                           </button>
+                          {!triggerIsActive && taskMissing && (
+                            <p className="text-[10px] text-muted-foreground/50 mt-1 text-center">Configure a task first</p>
+                          )}
                         </div>
                       );
                     })()}

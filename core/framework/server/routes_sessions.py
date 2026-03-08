@@ -9,6 +9,7 @@ Session-primary routes:
 - DELETE /api/sessions/{session_id}/worker           — unload worker from session
 - GET    /api/sessions/{session_id}/stats            — runtime statistics
 - GET    /api/sessions/{session_id}/entry-points     — list entry points
+- PATCH  /api/sessions/{session_id}/triggers/{id}   — update trigger task
 - GET    /api/sessions/{session_id}/graphs           — list graph IDs
 - GET    /api/sessions/{session_id}/queen-messages   — queen conversation history
 
@@ -238,6 +239,7 @@ async def handle_get_live_session(request: web.Request) -> web.Response:
                 "entry_node": graph_entry,
                 "trigger_type": t.trigger_type,
                 "trigger_config": t.trigger_config,
+                "task": t.task,
             }
             mono = getattr(session, "trigger_next_fire", {}).get(t.id)
             if mono is not None:
@@ -391,12 +393,54 @@ async def handle_session_entry_points(request: web.Request) -> web.Response:
             "entry_node": graph_entry,
             "trigger_type": t.trigger_type,
             "trigger_config": t.trigger_config,
+            "task": t.task,
         }
         mono = getattr(session, "trigger_next_fire", {}).get(t.id)
         if mono is not None:
             entry["next_fire_in"] = max(0.0, mono - time.monotonic())
         entry_points.append(entry)
     return web.json_response({"entry_points": entry_points})
+
+
+async def handle_update_trigger_task(request: web.Request) -> web.Response:
+    """PATCH /api/sessions/{session_id}/triggers/{trigger_id} — update trigger task."""
+    session, err = resolve_session(request)
+    if err:
+        return err
+
+    trigger_id = request.match_info["trigger_id"]
+    available = getattr(session, "available_triggers", {})
+    tdef = available.get(trigger_id)
+    if tdef is None:
+        return web.json_response(
+            {"error": f"Trigger '{trigger_id}' not found"},
+            status=404,
+        )
+
+    try:
+        body = await request.json()
+    except Exception:
+        return web.json_response({"error": "Invalid JSON body"}, status=400)
+
+    task = body.get("task")
+    if task is None:
+        return web.json_response({"error": "Missing 'task' field"}, status=400)
+    if not isinstance(task, str):
+        return web.json_response({"error": "'task' must be a string"}, status=400)
+
+    tdef.task = task
+
+    # Persist if trigger is currently active
+    if trigger_id in getattr(session, "active_trigger_ids", set()):
+        from framework.tools.queen_lifecycle_tools import _persist_active_triggers
+
+        session_id = request.match_info["session_id"]
+        await _persist_active_triggers(session, session_id)
+
+    return web.json_response({
+        "trigger_id": trigger_id,
+        "task": tdef.task,
+    })
 
 
 async def handle_session_graphs(request: web.Request) -> web.Response:
@@ -810,6 +854,7 @@ def register_routes(app: web.Application) -> None:
     # Session info
     app.router.add_get("/api/sessions/{session_id}/stats", handle_session_stats)
     app.router.add_get("/api/sessions/{session_id}/entry-points", handle_session_entry_points)
+    app.router.add_patch("/api/sessions/{session_id}/triggers/{trigger_id}", handle_update_trigger_task)
     app.router.add_get("/api/sessions/{session_id}/graphs", handle_session_graphs)
     app.router.add_get("/api/sessions/{session_id}/queen-messages", handle_queen_messages)
 

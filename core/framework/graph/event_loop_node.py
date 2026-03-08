@@ -3837,8 +3837,10 @@ class EventLoopNode(NodeProtocol):
 
         parts: list[str] = []
         for t in triggers:
+            task = t.payload.get("task", "")
+            task_line = f"\nTask: {task}" if task else ""
             payload_str = json.dumps(t.payload, default=str)
-            parts.append(f"[TRIGGER: {t.trigger_type}/{t.source_id}]\n{payload_str}")
+            parts.append(f"[TRIGGER: {t.trigger_type}/{t.source_id}]{task_line}\n{payload_str}")
 
         combined = "\n\n".join(parts)
         logger.info("[drain] %d trigger(s): %s", len(triggers), combined[:200])

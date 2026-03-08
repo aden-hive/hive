@@ -260,6 +260,7 @@ class SessionManager:
                             trigger_type=ep.trigger_type,
                             trigger_config=ep.trigger_config,
                             description=ep.name,
+                            task=getattr(ep, "task", ""),
                         )
                         runtime.unregister_entry_point(ep.id)
                         logger.info(
@@ -372,9 +373,14 @@ class SessionManager:
                 if state and state.active_triggers:
                     from framework.tools.queen_lifecycle_tools import _start_trigger_timer
 
+                    saved_tasks = getattr(state, "trigger_tasks", {}) or {}
                     for tid in state.active_triggers:
                         tdef = session.available_triggers.get(tid)
                         if tdef:
+                            # Restore user-configured task override
+                            saved_task = saved_tasks.get(tid, "")
+                            if saved_task:
+                                tdef.task = saved_task
                             tdef.active = True
                             session.active_trigger_ids.add(tid)
                             await _start_trigger_timer(session, tid, tdef)
@@ -960,7 +966,8 @@ class SessionManager:
             for t in session.available_triggers.values():
                 cfg = t.trigger_config
                 detail = cfg.get("cron") or f"every {cfg.get('interval_minutes', '?')} min"
-                parts.append(f"  - {t.id} ({t.trigger_type}: {detail})")
+                task_info = f' -> task: "{t.task}"' if t.task else " (no task configured)"
+                parts.append(f"  - {t.id} ({t.trigger_type}: {detail}){task_info}")
             trigger_lines = "\n\nAvailable triggers (inactive — use set_trigger to activate):\n" + "\n".join(parts)
 
         await node.inject_event(f"[SYSTEM] Worker loaded.{profile}{trigger_lines}")

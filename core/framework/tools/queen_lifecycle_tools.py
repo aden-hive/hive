@@ -274,7 +274,7 @@ async def _start_trigger_timer(session: Any, trigger_id: str, trigger_def: Any) 
                         trigger = TriggerEvent(
                             trigger_type="timer",
                             source_id=trigger_id,
-                            payload={"schedule": cron_expr, "time": datetime.now(UTC).isoformat()},
+                            payload={"schedule": cron_expr, "time": datetime.now(UTC).isoformat(), "task": trigger_def.task},
                             timestamp=time.time(),
                         )
                         await session.event_bus.publish(
@@ -307,7 +307,7 @@ async def _start_trigger_timer(session: Any, trigger_id: str, trigger_def: Any) 
                         trigger = TriggerEvent(
                             trigger_type="timer",
                             source_id=trigger_id,
-                            payload={"interval_minutes": interval_minutes, "time": datetime.now(UTC).isoformat()},
+                            payload={"interval_minutes": interval_minutes, "time": datetime.now(UTC).isoformat(), "task": trigger_def.task},
                             timestamp=time.time(),
                         )
                         await session.event_bus.publish(
@@ -363,6 +363,12 @@ async def _persist_active_triggers(session: Any, session_id: str | None) -> None
                 timestamps=SessionTimestamps(started_at=now, updated_at=now),
             )
         state.active_triggers = list(session.active_trigger_ids)
+        available = getattr(session, "available_triggers", {})
+        state.trigger_tasks = {
+            tid: available[tid].task
+            for tid in session.active_trigger_ids
+            if tid in available and available[tid].task
+        }
         await store.write_state(session_id, state)
     except Exception as e:
         logger.warning("Failed to persist active triggers: %s", e)
@@ -1739,6 +1745,7 @@ def register_queen_lifecycle_tools(
         trigger_id: str,
         trigger_type: str | None = None,
         trigger_config: dict | None = None,
+        task: str | None = None,
     ) -> str:
         """Activate a trigger so it fires periodically into the queen."""
         if trigger_id in getattr(session, "active_trigger_ids", set()):
@@ -1762,6 +1769,17 @@ def register_queen_lifecycle_tools(
                 return json.dumps({
                     "error": f"Trigger '{trigger_id}' not found. Provide trigger_type and trigger_config to create a custom trigger."
                 })
+
+        # Apply task override if provided
+        if task:
+            tdef.task = task
+
+        # Task is mandatory before activation
+        if not tdef.task:
+            return json.dumps({
+                "error": f"Trigger '{trigger_id}' has no task configured. "
+                "Set a task describing what the worker should do when this trigger fires."
+            })
 
         # Use provided overrides if given
         t_type = trigger_type or tdef.trigger_type
@@ -1827,7 +1845,8 @@ def register_queen_lifecycle_tools(
         name="set_trigger",
         description=(
             "Activate a trigger (timer) so it fires periodically. "
-            "Use trigger_id of an available trigger, or provide trigger_type + trigger_config to create a custom one."
+            "Use trigger_id of an available trigger, or provide trigger_type + trigger_config to create a custom one. "
+            "A task must be configured before activation — either pre-set on the trigger or provided here."
         ),
         parameters={
             "type": "object",
@@ -1843,6 +1862,10 @@ def register_queen_lifecycle_tools(
                 "trigger_config": {
                     "type": "object",
                     "description": "Config for the trigger. Timer: {cron: '*/5 * * * *'} or {interval_minutes: 5}. Only needed for custom triggers.",
+                },
+                "task": {
+                    "type": "string",
+                    "description": "The task/instructions for the worker when this trigger fires (e.g. 'Process inbox emails using saved rules'). Required if not already configured on the trigger.",
                 },
             },
             "required": ["trigger_id"],
@@ -1917,6 +1940,7 @@ def register_queen_lifecycle_tools(
                 "trigger_type": tdef.trigger_type,
                 "trigger_config": tdef.trigger_config,
                 "description": tdef.description,
+                "task": tdef.task,
                 "active": tdef.active,
             })
         return json.dumps({"triggers": triggers})

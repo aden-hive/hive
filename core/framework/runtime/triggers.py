@@ -18,4 +18,5 @@ class TriggerDefinition:
     trigger_type: str  # "timer" | "webhook"
     trigger_config: dict[str, Any] = field(default_factory=dict)
     description: str = ""
+    task: str = ""
     active: bool = False

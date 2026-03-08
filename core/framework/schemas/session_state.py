@@ -143,6 +143,8 @@ class SessionState(BaseModel):
 
     # Trigger activation state (IDs of triggers the queen/user turned on)
     active_triggers: list[str] = Field(default_factory=list)
+    # Per-trigger task strings (user overrides, keyed by trigger ID)
+    trigger_tasks: dict[str, str] = Field(default_factory=dict)
 
     model_config = {"extra": "allow"}
 

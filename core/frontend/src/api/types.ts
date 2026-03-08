@@ -31,6 +31,8 @@ export interface EntryPoint {
   entry_node: string;
   trigger_type: string;
   trigger_config?: Record<string, unknown>;
+  /** Worker task string when this trigger fires autonomously. */
+  task?: string;
   /** Seconds until the next timer fire (only present for timer entry points). */
   next_fire_in?: number;
 }

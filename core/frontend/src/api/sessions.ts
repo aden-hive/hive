@@ -64,6 +64,12 @@ export const sessionsApi = {
       `/sessions/${sessionId}/entry-points`,
     ),
 
+  updateTriggerTask: (sessionId: string, triggerId: string, task: string) =>
+    api.patch<{ trigger_id: string; task: string }>(
+      `/sessions/${sessionId}/triggers/${triggerId}`,
+      { task },
+    ),
+
   graphs: (sessionId: string) =>
     api.get<{ graphs: string[] }>(`/sessions/${sessionId}/graphs`),
 
