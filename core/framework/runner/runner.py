@@ -943,6 +943,8 @@ class AgentRunner:
 
         try:
             # Trigger and wait for result
+
+            logging.info("Queen is working on your request...")
             result = await self._agent_runtime.trigger_and_wait(
                 entry_point_id=entry_point_id,
                 input_data=input_data,
