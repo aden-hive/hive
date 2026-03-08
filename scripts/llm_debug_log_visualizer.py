@@ -93,7 +93,11 @@ def _discover_records(logs_dir: Path, limit_files: int) -> list[dict[str, Any]]:
         raise FileNotFoundError(f"log directory not found: {logs_dir}")
 
     files = sorted(
-        [path for path in logs_dir.iterdir() if path.is_file() and path.suffix == ".jsonl"],
+        [
+            path
+            for path in logs_dir.iterdir()
+            if path.is_file() and path.suffix == ".jsonl"
+        ],
         key=lambda path: path.stat().st_mtime,
         reverse=True,
     )[:limit_files]
@@ -113,7 +117,9 @@ def _format_timestamp(raw: str) -> str:
         return raw
 
 
-def _group_sessions(records: list[dict[str, Any]]) -> tuple[list[SessionSummary], dict[str, list[dict[str, Any]]]]:
+def _group_sessions(
+    records: list[dict[str, Any]],
+) -> tuple[list[SessionSummary], dict[str, list[dict[str, Any]]]]:
     by_session: dict[str, list[dict[str, Any]]] = defaultdict(list)
     for record in records:
         execution_id = str(record.get("execution_id") or "").strip()
@@ -122,7 +128,12 @@ def _group_sessions(records: list[dict[str, Any]]) -> tuple[list[SessionSummary]
 
     summaries: list[SessionSummary] = []
     for execution_id, session_records in by_session.items():
-        session_records.sort(key=lambda record: (str(record.get("timestamp", "")), record.get("iteration", 0)))
+        session_records.sort(
+            key=lambda record: (
+                str(record.get("timestamp", "")),
+                record.get("iteration", 0),
+            )
+        )
         first = session_records[0]
         last = session_records[-1]
         summaries.append(
@@ -132,13 +143,26 @@ def _group_sessions(records: list[dict[str, Any]]) -> tuple[list[SessionSummary]
                 start_timestamp=str(first.get("timestamp", "")),
                 end_timestamp=str(last.get("timestamp", "")),
                 turn_count=len(session_records),
-                streams=sorted({str(r.get("stream_id", "")) for r in session_records if r.get("stream_id")}),
-                nodes=sorted({str(r.get("node_id", "")) for r in session_records if r.get("node_id")}),
+                streams=sorted(
+                    {
+                        str(r.get("stream_id", ""))
+                        for r in session_records
+                        if r.get("stream_id")
+                    }
+                ),
+                nodes=sorted(
+                    {
+                        str(r.get("node_id", ""))
+                        for r in session_records
+                        if r.get("node_id")
+                    }
+                ),
                 models=sorted(
                     {
                         str(r.get("token_counts", {}).get("model", ""))
                         for r in session_records
-                        if isinstance(r.get("token_counts"), dict) and r.get("token_counts", {}).get("model")
+                        if isinstance(r.get("token_counts"), dict)
+                        and r.get("token_counts", {}).get("model")
                     }
                 ),
             )
@@ -172,7 +196,10 @@ def _render_html(
     sessions_data = {
         execution_id: sorted(
             records,
-            key=lambda record: (str(record.get("timestamp", "")), record.get("iteration", 0)),
+            key=lambda record: (
+                str(record.get("timestamp", "")),
+                record.get("iteration", 0),
+            ),
         )
         for execution_id, records in sessions.items()
     }
@@ -809,7 +836,9 @@ def main() -> int:
     records = _discover_records(args.logs_dir.expanduser(), args.limit_files)
     summaries, sessions = _group_sessions(records)
 
-    initial_session_id = args.session or (summaries[0].execution_id if summaries else "")
+    initial_session_id = args.session or (
+        summaries[0].execution_id if summaries else ""
+    )
     if initial_session_id and initial_session_id not in sessions:
         print(f"session not found: {initial_session_id}")
         return 1

@@ -221,6 +221,42 @@ class LoopConfig:
     cf_grace_turns: int = 1
     tool_doom_loop_enabled: bool = True
 
+    # --- Lifecycle hooks ---
+    # Hooks are async callables keyed by event name.  Supported events:
+    #   "session_start"    — fires once after the first user message is added,
+    #                        before the first LLM turn.  trigger = initial message.
+    #   "external_message" — fires when inject_notification() delivers a message.
+    #                        trigger = injected message text.
+    # Each hook receives a HookContext and may return a HookResult to patch
+    # the system prompt and/or inject a follow-up user message.
+    hooks: dict[str, list] = None  # dict[str, list[HookFn]]  (None → no hooks)
+
+    def __post_init__(self) -> None:
+        if self.hooks is None:
+            object.__setattr__(self, "hooks", {})
+
+
+# ---------------------------------------------------------------------------
+# Hook types
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class HookContext:
+    """Context passed to every lifecycle hook."""
+
+    event: str  # event name, e.g. "session_start"
+    trigger: str | None  # message that triggered the hook, if any
+    system_prompt: str  # current system prompt at hook invocation time
+
+
+@dataclass
+class HookResult:
+    """What a hook may return to modify node state."""
+
+    system_prompt: str | None = None  # replace current system prompt
+    inject: str | None = None  # inject an additional user message
+
 
 # ---------------------------------------------------------------------------
 # Output accumulator with write-through persistence
@@ -493,6 +529,9 @@ class EventLoopNode(NodeProtocol):
                 if initial_message:
                     await conversation.add_user_message(initial_message)
 
+                # Fire session_start hooks (e.g. persona selection)
+                await self._run_hooks("session_start", conversation, trigger=initial_message)
+
         # 2a. Guard: ensure at least one non-system message exists.
         # A restored conversation may have 0 messages if phase_id filtering
         # removes them all, or if a prior run stored metadata without messages
@@ -622,8 +661,10 @@ class EventLoopNode(NodeProtocol):
             await self._publish_iteration(stream_id, node_id, iteration, execution_id)
 
             # 6d. Pre-turn compaction check (tiered)
+            _compacted_this_iter = False
             if conversation.needs_compaction():
                 await self._compact(ctx, conversation, accumulator)
+                _compacted_this_iter = True
 
             # 6e. Run single LLM turn (with transient error retry)
             logger.info(
@@ -827,8 +868,11 @@ class EventLoopNode(NodeProtocol):
             if turn_input > 0:
                 conversation.update_token_count(turn_input)
 
-            # 6e''. Post-turn compaction check (catches tool-result bloat)
-            if conversation.needs_compaction():
+            # 6e''. Post-turn compaction check (catches tool-result bloat).
+            # Skip if pre-turn already compacted this iteration — two compactions
+            # in one iteration produce back-to-back spillover files and leave the
+            # agent disoriented on the very next turn.
+            if not _compacted_this_iter and conversation.needs_compaction():
                 await self._compact(ctx, conversation, accumulator)
 
             # Reset auto-block grace streak when real work happens
@@ -2768,6 +2812,10 @@ class EventLoopNode(NodeProtocol):
         if self._mark_complete_flag:
             return JudgeVerdict(action="ACCEPT")
 
+        # Opt-out: node explicitly disables judge (e.g. conversational queen)
+        if ctx.node_spec.skip_judge:
+            return JudgeVerdict(action="RETRY", feedback="")
+
         if self._judge is not None:
             context = {
                 "assistant_text": assistant_text,
@@ -3045,17 +3093,20 @@ class EventLoopNode(NodeProtocol):
         if not first:
             return False, ""
 
-        # Check similarity against all recent fingerprints
+        # Convert a turn's list of (name, args) pairs to a single comparable string.
+        def _turn_sig(fp: list[tuple[str, str]]) -> str:
+            return "|".join(f"{name}:{args}" for name, args in fp)
+
+        first_sig = _turn_sig(first)
         similarity_threshold = self._config.stall_similarity_threshold
         similar_count = sum(
             1
             for fp in recent_tool_fingerprints
-            # Compare canonicalized tool input strings using n-gram similarity
-            if self._ngram_similarity(fp[1], first[1]) >= similarity_threshold
+            if self._ngram_similarity(_turn_sig(fp), first_sig) >= similarity_threshold
         )
 
         if similar_count >= threshold:
-            tool_names = [name for name, _ in recent_tool_fingerprints]
+            tool_names = [name for fp in recent_tool_fingerprints for name, _ in fp]
             desc = (
                 f"Doom loop detected: {similar_count}/{len(recent_tool_fingerprints)} "
                 f"consecutive similar tool calls ({', '.join(tool_names)})"
@@ -3269,8 +3320,6 @@ class EventLoopNode(NodeProtocol):
 
     # --- Compaction -----------------------------------------------------------
 
-    # Threshold above which LLM compaction is invoked (structural handles 80-95%).
-    _LLM_COMPACT_THRESHOLD = 0.95
     # Max chars of formatted messages before proactively splitting for LLM.
     _LLM_COMPACT_CHAR_LIMIT = 240_000
     # Max recursion depth for binary-search splitting.
@@ -3285,8 +3334,11 @@ class EventLoopNode(NodeProtocol):
         """Compact conversation history to stay within token budget.
 
         1. Prune old tool results (always, free).
-        2. Structure-preserving compaction at >=80% (standard, then aggressive).
-        3. LLM compaction at >95% with recursive binary-search splitting.
+        2. Structure-preserving compaction (standard, free) — removes freeform text
+           to spillover files, retains tool-call structure.
+        3. LLM summary compaction — generates a summary and places it as the first
+           message, replacing old messages. Used whenever structural compaction
+           does not fully resolve the budget.
         4. Emergency deterministic summary only if LLM failed or unavailable.
         """
         ratio_before = conversation.usage_ratio()
@@ -3309,36 +3361,26 @@ class EventLoopNode(NodeProtocol):
             await self._log_compaction(ctx, conversation, ratio_before)
             return
 
-        # --- Step 2: Structure-preserving compaction (>=80%) ---
+        # --- Step 2: Standard structure-preserving compaction (free, no LLM) ---
+        # Removes freeform text to spillover files; keeps tool-call pairs in context.
         spill_dir = self._config.spillover_dir
         if spill_dir:
-            pre_structural = conversation.usage_ratio()
             await conversation.compact_preserving_structure(
                 spillover_dir=spill_dir,
                 keep_recent=4,
                 phase_graduated=phase_grad,
             )
-            if conversation.usage_ratio() >= 0.9 * pre_structural:
-                logger.info(
-                    "Standard structural compaction ineffective "
-                    "(%.0f%% -> %.0f%%), trying aggressive",
-                    pre_structural * 100,
-                    conversation.usage_ratio() * 100,
-                )
-                await conversation.compact_preserving_structure(
-                    spillover_dir=spill_dir,
-                    keep_recent=4,
-                    phase_graduated=phase_grad,
-                    aggressive=True,
-                )
         if not conversation.needs_compaction():
             await self._log_compaction(ctx, conversation, ratio_before)
             return
 
-        # --- Step 3: LLM compaction at >95% (recursive binary-search) ---
-        if conversation.usage_ratio() > self._LLM_COMPACT_THRESHOLD and ctx.llm is not None:
+        # --- Step 3: LLM summary compaction ---
+        # Structural compaction alone did not hit target. Generate an LLM summary
+        # and place it as the first message — more reliable for token reduction
+        # than offloading more content to files.
+        if ctx.llm is not None:
             logger.info(
-                "LLM compaction triggered (%.0f%% usage)",
+                "LLM summary compaction triggered (%.0f%% usage)",
                 conversation.usage_ratio() * 100,
             )
             try:
@@ -3664,14 +3706,23 @@ class EventLoopNode(NodeProtocol):
                     data_files = [f for f in all_files if f not in conv_files]
 
                     if conv_files:
-                        conv_list = "\n".join(f"  - {f}" for f in conv_files)
+                        conv_list = "\n".join(
+                            f"  - {f}  (full path: {data_dir / f})" for f in conv_files
+                        )
                         parts.append(
                             "CONVERSATION HISTORY (freeform messages saved during compaction — "
-                            "use load_data to review earlier dialogue):\n" + conv_list
+                            "use load_data('<filename>'), read_file('<full_path>'), "
+                            "or run_command('cat \"<full_path>\"') to review earlier dialogue):\n"
+                            + conv_list
                         )
                     if data_files:
-                        file_list = "\n".join(f"  - {f}" for f in data_files[:30])
-                        parts.append("DATA FILES (use load_data to read):\n" + file_list)
+                        file_list = "\n".join(
+                            f"  - {f}  (full path: {data_dir / f})" for f in data_files[:30]
+                        )
+                        parts.append(
+                            "DATA FILES (use load_data('<filename>'), read_file('<full_path>'), "
+                            "or run_command('cat \"<full_path>\"') to read):\n" + file_list
+                        )
                     if not all_files:
                         parts.append(
                             "NOTE: Large tool results may have been saved to files. "
@@ -3940,6 +3991,45 @@ class EventLoopNode(NodeProtocol):
                 )
         except Exception as e:
             logger.warning("Action plan generation failed for node '%s': %s", node_id, e)
+
+    async def _run_hooks(
+        self,
+        event: str,
+        conversation: NodeConversation,
+        trigger: str | None = None,
+    ) -> None:
+        """Run all registered hooks for *event*, applying their results.
+
+        Each hook receives a HookContext and may return a HookResult that:
+        - replaces the system prompt (result.system_prompt)
+        - injects an extra user message (result.inject)
+        Hooks run in registration order; each sees the prompt as left by the
+        previous hook.
+        """
+        hook_list = self._config.hooks.get(event, [])
+        if not hook_list:
+            return
+        for hook in hook_list:
+            ctx = HookContext(
+                event=event,
+                trigger=trigger,
+                system_prompt=conversation.system_prompt,
+            )
+            try:
+                result = await hook(ctx)
+            except Exception:
+                import logging
+
+                logging.getLogger(__name__).warning(
+                    "Hook '%s' raised an exception", event, exc_info=True
+                )
+                continue
+            if result is None:
+                continue
+            if result.system_prompt:
+                conversation.update_system_prompt(result.system_prompt)
+            if result.inject:
+                await conversation.add_user_message(result.inject)
 
     async def _publish_iteration(
         self, stream_id: str, node_id: str, iteration: int, execution_id: str = ""

@@ -11,7 +11,7 @@ from framework.runner.tool_registry import ToolRegistry
 from framework.runtime.agent_runtime import AgentRuntime, create_agent_runtime
 from framework.runtime.execution_stream import EntryPointSpec
 
-from .config import default_config, metadata
+from .config import default_config
 from .nodes import (
     intake_node,
     job_search_node,
@@ -290,6 +290,7 @@ class JobHunterAgent:
         if self.entry_node not in node_ids:
             errors.append(f"Entry node '{self.entry_node}' not found")
         return {"valid": len(errors) == 0, "errors": errors}
+
 
 # Create default instance
 default_agent = JobHunterAgent()

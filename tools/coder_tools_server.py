@@ -19,6 +19,7 @@ import os
 import re
 import subprocess
 import sys
+import textwrap
 import time
 from pathlib import Path
 
@@ -480,9 +481,12 @@ def list_agent_tools(
             if not providers:
                 providers = ["no_provider"]
 
+            desc = t["description"]
+            if output_schema == "simple" and desc and len(desc) > 200:
+                desc = desc[:200].rsplit(" ", 1)[0] + "..."
             tool_payload = {
                 "name": t["name"],
-                "description": t["description"],
+                "description": desc,
             }
             if output_schema == "full":
                 tool_payload["server"] = t["server"]
@@ -1217,11 +1221,13 @@ def run_agent_tests(
 def validate_agent_package(agent_name: str) -> str:
     """Run structural validation checks on a built agent package in one call.
 
-    Executes 4 steps and reports all results (does not stop on first failure):
+    Executes 5 steps and reports all results (does not stop on first failure):
       1. Class validation — checks graph structure and entry_points contract
-      2. Graph validation — loads the agent graph without credential checks
-      3. Tool validation — checks declared tools exist in MCP servers
-      4. Tests — runs the agent's pytest suite
+      2. Node completeness — every NodeSpec in nodes/ must be in the nodes list,
+         and GCU nodes must be referenced in a parent's sub_agents
+      3. Graph validation — loads the agent graph without credential checks
+      4. Tool validation — checks declared tools exist in MCP servers
+      5. Tests — runs the agent's pytest suite
 
     Note: Credential validation is intentionally skipped here (building phase).
     Credentials are validated at run time by run_agent_with_input() preflight.
@@ -1250,7 +1256,10 @@ def validate_agent_package(agent_name: str) -> str:
     try:
         proc = subprocess.run(
             [
-                "uv", "run", "python", "-c",
+                "uv",
+                "run",
+                "python",
+                "-c",
                 f"from {agent_name} import default_agent; print(default_agent.validate())",
             ],
             capture_output=True,
@@ -1270,16 +1279,73 @@ def validate_agent_package(agent_name: str) -> str:
     except Exception as e:
         steps["class_validation"] = {"passed": False, "error": str(e)}
 
+    # Step A2: Node completeness — every NodeSpec in nodes/ must be in the nodes list
+    try:
+        _check_template = textwrap.dedent("""\
+            import importlib, json
+            agent = importlib.import_module('{agent_name}')
+            nodes_mod = importlib.import_module('{agent_name}.nodes')
+            graph_ids = {{n.id for n in agent.nodes}}
+            defined = {{}}
+            for attr in dir(nodes_mod):
+                obj = getattr(nodes_mod, attr)
+                if hasattr(obj, 'id') and hasattr(obj, 'node_type'):
+                    defined[obj.id] = attr
+            orphaned = set(defined) - graph_ids
+            errors = [
+                f"Node '{{nid}}' ({{defined[nid]}}) defined in nodes/ but not in nodes list"
+                for nid in sorted(orphaned)
+            ]
+            sub_refs = set()
+            for n in agent.nodes:
+                for sa in getattr(n, 'sub_agents', []) or []:
+                    sub_refs.add(sa)
+            for n in agent.nodes:
+                if n.node_type == 'gcu' and n.id not in sub_refs:
+                    errors.append(
+                        f"GCU node '{{n.id}}' not referenced in any node's sub_agents list"
+                    )
+            print(json.dumps({{'valid': len(errors) == 0, 'errors': errors}}))
+        """)
+        check_script = _check_template.format(agent_name=agent_name)
+        proc = subprocess.run(
+            ["uv", "run", "python", "-c", check_script],
+            capture_output=True,
+            text=True,
+            timeout=30,
+            env=env,
+            cwd=PROJECT_ROOT,
+            stdin=subprocess.DEVNULL,
+        )
+        if proc.returncode == 0:
+            result = json.loads(proc.stdout.strip())
+            steps["node_completeness"] = {
+                "passed": result["valid"],
+                "output": "; ".join(result["errors"]) if result["errors"] else "All defined nodes are in the graph",
+            }
+            if not result["valid"]:
+                steps["node_completeness"]["errors"] = result["errors"]
+        else:
+            steps["node_completeness"] = {
+                "passed": False,
+                "error": proc.stderr.strip()[:2000],
+            }
+    except Exception as e:
+        steps["node_completeness"] = {"passed": False, "error": str(e)}
+
     # Step B: Graph validation (subprocess for import isolation)
     # Credentials are checked at run time (run_agent_with_input preflight),
     # not at build time.
     try:
         proc = subprocess.run(
             [
-                "uv", "run", "python", "-c",
-                f'from framework.runner.runner import AgentRunner; '
+                "uv",
+                "run",
+                "python",
+                "-c",
+                f"from framework.runner.runner import AgentRunner; "
                 f'r = AgentRunner.load("exports/{agent_name}", '
-                f'skip_credential_validation=True); '
+                f"skip_credential_validation=True); "
                 f'print("AgentRunner.load (graph-only): OK")',
             ],
             capture_output=True,
@@ -1333,7 +1399,6 @@ def validate_agent_package(agent_name: str) -> str:
     # Build summary
     failed_steps = [name for name, step in steps.items() if not step.get("passed")]
     total = len(steps)
-    passed_count = total - len(failed_steps)
     valid = len(failed_steps) == 0
 
     if valid:
@@ -1391,13 +1456,15 @@ def initialize_agent_package(agent_name: str, nodes: str | None = None) -> str:
     import re
 
     if not re.match(r"^[a-z][a-z0-9_]*$", agent_name):
-        return json.dumps({
-            "success": False,
-            "error": (
-                f"Invalid agent_name '{agent_name}'. Must be snake_case: "
-                "lowercase letters, numbers, underscores, starting with a letter."
-            ),
-        })
+        return json.dumps(
+            {
+                "success": False,
+                "error": (
+                    f"Invalid agent_name '{agent_name}'. Must be snake_case: "
+                    "lowercase letters, numbers, underscores, starting with a letter."
+                ),
+            }
+        )
 
     node_list = [n.strip() for n in nodes.split(",") if n.strip()] if nodes else ["start"]
 
@@ -1424,7 +1491,9 @@ def initialize_agent_package(agent_name: str, nodes: str | None = None) -> str:
         }
 
     # -- config.py --
-    _write("config.py", f'''\
+    _write(
+        "config.py",
+        f'''\
 """Runtime configuration."""
 
 import json
@@ -1468,7 +1537,8 @@ class AgentMetadata:
 
 
 metadata = AgentMetadata()
-''')
+''',
+    )
 
     # -- nodes/__init__.py --
     node_specs = []
@@ -1476,7 +1546,7 @@ metadata = AgentMetadata()
     for node_id in node_list:
         var = _node_var_name(node_id)
         node_var_names.append(var)
-        is_first = (node_id == entry_node)
+        is_first = node_id == entry_node
         node_specs.append(f'''\
 {var} = NodeSpec(
     id="{node_id}",
@@ -1513,17 +1583,19 @@ __all__ = {node_var_names!r}
     edge_defs = []
     for i in range(len(node_list) - 1):
         src, tgt = node_list[i], node_list[i + 1]
-        edge_defs.append(f'''\
+        edge_defs.append(f"""\
     EdgeSpec(
         id="{src}-to-{tgt}",
         source="{src}",
         target="{tgt}",
         condition=EdgeCondition.ON_SUCCESS,
         priority=1,
-    ),''')
+    ),""")
     edges_str = "\n".join(edge_defs) if edge_defs else "    # TODO: Add edges"
 
-    _write("agent.py", f'''\
+    _write(
+        "agent.py",
+        f'''\
 """Agent graph construction for {human_name}."""
 
 from pathlib import Path
@@ -1728,14 +1800,18 @@ class {class_name}:
         for ep_id, nid in self.entry_points.items():
             if nid not in node_ids:
                 errors.append(f"Entry point '{{ep_id}}' references unknown node '{{nid}}'")
+
         return {{"valid": len(errors) == 0, "errors": errors, "warnings": warnings}}
 
 
 default_agent = {class_name}()
-''')
+''',
+    )
 
     # -- __init__.py --
-    _write("__init__.py", f'''\
+    _write(
+        "__init__.py",
+        f'''\
 """{human_name} — TODO: Add description."""
 
 from .agent import (
@@ -1770,10 +1846,13 @@ __all__ = [
     "default_config",
     "metadata",
 ]
-''')
+''',
+    )
 
     # -- __main__.py --
-    _write("__main__.py", f'''\
+    _write(
+        "__main__.py",
+        f'''\
 """CLI entry point for {human_name}."""
 
 import asyncio
@@ -1824,7 +1903,9 @@ def info():
     """Show agent info."""
     data = default_agent.info()
     click.echo(
-        f"Agent: {{data[\'name\']}}\\nVersion: {{data[\'version\']}}\\nDescription: {{data[\'description\']}}"
+        f"Agent: {{data[\'name\']}}\n"
+        f"Version: {{data[\'version\']}}\n"
+        f"Description: {{data[\'description\']}}"
     )
     click.echo(f"Nodes: {{', '.join(data[\'nodes\'])}}")
     click.echo(f"Client-facing: {{', '.join(data[\'client_facing_nodes\'])}}")
@@ -1845,21 +1926,30 @@ def validate():
 
 if __name__ == "__main__":
     cli()
-''')
+''',
+    )
 
     # -- mcp_servers.json --
-    _write("mcp_servers.json", json.dumps({
-        "hive-tools": {
-            "transport": "stdio",
-            "command": "uv",
-            "args": ["run", "python", "mcp_server.py", "--stdio"],
-            "cwd": "../../tools",
-            "description": "Hive tools MCP server",
-        }
-    }, indent=2))
+    _write(
+        "mcp_servers.json",
+        json.dumps(
+            {
+                "hive-tools": {
+                    "transport": "stdio",
+                    "command": "uv",
+                    "args": ["run", "python", "mcp_server.py", "--stdio"],
+                    "cwd": "../../tools",
+                    "description": "Hive tools MCP server",
+                }
+            },
+            indent=2,
+        ),
+    )
 
     # -- tests/conftest.py --
-    _write("tests/conftest.py", f'''\
+    _write(
+        "tests/conftest.py",
+        '''\
 """Test fixtures."""
 
 import sys
@@ -1890,22 +1980,26 @@ def runner_loaded():
     from framework.runner.runner import AgentRunner
 
     return AgentRunner.load(AGENT_PATH)
-''')
+''',
+    )
 
-    return json.dumps({
-        "success": True,
-        "agent_name": agent_name,
-        "class_name": class_name,
-        "entry_node": entry_node,
-        "nodes": node_list,
-        "files_written": files_written,
-        "file_count": len(files_written),
-        "next_steps": [
-            f"Customize node definitions in exports/{agent_name}/nodes/__init__.py",
-            f"Define goal and edges in exports/{agent_name}/agent.py",
-            f"Run validate_agent_package(\"{agent_name}\") to check structure",
-        ],
-    }, indent=2)
+    return json.dumps(
+        {
+            "success": True,
+            "agent_name": agent_name,
+            "class_name": class_name,
+            "entry_node": entry_node,
+            "nodes": node_list,
+            "files_written": files_written,
+            "file_count": len(files_written),
+            "next_steps": [
+                f"Customize node definitions in exports/{agent_name}/nodes/__init__.py",
+                f"Define goal and edges in exports/{agent_name}/agent.py",
+                f'Run validate_agent_package("{agent_name}") to check structure',
+            ],
+        },
+        indent=2,
+    )
 
 
 # ── Main ──────────────────────────────────────────────────────────────────

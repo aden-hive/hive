@@ -1875,6 +1875,7 @@ class GraphExecutor:
                     max_history_tokens=lc.get("max_history_tokens", 32000),
                     max_tool_result_chars=lc.get("max_tool_result_chars", 30_000),
                     spillover_dir=spillover,
+                    hooks=lc.get("hooks", {}),
                 ),
                 tool_executor=self.tool_executor,
                 conversation_store=conv_store,

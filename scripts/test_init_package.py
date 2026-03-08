@@ -10,6 +10,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "tools"))
 
 # Set PROJECT_ROOT before importing
 import tools.coder_tools_server as srv
+
 srv.PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 
 # Access the underlying function (FastMCP wraps it as FunctionTool)

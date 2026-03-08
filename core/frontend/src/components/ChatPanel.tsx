@@ -284,7 +284,8 @@ export default function ChatPanel({ messages, onSend, isWaiting, isWorkerWaiting
           </div>
         ))}
 
-        {isWaiting && (
+        {/* Show typing indicator while waiting for first queen response (disabled + empty chat) */}
+        {(isWaiting || (disabled && threadMessages.length === 0)) && (
           <div className="flex gap-3">
             <div
               className="flex-shrink-0 w-9 h-9 rounded-xl flex items-center justify-center"

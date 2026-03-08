@@ -639,8 +639,9 @@ class SessionManager:
             _QUEEN_BUILDING_TOOLS,
             _QUEEN_RUNNING_TOOLS,
             _QUEEN_STAGING_TOOLS,
-            _package_builder_knowledge,
             _appendices,
+            _gcu_building_section,
+            _package_builder_knowledge,
             _queen_behavior_always,
             _queen_behavior_building,
             _queen_behavior_running,
@@ -684,18 +685,19 @@ class SessionManager:
                 "Handle all tasks directly using your coding tools."
             )
 
-        # Compose phase-specific prompts
-        phase_state.prompt_building = (
-            _queen_identity_building
-            + _queen_style
+        # Compose phase-specific prompts.
+        _building_body = (
+            _queen_style
             + _queen_tools_building
             + _queen_behavior_always
             + _queen_behavior_building
             + _package_builder_knowledge
+            + _gcu_building_section
             + _queen_phase_7
             + _appendices
             + worker_identity
         )
+        phase_state.prompt_building = _queen_identity_building + _building_body
         phase_state.prompt_staging = (
             _queen_identity_staging
             + _queen_style
@@ -713,7 +715,29 @@ class SessionManager:
             + worker_identity
         )
 
-        # Use the initial phase prompt as the node's system_prompt
+        # Build the session_start hook: selects the best-fit expert persona
+        # from the user's opening message and replaces the identity prefix.
+        from framework.agents.hive_coder.nodes.thinking_hook import select_expert_persona
+        from framework.graph.event_loop_node import HookContext, HookResult
+        from framework.runtime.event_bus import AgentEvent, EventType
+
+        _session_llm = session.llm
+        _session_event_bus = session.event_bus
+
+        async def _persona_hook(ctx: HookContext) -> HookResult | None:
+            persona = await select_expert_persona(ctx.trigger or "", _session_llm)
+            if not persona:
+                return None
+            if _session_event_bus is not None:
+                await _session_event_bus.publish(
+                    AgentEvent(
+                        type=EventType.QUEEN_PERSONA_SELECTED,
+                        stream_id="queen",
+                        data={"persona": persona},
+                    )
+                )
+            return HookResult(system_prompt=persona + "\n\n" + _building_body)
+
         initial_prompt_text = phase_state.get_current_prompt()
 
         registered_tool_names = set(queen_registry.get_tools().keys())
@@ -730,7 +754,13 @@ class SessionManager:
             node_updates["tools"] = available_tools
 
         adjusted_node = _orig_node.model_copy(update=node_updates)
-        queen_graph = _queen_graph.model_copy(update={"nodes": [adjusted_node]})
+        _queen_loop_config = {
+            **(_queen_graph.loop_config or {}),
+            "hooks": {"session_start": [_persona_hook]},
+        }
+        queen_graph = _queen_graph.model_copy(
+            update={"nodes": [adjusted_node], "loop_config": _queen_loop_config}
+        )
 
         queen_runtime = Runtime(hive_home / "queen")
 
@@ -744,7 +774,7 @@ class SessionManager:
                     event_bus=session.event_bus,
                     stream_id="queen",
                     storage_path=queen_dir,
-                    loop_config=queen_graph.loop_config,
+                    loop_config=_queen_loop_config,
                     execution_id=session.id,
                     dynamic_tools_provider=phase_state.get_current_tools,
                     dynamic_prompt_provider=phase_state.get_current_prompt,
