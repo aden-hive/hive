@@ -14,7 +14,7 @@ import pytest
 from aiohttp.test_utils import TestClient, TestServer
 
 from framework.server.app import create_app
-from framework.server.session_manager import Session
+from framework.server.session_manager import Session, SessionManager
 
 # ---------------------------------------------------------------------------
 # Mock helpers
@@ -180,6 +180,61 @@ def _make_session(
         worker_runtime=rt,
         worker_info=MockAgentInfo(),
     )
+
+
+def _write_queen_history(
+    base_dir: Path,
+    session_id: str,
+    messages: list[dict],
+    *,
+    agent_name: str = "test_agent",
+    agent_path: str = "/tmp/test_agent",
+) -> Path:
+    """Create a queen session using the real flat conversations/parts layout."""
+    queen_dir = base_dir / ".hive" / "queen" / "session" / session_id
+    parts_dir = queen_dir / "conversations" / "parts"
+    parts_dir.mkdir(parents=True)
+    for i, message in enumerate(messages):
+        (parts_dir / f"{i:010d}.json").write_text(json.dumps(message))
+    (queen_dir / "meta.json").write_text(
+        json.dumps(
+            {
+                "agent_name": agent_name,
+                "agent_path": agent_path,
+                "created_at": 1772822707.257652,
+            }
+        )
+    )
+    return queen_dir
+
+
+def _write_worker_history(
+    base_dir: Path,
+    agent_name: str,
+    worker_session_id: str,
+    messages: list[dict],
+    *,
+    started_at: str = "2026-03-07T00:14:31",
+    status: str = "paused",
+) -> Path:
+    """Create a worker session with state and nested conversations layout."""
+    session_dir = base_dir / ".hive" / "agents" / agent_name / "sessions" / worker_session_id
+    (session_dir / "conversations" / "chat_node" / "parts").mkdir(parents=True)
+    (session_dir / "state.json").write_text(
+        json.dumps(
+            {
+                "status": status,
+                "started_at": started_at,
+                "completed_at": None,
+                "progress": {"steps_executed": len(messages)},
+            }
+        )
+    )
+    for i, message in enumerate(messages):
+        (session_dir / "conversations" / "chat_node" / "parts" / f"{i:04d}.json").write_text(
+            json.dumps(message)
+        )
+    return session_dir
 
 
 # ---------------------------------------------------------------------------
@@ -944,6 +999,125 @@ class TestMessages:
             data = await resp.json()
             assert data["messages"] == []
 
+
+class TestQueenHistory:
+    @pytest.mark.asyncio
+    async def test_get_queen_messages_from_flat_parts_layout(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path))
+        session_id = "session_20260307_001430_7d488345"
+        _write_queen_history(
+            tmp_path,
+            session_id,
+            [
+                {"seq": -1, "role": "user", "content": "greeting: Session started."},
+                {"seq": 0, "role": "user", "content": "hello queen"},
+                {"seq": 0.5, "role": "user", "content": "[Judge feedback]: internal note"},
+                {
+                    "seq": 0.75,
+                    "role": "user",
+                    "content": '[User dismissed the question: "What would you like to do?"]',
+                },
+                {"seq": 1, "role": "assistant", "content": "hello user"},
+            ],
+        )
+
+        app = create_app()
+        async with TestClient(TestServer(app)) as client:
+            resp = await client.get(f"/api/sessions/{session_id}/queen-messages")
+            assert resp.status == 200
+            data = await resp.json()
+            assert data["session_id"] == session_id
+            assert [m["seq"] for m in data["messages"]] == [0, 1]
+            assert data["messages"][0]["role"] == "user"
+            assert data["messages"][1]["role"] == "assistant"
+
+    @pytest.mark.asyncio
+    async def test_history_preview_reads_flat_parts_layout(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path))
+        session_id = "session_20260307_001430_7d488345"
+        _write_queen_history(
+            tmp_path,
+            session_id,
+            [
+                {"seq": 0, "role": "user", "content": "hello queen"},
+                {"seq": 1, "role": "assistant", "content": "hello user"},
+            ],
+            agent_name="tech_news_reporter-graph",
+            agent_path="/tmp/tech_news_reporter",
+        )
+
+        app = create_app()
+        async with TestClient(TestServer(app)) as client:
+            resp = await client.get("/api/sessions/history")
+            assert resp.status == 200
+            data = await resp.json()
+            assert len(data["sessions"]) == 1
+            history = data["sessions"][0]
+            assert history["session_id"] == session_id
+            assert history["has_messages"] is True
+            assert history["message_count"] == 2
+            assert history["last_message"] == "hello user"
+
+    @pytest.mark.asyncio
+    async def test_cold_worker_sessions_and_messages_are_available(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path))
+        queen_session_id = "session_20260307_001430_7d488345"
+        worker_session_id = "session_20260307_001431_worker123"
+
+        _write_queen_history(
+            tmp_path,
+            queen_session_id,
+            [
+                {"seq": 0, "role": "user", "content": "hello queen"},
+                {"seq": 1, "role": "assistant", "content": "working on it"},
+            ],
+            agent_name="tech_news_reporter-graph",
+            agent_path=str(tmp_path / ".hive" / "agents" / "tech_news_reporter"),
+        )
+        _write_worker_history(
+            tmp_path,
+            "tech_news_reporter",
+            worker_session_id,
+            [
+                {"seq": 0, "role": "user", "content": "greeting: Session started."},
+                {"seq": 1, "role": "user", "content": "find me the news", "is_client_input": True},
+                {
+                    "seq": 1.5,
+                    "role": "user",
+                    "content": '[User dismissed the question: "Ready when you are. What would you like to work on?"]',
+                    "is_client_input": True,
+                },
+                {"seq": 2, "role": "assistant", "content": "Here is the report"},
+            ],
+        )
+
+        app = create_app()
+        async with TestClient(TestServer(app)) as client:
+            list_resp = await client.get(f"/api/sessions/{queen_session_id}/worker-sessions")
+            assert list_resp.status == 200
+            listed = (await list_resp.json())["sessions"]
+            assert len(listed) == 1
+            assert listed[0]["session_id"] == worker_session_id
+
+            msg_resp = await client.get(
+                f"/api/sessions/{queen_session_id}/worker-sessions/{worker_session_id}/messages?client_only=true"
+            )
+            assert msg_resp.status == 200
+            msgs = (await msg_resp.json())["messages"]
+            assert [m["seq"] for m in msgs] == [1, 2]
+            assert msgs[0]["role"] == "user"
+            assert msgs[1]["role"] == "assistant"
+
+    @pytest.mark.asyncio
+    async def test_client_visible_message_filters_bootstrap_and_dismissed_prompts(self):
+        assert SessionManager.is_client_visible_message({"role": "user", "content": "greeting: Session started."}) is False
+        assert SessionManager.is_client_visible_message(
+            {"role": "user", "content": '[User dismissed the question: "What would you like to do?"]'}
+        ) is False
+        assert SessionManager.is_client_visible_message(
+            {"role": "assistant", "content": "Here is the report"}
+        ) is True
+
     @pytest.mark.asyncio
     async def test_get_messages_client_only(self, tmp_agent_dir):
         """client_only=true keeps user+client-facing assistant."""
@@ -1049,6 +1223,219 @@ class TestMessages:
             msgs = (await resp.json())["messages"]
             # No runner -> can't resolve client-facing nodes -> returns all messages
             assert len(msgs) == 2
+
+
+class TestTranscript:
+    """Tests for GET /api/sessions/{id}/transcript — unified conversation history."""
+
+    @pytest.mark.asyncio
+    async def test_transcript_queen_only(self, tmp_path, monkeypatch):
+        """Transcript returns queen messages when no worker exists."""
+        monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path))
+        session_id = "session_transcript_queen"
+        _write_queen_history(
+            tmp_path,
+            session_id,
+            [
+                {"seq": 0, "role": "user", "content": "greeting: Session started."},
+                {"seq": 1, "role": "user", "content": "hello"},
+                {"seq": 2, "role": "assistant", "content": "hi there"},
+            ],
+        )
+
+        app = create_app()
+        async with TestClient(TestServer(app)) as client:
+            resp = await client.get(f"/api/sessions/{session_id}/transcript")
+            assert resp.status == 200
+            data = await resp.json()
+            assert data["session_id"] == session_id
+            # greeting filtered out
+            assert len(data["messages"]) == 2
+            assert data["messages"][0]["content"] == "hello"
+            assert data["messages"][0]["_source"] == "queen"
+            assert data["messages"][1]["content"] == "hi there"
+            assert data["messages"][1]["_source"] == "queen"
+
+    @pytest.mark.asyncio
+    async def test_transcript_queen_plus_worker(self, tmp_path, monkeypatch):
+        """Transcript merges queen and worker messages chronologically."""
+        monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path))
+        queen_session_id = "session_transcript_merged"
+        worker_session_id = "session_20260307_001431_worker1"
+
+        _write_queen_history(
+            tmp_path,
+            queen_session_id,
+            [
+                {"seq": 0, "role": "user", "content": "build me an agent", "created_at": 100.0},
+                {"seq": 1, "role": "assistant", "content": "on it", "created_at": 101.0},
+            ],
+            agent_name="test_agent",
+            agent_path=str(tmp_path / ".hive" / "agents" / "test_agent"),
+        )
+        _write_worker_history(
+            tmp_path,
+            "test_agent",
+            worker_session_id,
+            [
+                {"seq": 0, "role": "user", "content": "do the task", "is_client_input": True, "created_at": 102.0},
+                {"seq": 1, "role": "assistant", "content": "done!", "created_at": 103.0},
+                {"seq": 2, "role": "tool", "content": "tool output", "created_at": 103.5},
+            ],
+            status="completed",
+        )
+
+        app = create_app()
+        async with TestClient(TestServer(app)) as client:
+            resp = await client.get(f"/api/sessions/{queen_session_id}/transcript")
+            assert resp.status == 200
+            msgs = (await resp.json())["messages"]
+            # queen: 2 visible, worker: 2 visible (tool filtered), total 4 sorted
+            assert len(msgs) == 4
+            assert msgs[0]["_source"] == "queen"
+            assert msgs[0]["content"] == "build me an agent"
+            assert msgs[1]["_source"] == "queen"
+            assert msgs[2]["_source"] == "worker"
+            assert msgs[2]["content"] == "do the task"
+            assert msgs[3]["_source"] == "worker"
+            assert msgs[3]["content"] == "done!"
+
+    @pytest.mark.asyncio
+    async def test_transcript_filters_escalation_messages(self, tmp_path, monkeypatch):
+        """Escalation and judge ticket messages are filtered from transcript."""
+        monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path))
+        session_id = "session_transcript_escalation"
+        _write_queen_history(
+            tmp_path,
+            session_id,
+            [
+                {"seq": 0, "role": "user", "content": "hello"},
+                {
+                    "seq": 1,
+                    "role": "user",
+                    "content": "[WORKER_ESCALATION_REQUEST]\nstream_id: main\nreason: stuck",
+                },
+                {
+                    "seq": 2,
+                    "role": "user",
+                    "content": '[ESCALATION TICKET from Health Judge]\n{"severity": "high"}',
+                },
+                {"seq": 3, "role": "assistant", "content": "let me help"},
+            ],
+        )
+
+        app = create_app()
+        async with TestClient(TestServer(app)) as client:
+            resp = await client.get(f"/api/sessions/{session_id}/transcript")
+            assert resp.status == 200
+            msgs = (await resp.json())["messages"]
+            assert len(msgs) == 2
+            assert msgs[0]["content"] == "hello"
+            assert msgs[1]["content"] == "let me help"
+
+    @pytest.mark.asyncio
+    async def test_transcript_keeps_assistant_with_tool_calls_and_content(self, tmp_path, monkeypatch):
+        """Queen assistant messages that have tool_calls AND non-empty content
+        must be kept — this is what the user sees streamed live (e.g. ask_user
+        with a preamble).  Tool-only messages (empty content) are still filtered."""
+        monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path))
+        session_id = "session_transcript_ask_user"
+        _write_queen_history(
+            tmp_path,
+            session_id,
+            [
+                {"seq": 0, "role": "user", "content": "greeting: Session started."},
+                # Queen greets AND calls ask_user — content must be visible
+                {
+                    "seq": 1,
+                    "role": "assistant",
+                    "content": "Hello! What would you like to do?",
+                    "tool_calls": [{"id": "call_1", "type": "function", "function": {"name": "ask_user", "arguments": "{\"question\": \"What next?\"}"}}],
+                },
+                {"seq": 2, "role": "tool", "content": "Waiting for user input...", "tool_use_id": "call_1"},
+                {"seq": 3, "role": "user", "content": "run it", "is_client_input": True},
+                # Internal tool call with no user-visible text — must be filtered
+                {
+                    "seq": 4,
+                    "role": "assistant",
+                    "content": "",
+                    "tool_calls": [{"id": "call_2", "type": "function", "function": {"name": "get_worker_status", "arguments": "{}"}}],
+                },
+                {"seq": 5, "role": "tool", "content": "Worker is idle.", "tool_use_id": "call_2"},
+                # Queen responds with text + ask_user again
+                {
+                    "seq": 6,
+                    "role": "assistant",
+                    "content": "Worker is ready. Starting now.",
+                    "tool_calls": [{"id": "call_3", "type": "function", "function": {"name": "ask_user", "arguments": "{\"question\": \"Confirm?\"}"}}],
+                },
+            ],
+        )
+
+        app = create_app()
+        async with TestClient(TestServer(app)) as client:
+            resp = await client.get(f"/api/sessions/{session_id}/transcript")
+            assert resp.status == 200
+            msgs = (await resp.json())["messages"]
+            # greeting filtered; tool-only assistant filtered; tool msgs filtered
+            # Kept: seq1 (assistant+content+ask_user), seq3 (user), seq6 (assistant+content+ask_user)
+            assert len(msgs) == 3
+            assert msgs[0]["role"] == "assistant"
+            assert msgs[0]["content"] == "Hello! What would you like to do?"
+            assert msgs[1]["role"] == "user"
+            assert msgs[1]["content"] == "run it"
+            assert msgs[2]["role"] == "assistant"
+            assert msgs[2]["content"] == "Worker is ready. Starting now."
+
+    @pytest.mark.asyncio
+    async def test_transcript_empty_session(self, tmp_path, monkeypatch):
+        """Transcript returns empty list for nonexistent session."""
+        monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path))
+
+        app = create_app()
+        async with TestClient(TestServer(app)) as client:
+            resp = await client.get("/api/sessions/nonexistent_session/transcript")
+            assert resp.status == 200
+            data = await resp.json()
+            assert data["messages"] == []
+
+    @pytest.mark.asyncio
+    async def test_transcript_worker_completed_session(self, tmp_path, monkeypatch):
+        """Transcript picks up worker messages even when worker status is completed."""
+        monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path))
+        queen_session_id = "session_transcript_completed_worker"
+        worker_session_id = "session_20260307_worker_completed"
+
+        _write_queen_history(
+            tmp_path,
+            queen_session_id,
+            [
+                {"seq": 0, "role": "user", "content": "start task", "created_at": 100.0},
+            ],
+            agent_name="my_agent",
+            agent_path=str(tmp_path / ".hive" / "agents" / "my_agent"),
+        )
+        _write_worker_history(
+            tmp_path,
+            "my_agent",
+            worker_session_id,
+            [
+                {"seq": 0, "role": "user", "content": "greeting: Session started.", "created_at": 101.0},
+                {"seq": 1, "role": "user", "content": "work on it", "is_client_input": True, "created_at": 102.0},
+                {"seq": 2, "role": "assistant", "content": "all done", "created_at": 103.0},
+            ],
+            status="completed",
+        )
+
+        app = create_app()
+        async with TestClient(TestServer(app)) as client:
+            resp = await client.get(f"/api/sessions/{queen_session_id}/transcript")
+            assert resp.status == 200
+            msgs = (await resp.json())["messages"]
+            # queen: 1, worker: 2 (greeting filtered), total 3
+            assert len(msgs) == 3
+            sources = [m["_source"] for m in msgs]
+            assert sources == ["queen", "worker", "worker"]
 
 
 class TestGraphNodes:

@@ -1000,6 +1000,187 @@ class SessionManager:
     # ------------------------------------------------------------------
 
     @staticmethod
+    def _iter_conversation_part_files(convs_dir: Path):
+        """Yield ``(node_id, part_file)`` pairs for both supported disk layouts.
+
+        Queen conversations are currently stored flat under
+        ``conversations/parts/*.json``. Worker conversations use the older nested
+        ``conversations/<node_id>/parts/*.json`` layout. History readers must
+        support both so closed-session restores can recover the visible transcript.
+        """
+        flat_parts_dir = convs_dir / "parts"
+        if flat_parts_dir.exists():
+            for part_file in sorted(flat_parts_dir.iterdir()):
+                if part_file.suffix == ".json":
+                    yield None, part_file
+
+        for node_dir in convs_dir.iterdir():
+            if not node_dir.is_dir() or node_dir.name == "parts":
+                continue
+            parts_dir = node_dir / "parts"
+            if not parts_dir.exists():
+                continue
+            for part_file in sorted(parts_dir.iterdir()):
+                if part_file.suffix == ".json":
+                    yield node_dir.name, part_file
+
+    @staticmethod
+    def is_client_visible_message(message: dict) -> bool:
+        """Return True when a stored conversation message should appear in chat UI."""
+        if message.get("is_transition_marker"):
+            return False
+        if message.get("role") == "tool":
+            return False
+        # Filter tool-only assistant messages (no user-visible text).
+        # Keep assistant messages that have tool_calls BUT also have non-empty
+        # content — the queen frequently writes conversational text AND calls a
+        # tool (e.g. ask_user) in the same turn.  The content is what the user
+        # saw streamed live and must be restored in the history transcript.
+        if message.get("role") == "assistant" and message.get("tool_calls"):
+            raw = message.get("content") or ""
+            if isinstance(raw, list):
+                raw = " ".join(
+                    block.get("text", "")
+                    for block in raw
+                    if isinstance(block, dict) and block.get("type") == "text"
+                )
+            if not (isinstance(raw, str) and raw.strip()):
+                return False
+
+        content = message.get("content") or ""
+        if isinstance(content, list):
+            content = " ".join(
+                block.get("text", "")
+                for block in content
+                if isinstance(block, dict) and block.get("type") == "text"
+            )
+
+        if isinstance(content, str):
+            stripped = content.strip()
+            if stripped == "greeting: Session started.":
+                return False
+            if stripped.startswith("[Judge feedback]:"):
+                return False
+            if stripped.startswith("[User dismissed the question:"):
+                return False
+            if stripped == "[Continue working on your current task.]":
+                return False
+            if stripped.startswith("[WORKER_ESCALATION_REQUEST]"):
+                return False
+            if stripped.startswith("[ESCALATION TICKET from Health Judge]"):
+                return False
+
+        return True
+
+    @staticmethod
+    def build_transcript(
+        session_id: str,
+        *,
+        worker_sessions_dir: Path | None = None,
+        client_facing_nodes: set[str] | None = None,
+    ) -> list[dict]:
+        """Build a unified, filtered, chronological transcript from disk.
+
+        Reads queen messages from ``~/.hive/queen/session/{session_id}/``
+        and worker messages from *worker_sessions_dir* (if provided).
+
+        Each returned message carries a ``_source`` field (``"queen"`` or
+        ``"worker"``) so the frontend can tag senders correctly.
+
+        Filtering:
+        - ``is_client_visible_message`` is applied to all messages.
+        - When *client_facing_nodes* is provided, worker assistant messages
+          are restricted to those nodes.  Otherwise all visible user/assistant
+          worker messages are included.
+        """
+        transcript: list[dict] = []
+
+        # --- Queen messages ---
+        queen_convs = (
+            Path.home() / ".hive" / "queen" / "session" / session_id / "conversations"
+        )
+        if queen_convs.exists():
+            for node_id, part_file in SessionManager._iter_conversation_part_files(queen_convs):
+                try:
+                    part = json.loads(part_file.read_text(encoding="utf-8"))
+                    if node_id is not None:
+                        part["_node_id"] = node_id
+                    part.setdefault("created_at", part_file.stat().st_mtime)
+                    part["_source"] = "queen"
+                    transcript.append(part)
+                except (json.JSONDecodeError, OSError):
+                    continue
+
+        # --- Worker messages (most-relevant worker session) ---
+        if worker_sessions_dir is not None and worker_sessions_dir.exists():
+            # Pick the best worker session: prefer active/paused, fall back to
+            # most recently started completed/cancelled session.
+            best_ws: Path | None = None
+            best_priority = -1
+            best_mtime = 0.0
+            _priority_map = {"active": 3, "paused": 2}
+            for d in worker_sessions_dir.iterdir():
+                if not d.is_dir() or not d.name.startswith("session_"):
+                    continue
+                state_path = d / "state.json"
+                status = "unknown"
+                started = 0.0
+                if state_path.exists():
+                    try:
+                        st = json.loads(state_path.read_text(encoding="utf-8"))
+                        status = st.get("status", "unknown")
+                        sa = st.get("started_at", "")
+                        if sa:
+                            try:
+                                started = datetime.fromisoformat(
+                                    sa.replace("Z", "+00:00")
+                                ).timestamp()
+                            except ValueError:
+                                pass
+                    except (json.JSONDecodeError, OSError):
+                        pass
+                pri = _priority_map.get(status, 1)
+                if pri > best_priority or (pri == best_priority and started > best_mtime):
+                    best_ws = d
+                    best_priority = pri
+                    best_mtime = started
+
+            if best_ws is not None:
+                ws_convs = best_ws / "conversations"
+                if ws_convs.exists():
+                    for node_id, part_file in SessionManager._iter_conversation_part_files(ws_convs):
+                        try:
+                            part = json.loads(
+                                part_file.read_text(encoding="utf-8")
+                            )
+                            part["_node_id"] = node_id if node_id is not None else part.get("phase_id")
+                            part.setdefault(
+                                "created_at", part_file.stat().st_mtime
+                            )
+                            part["_source"] = "worker"
+                            transcript.append(part)
+                        except (json.JSONDecodeError, OSError):
+                            continue
+
+        # --- Filter ---
+        visible = [
+            m for m in transcript if SessionManager.is_client_visible_message(m)
+        ]
+
+        # Worker-specific filtering: include all visible worker messages
+        result: list[dict] = []
+        for m in visible:
+            if m.get("_source") == "worker":
+                keep = m["role"] in ("user", "assistant")
+            else:
+                keep = True
+            if keep:
+                result.append(m)
+
+        result.sort(key=lambda m: m.get("created_at", m.get("seq", 0)))
+        return result
+
+    @staticmethod
     def get_cold_session_info(session_id: str) -> dict | None:
         """Return disk metadata for a session that is no longer live in memory.
 
@@ -1015,13 +1196,9 @@ class SessionManager:
         # Check whether any message part files are actually present
         has_messages = False
         try:
-            for node_dir in convs_dir.iterdir():
-                if not node_dir.is_dir():
-                    continue
-                parts_dir = node_dir / "parts"
-                if parts_dir.exists() and any(f.suffix == ".json" for f in parts_dir.iterdir()):
-                    has_messages = True
-                    break
+            for _node_id, _part_file in SessionManager._iter_conversation_part_files(convs_dir):
+                has_messages = True
+                break
         except OSError:
             pass
 
@@ -1098,29 +1275,17 @@ class SessionManager:
             if convs_dir.exists():
                 try:
                     all_parts: list[dict] = []
-                    for node_dir in convs_dir.iterdir():
-                        if not node_dir.is_dir():
+                    for node_id, part_file in SessionManager._iter_conversation_part_files(convs_dir):
+                        try:
+                            part = json.loads(part_file.read_text(encoding="utf-8"))
+                            if node_id is not None:
+                                part.setdefault("_node_id", node_id)
+                            part.setdefault("created_at", part_file.stat().st_mtime)
+                            all_parts.append(part)
+                        except (json.JSONDecodeError, OSError):
                             continue
-                        parts_dir = node_dir / "parts"
-                        if not parts_dir.exists():
-                            continue
-                        for part_file in sorted(parts_dir.iterdir()):
-                            if part_file.suffix != ".json":
-                                continue
-                            try:
-                                part = json.loads(part_file.read_text(encoding="utf-8"))
-                                part.setdefault("created_at", part_file.stat().st_mtime)
-                                all_parts.append(part)
-                            except (json.JSONDecodeError, OSError):
-                                continue
                     # Filter to client-facing messages only
-                    client_msgs = [
-                        p
-                        for p in all_parts
-                        if not p.get("is_transition_marker")
-                        and p.get("role") != "tool"
-                        and not (p.get("role") == "assistant" and p.get("tool_calls"))
-                    ]
+                    client_msgs = [p for p in all_parts if SessionManager.is_client_visible_message(p)]
                     client_msgs.sort(key=lambda m: m.get("created_at", m.get("seq", 0)))
                     message_count = len(client_msgs)
                     # Last assistant message as preview snippet

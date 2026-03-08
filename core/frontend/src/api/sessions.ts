@@ -71,6 +71,12 @@ export const sessionsApi = {
   queenMessages: (sessionId: string) =>
     api.get<{ messages: Message[]; session_id: string }>(`/sessions/${sessionId}/queen-messages`),
 
+  /** Unified, filtered, chronological transcript (queen + worker) from disk.
+   *  Works for both live and cold sessions — the canonical endpoint for
+   *  restoring chat history in the UI. */
+  transcript: (sessionId: string) =>
+    api.get<{ messages: Message[]; session_id: string }>(`/sessions/${sessionId}/transcript`),
+
   /** List all queen sessions on disk — live + cold (post-restart). */
   history: () =>
     api.get<{ sessions: Array<{ session_id: string; cold: boolean; live: boolean; has_messages: boolean; created_at: number; agent_name?: string | null; agent_path?: string | null }> }>("/sessions/history"),

@@ -599,6 +599,26 @@ export default function Workspace() {
     }).catch(() => { });
   }, []);
 
+  /**
+   * Fetch the full unified transcript for a session from the backend.
+   * Single API call — the backend handles queen+worker merging, filtering,
+   * and chronological sorting.  Used by both cold restore and history-open.
+   */
+  const fetchRestoredConversation = useCallback(async (
+    sessionId: string,
+    thread: string,
+    workerDisplayName?: string,
+  ): Promise<ChatMessage[]> => {
+    const { messages: transcript } = await sessionsApi.transcript(sessionId);
+    return (transcript as (Message & { _source?: string })[]).map(m => {
+      const isQueen = m._source === "queen";
+      const sender = isQueen ? "Queen Bee" : (workerDisplayName || "Agent");
+      const msg = backendMessageToChatMessage(m, thread, sender);
+      if (isQueen) msg.role = "queen";
+      return msg;
+    });
+  }, []);
+
   // --- Agent loading: loadAgentForType ---
   const loadingRef = useRef(new Set<string>());
   const loadAgentForType = useCallback(async (agentType: string) => {
@@ -799,25 +819,11 @@ export default function Workspace() {
         let preQueenMsgs: ChatMessage[] = [];
         if (coldRestoreId && !alreadyHasMessages) {
           try {
-            const { messages: queenMsgs } = await sessionsApi.queenMessages(coldRestoreId);
-            // Also pre-fetch worker messages from the old session if a resumable worker exists
-            const displayNameTemp = formatAgentDisplayName(agentPath);
-            for (const m of queenMsgs as Message[]) {
-              const msg = backendMessageToChatMessage(m, agentType, "Queen Bee");
-              msg.role = "queen";
-              preQueenMsgs.push(msg);
-            }
-            // Also try to grab worker messages while we're here
-            try {
-              const { sessions: workerSessions } = await sessionsApi.workerSessions(coldRestoreId);
-              const resumable = workerSessions.find(s => s.status === "active" || s.status === "paused");
-              if (resumable) {
-                const { messages: wMsgs } = await sessionsApi.messages(coldRestoreId, resumable.session_id);
-                for (const m of wMsgs as Message[]) {
-                  preQueenMsgs.push(backendMessageToChatMessage(m, agentType, displayNameTemp));
-                }
-              }
-            } catch { /* not critical */ }
+            preQueenMsgs = await fetchRestoredConversation(
+              coldRestoreId,
+              agentType,
+              formatAgentDisplayName(agentPath),
+            );
           } catch {
             // Not available — will start fresh
           }
@@ -927,40 +933,31 @@ export default function Workspace() {
 
       // Restore messages when rejoining an existing session OR cold-restoring from disk.
       let isWorkerRunning = false;
-      const restoredMsgs: ChatMessage[] = [];
+      let restoredMsgs: ChatMessage[] = [];
       // For cold-restore, use the old session ID. For live resume, use current session.
       const historyId = coldRestoreId ?? (isResumedSession ? session.session_id : undefined);
 
-      // For LIVE resume (not cold restore), fetch worker + queen messages now.
+      // For LIVE resume (not cold restore), fetch the full transcript now.
       // For cold restore they were already pre-fetched above (before create) so we skip to avoid
       // double-restoring and to avoid capturing the new greeting.
       if (historyId && !coldRestoreId) {
         try {
-          const { sessions: workerSessions } = await sessionsApi.workerSessions(historyId);
-          const resumable = workerSessions.find(
-            (s) => s.status === "active" || s.status === "paused",
+          restoredMsgs = await fetchRestoredConversation(
+            historyId,
+            agentType,
+            displayName,
           );
-          isWorkerRunning = resumable?.status === "active";
-
-          if (resumable) {
-            const { messages } = await sessionsApi.messages(historyId, resumable.session_id);
-            for (const m of messages as Message[]) {
-              restoredMsgs.push(backendMessageToChatMessage(m, agentType, displayName));
-            }
-          }
         } catch {
-          // Worker session listing failed — not critical
+          // Transcript fetch failed — not critical
         }
 
+        // Check if a worker is currently running (for live resume only)
         try {
-          const { messages: queenMsgs } = await sessionsApi.queenMessages(historyId);
-          for (const m of queenMsgs as Message[]) {
-            const msg = backendMessageToChatMessage(m, agentType, "Queen Bee");
-            msg.role = "queen";
-            restoredMsgs.push(msg);
-          }
+          const { sessions: workerSessions } = await sessionsApi.workerSessions(historyId);
+          const active = workerSessions.find((s) => s.status === "active");
+          isWorkerRunning = !!active;
         } catch {
-          // Queen messages not available — not critical
+          // Not critical
         }
       }
 
@@ -1001,7 +998,7 @@ export default function Workspace() {
     } finally {
       loadingRef.current.delete(agentType);
     }
-  }, [updateAgentState, initialPrompt]);
+  }, [updateAgentState, initialPrompt, fetchRestoredConversation]);
 
   // Auto-load agents when new tabs appear in sessionsByAgent.
   // Only eagerly load the active tab — background tabs are deferred until the
@@ -2248,24 +2245,6 @@ export default function Workspace() {
       }
     }
 
-    // Pre-fetch messages from disk so the tab opens with conversation already shown.
-    // This happens BEFORE creating the tab so no "new session" empty state is visible.
-    let prefetchedMessages: ChatMessage[] = [];
-    try {
-      const { messages: queenMsgs } = await sessionsApi.queenMessages(sessionId);
-      for (const m of queenMsgs as Message[]) {
-        const resolvedType = agentPath || "new-agent";
-        const msg = backendMessageToChatMessage(m, resolvedType, "Queen Bee");
-        msg.role = "queen";
-        prefetchedMessages.push(msg);
-      }
-      if (prefetchedMessages.length > 0) {
-        prefetchedMessages.sort((a, b) => (a.createdAt ?? 0) - (b.createdAt ?? 0));
-      }
-    } catch {
-      // Not available — session will open empty and loadAgentForType will try again
-    }
-
     const resolvedAgentType = agentPath || "new-agent";
     const existingTabCount = Object.keys(sessionsByAgent).filter(
       k => baseAgentType(k) === resolvedAgentType && (sessionsByAgent[k] || []).length > 0
@@ -2275,14 +2254,28 @@ export default function Workspace() {
       "New Agent";
     const label = existingTabCount === 0 ? rawLabel : `${rawLabel} #${existingTabCount + 1}`;
     const newSession = createSession(resolvedAgentType, label);
+    const tabKey = existingTabCount === 0 ? resolvedAgentType : `${resolvedAgentType}::${newSession.id}`;
+    if (tabKey !== resolvedAgentType) newSession.tabKey = tabKey;
     newSession.backendSessionId = sessionId;
     newSession.historySourceId = sessionId;
+
+    // Pre-fetch messages from disk so the tab opens with conversation already shown.
+    // Use tabKey as the thread because ChatPanel filters by activeThread.
+    let prefetchedMessages: ChatMessage[] = [];
+    try {
+      prefetchedMessages = await fetchRestoredConversation(
+        sessionId,
+        tabKey,
+        agentPath ? formatAgentDisplayName(agentPath) : undefined,
+      );
+    } catch {
+      // Not available — session will open empty and loadAgentForType will try again
+    }
+
     // Pre-populate messages so the chat panel immediately shows the conversation
     if (prefetchedMessages.length > 0) {
       newSession.messages = prefetchedMessages;
     }
-    const tabKey = existingTabCount === 0 ? resolvedAgentType : `${resolvedAgentType}::${newSession.id}`;
-    if (tabKey !== resolvedAgentType) newSession.tabKey = tabKey;
 
     // Suppress queen intro BEFORE the tab is created so loadAgentForType
     // never sees an unsuppressed window — the user never expects a greeting on reopen.
@@ -2293,7 +2286,7 @@ export default function Workspace() {
     setSessionsByAgent(prev => ({ ...prev, [tabKey]: [newSession] }));
     setActiveSessionByAgent(prev => ({ ...prev, [tabKey]: newSession.id }));
     setActiveWorker(tabKey);
-  }, [sessionsByAgent]);
+  }, [sessionsByAgent, fetchRestoredConversation]);
 
   // Post-mount: open the session from the URL ?session= param via handleHistoryOpen.
   // This runs AFTER persisted tabs are hydrated, so dedup works correctly.
@@ -2309,7 +2302,7 @@ export default function Workspace() {
       const match = r.sessions.find((s: { session_id: string }) => s.session_id === sid);
       handleHistoryOpen(
         sid,
-        match?.agent_path ?? initialAgentRef.current !== "new-agent" ? initialAgentRef.current : null,
+        match?.agent_path ?? (initialAgentRef.current !== "new-agent" ? initialAgentRef.current : null),
         match?.agent_name ?? null,
       );
     }).catch(() => {
