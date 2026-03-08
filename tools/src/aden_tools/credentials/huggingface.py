@@ -1,7 +1,7 @@
 """
 HuggingFace credentials.
 
-Contains credentials for HuggingFace Hub API access.
+Contains credentials for HuggingFace Hub API and Inference API access.
 """
 
 from .base import CredentialSpec
@@ -16,11 +16,14 @@ HUGGINGFACE_CREDENTIALS = {
             "huggingface_get_dataset",
             "huggingface_search_spaces",
             "huggingface_whoami",
+            "huggingface_run_inference",
+            "huggingface_run_embedding",
+            "huggingface_list_inference_endpoints",
         ],
         required=True,
         startup_required=False,
         help_url="https://huggingface.co/settings/tokens",
-        description="HuggingFace API token for Hub access (models, datasets, spaces)",
+        description="HuggingFace API token for Hub access (models, datasets, spaces) and Inference API",
         direct_api_key_supported=True,
         api_key_instructions="""To get a HuggingFace token:
 1. Go to https://huggingface.co/settings/tokens
@@ -34,3 +37,4 @@ HUGGINGFACE_CREDENTIALS = {
         credential_key="api_key",
     ),
 }
+
