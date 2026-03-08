@@ -120,49 +120,49 @@ function Test-DefenderExclusions {
         Hashtable with DefenderEnabled, MissingPaths, and optional Error
     #>
     param([string[]]$Paths)
-    
+
     # Security: Define safe path prefixes (project + user directories only)
     $safePrefixes = @(
         $ScriptDir,         # Project directory
         $env:LOCALAPPDATA,  # User local appdata
         $env:APPDATA        # User roaming appdata
     )
-    
+
     # Normalize and filter null/empty values
     $safePrefixes = $safePrefixes | Where-Object { $_ } | ForEach-Object {
         try { [System.IO.Path]::GetFullPath($_) } catch { $null }
     } | Where-Object { $_ }
-    
+
     try {
         # Check if Defender cmdlets are available (may not exist on older Windows)
         $mpModule = Get-Module -ListAvailable -Name Defender -ErrorAction SilentlyContinue
         if (-not $mpModule) {
-            return @{ 
+            return @{
                 DefenderEnabled = $false
                 Error = "Windows Defender module not available"
             }
         }
-        
+
         # Check if Defender is running
         $status = Get-MpComputerStatus -ErrorAction Stop
         if (-not $status.RealTimeProtectionEnabled) {
-            return @{ 
+            return @{
                 DefenderEnabled = $false
                 Reason = "Real-time protection is disabled"
             }
         }
-        
+
         # Get current exclusions
         $prefs = Get-MpPreference -ErrorAction Stop
         $existing = $prefs.ExclusionPath
         if (-not $existing) { $existing = @() }
-        
+
         # Normalize existing paths for comparison (some may contain wildcards
         # or env vars that GetFullPath rejects — skip those gracefully)
         $existing = $existing | Where-Object { $_ } | ForEach-Object {
             try { [System.IO.Path]::GetFullPath($_) } catch { $_ }
         }
-        
+
         # Normalize paths and find missing exclusions
         $missing = @()
         foreach ($path in $Paths) {
@@ -171,7 +171,7 @@ function Test-DefenderExclusions {
             } catch {
                 continue  # Skip paths with unsupported format
             }
-            
+
             # Security: Ensure path is within safe boundaries
             $isSafe = $false
             foreach ($prefix in $safePrefixes) {
@@ -180,17 +180,17 @@ function Test-DefenderExclusions {
                     break
                 }
             }
-            
+
             if (-not $isSafe) {
                 Write-Warn "Security: Refusing to exclude path outside safe boundaries: $normalized"
                 continue
             }
-            
+
             # Info: Warn if path doesn't exist yet (but still process it)
             if (-not (Test-Path $path -ErrorAction SilentlyContinue)) {
                 Write-Verbose "Path does not exist yet: $path (will be excluded when created)"
             }
-            
+
             # Check if path is already excluded (or is a child of an excluded path)
             $alreadyExcluded = $false
             foreach ($excluded in $existing) {
@@ -199,19 +199,19 @@ function Test-DefenderExclusions {
                     break
                 }
             }
-            
+
             if (-not $alreadyExcluded) {
                 $missing += $normalized
             }
         }
-        
+
         return @{
             DefenderEnabled = $true
             MissingPaths = $missing
             ExistingPaths = $existing
         }
     } catch {
-        return @{ 
+        return @{
             DefenderEnabled = $false
             Error = $_.Exception.Message
         }
@@ -230,7 +230,7 @@ function Test-IsDefenderEnabled {
         if (-not $mpModule) {
             return $false
         }
-        
+
         $status = Get-MpComputerStatus -ErrorAction Stop
         return $status.RealTimeProtectionEnabled
     } catch {
@@ -249,10 +249,10 @@ function Add-DefenderExclusions {
         Hashtable with Added and Failed arrays
     #>
     param([string[]]$Paths)
-    
+
     $added = @()
     $failed = @()
-    
+
     foreach ($path in $Paths) {
         try {
             try {
@@ -263,14 +263,14 @@ function Add-DefenderExclusions {
             Add-MpPreference -ExclusionPath $normalized -ErrorAction Stop
             $added += $normalized
         } catch {
-            $failed += @{ 
+            $failed += @{
                 Path = $path
                 Error = $_.Exception.Message
             }
         }
     }
-    
-    return @{ 
+
+    return @{
         Added = $added
         Failed = $failed
     }
@@ -618,37 +618,37 @@ if (-not $checkResult.DefenderEnabled) {
         Write-Color -Text "  - $path" -Color Cyan
     }
     Write-Host ""
-    
+
     # Security notice
     Write-Color -Text "⚠️  Security Trade-off:" -Color Yellow
     Write-Host "Adding exclusions improves performance but reduces real-time protection."
     Write-Host "Only proceed if you trust this project and its dependencies."
     Write-Host ""
-    
+
     # Prompt for consent (default = No for security)
     if (Prompt-YesNo "Add these Defender exclusions?" "n") {
         Write-Host ""
-        
+
         # Check admin privileges
         if (-not (Test-IsAdmin)) {
             Write-Warn "Administrator privileges required to modify Defender settings."
             Write-Host ""
             Write-Color -Text "To add exclusions manually, run PowerShell as Administrator and paste:" -Color White
             Write-Host ""
-            
+
             foreach ($path in $checkResult.MissingPaths) {
                 $cmd = "Add-MpPreference -ExclusionPath '$path'"
                 Write-Color -Text "  $cmd" -Color Cyan
             }
-            
+
             Write-Host ""
             Write-Color -Text "Or copy all commands to clipboard? [y/N]" -Color White
             $copyChoice = Read-Host
             if ($copyChoice -match "^[Yy]") {
-                $commands = ($checkResult.MissingPaths | ForEach-Object { 
-                    "Add-MpPreference -ExclusionPath '$_'" 
+                $commands = ($checkResult.MissingPaths | ForEach-Object {
+                    "Add-MpPreference -ExclusionPath '$_'"
                 }) -join "`r`n"
-                
+
                 try {
                     Set-Clipboard -Value $commands
                     Write-Ok "Commands copied to clipboard"
@@ -665,7 +665,7 @@ if (-not $checkResult.DefenderEnabled) {
             } else {
                 # Add exclusions
                 Write-Host "  Adding exclusions... " -NoNewline
-                
+
                 # Re-check paths in case something changed
                 $freshCheck = Test-DefenderExclusions -Paths $pathsToExclude
                 if ($freshCheck.MissingPaths.Count -eq 0) {
@@ -673,17 +673,17 @@ if (-not $checkResult.DefenderEnabled) {
                     Write-Host "  (Exclusions were added by another process)"
                 } else {
                     $result = Add-DefenderExclusions -Paths $freshCheck.MissingPaths
-                    
+
                     if ($result.Added.Count -gt 0) {
                         Write-Ok "done"
                         foreach ($path in $result.Added) {
                             Write-Ok "Excluded: $path"
                         }
                     }
-                    
+
                     if ($result.Failed.Count -gt 0) {
                         Write-Host ""
-                        
+
                         # Calculate and show success rate
                         $totalPaths = $result.Added.Count + $result.Failed.Count
                         if ($totalPaths -gt 0) {
@@ -692,7 +692,7 @@ if (-not $checkResult.DefenderEnabled) {
                             Write-Host "Performance benefit may be reduced."
                             Write-Host ""
                         }
-                        
+
                         Write-Warn "Failed exclusions:"
                         foreach ($failure in $result.Failed) {
                             Write-Warn "  $($failure.Path): $($failure.Error)"
@@ -714,7 +714,7 @@ if (-not $checkResult.DefenderEnabled) {
 # Step 3: Verify Python Imports
 # ============================================================
 
-Write-Step -Number "3" -Text "Step 3: Verifying Python imports..."
+Write-Step -Number "4" -Text "Step 4: Verifying Python imports..."
 
 $importErrors = 0
 
@@ -730,7 +730,7 @@ $modulesToCheck = @("framework", "aden_tools", "litellm")
 try {
     $checkOutput = & uv run python scripts/check_requirements.py @modulesToCheck 2>&1 | Out-String
     $resultJson = $null
-    
+
     # Try to parse JSON result
     try {
         $resultJson = $checkOutput | ConvertFrom-Json
@@ -739,12 +739,12 @@ try {
         Write-Host $checkOutput
         exit 1
     }
-    
+
     # Display results for each module
     foreach ($imp in $imports) {
         Write-Host "  $($imp.Label)... " -NoNewline
         $status = $resultJson.$($imp.Module)
-        
+
         if ($status -eq "ok") {
             Write-Ok "ok"
         } elseif ($imp.Required) {
@@ -776,7 +776,7 @@ Write-Host ""
 # Step 4: Verify Claude Code Skills
 # ============================================================
 
-Write-Step -Number "4" -Text "Step 4: Verifying Claude Code skills..."
+Write-Step -Number "5" -Text "Step 5: Verifying Claude Code skills..."
 
 # (skills check is informational only, shown in final verification)
 
@@ -1435,7 +1435,7 @@ $verifyModules = @("framework", "aden_tools")
 try {
     $verifyOutput = & uv run python scripts/check_requirements.py @verifyModules 2>&1 | Out-String
     $verifyJson = $null
-    
+
     try {
         $verifyJson = $verifyOutput | ConvertFrom-Json
     } catch {
@@ -1448,12 +1448,12 @@ try {
             else { Write-Fail "failed"; $verifyErrors++ }
         }
     }
-    
+
     if ($verifyJson) {
         Write-Host "  $([char]0x2B21) framework... " -NoNewline
         if ($verifyJson.framework -eq "ok") { Write-Ok "ok" }
         else { Write-Fail "failed"; $verifyErrors++ }
-        
+
         Write-Host "  $([char]0x2B21) aden_tools... " -NoNewline
         if ($verifyJson.aden_tools -eq "ok") { Write-Ok "ok" }
         else { Write-Fail "failed"; $verifyErrors++ }

@@ -315,7 +315,7 @@ echo ""
 # Step 3: Verify Python Imports
 # ============================================================
 
-echo -e "${BLUE}Step 3: Verifying Python imports...${NC}"
+echo -e "${BLUE}Step 4: Verifying Python imports...${NC}"
 echo ""
 
 IMPORT_ERRORS=0
@@ -375,7 +375,7 @@ echo ""
 # Step 4: Verify Claude Code Skills
 # ============================================================
 
-echo -e "${BLUE}Step 4: Verifying Claude Code skills...${NC}"
+echo -e "${BLUE}Step 5: Verifying Claude Code skills...${NC}"
 echo ""
 
 # Provider configuration - use associative arrays (Bash 4+) or indexed arrays (Bash 3.2)
