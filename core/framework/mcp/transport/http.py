@@ -38,9 +38,14 @@ class HttpMCPTransport(MCPTransport):
         self._origin = f"{split.scheme}://{split.netloc}"
         self._base_path = split.path.rstrip("/")
         self._rpc_paths = self._build_rpc_paths()
+        client_headers = {
+            # MCP-over-HTTP servers may require both accepted response media types.
+            "Accept": "application/json, text/event-stream",
+            **self.config.headers,
+        }
         self._http_client = httpx.Client(
             base_url=self._origin,
-            headers=self.config.headers,
+            headers=client_headers,
             timeout=30.0,
         )
 
@@ -127,11 +132,9 @@ class HttpMCPTransport(MCPTransport):
                 continue
 
             try:
-                data = response.json()
+                data = self._parse_response_payload(response)
             except json.JSONDecodeError as e:
-                raise MCPTransportError(
-                    f"Failed to parse MCP response from {path}: {e}"
-                ) from e
+                raise MCPTransportError(f"Failed to parse MCP response from {path}: {e}") from e
 
             if "error" in data:
                 raise MCPTransportError(f"MCP error: {data['error']}")
@@ -176,3 +179,27 @@ class HttpMCPTransport(MCPTransport):
 
     def has_bearer_token(self) -> bool:
         return bool(self._bearer_token)
+
+    def _parse_response_payload(self, response: httpx.Response) -> dict[str, Any]:
+        content_type = (response.headers.get("content-type") or "").lower()
+        if "text/event-stream" in content_type:
+            return self._parse_sse_payload(response.text)
+        return response.json()
+
+    def _parse_sse_payload(self, body: str) -> dict[str, Any]:
+        # Minimal SSE parser for MCP JSON-RPC responses over streaming transport.
+        # We pick the first data frame that decodes into a JSON object.
+        for raw_line in body.splitlines():
+            line = raw_line.strip()
+            if not line.startswith("data:"):
+                continue
+            data_part = line[len("data:") :].strip()
+            if not data_part:
+                continue
+            try:
+                payload = json.loads(data_part)
+            except json.JSONDecodeError:
+                continue
+            if isinstance(payload, dict):
+                return payload
+        raise json.JSONDecodeError("No JSON object found in SSE data frames", body, 0)
