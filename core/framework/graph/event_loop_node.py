@@ -477,12 +477,14 @@ class EventLoopNode(NodeProtocol):
                 # If it doesn't exist yet, seed it with available context.
                 if self._config.spillover_dir:
                     _adapt_path = Path(self._config.spillover_dir) / "adapt.md"
-                    if not _adapt_path.exists() and ctx.accounts_prompt:
+                    if not _adapt_path.exists():
                         _adapt_path.parent.mkdir(parents=True, exist_ok=True)
-                        _adapt_path.write_text(
-                            f"## Identity\n{ctx.accounts_prompt}\n",
-                            encoding="utf-8",
+                        seed = (
+                            f"## Identity\n{ctx.accounts_prompt}\n"
+                            if ctx.accounts_prompt
+                            else "# Session Working Memory\n"
                         )
+                        _adapt_path.write_text(seed, encoding="utf-8")
                     if _adapt_path.exists():
                         _adapt_text = _adapt_path.read_text(encoding="utf-8").strip()
                         if _adapt_text:

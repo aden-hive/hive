@@ -46,6 +46,8 @@ class Session:
     judge_task: asyncio.Task | None = None
     escalation_sub: str | None = None
     worker_handoff_sub: str | None = None
+    # Periodic memory consolidation
+    memory_consolidation_task: asyncio.Task | None = None
     # Session directory resumption:
     # When set, _start_queen writes queen conversations to this existing session's
     # directory instead of creating a new one.  This lets cold-restores accumulate
@@ -382,9 +384,7 @@ class SessionManager:
         # Capture session data for memory consolidation before teardown
         _llm = getattr(session, "llm", None)
         _storage_id = getattr(session, "queen_resume_from", None) or session_id
-        _adapt_path = (
-            Path.home() / ".hive" / "queen" / "session" / _storage_id / "data" / "adapt.md"
-        )
+        _session_dir = Path.home() / ".hive" / "queen" / "session" / _storage_id
 
         # Stop judge
         self._stop_judge(session)
@@ -395,7 +395,10 @@ class SessionManager:
                 pass
             session.worker_handoff_sub = None
 
-        # Stop queen
+        # Stop queen and periodic memory consolidation
+        if session.memory_consolidation_task is not None:
+            session.memory_consolidation_task.cancel()
+            session.memory_consolidation_task = None
         if session.queen_task is not None:
             session.queen_task.cancel()
             session.queen_task = None
@@ -408,17 +411,14 @@ class SessionManager:
             except Exception as e:
                 logger.error("Error cleaning up worker: %s", e)
 
-        # Consolidate queen's cross-session memory in the background.
-        # Reads adapt.md from the completed session, runs an LLM call to
-        # update MEMORY.md and write a journal entry. Runs fire-and-forget
-        # so teardown is never blocked.
-        if _llm is not None and _adapt_path.exists():
+        # Final memory consolidation — fire-and-forget so teardown isn't blocked.
+        if _llm is not None and _session_dir.exists():
             import asyncio
 
             from framework.agents.hive_coder.queen_memory import consolidate_queen_memory
 
             asyncio.create_task(
-                consolidate_queen_memory(session_id, _adapt_path, _llm),
+                consolidate_queen_memory(session_id, _session_dir, _llm),
                 name=f"queen-memory-consolidation-{session_id}",
             )
 
@@ -821,6 +821,29 @@ class SessionManager:
                 session.queen_executor = None
 
         session.queen_task = asyncio.create_task(_queen_loop())
+
+        # Periodic memory consolidation — runs every 15 minutes regardless of
+        # whether the session ends cleanly. Uses the conversation parts
+        # (always written) so it works even if adapt.md is empty.
+        _consolidation_llm = session.llm
+        _consolidation_session_dir = queen_dir
+
+        async def _periodic_memory_consolidation() -> None:
+            from framework.agents.hive_coder.queen_memory import consolidate_queen_memory
+
+            while True:
+                try:
+                    await asyncio.sleep(15 * 60)  # 15 minutes
+                except asyncio.CancelledError:
+                    break
+                await consolidate_queen_memory(
+                    session.id, _consolidation_session_dir, _consolidation_llm
+                )
+
+        session.memory_consolidation_task = asyncio.create_task(
+            _periodic_memory_consolidation(),
+            name=f"queen-memory-periodic-{session.id}",
+        )
 
     # ------------------------------------------------------------------
     # Judge startup / teardown

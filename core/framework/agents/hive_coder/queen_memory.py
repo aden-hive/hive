@@ -151,45 +151,88 @@ and write a brief diary_entry noting it was a quiet session.
 """
 
 
+def read_session_context(session_dir: Path, max_messages: int = 80) -> str:
+    """Extract a readable transcript from conversation parts + adapt.md.
+
+    Reads the last ``max_messages`` conversation parts and the session's
+    adapt.md (working memory). Tool results are omitted — only user and
+    assistant turns (with tool-call names noted) are included.
+    """
+    parts: list[str] = []
+
+    # Working notes
+    adapt_path = session_dir / "data" / "adapt.md"
+    if adapt_path.exists():
+        text = adapt_path.read_text(encoding="utf-8").strip()
+        if text:
+            parts.append(f"## Session Working Notes (adapt.md)\n\n{text}")
+
+    # Conversation transcript
+    parts_dir = session_dir / "conversations" / "parts"
+    if parts_dir.exists():
+        part_files = sorted(parts_dir.glob("*.json"))[-max_messages:]
+        lines: list[str] = []
+        for pf in part_files:
+            try:
+                data = json.loads(pf.read_text(encoding="utf-8"))
+                role = data.get("role", "")
+                content = str(data.get("content", "")).strip()
+                tool_calls = data.get("tool_calls") or []
+                if role == "tool":
+                    continue  # skip verbose tool results
+                if role == "assistant" and tool_calls and not content:
+                    names = [
+                        tc.get("function", {}).get("name", "?")
+                        for tc in tool_calls
+                    ]
+                    lines.append(f"[queen calls: {', '.join(names)}]")
+                elif content:
+                    label = "user" if role == "user" else "queen"
+                    lines.append(f"[{label}]: {content[:600]}")
+            except Exception:
+                continue
+        if lines:
+            parts.append("## Conversation\n\n" + "\n".join(lines))
+
+    return "\n\n".join(parts)
+
+
 async def consolidate_queen_memory(
     session_id: str,
-    adapt_path: Path,
+    session_dir: Path,
     llm: object,
 ) -> None:
-    """Run post-session LLM consolidation to update MEMORY.md and today's journal.
+    """Update MEMORY.md and append a diary entry based on the current session.
 
-    This is called automatically at session end — never by the queen agent.
-    Failures are logged and silently swallowed so they never block teardown.
+    Reads conversation parts and adapt.md from session_dir. Called
+    periodically in the background and once at session end. Failures are
+    logged and silently swallowed so they never block teardown.
 
     Args:
-        session_id: The session ID, used for the adapt.md path reference.
-        adapt_path: Full path to this session's adapt.md file.
+        session_id: The session ID (used for the adapt.md path reference).
+        session_dir: Path to the session directory (~/.hive/queen/session/{id}).
         llm: LLMProvider instance (must support acomplete()).
     """
     try:
-        adapt_content = (
-            adapt_path.read_text(encoding="utf-8").strip()
-            if adapt_path.exists()
-            else ""
-        )
-        if not adapt_content:
-            logger.debug("queen_memory: adapt.md empty, skipping consolidation")
+        session_context = read_session_context(session_dir)
+        if not session_context:
+            logger.debug("queen_memory: no session context, skipping consolidation")
             return
 
         existing_semantic = read_semantic_memory()
         today_journal = read_episodic_memory()
         today_str = date.today().strftime("%B %-d, %Y")
+        adapt_path = session_dir / "data" / "adapt.md"
 
         user_msg = (
             f"## Existing Semantic Memory (MEMORY.md)\n\n"
             f"{existing_semantic or '(none yet)'}\n\n"
-            f"## Today's Journal So Far ({today_str})\n\n"
+            f"## Today's Diary So Far ({today_str})\n\n"
             f"{today_journal or '(none yet)'}\n\n"
-            f"## This Session's Working Notes (adapt.md)\n\n"
-            f"{adapt_content}\n\n"
+            f"{session_context}\n\n"
             f"## Session Reference\n\n"
             f"Session ID: {session_id}\n"
-            f"Session adapt.md path: {adapt_path}\n"
+            f"Session path: {adapt_path}\n"
         )
 
         response = await llm.acomplete(
