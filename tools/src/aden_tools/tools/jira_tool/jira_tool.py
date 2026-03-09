@@ -383,3 +383,139 @@ def register_tools(
             "created": data.get("created", ""),
             "status": "created",
         }
+
+    @mcp.tool()
+    def jira_update_issue(
+        issue_key: str,
+        summary: str = "",
+        description: str = "",
+        priority: str = "",
+        labels: str = "",
+        assignee_account_id: str = "",
+    ) -> dict[str, Any]:
+        """
+        Update fields on an existing Jira issue.
+
+        Args:
+            issue_key: Issue key e.g. "PROJ-123" (required)
+            summary: New summary/title (optional)
+            description: New plain text description (optional)
+            priority: New priority name e.g. High, Medium, Low (optional)
+            labels: Comma-separated labels to replace existing labels (optional)
+            assignee_account_id: Atlassian account ID to reassign to (optional)
+
+        Returns:
+            Dict with update status or error
+        """
+        domain, email, token = _get_credentials(credentials)
+        if not domain or not email or not token:
+            return _auth_error()
+        if not issue_key:
+            return {"error": "issue_key is required"}
+
+        fields: dict[str, Any] = {}
+        if summary:
+            fields["summary"] = summary
+        if description:
+            fields["description"] = _text_to_adf(description)
+        if priority:
+            fields["priority"] = {"name": priority}
+        if labels:
+            fields["labels"] = [item.strip() for item in labels.split(",") if item.strip()]
+        if assignee_account_id:
+            fields["assignee"] = {"accountId": assignee_account_id}
+
+        if not fields:
+            return {"error": "At least one field to update is required"}
+
+        url = f"{_base_url(domain)}/issue/{issue_key}"
+        data = _request("put", url, email, token, json={"fields": fields})
+        if isinstance(data, dict) and "error" in data:
+            return data
+
+        return {
+            "key": issue_key,
+            "status": "updated",
+            "url": f"https://{domain}/browse/{issue_key}",
+        }
+
+    @mcp.tool()
+    def jira_list_transitions(
+        issue_key: str,
+    ) -> dict[str, Any]:
+        """
+        List available status transitions for a Jira issue.
+
+        Use this to discover which statuses an issue can move to before
+        calling jira_transition_issue.
+
+        Args:
+            issue_key: Issue key e.g. "PROJ-123" (required)
+
+        Returns:
+            Dict with available transitions (id, name, to status)
+        """
+        domain, email, token = _get_credentials(credentials)
+        if not domain or not email or not token:
+            return _auth_error()
+        if not issue_key:
+            return {"error": "issue_key is required"}
+
+        url = f"{_base_url(domain)}/issue/{issue_key}/transitions"
+        data = _request("get", url, email, token)
+        if isinstance(data, dict) and "error" in data:
+            return data
+
+        transitions = []
+        for t in data.get("transitions", []):
+            to_status = t.get("to") or {}
+            transitions.append(
+                {
+                    "id": t.get("id", ""),
+                    "name": t.get("name", ""),
+                    "to_status": to_status.get("name", ""),
+                }
+            )
+        return {"transitions": transitions, "count": len(transitions)}
+
+    @mcp.tool()
+    def jira_transition_issue(
+        issue_key: str,
+        transition_id: str,
+        comment: str = "",
+    ) -> dict[str, Any]:
+        """
+        Transition a Jira issue to a new status.
+
+        Use jira_list_transitions first to find the correct transition_id.
+
+        Args:
+            issue_key: Issue key e.g. "PROJ-123" (required)
+            transition_id: Transition ID from jira_list_transitions (required)
+            comment: Optional comment to add with the transition
+
+        Returns:
+            Dict with transition status or error
+        """
+        domain, email, token = _get_credentials(credentials)
+        if not domain or not email or not token:
+            return _auth_error()
+        if not issue_key or not transition_id:
+            return {"error": "issue_key and transition_id are required"}
+
+        body: dict[str, Any] = {"transition": {"id": transition_id}}
+        if comment:
+            body["update"] = {
+                "comment": [{"add": {"body": _text_to_adf(comment)}}]
+            }
+
+        url = f"{_base_url(domain)}/issue/{issue_key}/transitions"
+        data = _request("post", url, email, token, json=body)
+        if isinstance(data, dict) and "error" in data:
+            return data
+
+        return {
+            "key": issue_key,
+            "status": "transitioned",
+            "url": f"https://{domain}/browse/{issue_key}",
+        }
