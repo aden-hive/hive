@@ -539,6 +539,40 @@ def register_queen_lifecycle_tools(
     )
     tools_registered += 1
 
+    # --- stop_worker_and_plan (Running/Staging → Planning) --------------------
+
+    async def stop_worker_and_plan() -> str:
+        """Stop the worker and switch to planning phase for diagnosis."""
+        stop_result = await stop_worker()
+
+        # Switch to planning phase
+        if phase_state is not None:
+            await phase_state.switch_to_planning(source="tool")
+
+        result = json.loads(stop_result)
+        result["phase"] = "planning"
+        result["message"] = (
+            "Worker stopped. You are now in planning phase. "
+            "Diagnose the issue using read-only tools (checkpoints, logs, sessions), "
+            "discuss a fix plan with the user, then call "
+            "initialize_and_build_agent() to implement the fix."
+        )
+        return json.dumps(result)
+
+    _stop_plan_tool = Tool(
+        name="stop_worker_and_plan",
+        description=(
+            "Stop the worker and switch to planning phase for diagnosis. "
+            "Use this when you need to investigate an issue before fixing it. "
+            "After diagnosis, call initialize_and_build_agent() to switch to building."
+        ),
+        parameters={"type": "object", "properties": {}},
+    )
+    registry.register(
+        "stop_worker_and_plan", _stop_plan_tool, lambda inputs: stop_worker_and_plan()
+    )
+    tools_registered += 1
+
     # --- replan_agent (Building → Planning) -----------------------------------
 
     async def replan_agent() -> str:
@@ -573,14 +607,38 @@ def register_queen_lifecycle_tools(
     tools_registered += 1
 
     # --- initialize_and_build_agent wrapper (Planning → Building) -------------
+    # With agent_name: scaffold a new agent via MCP tool, then switch to building.
+    # Without agent_name: just switch to building (for fixing an existing loaded agent).
 
-    # Grab the underlying MCP tool executor before we override it.
     _existing_init = registry._tools.get("initialize_and_build_agent")
     if _existing_init is not None:
         _orig_init_executor = _existing_init.executor
 
         async def initialize_and_build_agent_wrapper(inputs: dict) -> str:
-            """Wrapper: scaffold package via MCP tool, then switch to building phase."""
+            """Wrapper: scaffold or just switch to building phase."""
+            agent_name = (inputs.get("agent_name") or "").strip()
+
+            # No agent_name → just switch to building (for fixing existing agent)
+            if not agent_name:
+                runtime = _get_runtime()
+                if runtime is None:
+                    return json.dumps(
+                        {"error": "No worker loaded. Provide agent_name to scaffold a new agent."}
+                    )
+                if phase_state is not None:
+                    await phase_state.switch_to_building(source="tool")
+                return json.dumps(
+                    {
+                        "status": "editing",
+                        "phase": "building",
+                        "message": (
+                            "Switched to BUILDING phase. Full coding tools restored. "
+                            "Implement the fix, then call load_built_agent(path) to reload."
+                        ),
+                    }
+                )
+
+            # Has agent_name → scaffold via MCP tool
             result = _orig_init_executor(inputs)
             # Handle both sync and async executors
             if asyncio.iscoroutine(result) or asyncio.isfuture(result):

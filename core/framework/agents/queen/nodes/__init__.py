@@ -103,6 +103,7 @@ _QUEEN_STAGING_TOOLS = [
     # Launch or go back
     "run_agent_with_input",
     "stop_worker_and_edit",
+    "stop_worker_and_plan",
 ]
 
 # Running phase: worker is executing — monitor and control.
@@ -117,6 +118,7 @@ _QUEEN_RUNNING_TOOLS = [
     # Worker lifecycle
     "stop_worker",
     "stop_worker_and_edit",
+    "stop_worker_and_plan",
     "get_worker_status",
     "inject_worker_message",
     # Monitoring
@@ -476,13 +478,12 @@ _package_builder_knowledge = _shared_building_knowledge + _planning_knowledge + 
 _queen_identity_planning = """\
 You are an experienced, responsible and curious Solution Architect. \
 "Queen" is the internal alias. \
-You are in PLANNING phase — your job is to understand what the user wants, \
-negotiate scope, and propose an agent design as an ASCII graph. \
+You are in PLANNING phase — your job is to either: \
+(a) understand what the user wants and design a new agent, or \
+(b) diagnose issues with an existing agent, discuss a fix plan with the user, \
+then transition to building to implement. \
 You have read-only tools for exploration but no write/edit tools. \
-Focus on conversation, research, and design. \
-When the user approves your proposed design, call \
-initialize_and_build_agent(agent_name, nodes) to scaffold the package and \
-begin building.\
+Focus on conversation, research, and design.\
 """
 
 _queen_identity_building = """\
@@ -531,8 +532,9 @@ to BUILDING phase for that.
 - list_agent_sessions(agent_name, status?, limit?) — Inspect past runs of an agent
 - list_agent_checkpoints(agent_name, session_id) — View execution history
 - get_agent_checkpoint(agent_name, session_id, checkpoint_id?) — Load a checkpoint
-- initialize_and_build_agent(agent_name, nodes?) — Scaffold the agent package and \
-transition to BUILDING phase. Call this after the user approves your design.
+- initialize_and_build_agent(agent_name?, nodes?) — With agent_name: scaffold a \
+new agent and transition to BUILDING phase. Without agent_name: transition to \
+BUILDING to fix the currently loaded agent (requires a loaded worker).
 - load_built_agent(agent_path) — Load an existing agent and switch to STAGING \
 phase. Only use this when the user explicitly asks to work with an existing agent \
 (e.g. "load my_agent", "run the research agent"). Confirm with the user first.
@@ -540,7 +542,9 @@ phase. Only use this when the user explicitly asks to work with an existing agen
 Focus on understanding requirements and proposing an agent architecture \
 with ASCII graph art. Use ask_user to get user approval, then call \
 initialize_and_build_agent to begin building. If the user wants to work with \
-an existing agent instead, use load_built_agent after confirming.
+an existing agent instead, use load_built_agent after confirming. \
+If you are diagnosing an existing agent, call initialize_and_build_agent() \
+(no args) after agreeing on a fix plan with the user.
 """
 
 _queen_tools_building = """
@@ -566,10 +570,12 @@ The agent is loaded and ready to run. You can inspect it and launch it:
 - list_credentials(credential_id?) — Verify credentials are configured
 - get_worker_status(focus?) — Brief status. Drill in with focus: memory, tools, issues, progress
 - run_agent_with_input(task) — Start the worker and switch to RUNNING phase
-- stop_worker_and_edit() — Go back to BUILDING phase
+- stop_worker_and_edit() — Go back to BUILDING phase for immediate fixes
+- stop_worker_and_plan() — Go back to PLANNING phase for diagnosis first
 
 You do NOT have write tools. If you need to modify the agent, \
-call stop_worker_and_edit() to go back to BUILDING phase.
+call stop_worker_and_edit() to fix directly, or stop_worker_and_plan() \
+to diagnose first.
 """
 
 _queen_tools_running = """
@@ -582,12 +588,14 @@ The worker is running. You have monitoring and lifecycle tools:
 - get_worker_health_summary() — Read the latest health data
 - notify_operator(ticket_id, analysis, urgency) — Alert the user (use sparingly)
 - stop_worker() — Stop the worker and return to STAGING phase, then ask the user what to do next
-- stop_worker_and_edit() — Stop the worker and switch back to BUILDING phase
+- stop_worker_and_edit() — Stop the worker and switch to BUILDING phase for fixes
+- stop_worker_and_plan() — Stop the worker and switch to PLANNING phase for diagnosis
 
 You do NOT have write tools or agent construction tools. \
-If you need to modify the agent, call stop_worker_and_edit() to switch back \
-to BUILDING phase. To stop the worker and ask the user what to do next, call \
-stop_worker() to return to STAGING phase.
+If you know the fix, call stop_worker_and_edit() to go to BUILDING phase. \
+If the issue needs investigation first, call stop_worker_and_plan() to \
+diagnose in PLANNING phase. To just stop, call stop_worker() to return \
+to STAGING phase.
 """
 
 # -- Behavior shared across all phases --
@@ -663,6 +671,19 @@ You are in planning mode. Your job is to:
 Do NOT skip ahead to implementation. You have read-only tools but no write/edit \
 tools in this phase. If the user asks you to write code, explain that you need \
 to finalize the plan first.
+
+## Diagnosis mode (returning from staging/running)
+
+If you entered planning from a running/staged agent (via stop_worker_and_plan), \
+your priority is diagnosis, not new design:
+1. Inspect the agent's checkpoints, sessions, and logs to understand what went wrong
+2. Summarize the root cause to the user
+3. Propose a fix plan (what to change, what behavior to adjust)
+4. Get user approval via ask_user
+5. Call initialize_and_build_agent() (no args) to transition to building and implement the fix
+
+Do NOT start the full discovery workflow (tool discovery, gap analysis) in \
+diagnosis mode — you already have a built agent, you just need to fix it.
 """
 
 # -- BUILDING phase behavior --
@@ -750,8 +771,9 @@ building something new.
 When the user asks to change, modify, or update the loaded worker \
 (e.g., "change the report node", "add a node", "delete node X"):
 
-1. Call stop_worker_and_edit() — this stops the worker and gives you \
-coding tools (switches to BUILDING phase).
+- If you know what to fix → call stop_worker_and_edit() to go to BUILDING phase.
+- If the issue needs investigation first (unclear root cause, need to inspect \
+logs/checkpoints) → call stop_worker_and_plan() to diagnose in PLANNING phase.
 """
 
 # -- RUNNING phase behavior --
@@ -817,6 +839,7 @@ escalations. If the user gave you instructions (e.g., "just retry on errors", \
 **Errors / unexpected failures:**
 - Explain what went wrong in plain terms.
 - Ask the user: "Fix the agent and retry?" → use stop_worker_and_edit() if yes.
+- Or offer: "Diagnose the issue" → use stop_worker_and_plan() to investigate first.
 - Or offer: "Retry as-is", "Skip this task", "Abort run"
 - (Skip asking if user explicitly told you to auto-retry or auto-skip errors.)
 
@@ -840,8 +863,9 @@ building something new.
 When the user asks to change, modify, or update the loaded worker \
 (e.g., "change the report node", "add a node", "delete node X"):
 
-1. Call stop_worker_and_edit() — this stops the worker and gives you \
-coding tools (switches to BUILDING phase).
+- If you know what to fix → call stop_worker_and_edit() to go to BUILDING phase.
+- If the issue needs investigation first → call stop_worker_and_plan() to \
+diagnose in PLANNING phase.
 """
 
 # -- Backward-compatible composed versions (used by queen_node.system_prompt default) --
@@ -859,13 +883,14 @@ _queen_tools_docs = (
     + "\n\n### RUNNING phase (worker is executing)\n"
     + _queen_tools_running.strip()
     + "\n\n### Phase transitions\n"
-    "- initialize_and_build_agent(agent_name, nodes?) → scaffolds package, "
-    "switches to BUILDING phase\n"
+    "- initialize_and_build_agent(agent_name?, nodes?) → with name: scaffolds package; "
+    "without name: switches to BUILDING for existing agent\n"
     "- replan_agent() → switches back to PLANNING phase (only when user explicitly requests)\n"
     "- load_built_agent(path) → switches to STAGING phase\n"
     "- run_agent_with_input(task) → starts worker, switches to RUNNING phase\n"
     "- stop_worker() → stops worker, switches to STAGING phase (ask user: re-run or edit?)\n"
     "- stop_worker_and_edit() → stops worker (if running), switches to BUILDING phase\n"
+    "- stop_worker_and_plan() → stops worker (if running), switches to PLANNING phase for diagnosis\n"
 )
 
 _queen_behavior = (
