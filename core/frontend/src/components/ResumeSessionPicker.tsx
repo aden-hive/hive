@@ -6,7 +6,7 @@
  * agent path.  Clicking a session navigates to /workspace?session=<id>.
  */
 
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import ReactDOM from "react-dom";
 import { useNavigate } from "react-router-dom";
 import { X, Search, Bot, Loader2, Clock } from "lucide-react";
@@ -112,7 +112,9 @@ export default function ResumeSessionPicker({
   const [sessions, setSessions] = useState<HistoryEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [query, setQuery] = useState("");
+  const [highlightIndex, setHighlightIndex] = useState(0);
   const searchRef = useRef<HTMLInputElement>(null);
+  const itemRefs = useRef<Map<number, HTMLButtonElement>>(new Map());
 
   // Fetch sessions on open
   useEffect(() => {
@@ -149,6 +151,42 @@ export default function ResumeSessionPicker({
 
   const groups = groupByDate(filtered);
 
+  // Flat ordered list for keyboard navigation across date groups
+  const flatItems = useMemo(
+    () => groups.flatMap((g) => g.items),
+    [groups]
+  );
+
+  // Reset highlight when the filtered list changes
+  useEffect(() => {
+    setHighlightIndex(0);
+  }, [query, sessions]);
+
+  // Scroll highlighted item into view
+  useEffect(() => {
+    const el = itemRefs.current.get(highlightIndex);
+    if (el) el.scrollIntoView({ block: "nearest" });
+  }, [highlightIndex]);
+
+  const handleKeyNav = useCallback(
+    (e: React.KeyboardEvent) => {
+      if (e.key === "Escape") { onClose(); return; }
+      if (flatItems.length === 0) return;
+      if (e.key === "ArrowDown") {
+        e.preventDefault();
+        setHighlightIndex((i) => Math.min(i + 1, flatItems.length - 1));
+      } else if (e.key === "ArrowUp") {
+        e.preventDefault();
+        setHighlightIndex((i) => Math.max(i - 1, 0));
+      } else if (e.key === "Enter") {
+        e.preventDefault();
+        const item = flatItems[highlightIndex];
+        if (item) handleSelect(item);
+      }
+    },
+    [flatItems, highlightIndex, handleSelect, onClose]
+  );
+
   return ReactDOM.createPortal(
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm"
@@ -175,9 +213,7 @@ export default function ResumeSessionPicker({
             onChange={(e) => setQuery(e.target.value)}
             placeholder="Search sessions…"
             className="flex-1 bg-transparent text-sm text-foreground placeholder:text-muted-foreground/60 focus:outline-none"
-            onKeyDown={(e) => {
-              if (e.key === "Escape") onClose();
-            }}
+            onKeyDown={handleKeyNav}
           />
           <button
             onClick={onClose}
@@ -206,11 +242,18 @@ export default function ResumeSessionPicker({
                 <p className="px-4 pt-4 pb-1 text-[10px] font-semibold text-muted-foreground/40 uppercase tracking-wider">
                   {label}
                 </p>
-                {items.map((s) => (
+                {items.map((s) => {
+                  const flatIdx = flatItems.indexOf(s);
+                  const isHighlighted = flatIdx === highlightIndex;
+                  return (
                   <button
                     key={s.session_id}
+                    ref={(el) => { if (el) itemRefs.current.set(flatIdx, el); else itemRefs.current.delete(flatIdx); }}
                     onClick={() => handleSelect(s)}
-                    className="w-full flex items-start gap-3 px-4 py-2.5 text-left hover:bg-muted/40 transition-colors group"
+                    onMouseEnter={() => setHighlightIndex(flatIdx)}
+                    className={`w-full flex items-start gap-3 px-4 py-2.5 text-left transition-colors group ${
+                      isHighlighted ? "bg-muted/50" : "hover:bg-muted/40"
+                    }`}
                   >
                     <Bot className="w-4 h-4 flex-shrink-0 mt-0.5 text-muted-foreground/40 group-hover:text-muted-foreground/70 transition-colors" />
                     <div className="min-w-0 flex-1">
@@ -237,7 +280,8 @@ export default function ResumeSessionPicker({
                       </div>
                     </div>
                   </button>
-                ))}
+                  );
+                })}
               </div>
             ))
           )}

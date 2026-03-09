@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { Crown, X } from "lucide-react";
 import { loadPersistedTabs, savePersistedTabs, TAB_STORAGE_KEY, type PersistedTabState } from "@/lib/tab-persistence";
@@ -39,9 +39,10 @@ export default function TopBar({ tabs: tabsProp, onTabClick, onCloseTab, canClos
   const tabs: TopBarTab[] = tabsProp ?? deriveTabs(persisted);
   const showClose = canCloseTabs ?? true;
 
-  // Drag-to-reorder state
+  // Drag-to-reorder state — position-aware (left/right half of target tab)
   const [dragIndex, setDragIndex] = useState<number | null>(null);
-  const [dropIndex, setDropIndex] = useState<number | null>(null);
+  const [dropTarget, setDropTarget] = useState<{ index: number; side: "left" | "right" } | null>(null);
+  const tabStripRef = useRef<HTMLDivElement>(null);
 
   const handleTabClick = useCallback((agentType: string) => {
     if (onTabClick) {
@@ -103,34 +104,77 @@ export default function TopBar({ tabs: tabsProp, onTabClick, onCloseTab, canClos
         {tabs.length > 0 && (
           <>
             <span className="text-border text-xs flex-shrink-0">|</span>
-            <div className="flex items-center gap-0.5 min-w-0 overflow-x-auto scrollbar-hide">
-              {tabs.map((tab, i) => (
+            <div
+              ref={tabStripRef}
+              className="flex items-center gap-0.5 min-w-0 overflow-x-auto scrollbar-hide"
+              onDragOver={onReorderTabs ? (e) => {
+                e.preventDefault();
+                // When hovering the container gaps (not directly over a tab), find
+                // the nearest tab by checking all child button rects.
+                const strip = tabStripRef.current;
+                if (!strip) return;
+                const buttons = strip.querySelectorAll<HTMLButtonElement>("[data-tab-idx]");
+                let closest: { idx: number; side: "left" | "right" } | null = null;
+                let minDist = Infinity;
+                buttons.forEach((btn) => {
+                  const rect = btn.getBoundingClientRect();
+                  const midX = rect.left + rect.width / 2;
+                  const idx = Number(btn.dataset.tabIdx);
+                  // Distance to left edge vs right edge
+                  const distLeft = Math.abs(e.clientX - rect.left);
+                  const distRight = Math.abs(e.clientX - rect.right);
+                  const dist = Math.min(distLeft, distRight);
+                  if (dist < minDist) {
+                    minDist = dist;
+                    closest = { idx, side: e.clientX < midX ? "left" : "right" };
+                  }
+                });
+                if (closest) setDropTarget(closest);
+              } : undefined}
+              onDragLeave={onReorderTabs ? () => setDropTarget(null) : undefined}
+              onDrop={onReorderTabs ? (e) => {
+                e.preventDefault();
+                if (dragIndex !== null && dropTarget !== null) {
+                  const newOrder = tabs.map(t => t.agentType);
+                  const [removed] = newOrder.splice(dragIndex, 1);
+                  // Calculate insert position: if dropping to the right of a tab,
+                  // insert after it; if to the left, insert before it.
+                  let insertAt = dropTarget.side === "right" ? dropTarget.index + 1 : dropTarget.index;
+                  // Adjust for the removal shifting indices
+                  if (dragIndex < insertAt) insertAt--;
+                  newOrder.splice(insertAt, 0, removed);
+                  onReorderTabs(newOrder);
+                }
+                setDragIndex(null);
+                setDropTarget(null);
+              } : undefined}
+            >
+              {tabs.map((tab, i) => {
+                const isDragging = dragIndex !== null;
+                const showLeftIndicator = isDragging && dropTarget?.index === i && dropTarget?.side === "left" && dragIndex !== i && dragIndex !== i - 1;
+                const showRightIndicator = isDragging && dropTarget?.index === i && dropTarget?.side === "right" && dragIndex !== i && dragIndex !== i + 1;
+                return (
                 <button
                   key={tab.agentType}
+                  data-tab-idx={i}
                   onClick={() => handleTabClick(tab.agentType)}
                   draggable={!!onReorderTabs}
                   onDragStart={onReorderTabs ? () => setDragIndex(i) : undefined}
-                  onDragEnd={onReorderTabs ? () => { setDragIndex(null); setDropIndex(null); } : undefined}
-                  onDragOver={onReorderTabs ? (e) => { e.preventDefault(); setDropIndex(i); } : undefined}
-                  onDrop={onReorderTabs ? (e) => {
+                  onDragEnd={onReorderTabs ? () => { setDragIndex(null); setDropTarget(null); } : undefined}
+                  onDragOver={onReorderTabs ? (e) => {
                     e.preventDefault();
-                    if (dragIndex !== null && dragIndex !== i) {
-                      const newOrder = tabs.map(t => t.agentType);
-                      const [removed] = newOrder.splice(dragIndex, 1);
-                      newOrder.splice(i, 0, removed);
-                      onReorderTabs(newOrder);
-                    }
-                    setDragIndex(null);
-                    setDropIndex(null);
+                    e.stopPropagation();
+                    const rect = e.currentTarget.getBoundingClientRect();
+                    const midX = rect.left + rect.width / 2;
+                    setDropTarget({ index: i, side: e.clientX < midX ? "left" : "right" });
                   } : undefined}
                   className={`group flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-colors whitespace-nowrap flex-shrink-0 ${
                     tab.isActive
                       ? "bg-primary/15 text-primary"
                       : "text-muted-foreground hover:text-foreground hover:bg-muted/50"
-                  } ${onReorderTabs ? "cursor-grab active:cursor-grabbing" : ""} ${
-                    dragIndex !== null && dropIndex === i && dragIndex !== i
-                      ? "border-l-2 border-primary"
-                      : ""
+                  } ${onReorderTabs ? "active:cursor-grabbing" : ""} ${
+                    showLeftIndicator ? "border-l-2 border-primary" : ""
+                  } ${showRightIndicator ? "border-r-2 border-primary" : ""
                   } ${dragIndex === i ? "opacity-40" : ""}`}
                 >
                   {tab.hasRunning && (
@@ -147,7 +191,8 @@ export default function TopBar({ tabs: tabsProp, onTabClick, onCloseTab, canClos
                     />
                   )}
                 </button>
-              ))}
+                );
+              })}
             </div>
             {afterTabs}
           </>
