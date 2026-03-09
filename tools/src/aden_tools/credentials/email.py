@@ -36,8 +36,8 @@ EMAIL_CREDENTIALS = {
     "google": CredentialSpec(
         env_var="GOOGLE_ACCESS_TOKEN",
         tools=[
-            # send_email is excluded: it's a multi-provider tool that checks
-            # credentials at runtime based on the provider parameter.
+            # send_email is a multi-provider tool; also listed under resend
+            "send_email",
             # Gmail tools
             "gmail_reply_email",
             "gmail_list_messages",
