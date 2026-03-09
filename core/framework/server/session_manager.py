@@ -1039,7 +1039,10 @@ class SessionManager:
                 detail = cfg.get("cron") or f"every {cfg.get('interval_minutes', '?')} min"
                 task_info = f' -> task: "{t.task}"' if t.task else " (no task configured)"
                 parts.append(f"  - {t.id} ({t.trigger_type}: {detail}){task_info}")
-            trigger_lines = "\n\nAvailable triggers (inactive — use set_trigger to activate):\n" + "\n".join(parts)
+            trigger_lines = (
+                "\n\nAvailable triggers (inactive — use set_trigger to activate):\n"
+                + "\n".join(parts)
+            )
 
         await node.inject_event(f"[SYSTEM] Worker loaded.{profile}{trigger_lines}")
 

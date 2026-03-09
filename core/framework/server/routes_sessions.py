@@ -437,10 +437,12 @@ async def handle_update_trigger_task(request: web.Request) -> web.Response:
         session_id = request.match_info["session_id"]
         await _persist_active_triggers(session, session_id)
 
-    return web.json_response({
-        "trigger_id": trigger_id,
-        "task": tdef.task,
-    })
+    return web.json_response(
+        {
+            "trigger_id": trigger_id,
+            "task": tdef.task,
+        }
+    )
 
 
 async def handle_session_graphs(request: web.Request) -> web.Response:
@@ -854,7 +856,9 @@ def register_routes(app: web.Application) -> None:
     # Session info
     app.router.add_get("/api/sessions/{session_id}/stats", handle_session_stats)
     app.router.add_get("/api/sessions/{session_id}/entry-points", handle_session_entry_points)
-    app.router.add_patch("/api/sessions/{session_id}/triggers/{trigger_id}", handle_update_trigger_task)
+    app.router.add_patch(
+        "/api/sessions/{session_id}/triggers/{trigger_id}", handle_update_trigger_task
+    )
     app.router.add_get("/api/sessions/{session_id}/graphs", handle_session_graphs)
     app.router.add_get("/api/sessions/{session_id}/queen-messages", handle_queen_messages)
 
