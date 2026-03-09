@@ -1,4 +1,6 @@
-"""MCP servers for worker-bee."""
+"""Model Context Protocol client package."""
 
-# Don't auto-import servers to avoid double-import issues when running with -m
-__all__ = []
+from .client import MCPClient
+from .models import MCPServerConfig, MCPTool
+
+__all__ = ["MCPClient", "MCPServerConfig", "MCPTool"]

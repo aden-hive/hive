@@ -13,6 +13,9 @@ from pathlib import Path
 from typing import Any
 
 from framework.llm.provider import Tool, ToolResult, ToolUse
+from framework.mcp.client import MCPClient
+from framework.mcp.config import load_mcp_server_entries, resolve_stdio_server_config
+from framework.mcp.models import MCPServerConfig
 
 logger = logging.getLogger(__name__)
 
@@ -334,8 +337,7 @@ class ToolRegistry:
         list_agent_tools, discover_mcp_tools) so hive-tools and other servers
         work on Windows. Call with base_dir = directory containing the config.
         """
-        registry = ToolRegistry()
-        return registry._resolve_mcp_server_config(server_config, base_dir)
+        return resolve_stdio_server_config(server_config, base_dir)
 
     def _resolve_mcp_server_config(
         self, server_config: dict[str, Any], base_dir: Path
@@ -347,81 +349,7 @@ class ToolRegistry:
         If the resolved cwd doesn't exist (e.g. config from ~/.hive/agents/), fall back
         to Path.cwd() / "tools".
         """
-        config = dict(server_config)
-        if config.get("transport") != "stdio":
-            return config
-
-        cwd = config.get("cwd")
-        args = list(config.get("args", []))
-        if not cwd and not args:
-            return config
-
-        # Resolve cwd relative to base_dir
-        resolved_cwd: Path | None = None
-        if cwd:
-            if Path(cwd).is_absolute():
-                resolved_cwd = Path(cwd)
-            else:
-                resolved_cwd = (base_dir / cwd).resolve()
-
-        # Find .py script in args (e.g. coder_tools_server.py, files_server.py)
-        script_name = None
-        for i, arg in enumerate(args):
-            if isinstance(arg, str) and arg.endswith(".py"):
-                script_name = arg
-                script_idx = i
-                break
-
-        if resolved_cwd is None:
-            return config
-
-        # If resolved cwd doesn't exist or (when we have a script) doesn't contain it,
-        # try fallback
-        tools_fallback = Path.cwd() / "tools"
-        need_fallback = not resolved_cwd.is_dir()
-        if script_name and not need_fallback:
-            need_fallback = not (resolved_cwd / script_name).exists()
-        if need_fallback:
-            fallback_ok = tools_fallback.is_dir()
-            if script_name:
-                fallback_ok = fallback_ok and (tools_fallback / script_name).exists()
-            else:
-                # No script (e.g. GCU); just need tools dir to exist
-                pass
-            if fallback_ok:
-                resolved_cwd = tools_fallback
-                logger.debug(
-                    "MCP server '%s': using fallback tools dir %s",
-                    config.get("name", "?"),
-                    resolved_cwd,
-                )
-            else:
-                config["cwd"] = str(resolved_cwd)
-                return config
-
-        if not script_name:
-            # No .py script (e.g. GCU uses -m gcu.server); just set cwd
-            config["cwd"] = str(resolved_cwd)
-            return config
-
-        # For coder_tools_server, inject --project-root so writes go to the expected workspace
-        if script_name and "coder_tools" in script_name:
-            project_root = str(resolved_cwd.parent.resolve())
-            args = list(args)
-            if "--project-root" not in args:
-                args.extend(["--project-root", project_root])
-            config["args"] = args
-
-        if os.name == "nt":
-            # Windows: cwd=None avoids WinError 267; use absolute script path
-            config["cwd"] = None
-            abs_script = str((resolved_cwd / script_name).resolve())
-            args = list(config["args"])
-            args[script_idx] = abs_script
-            config["args"] = args
-        else:
-            config["cwd"] = str(resolved_cwd)
-        return config
+        return resolve_stdio_server_config(server_config, base_dir)
 
     def load_mcp_config(self, config_path: Path) -> None:
         """
@@ -437,21 +365,10 @@ class ToolRegistry:
         self._mcp_config_path = Path(config_path)
 
         try:
-            with open(config_path, encoding="utf-8") as f:
-                config = json.load(f)
+            base_dir, server_list = load_mcp_server_entries(config_path)
         except Exception as e:
             logger.warning(f"Failed to load MCP config from {config_path}: {e}")
             return
-
-        base_dir = config_path.parent
-
-        # Support both formats:
-        #   {"servers": [{"name": "x", ...}]}        (list format)
-        #   {"server-name": {"transport": ...}, ...}  (dict format)
-        server_list = config.get("servers", [])
-        if not server_list and "servers" not in config:
-            # Treat top-level keys as server names
-            server_list = [{"name": name, **cfg} for name, cfg in config.items()]
 
         for server_config in server_list:
             server_config = self._resolve_mcp_server_config(server_config, base_dir)
@@ -488,8 +405,6 @@ class ToolRegistry:
             Number of tools registered from this server
         """
         try:
-            from framework.runner.mcp_client import MCPClient, MCPServerConfig
-
             # Build config object
             config = MCPServerConfig(
                 name=server_config["name"],
