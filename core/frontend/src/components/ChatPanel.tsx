@@ -15,6 +15,8 @@ export interface ChatMessage {
   thread?: string;
   /** Epoch ms when this message was first created — used for ordering queen/worker interleaving */
   createdAt?: number;
+  /** Message sequence number from the backend — used as a tiebreaker for sorting */
+  seq?: number;
 }
 
 interface ChatPanelProps {
@@ -191,12 +193,19 @@ function groupMessages(msgs: ChatMessage[]): RenderItem[] {
 function CollapsibleWorkerThread({ group, queenPhase }: { group: WorkerGroup; queenPhase?: string }) {
   // Auto-collapse groups with >1 message; single-message groups stay open
   const [collapsed, setCollapsed] = useState(group.messages.length > 1);
+  // Track whether user has manually toggled — if not, auto-collapse as
+  // new messages stream into the group.
+  const userToggledRef = useRef(false);
 
-  // Last message is always shown (even when collapsed) as a preview
-  const lastMsg = group.messages[group.messages.length - 1];
-  const hiddenCount = group.messages.length - 1;
+  useEffect(() => {
+    if (!userToggledRef.current && group.messages.length > 1) {
+      setCollapsed(true);
+    }
+  }, [group.messages.length]);
 
-  if (group.messages.length === 1) {
+  const totalCount = group.messages.length;
+
+  if (totalCount === 1) {
     // Single worker message — render normally, no collapse UI
     return <MessageBubble msg={group.messages[0]} queenPhase={queenPhase as any} />;
   }
@@ -205,7 +214,7 @@ function CollapsibleWorkerThread({ group, queenPhase }: { group: WorkerGroup; qu
     <div className="relative">
       {/* Collapse/expand toggle */}
       <button
-        onClick={() => setCollapsed((c) => !c)}
+        onClick={() => { userToggledRef.current = true; setCollapsed((c) => !c); }}
         className="flex items-center gap-1.5 text-[11px] font-medium mb-1 px-1 py-0.5 rounded hover:bg-muted/40 transition-colors"
         style={{ color: workerColor }}
       >
@@ -217,8 +226,8 @@ function CollapsibleWorkerThread({ group, queenPhase }: { group: WorkerGroup; qu
         <span>{group.workerName}</span>
         <span className="text-muted-foreground font-normal">
           {collapsed
-            ? `\u2014 ${hiddenCount} step${hiddenCount > 1 ? "s" : ""} hidden`
-            : `\u2014 ${group.messages.length} steps`}
+            ? `\u2014 ${totalCount} step${totalCount > 1 ? "s" : ""} hidden`
+            : `\u2014 ${totalCount} steps`}
         </span>
       </button>
 
@@ -230,15 +239,6 @@ function CollapsibleWorkerThread({ group, queenPhase }: { group: WorkerGroup; qu
               <MessageBubble msg={msg} queenPhase={queenPhase as any} />
             </div>
           ))}
-        </div>
-      )}
-
-      {/* Collapsed: show only the last message as preview */}
-      {collapsed && (
-        <div className="pl-4 border-l-2 ml-1 opacity-80" style={{ borderColor: `${workerColor}30` }}>
-          <div className="text-[13px]">
-            <MessageBubble msg={lastMsg} queenPhase={queenPhase as any} />
-          </div>
         </div>
       )}
     </div>
@@ -328,6 +328,10 @@ export default function ChatPanel({ messages, onSend, isWaiting, isWorkerWaiting
   const scrollRef = useRef<HTMLDivElement>(null);
   const stickToBottom = useRef(true);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  // Per-thread scroll position tracking
+  const seenThreads = useRef<Set<string>>(new Set());
+  const savedScrollPositions = useRef<Record<string, number>>({});
+  const prevThreadRef = useRef<string>(activeThread);
 
   const threadMessages = messages.filter((m) => {
     if (m.type === "system" && !m.thread) return false;
@@ -352,6 +356,8 @@ export default function ChatPanel({ messages, onSend, isWaiting, isWorkerWaiting
     if (!el) return;
     const distFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
     stickToBottom.current = distFromBottom < 80;
+    // Persist scroll position for the current thread
+    savedScrollPositions.current[activeThread] = el.scrollTop;
   };
 
   useEffect(() => {
@@ -360,9 +366,31 @@ export default function ChatPanel({ messages, onSend, isWaiting, isWorkerWaiting
     }
   }, [threadMessages, pendingQuestion, isWaiting, isWorkerWaiting]);
 
-  // Always start pinned to bottom when switching threads
+  // Save scroll position for the old thread, restore for the new one.
+  // First-time threads start pinned to bottom; revisited threads restore
+  // the user's last scroll position.
   useEffect(() => {
-    stickToBottom.current = true;
+    const prev = prevThreadRef.current;
+    if (prev !== activeThread && scrollRef.current) {
+      // Save outgoing thread position
+      savedScrollPositions.current[prev] = scrollRef.current.scrollTop;
+    }
+    prevThreadRef.current = activeThread;
+
+    if (!seenThreads.current.has(activeThread)) {
+      // First time opening this thread — pin to bottom
+      seenThreads.current.add(activeThread);
+      stickToBottom.current = true;
+    } else {
+      // Revisited thread — restore saved scroll position
+      stickToBottom.current = false;
+      requestAnimationFrame(() => {
+        const el = scrollRef.current;
+        if (el && savedScrollPositions.current[activeThread] != null) {
+          el.scrollTop = savedScrollPositions.current[activeThread];
+        }
+      });
+    }
   }, [activeThread]);
 
   const handleSubmit = (e: React.FormEvent) => {

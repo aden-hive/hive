@@ -845,14 +845,14 @@ export default function Workspace() {
           }));
         }
 
-        // CRITICAL: Pre-fetch queen messages from the old session directory BEFORE
+        // CRITICAL: Pre-fetch the full transcript from the old session directory BEFORE
         // creating the new session. When queen_resume_from is set the new session writes
         // to the SAME directory, so if we fetch after creation we risk capturing the
         // new queen's greeting in the restored history.
-        // SKIP if messages were already pre-populated by handleHistoryOpen (avoids
-        // double-fetch and greeting leakage).
+        // Always fetch even when localStorage already has messages — localStorage is
+        // capped at 50 messages so restored sessions would otherwise be truncated.
         let preQueenMsgs: ChatMessage[] = [];
-        if (coldRestoreId && !alreadyHasMessages) {
+        if (coldRestoreId) {
           try {
             preQueenMsgs = await fetchRestoredConversation(
               coldRestoreId,
@@ -920,13 +920,20 @@ export default function Workspace() {
 
         // If we pre-fetched messages for a cold restore, populate the UI immediately.
         // This happens before the SSE connection opens so no greeting can slip through.
+        // Merge with dedup: prepend any older messages not already present (localStorage
+        // is capped at 50, so preQueenMsgs may contain the full earlier history).
         if (preQueenMsgs.length > 0) {
-          preQueenMsgs.sort((a, b) => (a.createdAt ?? 0) - (b.createdAt ?? 0));
           setSessionsByAgent(prev => ({
             ...prev,
-            [agentType]: (prev[agentType] || []).map((s, i) =>
-              i === 0 ? { ...s, messages: preQueenMsgs, graphNodes: [] } : s,
-            ),
+            [agentType]: (prev[agentType] || []).map((s, i) => {
+              if (i !== 0) return s;
+              const existingIds = new Set(s.messages.map((m) => m.id));
+              const newOnly = preQueenMsgs.filter((m) => !existingIds.has(m.id));
+              // Merge and globally sort by createdAt for correct chronological order
+              const merged = [...newOnly, ...s.messages];
+              merged.sort((a, b) => (a.createdAt ?? 0) - (b.createdAt ?? 0) || (a.seq ?? 0) - (b.seq ?? 0));
+              return { ...s, messages: merged, graphNodes: [] };
+            }),
           }));
         }
       }
@@ -1014,7 +1021,6 @@ export default function Workspace() {
       // Merge messages in chronological order (only for live resume; cold restore
       // was already applied above before create).
       if (restoredMsgs.length > 0) {
-        restoredMsgs.sort((a, b) => (a.createdAt ?? 0) - (b.createdAt ?? 0));
         setSessionsByAgent((prev) => ({
           ...prev,
           [agentType]: (prev[agentType] || []).map((s, i) => {
@@ -1024,7 +1030,10 @@ export default function Workspace() {
             // the same message twice (or show another session's messages at the top).
             const existingIds = new Set(s.messages.map((m) => m.id));
             const newOnly = restoredMsgs.filter((m) => !existingIds.has(m.id));
-            return { ...s, messages: [...newOnly, ...s.messages] };
+            // Merge and globally sort for correct chronological order
+            const merged = [...newOnly, ...s.messages];
+            merged.sort((a, b) => (a.createdAt ?? 0) - (b.createdAt ?? 0) || (a.seq ?? 0) - (b.seq ?? 0));
+            return { ...s, messages: merged };
           }),
         }));
       }

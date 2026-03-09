@@ -38,8 +38,10 @@ export function backendMessageToChatMessage(
   agentDisplayName?: string,
 ): ChatMessage {
   // Use file-mtime created_at (epoch seconds → ms) for cross-conversation
-  // ordering; fall back to seq for backwards compatibility.
-  const createdAt = msg.created_at ? msg.created_at * 1000 : msg.seq;
+  // ordering; fall back to seq as a relative tiebreaker (not an absolute
+  // timestamp) when created_at is missing.
+  const createdAt = msg.created_at ? msg.created_at * 1000 : undefined;
+  const seq = msg.seq;
   // For worker messages, use the node_id (phase_id) to show which node responded
   const sender = msg.role === "user" ? "You" : 
     (msg._source === "worker" && msg._node_id ? formatAgentDisplayName(msg._node_id) : 
@@ -58,7 +60,7 @@ export function backendMessageToChatMessage(
   }
 
   return {
-    id: `backend-${msg._node_id}-${msg.seq}`,
+    id: `backend-${msg._node_id || "queen"}-${msg.seq}`,
     agent: sender,
     agentColor: "",
     content,
@@ -67,6 +69,7 @@ export function backendMessageToChatMessage(
     role: msg.role === "user" ? undefined : "worker",
     thread,
     createdAt,
+    seq,
   };
 }
 

@@ -696,6 +696,8 @@ async def handle_queen_messages(request: web.Request) -> web.Response:
             part = json.loads(part_file.read_text(encoding="utf-8"))
             if node_id is not None:
                 part["_node_id"] = node_id
+            else:
+                part.setdefault("_node_id", part.get("phase_id") or "queen")
             # Use file mtime as created_at so frontend can order
             # queen and worker messages chronologically.
             part.setdefault("created_at", part_file.stat().st_mtime)

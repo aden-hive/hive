@@ -1050,7 +1050,19 @@ class SessionManager:
                     if isinstance(block, dict) and block.get("type") == "text"
                 )
             if not (isinstance(raw, str) and raw.strip()):
-                return False
+                # Even with empty content, keep the message if a tool call
+                # targets ask_user / ask_worker — the question text inside the
+                # tool arguments is what the user saw as the greeting or prompt.
+                # We synthesise visible content from the tool call below.
+                _has_user_facing_tool = False
+                for tc in message.get("tool_calls") or []:
+                    fn = tc if isinstance(tc, dict) else {}
+                    name = (fn.get("function") or fn).get("name", "")
+                    if name in ("ask_user", "ask_worker"):
+                        _has_user_facing_tool = True
+                        break
+                if not _has_user_facing_tool:
+                    return False
 
         content = message.get("content") or ""
         if isinstance(content, list):
@@ -1113,6 +1125,11 @@ class SessionManager:
                     part = json.loads(part_file.read_text(encoding="utf-8"))
                     if node_id is not None:
                         part["_node_id"] = node_id
+                    else:
+                        # Queen messages are flat (no node subdirectory) — use
+                        # phase_id from the message, or default to "queen" so
+                        # the frontend can generate stable message IDs.
+                        part.setdefault("_node_id", part.get("phase_id") or "queen")
                     part.setdefault("created_at", part_file.stat().st_mtime)
                     part["_source"] = "queen"
                     transcript.append(part)
@@ -1186,6 +1203,38 @@ class SessionManager:
                 result.append(m)
 
         result.sort(key=lambda m: m.get("created_at", m.get("seq", 0)))
+
+        # Post-process: for assistant messages that passed the filter only because
+        # they have ask_user/ask_worker tool calls (content was empty), synthesise
+        # visible content from the tool call arguments so the frontend has text.
+        for m in result:
+            if m.get("role") != "assistant" or not m.get("tool_calls"):
+                continue
+            raw_content = m.get("content") or ""
+            if isinstance(raw_content, list):
+                raw_content = " ".join(
+                    b.get("text", "")
+                    for b in raw_content
+                    if isinstance(b, dict) and b.get("type") == "text"
+                )
+            if isinstance(raw_content, str) and raw_content.strip():
+                continue  # already has visible text
+            # Extract question/prompt from ask_user or ask_worker tool call
+            for tc in m.get("tool_calls") or []:
+                fn = tc if isinstance(tc, dict) else {}
+                func = fn.get("function") or fn
+                name = func.get("name", "")
+                if name not in ("ask_user", "ask_worker"):
+                    continue
+                try:
+                    args = json.loads(func.get("arguments", "{}"))
+                except (json.JSONDecodeError, TypeError):
+                    args = {}
+                question = args.get("question") or args.get("prompt") or args.get("message") or ""
+                if question:
+                    m["content"] = question
+                    break
+
         return result
 
     @staticmethod
