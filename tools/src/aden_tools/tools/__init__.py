@@ -119,6 +119,7 @@ from .shopify_tool import register_tools as register_shopify
 from .slack_tool import register_tools as register_slack
 from .snowflake_tool import register_tools as register_snowflake
 from .ssl_tls_scanner import register_tools as register_ssl_tls_scanner
+from .stackoverflow_tool import register_tools as register_stackoverflow
 from .stripe_tool import register_tools as register_stripe
 from .subdomain_enumerator import register_tools as register_subdomain_enumerator
 from .supabase_tool import register_tools as register_supabase
@@ -233,6 +234,7 @@ def _register_unverified(
     """Register unverified (new/community) tools."""
     # --- No credentials ---
     register_duckduckgo(mcp)
+    register_stackoverflow(mcp)
     register_yahoo_finance(mcp)
     register_youtube_transcript(mcp)
 
