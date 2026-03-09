@@ -306,6 +306,7 @@ def register_tools(
     def _plain_to_html(text: str) -> str:
         """Wrap plain text in a <pre> tag for safe HTML embedding."""
         import html as html_module
+
         return f"<pre>{html_module.escape(text)}</pre>"
 
     @mcp.tool()
@@ -374,13 +375,13 @@ def register_tools(
         # Append quoted original body so the thread is visible in the reply
         original_body = original.get("body_html") or _plain_to_html(original.get("body_text") or "")
         quoted_html = (
-            f'<br><br>'
+            f"<br><br>"
             f'<div class="gmail_quote">'
-            f'<div>On {original_date}, {reply_to_address} wrote:</div>'
+            f"<div>On {original_date}, {reply_to_address} wrote:</div>"
             f'<blockquote style="margin:0 0 0 .8ex;border-left:1px #ccc solid;padding-left:1ex">'
-            f'{original_body}'
-            f'</blockquote>'
-            f'</div>'
+            f"{original_body}"
+            f"</blockquote>"
+            f"</div>"
         )
         full_html = html + quoted_html
 
