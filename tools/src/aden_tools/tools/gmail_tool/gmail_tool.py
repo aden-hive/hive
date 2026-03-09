@@ -559,7 +559,9 @@ def register_tools(
             orig_from = orig_headers.get("From", "")
             orig_date = orig_headers.get("Date", "")
             to = orig_from or to
-            subject = orig_subject if orig_subject.lower().startswith("re:") else f"Re: {orig_subject}"
+            subject = (
+                orig_subject if orig_subject.lower().startswith("re:") else f"Re: {orig_subject}"
+            )
 
             # Extract body recursively (prefer HTML, fall back to plain text)
             def _extract_body(part: dict, mime_type: str) -> str | None:
@@ -582,7 +584,8 @@ def register_tools(
                 f"<br><br>"
                 f'<div class="gmail_quote">'
                 f"<div>On {orig_date}, {orig_from} wrote:</div>"
-                f'<blockquote style="margin:0 0 0 .8ex;border-left:1px #ccc solid;padding-left:1ex">'
+                "<blockquote"
+                ' style="margin:0 0 0 .8ex;border-left:1px #ccc solid;padding-left:1ex">'
                 f"{orig_body_html}"
                 f"</blockquote>"
                 f"</div>"

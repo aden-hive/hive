@@ -563,6 +563,7 @@ def _orig_message_response(
 ) -> MagicMock:
     """Mock response for fetching an original message (format=full)."""
     import base64
+
     encoded_body = base64.urlsafe_b64encode(body_html.encode()).decode()
     return _mock_response(
         200,
@@ -652,6 +653,7 @@ class TestGmailCreateDraft:
         # Verify MIME headers and quoted body
         import base64
         import email
+
         raw = base64.urlsafe_b64decode(body["message"]["raw"])
         mime = email.message_from_bytes(raw)
         assert mime["In-Reply-To"] == "<orig-msg-id@mail.gmail.com>"
@@ -681,15 +683,9 @@ class TestGmailCreateDraft:
         with patch(HTTPX_MODULE, side_effect=[orig_resp, draft_resp]):
             result = create_draft_fn(html="<p>x</p>", reply_to_message_id="origmsg")
 
-        import base64, email
-        draft_call_body = None
         # Extract subject from result — it should not be "Re: Re: Hello there"
         assert result["success"] is True
-        # Check via MIME
-        raw_calls = []
-        # Re-run just to inspect — easier to check via the mock args we already have
-        # Since we can't re-inspect after the fact here, trust the impl and check subject
-        # via a secondary call pattern below in a dedicated test.
+        # Check via MIME is covered by test_reply_draft_subject_no_double_re below.
 
     def test_reply_draft_subject_no_double_re(self, create_draft_fn, monkeypatch):
         monkeypatch.setenv("GOOGLE_ACCESS_TOKEN", "tok")
@@ -699,7 +695,9 @@ class TestGmailCreateDraft:
         with patch(HTTPX_MODULE, side_effect=[orig_resp, draft_resp]) as mock_req:
             create_draft_fn(html="<p>x</p>", reply_to_message_id="origmsg")
 
-        import base64, email
+        import base64
+        import email
+
         body = mock_req.call_args_list[1][1]["json"]
         raw = base64.urlsafe_b64decode(body["message"]["raw"])
         mime = email.message_from_bytes(raw)
