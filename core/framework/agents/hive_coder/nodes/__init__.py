@@ -141,6 +141,30 @@ collaborate with the user to define it.
 - **Discover tools dynamically.** NEVER reference tools from static \
 docs. Always run list_agent_tools() to see what actually exists.
 
+## Paths (MANDATORY)
+**Always use RELATIVE paths** when reading files \
+(e.g. `exports/agent_name/config.py`, `exports/agent_name/nodes/__init__.py`).
+**Never use absolute paths** like `/mnt/data/...` or `/workspace/...` — they fail.
+The project root is implicit.
+
+## Worker File Tools (hive-tools MCP)
+Workers use a DIFFERENT MCP server (hive-tools) with DIFFERENT tool names. \
+When designing worker nodes, reference these tool names in your graph — \
+NOT the coder-tools names (read_file, write_file, etc.).
+
+Worker data tools (for large results and spillover):
+- save_data(filename, data, data_dir) — save data to a file for later retrieval
+- load_data(filename, data_dir, offset_bytes?, limit_bytes?) — load data \
+with byte-based pagination
+- list_data_files(data_dir) — list available data files
+- append_data(filename, data, data_dir) — append to a file incrementally
+- edit_data(filename, old_text, new_text, data_dir) — find-and-replace in a data file
+- serve_file_to_user(filename, data_dir, label?, open_in_browser?) — \
+generate a clickable file URI for the user
+
+IMPORTANT: Do NOT design workers to use read_file, write_file, edit_file, \
+search_files, or list_directory — those are YOUR tools, not theirs.
+
 # Tool Discovery (MANDATORY before designing)
 
 Before designing any agent, run list_agent_tools() with NO arguments \
@@ -301,21 +325,22 @@ use box-drawing characters and clear flow arrows:
 │  subagent: gcu_search   │
 │  input:  user_request   │
 │  tools: web_search,     │
-│         write_file      │
+│         save_data       │
 └────────────┬────────────┘
              │ on_success
              ▼
 ┌─────────────────────────┐
 │  work                   │
 │  subagent: gcu_interact │
-│  tools: read_file,      │
-│         write_file      │
+│  tools: load_data,      │
+│         save_data       │
 └────────────┬────────────┘
              │ on_success
              ▼
 ┌─────────────────────────┐
 │  review                 │
-│  tools: write_file      │
+│  tools: save_data       │
+│   serve_file_to_user    │
 └────────────┬────────────┘
              │ on_failure
              └──────► back to gather
@@ -355,7 +380,7 @@ errors yourself. Don't declare success until validation passes.
 **Never use absolute paths** like `/mnt/data/...` or `/workspace/...` — they fail.
 The project root is implicit.
 
-## File I/O
+## File I/O (your tools — coder-tools MCP)
 - read_file(path, offset?, limit?, hashline?) — read with line numbers; \
 hashline=True for N:hhhh|content anchors (use with hashline_edit)
 - write_file(path, content) — create/overwrite, auto-mkdir
@@ -368,6 +393,24 @@ replace_lines, insert_after, insert_before, replace, append
 hashline=True for anchors in results
 - run_command(command, cwd?, timeout?) — shell execution
 - undo_changes(path?) — restore from git snapshot
+
+## Worker File Tools (hive-tools MCP)
+Workers use a DIFFERENT MCP server (hive-tools) with DIFFERENT tool names. \
+When writing worker system prompts or node instructions, reference these \
+tool names — NOT the coder-tools names above.
+
+Worker data tools (for large results and spillover):
+- save_data(filename, data, data_dir) — save data to a file for later retrieval
+- load_data(filename, data_dir, offset_bytes?, limit_bytes?) — load data \
+with byte-based pagination
+- list_data_files(data_dir) — list available data files
+- append_data(filename, data, data_dir) — append to a file incrementally
+- edit_data(filename, old_text, new_text, data_dir) — find-and-replace in a data file
+- serve_file_to_user(filename, data_dir, label?, open_in_browser?) — \
+generate a clickable file URI for the user
+
+IMPORTANT: Do NOT tell workers to use read_file, write_file, edit_file, \
+search_files, or list_directory — those are YOUR tools, not theirs.
 
 ## Meta-Agent
 - list_agent_tools(server_config_path?, output_schema?, group?) — discover \
