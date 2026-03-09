@@ -124,6 +124,71 @@ class _HubSpotClient:
         )
         return self._handle_response(response)
 
+    def delete_object(
+        self,
+        object_type: str,
+        object_id: str,
+    ) -> dict[str, Any]:
+        """Delete (archive) a CRM object by ID.
+
+        API ref: DELETE /crm/v3/objects/{objectType}/{objectId}
+        """
+        response = httpx.delete(
+            f"{HUBSPOT_API_BASE}/crm/v3/objects/{object_type}/{object_id}",
+            headers=self._headers,
+            timeout=30.0,
+        )
+        if response.status_code == 204:
+            return {"status": "deleted", "object_type": object_type, "object_id": object_id}
+        return self._handle_response(response)
+
+    def list_associations(
+        self,
+        from_object_type: str,
+        from_object_id: str,
+        to_object_type: str,
+        limit: int = 100,
+    ) -> dict[str, Any]:
+        """List associations between CRM objects.
+
+        API ref: GET /crm/v4/objects/{fromObjectType}/{fromObjectId}/associations/{toObjectType}
+        """
+        params: dict[str, Any] = {"limit": min(limit, 500)}
+        response = httpx.get(
+            f"{HUBSPOT_API_BASE}/crm/v4/objects/{from_object_type}/{from_object_id}/associations/{to_object_type}",
+            headers=self._headers,
+            params=params,
+            timeout=30.0,
+        )
+        return self._handle_response(response)
+
+    def create_association(
+        self,
+        from_object_type: str,
+        from_object_id: str,
+        to_object_type: str,
+        to_object_id: str,
+        association_category: str = "HUBSPOT_DEFINED",
+        association_type_id: int = 0,
+    ) -> dict[str, Any]:
+        """Create an association between two CRM objects.
+
+        API ref: PUT /crm/v4/objects/{fromObjectType}/{fromObjectId}/associations/{toObjectType}/{toObjectId}
+        """
+        body = [
+            {
+                "associationCategory": association_category,
+                "associationTypeId": association_type_id,
+            }
+        ]
+        response = httpx.put(
+            f"{HUBSPOT_API_BASE}/crm/v4/objects/{from_object_type}/{from_object_id}/associations/{to_object_type}/{to_object_id}",
+            headers=self._headers,
+            json=body,
+            timeout=30.0,
+        )
+        return self._handle_response(response)
+
 
 def register_tools(
     mcp: FastMCP,
