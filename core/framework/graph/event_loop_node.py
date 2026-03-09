@@ -101,7 +101,10 @@ class JudgeVerdict:
     """Result of judge evaluation for the event loop."""
 
     action: Literal["ACCEPT", "RETRY", "ESCALATE"]
-    feedback: str = ""
+    # None  = no evaluation happened (skip_judge, tool-continue); not logged.
+    # ""    = evaluated but no feedback; logged with default text.
+    # "..." = evaluated with feedback; logged as-is.
+    feedback: str | None = None
 
 
 @runtime_checkable
@@ -1599,7 +1602,7 @@ class EventLoopNode(NodeProtocol):
                         node_name=ctx.node_spec.name,
                         node_type="event_loop",
                         success=False,
-                        error=f"Judge escalated: {verdict.feedback}",
+                        error=f"Judge escalated: {verdict.feedback or 'no feedback'}",
                         total_steps=iteration + 1,
                         tokens_used=total_input_tokens + total_output_tokens,
                         input_tokens=total_input_tokens,
@@ -1613,7 +1616,7 @@ class EventLoopNode(NodeProtocol):
                     )
                 return NodeResult(
                     success=False,
-                    error=f"Judge escalated: {verdict.feedback}",
+                    error=f"Judge escalated: {verdict.feedback or 'no feedback'}",
                     output=accumulator.to_dict(),
                     tokens_used=total_input_tokens + total_output_tokens,
                     latency_ms=latency_ms,
@@ -1636,8 +1639,9 @@ class EventLoopNode(NodeProtocol):
                         output_tokens=turn_tokens.get("output", 0),
                         latency_ms=iter_latency_ms,
                     )
-                if verdict.feedback:
-                    await conversation.add_user_message(f"[Judge feedback]: {verdict.feedback}")
+                if verdict.feedback is not None:
+                    fb = verdict.feedback or "[Judge returned RETRY without feedback]"
+                    await conversation.add_user_message(f"[Judge feedback]: {fb}")
                 continue
 
         # 7. Max iterations exhausted
@@ -2787,7 +2791,7 @@ class EventLoopNode(NodeProtocol):
 
         # Opt-out: node explicitly disables judge (e.g. conversational queen)
         if ctx.node_spec.skip_judge:
-            return JudgeVerdict(action="RETRY", feedback="")
+            return JudgeVerdict(action="RETRY")
 
         if self._judge is not None:
             context = {
@@ -2802,7 +2806,14 @@ class EventLoopNode(NodeProtocol):
                     accumulator, ctx.node_spec.output_keys, ctx.node_spec.nullable_output_keys
                 ),
             }
-            return await self._judge.evaluate(context)
+            verdict = await self._judge.evaluate(context)
+            # Ensure evaluated RETRY always carries feedback for logging.
+            if verdict.action == "RETRY" and not verdict.feedback:
+                verdict = JudgeVerdict(
+                    action="RETRY",
+                    feedback=verdict.feedback or "Custom judge returned RETRY.",
+                )
+            return verdict
 
         # Implicit judge: accept when no tool calls and all output keys present
         if not tool_results:
@@ -2875,8 +2886,8 @@ class EventLoopNode(NodeProtocol):
                     ),
                 )
 
-        # Tool calls were made -- continue loop
-        return JudgeVerdict(action="RETRY", feedback="")
+        # Tool calls were made -- continue loop (no evaluation)
+        return JudgeVerdict(action="RETRY")
 
     # -------------------------------------------------------------------
     # Helpers
