@@ -76,6 +76,8 @@ _QUEEN_PLANNING_TOOLS = [
     "list_agent_tools",
     "list_agents",
     "initialize_and_build_agent",
+    # Load existing agent (after user confirms)
+    "load_built_agent",
 ]
 
 # Building phase: full coding + agent construction tools.
@@ -517,16 +519,22 @@ but no write/edit tools.
 - read_file(path, offset?, limit?) — Read files to study reference agents
 - list_directory(path, recursive?) — Explore project structure
 - search_files(pattern, path?, include?) — Search codebase
-- run_command(command, cwd?, timeout?) — Run read-only commands (e.g. grep, ls)
+- run_command(command, cwd?, timeout?) — Read-only commands only (grep, ls, git log). \
+Never use this to write files, run scripts, or modify the filesystem — transition \
+to BUILDING phase for that.
 - list_agent_tools(server_config_path?, output_schema?, group?) \
 — Discover available tools for design
 - list_agents() — See existing agent packages for reference
 - initialize_and_build_agent(agent_name, nodes?) — Scaffold the agent package and \
 transition to BUILDING phase. Call this after the user approves your design.
+- load_built_agent(agent_path) — Load an existing agent and switch to STAGING \
+phase. Only use this when the user explicitly asks to work with an existing agent \
+(e.g. "load my_agent", "run the research agent"). Confirm with the user first.
 
 Focus on understanding requirements and proposing an agent architecture \
 with ASCII graph art. Use ask_user to get user approval, then call \
-initialize_and_build_agent to begin building.
+initialize_and_build_agent to begin building. If the user wants to work with \
+an existing agent instead, use load_built_agent after confirming.
 """
 
 _queen_tools_building = """
