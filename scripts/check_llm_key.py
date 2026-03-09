@@ -108,7 +108,9 @@ def main() -> None:
         if api_base:
             # Custom API base (ZAI or other OpenAI-compatible)
             endpoint = api_base.rstrip("/") + "/models"
-            name = {"zai": "ZAI", "minimax": "MiniMax"}.get(provider_id, "Custom provider")
+            name = {"zai": "ZAI", "minimax": "MiniMax"}.get(
+                provider_id, "Custom provider"
+            )
             result = check_openai_compatible(api_key, endpoint, name)
         elif provider_id in PROVIDERS:
             result = PROVIDERS[provider_id](api_key)

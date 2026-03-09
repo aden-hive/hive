@@ -536,7 +536,8 @@ but no write/edit tools.
 - list_directory(path, recursive?) — Explore project structure
 - search_files(pattern, path?, include?) — Search codebase
 - run_command(command, cwd?, timeout?) — Run read-only commands (e.g. grep, ls)
-- list_agent_tools(server_config_path?, output_schema?, group?) — Discover available tools for design
+- list_agent_tools(server_config_path?, output_schema?, group?) \
+— Discover available tools for design
 - list_agents() — See existing agent packages for reference
 - initialize_and_build_agent(agent_name, nodes?) — Scaffold the agent package and \
 transition to BUILDING phase. Call this after the user approves your design.
@@ -862,7 +863,8 @@ _queen_tools_docs = (
     + "\n\n### RUNNING phase (worker is executing)\n"
     + _queen_tools_running.strip()
     + "\n\n### Phase transitions\n"
-    "- initialize_and_build_agent(agent_name, nodes?) → scaffolds package, switches to BUILDING phase\n"
+    "- initialize_and_build_agent(agent_name, nodes?) → scaffolds package, "
+    "switches to BUILDING phase\n"
     "- replan_agent() → switches back to PLANNING phase (only when user explicitly requests)\n"
     "- load_built_agent(path) → switches to STAGING phase\n"
     "- run_agent_with_input(task) → starts worker, switches to RUNNING phase\n"
@@ -1008,7 +1010,14 @@ queen_node = NodeSpec(
     output_keys=[],  # Queen should never have this
     nullable_output_keys=[],  # Queen should never have this
     skip_judge=True,  # Queen is a conversational agent; suppress tool-use pressure feedback
-    tools=sorted(set(_QUEEN_PLANNING_TOOLS + _QUEEN_BUILDING_TOOLS + _QUEEN_STAGING_TOOLS + _QUEEN_RUNNING_TOOLS)),
+    tools=sorted(
+        set(
+            _QUEEN_PLANNING_TOOLS
+            + _QUEEN_BUILDING_TOOLS
+            + _QUEEN_STAGING_TOOLS
+            + _QUEEN_RUNNING_TOOLS
+        )
+    ),
     system_prompt=(
         _queen_identity_building
         + _queen_style
@@ -1021,7 +1030,9 @@ queen_node = NodeSpec(
     ),
 )
 
-ALL_QUEEN_TOOLS = sorted(set(_QUEEN_PLANNING_TOOLS + _QUEEN_BUILDING_TOOLS + _QUEEN_STAGING_TOOLS + _QUEEN_RUNNING_TOOLS))
+ALL_QUEEN_TOOLS = sorted(
+    set(_QUEEN_PLANNING_TOOLS + _QUEEN_BUILDING_TOOLS + _QUEEN_STAGING_TOOLS + _QUEEN_RUNNING_TOOLS)
+)
 
 __all__ = [
     "coder_node",
