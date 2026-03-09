@@ -357,8 +357,8 @@ async def handle_pause(request: web.Request) -> web.Response:
     runtime.pause_timers()
 
     # Switch to staging (agent still loaded, ready to re-run)
-    if session.mode_state is not None:
-        await session.mode_state.switch_to_staging(source="frontend")
+    if session.phase_state is not None:
+        await session.phase_state.switch_to_staging(source="frontend")
 
     return web.json_response(
         {

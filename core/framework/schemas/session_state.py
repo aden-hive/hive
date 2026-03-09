@@ -145,6 +145,8 @@ class SessionState(BaseModel):
     active_triggers: list[str] = Field(default_factory=list)
     # Per-trigger task strings (user overrides, keyed by trigger ID)
     trigger_tasks: dict[str, str] = Field(default_factory=dict)
+    # True after first successful worker execution (gates trigger delivery on restart)
+    worker_configured: bool = Field(default=False)
 
     model_config = {"extra": "allow"}
 

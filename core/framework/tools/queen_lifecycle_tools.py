@@ -269,25 +269,28 @@ async def _start_trigger_timer(session: Any, trigger_id: str, trigger_def: Any) 
 
                 while True:
                     # Fire trigger
-                    queen_node = _get_queen_node(session)
-                    if queen_node is not None:
-                        trigger = TriggerEvent(
-                            trigger_type="timer",
-                            source_id=trigger_id,
-                            payload={"schedule": cron_expr, "time": datetime.now(UTC).isoformat(), "task": trigger_def.task},
-                            timestamp=time.time(),
-                        )
-                        await session.event_bus.publish(
-                            AgentEvent(
-                                type=EventType.TRIGGER_FIRED,
-                                stream_id="queen",
-                                data={"trigger_id": trigger_id, "trigger_type": "timer", "payload": trigger.payload},
-                            )
-                        )
-                        await queen_node.inject_trigger(trigger)
-                        logger.info("Trigger '%s' fired (cron: %s)", trigger_id, cron_expr)
+                    if getattr(session, "worker_runtime", None) is None:
+                        logger.warning("Trigger '%s': worker not loaded, discarding tick", trigger_id)
                     else:
-                        logger.warning("Trigger '%s': queen node not available, skipping tick", trigger_id)
+                        queen_node = _get_queen_node(session)
+                        if queen_node is not None:
+                            trigger = TriggerEvent(
+                                trigger_type="timer",
+                                source_id=trigger_id,
+                                payload={"schedule": cron_expr, "time": datetime.now(UTC).isoformat(), "task": trigger_def.task},
+                                timestamp=time.time(),
+                            )
+                            await session.event_bus.publish(
+                                AgentEvent(
+                                    type=EventType.TRIGGER_FIRED,
+                                    stream_id="queen",
+                                    data={"trigger_id": trigger_id, "trigger_type": "timer", "payload": trigger.payload},
+                                )
+                            )
+                            await queen_node.inject_trigger(trigger)
+                            logger.info("Trigger '%s' fired (cron: %s)", trigger_id, cron_expr)
+                        else:
+                            logger.warning("Trigger '%s': queen node not available, skipping tick", trigger_id)
 
                     # Compute next fire
                     cron = croniter(cron_expr, datetime.now())
@@ -302,25 +305,28 @@ async def _start_trigger_timer(session: Any, trigger_id: str, trigger_def: Any) 
                 await asyncio.sleep(sleep_secs)
 
                 while True:
-                    queen_node = _get_queen_node(session)
-                    if queen_node is not None:
-                        trigger = TriggerEvent(
-                            trigger_type="timer",
-                            source_id=trigger_id,
-                            payload={"interval_minutes": interval_minutes, "time": datetime.now(UTC).isoformat(), "task": trigger_def.task},
-                            timestamp=time.time(),
-                        )
-                        await session.event_bus.publish(
-                            AgentEvent(
-                                type=EventType.TRIGGER_FIRED,
-                                stream_id="queen",
-                                data={"trigger_id": trigger_id, "trigger_type": "timer", "payload": trigger.payload},
-                            )
-                        )
-                        await queen_node.inject_trigger(trigger)
-                        logger.info("Trigger '%s' fired (interval: %dm)", trigger_id, interval_minutes)
+                    if getattr(session, "worker_runtime", None) is None:
+                        logger.warning("Trigger '%s': worker not loaded, discarding tick", trigger_id)
                     else:
-                        logger.warning("Trigger '%s': queen node not available, skipping tick", trigger_id)
+                        queen_node = _get_queen_node(session)
+                        if queen_node is not None:
+                            trigger = TriggerEvent(
+                                trigger_type="timer",
+                                source_id=trigger_id,
+                                payload={"interval_minutes": interval_minutes, "time": datetime.now(UTC).isoformat(), "task": trigger_def.task},
+                                timestamp=time.time(),
+                            )
+                            await session.event_bus.publish(
+                                AgentEvent(
+                                    type=EventType.TRIGGER_FIRED,
+                                    stream_id="queen",
+                                    data={"trigger_id": trigger_id, "trigger_type": "timer", "payload": trigger.payload},
+                                )
+                            )
+                            await queen_node.inject_trigger(trigger)
+                            logger.info("Trigger '%s' fired (interval: %dm)", trigger_id, interval_minutes)
+                        else:
+                            logger.warning("Trigger '%s': queen node not available, skipping tick", trigger_id)
 
                     session.trigger_next_fire[trigger_id] = time.monotonic() + sleep_secs
                     await asyncio.sleep(sleep_secs)
@@ -332,6 +338,76 @@ async def _start_trigger_timer(session: Any, trigger_id: str, trigger_def: Any) 
 
     task = asyncio.create_task(_timer_loop(), name=f"trigger-timer-{trigger_id}")
     session.active_timer_tasks[trigger_id] = task
+
+
+async def _start_trigger_webhook(session: Any, trigger_id: str, trigger_def: Any) -> None:
+    """Subscribe to WEBHOOK_RECEIVED EventBus events for a webhook trigger.
+
+    Creates (or reuses) the queen-owned WebhookServer on the session,
+    registers the route, and subscribes via EventBus with filter_stream=trigger_id.
+    The subscription ID is stored in session.active_webhook_subs[trigger_id].
+    """
+    from framework.graph.event_loop_node import TriggerEvent
+    from framework.runtime.webhook_server import WebhookRoute, WebhookServer, WebhookServerConfig
+
+    tc = trigger_def.trigger_config
+    path: str = tc["path"]
+    methods: list[str] = [m.upper() for m in tc.get("methods", ["POST"])]
+    secret: str | None = tc.get("secret")
+    # Queen server defaults to 8090 to avoid colliding with worker's 8080
+    port: int = int(tc.get("port", 8090))
+
+    # Lazy-create the queen webhook server (singleton per session)
+    if getattr(session, "queen_webhook_server", None) is None:
+        server = WebhookServer(session.event_bus, WebhookServerConfig(host="127.0.0.1", port=port))
+        session.queen_webhook_server = server
+
+    # Register route — source_id=trigger_id so filter_stream matches exactly
+    route = WebhookRoute(source_id=trigger_id, path=path, methods=methods, secret=secret)
+    session.queen_webhook_server.add_route(route)
+
+    if not session.queen_webhook_server.is_running:
+        await session.queen_webhook_server.start()
+
+    # Subscribe to WEBHOOK_RECEIVED filtered by trigger_id (== route.source_id)
+    async def _on_webhook(event: Any) -> None:
+        if getattr(session, "worker_runtime", None) is None:
+            logger.warning("Webhook trigger '%s': no worker loaded, discarding", trigger_id)
+            return
+        queen_node = _get_queen_node(session)
+        if queen_node is None:
+            logger.warning("Webhook trigger '%s': queen node not ready, skipping", trigger_id)
+            return
+        trigger = TriggerEvent(
+            trigger_type="webhook",
+            source_id=trigger_id,
+            payload={
+                "source": trigger_id,
+                "method": event.data.get("method", ""),
+                "path": path,
+                "payload": event.data.get("payload", {}),
+                "task": trigger_def.task,
+            },
+            timestamp=time.time(),
+        )
+        await session.event_bus.publish(
+            AgentEvent(
+                type=EventType.TRIGGER_FIRED,
+                stream_id="queen",
+                data={"trigger_id": trigger_id, "trigger_type": "webhook", "payload": trigger.payload},
+            )
+        )
+        await queen_node.inject_trigger(trigger)
+        logger.info("Webhook trigger '%s' fired (%s %s)", trigger_id, event.data.get("method", ""), path)
+
+    sub_id = session.event_bus.subscribe(
+        event_types=[EventType.WEBHOOK_RECEIVED],
+        handler=_on_webhook,
+        filter_stream=trigger_id,
+    )
+    if not hasattr(session, "active_webhook_subs"):
+        session.active_webhook_subs = {}
+    session.active_webhook_subs[trigger_id] = sub_id
 
 
 def _get_queen_node(session: Any):
@@ -369,6 +445,8 @@ async def _persist_active_triggers(session: Any, session_id: str | None) -> None
             for tid in session.active_trigger_ids
             if tid in available and available[tid].task
         }
+        if getattr(session, "worker_configured", False):
+            state.worker_configured = True
         await store.write_state(session_id, state)
     except Exception as e:
         logger.warning("Failed to persist active triggers: %s", e)
@@ -1789,9 +1867,42 @@ def register_queen_lifecycle_tools(
         if trigger_config:
             tdef.trigger_config = t_config
 
-        # Validate
+        # Validate and activate by type
         if t_type == "webhook":
-            return json.dumps({"error": "Webhook triggers are not yet supported at the queen level."})
+            path = t_config.get("path", "").strip()
+            if not path or not path.startswith("/"):
+                return json.dumps({"error": "Webhook trigger requires 'path' starting with '/' in trigger_config (e.g. '/hooks/github')."})
+            valid_methods = {"GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"}
+            methods = t_config.get("methods", ["POST"])
+            invalid = [m.upper() for m in methods if m.upper() not in valid_methods]
+            if invalid:
+                return json.dumps({"error": f"Invalid HTTP methods: {invalid}. Valid: {sorted(valid_methods)}"})
+
+            try:
+                await _start_trigger_webhook(session, trigger_id, tdef)
+            except Exception as e:
+                return json.dumps({"error": f"Failed to start webhook trigger: {e}"})
+
+            tdef.active = True
+            session.active_trigger_ids.add(trigger_id)
+            await _persist_active_triggers(session, session_id)
+            bus = getattr(session, "event_bus", None)
+            if bus:
+                await bus.publish(
+                    AgentEvent(
+                        type=EventType.TRIGGER_ACTIVATED,
+                        stream_id="queen",
+                        data={"trigger_id": trigger_id, "trigger_type": t_type, "trigger_config": t_config},
+                    )
+                )
+            port = int(t_config.get("port", 8090))
+            return json.dumps({
+                "status": "activated",
+                "trigger_id": trigger_id,
+                "trigger_type": t_type,
+                "webhook_url": f"http://127.0.0.1:{port}{path}",
+            })
+
         if t_type != "timer":
             return json.dumps({"error": f"Unsupported trigger type: {t_type}"})
 
@@ -1881,11 +1992,19 @@ def register_queen_lifecycle_tools(
         if trigger_id not in getattr(session, "active_trigger_ids", set()):
             return json.dumps({"error": f"Trigger '{trigger_id}' is not active."})
 
-        # Cancel timer task
+        # Cancel timer task (if timer trigger)
         task = session.active_timer_tasks.pop(trigger_id, None)
         if task and not task.done():
             task.cancel()
         getattr(session, "trigger_next_fire", {}).pop(trigger_id, None)
+
+        # Unsubscribe webhook handler (if webhook trigger)
+        webhook_subs = getattr(session, "active_webhook_subs", {})
+        if sub_id := webhook_subs.pop(trigger_id, None):
+            try:
+                session.event_bus.unsubscribe(sub_id)
+            except Exception:
+                pass
 
         session.active_trigger_ids.discard(trigger_id)
 

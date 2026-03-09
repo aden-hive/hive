@@ -103,6 +103,7 @@ _QUEEN_RUNNING_TOOLS = [
     "stop_worker",
     "stop_worker_and_edit",
     "get_worker_status",
+    "run_agent_with_input",
     "inject_worker_message",
     # Monitoring
     "get_worker_health_summary",
@@ -661,9 +662,29 @@ coding tools (switches to BUILDING phase).
 ## Trigger Management
 
 Use list_triggers() to see available triggers from the loaded worker.
-Use set_trigger(trigger_id) to activate a timer before or after starting \
-the worker. Triggers fire periodically and inject [TRIGGER: ...] messages \
-into your conversation so you can decide whether to start_worker().
+Use set_trigger(trigger_id) to activate a timer. Once active, triggers \
+fire periodically and inject [TRIGGER: ...] messages so you can decide \
+whether to call run_agent_with_input(task).
+
+### When the user says "Enable trigger <id>" (or clicks Enable in the UI):
+
+1. Call get_worker_status(focus="memory") to check if the worker has \
+saved configuration (rules, preferences, settings from a prior run).
+2. If memory contains saved config: compose a task string from it \
+(e.g. "Process inbox emails using saved rules") and call \
+set_trigger(trigger_id, task="...") immediately. Tell the user the \
+trigger is now active and what schedule it uses. Do NOT ask them to \
+provide the task — you derive it from memory.
+3. If memory is empty (no prior run): tell the user the agent needs to \
+run once first so its configuration can be saved. Offer to run it now. \
+Once the worker finishes, enable the trigger.
+4. If the user just provided config this session (rules/task context \
+already in conversation): use that directly, no memory lookup needed. \
+Enable the trigger immediately.
+
+Never ask "what should the task be?" when enabling a trigger for an \
+agent with a clear purpose. The task string is a brief description of \
+what the worker does, derived from its saved state or your current context.
 """
 
 # -- RUNNING phase behavior --
@@ -761,10 +782,10 @@ You will receive [TRIGGER: ...] messages when a scheduled timer fires. \
 These are framework-level signals, not user messages.
 
 Rules:
-- Check get_worker_status() before calling start_worker(). If the worker \
+- Check get_worker_status() before calling run_agent_with_input(task). If the worker \
 is already RUNNING, decide: skip this trigger, or note it for after completion.
 - When multiple [TRIGGER] messages arrive at once, read them all before acting. \
-Batch your response — do not call start_worker() once per trigger.
+Batch your response — do not call run_agent_with_input() once per trigger.
 - If a trigger fires but the task no longer makes sense (e.g., user changed \
 config since last run), skip it and inform the user.
 - Never disable a trigger without telling the user. Use remove_trigger() only \

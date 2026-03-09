@@ -53,6 +53,12 @@ class Session:
     # Active trigger tracking (IDs currently firing + their asyncio tasks)
     active_trigger_ids: set[str] = field(default_factory=set)
     active_timer_tasks: dict[str, asyncio.Task] = field(default_factory=dict)
+    # Queen-owned webhook server (lazy singleton, created on first webhook trigger activation)
+    queen_webhook_server: Any = None
+    # EventBus subscription IDs for active webhook triggers (trigger_id -> sub_id)
+    active_webhook_subs: dict[str, str] = field(default_factory=dict)
+    # True after first successful worker execution (gates trigger delivery)
+    worker_configured: bool = False
     # Monotonic timestamps for next trigger fire (mirrors AgentRuntime._timer_next_fire)
     trigger_next_fire: dict[str, float] = field(default_factory=dict)
     # Session directory resumption:
@@ -371,7 +377,10 @@ class SessionManager:
                 store = session.worker_runtime._session_store
                 state = await store.read_state(session_id)
                 if state and state.active_triggers:
-                    from framework.tools.queen_lifecycle_tools import _start_trigger_timer
+                    from framework.tools.queen_lifecycle_tools import (
+                        _start_trigger_timer,
+                        _start_trigger_webhook,
+                    )
 
                     saved_tasks = getattr(state, "trigger_tasks", {}) or {}
                     for tid in state.active_triggers:
@@ -383,13 +392,21 @@ class SessionManager:
                                 tdef.task = saved_task
                             tdef.active = True
                             session.active_trigger_ids.add(tid)
-                            await _start_trigger_timer(session, tid, tdef)
-                            logger.info("Restored trigger timer '%s'", tid)
+                            if tdef.trigger_type == "timer":
+                                await _start_trigger_timer(session, tid, tdef)
+                                logger.info("Restored trigger timer '%s'", tid)
+                            elif tdef.trigger_type == "webhook":
+                                await _start_trigger_webhook(session, tid, tdef)
+                                logger.info("Restored webhook trigger '%s'", tid)
                         else:
                             logger.warning(
                                 "Saved trigger '%s' not found in worker entry points, skipping",
                                 tid,
                             )
+
+                # Restore worker_configured flag
+                if state and getattr(state, "worker_configured", False):
+                    session.worker_configured = True
             except Exception as e:
                 logger.warning("Failed to restore active triggers: %s", e)
 
@@ -421,6 +438,14 @@ class SessionManager:
             task.cancel()
             logger.info("Cancelled trigger timer '%s' on unload", tid)
         session.active_timer_tasks.clear()
+
+        # Unsubscribe webhook handlers (server stays alive — queen-owned)
+        for sub_id in session.active_webhook_subs.values():
+            try:
+                session.event_bus.unsubscribe(sub_id)
+            except Exception:
+                pass
+        session.active_webhook_subs.clear()
         session.active_trigger_ids.clear()
 
         # Clean up hoisted triggers
@@ -472,6 +497,20 @@ class SessionManager:
         for task in session.active_timer_tasks.values():
             task.cancel()
         session.active_timer_tasks.clear()
+
+        # Unsubscribe webhook handlers and stop queen webhook server
+        for sub_id in session.active_webhook_subs.values():
+            try:
+                session.event_bus.unsubscribe(sub_id)
+            except Exception:
+                pass
+        session.active_webhook_subs.clear()
+        if session.queen_webhook_server is not None:
+            try:
+                await session.queen_webhook_server.stop()
+            except Exception:
+                logger.error("Error stopping queen webhook server", exc_info=True)
+            session.queen_webhook_server = None
 
         # Cleanup worker
         if session.runner:
@@ -799,6 +838,8 @@ class SessionManager:
                     if phase_state.phase == "running":
                         # Build termination notification for the queen
                         if event.type == _ET.EXECUTION_COMPLETED:
+                            # Mark worker as configured after first successful run
+                            session.worker_configured = True
                             output = event.data.get("output", {})
                             output_summary = ""
                             if output:
