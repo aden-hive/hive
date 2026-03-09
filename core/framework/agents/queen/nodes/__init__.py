@@ -1,4 +1,4 @@
-"""Node definitions for Hive Coder agent."""
+"""Node definitions for Queen agent."""
 
 from pathlib import Path
 
@@ -75,7 +75,12 @@ _QUEEN_PLANNING_TOOLS = [
     # Discovery + design
     "list_agent_tools",
     "list_agents",
+    "list_agent_sessions",
+    "list_agent_checkpoints",
+    "get_agent_checkpoint",
     "initialize_and_build_agent",
+    # Load existing agent (after user confirms)
+    "load_built_agent",
 ]
 
 # Building phase: full coding + agent construction tools.
@@ -99,6 +104,7 @@ _QUEEN_STAGING_TOOLS = [
     # Launch or go back
     "run_agent_with_input",
     "stop_worker_and_edit",
+    "stop_worker_and_plan",
     "write_to_diary",  # Episodic memory — available in all phases
 ]
 
@@ -114,6 +120,7 @@ _QUEEN_RUNNING_TOOLS = [
     # Worker lifecycle
     "stop_worker",
     "stop_worker_and_edit",
+    "stop_worker_and_plan",
     "get_worker_status",
     "inject_worker_message",
     # Monitoring
@@ -130,6 +137,34 @@ _QUEEN_RUNNING_TOOLS = [
 # additions.
 # ---------------------------------------------------------------------------
 
+_shared_building_knowledge = """\
+# Shared Rules (Planning & Building)
+
+## Paths (MANDATORY)
+**Always use RELATIVE paths** \
+(e.g. `exports/agent_name/config.py`, `exports/agent_name/nodes/__init__.py`).
+**Never use absolute paths** like `/mnt/data/...` or `/workspace/...` — they fail.
+The project root is implicit.
+
+## Worker File Tools (hive-tools MCP)
+Workers use a DIFFERENT MCP server (hive-tools) with DIFFERENT tool names. \
+When designing worker nodes or writing worker system prompts, reference these \
+tool names — NOT the coder-tools names (read_file, write_file, etc.).
+
+Worker data tools (for large results and spillover):
+- save_data(filename, data, data_dir) — save data to a file for later retrieval
+- load_data(filename, data_dir, offset_bytes?, limit_bytes?) — load data \
+with byte-based pagination
+- list_data_files(data_dir) — list available data files
+- append_data(filename, data, data_dir) — append to a file incrementally
+- edit_data(filename, old_text, new_text, data_dir) — find-and-replace in a data file
+- serve_file_to_user(filename, data_dir, label?, open_in_browser?) — \
+generate a clickable file URI for the user
+
+IMPORTANT: Do NOT tell workers to use read_file, write_file, edit_file, \
+search_files, or list_directory — those are YOUR tools, not theirs.
+"""
+
 _planning_knowledge = """\
 **A responsible engineer doesn't jump into building. First, \
 understand the problem and be transparent about what the framework can and cannot do.**
@@ -143,30 +178,6 @@ what they want before this step, skip the question and proceed directly.
 collaborate with the user to define it.
 - **Discover tools dynamically.** NEVER reference tools from static \
 docs. Always run list_agent_tools() to see what actually exists.
-
-## Paths (MANDATORY)
-**Always use RELATIVE paths** when reading files \
-(e.g. `exports/agent_name/config.py`, `exports/agent_name/nodes/__init__.py`).
-**Never use absolute paths** like `/mnt/data/...` or `/workspace/...` — they fail.
-The project root is implicit.
-
-## Worker File Tools (hive-tools MCP)
-Workers use a DIFFERENT MCP server (hive-tools) with DIFFERENT tool names. \
-When designing worker nodes, reference these tool names in your graph — \
-NOT the coder-tools names (read_file, write_file, etc.).
-
-Worker data tools (for large results and spillover):
-- save_data(filename, data, data_dir) — save data to a file for later retrieval
-- load_data(filename, data_dir, offset_bytes?, limit_bytes?) — load data \
-with byte-based pagination
-- list_data_files(data_dir) — list available data files
-- append_data(filename, data, data_dir) — append to a file incrementally
-- edit_data(filename, old_text, new_text, data_dir) — find-and-replace in a data file
-- serve_file_to_user(filename, data_dir, label?, open_in_browser?) — \
-generate a clickable file URI for the user
-
-IMPORTANT: Do NOT design workers to use read_file, write_file, edit_file, \
-search_files, or list_directory — those are YOUR tools, not theirs.
 
 # Tool Discovery (MANDATORY before designing)
 
@@ -378,11 +389,6 @@ exists. Read actual source to confirm. Search if unsure.
 errors yourself. Don't declare success until validation passes.
 
 # Tools
-## Paths (MANDATORY)
-**Always use RELATIVE paths**
-(e.g. `exports/agent_name/config.py`, `exports/agent_name/nodes/__init__.py`).
-**Never use absolute paths** like `/mnt/data/...` or `/workspace/...` — they fail.
-The project root is implicit.
 
 ## File I/O (your tools — coder-tools MCP)
 - read_file(path, offset?, limit?, hashline?) — read with line numbers; \
@@ -397,24 +403,6 @@ replace_lines, insert_after, insert_before, replace, append
 hashline=True for anchors in results
 - run_command(command, cwd?, timeout?) — shell execution
 - undo_changes(path?) — restore from git snapshot
-
-## Worker File Tools (hive-tools MCP)
-Workers use a DIFFERENT MCP server (hive-tools) with DIFFERENT tool names. \
-When writing worker system prompts or node instructions, reference these \
-tool names — NOT the coder-tools names above.
-
-Worker data tools (for large results and spillover):
-- save_data(filename, data, data_dir) — save data to a file for later retrieval
-- load_data(filename, data_dir, offset_bytes?, limit_bytes?) — load data \
-with byte-based pagination
-- list_data_files(data_dir) — list available data files
-- append_data(filename, data, data_dir) — append to a file incrementally
-- edit_data(filename, old_text, new_text, data_dir) — find-and-replace in a data file
-- serve_file_to_user(filename, data_dir, label?, open_in_browser?) — \
-generate a clickable file URI for the user
-
-IMPORTANT: Do NOT tell workers to use read_file, write_file, edit_file, \
-search_files, or list_directory — those are YOUR tools, not theirs.
 
 ## Meta-Agent
 - list_agent_tools(server_config_path?, output_schema?, group?) — discover \
@@ -481,7 +469,7 @@ visualizer. Do NOT wait for user input between validation and loading.
 """
 
 # Composed version — coder_node uses both halves (it has no phase split).
-_package_builder_knowledge = _planning_knowledge + _building_knowledge
+_package_builder_knowledge = _shared_building_knowledge + _planning_knowledge + _building_knowledge
 
 
 # ---------------------------------------------------------------------------
@@ -493,13 +481,12 @@ _package_builder_knowledge = _planning_knowledge + _building_knowledge
 _queen_identity_planning = """\
 You are an experienced, responsible and curious Solution Architect. \
 "Queen" is the internal alias. \
-You are in PLANNING phase — your job is to understand what the user wants, \
-negotiate scope, and propose an agent design as an ASCII graph. \
+You are in PLANNING phase — your job is to either: \
+(a) understand what the user wants and design a new agent, or \
+(b) diagnose issues with an existing agent, discuss a fix plan with the user, \
+then transition to building to implement. \
 You have read-only tools for exploration but no write/edit tools. \
-Focus on conversation, research, and design. \
-When the user approves your proposed design, call \
-initialize_and_build_agent(agent_name, nodes) to scaffold the package and \
-begin building.\
+Focus on conversation, research, and design.\
 """
 
 _queen_identity_building = """\
@@ -539,16 +526,28 @@ but no write/edit tools.
 - read_file(path, offset?, limit?) — Read files to study reference agents
 - list_directory(path, recursive?) — Explore project structure
 - search_files(pattern, path?, include?) — Search codebase
-- run_command(command, cwd?, timeout?) — Run read-only commands (e.g. grep, ls)
+- run_command(command, cwd?, timeout?) — Read-only commands only (grep, ls, git log). \
+Never use this to write files, run scripts, or modify the filesystem — transition \
+to BUILDING phase for that.
 - list_agent_tools(server_config_path?, output_schema?, group?) \
 — Discover available tools for design
 - list_agents() — See existing agent packages for reference
-- initialize_and_build_agent(agent_name, nodes?) — Scaffold the agent package and \
-transition to BUILDING phase. Call this after the user approves your design.
+- list_agent_sessions(agent_name, status?, limit?) — Inspect past runs of an agent
+- list_agent_checkpoints(agent_name, session_id) — View execution history
+- get_agent_checkpoint(agent_name, session_id, checkpoint_id?) — Load a checkpoint
+- initialize_and_build_agent(agent_name?, nodes?) — With agent_name: scaffold a \
+new agent and transition to BUILDING phase. Without agent_name: transition to \
+BUILDING to fix the currently loaded agent (requires a loaded worker).
+- load_built_agent(agent_path) — Load an existing agent and switch to STAGING \
+phase. Only use this when the user explicitly asks to work with an existing agent \
+(e.g. "load my_agent", "run the research agent"). Confirm with the user first.
 
 Focus on understanding requirements and proposing an agent architecture \
 with ASCII graph art. Use ask_user to get user approval, then call \
-initialize_and_build_agent to begin building.
+initialize_and_build_agent to begin building. If the user wants to work with \
+an existing agent instead, use load_built_agent after confirming. \
+If you are diagnosing an existing agent, call initialize_and_build_agent() \
+(no args) after agreeing on a fix plan with the user.
 """
 
 _queen_tools_building = """
@@ -574,10 +573,12 @@ The agent is loaded and ready to run. You can inspect it and launch it:
 - list_credentials(credential_id?) — Verify credentials are configured
 - get_worker_status(focus?) — Brief status. Drill in with focus: memory, tools, issues, progress
 - run_agent_with_input(task) — Start the worker and switch to RUNNING phase
-- stop_worker_and_edit() — Go back to BUILDING phase
+- stop_worker_and_plan() — Go to PLANNING phase to discuss changes with the user \
+first (DEFAULT for most modification requests)
+- stop_worker_and_edit() — Go to BUILDING phase for immediate, specific fixes
 
-You do NOT have write tools. If you need to modify the agent, \
-call stop_worker_and_edit() to go back to BUILDING phase.
+You do NOT have write tools. To modify the agent, prefer \
+stop_worker_and_plan() unless the user gave a specific instruction.
 """
 
 _queen_tools_running = """
@@ -590,12 +591,13 @@ The worker is running. You have monitoring and lifecycle tools:
 - get_worker_health_summary() — Read the latest health data
 - notify_operator(ticket_id, analysis, urgency) — Alert the user (use sparingly)
 - stop_worker() — Stop the worker and return to STAGING phase, then ask the user what to do next
-- stop_worker_and_edit() — Stop the worker and switch back to BUILDING phase
+- stop_worker_and_plan() — Stop and switch to PLANNING phase to discuss changes \
+with the user first (DEFAULT for most modification requests)
+- stop_worker_and_edit() — Stop and switch to BUILDING phase for specific fixes
 
-You do NOT have write tools or agent construction tools. \
-If you need to modify the agent, call stop_worker_and_edit() to switch back \
-to BUILDING phase. To stop the worker and ask the user what to do next, call \
-stop_worker() to return to STAGING phase.
+You do NOT have write tools. To modify the agent, prefer \
+stop_worker_and_plan() unless the user gave a specific instruction. \
+To just stop without modifying, call stop_worker().
 """
 
 # -- Behavior shared across all phases --
@@ -775,8 +777,21 @@ building something new.
 When the user asks to change, modify, or update the loaded worker \
 (e.g., "change the report node", "add a node", "delete node X"):
 
-1. Call stop_worker_and_edit() — this stops the worker and gives you \
-coding tools (switches to BUILDING phase).
+**Default: use stop_worker_and_plan().** Most modification requests need \
+discussion first — what to change, why, and how. Only skip planning if \
+the user gave you an explicit, unambiguous instruction (e.g., "delete node X", \
+"change the model to gpt-4o").
+
+Use stop_worker_and_plan() when:
+- The user says "modify", "improve", "fix", or "change" without specifics
+- The request is vague or open-ended ("make it better", "it's not working right")
+- You need to understand the user's intent before making changes
+- The issue requires inspecting logs, checkpoints, or past runs first
+
+Use stop_worker_and_edit() only when:
+- The user gave a specific, concrete instruction ("add save_data to the gather node")
+- You already discussed the fix in a previous planning session
+- The change is trivial and unambiguous (rename, toggle a flag)
 """
 
 # -- RUNNING phase behavior --
@@ -842,6 +857,7 @@ escalations. If the user gave you instructions (e.g., "just retry on errors", \
 **Errors / unexpected failures:**
 - Explain what went wrong in plain terms.
 - Ask the user: "Fix the agent and retry?" → use stop_worker_and_edit() if yes.
+- Or offer: "Diagnose the issue" → use stop_worker_and_plan() to investigate first.
 - Or offer: "Retry as-is", "Skip this task", "Abort run"
 - (Skip asking if user explicitly told you to auto-retry or auto-skip errors.)
 
@@ -865,8 +881,9 @@ building something new.
 When the user asks to change, modify, or update the loaded worker \
 (e.g., "change the report node", "add a node", "delete node X"):
 
-1. Call stop_worker_and_edit() — this stops the worker and gives you \
-coding tools (switches to BUILDING phase).
+**Default: use stop_worker_and_plan().** Most modification requests need \
+discussion first. Only use stop_worker_and_edit() when the user gave a \
+specific, unambiguous instruction or you already agreed on the fix.
 """
 
 # -- Backward-compatible composed versions (used by queen_node.system_prompt default) --
@@ -884,13 +901,14 @@ _queen_tools_docs = (
     + "\n\n### RUNNING phase (worker is executing)\n"
     + _queen_tools_running.strip()
     + "\n\n### Phase transitions\n"
-    "- initialize_and_build_agent(agent_name, nodes?) → scaffolds package, "
-    "switches to BUILDING phase\n"
+    "- initialize_and_build_agent(agent_name?, nodes?) → with name: scaffolds package; "
+    "without name: switches to BUILDING for existing agent\n"
     "- replan_agent() → switches back to PLANNING phase (only when user explicitly requests)\n"
     "- load_built_agent(path) → switches to STAGING phase\n"
     "- run_agent_with_input(task) → starts worker, switches to RUNNING phase\n"
     "- stop_worker() → stops worker, switches to STAGING phase (ask user: re-run or edit?)\n"
     "- stop_worker_and_edit() → stops worker (if running), switches to BUILDING phase\n"
+    "- stop_worker_and_plan() → stops worker (if running), switches to PLANNING phase for diagnosis\n"
 )
 
 _queen_behavior = (
@@ -922,46 +940,6 @@ _queen_style = """
 # Node definitions
 # ---------------------------------------------------------------------------
 
-# Single node — like opencode's while(true) loop.
-# One continuous context handles the entire workflow:
-# discover → design → implement → verify → present → iterate.
-coder_node = NodeSpec(
-    id="coder",
-    name="Hive Coder",
-    description=(
-        "Autonomous coding agent that builds Hive agent packages. "
-        "Handles the full lifecycle: understanding user intent, "
-        "designing architecture, writing code, validating, and "
-        "iterating on feedback — all in one continuous conversation."
-    ),
-    node_type="event_loop",
-    client_facing=True,
-    max_node_visits=0,
-    input_keys=["user_request"],
-    output_keys=["agent_name", "validation_result"],
-    success_criteria=(
-        "A complete, validated Hive agent package exists at "
-        "exports/{agent_name}/ and passes structural validation."
-    ),
-    tools=_SHARED_TOOLS
-    + [
-        "initialize_and_build_agent",
-        # Graph lifecycle tools (multi-graph sessions)
-        "load_agent",
-        "unload_agent",
-        "start_agent",
-        "restart_agent",
-        "get_user_presence",
-    ],
-    system_prompt=(
-        "You are Hive Coder, the best agent-building coding agent. You build "
-        "production-ready Hive agent packages from natural language.\n"
-        + _package_builder_knowledge
-        + _gcu_building_section
-        + _appendices
-    ),
-)
-
 
 ticket_triage_node = NodeSpec(
     id="ticket_triage",
@@ -982,7 +960,7 @@ ticket_triage_node = NodeSpec(
     ),
     tools=["notify_operator"],
     system_prompt="""\
-You are the Queen (Hive Coder). The Worker Health Judge has escalated a worker \
+You are the Queen. The Worker Health Judge has escalated a worker \
 issue to you. The ticket is in your memory under key "ticket". Read it carefully.
 
 ## Dismiss criteria — do NOT call notify_operator:
@@ -1056,7 +1034,6 @@ ALL_QUEEN_TOOLS = sorted(
 )
 
 __all__ = [
-    "coder_node",
     "ticket_triage_node",
     "queen_node",
     "ALL_QUEEN_TRIAGE_TOOLS",
@@ -1080,6 +1057,7 @@ __all__ = [
     "_queen_behavior_running",
     "_queen_phase_7",
     "_queen_style",
+    "_shared_building_knowledge",
     "_planning_knowledge",
     "_building_knowledge",
     "_package_builder_knowledge",

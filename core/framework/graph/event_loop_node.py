@@ -2176,7 +2176,7 @@ class EventLoopNode(NodeProtocol):
 
                     result = ToolResult(
                         tool_use_id=tc.tool_use_id,
-                        content="Escalation requested to hive_coder (queen); waiting for guidance.",
+                        content="Escalation requested to queen; waiting for guidance.",
                         is_error=False,
                     )
                     results_by_id[tc.tool_use_id] = result
@@ -2604,7 +2604,7 @@ class EventLoopNode(NodeProtocol):
         return Tool(
             name="escalate",
             description=(
-                "Escalate to the Hive Coder queen when requesting user input, "
+                "Escalate to the queen when requesting user input, "
                 "blocked by errors, missing "
                 "credentials, or ambiguous constraints that require supervisor "
                 "guidance. Include a concise reason and optional context. "

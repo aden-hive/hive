@@ -134,22 +134,15 @@ class QueenPhaseState:
         tool_names = [t.name for t in self.running_tools]
         logger.info("Queen phase → running (source=%s, tools: %s)", source, tool_names)
         await self._emit_phase_event()
-        if self.inject_notification:
-            if source == "frontend":
-                msg = (
-                    "[PHASE CHANGE] The user clicked Run in the UI. Switched to RUNNING phase. "
-                    "Worker is now executing. You have monitoring/lifecycle tools: "
-                    + ", ".join(tool_names)
-                    + "."
-                )
-            else:
-                msg = (
-                    "[PHASE CHANGE] Switched to RUNNING phase. "
-                    "Worker is executing. You now have monitoring/lifecycle tools: "
-                    + ", ".join(tool_names)
-                    + "."
-                )
-            await self.inject_notification(msg)
+        # Skip notification when source="tool" — the tool result already
+        # contains the phase change info.
+        if self.inject_notification and source != "tool":
+            await self.inject_notification(
+                "[PHASE CHANGE] The user clicked Run in the UI. Switched to RUNNING phase. "
+                "Worker is now executing. You have monitoring/lifecycle tools: "
+                + ", ".join(tool_names)
+                + "."
+            )
 
     async def switch_to_staging(self, source: str = "tool") -> None:
         """Switch to staging phase and notify the queen.
@@ -163,24 +156,19 @@ class QueenPhaseState:
         tool_names = [t.name for t in self.staging_tools]
         logger.info("Queen phase → staging (source=%s, tools: %s)", source, tool_names)
         await self._emit_phase_event()
-        if self.inject_notification:
+        # Skip notification when source="tool" — the tool result already
+        # contains the phase change info.
+        if self.inject_notification and source != "tool":
             if source == "frontend":
                 msg = (
                     "[PHASE CHANGE] The user stopped the worker from the UI. "
                     "Switched to STAGING phase. Agent is still loaded. "
                     "Available tools: " + ", ".join(tool_names) + "."
                 )
-            elif source == "auto":
+            else:
                 msg = (
                     "[PHASE CHANGE] Worker execution completed. Switched to STAGING phase. "
                     "Agent is still loaded. Call run_agent_with_input(task) to run again. "
-                    "Available tools: " + ", ".join(tool_names) + "."
-                )
-            else:
-                msg = (
-                    "[PHASE CHANGE] Switched to STAGING phase. "
-                    "Agent loaded and ready. Call run_agent_with_input(task) to start, "
-                    "or stop_worker_and_edit() to go back to building. "
                     "Available tools: " + ", ".join(tool_names) + "."
                 )
             await self.inject_notification(msg)
@@ -197,7 +185,7 @@ class QueenPhaseState:
         tool_names = [t.name for t in self.building_tools]
         logger.info("Queen phase → building (source=%s, tools: %s)", source, tool_names)
         await self._emit_phase_event()
-        if self.inject_notification:
+        if self.inject_notification and source != "tool":
             await self.inject_notification(
                 "[PHASE CHANGE] Switched to BUILDING phase. "
                 "Lifecycle tools removed. Full coding tools restored. "
@@ -216,7 +204,10 @@ class QueenPhaseState:
         tool_names = [t.name for t in self.planning_tools]
         logger.info("Queen phase → planning (source=%s, tools: %s)", source, tool_names)
         await self._emit_phase_event()
-        if self.inject_notification:
+        # Skip notification when source="tool" — the tool result already
+        # contains the phase change info; injecting a duplicate notification
+        # causes the queen to respond twice.
+        if self.inject_notification and source != "tool":
             await self.inject_notification(
                 "[PHASE CHANGE] Switched to PLANNING phase. "
                 "Coding tools removed. Discuss goals and design with the user. "
@@ -539,6 +530,40 @@ def register_queen_lifecycle_tools(
     )
     tools_registered += 1
 
+    # --- stop_worker_and_plan (Running/Staging → Planning) --------------------
+
+    async def stop_worker_and_plan() -> str:
+        """Stop the worker and switch to planning phase for diagnosis."""
+        stop_result = await stop_worker()
+
+        # Switch to planning phase
+        if phase_state is not None:
+            await phase_state.switch_to_planning(source="tool")
+
+        result = json.loads(stop_result)
+        result["phase"] = "planning"
+        result["message"] = (
+            "Worker stopped. You are now in planning phase. "
+            "Diagnose the issue using read-only tools (checkpoints, logs, sessions), "
+            "discuss a fix plan with the user, then call "
+            "initialize_and_build_agent() to implement the fix."
+        )
+        return json.dumps(result)
+
+    _stop_plan_tool = Tool(
+        name="stop_worker_and_plan",
+        description=(
+            "Stop the worker and switch to planning phase for diagnosis. "
+            "Use this when you need to investigate an issue before fixing it. "
+            "After diagnosis, call initialize_and_build_agent() to switch to building."
+        ),
+        parameters={"type": "object", "properties": {}},
+    )
+    registry.register(
+        "stop_worker_and_plan", _stop_plan_tool, lambda inputs: stop_worker_and_plan()
+    )
+    tools_registered += 1
+
     # --- replan_agent (Building → Planning) -----------------------------------
 
     async def replan_agent() -> str:
@@ -573,14 +598,38 @@ def register_queen_lifecycle_tools(
     tools_registered += 1
 
     # --- initialize_and_build_agent wrapper (Planning → Building) -------------
+    # With agent_name: scaffold a new agent via MCP tool, then switch to building.
+    # Without agent_name: just switch to building (for fixing an existing loaded agent).
 
-    # Grab the underlying MCP tool executor before we override it.
     _existing_init = registry._tools.get("initialize_and_build_agent")
     if _existing_init is not None:
         _orig_init_executor = _existing_init.executor
 
         async def initialize_and_build_agent_wrapper(inputs: dict) -> str:
-            """Wrapper: scaffold package via MCP tool, then switch to building phase."""
+            """Wrapper: scaffold or just switch to building phase."""
+            agent_name = (inputs.get("agent_name") or "").strip()
+
+            # No agent_name → just switch to building (for fixing existing agent)
+            if not agent_name:
+                runtime = _get_runtime()
+                if runtime is None:
+                    return json.dumps(
+                        {"error": "No worker loaded. Provide agent_name to scaffold a new agent."}
+                    )
+                if phase_state is not None:
+                    await phase_state.switch_to_building(source="tool")
+                return json.dumps(
+                    {
+                        "status": "editing",
+                        "phase": "building",
+                        "message": (
+                            "Switched to BUILDING phase. Full coding tools restored. "
+                            "Implement the fix, then call load_built_agent(path) to reload."
+                        ),
+                    }
+                )
+
+            # Has agent_name → scaffold via MCP tool
             result = _orig_init_executor(inputs)
             # Handle both sync and async executors
             if asyncio.iscoroutine(result) or asyncio.isfuture(result):

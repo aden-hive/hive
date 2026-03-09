@@ -3,7 +3,7 @@
 Coder Tools MCP Server — OpenCode-inspired coding tools.
 
 Provides rich file I/O, fuzzy-match editing, git snapshots, and shell execution
-for the hive_coder agent. Modeled after opencode's tool architecture.
+for the queen agent. Modeled after opencode's tool architecture.
 
 All paths scoped to a configurable project root for safety.
 

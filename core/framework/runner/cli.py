@@ -208,21 +208,6 @@ def register_commands(subparsers: argparse._SubParsersAction) -> None:
     )
     tui_parser.set_defaults(func=cmd_tui)
 
-    # code command (Hive Coder — framework agent builder)
-    code_parser = subparsers.add_parser(
-        "code",
-        help="Launch Hive Coder to build agents",
-        description="Interactive agent builder. Describe what you want and Hive Coder builds it.",
-    )
-    code_parser.add_argument(
-        "--model",
-        "-m",
-        type=str,
-        default=None,
-        help="LLM model to use (any LiteLLM-compatible name)",
-    )
-    code_parser.set_defaults(func=cmd_code)
-
     # sessions command group (checkpoint/resume management)
     sessions_parser = subparsers.add_parser(
         "sessions",
@@ -1431,85 +1416,6 @@ def cmd_tui(args: argparse.Namespace) -> int:
     print("TUI session ended.")
     return 0
 
-
-def cmd_code(args: argparse.Namespace) -> int:
-    """Launch Hive Coder with multi-graph support.
-
-    Unlike ``_launch_agent_tui``, this sets up graph lifecycle tools and
-    assigns ``graph_id="hive_coder"`` so the coder can load, supervise,
-    and restart secondary agent graphs within the same session.
-    """
-    import logging
-
-    logging.basicConfig(level=logging.WARNING, format="%(message)s")
-
-    framework_agents_dir = _get_framework_agents_dir()
-    hive_coder_path = framework_agents_dir / "hive_coder"
-
-    if not (hive_coder_path / "agent.py").exists():
-        print("Error: Hive Coder agent not found.", file=sys.stderr)
-        return 1
-
-    # Ensure framework agents dir is on sys.path for import
-    fa_str = str(framework_agents_dir)
-    if fa_str not in sys.path:
-        sys.path.insert(0, fa_str)
-
-    from framework.credentials.models import CredentialError
-    from framework.runner import AgentRunner
-    from framework.tools.session_graph_tools import register_graph_tools
-    from framework.tui.app import AdenTUI
-
-    async def run_with_tui():
-        try:
-            runner = AgentRunner.load(hive_coder_path, model=args.model)
-        except CredentialError as e:
-            print(f"\n{e}", file=sys.stderr)
-            return
-        except Exception as e:
-            print(f"Error loading agent: {e}")
-            return
-
-        if runner._agent_runtime is None:
-            try:
-                runner._setup()
-            except CredentialError as e:
-                print(f"\n{e}", file=sys.stderr)
-                return
-
-        runtime = runner._agent_runtime
-
-        # -- Multi-graph setup --
-        # Tag the primary graph so events carry graph_id="hive_coder"
-        runtime._graph_id = "hive_coder"
-        runtime._active_graph_id = "hive_coder"
-
-        # Register graph lifecycle tools (load_agent, unload_agent, etc.)
-        register_graph_tools(runner._tool_registry, runtime)
-
-        # Refresh tool schemas AND executor so streams see the new tools.
-        # The executor closure references the registry dict by ref, but
-        # refreshing both is robust against any copy-on-read behavior.
-        runtime._tools = list(runner._tool_registry.get_tools().values())
-        runtime._tool_executor = runner._tool_registry.get_executor()
-
-        if not runtime.is_running:
-            await runtime.start()
-
-        app = AdenTUI(runtime)
-        try:
-            await app.run_async()
-        except Exception as e:
-            import traceback
-
-            traceback.print_exc()
-            print(f"TUI error: {e}")
-
-        await runner.cleanup_async()
-
-    asyncio.run(run_with_tui())
-    print("TUI session ended.")
-    return 0
 
 
 def _extract_python_agent_metadata(agent_path: Path) -> tuple[str, str]:
