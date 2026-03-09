@@ -328,3 +328,96 @@ def register_tools(
             return {"error": "Request timed out"}
         except httpx.RequestError as e:
             return {"error": f"Network error: {e}"}
+
+    @mcp.tool()
+    def discord_get_channel(
+        channel_id: str,
+        account: str = "",
+    ) -> dict:
+        """
+        Get detailed information about a Discord channel.
+
+        Returns channel metadata including name, topic, type, position,
+        permission overwrites, and rate limit settings.
+
+        Args:
+            channel_id: Channel ID (right-click channel > Copy ID in Dev Mode)
+
+        Returns:
+            Dict with channel details or error
+        """
+        client = _get_client(account)
+        if isinstance(client, dict):
+            return client
+        try:
+            result = client.get_channel(channel_id)
+            if "error" in result:
+                return result
+            return {"channel": result, "success": True}
+        except httpx.TimeoutException:
+            return {"error": "Request timed out"}
+        except httpx.RequestError as e:
+            return {"error": f"Network error: {e}"}
+
+    @mcp.tool()
+    def discord_create_reaction(
+        channel_id: str,
+        message_id: str,
+        emoji: str,
+        account: str = "",
+    ) -> dict:
+        """
+        Add a reaction to a Discord message.
+
+        Args:
+            channel_id: Channel ID where the message is
+            message_id: ID of the message to react to
+            emoji: Unicode emoji (e.g. "👍") or custom emoji in format "name:id"
+
+        Returns:
+            Dict with success status or error
+        """
+        client = _get_client(account)
+        if isinstance(client, dict):
+            return client
+        try:
+            result = client.create_reaction(channel_id, message_id, emoji)
+            if isinstance(result, dict) and "error" in result:
+                return result
+            return {"success": True}
+        except httpx.TimeoutException:
+            return {"error": "Request timed out"}
+        except httpx.RequestError as e:
+            return {"error": f"Network error: {e}"}
+
+    @mcp.tool()
+    def discord_delete_message(
+        channel_id: str,
+        message_id: str,
+        account: str = "",
+    ) -> dict:
+        """
+        Delete a message from a Discord channel.
+
+        The bot can delete its own messages, or any message if it has
+        Manage Messages permission in the channel.
+
+        Args:
+            channel_id: Channel ID where the message is
+            message_id: ID of the message to delete
+
+        Returns:
+            Dict with success status or error
+        """
+        client = _get_client(account)
+        if isinstance(client, dict):
+            return client
+        try:
+            result = client.delete_message(channel_id, message_id)
+            if isinstance(result, dict) and "error" in result:
+                return result
+            return {"success": True, "deleted_message_id": message_id}
+        except httpx.TimeoutException:
+            return {"error": "Request timed out"}
+        except httpx.RequestError as e:
+            return {"error": f"Network error: {e}"}
