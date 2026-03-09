@@ -96,9 +96,15 @@ class StdioMCPTransport(MCPTransport):
                         from mcp import ClientSession
                         from mcp.client.stdio import stdio_client
 
-                        errlog = sys.stderr if os.name == "nt" else open(os.devnull, "w")  # noqa: SIM115
+                        errlog = (
+                            sys.stderr
+                            if os.name == "nt"
+                            else open(os.devnull, "w")  # noqa: SIM115
+                        )
                         self._stdio_context = stdio_client(server_params, errlog=errlog)
-                        self._read_stream, self._write_stream = await self._stdio_context.__aenter__()
+                        self._read_stream, self._write_stream = (
+                            await self._stdio_context.__aenter__()
+                        )
                         self._session = ClientSession(self._read_stream, self._write_stream)
                         await self._session.__aenter__()
                         await self._session.initialize()
@@ -174,7 +180,9 @@ class StdioMCPTransport(MCPTransport):
             if self._session:
                 await self._session.__aexit__(None, None, None)
         except asyncio.CancelledError:
-            logger.warning("MCP session cleanup was cancelled; proceeding with best-effort shutdown")
+            logger.warning(
+                "MCP session cleanup was cancelled; proceeding with best-effort shutdown"
+            )
         except Exception as e:
             logger.warning("Error closing MCP session: %s", e)
         finally:
@@ -184,7 +192,9 @@ class StdioMCPTransport(MCPTransport):
             if self._stdio_context:
                 await self._stdio_context.__aexit__(None, None, None)
         except asyncio.CancelledError:
-            logger.debug("STDIO context cleanup was cancelled; proceeding with best-effort shutdown")
+            logger.debug(
+                "STDIO context cleanup was cancelled; proceeding with best-effort shutdown"
+            )
         except Exception as e:
             msg = str(e).lower()
             if "cancel scope" in msg or "different task" in msg:
@@ -244,4 +254,3 @@ class StdioMCPTransport(MCPTransport):
             self._write_stream = None
             self._loop = None
             self._loop_thread = None
-
