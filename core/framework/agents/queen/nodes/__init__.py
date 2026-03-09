@@ -127,6 +127,34 @@ _QUEEN_RUNNING_TOOLS = [
 # additions.
 # ---------------------------------------------------------------------------
 
+_shared_building_knowledge = """\
+# Shared Rules (Planning & Building)
+
+## Paths (MANDATORY)
+**Always use RELATIVE paths** \
+(e.g. `exports/agent_name/config.py`, `exports/agent_name/nodes/__init__.py`).
+**Never use absolute paths** like `/mnt/data/...` or `/workspace/...` — they fail.
+The project root is implicit.
+
+## Worker File Tools (hive-tools MCP)
+Workers use a DIFFERENT MCP server (hive-tools) with DIFFERENT tool names. \
+When designing worker nodes or writing worker system prompts, reference these \
+tool names — NOT the coder-tools names (read_file, write_file, etc.).
+
+Worker data tools (for large results and spillover):
+- save_data(filename, data, data_dir) — save data to a file for later retrieval
+- load_data(filename, data_dir, offset_bytes?, limit_bytes?) — load data \
+with byte-based pagination
+- list_data_files(data_dir) — list available data files
+- append_data(filename, data, data_dir) — append to a file incrementally
+- edit_data(filename, old_text, new_text, data_dir) — find-and-replace in a data file
+- serve_file_to_user(filename, data_dir, label?, open_in_browser?) — \
+generate a clickable file URI for the user
+
+IMPORTANT: Do NOT tell workers to use read_file, write_file, edit_file, \
+search_files, or list_directory — those are YOUR tools, not theirs.
+"""
+
 _planning_knowledge = """\
 **A responsible engineer doesn't jump into building. First, \
 understand the problem and be transparent about what the framework can and cannot do.**
@@ -140,30 +168,6 @@ what they want before this step, skip the question and proceed directly.
 collaborate with the user to define it.
 - **Discover tools dynamically.** NEVER reference tools from static \
 docs. Always run list_agent_tools() to see what actually exists.
-
-## Paths (MANDATORY)
-**Always use RELATIVE paths** when reading files \
-(e.g. `exports/agent_name/config.py`, `exports/agent_name/nodes/__init__.py`).
-**Never use absolute paths** like `/mnt/data/...` or `/workspace/...` — they fail.
-The project root is implicit.
-
-## Worker File Tools (hive-tools MCP)
-Workers use a DIFFERENT MCP server (hive-tools) with DIFFERENT tool names. \
-When designing worker nodes, reference these tool names in your graph — \
-NOT the coder-tools names (read_file, write_file, etc.).
-
-Worker data tools (for large results and spillover):
-- save_data(filename, data, data_dir) — save data to a file for later retrieval
-- load_data(filename, data_dir, offset_bytes?, limit_bytes?) — load data \
-with byte-based pagination
-- list_data_files(data_dir) — list available data files
-- append_data(filename, data, data_dir) — append to a file incrementally
-- edit_data(filename, old_text, new_text, data_dir) — find-and-replace in a data file
-- serve_file_to_user(filename, data_dir, label?, open_in_browser?) — \
-generate a clickable file URI for the user
-
-IMPORTANT: Do NOT design workers to use read_file, write_file, edit_file, \
-search_files, or list_directory — those are YOUR tools, not theirs.
 
 # Tool Discovery (MANDATORY before designing)
 
@@ -375,11 +379,6 @@ exists. Read actual source to confirm. Search if unsure.
 errors yourself. Don't declare success until validation passes.
 
 # Tools
-## Paths (MANDATORY)
-**Always use RELATIVE paths**
-(e.g. `exports/agent_name/config.py`, `exports/agent_name/nodes/__init__.py`).
-**Never use absolute paths** like `/mnt/data/...` or `/workspace/...` — they fail.
-The project root is implicit.
 
 ## File I/O (your tools — coder-tools MCP)
 - read_file(path, offset?, limit?, hashline?) — read with line numbers; \
@@ -394,24 +393,6 @@ replace_lines, insert_after, insert_before, replace, append
 hashline=True for anchors in results
 - run_command(command, cwd?, timeout?) — shell execution
 - undo_changes(path?) — restore from git snapshot
-
-## Worker File Tools (hive-tools MCP)
-Workers use a DIFFERENT MCP server (hive-tools) with DIFFERENT tool names. \
-When writing worker system prompts or node instructions, reference these \
-tool names — NOT the coder-tools names above.
-
-Worker data tools (for large results and spillover):
-- save_data(filename, data, data_dir) — save data to a file for later retrieval
-- load_data(filename, data_dir, offset_bytes?, limit_bytes?) — load data \
-with byte-based pagination
-- list_data_files(data_dir) — list available data files
-- append_data(filename, data, data_dir) — append to a file incrementally
-- edit_data(filename, old_text, new_text, data_dir) — find-and-replace in a data file
-- serve_file_to_user(filename, data_dir, label?, open_in_browser?) — \
-generate a clickable file URI for the user
-
-IMPORTANT: Do NOT tell workers to use read_file, write_file, edit_file, \
-search_files, or list_directory — those are YOUR tools, not theirs.
 
 ## Meta-Agent
 - list_agent_tools(server_config_path?, output_schema?, group?) — discover \
@@ -478,7 +459,7 @@ visualizer. Do NOT wait for user input between validation and loading.
 """
 
 # Composed version — coder_node uses both halves (it has no phase split).
-_package_builder_knowledge = _planning_knowledge + _building_knowledge
+_package_builder_knowledge = _shared_building_knowledge + _planning_knowledge + _building_knowledge
 
 
 # ---------------------------------------------------------------------------
@@ -1020,6 +1001,7 @@ __all__ = [
     "_queen_behavior_running",
     "_queen_phase_7",
     "_queen_style",
+    "_shared_building_knowledge",
     "_planning_knowledge",
     "_building_knowledge",
     "_package_builder_knowledge",

@@ -43,6 +43,7 @@ async def create_queen(
         _building_knowledge,
         _gcu_building_section,
         _planning_knowledge,
+        _shared_building_knowledge,
         _queen_behavior_always,
         _queen_behavior_building,
         _queen_behavior_planning,
@@ -149,6 +150,7 @@ async def create_queen(
 
     _planning_body = (
         _queen_style
+        + _shared_building_knowledge
         + _queen_tools_planning
         + _queen_behavior_always
         + _queen_behavior_planning
@@ -159,6 +161,7 @@ async def create_queen(
 
     _building_body = (
         _queen_style
+        + _shared_building_knowledge
         + _queen_tools_building
         + _queen_behavior_always
         + _queen_behavior_building
