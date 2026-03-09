@@ -747,9 +747,12 @@ class EventLoopNode(NodeProtocol):
                 continue  # back to top of for-iteration loop
 
             # 6e'. Feed actual API token count back for accurate estimation
-            turn_input = turn_tokens.get("input", 0)
-            if turn_input > 0:
-                conversation.update_token_count(turn_input)
+            if "turn_tokens" in locals():
+                turn_input = turn_tokens.get("input", 0)
+                if turn_input > 0:
+                    conversation.update_token_count(turn_input)
+            else:
+                turn_tokens = {"input": 0, "output": 0}
 
             # 6e''. Post-turn compaction check (catches tool-result bloat)
             if conversation.needs_compaction():

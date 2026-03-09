@@ -1,0 +1,25 @@
+{
+  "agent": {
+    "id": "gtm_signal_agent",
+    "name": "GTM Signal Intelligence Agent",
+    "version": "1.0.0",
+    "description": "Continuously detects GTM signals, enriches leads, scores opportunities, drafts outreach, and supports human approval before CRM actions."
+  },
+  "graph": {
+    "id": "gtm-signal-agent-graph",
+    "goal_id": "gtm-signal-automation",
+    "version": "1.0.0",
+    "entry_node": "intake",
+    "entry_points": {
+      "start": "intake"
+    },
+    "pause_nodes": [],
+    "terminal_nodes": [],
+    "conversation_mode": "continuous"
+  },
+  "required_tools": [
+    "exa_search",
+    "apollo_enrichment",
+    "hubspot_upsert"
+  ]
+}
