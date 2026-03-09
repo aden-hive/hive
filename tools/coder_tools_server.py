@@ -1321,9 +1321,11 @@ def validate_agent_package(agent_name: str) -> str:
             result = json.loads(proc.stdout.strip())
             steps["node_completeness"] = {
                 "passed": result["valid"],
-                "output": "; ".join(result["errors"])
-                if result["errors"]
-                else "All defined nodes are in the graph",
+                "output": (
+                    "; ".join(result["errors"])
+                    if result["errors"]
+                    else "All defined nodes are in the graph"
+                ),
             }
             if not result["valid"]:
                 steps["node_completeness"]["errors"] = result["errors"]
@@ -1434,7 +1436,7 @@ def _node_var_name(node_id: str) -> str:
 
 
 @mcp.tool()
-def initialize_agent_package(agent_name: str, nodes: str | None = None) -> str:
+def initialize_and_build_agent(agent_name: str, nodes: str | None = None) -> str:
     """Scaffold a new agent package with placeholder files.
 
     Creates exports/{agent_name}/ with all files needed for a runnable agent:

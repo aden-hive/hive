@@ -71,12 +71,13 @@ class WorkerSessionAdapter:
 class QueenPhaseState:
     """Mutable state container for queen operating phase.
 
-    Three phases: building → staging → running.
+    Four phases: planning → building → staging → running.
     Shared between the dynamic_tools_provider callback and tool handlers
     that trigger phase transitions.
     """
 
-    phase: str = "building"  # "building", "staging", or "running"
+    phase: str = "building"  # "planning", "building", "staging", or "running"
+    planning_tools: list = field(default_factory=list)  # list[Tool]
     building_tools: list = field(default_factory=list)  # list[Tool]
     staging_tools: list = field(default_factory=list)  # list[Tool]
     running_tools: list = field(default_factory=list)  # list[Tool]
@@ -84,12 +85,15 @@ class QueenPhaseState:
     event_bus: Any = None  # EventBus — for emitting QUEEN_PHASE_CHANGED events
 
     # Phase-specific prompts (set by session_manager after construction)
+    prompt_planning: str = ""
     prompt_building: str = ""
     prompt_staging: str = ""
     prompt_running: str = ""
 
     def get_current_tools(self) -> list:
         """Return tools for the current phase."""
+        if self.phase == "planning":
+            return list(self.planning_tools)
         if self.phase == "running":
             return list(self.running_tools)
         if self.phase == "staging":
@@ -98,6 +102,8 @@ class QueenPhaseState:
 
     def get_current_prompt(self) -> str:
         """Return the system prompt for the current phase."""
+        if self.phase == "planning":
+            return self.prompt_planning
         if self.phase == "running":
             return self.prompt_running
         if self.phase == "staging":
@@ -196,6 +202,25 @@ class QueenPhaseState:
                 "[PHASE CHANGE] Switched to BUILDING phase. "
                 "Lifecycle tools removed. Full coding tools restored. "
                 "Call load_built_agent(path) when ready to stage."
+            )
+
+    async def switch_to_planning(self, source: str = "tool") -> None:
+        """Switch to planning phase and notify the queen.
+
+        Args:
+            source: Who triggered the switch — "tool", "frontend", or "auto".
+        """
+        if self.phase == "planning":
+            return
+        self.phase = "planning"
+        tool_names = [t.name for t in self.planning_tools]
+        logger.info("Queen phase → planning (source=%s, tools: %s)", source, tool_names)
+        await self._emit_phase_event()
+        if self.inject_notification:
+            await self.inject_notification(
+                "[PHASE CHANGE] Switched to PLANNING phase. "
+                "Coding tools removed. Discuss goals and design with the user. "
+                "Available tools: " + ", ".join(tool_names) + "."
             )
 
 
@@ -513,6 +538,71 @@ def register_queen_lifecycle_tools(
         "stop_worker_and_edit", _stop_edit_tool, lambda inputs: stop_worker_and_edit()
     )
     tools_registered += 1
+
+    # --- replan_agent (Building → Planning) -----------------------------------
+
+    async def replan_agent() -> str:
+        """Switch from building back to planning phase.
+        Only use when the user explicitly asks to re-plan."""
+        if phase_state is not None:
+            if phase_state.phase != "building":
+                return json.dumps(
+                    {"error": f"Cannot replan: currently in {phase_state.phase} phase."}
+                )
+            await phase_state.switch_to_planning(source="tool")
+        return json.dumps(
+            {
+                "status": "replanning",
+                "phase": "planning",
+                "message": (
+                    "Switched to PLANNING phase. Coding tools removed. "
+                    "Discuss the new design with the user."
+                ),
+            }
+        )
+
+    _replan_tool = Tool(
+        name="replan_agent",
+        description=(
+            "Switch from building back to planning phase. "
+            "Only use when the user explicitly asks to re-plan or redesign the agent."
+        ),
+        parameters={"type": "object", "properties": {}},
+    )
+    registry.register("replan_agent", _replan_tool, lambda inputs: replan_agent())
+    tools_registered += 1
+
+    # --- initialize_and_build_agent wrapper (Planning → Building) -------------
+
+    # Grab the underlying MCP tool executor before we override it.
+    _existing_init = registry._tools.get("initialize_and_build_agent")
+    if _existing_init is not None:
+        _orig_init_executor = _existing_init.executor
+
+        async def initialize_and_build_agent_wrapper(inputs: dict) -> str:
+            """Wrapper: scaffold package via MCP tool, then switch to building phase."""
+            result = _orig_init_executor(inputs)
+            # Handle both sync and async executors
+            if asyncio.iscoroutine(result) or asyncio.isfuture(result):
+                result = await result
+            # If result is a ToolResult, extract the text content
+            result_str = str(result)
+            if hasattr(result, "content"):
+                result_str = str(result.content)
+            try:
+                parsed = json.loads(result_str)
+                if parsed.get("success", True):
+                    if phase_state is not None:
+                        await phase_state.switch_to_building(source="tool")
+            except (json.JSONDecodeError, KeyError, TypeError):
+                pass
+            return result_str
+
+        registry.register(
+            "initialize_and_build_agent",
+            _existing_init.tool,
+            lambda inputs: initialize_and_build_agent_wrapper(inputs),
+        )
 
     # --- stop_worker (Running → Staging) -------------------------------------
 

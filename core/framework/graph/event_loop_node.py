@@ -101,7 +101,10 @@ class JudgeVerdict:
     """Result of judge evaluation for the event loop."""
 
     action: Literal["ACCEPT", "RETRY", "ESCALATE"]
-    feedback: str = ""
+    # None  = no evaluation happened (skip_judge, tool-continue); not logged.
+    # ""    = evaluated but no feedback; logged with default text.
+    # "..." = evaluated with feedback; logged as-is.
+    feedback: str | None = None
 
 
 @runtime_checkable
@@ -1475,7 +1478,7 @@ class EventLoopNode(NodeProtocol):
                 continue
 
             # Judge evaluation (should_judge is always True here)
-            verdict = await self._evaluate(
+            verdict = await self._judge_turn(
                 ctx,
                 conversation,
                 accumulator,
@@ -1609,7 +1612,7 @@ class EventLoopNode(NodeProtocol):
                         node_name=ctx.node_spec.name,
                         node_type="event_loop",
                         success=False,
-                        error=f"Judge escalated: {verdict.feedback}",
+                        error=f"Judge escalated: {verdict.feedback or 'no feedback'}",
                         total_steps=iteration + 1,
                         tokens_used=total_input_tokens + total_output_tokens,
                         input_tokens=total_input_tokens,
@@ -1623,7 +1626,7 @@ class EventLoopNode(NodeProtocol):
                     )
                 return NodeResult(
                     success=False,
-                    error=f"Judge escalated: {verdict.feedback}",
+                    error=f"Judge escalated: {verdict.feedback or 'no feedback'}",
                     output=accumulator.to_dict(),
                     tokens_used=total_input_tokens + total_output_tokens,
                     latency_ms=latency_ms,
@@ -1646,8 +1649,9 @@ class EventLoopNode(NodeProtocol):
                         output_tokens=turn_tokens.get("output", 0),
                         latency_ms=iter_latency_ms,
                     )
-                if verdict.feedback:
-                    await conversation.add_user_message(f"[Judge feedback]: {verdict.feedback}")
+                if verdict.feedback is not None:
+                    fb = verdict.feedback or "[Judge returned RETRY without feedback]"
+                    await conversation.add_user_message(f"[Judge feedback]: {fb}")
                 continue
 
         # 7. Max iterations exhausted
@@ -2789,7 +2793,7 @@ class EventLoopNode(NodeProtocol):
     # Judge evaluation
     # -------------------------------------------------------------------
 
-    async def _evaluate(
+    async def _judge_turn(
         self,
         ctx: NodeContext,
         conversation: NodeConversation,
@@ -2798,14 +2802,29 @@ class EventLoopNode(NodeProtocol):
         tool_results: list[dict],
         iteration: int,
     ) -> JudgeVerdict:
-        """Evaluate the current state using judge or implicit logic."""
-        # Short-circuit: subagent called report_to_parent(mark_complete=True)
+        """Evaluate the current state using judge or implicit logic.
+
+        Evaluation levels (in order):
+          0. Short-circuits: mark_complete, skip_judge, tool-continue.
+          1. Custom judge (JudgeProtocol) — full authority when set.
+          2. Implicit judge — output-key check + optional conversation-aware
+             quality gate (when ``success_criteria`` is defined).
+
+        Returns a JudgeVerdict.  ``feedback=None`` means no real evaluation
+        happened (skip_judge, tool-continue); the caller must not inject a
+        feedback message.  Any non-None feedback (including ``""``) means a
+        real evaluation occurred and will be logged into the conversation.
+        """
+
+        # --- Level 0: short-circuits (no evaluation) -----------------------
+
         if self._mark_complete_flag:
             return JudgeVerdict(action="ACCEPT")
 
-        # Opt-out: node explicitly disables judge (e.g. conversational queen)
         if ctx.node_spec.skip_judge:
-            return JudgeVerdict(action="RETRY", feedback="")
+            return JudgeVerdict(action="RETRY")  # feedback=None → not logged
+
+        # --- Level 1: custom judge -----------------------------------------
 
         if self._judge is not None:
             context = {
@@ -2820,81 +2839,82 @@ class EventLoopNode(NodeProtocol):
                     accumulator, ctx.node_spec.output_keys, ctx.node_spec.nullable_output_keys
                 ),
             }
-            return await self._judge.evaluate(context)
+            verdict = await self._judge.evaluate(context)
+            # Ensure evaluated RETRY always carries feedback for logging.
+            if verdict.action == "RETRY" and not verdict.feedback:
+                return JudgeVerdict(action="RETRY", feedback="Custom judge returned RETRY.")
+            return verdict
 
-        # Implicit judge: accept when no tool calls and all output keys present
-        if not tool_results:
-            missing = self._get_missing_output_keys(
-                accumulator, ctx.node_spec.output_keys, ctx.node_spec.nullable_output_keys
+        # --- Level 2: implicit judge ---------------------------------------
+
+        # Real tool calls were made — let the agent keep working.
+        if tool_results:
+            return JudgeVerdict(action="RETRY")  # feedback=None → not logged
+
+        missing = self._get_missing_output_keys(
+            accumulator, ctx.node_spec.output_keys, ctx.node_spec.nullable_output_keys
+        )
+
+        if missing:
+            return JudgeVerdict(
+                action="RETRY",
+                feedback=(
+                    f"Task incomplete. Required outputs not yet produced: {missing}. "
+                    f"Follow your system prompt instructions to complete the work."
+                ),
             )
-            if not missing:
-                # Safety check: when ALL output keys are nullable and NONE
-                # have been set, the node produced nothing useful.  Retry
-                # instead of accepting an empty result — this prevents
-                # client-facing nodes from terminating before the user
-                # ever interacts, and non-client-facing nodes from
-                # short-circuiting without doing their work.
-                output_keys = ctx.node_spec.output_keys or []
-                nullable_keys = set(ctx.node_spec.nullable_output_keys or [])
-                all_nullable = output_keys and nullable_keys >= set(output_keys)
-                none_set = not any(accumulator.get(k) is not None for k in output_keys)
-                if all_nullable and none_set:
-                    return JudgeVerdict(
-                        action="RETRY",
-                        feedback=(
-                            f"No output keys have been set yet. "
-                            f"Use set_output to set at least one of: {output_keys}"
-                        ),
-                    )
 
-                # Client-facing nodes with no output keys are meant for
-                # continuous interaction — they should not auto-accept.
-                # Only exit via shutdown, max_iterations, or max_node_visits.
-                # Inject tool-use pressure so models stuck in a
-                # "narrate-instead-of-act" loop get corrective feedback.
-                if not output_keys and ctx.node_spec.client_facing:
-                    return JudgeVerdict(
-                        action="RETRY",
-                        feedback=(
-                            "STOP describing what you will do. "
-                            "You have FULL access to all tools — file creation, "
-                            "shell commands, MCP tools — and you CAN call them "
-                            "directly in your response. Respond ONLY with tool "
-                            "calls, no prose. Execute the task now."
-                        ),
-                    )
+        # All output keys present — run safety checks before accepting.
 
-                # Level 2: conversation-aware quality check (if success_criteria set)
-                if ctx.node_spec.success_criteria and ctx.llm:
-                    from framework.graph.conversation_judge import evaluate_phase_completion
+        output_keys = ctx.node_spec.output_keys or []
+        nullable_keys = set(ctx.node_spec.nullable_output_keys or [])
 
-                    verdict = await evaluate_phase_completion(
-                        llm=ctx.llm,
-                        conversation=conversation,
-                        phase_name=ctx.node_spec.name,
-                        phase_description=ctx.node_spec.description,
-                        success_criteria=ctx.node_spec.success_criteria,
-                        accumulator_state=accumulator.to_dict(),
-                        max_history_tokens=self._config.max_history_tokens,
-                    )
-                    if verdict.action != "ACCEPT":
-                        return JudgeVerdict(
-                            action=verdict.action,
-                            feedback=verdict.feedback or "Phase criteria not met.",
-                        )
+        # All-nullable with nothing set → node produced nothing useful.
+        all_nullable = output_keys and nullable_keys >= set(output_keys)
+        none_set = not any(accumulator.get(k) is not None for k in output_keys)
+        if all_nullable and none_set:
+            return JudgeVerdict(
+                action="RETRY",
+                feedback=(
+                    f"No output keys have been set yet. "
+                    f"Use set_output to set at least one of: {output_keys}"
+                ),
+            )
 
-                return JudgeVerdict(action="ACCEPT")
-            else:
+        # Client-facing with no output keys → continuous interaction node.
+        # Inject tool-use pressure instead of auto-accepting.
+        if not output_keys and ctx.node_spec.client_facing:
+            return JudgeVerdict(
+                action="RETRY",
+                feedback=(
+                    "STOP describing what you will do. "
+                    "You have FULL access to all tools — file creation, "
+                    "shell commands, MCP tools — and you CAN call them "
+                    "directly in your response. Respond ONLY with tool "
+                    "calls, no prose. Execute the task now."
+                ),
+            )
+
+        # Level 2b: conversation-aware quality check (if success_criteria set)
+        if ctx.node_spec.success_criteria and ctx.llm:
+            from framework.graph.conversation_judge import evaluate_phase_completion
+
+            verdict = await evaluate_phase_completion(
+                llm=ctx.llm,
+                conversation=conversation,
+                phase_name=ctx.node_spec.name,
+                phase_description=ctx.node_spec.description,
+                success_criteria=ctx.node_spec.success_criteria,
+                accumulator_state=accumulator.to_dict(),
+                max_history_tokens=self._config.max_history_tokens,
+            )
+            if verdict.action != "ACCEPT":
                 return JudgeVerdict(
-                    action="RETRY",
-                    feedback=(
-                        f"Task incomplete. Required outputs not yet produced: {missing}. "
-                        f"Follow your system prompt instructions to complete the work."
-                    ),
+                    action=verdict.action,
+                    feedback=verdict.feedback or "Phase criteria not met.",
                 )
 
-        # Tool calls were made -- continue loop
-        return JudgeVerdict(action="RETRY", feedback="")
+        return JudgeVerdict(action="ACCEPT")
 
     # -------------------------------------------------------------------
     # Helpers
