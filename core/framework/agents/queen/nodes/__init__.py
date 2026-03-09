@@ -75,6 +75,9 @@ _QUEEN_PLANNING_TOOLS = [
     # Discovery + design
     "list_agent_tools",
     "list_agents",
+    "list_agent_sessions",
+    "list_agent_checkpoints",
+    "get_agent_checkpoint",
     "initialize_and_build_agent",
     # Load existing agent (after user confirms)
     "load_built_agent",
@@ -525,6 +528,9 @@ to BUILDING phase for that.
 - list_agent_tools(server_config_path?, output_schema?, group?) \
 — Discover available tools for design
 - list_agents() — See existing agent packages for reference
+- list_agent_sessions(agent_name, status?, limit?) — Inspect past runs of an agent
+- list_agent_checkpoints(agent_name, session_id) — View execution history
+- get_agent_checkpoint(agent_name, session_id, checkpoint_id?) — Load a checkpoint
 - initialize_and_build_agent(agent_name, nodes?) — Scaffold the agent package and \
 transition to BUILDING phase. Call this after the user approves your design.
 - load_built_agent(agent_path) — Load an existing agent and switch to STAGING \
