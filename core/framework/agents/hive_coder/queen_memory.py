@@ -219,6 +219,8 @@ async def consolidate_queen_memory(
             logger.debug("queen_memory: no session context, skipping consolidation")
             return
 
+        logger.info("queen_memory: consolidating memory for session %s ...", session_id)
+
         existing_semantic = read_semantic_memory()
         today_journal = read_episodic_memory()
         today_str = date.today().strftime("%B %-d, %Y")
