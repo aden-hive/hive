@@ -487,6 +487,117 @@ class _GitHubClient:
             "total": len(emails),
         }
 
+    # --- Commits ---
+
+    def list_commits(
+        self,
+        owner: str,
+        repo: str,
+        sha: str | None = None,
+        author: str | None = None,
+        since: str | None = None,
+        until: str | None = None,
+        limit: int = 30,
+    ) -> dict[str, Any]:
+        """List commits for a repository.
+
+        API ref: GET /repos/{owner}/{repo}/commits
+        """
+        owner = _sanitize_path_param(owner, "owner")
+        repo = _sanitize_path_param(repo, "repo")
+        params: dict[str, Any] = {"per_page": min(limit, 100)}
+        if sha:
+            params["sha"] = sha
+        if author:
+            params["author"] = author
+        if since:
+            params["since"] = since
+        if until:
+            params["until"] = until
+
+        response = httpx.get(
+            f"{GITHUB_API_BASE}/repos/{owner}/{repo}/commits",
+            headers=self._headers,
+            params=params,
+            timeout=30.0,
+        )
+        return self._handle_response(response)
+
+    # --- Releases ---
+
+    def create_release(
+        self,
+        owner: str,
+        repo: str,
+        tag_name: str,
+        name: str | None = None,
+        body: str | None = None,
+        draft: bool = False,
+        prerelease: bool = False,
+        target_commitish: str | None = None,
+    ) -> dict[str, Any]:
+        """Create a new release.
+
+        API ref: POST /repos/{owner}/{repo}/releases
+        """
+        owner = _sanitize_path_param(owner, "owner")
+        repo = _sanitize_path_param(repo, "repo")
+        payload: dict[str, Any] = {
+            "tag_name": tag_name,
+            "draft": draft,
+            "prerelease": prerelease,
+        }
+        if name:
+            payload["name"] = name
+        if body:
+            payload["body"] = body
+        if target_commitish:
+            payload["target_commitish"] = target_commitish
+
+        response = httpx.post(
+            f"{GITHUB_API_BASE}/repos/{owner}/{repo}/releases",
+            headers=self._headers,
+            json=payload,
+            timeout=30.0,
+        )
+        return self._handle_response(response)
+
+    # --- Actions / Workflow Runs ---
+
+    def list_workflow_runs(
+        self,
+        owner: str,
+        repo: str,
+        workflow_id: str | None = None,
+        branch: str | None = None,
+        status: str | None = None,
+        limit: int = 20,
+    ) -> dict[str, Any]:
+        """List workflow runs for a repository.
+
+        API ref: GET /repos/{owner}/{repo}/actions/runs
+        """
+        owner = _sanitize_path_param(owner, "owner")
+        repo = _sanitize_path_param(repo, "repo")
+        params: dict[str, Any] = {"per_page": min(limit, 100)}
+        if branch:
+            params["branch"] = branch
+        if status:
+            params["status"] = status
+
+        if workflow_id:
+            url = f"{GITHUB_API_BASE}/repos/{owner}/{repo}/actions/workflows/{workflow_id}/runs"
+        else:
+            url = f"{GITHUB_API_BASE}/repos/{owner}/{repo}/actions/runs"
+
+        response = httpx.get(
+            url,
+            headers=self._headers,
+            params=params,
+            timeout=30.0,
+        )
+        return self._handle_response(response)
+
 
 def register_tools(
     mcp: FastMCP,
