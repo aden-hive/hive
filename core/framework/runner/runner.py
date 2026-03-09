@@ -32,6 +32,7 @@ from framework.runtime.runtime_log_store import RuntimeLogStore
 
 if TYPE_CHECKING:
     from framework.runner.protocol import AgentMessage, CapabilityResponse
+    from framework.schemas.replay import ReplayConfig
 
 
 logger = logging.getLogger(__name__)
@@ -1494,6 +1495,80 @@ class AgentRunner:
             input_data=input_data or {},
             entry_point_id=entry_point_id,
             session_state=session_state,
+        )
+
+    async def run_replay(
+        self,
+        replay_config: "ReplayConfig",
+    ) -> tuple["ExecutionResult", str]:
+        """Re-execute a previous session with frozen LLM/tool responses.
+
+        Loads the source session's L3 tool_logs.jsonl to build a response
+        cache, then runs the agent using those cached responses instead of
+        calling live LLM / tool systems.  The replay is saved as a new,
+        independent session so the original session is never mutated.
+
+        Args:
+            replay_config: Controls which session to replay, which node to
+                start from, and whether LLM / tool calls are frozen.
+
+        Returns:
+            ``(ExecutionResult, replay_session_id)`` — the execution result
+            of the replay run and the new session ID under which it was stored.
+
+        Example::
+
+            from framework.schemas.replay import ReplayConfig
+            runner = AgentRunner.load("exports/my-agent")
+            config = ReplayConfig(
+                source_session_id="session_20260304_143022_abc12345",
+                freeze_llm=True,
+                freeze_tools=True,
+            )
+            result, session_id = await runner.run_replay(config)
+        """
+        from framework.schemas.replay import ReplayConfig as _ReplayConfig
+
+        # Ensure the runtime is set up and running
+        if self._agent_runtime is None:
+            self._setup()
+        if not self._agent_runtime.is_running:
+            await self._agent_runtime.start()
+
+        # Resolve entry point (same logic as run())
+        entry_points = self._agent_runtime.get_entry_points()
+        entry_point_id = entry_points[0].id if entry_points else "default"
+
+        # Thread replay_config to GraphExecutor via a special key in session_state.
+        # GraphExecutor.execute() detects and unpacks this key before its normal
+        # session_state processing, avoiding the need to modify the entire
+        # AgentRuntime → ExecutionStream → GraphExecutor call chain.
+        session_state: dict = {"_replay_config": replay_config.model_dump()}
+
+        # Trigger execution and capture exec_id so we can return it as the
+        # replay_session_id alongside the ExecutionResult.
+        replay_session_id: str = await self._agent_runtime.trigger(
+            entry_point_id=entry_point_id,
+            input_data={},  # actual input_data is merged from source session by executor
+            session_state=session_state,
+        )
+
+        # Wait for completion using the internal stream (same as trigger_and_wait,
+        # but we capture exec_id above before delegating to wait_for_completion).
+        stream = self._agent_runtime._resolve_stream(entry_point_id)  # type: ignore[attr-defined]
+        if stream is None:
+            return (
+                ExecutionResult(
+                    success=False,
+                    error=f"Cannot resolve execution stream for entry point '{entry_point_id}'.",
+                ),
+                replay_session_id,
+            )
+
+        result = await stream.wait_for_completion(replay_session_id)
+        return (
+            result or ExecutionResult(success=False, error="Replay execution timed out."),
+            replay_session_id,
         )
 
     async def _run_with_agent_runtime(

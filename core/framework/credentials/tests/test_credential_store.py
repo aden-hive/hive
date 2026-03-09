@@ -10,8 +10,11 @@ Tests cover:
 - OAuth2 module
 """
 
+import concurrent.futures
+import json
 import os
 import tempfile
+import threading
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from unittest.mock import patch
@@ -322,6 +325,164 @@ class TestEncryptedFileStorage:
         storage.save(CredentialObject(id="test", keys={}))
         assert storage.delete("test")
         assert storage.load("test") is None
+
+    # ------------------------------------------------------------------ #
+    # T1 — Concurrent saves, same EncryptedFileStorage instance            #
+    # ------------------------------------------------------------------ #
+    def test_concurrent_saves_same_instance(self, storage):
+        """20 threads each save a distinct credential through the same instance.
+        All 20 must appear in list_all() — verifies threading.RLock prevents
+        in-process TOCTOU on the index."""
+        ids = [f"cred_{i}" for i in range(20)]
+
+        def save_one(cred_id):
+            storage.save(CredentialObject(id=cred_id, keys={}))
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=10) as ex:
+            futures = [ex.submit(save_one, cid) for cid in ids]
+            for f in concurrent.futures.as_completed(futures):
+                f.result()  # re-raise any exception
+
+        result = set(storage.list_all())
+        assert result == set(ids), f"Missing IDs: {set(ids) - result}"
+
+    # ------------------------------------------------------------------ #
+    # T2 — Concurrent saves, two separate instances (cross-instance TOCTOU)#
+    # ------------------------------------------------------------------ #
+    def test_concurrent_saves_cross_instance(self, temp_dir):
+        """Two EncryptedFileStorage instances pointed at the same directory
+        save different credentials concurrently.  Both must survive in the
+        index — directly reproduces the T1–T12 interleaving from the forensic
+        analysis (issue #5855)."""
+        from cryptography.fernet import Fernet
+
+        key = Fernet.generate_key()
+        store_a = EncryptedFileStorage(temp_dir, encryption_key=key)
+        store_b = EncryptedFileStorage(temp_dir, encryption_key=key)
+
+        errors = []
+        iterations = 15
+
+        def save_via_a():
+            for i in range(iterations):
+                try:
+                    store_a.save(CredentialObject(id=f"alpha_{i}", keys={}))
+                except Exception as e:
+                    errors.append(e)
+
+        def save_via_b():
+            for i in range(iterations):
+                try:
+                    store_b.save(CredentialObject(id=f"beta_{i}", keys={}))
+                except Exception as e:
+                    errors.append(e)
+
+        t1 = threading.Thread(target=save_via_a)
+        t2 = threading.Thread(target=save_via_b)
+        t1.start()
+        t2.start()
+        t1.join()
+        t2.join()
+
+        assert not errors, f"Exceptions during concurrent saves: {errors}"
+
+        # Verify from a fresh third instance
+        store_c = EncryptedFileStorage(temp_dir, encryption_key=key)
+        result = set(store_c.list_all())
+        expected = {f"alpha_{i}" for i in range(iterations)} | {f"beta_{i}" for i in range(iterations)}
+        assert result == expected, f"Missing IDs: {expected - result}"
+
+    # ------------------------------------------------------------------ #
+    # T3 — Corrupted index: list_all() recovers via .enc scan             #
+    # ------------------------------------------------------------------ #
+    def test_corrupted_index_list_all_recovers(self, storage):
+        """Pre-saving a credential then corrupting index.json must not crash
+        list_all() — it should fall back to scanning .enc files."""
+        storage.save(CredentialObject(id="existing", keys={}))
+
+        index_path = storage.base_path / "metadata" / "index.json"
+        index_path.write_bytes(b"")  # truncate to empty — simulates crash mid-write
+
+        result = storage.list_all()  # must not raise
+        assert isinstance(result, list)
+        assert "existing" in result  # recovered from .enc scan
+
+    # ------------------------------------------------------------------ #
+    # T4 — Corrupted index: save() still works and new entry is readable  #
+    # ------------------------------------------------------------------ #
+    def test_corrupted_index_save_recovers(self, storage):
+        """With a corrupt index.json, save() must succeed and the credential
+        must be loadable afterward."""
+        index_path = storage.base_path / "metadata" / "index.json"
+        index_path.write_text("not valid json")
+
+        cred = CredentialObject(
+            id="new_cred",
+            keys={"k": CredentialKey(name="k", value=SecretStr("v"))},
+        )
+        storage.save(cred)  # must not raise
+
+        loaded = storage.load("new_cred")
+        assert loaded is not None
+        assert loaded.get_key("k") == "v"
+        assert "new_cred" in storage.list_all()
+
+    # ------------------------------------------------------------------ #
+    # T5 — Atomic .enc write: no partial file left on mid-write failure   #
+    # ------------------------------------------------------------------ #
+    def test_atomic_enc_write_no_partial_on_crash(self, storage):
+        """If os.fsync raises (disk-full / crash simulation), the .enc file
+        must not be left in a corrupt/partial state — atomic_write's
+        BaseException handler deletes the .tmp file."""
+        import unittest.mock
+
+        cred = CredentialObject(id="crash_test", keys={})
+
+        with unittest.mock.patch("os.fsync", side_effect=OSError("disk full")):
+            with pytest.raises(OSError):
+                storage.save(cred)
+
+        cred_path = storage._cred_path("crash_test")
+        assert not cred_path.exists(), ".enc must not exist after a failed atomic write"
+
+        tmp_path = cred_path.with_suffix(".enc.tmp")
+        assert not tmp_path.exists(), ".tmp must be cleaned up after failure"
+
+    # ------------------------------------------------------------------ #
+    # T6 — delete() index-first: no ghost entry when unlink fails         #
+    # ------------------------------------------------------------------ #
+    def test_delete_no_ghost_entry(self, storage):
+        """delete() must remove the credential from the index before
+        unlinking the .enc file.  If unlink raises, the index is already
+        correct — no ghost entry should remain."""
+        storage.save(CredentialObject(id="ghost_target", keys={}))
+
+        original_unlink = Path.unlink
+
+        def failing_unlink(self_path, missing_ok=False):
+            if self_path.suffix == ".enc" and "ghost_target" in self_path.name:
+                raise OSError("unlink failed")
+            original_unlink(self_path, missing_ok=missing_ok)
+
+        with patch.object(Path, "unlink", failing_unlink):
+            with pytest.raises(OSError):
+                storage.delete("ghost_target")
+
+        # Index must already have been updated — credential ID not listed
+        assert "ghost_target" not in storage.list_all()
+
+    # ------------------------------------------------------------------ #
+    # T7 — Atomic index write: no .tmp file left after successful save    #
+    # ------------------------------------------------------------------ #
+    def test_atomic_index_write_no_tmp_leftover(self, storage):
+        """After a successful save(), no index.json.tmp file should exist.
+        Confirms atomic_write cleans up its temp file on success."""
+        storage.save(CredentialObject(id="clean_write", keys={}))
+
+        index_path = storage.base_path / "metadata" / "index.json"
+        tmp_path = index_path.with_suffix(".json.tmp")
+        assert not tmp_path.exists(), "index.json.tmp must not exist after successful write"
+        assert index_path.exists(), "index.json must exist after save"
 
 
 class TestCompositeStorage:

@@ -6,7 +6,9 @@ summary aggregation at end_run().
 
 from __future__ import annotations
 
+import asyncio
 import json
+import threading
 from pathlib import Path
 
 import pytest
@@ -1081,3 +1083,214 @@ class TestRuntimeLogger:
         node = loaded.nodes[0]
         assert node.exit_status == "guard_failure"
         assert node.success is False
+
+    # -----------------------------------------------------------------------
+    # Concurrency tests — issue #5918
+    # -----------------------------------------------------------------------
+
+    @pytest.mark.asyncio
+    async def test_ensure_node_logged_concurrent_with_log_node_complete(
+        self, tmp_path: Path
+    ):
+        """Reproduces TOCTOU interleaving table A from forensic_analysis_5918.md.
+
+        N OS threads all call ensure_node_logged() for the same node_id
+        simultaneously. A threading.Barrier releases all N at once to maximise
+        the collision window — every thread sees an empty _logged_node_ids set
+        before any write lands.
+
+        With the buggy split-lock code (Lock + two separate `with` blocks),
+        multiple threads pass the check and each calls log_node_complete(),
+        producing N entries. With the fix (RLock + single contiguous scope),
+        only the first thread to acquire the lock writes; all others see the
+        node already in _logged_node_ids and return immediately → exactly 1
+        entry.
+        """
+        N = 10
+        store = RuntimeLogStore(tmp_path / "logs")
+        rt_logger = RuntimeLogger(store=store, agent_id="test-agent")
+        run_id = rt_logger.start_run("goal-1")
+
+        barrier = threading.Barrier(N)
+        errors: list[Exception] = []
+
+        def thread_ensure() -> None:
+            try:
+                barrier.wait()  # all N threads released simultaneously
+                rt_logger.ensure_node_logged(
+                    node_id="node-1",
+                    node_name="Search",
+                    node_type="event_loop",
+                    success=True,
+                    tokens_used=150,
+                )
+            except Exception as exc:
+                errors.append(exc)
+
+        threads = [threading.Thread(target=thread_ensure) for _ in range(N)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        assert not errors, f"Thread raised exception: {errors}"
+
+        details = store.read_node_details_sync(run_id)
+        assert len(details) == 1, (
+            f"Expected exactly 1 NodeDetail entry but got {len(details)} "
+            f"from {N} concurrent ensure_node_logged() calls. "
+            "Duplicate entries indicate TOCTOU race is not fixed."
+        )
+        assert details[0].node_id == "node-1"
+
+    @pytest.mark.asyncio
+    async def test_two_concurrent_ensure_node_logged_same_node_id(
+        self, tmp_path: Path
+    ):
+        """Reproduces TOCTOU interleaving table B from forensic_analysis_5918.md.
+
+        Two OS threads both call ensure_node_logged() for the same node_id
+        simultaneously. A threading.Barrier releases them together. A
+        threading.Event stall inside a monkeypatched append_node_detail holds
+        the first writer so the second thread can complete its check before
+        either write lands — deterministically opening the race window.
+
+        With the buggy code, both threads pass the check before either writes,
+        producing 2 entries. With the fix, only 1 entry is written.
+        """
+        store = RuntimeLogStore(tmp_path / "logs")
+        rt_logger = RuntimeLogger(store=store, agent_id="test-agent")
+        run_id = rt_logger.start_run("goal-1")
+
+        barrier = threading.Barrier(2)
+        # first_writer_entered: set when the first thread is inside append_node_detail
+        first_writer_entered = threading.Event()
+        # second_thread_checked: set when both threads have passed the id-set check
+        second_thread_checked = threading.Event()
+        errors: list[Exception] = []
+
+        original_append = store.append_node_detail
+
+        call_count = 0
+        call_count_lock = threading.Lock()
+
+        def stalling_append(run_id_arg, detail):  # type: ignore[override]
+            nonlocal call_count
+            with call_count_lock:
+                call_count += 1
+                is_first = call_count == 1
+            if is_first:
+                # Signal that the first writer has entered; wait for the second
+                # thread to have also completed the id-set check (if the bug
+                # exists, it already passed the check and is about to call us).
+                first_writer_entered.set()
+                second_thread_checked.wait(timeout=2.0)
+            original_append(run_id_arg, detail)
+
+        store.append_node_detail = stalling_append  # type: ignore[method-assign]
+
+        def thread_ensure(thread_index: int) -> None:
+            try:
+                barrier.wait()  # both threads start simultaneously
+                if thread_index == 1:
+                    # Thread 1 goes first; its append will stall
+                    pass
+                else:
+                    # Thread 2 waits until thread 1 is inside append, then
+                    # signals it may proceed (simulating it also passed the check)
+                    first_writer_entered.wait(timeout=2.0)
+                    second_thread_checked.set()
+                rt_logger.ensure_node_logged(
+                    node_id="node-1",
+                    node_name="Search",
+                    node_type="event_loop",
+                    success=True,
+                    tokens_used=60000,
+                )
+            except Exception as exc:
+                errors.append(exc)
+
+        t1 = threading.Thread(target=thread_ensure, args=(1,))
+        t2 = threading.Thread(target=thread_ensure, args=(2,))
+        t1.start()
+        t2.start()
+        t1.join(timeout=5.0)
+        t2.join(timeout=5.0)
+
+        assert not errors, f"Thread raised exception: {errors}"
+
+        details = store.read_node_details_sync(run_id)
+        assert len(details) == 1, (
+            f"Expected exactly 1 NodeDetail entry but got {len(details)}. "
+            "Duplicate entry indicates TOCTOU race is not fixed."
+        )
+        assert details[0].node_id == "node-1"
+
+    @pytest.mark.asyncio
+    async def test_ensure_node_logged_asyncio_gather_no_duplicate(
+        self, tmp_path: Path
+    ):
+        """Fan-out integration regression test — forensic_analysis_5918.md §2.
+
+        Simulates the asyncio.gather() parallel-branch path from
+        executor.py:2364-2365. Two coroutines each call log_node_complete()
+        then yield (asyncio.sleep(0)), then call ensure_node_logged() for
+        their respective node_ids. The yield between the two calls is the
+        cooperative-multitasking interleaving point that mirrors the await
+        inside EventLoopNode.execute() in the real fan-out path.
+
+        Asserts that details.jsonl contains exactly one entry per node_id
+        (no duplicates) after both coroutines complete.
+        """
+        store = RuntimeLogStore(tmp_path / "logs")
+        rt_logger = RuntimeLogger(store=store, agent_id="test-agent")
+        run_id = rt_logger.start_run("goal-1")
+
+        async def branch(node_id: str, input_tokens: int, output_tokens: int) -> None:
+            # Simulates EventLoopNode.execute() calling log_node_complete() at
+            # its ACCEPT exit point (event_loop_node.py:1359).
+            rt_logger.log_node_complete(
+                node_id=node_id,
+                node_name=node_id,
+                node_type="event_loop",
+                success=True,
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
+                exit_status="success",
+            )
+            # Yield to the event loop — mirrors the await inside execute().
+            # The other branch coroutine can now run its log_node_complete()
+            # or ensure_node_logged() here.
+            await asyncio.sleep(0)
+            # Simulates executor.py:2295 calling ensure_node_logged() after
+            # node_impl.execute() returns.
+            rt_logger.ensure_node_logged(
+                node_id=node_id,
+                node_name=node_id,
+                node_type="event_loop",
+                success=True,
+                tokens_used=input_tokens + output_tokens,
+            )
+
+        await asyncio.gather(
+            branch("node-A", input_tokens=100, output_tokens=50),
+            branch("node-B", input_tokens=200, output_tokens=80),
+        )
+
+        details = store.read_node_details_sync(run_id)
+        node_ids = [d.node_id for d in details]
+
+        assert len(details) == 2, (
+            f"Expected exactly 2 NodeDetail entries (one per branch) but got "
+            f"{len(details)}: {node_ids}"
+        )
+        assert node_ids.count("node-A") == 1, "node-A has duplicate entries"
+        assert node_ids.count("node-B") == 1, "node-B has duplicate entries"
+
+        # Token totals must not be doubled
+        node_a = next(d for d in details if d.node_id == "node-A")
+        node_b = next(d for d in details if d.node_id == "node-B")
+        assert node_a.input_tokens == 100
+        assert node_a.output_tokens == 50
+        assert node_b.input_tokens == 200
+        assert node_b.output_tokens == 80
