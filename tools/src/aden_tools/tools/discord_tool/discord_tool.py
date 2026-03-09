@@ -137,6 +137,46 @@ class _DiscordClient:
             params=params,
         )
 
+    def get_channel(self, channel_id: str) -> dict[str, Any]:
+        """Get detailed information about a channel.
+
+        API ref: GET /channels/{channel.id}
+        """
+        return self._request_with_retry("GET", f"{DISCORD_API_BASE}/channels/{channel_id}")
+
+    def create_reaction(
+        self,
+        channel_id: str,
+        message_id: str,
+        emoji: str,
+    ) -> dict[str, Any]:
+        """Add a reaction to a message.
+
+        API ref: PUT /channels/{channel.id}/messages/{message.id}/reactions/{emoji}/@me
+        """
+        # URL-encode the emoji for the path
+        import urllib.parse
+
+        encoded_emoji = urllib.parse.quote(emoji)
+        return self._request_with_retry(
+            "PUT",
+            f"{DISCORD_API_BASE}/channels/{channel_id}/messages/{message_id}/reactions/{encoded_emoji}/@me",
+        )
+
+    def delete_message(
+        self,
+        channel_id: str,
+        message_id: str,
+    ) -> dict[str, Any]:
+        """Delete a message from a channel.
+
+        API ref: DELETE /channels/{channel.id}/messages/{message.id}
+        """
+        return self._request_with_retry(
+            "DELETE",
+            f"{DISCORD_API_BASE}/channels/{channel_id}/messages/{message_id}",
+        )
+
 
 def register_tools(
     mcp: FastMCP,
