@@ -134,22 +134,15 @@ class QueenPhaseState:
         tool_names = [t.name for t in self.running_tools]
         logger.info("Queen phase → running (source=%s, tools: %s)", source, tool_names)
         await self._emit_phase_event()
-        if self.inject_notification:
-            if source == "frontend":
-                msg = (
-                    "[PHASE CHANGE] The user clicked Run in the UI. Switched to RUNNING phase. "
-                    "Worker is now executing. You have monitoring/lifecycle tools: "
-                    + ", ".join(tool_names)
-                    + "."
-                )
-            else:
-                msg = (
-                    "[PHASE CHANGE] Switched to RUNNING phase. "
-                    "Worker is executing. You now have monitoring/lifecycle tools: "
-                    + ", ".join(tool_names)
-                    + "."
-                )
-            await self.inject_notification(msg)
+        # Skip notification when source="tool" — the tool result already
+        # contains the phase change info.
+        if self.inject_notification and source != "tool":
+            await self.inject_notification(
+                "[PHASE CHANGE] The user clicked Run in the UI. Switched to RUNNING phase. "
+                "Worker is now executing. You have monitoring/lifecycle tools: "
+                + ", ".join(tool_names)
+                + "."
+            )
 
     async def switch_to_staging(self, source: str = "tool") -> None:
         """Switch to staging phase and notify the queen.
@@ -163,24 +156,19 @@ class QueenPhaseState:
         tool_names = [t.name for t in self.staging_tools]
         logger.info("Queen phase → staging (source=%s, tools: %s)", source, tool_names)
         await self._emit_phase_event()
-        if self.inject_notification:
+        # Skip notification when source="tool" — the tool result already
+        # contains the phase change info.
+        if self.inject_notification and source != "tool":
             if source == "frontend":
                 msg = (
                     "[PHASE CHANGE] The user stopped the worker from the UI. "
                     "Switched to STAGING phase. Agent is still loaded. "
                     "Available tools: " + ", ".join(tool_names) + "."
                 )
-            elif source == "auto":
+            else:
                 msg = (
                     "[PHASE CHANGE] Worker execution completed. Switched to STAGING phase. "
                     "Agent is still loaded. Call run_agent_with_input(task) to run again. "
-                    "Available tools: " + ", ".join(tool_names) + "."
-                )
-            else:
-                msg = (
-                    "[PHASE CHANGE] Switched to STAGING phase. "
-                    "Agent loaded and ready. Call run_agent_with_input(task) to start, "
-                    "or stop_worker_and_edit() to go back to building. "
                     "Available tools: " + ", ".join(tool_names) + "."
                 )
             await self.inject_notification(msg)
@@ -197,7 +185,7 @@ class QueenPhaseState:
         tool_names = [t.name for t in self.building_tools]
         logger.info("Queen phase → building (source=%s, tools: %s)", source, tool_names)
         await self._emit_phase_event()
-        if self.inject_notification:
+        if self.inject_notification and source != "tool":
             await self.inject_notification(
                 "[PHASE CHANGE] Switched to BUILDING phase. "
                 "Lifecycle tools removed. Full coding tools restored. "
@@ -216,7 +204,10 @@ class QueenPhaseState:
         tool_names = [t.name for t in self.planning_tools]
         logger.info("Queen phase → planning (source=%s, tools: %s)", source, tool_names)
         await self._emit_phase_event()
-        if self.inject_notification:
+        # Skip notification when source="tool" — the tool result already
+        # contains the phase change info; injecting a duplicate notification
+        # causes the queen to respond twice.
+        if self.inject_notification and source != "tool":
             await self.inject_notification(
                 "[PHASE CHANGE] Switched to PLANNING phase. "
                 "Coding tools removed. Discuss goals and design with the user. "

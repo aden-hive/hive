@@ -570,12 +570,12 @@ The agent is loaded and ready to run. You can inspect it and launch it:
 - list_credentials(credential_id?) — Verify credentials are configured
 - get_worker_status(focus?) — Brief status. Drill in with focus: memory, tools, issues, progress
 - run_agent_with_input(task) — Start the worker and switch to RUNNING phase
-- stop_worker_and_edit() — Go back to BUILDING phase for immediate fixes
-- stop_worker_and_plan() — Go back to PLANNING phase for diagnosis first
+- stop_worker_and_plan() — Go to PLANNING phase to discuss changes with the user \
+first (DEFAULT for most modification requests)
+- stop_worker_and_edit() — Go to BUILDING phase for immediate, specific fixes
 
-You do NOT have write tools. If you need to modify the agent, \
-call stop_worker_and_edit() to fix directly, or stop_worker_and_plan() \
-to diagnose first.
+You do NOT have write tools. To modify the agent, prefer \
+stop_worker_and_plan() unless the user gave a specific instruction.
 """
 
 _queen_tools_running = """
@@ -588,14 +588,13 @@ The worker is running. You have monitoring and lifecycle tools:
 - get_worker_health_summary() — Read the latest health data
 - notify_operator(ticket_id, analysis, urgency) — Alert the user (use sparingly)
 - stop_worker() — Stop the worker and return to STAGING phase, then ask the user what to do next
-- stop_worker_and_edit() — Stop the worker and switch to BUILDING phase for fixes
-- stop_worker_and_plan() — Stop the worker and switch to PLANNING phase for diagnosis
+- stop_worker_and_plan() — Stop and switch to PLANNING phase to discuss changes \
+with the user first (DEFAULT for most modification requests)
+- stop_worker_and_edit() — Stop and switch to BUILDING phase for specific fixes
 
-You do NOT have write tools or agent construction tools. \
-If you know the fix, call stop_worker_and_edit() to go to BUILDING phase. \
-If the issue needs investigation first, call stop_worker_and_plan() to \
-diagnose in PLANNING phase. To just stop, call stop_worker() to return \
-to STAGING phase.
+You do NOT have write tools. To modify the agent, prefer \
+stop_worker_and_plan() unless the user gave a specific instruction. \
+To just stop without modifying, call stop_worker().
 """
 
 # -- Behavior shared across all phases --
@@ -771,9 +770,21 @@ building something new.
 When the user asks to change, modify, or update the loaded worker \
 (e.g., "change the report node", "add a node", "delete node X"):
 
-- If you know what to fix → call stop_worker_and_edit() to go to BUILDING phase.
-- If the issue needs investigation first (unclear root cause, need to inspect \
-logs/checkpoints) → call stop_worker_and_plan() to diagnose in PLANNING phase.
+**Default: use stop_worker_and_plan().** Most modification requests need \
+discussion first — what to change, why, and how. Only skip planning if \
+the user gave you an explicit, unambiguous instruction (e.g., "delete node X", \
+"change the model to gpt-4o").
+
+Use stop_worker_and_plan() when:
+- The user says "modify", "improve", "fix", or "change" without specifics
+- The request is vague or open-ended ("make it better", "it's not working right")
+- You need to understand the user's intent before making changes
+- The issue requires inspecting logs, checkpoints, or past runs first
+
+Use stop_worker_and_edit() only when:
+- The user gave a specific, concrete instruction ("add save_data to the gather node")
+- You already discussed the fix in a previous planning session
+- The change is trivial and unambiguous (rename, toggle a flag)
 """
 
 # -- RUNNING phase behavior --
@@ -863,9 +874,9 @@ building something new.
 When the user asks to change, modify, or update the loaded worker \
 (e.g., "change the report node", "add a node", "delete node X"):
 
-- If you know what to fix → call stop_worker_and_edit() to go to BUILDING phase.
-- If the issue needs investigation first → call stop_worker_and_plan() to \
-diagnose in PLANNING phase.
+**Default: use stop_worker_and_plan().** Most modification requests need \
+discussion first. Only use stop_worker_and_edit() when the user gave a \
+specific, unambiguous instruction or you already agreed on the fix.
 """
 
 # -- Backward-compatible composed versions (used by queen_node.system_prompt default) --
