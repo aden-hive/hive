@@ -562,8 +562,9 @@ class SessionManager:
             _QUEEN_RUNNING_TOOLS,
             _QUEEN_STAGING_TOOLS,
             _appendices,
+            _building_knowledge,
             _gcu_building_section,
-            _package_builder_knowledge,
+            _planning_knowledge,
             _queen_behavior_always,
             _queen_behavior_building,
             _queen_behavior_planning,
@@ -618,7 +619,7 @@ class SessionManager:
             + _queen_tools_planning
             + _queen_behavior_always
             + _queen_behavior_planning
-            + _package_builder_knowledge
+            + _planning_knowledge
             + worker_identity
         )
         phase_state.prompt_planning = _queen_identity_planning + _planning_body
@@ -628,7 +629,7 @@ class SessionManager:
             + _queen_tools_building
             + _queen_behavior_always
             + _queen_behavior_building
-            + _package_builder_knowledge
+            + _building_knowledge
             + _gcu_building_section
             + _queen_phase_7
             + _appendices
