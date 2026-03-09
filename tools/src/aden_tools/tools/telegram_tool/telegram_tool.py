@@ -266,6 +266,64 @@ class _TelegramClient:
         )
         return self._handle_response(response)
 
+    def get_chat_member_count(self, chat_id: str) -> dict[str, Any]:
+        """Get the number of members in a chat.
+
+        API ref: https://core.telegram.org/bots/api#getchatmembercount
+        """
+        response = httpx.post(
+            f"{self._base_url}/getChatMemberCount",
+            json={"chat_id": chat_id},
+            timeout=30.0,
+        )
+        return self._handle_response(response)
+
+    def send_video(
+        self,
+        chat_id: str,
+        video: str,
+        caption: str | None = None,
+        parse_mode: str | None = None,
+        duration: int | None = None,
+    ) -> dict[str, Any]:
+        """Send a video to a chat via URL or file_id.
+
+        API ref: https://core.telegram.org/bots/api#sendvideo
+        """
+        payload: dict[str, Any] = {
+            "chat_id": chat_id,
+            "video": video,
+        }
+        if caption:
+            payload["caption"] = caption
+        if parse_mode:
+            payload["parse_mode"] = parse_mode
+        if duration is not None:
+            payload["duration"] = duration
+
+        response = httpx.post(
+            f"{self._base_url}/sendVideo",
+            json=payload,
+            timeout=60.0,  # longer timeout for video uploads
+        )
+        return self._handle_response(response)
+
+    def set_chat_description(
+        self,
+        chat_id: str,
+        description: str,
+    ) -> dict[str, Any]:
+        """Change the description of a group, supergroup, or channel.
+
+        API ref: https://core.telegram.org/bots/api#setchatdescription
+        """
+        response = httpx.post(
+            f"{self._base_url}/setChatDescription",
+            json={"chat_id": chat_id, "description": description},
+            timeout=30.0,
+        )
+        return self._handle_response(response)
+
 
 def register_tools(
     mcp: FastMCP,
