@@ -376,7 +376,12 @@ export default function Workspace() {
     // If there are already persisted tabs for this agent type, don't create
     // a new one — the post-mount effect will call handleHistoryOpen if needed
     // (for ?session= params coming from the home page sidebar).
-    if (initial[initialAgent]?.length) {
+    // Check exact key first, then scan for any tabKey whose base matches
+    // (handles TopBar navigation with bare agentType when tab uses ::suffix).
+    const existingKey = initial[initialAgent]?.length
+      ? initialAgent
+      : Object.keys(initial).find(k => baseAgentType(k) === initialAgent && (initial[k] || []).length > 0);
+    if (existingKey) {
       return initial;
     }
 
@@ -469,7 +474,12 @@ export default function Workspace() {
       const persisted = loadPersistedTabs();
       if (persisted?.activeWorker) return persisted.activeWorker;
     }
-    return initialAgent;
+    // initialAgent may be a bare agent path (from TopBar on home page) while
+    // sessionsByAgent is keyed by tabKey (with ::suffix). Find the matching key.
+    const matchingKey = Object.keys(sessionsByAgent).find(
+      k => k === initialAgent || baseAgentType(k) === initialAgent,
+    );
+    return matchingKey || initialAgent;
   });
 
   // Clear URL params after mount — they're consumed during initialization
@@ -656,6 +666,8 @@ export default function Workspace() {
 
   // --- Agent loading: loadAgentForType ---
   const loadingRef = useRef(new Set<string>());
+  // Stable ref so loadAgentForType doesn't get a new identity when URL is cleared
+  const initialPromptRef = useRef(initialPrompt);
   const loadAgentForType = useCallback(async (agentType: string) => {
     // agentType may be a unique composite key ("exports/foo::sessionId") for additional
     // tabs — extract the real agent path for selector checks and API calls.
@@ -668,7 +680,7 @@ export default function Workspace() {
       // Create a queen-only session (no worker) for agent building
       updateAgentState(agentType, { loading: true, error: null, ready: false, sessionId: null });
       try {
-        const prompt = initialPrompt || undefined;
+        const prompt = initialPromptRef.current || undefined;
         let liveSession: LiveSession | undefined;
 
         // Find the active session for this agent type
@@ -792,6 +804,8 @@ export default function Workspace() {
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : String(err);
         updateAgentState(agentType, { error: msg, loading: false });
+      } finally {
+        loadingRef.current.delete(agentType);
       }
       return;
     }
@@ -849,10 +863,10 @@ export default function Workspace() {
         // creating the new session. When queen_resume_from is set the new session writes
         // to the SAME directory, so if we fetch after creation we risk capturing the
         // new queen's greeting in the restored history.
-        // Always fetch even when localStorage already has messages — localStorage is
-        // capped at 50 messages so restored sessions would otherwise be truncated.
+        // SKIP when localStorage already restored messages — avoids duplicate merge
+        // (backendMessageToChatMessage generates new IDs each call, so dedup-by-id fails).
         let preQueenMsgs: ChatMessage[] = [];
-        if (coldRestoreId) {
+        if (coldRestoreId && !alreadyHasMessages) {
           try {
             preQueenMsgs = await fetchRestoredConversation(
               coldRestoreId,
@@ -1057,8 +1071,8 @@ export default function Workspace() {
         ...(isWorkerRunning
           ? { workerRunState: "running" }
           : pausedWorkerSessionId
-          ? { workerRunState: "paused", pausedWorkerSessionId }
-          : {}),
+            ? { workerRunState: "paused", pausedWorkerSessionId }
+            : {}),
       });
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -1066,7 +1080,7 @@ export default function Workspace() {
     } finally {
       loadingRef.current.delete(agentType);
     }
-  }, [updateAgentState, initialPrompt, fetchRestoredConversation]);
+  }, [updateAgentState, fetchRestoredConversation]);
 
   // Auto-load agents when new tabs appear in sessionsByAgent.
   // Only eagerly load the active tab — background tabs are deferred until the
@@ -1540,11 +1554,13 @@ export default function Workspace() {
               setAgentStates(prev => {
                 const cur = prev[agentType] || defaultAgentState();
                 const keepWorkerQ = cur.pendingQuestionSource === "worker";
-                return { ...prev, [agentType]: {
-                  ...cur,
-                  isTyping: false, isStreaming: false, queenIsTyping: false, workerIsTyping: false,
-                  ...(keepWorkerQ ? {} : { awaitingInput: false, workerInputMessageId: null, pendingQuestion: null, pendingOptions: null, pendingQuestionSource: null }),
-                }};
+                return {
+                  ...prev, [agentType]: {
+                    ...cur,
+                    isTyping: false, isStreaming: false, queenIsTyping: false, workerIsTyping: false,
+                    ...(keepWorkerQ ? {} : { awaitingInput: false, workerInputMessageId: null, pendingQuestion: null, pendingOptions: null, pendingQuestionSource: null }),
+                  }
+                };
               });
             } else {
               updateAgentState(agentType, { isTyping: false, isStreaming: false, queenIsTyping: false, workerIsTyping: false, awaitingInput: false, workerInputMessageId: null, pendingQuestion: null, pendingOptions: null, pendingQuestionSource: null });
@@ -1563,11 +1579,13 @@ export default function Workspace() {
               setAgentStates(prev => {
                 const cur = prev[agentType] || defaultAgentState();
                 const keepWorkerQ = cur.pendingQuestionSource === "worker";
-                return { ...prev, [agentType]: {
-                  ...cur,
-                  isTyping: false, isStreaming: false, queenIsTyping: false, workerIsTyping: false,
-                  ...(keepWorkerQ ? {} : { awaitingInput: false, workerInputMessageId: null, pendingQuestion: null, pendingOptions: null, pendingQuestionSource: null }),
-                }};
+                return {
+                  ...prev, [agentType]: {
+                    ...cur,
+                    isTyping: false, isStreaming: false, queenIsTyping: false, workerIsTyping: false,
+                    ...(keepWorkerQ ? {} : { awaitingInput: false, workerInputMessageId: null, pendingQuestion: null, pendingOptions: null, pendingQuestionSource: null }),
+                  }
+                };
               });
             } else {
               updateAgentState(agentType, { isTyping: false, isStreaming: false, queenIsTyping: false, workerIsTyping: false, awaitingInput: false, workerInputMessageId: null, pendingQuestion: null, pendingOptions: null, pendingQuestionSource: null });
@@ -1607,12 +1625,14 @@ export default function Workspace() {
             setAgentStates(prev => {
               const cur = prev[agentType] || defaultAgentState();
               const keepWorkerQ = cur.pendingQuestionSource === "worker";
-              return { ...prev, [agentType]: {
-                ...cur,
-                isStreaming: false,
-                activeToolCalls: {},
-                ...(keepWorkerQ ? {} : { awaitingInput: false, pendingQuestion: null, pendingOptions: null, pendingQuestionSource: null }),
-              }};
+              return {
+                ...prev, [agentType]: {
+                  ...cur,
+                  isStreaming: false,
+                  activeToolCalls: {},
+                  ...(keepWorkerQ ? {} : { awaitingInput: false, pendingQuestion: null, pendingOptions: null, pendingQuestionSource: null }),
+                }
+              };
             });
           } else {
             updateAgentState(agentType, { isStreaming: false, workerIsTyping: true, activeToolCalls: {}, awaitingInput: false, pendingQuestion: null, pendingOptions: null, pendingQuestionSource: null });
@@ -1910,14 +1930,16 @@ export default function Workspace() {
             const cur = prev[agentType] || defaultAgentState();
             const workerRunState =
               cur.workerRunState === "paused" ? "paused"
-              : newPhase === "running" ? "running"
-              : "idle";
-            return { ...prev, [agentType]: {
-              ...cur,
-              queenPhase: newPhase,
-              queenBuilding: newPhase === "building",
-              workerRunState,
-            }};
+                : newPhase === "running" ? "running"
+                  : "idle";
+            return {
+              ...prev, [agentType]: {
+                ...cur,
+                queenPhase: newPhase,
+                queenBuilding: newPhase === "building",
+                workerRunState,
+              }
+            };
           });
           break;
         }
@@ -2346,10 +2368,8 @@ export default function Workspace() {
     // First tab keeps agentType as its key (backward-compatible with all existing
     // logic).  Additional tabs get a unique key so each has its own isolated
     // agentStates slot, its own backend session, and its own tab-bar entry.
-    const tabKey = existingTabCount === 0 ? agentType : `${agentType}::${newSession.id}`;
-    if (tabKey !== agentType) {
-      newSession.tabKey = tabKey;
-    }
+    const tabKey = `${agentType}::${newSession.id}`;
+    newSession.tabKey = tabKey;
 
     setSessionsByAgent(prev => ({
       ...prev,
@@ -2662,7 +2682,7 @@ export default function Workspace() {
                   subagentReports={activeAgentState?.subagentReports}
                   sessionId={activeAgentState?.sessionId || undefined}
                   graphId={activeAgentState?.graphId || undefined}
-                  workerSessionId={null}
+                  workerSessionId={activeAgentState?.currentExecutionId || activeAgentState?.pausedWorkerSessionId || null}
                   nodeLogs={activeAgentState?.nodeLogs[selectedNode.id] || []}
                   actionPlan={activeAgentState?.nodeActionPlans[selectedNode.id]}
                   onClose={() => setSelectedNode(null)}
