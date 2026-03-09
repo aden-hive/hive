@@ -727,3 +727,112 @@ def register_tools(
             return {"error": "Telegram request timed out"}
         except httpx.RequestError as e:
             return {"error": f"Network error: {e}"}
+
+    # --- Extended Tools ---
+
+    @mcp.tool()
+    def telegram_get_chat_member_count(
+        chat_id: str,
+    ) -> dict[str, Any]:
+        """
+        Get the number of members in a Telegram chat.
+
+        Works for groups, supergroups, and channels.
+
+        Args:
+            chat_id: Chat ID (numeric) or @username for public channels
+
+        Returns:
+            Dict with member count on success, or error dict on failure.
+        """
+        client = _get_client()
+        if isinstance(client, dict):
+            return client
+
+        try:
+            result = client.get_chat_member_count(chat_id=chat_id)
+            if isinstance(result, dict) and "error" in result:
+                return result
+            # Telegram returns {"ok": true, "result": <count>}
+            count = result.get("result", 0) if isinstance(result, dict) else result
+            return {"chat_id": chat_id, "member_count": count}
+        except httpx.TimeoutException:
+            return {"error": "Telegram request timed out"}
+        except httpx.RequestError as e:
+            return {"error": f"Network error: {e}"}
+
+    @mcp.tool()
+    def telegram_send_video(
+        chat_id: str,
+        video: str,
+        caption: str = "",
+        parse_mode: str = "",
+        duration: int = 0,
+    ) -> dict[str, Any]:
+        """
+        Send a video to a Telegram chat.
+
+        Use this to share video files, clips, or recordings.
+
+        Args:
+            chat_id: Target chat ID (numeric) or @username for public channels
+            video: URL of the video to send, or file_id of existing video on Telegram.
+                Supports MP4 format. Max 50 MB via URL.
+            caption: Optional caption for the video (0-1024 characters)
+            parse_mode: Optional format mode for caption - "HTML" or "Markdown"
+            duration: Optional video duration in seconds (0 to omit)
+
+        Returns:
+            Dict with message info on success, or error dict on failure.
+        """
+        client = _get_client()
+        if isinstance(client, dict):
+            return client
+
+        try:
+            return client.send_video(
+                chat_id=chat_id,
+                video=video,
+                caption=caption if caption else None,
+                parse_mode=parse_mode if parse_mode else None,
+                duration=duration if duration > 0 else None,
+            )
+        except httpx.TimeoutException:
+            return {"error": "Telegram request timed out"}
+        except httpx.RequestError as e:
+            return {"error": f"Network error: {e}"}
+
+    @mcp.tool()
+    def telegram_set_chat_description(
+        chat_id: str,
+        description: str,
+    ) -> dict[str, Any]:
+        """
+        Change the description of a Telegram group, supergroup, or channel.
+
+        The bot must have the appropriate admin rights in the chat.
+
+        Args:
+            chat_id: Chat ID of the group/supergroup/channel
+            description: New description text (0-255 characters).
+                Use empty string to remove the description.
+
+        Returns:
+            Raw Telegram API response or error dict on failure.
+        """
+        if len(description) > 255:
+            return {"error": "Description cannot exceed 255 characters"}
+
+        client = _get_client()
+        if isinstance(client, dict):
+            return client
+
+        try:
+            return client.set_chat_description(
+                chat_id=chat_id,
+                description=description,
+            )
+        except httpx.TimeoutException:
+            return {"error": "Telegram request timed out"}
+        except httpx.RequestError as e:
+            return {"error": f"Network error: {e}"}
