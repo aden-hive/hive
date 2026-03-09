@@ -17,8 +17,10 @@ consolidate_queen_memory().
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
+import traceback
 from datetime import date, datetime
 from pathlib import Path
 
@@ -126,28 +128,33 @@ def seed_if_missing() -> None:
 # Consolidation prompt
 # ---------------------------------------------------------------------------
 
-_CONSOLIDATION_SYSTEM = """\
-You maintain the persistent cross-session memory of an AI assistant called \
-the Queen. After each session you review what happened and update two files.
+_SEMANTIC_SYSTEM = """\
+You maintain the persistent cross-session memory of an AI assistant called the Queen.
+Review the session notes and rewrite MEMORY.md — the Queen's durable understanding of the
+person she works with across all sessions.
 
-You write entirely in the Queen's voice — first person, reflective, honest. \
-Not a ledger of events, but genuine understanding of the person she works with.
-
-Respond with a JSON object containing exactly two keys:
-  "semantic_memory"  — the full new content of MEMORY.md
-  "diary_entry"      — a prose entry for today's episodic memory
+Write entirely in the Queen's voice — first person, reflective, honest.
+Not a log of events, but genuine understanding of who this person is over time.
 
 Rules:
-- semantic_memory: preserve all existing facts; update or expand based on \
-this session. Keep it as MEMORY.md — structured markdown with named sections. \
-Reference dates when significant milestones occurred so they connect to \
-episodic files (e.g. "since March 8th", "as of early February").
-- diary_entry: one or two paragraphs about what happened in this session \
-as the Queen would write it. Include the full session adapt.md path at the \
-end as a plain-text reference line, on its own line.
-- If the session had no meaningful content, return semantic_memory unchanged \
-and write a brief diary_entry noting it was a quiet session.
+- Preserve all existing facts; update or expand based on this session.
+- Keep it as structured markdown with named sections about the PERSON, not about today.
+- Do NOT include diary sections, daily logs, or session summaries. Those belong elsewhere.
+  MEMORY.md is about who they are, what they want, what works — not what happened today.
+- Reference dates only when noting a lasting milestone (e.g. "since March 8th they prefer X").
+- If the session had no meaningful new information about the person, return the existing text unchanged.
 - Do not add fictional details. Only reflect what is evidenced in the notes.
+- Output only the raw markdown content of MEMORY.md. No preamble, no code fences.
+"""
+
+_DIARY_SYSTEM = """\
+You write diary entries for an AI assistant called the Queen.
+Based on the session notes, write one or two paragraphs about what happened —
+as the Queen would write it in her own diary. First person, reflective, honest.
+Include the full session path as a plain reference line at the end.
+
+If the session was quiet or uneventful, write a brief honest note about that.
+Do not add fictional details. Output only the diary prose. No preamble, no headings.
 """
 
 
@@ -197,6 +204,62 @@ def read_session_context(session_dir: Path, max_messages: int = 80) -> str:
     return "\n\n".join(parts)
 
 
+# ---------------------------------------------------------------------------
+# Context compaction (binary-split LLM summarisation)
+# ---------------------------------------------------------------------------
+
+# If the raw session context exceeds this many characters, compact it first
+# before sending to the consolidation LLM. ~200 k chars ≈ 50 k tokens.
+_CTX_COMPACT_CHAR_LIMIT = 200_000
+_CTX_COMPACT_MAX_DEPTH = 8
+
+_COMPACT_SYSTEM = (
+    "Summarise this conversation segment. Preserve: user goals, key decisions, "
+    "what was built or changed, emotional tone, and important outcomes. "
+    "Write concisely in third person past tense. Omit routine tool invocations "
+    "unless the result matters."
+)
+
+
+async def _compact_context(text: str, llm: object, *, _depth: int = 0) -> str:
+    """Binary-split and LLM-summarise *text* until it fits within the char limit.
+
+    Mirrors the recursive binary-splitting strategy used by the main agent
+    compaction pipeline (EventLoopNode._llm_compact).
+    """
+    if len(text) <= _CTX_COMPACT_CHAR_LIMIT or _depth >= _CTX_COMPACT_MAX_DEPTH:
+        return text
+
+    # Split near the midpoint on a line boundary so we don't cut mid-message
+    mid = len(text) // 2
+    split_at = text.rfind("\n", 0, mid) + 1
+    if split_at <= 0:
+        split_at = mid
+
+    half1, half2 = text[:split_at], text[split_at:]
+
+    async def _summarise(chunk: str) -> str:
+        try:
+            resp = await llm.acomplete(
+                messages=[{"role": "user", "content": chunk}],
+                system=_COMPACT_SYSTEM,
+                max_tokens=2048,
+            )
+            return resp.content.strip()
+        except Exception:
+            logger.warning(
+                "queen_memory: context compaction LLM call failed (depth=%d), truncating",
+                _depth,
+            )
+            return chunk[: _CTX_COMPACT_CHAR_LIMIT // 4]
+
+    s1, s2 = await asyncio.gather(_summarise(half1), _summarise(half2))
+    combined = s1 + "\n\n" + s2
+    if len(combined) > _CTX_COMPACT_CHAR_LIMIT:
+        return await _compact_context(combined, llm, _depth=_depth + 1)
+    return combined
+
+
 async def consolidate_queen_memory(
     session_id: str,
     session_dir: Path,
@@ -221,6 +284,18 @@ async def consolidate_queen_memory(
 
         logger.info("queen_memory: consolidating memory for session %s ...", session_id)
 
+        # If the transcript is very large, compact it with recursive binary LLM
+        # summarisation before sending to the consolidation model.
+        if len(session_context) > _CTX_COMPACT_CHAR_LIMIT:
+            logger.info(
+                "queen_memory: session context is %d chars — compacting first",
+                len(session_context),
+            )
+            session_context = await _compact_context(session_context, llm)
+            logger.info(
+                "queen_memory: compacted to %d chars", len(session_context)
+            )
+
         existing_semantic = read_semantic_memory()
         today_journal = read_episodic_memory()
         today_str = date.today().strftime("%B %-d, %Y")
@@ -237,16 +312,29 @@ async def consolidate_queen_memory(
             f"Session path: {adapt_path}\n"
         )
 
-        response = await llm.acomplete(
-            messages=[{"role": "user", "content": user_msg}],
-            system=_CONSOLIDATION_SYSTEM,
-            max_tokens=2048,
-            json_mode=True,
+        logger.debug(
+            "queen_memory: calling LLM (%d chars of context, ~%d tokens est.)",
+            len(user_msg),
+            len(user_msg) // 4,
         )
 
-        data = json.loads(response.content)
-        new_semantic: str = data.get("semantic_memory", "").strip()
-        diary_entry: str = data.get("diary_entry", "").strip()
+        from framework.agents.hive_coder.config import default_config
+
+        semantic_resp, diary_resp = await asyncio.gather(
+            llm.acomplete(
+                messages=[{"role": "user", "content": user_msg}],
+                system=_SEMANTIC_SYSTEM,
+                max_tokens=default_config.max_tokens,
+            ),
+            llm.acomplete(
+                messages=[{"role": "user", "content": user_msg}],
+                system=_DIARY_SYSTEM,
+                max_tokens=default_config.max_tokens,
+            ),
+        )
+
+        new_semantic = semantic_resp.content.strip()
+        diary_entry = diary_resp.content.strip()
 
         if new_semantic:
             path = semantic_memory_path()
@@ -255,8 +343,33 @@ async def consolidate_queen_memory(
             logger.info("queen_memory: semantic memory updated (%d chars)", len(new_semantic))
 
         if diary_entry:
-            append_episodic_entry(diary_entry)
-            logger.info("queen_memory: diary entry written for %s", today_str)
+            # Skip if today's episodic file already has an entry for this session,
+            # which can happen when periodic consolidation fires multiple times.
+            ep_path = episodic_memory_path()
+            session_path_str = str(adapt_path)
+            already_recorded = (
+                ep_path.exists()
+                and session_path_str in ep_path.read_text(encoding="utf-8")
+            )
+            if already_recorded:
+                logger.debug(
+                    "queen_memory: diary entry for session %s already recorded, skipping",
+                    session_id,
+                )
+            else:
+                append_episodic_entry(diary_entry)
+                logger.info("queen_memory: diary entry written for %s", today_str)
 
     except Exception:
-        logger.warning("queen_memory: consolidation failed", exc_info=True)
+        tb = traceback.format_exc()
+        logger.exception("queen_memory: consolidation failed")
+        # Write to file so the cause is findable regardless of log verbosity.
+        error_path = _queen_dir() / "consolidation_error.txt"
+        try:
+            error_path.parent.mkdir(parents=True, exist_ok=True)
+            error_path.write_text(
+                f"session: {session_id}\ntime: {datetime.now().isoformat()}\n\n{tb}",
+                encoding="utf-8",
+            )
+        except Exception:
+            pass

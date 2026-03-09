@@ -833,7 +833,7 @@ class SessionManager:
 
             while True:
                 try:
-                    await asyncio.sleep(15 * 60)  # 15 minutes
+                    await asyncio.sleep(5 * 60)  # 5 minutes
                 except asyncio.CancelledError:
                     break
                 await consolidate_queen_memory(
