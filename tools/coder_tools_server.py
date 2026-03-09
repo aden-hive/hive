@@ -1321,7 +1321,9 @@ def validate_agent_package(agent_name: str) -> str:
             result = json.loads(proc.stdout.strip())
             steps["node_completeness"] = {
                 "passed": result["valid"],
-                "output": "; ".join(result["errors"]) if result["errors"] else "All defined nodes are in the graph",
+                "output": "; ".join(result["errors"])
+                if result["errors"]
+                else "All defined nodes are in the graph",
             }
             if not result["valid"]:
                 steps["node_completeness"]["errors"] = result["errors"]
