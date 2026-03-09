@@ -1118,3 +1118,120 @@ def register_tools(
             return {"error": "Request timed out"}
         except httpx.RequestError as e:
             return {"error": _sanitize_error_message(e)}
+
+    # --- Commits ---
+
+    @mcp.tool()
+    def github_list_commits(
+        owner: str,
+        repo: str,
+        sha: str | None = None,
+        author: str | None = None,
+        since: str | None = None,
+        until: str | None = None,
+        limit: int = 30,
+        account: str = "",
+    ) -> dict:
+        """
+        List commits for a repository.
+
+        Args:
+            owner: Repository owner
+            repo: Repository name
+            sha: Branch name or commit SHA to list commits from (default: default branch)
+            author: GitHub username or email to filter commits by author
+            since: ISO 8601 date to list commits after (e.g. "2024-01-01T00:00:00Z")
+            until: ISO 8601 date to list commits before
+            limit: Maximum number of commits to return (1-100, default 30)
+
+        Returns:
+            Dict with list of commits or error
+        """
+        client = _get_client(account)
+        if isinstance(client, dict):
+            return client
+        try:
+            return client.list_commits(owner, repo, sha, author, since, until, limit)
+        except httpx.TimeoutException:
+            return {"error": "Request timed out"}
+        except httpx.RequestError as e:
+            return {"error": _sanitize_error_message(e)}
+
+    # --- Releases ---
+
+    @mcp.tool()
+    def github_create_release(
+        owner: str,
+        repo: str,
+        tag_name: str,
+        name: str | None = None,
+        body: str | None = None,
+        draft: bool = False,
+        prerelease: bool = False,
+        target_commitish: str | None = None,
+        account: str = "",
+    ) -> dict:
+        """
+        Create a new release for a repository.
+
+        Args:
+            owner: Repository owner
+            repo: Repository name
+            tag_name: The name of the tag for the release (e.g. "v1.0.0")
+            name: Release title (optional, defaults to tag_name)
+            body: Release notes in Markdown (optional)
+            draft: True to create as unpublished draft
+            prerelease: True to mark as pre-release
+            target_commitish: Branch or commit SHA to tag (default: default branch)
+
+        Returns:
+            Dict with created release information or error
+        """
+        client = _get_client(account)
+        if isinstance(client, dict):
+            return client
+        try:
+            return client.create_release(
+                owner, repo, tag_name, name, body, draft, prerelease, target_commitish
+            )
+        except httpx.TimeoutException:
+            return {"error": "Request timed out"}
+        except httpx.RequestError as e:
+            return {"error": _sanitize_error_message(e)}
+
+    # --- Actions / Workflow Runs ---
+
+    @mcp.tool()
+    def github_list_workflow_runs(
+        owner: str,
+        repo: str,
+        workflow_id: str | None = None,
+        branch: str | None = None,
+        status: str | None = None,
+        limit: int = 20,
+        account: str = "",
+    ) -> dict:
+        """
+        List GitHub Actions workflow runs for a repository.
+
+        Args:
+            owner: Repository owner
+            repo: Repository name
+            workflow_id: Filter by workflow file name or ID (e.g. "ci.yml")
+            branch: Filter by branch name
+            status: Filter by status ("completed", "in_progress", "queued",
+                "success", "failure", "cancelled")
+            limit: Maximum number of runs to return (1-100, default 20)
+
+        Returns:
+            Dict with workflow runs or error
+        """
+        client = _get_client(account)
+        if isinstance(client, dict):
+            return client
+        try:
+            return client.list_workflow_runs(owner, repo, workflow_id, branch, status, limit)
+        except httpx.TimeoutException:
+            return {"error": "Request timed out"}
+        except httpx.RequestError as e:
+            return {"error": _sanitize_error_message(e)}
