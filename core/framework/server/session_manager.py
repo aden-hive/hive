@@ -379,6 +379,13 @@ class SessionManager:
         if session is None:
             return False
 
+        # Capture session data for memory consolidation before teardown
+        _llm = getattr(session, "llm", None)
+        _storage_id = getattr(session, "queen_resume_from", None) or session_id
+        _adapt_path = (
+            Path.home() / ".hive" / "queen" / "session" / _storage_id / "data" / "adapt.md"
+        )
+
         # Stop judge
         self._stop_judge(session)
         if session.worker_handoff_sub is not None:
@@ -400,6 +407,20 @@ class SessionManager:
                 await session.runner.cleanup_async()
             except Exception as e:
                 logger.error("Error cleaning up worker: %s", e)
+
+        # Consolidate queen's cross-session memory in the background.
+        # Reads adapt.md from the completed session, runs an LLM call to
+        # update MEMORY.md and write a journal entry. Runs fire-and-forget
+        # so teardown is never blocked.
+        if _llm is not None and _adapt_path.exists():
+            import asyncio
+
+            from framework.agents.hive_coder.queen_memory import consolidate_queen_memory
+
+            asyncio.create_task(
+                consolidate_queen_memory(session_id, _adapt_path, _llm),
+                name=f"queen-memory-consolidation-{session_id}",
+            )
 
         logger.info("Session '%s' stopped", session_id)
         return True
@@ -540,6 +561,13 @@ class SessionManager:
             phase_state=phase_state,
         )
 
+        # Register episodic memory tool + seed global memory on very first session
+        from framework.agents.hive_coder import queen_memory as _queen_memory_module
+        from framework.tools.queen_memory_tools import register_queen_memory_tools
+
+        register_queen_memory_tools(queen_registry)
+        _queen_memory_module.seed_if_missing()
+
         # Monitoring tools need concrete worker paths — only register when present
         if session.worker_runtime:
             from framework.tools.worker_monitoring_tools import register_worker_monitoring_tools
@@ -635,6 +663,17 @@ class SessionManager:
             + _queen_behavior_running
             + worker_identity
         )
+
+        # Inject cross-session memory into all phase prompts.
+        # Must happen before _persona_hook is defined so the hook closure picks
+        # up the updated _building_body.
+        _global_mem = _queen_memory_module.format_for_injection()
+        if _global_mem:
+            _mem_block = f"\n\n{_global_mem}\n\n"
+            _building_body = _building_body + _mem_block
+            phase_state.prompt_building = _queen_identity_building + _building_body
+            phase_state.prompt_staging = phase_state.prompt_staging + _mem_block
+            phase_state.prompt_running = phase_state.prompt_running + _mem_block
 
         # Build the session_start hook: selects the best-fit expert persona
         # from the user's opening message and replaces the identity prefix.

@@ -488,12 +488,19 @@ class EventLoopNode(NodeProtocol):
                         if _adapt_text:
                             system_prompt = (
                                 f"{system_prompt}\n\n"
-                                f"--- Your Memory ---\n{_adapt_text}\n--- End Memory ---\n\n"
-                                'Maintain your memory by calling save_data("adapt.md", ...) '
-                                'or edit_data("adapt.md", ...) as you work.\n'
-                                "IMMEDIATELY save: user rules about which account/identity to use, "
-                                "behavioral constraints, and preferences. "
-                                "Also record session history, decisions, and working notes."
+                                "--- Session Working Memory ---\n"
+                                f"{_adapt_text}\n"
+                                "--- End Session Working Memory ---\n\n"
+                                "Maintain your session working memory by calling "
+                                'save_data("adapt.md", ...) or edit_data("adapt.md", ...)'
+                                " as you work.\n"
+                                "This is session-scoped scratch space. "
+                                "IMMEDIATELY save: account/identity rules, "
+                                "behavioral constraints, and preferences specific to "
+                                "this session. Also record current task state, "
+                                "decisions, and working notes. "
+                                "For lasting knowledge about the user, use "
+                                "update_queen_memory() and append_queen_journal() instead."
                             )
 
                 conversation = NodeConversation(
