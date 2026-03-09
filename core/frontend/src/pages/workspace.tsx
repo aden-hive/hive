@@ -345,7 +345,6 @@ export default function Workspace() {
         if (initialPrompt && hasExplicitAgent && (tab.agentType === "new-agent" || tab.agentType.startsWith("new-agent-"))) {
           continue;
         }
-        if (!initial[tabKey]) initial[tabKey] = [];
         const session = createSession(tab.agentType, tab.label);
         session.id = tab.id;
         session.backendSessionId = tab.backendSessionId;
@@ -359,7 +358,12 @@ export default function Workspace() {
           session.messages = cached.messages || [];
           session.graphNodes = cached.graphNodes || [];
         }
-        initial[tabKey].push(session);
+        // Only keep the latest persisted session per tabKey. Multiple sessions
+        // accumulate when history sessions are opened after the previous one was
+        // closed (both get the bare agentType as their tabKey). Keeping only the
+        // last entry prevents the older session's transcript from bleeding into
+        // the top of the newer conversation on reload.
+        initial[tabKey] = [session];
       }
     }
 
@@ -1013,9 +1017,15 @@ export default function Workspace() {
         restoredMsgs.sort((a, b) => (a.createdAt ?? 0) - (b.createdAt ?? 0));
         setSessionsByAgent((prev) => ({
           ...prev,
-          [agentType]: (prev[agentType] || []).map((s, i) =>
-            i === 0 ? { ...s, messages: [...restoredMsgs, ...s.messages] } : s,
-          ),
+          [agentType]: (prev[agentType] || []).map((s, i) => {
+            if (i !== 0) return s;
+            // Deduplicate: handleHistoryOpen may have already pre-populated these
+            // messages. Filter to only those not already present so we never show
+            // the same message twice (or show another session's messages at the top).
+            const existingIds = new Set(s.messages.map((m) => m.id));
+            const newOnly = restoredMsgs.filter((m) => !existingIds.has(m.id));
+            return { ...s, messages: [...newOnly, ...s.messages] };
+          }),
         }));
       }
 

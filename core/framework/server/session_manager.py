@@ -1031,9 +1031,11 @@ class SessionManager:
             return False
         if message.get("role") == "tool":
             return False
-        # For user messages, only show those explicitly marked as client input
-        if message.get("role") == "user":
-            return message.get("is_client_input", False)
+        # For user messages, only show those explicitly marked as client input.
+        # Do NOT early-return here — fall through so the content filters below
+        # can still exclude bracketed control messages (e.g. dismiss signals).
+        if message.get("role") == "user" and not message.get("is_client_input", False):
+            return False
         # Filter tool-only assistant messages (no user-visible text).
         # Keep assistant messages that have tool_calls BUT also have non-empty
         # content — the queen frequently writes conversational text AND calls a
@@ -1071,6 +1073,9 @@ class SessionManager:
             if stripped.startswith("[WORKER_ESCALATION_REQUEST]"):
                 return False
             if stripped.startswith("[ESCALATION TICKET from Health Judge]"):
+                return False
+            # Internal context injected silently when queen routes a worker answer
+            if stripped.startswith("[Worker asked:") and "\nUser answered:" in stripped:
                 return False
 
         return True

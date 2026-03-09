@@ -44,11 +44,24 @@ export function backendMessageToChatMessage(
   const sender = msg.role === "user" ? "You" : 
     (msg._source === "worker" && msg._node_id ? formatAgentDisplayName(msg._node_id) : 
      agentDisplayName || msg._node_id || "Agent");
+
+  // Strip the [Worker asked: "..." | Options: ...] prefix that is prepended when
+  // a user answers "Other" on a worker question widget and the answer is routed
+  // through the queen.  Only the user's actual answer should be visible in the
+  // chat transcript — the bracketed context is internal scaffolding.
+  let content = msg.content as string;
+  if (typeof content === "string") {
+    const workerAskedMatch = content.match(/^\[Worker asked:.*?\]\nUser answered: "([\s\S]*)"$/);
+    if (workerAskedMatch) {
+      content = workerAskedMatch[1];
+    }
+  }
+
   return {
     id: `backend-${msg._node_id}-${msg.seq}`,
     agent: sender,
     agentColor: "",
-    content: msg.content,
+    content,
     timestamp: "",
     type: msg.role === "user" ? "user" : undefined,
     role: msg.role === "user" ? undefined : "worker",
