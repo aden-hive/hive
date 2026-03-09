@@ -902,46 +902,6 @@ _queen_style = """
 # Node definitions
 # ---------------------------------------------------------------------------
 
-# Single node — like opencode's while(true) loop.
-# One continuous context handles the entire workflow:
-# discover → design → implement → verify → present → iterate.
-coder_node = NodeSpec(
-    id="coder",
-    name="Queen",
-    description=(
-        "Autonomous coding agent that builds Hive agent packages. "
-        "Handles the full lifecycle: understanding user intent, "
-        "designing architecture, writing code, validating, and "
-        "iterating on feedback — all in one continuous conversation."
-    ),
-    node_type="event_loop",
-    client_facing=True,
-    max_node_visits=0,
-    input_keys=["user_request"],
-    output_keys=["agent_name", "validation_result"],
-    success_criteria=(
-        "A complete, validated Hive agent package exists at "
-        "exports/{agent_name}/ and passes structural validation."
-    ),
-    tools=_SHARED_TOOLS
-    + [
-        "initialize_and_build_agent",
-        # Graph lifecycle tools (multi-graph sessions)
-        "load_agent",
-        "unload_agent",
-        "start_agent",
-        "restart_agent",
-        "get_user_presence",
-    ],
-    system_prompt=(
-        "You are Queen, the best agent-building coding agent. You build "
-        "production-ready Hive agent packages from natural language.\n"
-        + _package_builder_knowledge
-        + _gcu_building_section
-        + _appendices
-    ),
-)
-
 
 ticket_triage_node = NodeSpec(
     id="ticket_triage",
@@ -1036,7 +996,6 @@ ALL_QUEEN_TOOLS = sorted(
 )
 
 __all__ = [
-    "coder_node",
     "ticket_triage_node",
     "queen_node",
     "ALL_QUEEN_TRIAGE_TOOLS",
