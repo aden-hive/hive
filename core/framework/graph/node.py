@@ -380,6 +380,12 @@ class SharedMemory:
         """
         Check for code patterns in a string using sampling for efficiency.
 
+        Uses a threshold approach: a single keyword like "import" or "class"
+        in natural language shouldn't trigger rejection.  We require multiple
+        distinct indicators to be present, which makes it far more likely
+        that the text is actually code rather than a report that happens to
+        mention "import" once.
+
         For strings under 10KB, checks the entire content.
         For longer strings, samples at strategic positions to balance
         performance with detection accuracy.
@@ -390,36 +396,50 @@ class SharedMemory:
         Returns:
             True if code indicators are found, False otherwise
         """
-        code_indicators = [
-            # Python
+        # Strong indicators — almost never appear in natural prose
+        strong_indicators = [
             "```python",
+            "```javascript",
+            "```typescript",
+            "=> {",
+            "require(",
+            "<script",
+            "<?php",
+            "<%",
+            "async def ",
+        ]
+
+        # Weak indicators — common English words that also appear in code
+        weak_indicators = [
             "def ",
             "class ",
             "import ",
-            "async def ",
             "from ",
-            # JavaScript/TypeScript
             "function ",
             "const ",
             "let ",
-            "=> {",
-            "require(",
             "export ",
-            # SQL
             "SELECT ",
             "INSERT ",
             "UPDATE ",
             "DELETE ",
             "DROP ",
-            # HTML/Script injection
-            "<script",
-            "<?php",
-            "<%",
         ]
+
+        # Threshold: 1 strong indicator OR 3+ distinct weak indicators
+        min_weak_matches = 3
+
+        def _check_text(text: str) -> bool:
+            # Any strong indicator is an immediate match
+            if any(s in text for s in strong_indicators):
+                return True
+            # Count distinct weak indicators found
+            weak_count = sum(1 for w in weak_indicators if w in text)
+            return weak_count >= min_weak_matches
 
         # For strings under 10KB, check the entire content
         if len(value) < 10000:
-            return any(indicator in value for indicator in code_indicators)
+            return _check_text(value)
 
         # For longer strings, sample at strategic positions
         sample_positions = [
@@ -432,7 +452,7 @@ class SharedMemory:
 
         for pos in sample_positions:
             chunk = value[pos : pos + 2000]
-            if any(indicator in chunk for indicator in code_indicators):
+            if _check_text(chunk):
                 return True
 
         return False
