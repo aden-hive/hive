@@ -17,7 +17,6 @@ import type { LiveSession, AgentEvent, DiscoverEntry, Message, NodeSpec } from "
 import { backendMessageToChatMessage, sseEventToChatMessage, formatAgentDisplayName } from "@/lib/chat-helpers";
 import { topologyToGraphNodes } from "@/lib/graph-converter";
 import { ApiError } from "@/api/client";
-import HistorySidebar from "@/components/HistorySidebar";
 
 const makeId = () => Math.random().toString(36).slice(2, 9);
 
@@ -493,7 +492,6 @@ export default function Workspace() {
   const [selectedNode, setSelectedNode] = useState<GraphNode | null>(null);
   const [newTabOpen, setNewTabOpen] = useState(false);
   const newTabBtnRef = useRef<HTMLButtonElement>(null);
-  const [historySidebarRefreshKey, setHistorySidebarRefreshKey] = useState(0);
 
   // Ref mirror of sessionsByAgent so SSE callback can read current graph
   // state without adding sessionsByAgent to its dependency array.
@@ -1043,7 +1041,6 @@ export default function Workspace() {
           ? { workerRunState: "paused", pausedWorkerSessionId }
           : {}),
       });
-      setHistorySidebarRefreshKey(k => k + 1);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
       updateAgentState(agentType, { error: msg, loading: false });
@@ -2305,7 +2302,6 @@ export default function Workspace() {
       return next;
     });
 
-    setHistorySidebarRefreshKey(k => k + 1);
 
     if (remaining.length === 0) {
       navigate("/");
@@ -2342,7 +2338,6 @@ export default function Workspace() {
     }));
     setActiveSessionByAgent(prev => ({ ...prev, [tabKey]: newSession.id }));
     setActiveWorker(tabKey);
-    setHistorySidebarRefreshKey(k => k + 1);
   }, [sessionsByAgent]);
 
   // Open a history session: switch to its existing tab, or open a new tab.
@@ -2484,16 +2479,6 @@ export default function Workspace() {
 
       {/* Main content area */}
       <div className="flex flex-1 min-h-0">
-
-        {/* ── History sidebar ─────────────────────────────────────── */}
-        <HistorySidebar
-          onOpen={handleHistoryOpen}
-          onNewChat={() => navigate("/")}
-          openSessionIds={Object.values(sessionsByAgent).flat().flatMap(s => [s.backendSessionId, s.historySourceId].filter(Boolean) as string[])}
-          activeSessionId={activeSession?.backendSessionId}
-          activeHistorySourceId={activeSession?.historySourceId}
-          refreshKey={historySidebarRefreshKey}
-        />
 
         {/* ── Pipeline graph + chat ──────────────────────────────────── */}
         <div className="w-[300px] min-w-[240px] bg-card/30 flex flex-col border-r border-border/30">
