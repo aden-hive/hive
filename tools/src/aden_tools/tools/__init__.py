@@ -89,6 +89,7 @@ from .jira_tool import register_tools as register_jira
 from .kafka_tool import register_tools as register_kafka
 from .langfuse_tool import register_tools as register_langfuse
 from .linear_tool import register_tools as register_linear
+from .linkedin_tool import register_tools as register_linkedin
 from .lusha_tool import register_tools as register_lusha
 from .microsoft_graph_tool import register_tools as register_microsoft_graph
 from .mongodb_tool import register_tools as register_mongodb
@@ -114,8 +115,10 @@ from .risk_scorer import register_tools as register_risk_scorer
 from .runtime_logs_tool import register_tools as register_runtime_logs
 from .salesforce_tool import register_tools as register_salesforce
 from .sap_tool import register_tools as register_sap
+from .scribeless_tool import register_tools as register_scribeless
 from .serpapi_tool import register_tools as register_serpapi
 from .shopify_tool import register_tools as register_shopify
+from .skiptrace_tool import register_tools as register_skiptrace
 from .slack_tool import register_tools as register_slack
 from .snowflake_tool import register_tools as register_snowflake
 from .ssl_tls_scanner import register_tools as register_ssl_tls_scanner
@@ -268,6 +271,7 @@ def _register_unverified(
     register_kafka(mcp, credentials=credentials)
     register_langfuse(mcp, credentials=credentials)
     register_linear(mcp, credentials=credentials)
+    register_linkedin(mcp, credentials=credentials)
     register_lusha(mcp, credentials=credentials)
     register_microsoft_graph(mcp, credentials=credentials)
     register_mongodb(mcp, credentials=credentials)
@@ -286,7 +290,9 @@ def _register_unverified(
     register_redshift(mcp, credentials=credentials)
     register_salesforce(mcp, credentials=credentials)
     register_sap(mcp, credentials=credentials)
+    register_scribeless(mcp, credentials=credentials)
     register_shopify(mcp, credentials=credentials)
+    register_skiptrace(mcp, credentials=credentials)
     register_snowflake(mcp, credentials=credentials)
     register_supabase(mcp, credentials=credentials)
     register_terraform(mcp, credentials=credentials)
