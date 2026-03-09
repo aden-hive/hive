@@ -554,3 +554,117 @@ def register_tools(
             return {"error": "Request timed out"}
         except httpx.RequestError as e:
             return {"error": f"Network error: {e}"}
+
+    # --- Delete ---
+
+    @mcp.tool()
+    def hubspot_delete_object(
+        object_type: str,
+        object_id: str,
+        account: str = "",
+    ) -> dict:
+        """
+        Delete (archive) a HubSpot CRM object.
+
+        Moves the object to the recycle bin. It can be restored from HubSpot UI
+        within 90 days.
+
+        Args:
+            object_type: CRM object type ("contacts", "companies", or "deals")
+            object_id: The HubSpot object ID to delete
+            account: Account alias for multi-account support
+
+        Returns:
+            Dict with deletion status or error
+        """
+        if object_type not in ("contacts", "companies", "deals"):
+            return {"error": f"Unsupported object_type: {object_type!r}. Use contacts, companies, or deals."}
+        client = _get_client(account)
+        if isinstance(client, dict):
+            return client
+        try:
+            return client.delete_object(object_type, object_id)
+        except httpx.TimeoutException:
+            return {"error": "Request timed out"}
+        except httpx.RequestError as e:
+            return {"error": f"Network error: {e}"}
+
+    # --- Associations ---
+
+    @mcp.tool()
+    def hubspot_list_associations(
+        from_object_type: str,
+        from_object_id: str,
+        to_object_type: str,
+        limit: int = 100,
+        account: str = "",
+    ) -> dict:
+        """
+        List associations between HubSpot CRM objects.
+
+        Retrieve objects associated with a given record, e.g. all deals
+        linked to a contact, or all contacts linked to a company.
+
+        Args:
+            from_object_type: Source object type ("contacts", "companies", or "deals")
+            from_object_id: ID of the source object
+            to_object_type: Target object type ("contacts", "companies", or "deals")
+            limit: Maximum associations to return (1-500, default 100)
+            account: Account alias for multi-account support
+
+        Returns:
+            Dict with associated object IDs and association types, or error
+        """
+        client = _get_client(account)
+        if isinstance(client, dict):
+            return client
+        try:
+            return client.list_associations(from_object_type, from_object_id, to_object_type, limit)
+        except httpx.TimeoutException:
+            return {"error": "Request timed out"}
+        except httpx.RequestError as e:
+            return {"error": f"Network error: {e}"}
+
+    @mcp.tool()
+    def hubspot_create_association(
+        from_object_type: str,
+        from_object_id: str,
+        to_object_type: str,
+        to_object_id: str,
+        association_type_id: int = 0,
+        account: str = "",
+    ) -> dict:
+        """
+        Create an association between two HubSpot CRM objects.
+
+        Links two records together, e.g. associate a contact with a company
+        or a deal with a contact. Common association_type_id values:
+        - 1: Contact to Company (primary)
+        - 3: Deal to Contact
+        - 5: Deal to Company
+        Use 0 for the default/primary association type.
+
+        Args:
+            from_object_type: Source object type ("contacts", "companies", or "deals")
+            from_object_id: ID of the source object
+            to_object_type: Target object type ("contacts", "companies", or "deals")
+            to_object_id: ID of the target object
+            association_type_id: HubSpot association type ID (default 0 for primary)
+            account: Account alias for multi-account support
+
+        Returns:
+            Dict with association result or error
+        """
+        client = _get_client(account)
+        if isinstance(client, dict):
+            return client
+        try:
+            return client.create_association(
+                from_object_type, from_object_id,
+                to_object_type, to_object_id,
+                association_type_id=association_type_id,
+            )
+        except httpx.TimeoutException:
+            return {"error": "Request timed out"}
+        except httpx.RequestError as e:
+            return {"error": f"Network error: {e}"}
