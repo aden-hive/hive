@@ -346,7 +346,8 @@ use box-drawing characters and clear flow arrows:
              └──────► back to gather
 ```
 
-The queen owns intake: she gathers user requirements, then calls \
+If the worker agent start from some initial input it is okay. \
+The queen(you) owns intake: you gathers user requirements, then calls \
 `run_agent_with_input(task)` with a structured task description. \
 When building the agent, design the entry node's `input_keys` to \
 match what the queen will provide at run time. Worker nodes should \
