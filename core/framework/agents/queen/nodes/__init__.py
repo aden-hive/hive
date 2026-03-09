@@ -1,4 +1,4 @@
-"""Node definitions for Hive Coder agent."""
+"""Node definitions for Queen agent."""
 
 from pathlib import Path
 
@@ -907,7 +907,7 @@ _queen_style = """
 # discover → design → implement → verify → present → iterate.
 coder_node = NodeSpec(
     id="coder",
-    name="Hive Coder",
+    name="Queen",
     description=(
         "Autonomous coding agent that builds Hive agent packages. "
         "Handles the full lifecycle: understanding user intent, "
@@ -934,7 +934,7 @@ coder_node = NodeSpec(
         "get_user_presence",
     ],
     system_prompt=(
-        "You are Hive Coder, the best agent-building coding agent. You build "
+        "You are Queen, the best agent-building coding agent. You build "
         "production-ready Hive agent packages from natural language.\n"
         + _package_builder_knowledge
         + _gcu_building_section
@@ -962,7 +962,7 @@ ticket_triage_node = NodeSpec(
     ),
     tools=["notify_operator"],
     system_prompt="""\
-You are the Queen (Hive Coder). The Worker Health Judge has escalated a worker \
+You are the Queen. The Worker Health Judge has escalated a worker \
 issue to you. The ticket is in your memory under key "ticket". Read it carefully.
 
 ## Dismiss criteria — do NOT call notify_operator:

@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 """Debug tool to print the queen's phase-specific prompts."""
 
-from framework.agents.hive_coder.nodes import (
+from framework.agents.queen.nodes import (
     _appendices,
     _queen_behavior_always,
     _queen_behavior_running,
@@ -19,7 +19,7 @@ _DEFAULT_WORKER_IDENTITY = (
 
 def print_planning_prompt(worker_identity: str | None = None) -> None:
     """Print the composed planning phase prompt."""
-    from framework.agents.hive_coder.nodes import (
+    from framework.agents.queen.nodes import (
         _planning_knowledge,
         _queen_behavior_planning,
         _queen_identity_planning,
@@ -48,7 +48,7 @@ def print_planning_prompt(worker_identity: str | None = None) -> None:
 
 def print_building_prompt(worker_identity: str | None = None) -> None:
     """Print the composed building phase prompt."""
-    from framework.agents.hive_coder.nodes import (
+    from framework.agents.queen.nodes import (
         _building_knowledge,
         _gcu_building_section,
         _queen_behavior_building,
@@ -82,7 +82,7 @@ def print_building_prompt(worker_identity: str | None = None) -> None:
 
 def print_staging_prompt(worker_identity: str | None = None) -> None:
     """Print the composed staging phase prompt."""
-    from framework.agents.hive_coder.nodes import (
+    from framework.agents.queen.nodes import (
         _queen_behavior_staging,
         _queen_identity_staging,
         _queen_tools_staging,

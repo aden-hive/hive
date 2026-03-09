@@ -1,5 +1,5 @@
 """
-Hive Coder — Native coding agent that builds Hive agent packages.
+Queen — Native agent builder for the Hive framework.
 
 Deeply understands the agent framework and produces complete Python packages
 with goals, nodes, edges, system prompts, MCP configuration, and tests

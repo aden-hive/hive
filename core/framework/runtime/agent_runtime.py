@@ -349,7 +349,7 @@ class AgentRuntime:
                             return
                         # Skip events originating from this graph's own
                         # executions (e.g. guardian should not fire on
-                        # hive_coder failures — only secondary graphs).
+                        # queen failures — only secondary graphs).
                         if _exclude_own and event.graph_id == self._graph_id:
                             return
                         ep_spec = self._entry_points.get(entry_point_id)

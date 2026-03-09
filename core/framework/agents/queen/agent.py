@@ -1,4 +1,4 @@
-"""Agent graph construction for Hive Coder."""
+"""Agent graph construction for Queen."""
 
 from framework.graph import Constraint, Goal, SuccessCriterion
 from framework.graph.edge import GraphSpec
@@ -7,8 +7,8 @@ from .nodes import coder_node, queen_node
 
 # Goal definition
 goal = Goal(
-    id="hive-coder",
-    name="Hive Agent Builder",
+    id="queen-builder",
+    name="Queen Agent Builder",
     description=(
         "Build complete, validated Hive agent packages from natural language "
         "specifications. Produces production-ready Python packages with goals, "
@@ -101,7 +101,7 @@ async_entry_points = []
 # Module-level variables read by AgentRunner.load()
 conversation_mode = "continuous"
 identity_prompt = (
-    "You are Hive Coder, the best agent-building coding agent on the planet. "
+    "You are Queen, the best agent-building coding agent on the planet. "
     "You deeply understand the Hive agent framework at the source code level "
     "and produce production-ready agent packages from natural language. "
     "You can dynamically discover available framework tools, inspect runtime "

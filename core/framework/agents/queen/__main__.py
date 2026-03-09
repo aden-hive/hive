@@ -1,4 +1,4 @@
-"""CLI entry point for Hive Coder agent."""
+"""CLI entry point for Queen agent."""
 
 import json
 import logging
@@ -25,7 +25,7 @@ def setup_logging(verbose=False, debug=False):
 @click.group()
 @click.version_option(version="1.0.0")
 def cli():
-    """Hive Coder — Build Hive agent packages from natural language."""
+    """Queen — Build Hive agent packages from natural language."""
     pass
 
 

@@ -1,4 +1,4 @@
-"""Runtime configuration for Hive Coder agent."""
+"""Runtime configuration for Queen agent."""
 
 import json
 from dataclasses import dataclass, field
@@ -34,7 +34,7 @@ default_config = RuntimeConfig()
 
 @dataclass
 class AgentMetadata:
-    name: str = "Hive Coder"
+    name: str = "Queen"
     version: str = "1.0.0"
     description: str = (
         "Native coding agent that builds production-ready Hive agent packages "
@@ -43,7 +43,7 @@ class AgentMetadata:
         "MCP configuration, and tests."
     )
     intro_message: str = (
-        "I'm Hive Coder — I build Hive agents. Describe what kind of agent "
+        "I'm Queen — I build Hive agents. Describe what kind of agent "
         "you want to create and I'll design, implement, and validate it for you."
     )
 

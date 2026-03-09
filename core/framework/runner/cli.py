@@ -208,11 +208,11 @@ def register_commands(subparsers: argparse._SubParsersAction) -> None:
     )
     tui_parser.set_defaults(func=cmd_tui)
 
-    # code command (Hive Coder — framework agent builder)
+    # code command (Queen — framework agent builder)
     code_parser = subparsers.add_parser(
         "code",
-        help="Launch Hive Coder to build agents",
-        description="Interactive agent builder. Describe what you want and Hive Coder builds it.",
+        help="Launch Queen to build agents",
+        description="Interactive agent builder. Describe what you want and Queen builds it.",
     )
     code_parser.add_argument(
         "--model",
@@ -1433,10 +1433,10 @@ def cmd_tui(args: argparse.Namespace) -> int:
 
 
 def cmd_code(args: argparse.Namespace) -> int:
-    """Launch Hive Coder with multi-graph support.
+    """Launch Queen with multi-graph support.
 
     Unlike ``_launch_agent_tui``, this sets up graph lifecycle tools and
-    assigns ``graph_id="hive_coder"`` so the coder can load, supervise,
+    assigns ``graph_id="queen"`` so the coder can load, supervise,
     and restart secondary agent graphs within the same session.
     """
     import logging
@@ -1444,10 +1444,10 @@ def cmd_code(args: argparse.Namespace) -> int:
     logging.basicConfig(level=logging.WARNING, format="%(message)s")
 
     framework_agents_dir = _get_framework_agents_dir()
-    hive_coder_path = framework_agents_dir / "hive_coder"
+    queen_path = framework_agents_dir / "queen"
 
-    if not (hive_coder_path / "agent.py").exists():
-        print("Error: Hive Coder agent not found.", file=sys.stderr)
+    if not (queen_path / "agent.py").exists():
+        print("Error: Queen agent not found.", file=sys.stderr)
         return 1
 
     # Ensure framework agents dir is on sys.path for import
@@ -1462,7 +1462,7 @@ def cmd_code(args: argparse.Namespace) -> int:
 
     async def run_with_tui():
         try:
-            runner = AgentRunner.load(hive_coder_path, model=args.model)
+            runner = AgentRunner.load(queen_path, model=args.model)
         except CredentialError as e:
             print(f"\n{e}", file=sys.stderr)
             return
@@ -1480,9 +1480,9 @@ def cmd_code(args: argparse.Namespace) -> int:
         runtime = runner._agent_runtime
 
         # -- Multi-graph setup --
-        # Tag the primary graph so events carry graph_id="hive_coder"
-        runtime._graph_id = "hive_coder"
-        runtime._active_graph_id = "hive_coder"
+        # Tag the primary graph so events carry graph_id="queen"
+        runtime._graph_id = "queen"
+        runtime._active_graph_id = "queen"
 
         # Register graph lifecycle tools (load_agent, unload_agent, etc.)
         register_graph_tools(runner._tool_registry, runtime)
