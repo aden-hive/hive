@@ -203,7 +203,7 @@ class EncryptedFileStorage(CredentialStorage):
         # Decrypt
         try:
             json_bytes = self._fernet.decrypt(encrypted)
-            data = json.loads(json_bytes.decode())
+            data = json.loads(json_bytes.decode("utf-8-sig"))
         except Exception as e:
             raise CredentialDecryptionError(
                 f"Failed to decrypt credential '{credential_id}': {e}"
@@ -227,7 +227,7 @@ class EncryptedFileStorage(CredentialStorage):
         index_path = self.base_path / "metadata" / "index.json"
         if not index_path.exists():
             return []
-        with open(index_path) as f:
+        with open(index_path, encoding="utf-8-sig") as f:
             index = json.load(f)
         return list(index.get("credentials", {}).keys())
 
@@ -268,7 +268,7 @@ class EncryptedFileStorage(CredentialStorage):
         index_path = self.base_path / "metadata" / "index.json"
 
         if index_path.exists():
-            with open(index_path) as f:
+            with open(index_path, encoding="utf-8-sig") as f:
                 index = json.load(f)
         else:
             index = {"credentials": {}, "version": "1.0"}
@@ -283,7 +283,7 @@ class EncryptedFileStorage(CredentialStorage):
 
         index["last_modified"] = datetime.now(UTC).isoformat()
 
-        with open(index_path, "w") as f:
+        with open(index_path, "w", encoding="utf-8") as f:
             json.dump(index, f, indent=2)
 
 

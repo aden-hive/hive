@@ -213,8 +213,7 @@ class AdenTUI(App):
         Binding("ctrl+z", "pause_execution", "Pause", show=True, priority=True),
         Binding("ctrl+r", "show_sessions", "Sessions", show=True, priority=True),
         Binding("ctrl+a", "show_agent_picker", "Agents", show=True, priority=True),
-        Binding("ctrl+e", "escalate_to_coder", "Coder", show=True, priority=True),
-        Binding("ctrl+e", "return_from_coder", "← Back", show=True, priority=True),
+        Binding("ctrl+q", "connect_to_queen", "Queen", show=True, priority=True),
         Binding("tab", "focus_next", "Next Panel", show=True),
         Binding("shift+tab", "focus_previous", "Previous Panel", show=False),
     ]
@@ -225,19 +224,22 @@ class AdenTUI(App):
         resume_session: str | None = None,
         resume_checkpoint: str | None = None,
         model: str | None = None,
-        no_guardian: bool = False,
     ):
         super().__init__()
 
         self.runtime = runtime
         self._model = model
-        self._no_guardian = no_guardian
         self._resume_session = resume_session
         self._resume_checkpoint = resume_checkpoint
         self._runner = None  # AgentRunner — needed for cleanup on swap
 
-        # Escalation stack: stores worker state when coder is in foreground
-        self._escalation_stack: list[dict] = []
+        # Health judge + queen monitoring graphs (loaded alongside worker agents)
+        self._queen_graph_id: str | None = None
+        self._judge_graph_id: str | None = None
+        self._judge_task = None  # concurrent.futures.Future for the judge loop
+        self._queen_task = None  # concurrent.futures.Future for the queen loop
+        self._queen_executor = None  # GraphExecutor for queen input injection
+        self._queen_escalation_sub = None  # EventBus subscription for queen
 
         # Widgets are created lazily when runtime is available
         self.graph_view = None
@@ -249,7 +251,7 @@ class AdenTUI(App):
         """Override to use native `open` for file:// URLs on macOS."""
         if url.startswith("file://") and platform.system() == "Darwin":
             path = url.removeprefix("file://")
-            subprocess.Popen(["open", path])
+            subprocess.Popen(["open", path], encoding="utf-8")
         else:
             super().open_url(url, new_tab=new_tab)
 
@@ -396,21 +398,18 @@ class AdenTUI(App):
         await self._finish_agent_load(runner)
 
     async def _finish_agent_load(self, runner) -> None:
-        """Complete agent setup, guardian attach, and widget mount."""
+        """Complete agent setup and widget mount."""
         import asyncio
+
+        # Reset health monitoring state from any prior agent load
+        self._stop_health_monitoring()
+        self._queen_graph_id = None
+        self._judge_graph_id = None
 
         loop = asyncio.get_event_loop()
         try:
             if runner._agent_runtime is None:
                 await loop.run_in_executor(None, runner._setup)
-
-            if not self._no_guardian and not runner.skip_guardian and runner._agent_runtime:
-                from framework.agents.hive_coder.guardian import attach_guardian
-
-                attach_guardian(runner._agent_runtime, runner._tool_registry)
-
-            if runner._agent_runtime and not runner._agent_runtime.is_running:
-                await runner._agent_runtime.start()
 
             self._runner = runner
             self.runtime = runner._agent_runtime
@@ -419,7 +418,24 @@ class AdenTUI(App):
             self.notify(f"Failed to load agent: {e}", severity="error", timeout=10)
             return
 
+        # Mount widgets FIRST — creates the ChatRepl and its dedicated agent
+        # event loop on a background thread.
         self._mount_agent_widgets()
+
+        # Start the runtime on the agent loop so ALL async tasks (timers,
+        # event handlers, execution streams) live on the same loop as worker
+        # execution.  Previously runtime.start() ran on Textual's UI loop,
+        # causing timer tasks to be starved by UI rendering.
+        if self.runtime and not self.runtime.is_running:
+            try:
+                agent_loop = self.chat_repl._agent_loop
+                future = asyncio.run_coroutine_threadsafe(self.runtime.start(), agent_loop)
+                await asyncio.wrap_future(future)
+            except Exception as e:
+                self.status_bar.set_graph_id("")
+                self.notify(f"Failed to start runtime: {e}", severity="error", timeout=10)
+                return
+
         await self._init_runtime_connection()
 
         # Clear resume state for subsequent loads
@@ -428,6 +444,259 @@ class AdenTUI(App):
 
         agent_name = runner.agent_path.name
         self.notify(f"Agent loaded: {agent_name}", severity="information", timeout=3)
+
+        # Load health judge + queen for worker agents (skip for hive_coder itself)
+        if agent_name != "hive_coder":
+            await self._load_judge_and_queen(runner._storage_path)
+
+    async def _load_judge_and_queen(self, storage_path) -> None:
+        """Start health judge and interactive queen as independent conversations.
+
+        Three-conversation architecture:
+        - **Queen**: persistent interactive GraphExecutor (user's primary interface)
+        - **Judge**: timer-driven background GraphExecutor (silent monitoring)
+        - **Worker**: the existing AgentRuntime (unchanged)
+
+        They share ONLY the EventBus (for communication) and the base
+        storage path (so the judge can read worker logs).  Nothing else
+        is shared — no state manager, no session store, no tool merging
+        into the worker runtime.  The worker is completely untouched.
+        """
+        import asyncio
+        import uuid
+        from datetime import datetime
+        from pathlib import Path
+
+        from framework.graph.executor import GraphExecutor
+        from framework.runner.tool_registry import ToolRegistry
+        from framework.runtime.core import Runtime
+        from framework.tools.queen_lifecycle_tools import (
+            QueenPhaseState,
+            register_queen_lifecycle_tools,
+        )
+        from framework.tools.worker_monitoring_tools import register_worker_monitoring_tools
+
+        log = logging.getLogger("tui.queen")
+
+        try:
+            storage_path = Path(storage_path)
+            event_bus = self.runtime._event_bus
+            llm = self.runtime._llm
+            agent_loop = self.chat_repl._agent_loop
+
+            # Generate a shared session ID for queen, judge, and worker.
+            ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+            session_id = f"session_{ts}_{uuid.uuid4().hex[:8]}"
+
+            # 1. Monitoring tools (health summary, emit ticket, notify operator).
+            #    Registered on a standalone registry — NOT merged into the worker.
+            monitoring_registry = ToolRegistry()
+            register_worker_monitoring_tools(
+                monitoring_registry,
+                event_bus,
+                storage_path,
+                worker_graph_id=self.runtime._graph_id,
+            )
+
+            # 2. Storage dirs — global, not per-agent.
+            hive_home = Path.home() / ".hive"
+            queen_dir = hive_home / "queen" / "session" / session_id
+            queen_dir.mkdir(parents=True, exist_ok=True)
+
+            # Health judge disabled for simplicity.
+            from framework.runtime.execution_stream import GraphScopedEventBus
+
+            queen_event_bus = GraphScopedEventBus(event_bus, "queen")
+
+            # ---------------------------------------------------------------
+            # 4. Queen — persistent interactive conversation.
+            #    Runs a continuous event_loop node that is the user's
+            #    primary interface.  Has lifecycle tools to control the
+            #    worker.  Escalation tickets from the judge are injected
+            #    as messages into this conversation.
+            # ---------------------------------------------------------------
+            import framework.agents.hive_coder as _hive_coder_pkg
+            from framework.agents.hive_coder.agent import queen_goal, queen_graph
+
+            # Queen gets lifecycle tools, monitoring tools, AND coding tools
+            # from the hive_coder's coder-tools MCP server.  This spawns a
+            # separate MCP process so the queen can read/write files, run
+            # commands, discover tools, etc. independently of the worker.
+            queen_registry = ToolRegistry()
+
+            # Coding tools from hive_coder's MCP config (coder_tools_server).
+            hive_coder_dir = Path(_hive_coder_pkg.__file__).parent
+            mcp_config = hive_coder_dir / "mcp_servers.json"
+            if mcp_config.exists():
+                try:
+                    queen_registry.load_mcp_config(mcp_config)
+                    log.info("Queen: loaded MCP config from %s", mcp_config)
+                except Exception:
+                    log.warning("Queen: MCP config failed to load", exc_info=True)
+
+            # Worker is already loaded in TUI path -> start in staging phase.
+            phase_state = QueenPhaseState(phase="staging", event_bus=event_bus)
+
+            register_queen_lifecycle_tools(
+                queen_registry,
+                worker_runtime=self.runtime,
+                event_bus=event_bus,
+                storage_path=storage_path,
+                session_id=session_id,
+                phase_state=phase_state,
+            )
+            register_worker_monitoring_tools(
+                queen_registry,
+                event_bus,
+                storage_path,
+                stream_id="queen",
+                worker_graph_id=self.runtime._graph_id,
+            )
+            queen_tools = list(queen_registry.get_tools().values())
+            queen_tool_executor = queen_registry.get_executor()
+
+            # Partition tools into phase-specific sets
+            from framework.agents.hive_coder.nodes import (
+                _QUEEN_BUILDING_TOOLS,
+                _QUEEN_RUNNING_TOOLS,
+                _QUEEN_STAGING_TOOLS,
+            )
+
+            building_names = set(_QUEEN_BUILDING_TOOLS)
+            staging_names = set(_QUEEN_STAGING_TOOLS)
+            running_names = set(_QUEEN_RUNNING_TOOLS)
+            phase_state.building_tools = [t for t in queen_tools if t.name in building_names]
+            phase_state.staging_tools = [t for t in queen_tools if t.name in staging_names]
+            phase_state.running_tools = [t for t in queen_tools if t.name in running_names]
+
+            # Build worker profile for queen's system prompt.
+            from framework.tools.queen_lifecycle_tools import build_worker_profile
+
+            worker_identity = build_worker_profile(
+                self.runtime,
+                agent_path=self._runner.agent_path if self._runner else None,
+            )
+
+            # Adjust queen graph: filter tools to what's registered and
+            # append worker identity to the system prompt.
+            registered_tool_names = set(queen_registry.get_tools().keys())
+            _orig_queen_node = queen_graph.nodes[0]
+            declared_tools = _orig_queen_node.tools or []
+            available_tools = [t for t in declared_tools if t in registered_tool_names]
+
+            node_updates: dict = {}
+            if set(available_tools) != set(declared_tools):
+                missing = sorted(set(declared_tools) - registered_tool_names)
+                log.warning("Queen: tools not available (MCP may have failed): %s", missing)
+                node_updates["tools"] = available_tools
+            # Always inject worker identity into system prompt.
+            base_prompt = _orig_queen_node.system_prompt or ""
+            node_updates["system_prompt"] = base_prompt + worker_identity
+
+            adjusted_node = _orig_queen_node.model_copy(update=node_updates)
+            queen_graph = queen_graph.model_copy(update={"nodes": [adjusted_node]})
+
+            queen_runtime = Runtime(hive_home / "queen")
+
+            async def _queen_loop():
+                try:
+                    executor = GraphExecutor(
+                        runtime=queen_runtime,
+                        llm=llm,
+                        tools=queen_tools,
+                        tool_executor=queen_tool_executor,
+                        event_bus=queen_event_bus,
+                        stream_id="queen",
+                        storage_path=queen_dir,
+                        loop_config=queen_graph.loop_config,
+                        dynamic_tools_provider=phase_state.get_current_tools,
+                    )
+                    self._queen_executor = executor
+
+                    # Wire inject_notification so phase switches notify the queen LLM
+                    async def _inject_phase_notification(content: str) -> None:
+                        node = executor.node_registry.get("queen")
+                        if node is not None and hasattr(node, "inject_event"):
+                            await node.inject_event(content)
+
+                    phase_state.inject_notification = _inject_phase_notification
+
+                    log.info(
+                        "Queen starting in %s phase with %d tools: %s",
+                        phase_state.phase,
+                        len(phase_state.get_current_tools()),
+                        [t.name for t in phase_state.get_current_tools()],
+                    )
+                    # The queen's event_loop node runs forever (continuous mode).
+                    # It blocks on _await_user_input() after each LLM turn,
+                    # and input is injected via executor.node_registry["queen"].inject_event().
+                    result = await executor.execute(
+                        graph=queen_graph,
+                        goal=queen_goal,
+                        input_data={"greeting": "Session started."},
+                        session_state={"resume_session_id": session_id},
+                    )
+                    # Should never reach here — queen is forever-alive.
+                    log.warning(
+                        "Queen executor returned (should be forever-alive): %s",
+                        result,
+                    )
+                except Exception:
+                    log.error("Queen conversation crashed", exc_info=True)
+                finally:
+                    self._queen_executor = None
+
+            self._queen_task = asyncio.run_coroutine_threadsafe(
+                _queen_loop(),
+                agent_loop,
+            )
+            self._queen_graph_id = "queen"
+
+            # Wire queen injection callback into ChatRepl so user input
+            # is routed to the queen by default.
+            async def _inject_queen(content: str) -> bool:
+                """Inject user input into the queen's active node."""
+                executor = self._queen_executor
+                if executor is None:
+                    return False
+                node = executor.node_registry.get("queen")
+                if node is not None and hasattr(node, "inject_event"):
+                    await node.inject_event(content)
+                    return True
+                return False
+
+            self.chat_repl._queen_inject_callback = _inject_queen
+
+            self.notify(
+                "Queen active",
+                severity="information",
+                timeout=3,
+            )
+        except Exception as e:
+            log.error("Failed to load health monitoring: %s", e, exc_info=True)
+            self.notify(
+                f"Health monitoring unavailable: {e}",
+                severity="warning",
+                timeout=5,
+            )
+
+    def _stop_health_monitoring(self) -> None:
+        """Cancel judge task, queen task, and subscriptions from a prior load."""
+        if self._judge_task is not None:
+            self._judge_task.cancel()
+            self._judge_task = None
+        if self._queen_task is not None:
+            self._queen_task.cancel()
+            self._queen_task = None
+        self._queen_executor = None
+        if self._queen_escalation_sub is not None:
+            try:
+                event_bus = self.runtime._event_bus if self.runtime else None
+                if event_bus:
+                    event_bus.unsubscribe(self._queen_escalation_sub)
+            except Exception:
+                pass
+            self._queen_escalation_sub = None
 
     def _show_account_selection(self, runner, accounts: list[dict]) -> None:
         """Show the account selection screen and continue loading on selection."""
@@ -623,220 +892,6 @@ class AdenTUI(App):
         """Worker wrapper for _load_and_switch_agent."""
         await self._load_and_switch_agent(agent_path)
 
-    # -- Escalation to Hive Coder --
-
-    @work(exclusive=True, group="escalation")
-    async def _do_escalate_to_coder(
-        self,
-        reason: str = "",
-        context: str = "",
-        node_id: str = "",
-    ) -> None:
-        """Push current agent onto stack and load hive_coder."""
-        from pathlib import Path
-
-        from framework.credentials.models import CredentialError
-        from framework.runner import AgentRunner
-        from framework.tools.session_graph_tools import register_graph_tools
-
-        if self.runtime is None:
-            self.notify("No active agent to escalate from", severity="error")
-            return
-
-        # 1. Save current state (do NOT cleanup — worker stays alive)
-        saved = {
-            "runner": self._runner,
-            "runtime": self.runtime,
-            "blocked_node_id": node_id,
-        }
-        self._escalation_stack.append(saved)
-
-        # Unsubscribe from worker events
-        if hasattr(self, "_subscription_id"):
-            try:
-                self.runtime.unsubscribe_from_events(self._subscription_id)
-            except Exception:
-                pass
-            del self._subscription_id
-
-        # Remember worker agent path for coder context
-        worker_path = ""
-        if self._runner and hasattr(self._runner, "agent_path"):
-            worker_path = str(self._runner.agent_path.resolve())
-
-        # 2. Remove worker widgets (they get destroyed)
-        workspace = self.query_one("#agent-workspace", Horizontal)
-        for child in list(workspace.children):
-            child.remove()
-        self.graph_view = None
-        self.chat_repl = None
-
-        # 3. Show loading state
-        self.status_bar.set_graph_id("Loading Hive Coder...")
-        self.notify("Escalating to Hive Coder...", timeout=3)
-
-        # 4. Load hive_coder
-        framework_agents_dir = Path(__file__).resolve().parent.parent / "agents"
-        hive_coder_path = framework_agents_dir / "hive_coder"
-
-        import asyncio
-        import functools
-
-        loop = asyncio.get_event_loop()
-        try:
-            load_fn = functools.partial(
-                AgentRunner.load,
-                str(hive_coder_path),
-                model=self._model,
-                interactive=False,
-            )
-            runner = await loop.run_in_executor(None, load_fn)
-            if runner._agent_runtime is None:
-                await loop.run_in_executor(None, runner._setup)
-
-            coder_runtime = runner._agent_runtime
-            coder_runtime._graph_id = "hive_coder"
-            coder_runtime._active_graph_id = "hive_coder"
-
-            # Register graph lifecycle tools
-            register_graph_tools(runner._tool_registry, coder_runtime)
-            coder_runtime._tools = list(runner._tool_registry.get_tools().values())
-            coder_runtime._tool_executor = runner._tool_registry.get_executor()
-
-            if not coder_runtime.is_running:
-                await coder_runtime.start()
-
-            self._runner = runner
-            self.runtime = coder_runtime
-        except CredentialError as e:
-            self.status_bar.set_graph_id("")
-            self._show_credential_setup(
-                str(hive_coder_path),
-                on_cancel=self._restore_from_escalation_stack,
-                credential_error=e,
-            )
-            return
-        except Exception as e:
-            self.status_bar.set_graph_id("")
-            self.notify(f"Failed to load coder: {e}", severity="error", timeout=10)
-            self._restore_from_escalation_stack()
-            return
-
-        # 5. Mount coder widgets and subscribe
-        self._mount_agent_widgets()
-        await self._init_runtime_connection()
-
-        self.status_bar.set_graph_id("hive_coder (escalated)")
-
-        # 6. Auto-trigger coder with escalation context
-        escalation_input = self._build_escalation_input(reason, context, worker_path)
-        try:
-            import asyncio
-
-            entry_points = self.runtime.get_entry_points()
-            if entry_points:
-                ep = entry_points[0]
-                future = asyncio.run_coroutine_threadsafe(
-                    self.runtime.trigger(
-                        entry_point_id=ep.id,
-                        input_data={"user_request": escalation_input},
-                    ),
-                    self.chat_repl._agent_loop,
-                )
-                exec_id = await asyncio.wrap_future(future)
-                self.chat_repl._current_exec_id = exec_id
-        except Exception as e:
-            self.notify(f"Error starting coder: {e}", severity="error")
-
-        self.notify(
-            "Hive Coder loaded. Ctrl+E or /back to return.",
-            severity="information",
-            timeout=5,
-        )
-        self.refresh_bindings()
-
-    def _build_escalation_input(self, reason: str, context: str, worker_path: str) -> str:
-        """Compose the user_request string for hive_coder."""
-        parts = []
-        if worker_path:
-            parts.append(
-                f"Modify the agent at: {worker_path}\n"
-                f"Do NOT ask which agent to modify — it is the path above."
-            )
-        if reason:
-            parts.append(f"Problem: {reason}")
-        if context:
-            parts.append(f"Context:\n{context}")
-        if not parts:
-            parts.append("The user needs help modifying their agent.")
-        return "\n\n".join(parts)
-
-    async def _return_from_escalation(self, summary: str = "") -> None:
-        """Pop escalation stack and restore the worker agent."""
-        if not self._escalation_stack:
-            self.notify("No escalation to return from", severity="warning")
-            return
-
-        # 1. Tear down coder
-        self._unmount_agent_widgets()
-        if self._runner is not None:
-            try:
-                await self._runner.cleanup_async()
-            except Exception:
-                pass
-
-        # 2. Restore worker
-        saved = self._escalation_stack.pop()
-        self._runner = saved["runner"]
-        self.runtime = saved["runtime"]
-
-        # 3. Mount fresh widgets for the worker runtime
-        self._mount_agent_widgets()
-        await self._init_runtime_connection()
-
-        graph_id = self.runtime.graph.id if self.runtime else ""
-        self.status_bar.set_graph_id(graph_id)
-
-        # 4. Inject return message to unblock the worker node
-        blocked_node_id = saved.get("blocked_node_id", "")
-        return_msg = summary or "Coder session completed. Continuing."
-        if blocked_node_id:
-            try:
-                import asyncio
-
-                future = asyncio.run_coroutine_threadsafe(
-                    self.runtime.inject_input(blocked_node_id, return_msg),
-                    self.chat_repl._agent_loop,
-                )
-                await asyncio.wrap_future(future)
-            except Exception as e:
-                self.notify(
-                    f"Could not resume worker: {e}",
-                    severity="warning",
-                    timeout=5,
-                )
-
-        # 5. Show return in chat (deferred — widgets need a tick to mount)
-        def _show_return():
-            if self.chat_repl:
-                self.chat_repl._write_history("[bold cyan]Returned from Hive Coder.[/bold cyan]")
-                if summary:
-                    self.chat_repl._write_history(f"[dim]{summary}[/dim]")
-
-        self.call_later(_show_return)
-        self.notify("Returned to worker agent", severity="information", timeout=3)
-        self.refresh_bindings()
-
-    def _restore_from_escalation_stack(self) -> None:
-        """Emergency restore when coder loading fails."""
-        if not self._escalation_stack:
-            return
-        saved = self._escalation_stack.pop()
-        self._runner = saved["runner"]
-        self.runtime = saved["runtime"]
-        self._mount_agent_widgets()
-        self.call_later(self._init_runtime_connection)
-
     # -- Logging --
 
     def _setup_logging_queue(self) -> None:
@@ -916,6 +971,8 @@ class AdenTUI(App):
         EventType.EXECUTION_PAUSED,
         EventType.EXECUTION_RESUMED,
         EventType.ESCALATION_REQUESTED,
+        EventType.WORKER_ESCALATION_TICKET,
+        EventType.QUEEN_INTERVENTION_REQUESTED,
     ]
 
     _LOG_PANE_EVENTS = frozenset(_EVENT_TYPES) - {
@@ -964,10 +1021,82 @@ class AdenTUI(App):
         try:
             et = event.type
 
-            # --- Multi-graph filtering ---
+            # --- Judge monitoring filter ---
+            # The judge runs as a silent background task.  Only surface
+            # escalation ticket events on the status bar; everything else
+            # (LLM deltas, tool calls, node iterations) goes to logs only.
+            if event.stream_id == "judge":
+                if et == EventType.WORKER_ESCALATION_TICKET:
+                    ticket = event.data.get("ticket", {})
+                    severity = ticket.get("severity", "")
+                    if severity:
+                        self.status_bar.set_node_detail(f"judge: {severity} ticket")
+                # All judge events → logs only, not displayed.
+                return
+
+            # --- Queen-primary event routing ---
+            # When the queen is active, queen events go to chat display
+            # and worker events are handled specially.
+            _queen_active = self._queen_executor is not None
+
+            if _queen_active:
+                # Queen events (stream_id="queen") → display in chat
+                if event.stream_id == "queen":
+                    if et == EventType.QUEEN_INTERVENTION_REQUESTED:
+                        self._handle_queen_intervention(event.data)
+                        return
+                    # Tag streaming source and active node so labels resolve
+                    # correctly even when worker events interleave.
+                    self.chat_repl._streaming_source = "queen"
+                    if event.node_id:
+                        self.chat_repl._active_node_id = event.node_id
+                    # Queen events fall through to the chat handlers below.
+
+                # Worker events (from AgentRuntime, graph_id set) when queen is primary
+                elif event.graph_id is not None:
+                    if et == EventType.CLIENT_INPUT_REQUESTED:
+                        # Worker asking for input — set override in ChatRepl
+                        self.chat_repl.handle_worker_input_requested(
+                            event.node_id or event.data.get("node_id", ""),
+                            graph_id=event.graph_id,
+                        )
+                        return
+                    elif et == EventType.EXECUTION_COMPLETED:
+                        # Inject status into queen conversation
+                        self._inject_worker_status_into_queen(
+                            "Worker execution completed successfully."
+                        )
+                        return
+                    elif et == EventType.EXECUTION_FAILED:
+                        error = event.data.get("error", "Unknown error")[:200]
+                        self._inject_worker_status_into_queen(f"Worker execution failed: {error}")
+                        return
+                    elif et in (
+                        EventType.LLM_TEXT_DELTA,
+                        EventType.CLIENT_OUTPUT_DELTA,
+                        EventType.TOOL_CALL_STARTED,
+                        EventType.TOOL_CALL_COMPLETED,
+                    ):
+                        # Let worker client-facing output and tool events
+                        # through so the user can see what the worker is
+                        # doing/asking.  Clear queen streaming source and
+                        # update the active node so labels resolve correctly.
+                        self.chat_repl._streaming_source = None
+                        if event.node_id:
+                            self.chat_repl._active_node_id = event.node_id
+                        # Fall through to the standard chat handlers below.
+                    else:
+                        # All other worker events while queen is active → logs only
+                        return
+
+            # --- Multi-graph filtering (non-queen mode) ---
             # If the event has a graph_id and it's not the active graph,
             # show a notification for important events and drop the rest.
-            if event.graph_id is not None and event.graph_id != self.runtime.active_graph_id:
+            if (
+                not _queen_active
+                and event.graph_id is not None
+                and event.graph_id != self.runtime.active_graph_id
+            ):
                 if et == EventType.CLIENT_INPUT_REQUESTED:
                     self.notify(
                         f"[bold]{event.graph_id}[/bold] is waiting for input",
@@ -1015,13 +1144,6 @@ class AdenTUI(App):
                 self.chat_repl.handle_input_requested(
                     event.node_id or event.data.get("node_id", ""),
                     graph_id=event.graph_id,
-                )
-            elif et == EventType.ESCALATION_REQUESTED:
-                self.chat_repl.handle_escalation_requested(event.data)
-                self._do_escalate_to_coder(
-                    reason=event.data.get("reason", ""),
-                    context=event.data.get("context", ""),
-                    node_id=event.node_id or "",
                 )
             elif et == EventType.NODE_LOOP_STARTED:
                 self.chat_repl.handle_node_started(event.node_id or "")
@@ -1094,10 +1216,14 @@ class AdenTUI(App):
                     )
 
             # --- Status bar events ---
+            # Map of external node IDs (queen, judge) to display names.
+            _ext_names = {"queen": "Queen"}
+
             if et == EventType.EXECUTION_STARTED:
                 entry_node = event.data.get("entry_node") or (
                     self.runtime.graph.entry_node if self.runtime else ""
                 )
+                entry_node = _ext_names.get(entry_node, entry_node)
                 self.status_bar.set_running(entry_node)
             elif et == EventType.EXECUTION_COMPLETED:
                 self.status_bar.set_completed()
@@ -1106,7 +1232,7 @@ class AdenTUI(App):
             elif et == EventType.NODE_LOOP_STARTED:
                 nid = event.node_id or ""
                 node = self.runtime.graph.get_node(nid)
-                name = node.name if node else nid
+                name = node.name if node else _ext_names.get(nid, nid)
                 self.status_bar.set_active_node(name, "thinking...")
             elif et == EventType.NODE_LOOP_ITERATION:
                 self.status_bar.set_node_detail(f"step {event.data.get('iteration', '?')}")
@@ -1146,6 +1272,48 @@ class AdenTUI(App):
                 e,
                 exc_info=True,
             )
+
+    def _handle_queen_intervention(self, data: dict) -> None:
+        """Notify the operator of a queen escalation — non-disruptively.
+
+        The worker keeps running. The operator can press Ctrl+Q to switch to
+        the queen's graph view for a conversation about the issue.
+        """
+        severity = data.get("severity", "unknown")
+        analysis = data.get("analysis", "(no analysis)")
+
+        severity_markup = {
+            "low": "[dim]low[/dim]",
+            "medium": "[yellow]medium[/yellow]",
+            "high": "[bold red]high[/bold red]",
+            "critical": "[bold red]CRITICAL[/bold red]",
+        }
+        sev_label = severity_markup.get(severity, severity)
+
+        msg = f"Queen escalation ({sev_label}): {analysis}"
+        if self._queen_graph_id:
+            msg += "\nPress [bold]Ctrl+Q[/bold] to chat with queen."
+
+        textual_severity = "error" if severity in ("high", "critical") else "warning"
+        self.notify(msg, severity=textual_severity, timeout=30)
+
+    def _inject_worker_status_into_queen(self, message: str) -> None:
+        """Inject a worker status update into the queen's conversation."""
+        import asyncio as _aio
+
+        executor = self._queen_executor
+        if executor is None:
+            return
+        node = executor.node_registry.get("queen")
+        if node is None or not hasattr(node, "inject_event"):
+            return
+
+        agent_loop = getattr(self.chat_repl, "_agent_loop", None)
+        if agent_loop is None:
+            return
+
+        status_msg = f"[WORKER STATUS UPDATE]\n{message}"
+        _aio.run_coroutine_threadsafe(node.inject_event(status_msg), agent_loop)
 
     # -- Actions --
 
@@ -1240,46 +1408,20 @@ class AdenTUI(App):
         self.notify(f"Logs {mode}", severity="information", timeout=2)
 
     def action_pause_execution(self) -> None:
-        """Immediately pause execution by cancelling task (bound to Ctrl+Z)."""
+        """Immediately pause execution by cancelling all running tasks (bound to Ctrl+Z)."""
         if self.chat_repl is None or self.runtime is None:
             return
         try:
-            if not self.chat_repl._current_exec_id:
+            if self.runtime.cancel_all_tasks(self.chat_repl._agent_loop):
+                self.chat_repl._current_exec_id = None
                 self.notify(
-                    "No active execution to pause",
+                    "All executions stopped",
                     severity="information",
                     timeout=3,
                 )
-                return
-
-            task_cancelled = False
-            all_streams = []
-            active_reg = self.runtime.get_graph_registration(self.runtime.active_graph_id)
-            if active_reg:
-                all_streams.extend(active_reg.streams.values())
-            for gid in self.runtime.list_graphs():
-                if gid == self.runtime.active_graph_id:
-                    continue
-                reg = self.runtime.get_graph_registration(gid)
-                if reg:
-                    all_streams.extend(reg.streams.values())
-
-            for stream in all_streams:
-                exec_id = self.chat_repl._current_exec_id
-                task = stream._execution_tasks.get(exec_id)
-                if task and not task.done():
-                    task.cancel()
-                    task_cancelled = True
-                    self.notify(
-                        "Execution paused - state saved",
-                        severity="information",
-                        timeout=3,
-                    )
-                    break
-
-            if not task_cancelled:
+            else:
                 self.notify(
-                    "Execution already completed",
+                    "No active executions",
                     severity="information",
                     timeout=2,
                 )
@@ -1304,29 +1446,21 @@ class AdenTUI(App):
             )
 
     def check_action(self, action: str, parameters: tuple[object, ...]) -> bool | None:
-        """Control which bindings are shown in the footer.
-
-        Both escalate_to_coder and return_from_coder are bound to Ctrl+E.
-        check_action toggles which one is active based on escalation state,
-        so the footer shows "Coder" or "← Back" accordingly.
-        """
-        if action == "escalate_to_coder":
-            return not self._escalation_stack
-        if action == "return_from_coder":
-            return bool(self._escalation_stack)
+        """Control which bindings are shown in the footer."""
+        if action == "connect_to_queen":
+            return bool(self._queen_graph_id and self.runtime is not None)
         return True
 
-    def action_escalate_to_coder(self) -> None:
-        """Escalate to Hive Coder (bound to Ctrl+E)."""
-        if self.runtime is None:
-            self.notify("No active agent to escalate from", severity="error")
+    def action_connect_to_queen(self) -> None:
+        """Toggle between worker and queen graph views (Ctrl+Q)."""
+        if not self._queen_graph_id:
+            self.notify("No queen monitoring active", severity="warning", timeout=3)
             return
-        # _do_escalate_to_coder is already @work-decorated; calling it starts the worker.
-        self._do_escalate_to_coder(reason="User-initiated escalation")
-
-    async def action_return_from_coder(self) -> None:
-        """Return from Hive Coder to worker agent (Ctrl+E toggles)."""
-        await self._return_from_escalation()
+        # Toggle: if already on queen, switch back to worker
+        if self.runtime and self.runtime.active_graph_id == self._queen_graph_id:
+            self.action_switch_graph(self.runtime.graph_id)
+        else:
+            self.action_switch_graph(self._queen_graph_id)
 
     async def on_unmount(self) -> None:
         """Cleanup on app shutdown - cancel execution which will save state."""
@@ -1354,6 +1488,12 @@ class AdenTUI(App):
                         except Exception:
                             pass
                         break
+        except Exception:
+            pass
+
+        # Stop health monitoring (judge + queen)
+        try:
+            self._stop_health_monitoring()
         except Exception:
             pass
 

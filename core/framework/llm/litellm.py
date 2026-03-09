@@ -11,7 +11,7 @@ import asyncio
 import json
 import logging
 import time
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncIterator
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -23,7 +23,7 @@ except ImportError:
     litellm = None  # type: ignore[assignment]
     RateLimitError = Exception  # type: ignore[assignment, misc]
 
-from framework.llm.provider import LLMProvider, LLMResponse, Tool, ToolResult, ToolUse
+from framework.llm.provider import LLMProvider, LLMResponse, Tool
 from framework.llm.stream_events import StreamEvent
 
 logger = logging.getLogger(__name__)
@@ -70,12 +70,59 @@ def _patch_litellm_anthropic_oauth() -> None:
     AnthropicModelInfo.validate_environment = _patched_validate_environment
 
 
+def _patch_litellm_metadata_nonetype() -> None:
+    """Patch litellm entry points to prevent metadata=None TypeError.
+
+    litellm bug: the @client decorator in utils.py has four places that do
+        "model_group" in kwargs.get("metadata", {})
+    but kwargs["metadata"] can be explicitly None (set internally by
+    litellm_params), causing:
+        TypeError: argument of type 'NoneType' is not iterable
+    This masks the real API error with a confusing APIConnectionError.
+
+    Fix: wrap the four litellm entry points (completion, acompletion,
+    responses, aresponses) to pop metadata=None before the @client
+    decorator's error handler can crash on it.
+    """
+    import functools
+
+    for fn_name in ("completion", "acompletion", "responses", "aresponses"):
+        original = getattr(litellm, fn_name, None)
+        if original is None:
+            continue
+        if asyncio.iscoroutinefunction(original):
+
+            @functools.wraps(original)
+            async def _async_wrapper(*args, _orig=original, **kwargs):
+                if kwargs.get("metadata") is None:
+                    kwargs.pop("metadata", None)
+                return await _orig(*args, **kwargs)
+
+            setattr(litellm, fn_name, _async_wrapper)
+        else:
+
+            @functools.wraps(original)
+            def _sync_wrapper(*args, _orig=original, **kwargs):
+                if kwargs.get("metadata") is None:
+                    kwargs.pop("metadata", None)
+                return _orig(*args, **kwargs)
+
+            setattr(litellm, fn_name, _sync_wrapper)
+
+
 if litellm is not None:
     _patch_litellm_anthropic_oauth()
+    _patch_litellm_metadata_nonetype()
 
 RATE_LIMIT_MAX_RETRIES = 10
 RATE_LIMIT_BACKOFF_BASE = 2  # seconds
 RATE_LIMIT_MAX_DELAY = 120  # seconds - cap to prevent absurd waits
+MINIMAX_API_BASE = "https://api.minimax.io/v1"
+
+# Empty-stream retries use a short fixed delay, not the rate-limit backoff.
+# Conversation-structure issues are deterministic — long waits don't help.
+EMPTY_STREAM_MAX_RETRIES = 3
+EMPTY_STREAM_RETRY_DELAY = 1.0  # seconds
 
 # Directory for dumping failed requests
 FAILED_REQUESTS_DIR = Path.home() / ".hive" / "failed_requests"
@@ -124,7 +171,7 @@ def _dump_failed_request(
         "temperature": kwargs.get("temperature"),
     }
 
-    with open(filepath, "w") as f:
+    with open(filepath, "w", encoding="utf-8") as f:
         json.dump(dump_data, f, indent=2, default=str)
 
     return str(filepath)
@@ -191,6 +238,11 @@ def _is_stream_transient_error(exc: BaseException) -> bool:
 
     Transient errors (recoverable=True): network issues, server errors, timeouts.
     Permanent errors (recoverable=False): auth, bad request, context window, etc.
+
+    NOTE: "Failed to parse tool call arguments" (malformed LLM output) is NOT
+    transient at the stream level — retrying with the same messages produces the
+    same malformed output.  This error is handled at the EventLoopNode level
+    where the conversation can be modified before retrying.
     """
     try:
         from litellm.exceptions import (
@@ -273,13 +325,32 @@ class LiteLLMProvider(LLMProvider):
         """
         self.model = model
         self.api_key = api_key
-        self.api_base = api_base
+        self.api_base = api_base or self._default_api_base_for_model(model)
         self.extra_kwargs = kwargs
+        # The Codex ChatGPT backend (chatgpt.com/backend-api/codex) rejects
+        # several standard OpenAI params: max_output_tokens, stream_options.
+        self._codex_backend = bool(
+            self.api_base and "chatgpt.com/backend-api/codex" in self.api_base
+        )
 
         if litellm is None:
             raise ImportError(
                 "LiteLLM is not installed. Please install it with: uv pip install litellm"
             )
+
+        # Note: The Codex ChatGPT backend is a Responses API endpoint at
+        # chatgpt.com/backend-api/codex/responses.  LiteLLM's model registry
+        # correctly marks codex models with mode="responses", so we do NOT
+        # override the mode.  The responses_api_bridge in litellm handles
+        # converting Chat Completions requests to Responses API format.
+
+    @staticmethod
+    def _default_api_base_for_model(model: str) -> str | None:
+        """Return provider-specific default API base when required."""
+        model_lower = model.lower()
+        if model_lower.startswith("minimax/") or model_lower.startswith("minimax-"):
+            return MINIMAX_API_BASE
+        return None
 
     def _completion_with_rate_limit_retry(
         self, max_retries: int | None = None, **kwargs: Any
@@ -327,6 +398,20 @@ class LiteLLMProvider(LLMProvider):
                         f"~{token_count} tokens ({token_method}). "
                         f"Full request dumped to: {dump_path}"
                     )
+
+                    # finish_reason=length means the model exhausted max_tokens
+                    # before producing content. Retrying with the same max_tokens
+                    # will never help — return immediately instead of looping.
+                    if finish_reason == "length":
+                        max_tok = kwargs.get("max_tokens", "unset")
+                        logger.error(
+                            f"[retry] {model} returned empty content with "
+                            f"finish_reason=length (max_tokens={max_tok}). "
+                            f"The model exhausted its token budget before "
+                            f"producing visible output. Increase max_tokens "
+                            f"or use a different model. Not retrying."
+                        )
+                        return response
 
                     if attempt == retries:
                         logger.error(
@@ -390,6 +475,21 @@ class LiteLLMProvider(LLMProvider):
         max_retries: int | None = None,
     ) -> LLMResponse:
         """Generate a completion using LiteLLM."""
+        # Codex ChatGPT backend requires streaming — delegate to the unified
+        # async streaming path which properly handles tool calls.
+        if self._codex_backend:
+            return asyncio.run(
+                self.acomplete(
+                    messages=messages,
+                    system=system,
+                    tools=tools,
+                    max_tokens=max_tokens,
+                    response_format=response_format,
+                    json_mode=json_mode,
+                    max_retries=max_retries,
+                )
+            )
+
         # Prepare messages with system prompt
         full_messages = []
         if system:
@@ -452,127 +552,6 @@ class LiteLLMProvider(LLMProvider):
             raw_response=response,
         )
 
-    def complete_with_tools(
-        self,
-        messages: list[dict[str, Any]],
-        system: str,
-        tools: list[Tool],
-        tool_executor: Callable[[ToolUse], ToolResult],
-        max_iterations: int = 10,
-        max_tokens: int = 4096,
-    ) -> LLMResponse:
-        """Run a tool-use loop until the LLM produces a final response."""
-        # Prepare messages with system prompt
-        current_messages = []
-        if system:
-            current_messages.append({"role": "system", "content": system})
-        current_messages.extend(messages)
-
-        total_input_tokens = 0
-        total_output_tokens = 0
-
-        # Convert tools to OpenAI format
-        openai_tools = [self._tool_to_openai_format(t) for t in tools]
-
-        for _ in range(max_iterations):
-            # Build kwargs
-            kwargs: dict[str, Any] = {
-                "model": self.model,
-                "messages": current_messages,
-                "max_tokens": max_tokens,
-                "tools": openai_tools,
-                **self.extra_kwargs,
-            }
-
-            if self.api_key:
-                kwargs["api_key"] = self.api_key
-            if self.api_base:
-                kwargs["api_base"] = self.api_base
-
-            response = self._completion_with_rate_limit_retry(**kwargs)
-
-            # Track tokens
-            usage = response.usage
-            if usage:
-                total_input_tokens += usage.prompt_tokens
-                total_output_tokens += usage.completion_tokens
-
-            choice = response.choices[0]
-            message = choice.message
-
-            # Check if we're done (no tool calls)
-            if choice.finish_reason == "stop" or not message.tool_calls:
-                return LLMResponse(
-                    content=message.content or "",
-                    model=response.model or self.model,
-                    input_tokens=total_input_tokens,
-                    output_tokens=total_output_tokens,
-                    stop_reason=choice.finish_reason or "stop",
-                    raw_response=response,
-                )
-
-            # Process tool calls.
-            # Add assistant message with tool calls.
-            current_messages.append(
-                {
-                    "role": "assistant",
-                    "content": message.content,
-                    "tool_calls": [
-                        {
-                            "id": tc.id,
-                            "type": "function",
-                            "function": {
-                                "name": tc.function.name,
-                                "arguments": tc.function.arguments,
-                            },
-                        }
-                        for tc in message.tool_calls
-                    ],
-                }
-            )
-
-            # Execute tools and add results.
-            for tool_call in message.tool_calls:
-                try:
-                    args = json.loads(tool_call.function.arguments)
-                except json.JSONDecodeError:
-                    # Surface error to LLM and skip tool execution
-                    current_messages.append(
-                        {
-                            "role": "tool",
-                            "tool_call_id": tool_call.id,
-                            "content": "Invalid JSON arguments provided to tool.",
-                        }
-                    )
-                    continue
-
-                tool_use = ToolUse(
-                    id=tool_call.id,
-                    name=tool_call.function.name,
-                    input=args,
-                )
-
-                result = tool_executor(tool_use)
-
-                # Add tool result message
-                current_messages.append(
-                    {
-                        "role": "tool",
-                        "tool_call_id": result.tool_use_id,
-                        "content": result.content,
-                    }
-                )
-
-        # Max iterations reached
-        return LLMResponse(
-            content="Max tool iterations reached",
-            model=self.model,
-            input_tokens=total_input_tokens,
-            output_tokens=total_output_tokens,
-            stop_reason="max_iterations",
-            raw_response=None,
-        )
-
     # ------------------------------------------------------------------
     # Async variants — non-blocking on the event loop
     # ------------------------------------------------------------------
@@ -620,6 +599,20 @@ class LiteLLMProvider(LLMProvider):
                         f"~{token_count} tokens ({token_method}). "
                         f"Full request dumped to: {dump_path}"
                     )
+
+                    # finish_reason=length means the model exhausted max_tokens
+                    # before producing content. Retrying with the same max_tokens
+                    # will never help — return immediately instead of looping.
+                    if finish_reason == "length":
+                        max_tok = kwargs.get("max_tokens", "unset")
+                        logger.error(
+                            f"[async-retry] {model} returned empty content with "
+                            f"finish_reason=length (max_tokens={max_tok}). "
+                            f"The model exhausted its token budget before "
+                            f"producing visible output. Increase max_tokens "
+                            f"or use a different model. Not retrying."
+                        )
+                        return response
 
                     if attempt == retries:
                         logger.error(
@@ -681,6 +674,19 @@ class LiteLLMProvider(LLMProvider):
         max_retries: int | None = None,
     ) -> LLMResponse:
         """Async version of complete(). Uses litellm.acompletion — non-blocking."""
+        # Codex ChatGPT backend requires streaming — route through stream() which
+        # already handles Codex quirks and has proper tool call accumulation.
+        if self._codex_backend:
+            stream_iter = self.stream(
+                messages=messages,
+                system=system,
+                tools=tools,
+                max_tokens=max_tokens,
+                response_format=response_format,
+                json_mode=json_mode,
+            )
+            return await self._collect_stream_to_response(stream_iter)
+
         full_messages: list[dict[str, Any]] = []
         if system:
             full_messages.append({"role": "system", "content": system})
@@ -725,115 +731,6 @@ class LiteLLMProvider(LLMProvider):
             raw_response=response,
         )
 
-    async def acomplete_with_tools(
-        self,
-        messages: list[dict[str, Any]],
-        system: str,
-        tools: list[Tool],
-        tool_executor: Callable[[ToolUse], ToolResult],
-        max_iterations: int = 10,
-        max_tokens: int = 4096,
-    ) -> LLMResponse:
-        """Async version of complete_with_tools(). Uses litellm.acompletion — non-blocking."""
-        current_messages: list[dict[str, Any]] = []
-        if system:
-            current_messages.append({"role": "system", "content": system})
-        current_messages.extend(messages)
-
-        total_input_tokens = 0
-        total_output_tokens = 0
-        openai_tools = [self._tool_to_openai_format(t) for t in tools]
-
-        for _ in range(max_iterations):
-            kwargs: dict[str, Any] = {
-                "model": self.model,
-                "messages": current_messages,
-                "max_tokens": max_tokens,
-                "tools": openai_tools,
-                **self.extra_kwargs,
-            }
-
-            if self.api_key:
-                kwargs["api_key"] = self.api_key
-            if self.api_base:
-                kwargs["api_base"] = self.api_base
-
-            response = await self._acompletion_with_rate_limit_retry(**kwargs)
-
-            usage = response.usage
-            if usage:
-                total_input_tokens += usage.prompt_tokens
-                total_output_tokens += usage.completion_tokens
-
-            choice = response.choices[0]
-            message = choice.message
-
-            if choice.finish_reason == "stop" or not message.tool_calls:
-                return LLMResponse(
-                    content=message.content or "",
-                    model=response.model or self.model,
-                    input_tokens=total_input_tokens,
-                    output_tokens=total_output_tokens,
-                    stop_reason=choice.finish_reason or "stop",
-                    raw_response=response,
-                )
-
-            current_messages.append(
-                {
-                    "role": "assistant",
-                    "content": message.content,
-                    "tool_calls": [
-                        {
-                            "id": tc.id,
-                            "type": "function",
-                            "function": {
-                                "name": tc.function.name,
-                                "arguments": tc.function.arguments,
-                            },
-                        }
-                        for tc in message.tool_calls
-                    ],
-                }
-            )
-
-            for tool_call in message.tool_calls:
-                try:
-                    args = json.loads(tool_call.function.arguments)
-                except json.JSONDecodeError:
-                    current_messages.append(
-                        {
-                            "role": "tool",
-                            "tool_call_id": tool_call.id,
-                            "content": "Invalid JSON arguments provided to tool.",
-                        }
-                    )
-                    continue
-
-                tool_use = ToolUse(
-                    id=tool_call.id,
-                    name=tool_call.function.name,
-                    input=args,
-                )
-
-                result = tool_executor(tool_use)
-
-                current_messages.append(
-                    {
-                        "role": "tool",
-                        "tool_call_id": result.tool_use_id,
-                        "content": result.content,
-                    }
-                )
-
-        return LLMResponse(
-            content="Max tool iterations reached",
-            model=self.model,
-            input_tokens=total_input_tokens,
-            output_tokens=total_output_tokens,
-            stop_reason="max_iterations",
-            raw_response=None,
-        )
-
     def _tool_to_openai_format(self, tool: Tool) -> dict[str, Any]:
         """Convert Tool to OpenAI function calling format."""
         return {
@@ -849,12 +746,85 @@ class LiteLLMProvider(LLMProvider):
             },
         }
 
+    def _is_minimax_model(self) -> bool:
+        """Return True when the configured model targets MiniMax."""
+        model = (self.model or "").lower()
+        return model.startswith("minimax/") or model.startswith("minimax-")
+
+    async def _stream_via_nonstream_completion(
+        self,
+        messages: list[dict[str, Any]],
+        system: str,
+        tools: list[Tool] | None,
+        max_tokens: int,
+        response_format: dict[str, Any] | None,
+        json_mode: bool,
+    ) -> AsyncIterator[StreamEvent]:
+        """Fallback path: convert non-stream completion to stream events.
+
+        Some providers currently fail in LiteLLM's chunk parser for stream=True.
+        For those providers we do a regular async completion and emit equivalent
+        stream events so higher layers continue to work.
+        """
+        from framework.llm.stream_events import (
+            FinishEvent,
+            StreamErrorEvent,
+            TextDeltaEvent,
+            TextEndEvent,
+            ToolCallEvent,
+        )
+
+        try:
+            response = await self.acomplete(
+                messages=messages,
+                system=system,
+                tools=tools,
+                max_tokens=max_tokens,
+                response_format=response_format,
+                json_mode=json_mode,
+            )
+        except Exception as e:
+            yield StreamErrorEvent(error=str(e), recoverable=False)
+            return
+
+        raw = response.raw_response
+        tool_calls = []
+        if raw and hasattr(raw, "choices") and raw.choices:
+            msg = raw.choices[0].message
+            tool_calls = msg.tool_calls or []
+
+        for tc in tool_calls:
+            parsed_args: Any
+            args = tc.function.arguments if tc.function else ""
+            try:
+                parsed_args = json.loads(args) if args else {}
+            except json.JSONDecodeError:
+                parsed_args = {"_raw": args}
+            yield ToolCallEvent(
+                tool_use_id=getattr(tc, "id", ""),
+                tool_name=tc.function.name if tc.function else "",
+                tool_input=parsed_args,
+            )
+
+        if response.content:
+            yield TextDeltaEvent(content=response.content, snapshot=response.content)
+            yield TextEndEvent(full_text=response.content)
+
+        yield FinishEvent(
+            stop_reason=response.stop_reason or "stop",
+            input_tokens=response.input_tokens,
+            output_tokens=response.output_tokens,
+            model=response.model,
+        )
+
     async def stream(
         self,
         messages: list[dict[str, Any]],
         system: str = "",
         tools: list[Tool] | None = None,
         max_tokens: int = 4096,
+        response_format: dict[str, Any] | None = None,
+        json_mode: bool = False,
     ) -> AsyncIterator[StreamEvent]:
         """Stream a completion via litellm.acompletion(stream=True).
 
@@ -874,10 +844,49 @@ class LiteLLMProvider(LLMProvider):
             ToolCallEvent,
         )
 
+        # MiniMax currently fails in litellm's stream chunk parser for some
+        # responses (missing "id" in stream chunks). Use non-stream fallback.
+        if self._is_minimax_model():
+            async for event in self._stream_via_nonstream_completion(
+                messages=messages,
+                system=system,
+                tools=tools,
+                max_tokens=max_tokens,
+                response_format=response_format,
+                json_mode=json_mode,
+            ):
+                yield event
+            return
+
         full_messages: list[dict[str, Any]] = []
         if system:
             full_messages.append({"role": "system", "content": system})
         full_messages.extend(messages)
+
+        # Codex Responses API requires an `instructions` field (system prompt).
+        # Inject a minimal one when callers don't provide a system message.
+        if self._codex_backend and not any(m["role"] == "system" for m in full_messages):
+            full_messages.insert(0, {"role": "system", "content": "You are a helpful assistant."})
+
+        # Add JSON mode via prompt engineering (works across all providers)
+        if json_mode:
+            json_instruction = "\n\nPlease respond with a valid JSON object."
+            if full_messages and full_messages[0]["role"] == "system":
+                full_messages[0]["content"] += json_instruction
+            else:
+                full_messages.insert(0, {"role": "system", "content": json_instruction.strip()})
+
+        # Remove ghost empty assistant messages (content="" and no tool_calls).
+        # These arise when a model returns an empty stream after a tool result
+        # (an "expected" no-op turn). Keeping them in history confuses some
+        # models (notably Codex/gpt-5.3) and causes cascading empty streams.
+        full_messages = [
+            m
+            for m in full_messages
+            if not (
+                m.get("role") == "assistant" and not m.get("content") and not m.get("tool_calls")
+            )
+        ]
 
         kwargs: dict[str, Any] = {
             "model": self.model,
@@ -893,6 +902,12 @@ class LiteLLMProvider(LLMProvider):
             kwargs["api_base"] = self.api_base
         if tools:
             kwargs["tools"] = [self._tool_to_openai_format(t) for t in tools]
+        if response_format:
+            kwargs["response_format"] = response_format
+        # The Codex ChatGPT backend (Responses API) rejects several params.
+        if self._codex_backend:
+            kwargs.pop("max_tokens", None)
+            kwargs.pop("stream_options", None)
 
         for attempt in range(RATE_LIMIT_MAX_RETRIES + 1):
             # Post-stream events (ToolCall, TextEnd, Finish) are buffered
@@ -901,8 +916,10 @@ class LiteLLMProvider(LLMProvider):
             tail_events: list[StreamEvent] = []
             accumulated_text = ""
             tool_calls_acc: dict[int, dict[str, str]] = {}
+            _last_tool_idx = 0  # tracks most recently opened tool call slot
             input_tokens = 0
             output_tokens = 0
+            stream_finish_reason: str | None = None
 
             try:
                 response = await litellm.acompletion(**kwargs)  # type: ignore[union-attr]
@@ -923,9 +940,36 @@ class LiteLLMProvider(LLMProvider):
                         )
 
                     # --- Tool calls (accumulate across chunks) ---
+                    # The Codex/Responses API bridge (litellm bug) hardcodes
+                    # index=0 on every ChatCompletionToolCallChunk, even for
+                    # parallel tool calls.  We work around this by using tc.id
+                    # (set on output_item.added events) as a "new tool call"
+                    # signal and tracking the most recently opened slot for
+                    # argument deltas that arrive with id=None.
                     if delta and delta.tool_calls:
                         for tc in delta.tool_calls:
                             idx = tc.index if hasattr(tc, "index") and tc.index is not None else 0
+
+                            if tc.id:
+                                # New tool call announced (or done event re-sent).
+                                # Check if this id already has a slot.
+                                existing_idx = next(
+                                    (k for k, v in tool_calls_acc.items() if v["id"] == tc.id),
+                                    None,
+                                )
+                                if existing_idx is not None:
+                                    idx = existing_idx
+                                elif idx in tool_calls_acc and tool_calls_acc[idx]["id"] not in (
+                                    "",
+                                    tc.id,
+                                ):
+                                    # Slot taken by a different call — assign new index
+                                    idx = max(tool_calls_acc.keys()) + 1
+                                _last_tool_idx = idx
+                            else:
+                                # Argument delta with no id — route to last opened slot
+                                idx = _last_tool_idx
+
                             if idx not in tool_calls_acc:
                                 tool_calls_acc[idx] = {"id": "", "name": "", "arguments": ""}
                             if tc.id:
@@ -938,6 +982,7 @@ class LiteLLMProvider(LLMProvider):
 
                     # --- Finish ---
                     if choice.finish_reason:
+                        stream_finish_reason = choice.finish_reason
                         for _idx, tc_data in sorted(tool_calls_acc.items()):
                             try:
                                 parsed_args = json.loads(tc_data["arguments"])
@@ -972,48 +1017,67 @@ class LiteLLMProvider(LLMProvider):
                 # (If text deltas were yielded above, has_content is True
                 # and we skip the retry path — nothing was yielded in vain.)
                 has_content = accumulated_text or tool_calls_acc
-                if not has_content and attempt < RATE_LIMIT_MAX_RETRIES:
-                    # If the conversation ends with an assistant or tool
-                    # message, an empty stream is expected — the LLM has
-                    # nothing new to say.  Don't burn retries on this;
-                    # let the caller (EventLoopNode) decide what to do.
-                    # Typical case: client_facing node where the LLM set
-                    # all outputs via set_output tool calls, and the tool
-                    # results are the last messages.
-                    last_role = next(
-                        (m["role"] for m in reversed(full_messages) if m.get("role") != "system"),
-                        None,
-                    )
-                    if last_role in ("assistant", "tool"):
-                        logger.debug(
-                            "[stream] Empty response after %s message — expected, not retrying.",
-                            last_role,
+                if not has_content:
+                    # finish_reason=length means the model exhausted
+                    # max_tokens before producing content. Retrying with
+                    # the same max_tokens will never help.
+                    if stream_finish_reason == "length":
+                        max_tok = kwargs.get("max_tokens", "unset")
+                        logger.error(
+                            f"[stream] {self.model} returned empty content "
+                            f"with finish_reason=length "
+                            f"(max_tokens={max_tok}). The model exhausted "
+                            f"its token budget before producing visible "
+                            f"output. Increase max_tokens or use a "
+                            f"different model. Not retrying."
                         )
                         for event in tail_events:
                             yield event
                         return
-                    wait = _compute_retry_delay(attempt)
-                    token_count, token_method = _estimate_tokens(
-                        self.model,
-                        full_messages,
-                    )
-                    dump_path = _dump_failed_request(
-                        model=self.model,
-                        kwargs=kwargs,
-                        error_type="empty_stream",
-                        attempt=attempt,
-                    )
-                    logger.warning(
-                        f"[stream-retry] {self.model} returned empty stream — "
-                        f"~{token_count} tokens ({token_method}). "
-                        f"Request dumped to: {dump_path}. "
-                        f"Retrying in {wait}s "
-                        f"(attempt {attempt + 1}/{RATE_LIMIT_MAX_RETRIES})"
-                    )
-                    await asyncio.sleep(wait)
-                    continue
 
-                # Success (or final attempt) — flush remaining events.
+                    # Empty stream — always retry regardless of last message
+                    # role.  Ghost empty streams after tool results are NOT
+                    # expected no-ops; they create infinite loops when the
+                    # conversation doesn't change between iterations.
+                    # After retries, return the empty result and let the
+                    # caller (EventLoopNode) decide how to handle it.
+                    last_role = next(
+                        (m["role"] for m in reversed(full_messages) if m.get("role") != "system"),
+                        None,
+                    )
+                    if attempt < EMPTY_STREAM_MAX_RETRIES:
+                        token_count, token_method = _estimate_tokens(
+                            self.model,
+                            full_messages,
+                        )
+                        dump_path = _dump_failed_request(
+                            model=self.model,
+                            kwargs=kwargs,
+                            error_type="empty_stream",
+                            attempt=attempt,
+                        )
+                        logger.warning(
+                            f"[stream-retry] {self.model} returned empty stream "
+                            f"after {last_role} message — "
+                            f"~{token_count} tokens ({token_method}). "
+                            f"Request dumped to: {dump_path}. "
+                            f"Retrying in {EMPTY_STREAM_RETRY_DELAY}s "
+                            f"(attempt {attempt + 1}/{EMPTY_STREAM_MAX_RETRIES})"
+                        )
+                        await asyncio.sleep(EMPTY_STREAM_RETRY_DELAY)
+                        continue
+
+                    # All retries exhausted — log and return the empty
+                    # result.  EventLoopNode's empty response guard will
+                    # accept if all outputs are set, or handle the ghost
+                    # stream case if outputs are still missing.
+                    logger.error(
+                        f"[stream] {self.model} returned empty stream after "
+                        f"{EMPTY_STREAM_MAX_RETRIES} retries "
+                        f"(last_role={last_role}). Returning empty result."
+                    )
+
+                # Success (or empty after exhausted retries) — flush events.
                 for event in tail_events:
                     yield event
                 return
@@ -1045,3 +1109,56 @@ class LiteLLMProvider(LLMProvider):
                 recoverable = _is_stream_transient_error(e)
                 yield StreamErrorEvent(error=str(e), recoverable=recoverable)
                 return
+
+    async def _collect_stream_to_response(
+        self,
+        stream: AsyncIterator[StreamEvent],
+    ) -> LLMResponse:
+        """Consume a stream() iterator and collect it into a single LLMResponse.
+
+        Used by acomplete() to route through the unified streaming path so that
+        all backends (including Codex) get proper tool call handling.
+        """
+        from framework.llm.stream_events import (
+            FinishEvent,
+            StreamErrorEvent,
+            TextDeltaEvent,
+            ToolCallEvent,
+        )
+
+        content = ""
+        tool_calls: list[dict[str, Any]] = []
+        input_tokens = 0
+        output_tokens = 0
+        stop_reason = ""
+        model = self.model
+
+        async for event in stream:
+            if isinstance(event, TextDeltaEvent):
+                content = event.snapshot  # snapshot is the accumulated text
+            elif isinstance(event, ToolCallEvent):
+                tool_calls.append(
+                    {
+                        "id": event.tool_use_id,
+                        "name": event.tool_name,
+                        "input": event.tool_input,
+                    }
+                )
+            elif isinstance(event, FinishEvent):
+                input_tokens = event.input_tokens
+                output_tokens = event.output_tokens
+                stop_reason = event.stop_reason
+                if event.model:
+                    model = event.model
+            elif isinstance(event, StreamErrorEvent):
+                if not event.recoverable:
+                    raise RuntimeError(f"Stream error: {event.error}")
+
+        return LLMResponse(
+            content=content,
+            model=model,
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            stop_reason=stop_reason,
+            raw_response={"tool_calls": tool_calls} if tool_calls else None,
+        )

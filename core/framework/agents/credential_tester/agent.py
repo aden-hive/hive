@@ -210,9 +210,6 @@ def list_connected_accounts() -> list[dict]:
 skip_credential_validation = True
 """Don't validate credentials at load time — we don't know which provider yet."""
 
-skip_guardian = True
-"""Don't attach the Hive Coder guardian — this is a standalone utility agent."""
-
 requires_account_selection = True
 """Signal TUI to show account picker before starting the agent."""
 
@@ -409,7 +406,8 @@ nodes = [
         client_facing=True,
         max_node_visits=0,
         input_keys=[],
-        output_keys=[],
+        output_keys=["test_result"],
+        nullable_output_keys=["test_result"],
         tools=["get_account_info"],
         system_prompt="""\
 You are a credential tester. Your job is to help the user verify that their \
@@ -447,7 +445,7 @@ edges = []
 entry_node = "tester"
 entry_points = {"start": "tester"}
 pause_nodes = []
-terminal_nodes = []  # Forever-alive: loops until user exits
+terminal_nodes = ["tester"]  # Tester node can terminate
 
 conversation_mode = "continuous"
 identity_prompt = (
@@ -456,7 +454,7 @@ identity_prompt = (
 )
 loop_config = {
     "max_iterations": 50,
-    "max_tool_calls_per_turn": 10,
+    "max_tool_calls_per_turn": 30,
     "max_history_tokens": 32000,
 }
 
@@ -534,7 +532,7 @@ class CredentialTesterAgent:
             version="1.0.0",
             entry_node="tester",
             entry_points={"start": "tester"},
-            terminal_nodes=[],
+            terminal_nodes=["tester"],  # Tester node can terminate
             pause_nodes=[],
             nodes=[tester_node],
             edges=[],
@@ -542,7 +540,7 @@ class CredentialTesterAgent:
             max_tokens=self.config.max_tokens,
             loop_config={
                 "max_iterations": 50,
-                "max_tool_calls_per_turn": 10,
+                "max_tool_calls_per_turn": 30,
                 "max_history_tokens": 32000,
             },
             conversation_mode="continuous",

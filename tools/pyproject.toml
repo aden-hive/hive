@@ -31,6 +31,8 @@ dependencies = [
     "litellm>=1.81.0",
     "dnspython>=2.4.0",
     "resend>=2.0.0",
+    "asana>=3.2.0",
+    "google-analytics-data>=0.18.0",
     "framework",
     "stripe>=14.3.0",
     "arxiv>=2.1.0",
@@ -65,6 +67,10 @@ sql = [
 bigquery = [
     "google-cloud-bigquery>=3.0.0",
 ]
+databricks = [
+    "databricks-sdk>=0.30.0",
+    "databricks-mcp>=0.1.0",
+]
 all = [
     "RestrictedPython>=7.0",
     "pytesseract>=0.3.10",
@@ -74,6 +80,8 @@ all = [
     "google-cloud-bigquery>=3.0.0",
     "python-docx>=1.1.0",
     "python-pptx>=0.6.21",
+    "databricks-sdk>=0.30.0",
+    "databricks-mcp>=0.1.0",
 ]
 
 [tool.uv.sources]
@@ -114,6 +122,10 @@ lint.isort.section-order = [
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
+addopts = "-m 'not live'"
+markers = [
+    "live: Tests that call real external APIs (require credentials, never run in CI)",
+]
 
 [dependency-groups]
 dev = [

@@ -10,7 +10,7 @@ def _load_preferred_model() -> str:
     config_path = Path.home() / ".hive" / "configuration.json"
     if config_path.exists():
         try:
-            with open(config_path) as f:
+            with open(config_path, encoding="utf-8") as f:
                 config = json.load(f)
             llm = config.get("llm", {})
             if llm.get("provider") and llm.get("model"):
@@ -24,7 +24,7 @@ def _load_preferred_model() -> str:
 class RuntimeConfig:
     model: str = field(default_factory=_load_preferred_model)
     temperature: float = 0.7
-    max_tokens: int = 40000
+    max_tokens: int = 8000
     api_key: str | None = None
     api_base: str | None = None
 

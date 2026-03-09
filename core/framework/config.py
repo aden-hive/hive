@@ -6,6 +6,7 @@ helper functions.
 """
 
 import json
+import logging
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -18,6 +19,7 @@ from framework.graph.edge import DEFAULT_MAX_TOKENS
 # ---------------------------------------------------------------------------
 
 HIVE_CONFIG_FILE = Path.home() / ".hive" / "configuration.json"
+logger = logging.getLogger(__name__)
 
 
 def get_hive_config() -> dict[str, Any]:
@@ -27,7 +29,12 @@ def get_hive_config() -> dict[str, Any]:
     try:
         with open(HIVE_CONFIG_FILE, encoding="utf-8-sig") as f:
             return json.load(f)
-    except (json.JSONDecodeError, OSError):
+    except (json.JSONDecodeError, OSError) as e:
+        logger.warning(
+            "Failed to load Hive config %s: %s",
+            HIVE_CONFIG_FILE,
+            e,
+        )
         return {}
 
 
@@ -50,12 +57,14 @@ def get_max_tokens() -> int:
 
 
 def get_api_key() -> str | None:
-    """Return the API key, supporting env var, Claude Code subscription, and ZAI Code.
+    """Return the API key, supporting env var, Claude Code subscription, Codex, and ZAI Code.
 
     Priority:
     1. Claude Code subscription (``use_claude_code_subscription: true``)
        reads the OAuth token from ``~/.claude/.credentials.json``.
-    2. Environment variable named in ``api_key_env_var``.
+    2. Codex subscription (``use_codex_subscription: true``)
+       reads the OAuth token from macOS Keychain or ``~/.codex/auth.json``.
+    3. Environment variable named in ``api_key_env_var``.
     """
     llm = get_hive_config().get("llm", {})
 
@@ -70,6 +79,17 @@ def get_api_key() -> str | None:
         except ImportError:
             pass
 
+    # Codex subscription: read OAuth token from Keychain / auth.json
+    if llm.get("use_codex_subscription"):
+        try:
+            from framework.runner.runner import get_codex_token
+
+            token = get_codex_token()
+            if token:
+                return token
+        except ImportError:
+            pass
+
     # Standard env-var path (covers ZAI Code and all API-key providers)
     api_key_env_var = llm.get("api_key_env_var")
     if api_key_env_var:
@@ -77,9 +97,18 @@ def get_api_key() -> str | None:
     return None
 
 
+def get_gcu_enabled() -> bool:
+    """Return whether GCU (browser automation) is enabled in user config."""
+    return get_hive_config().get("gcu_enabled", True)
+
+
 def get_api_base() -> str | None:
     """Return the api_base URL for OpenAI-compatible endpoints, if configured."""
-    return get_hive_config().get("llm", {}).get("api_base")
+    llm = get_hive_config().get("llm", {})
+    if llm.get("use_codex_subscription"):
+        # Codex subscription routes through the ChatGPT backend, not api.openai.com.
+        return "https://chatgpt.com/backend-api/codex"
+    return llm.get("api_base")
 
 
 def get_llm_extra_kwargs() -> dict[str, Any]:
@@ -88,6 +117,10 @@ def get_llm_extra_kwargs() -> dict[str, Any]:
     When ``use_claude_code_subscription`` is enabled, returns
     ``extra_headers`` with the OAuth Bearer token so that litellm's
     built-in Anthropic OAuth handler adds the required beta headers.
+
+    When ``use_codex_subscription`` is enabled, returns
+    ``extra_headers`` with the Bearer token, ``ChatGPT-Account-Id``,
+    and ``store=False`` (required by the ChatGPT backend).
     """
     llm = get_hive_config().get("llm", {})
     if llm.get("use_claude_code_subscription"):
@@ -95,6 +128,26 @@ def get_llm_extra_kwargs() -> dict[str, Any]:
         if api_key:
             return {
                 "extra_headers": {"authorization": f"Bearer {api_key}"},
+            }
+    if llm.get("use_codex_subscription"):
+        api_key = get_api_key()
+        if api_key:
+            headers: dict[str, str] = {
+                "Authorization": f"Bearer {api_key}",
+                "User-Agent": "CodexBar",
+            }
+            try:
+                from framework.runner.runner import get_codex_account_id
+
+                account_id = get_codex_account_id()
+                if account_id:
+                    headers["ChatGPT-Account-Id"] = account_id
+            except ImportError:
+                pass
+            return {
+                "extra_headers": headers,
+                "store": False,
+                "allowed_openai_params": ["store"],
             }
     return {}
 

@@ -19,6 +19,7 @@ from typing import TYPE_CHECKING, Any
 
 from framework.graph.checkpoint_config import CheckpointConfig
 from framework.graph.executor import ExecutionResult, GraphExecutor
+from framework.runtime.event_bus import EventBus
 from framework.runtime.shared_state import IsolationLevel, SharedStateManager
 from framework.runtime.stream_runtime import StreamRuntime, StreamRuntimeAdapter
 
@@ -26,37 +27,73 @@ if TYPE_CHECKING:
     from framework.graph.edge import GraphSpec
     from framework.graph.goal import Goal
     from framework.llm.provider import LLMProvider, Tool
-    from framework.runtime.event_bus import AgentEvent, EventBus
+    from framework.runtime.event_bus import AgentEvent
     from framework.runtime.outcome_aggregator import OutcomeAggregator
     from framework.storage.concurrent import ConcurrentStorage
     from framework.storage.session_store import SessionStore
 
+
+class ExecutionAlreadyRunningError(RuntimeError):
+    """Raised when attempting to start an execution on a stream that already has one running."""
+
+    def __init__(self, stream_id: str, active_ids: list[str]):
+        self.stream_id = stream_id
+        self.active_ids = active_ids
+        super().__init__(
+            f"Stream '{stream_id}' already has an active execution: {active_ids}. "
+            "Concurrent executions on the same stream are not allowed."
+        )
+
+
 logger = logging.getLogger(__name__)
 
 
-class _GraphScopedEventBus:
-    """Thin proxy that stamps ``graph_id`` on every published event.
+class GraphScopedEventBus(EventBus):
+    """Proxy that stamps ``graph_id`` on every published event.
 
     The ``GraphExecutor`` and ``EventLoopNode`` emit events via the
     convenience methods on ``EventBus`` (e.g. ``emit_llm_text_delta``).
     Rather than threading ``graph_id`` through every one of those 20+
-    methods, this proxy intercepts ``publish()`` and sets ``graph_id``
-    before forwarding to the real bus.  All other attribute access is
-    delegated unchanged.
+    methods, this subclass overrides ``publish()`` to stamp the id
+    before forwarding to the real bus.
+
+    Because the ``emit_*`` methods are *inherited* from ``EventBus``,
+    ``self.publish()`` inside them resolves to this class's override —
+    unlike a ``__getattr__``-based proxy where the delegated bound
+    methods would call ``EventBus.publish`` directly, bypassing the
+    stamp entirely.
     """
 
-    __slots__ = ("_bus", "_graph_id")
-
     def __init__(self, bus: "EventBus", graph_id: str) -> None:
-        object.__setattr__(self, "_bus", bus)
-        object.__setattr__(self, "_graph_id", graph_id)
+        # Intentionally skip super().__init__() — we delegate all state
+        # (subscriptions, history, semaphore, etc.) to the real bus.
+        self._real_bus = bus
+        self._scope_graph_id = graph_id
+        self.last_activity_time: float = time.monotonic()
 
     async def publish(self, event: "AgentEvent") -> None:  # type: ignore[override]
-        event.graph_id = object.__getattribute__(self, "_graph_id")
-        await object.__getattribute__(self, "_bus").publish(event)
+        event.graph_id = self._scope_graph_id
+        self.last_activity_time = time.monotonic()
+        await self._real_bus.publish(event)
 
-    def __getattr__(self, name: str) -> Any:
-        return getattr(object.__getattribute__(self, "_bus"), name)
+    # --- Delegate state-reading methods to the real bus ---
+    # These access internal state (_subscriptions, _event_history, etc.)
+    # that only exists on the real bus.
+
+    def subscribe(self, *args: Any, **kwargs: Any) -> str:
+        return self._real_bus.subscribe(*args, **kwargs)
+
+    def unsubscribe(self, subscription_id: str) -> bool:
+        return self._real_bus.unsubscribe(subscription_id)
+
+    def get_history(self, *args: Any, **kwargs: Any) -> list:
+        return self._real_bus.get_history(*args, **kwargs)
+
+    def get_stats(self) -> dict:
+        return self._real_bus.get_stats()
+
+    async def wait_for(self, *args: Any, **kwargs: Any) -> Any:
+        return await self._real_bus.wait_for(*args, **kwargs)
 
 
 @dataclass
@@ -71,6 +108,7 @@ class EntryPointSpec:
     isolation_level: str = "shared"  # "isolated" | "shared" | "synchronized"
     priority: int = 0
     max_concurrent: int = 10  # Max concurrent executions for this entry point
+    max_resurrections: int = 3  # Auto-restart on non-fatal failure (0 to disable)
 
     def get_isolation_level(self) -> IsolationLevel:
         """Convert string isolation level to enum."""
@@ -211,9 +249,11 @@ class ExecutionStream:
         self._lock = asyncio.Lock()
 
         # Graph-scoped event bus (stamps graph_id on published events)
-        self._scoped_event_bus = self._event_bus
-        if self._event_bus and self.graph_id:
-            self._scoped_event_bus = _GraphScopedEventBus(self._event_bus, self.graph_id)
+        # Always wrap in GraphScopedEventBus so we can track last_activity_time.
+        if self._event_bus:
+            self._scoped_event_bus = GraphScopedEventBus(self._event_bus, self.graph_id or "")
+        else:
+            self._scoped_event_bus = None
 
         # State
         self._running = False
@@ -244,6 +284,21 @@ class ExecutionStream:
         return list(self._active_executions.keys())
 
     @property
+    def agent_idle_seconds(self) -> float:
+        """Seconds since the last agent activity (LLM call, tool call, node transition).
+
+        Returns ``float('inf')`` if no event bus is attached or no events have
+        been published yet.  When there are no active executions, also returns
+        ``float('inf')`` (nothing to be idle *about*).
+        """
+        if not self._active_executions:
+            return float("inf")
+        bus = self._scoped_event_bus
+        if isinstance(bus, GraphScopedEventBus):
+            return time.monotonic() - bus.last_activity_time
+        return float("inf")
+
+    @property
     def is_awaiting_input(self) -> bool:
         """True when an active execution is blocked waiting for client input."""
         if not self._active_executors:
@@ -253,6 +308,38 @@ class ExecutionStream:
                 if getattr(node, "_awaiting_input", False):
                     return True
         return False
+
+    def get_waiting_nodes(self) -> list[dict[str, str]]:
+        """Return nodes currently blocked waiting for client input.
+
+        Each entry is ``{"node_id": ..., "execution_id": ...}``.
+        """
+        waiting: list[dict[str, str]] = []
+        for exec_id, executor in self._active_executors.items():
+            for node_id, node in executor.node_registry.items():
+                if getattr(node, "_awaiting_input", False):
+                    waiting.append({"node_id": node_id, "execution_id": exec_id})
+        return waiting
+
+    def get_injectable_nodes(self) -> list[dict[str, str]]:
+        """Return nodes that support message injection (have ``inject_event``).
+
+        Each entry is ``{"node_id": ..., "execution_id": ...}``.
+        The currently executing node is placed first so that
+        ``inject_worker_message`` targets the active node, not a stale one.
+        """
+        injectable: list[dict[str, str]] = []
+        current_first: list[dict[str, str]] = []
+        for exec_id, executor in self._active_executors.items():
+            current = getattr(executor, "current_node_id", None)
+            for node_id, node in executor.node_registry.items():
+                if hasattr(node, "inject_event"):
+                    entry = {"node_id": node_id, "execution_id": exec_id}
+                    if node_id == current:
+                        current_first.append(entry)
+                    else:
+                        injectable.append(entry)
+        return current_first + injectable
 
     def _record_execution_result(self, execution_id: str, result: ExecutionResult) -> None:
         """Record a completed execution result with retention pruning."""
@@ -283,20 +370,21 @@ class ExecutionStream:
         self._running = False
 
         # Cancel all active executions
+        tasks_to_wait = []
         for _, task in self._execution_tasks.items():
             if not task.done():
                 task.cancel()
-                try:
-                    await task
-                except asyncio.CancelledError:
-                    pass
-                except RuntimeError as e:
-                    # Task may be attached to a different event loop (e.g., when TUI
-                    # uses a separate loop). Log and continue cleanup.
-                    if "attached to a different loop" in str(e):
-                        logger.warning(f"Task cleanup skipped (different event loop): {e}")
-                    else:
-                        raise
+                tasks_to_wait.append(task)
+
+        if tasks_to_wait:
+            # Wait briefly — don't block indefinitely if tasks are stuck
+            # in long-running operations (LLM calls, tool executions).
+            _, pending = await asyncio.wait(tasks_to_wait, timeout=5.0)
+            if pending:
+                logger.warning(
+                    "%d execution task(s) did not finish within 5s after cancellation",
+                    len(pending),
+                )
 
         self._execution_tasks.clear()
         self._active_executions.clear()
@@ -314,7 +402,13 @@ class ExecutionStream:
                 )
             )
 
-    async def inject_input(self, node_id: str, content: str) -> bool:
+    async def inject_input(
+        self,
+        node_id: str,
+        content: str,
+        *,
+        is_client_input: bool = False,
+    ) -> bool:
         """Inject user input into a running client-facing EventLoopNode.
 
         Searches active executors for a node matching ``node_id`` and calls
@@ -325,7 +419,7 @@ class ExecutionStream:
         for executor in self._active_executors.values():
             node = executor.node_registry.get(node_id)
             if node is not None and hasattr(node, "inject_event"):
-                await node.inject_event(content)
+                await node.inject_event(content, is_client_input=is_client_input)
                 return True
         return False
 
@@ -350,6 +444,27 @@ class ExecutionStream:
         """
         if not self._running:
             raise RuntimeError(f"ExecutionStream '{self.stream_id}' is not running")
+
+        # Only one execution may run on a stream at a time — concurrent
+        # executions corrupt shared session state.  Cancel any running
+        # execution before starting the new one.  The cancelled execution
+        # writes its state to disk before cleanup, and the new execution
+        # runs in the same session directory (via resume_session_id).
+        active = self.active_execution_ids
+        for eid in active:
+            logger.info(
+                "Cancelling running execution %s on stream '%s' before starting new one",
+                eid,
+                self.stream_id,
+            )
+            executor = self._active_executors.get(eid)
+            if executor:
+                for node in executor.node_registry.values():
+                    if hasattr(node, "signal_shutdown"):
+                        node.signal_shutdown()
+                    if hasattr(node, "cancel_current_turn"):
+                        node.cancel_current_turn()
+            await self.cancel_execution(eid)
 
         # When resuming, reuse the original session ID so the execution
         # continues in the same session directory instead of creating a new one.
@@ -396,14 +511,55 @@ class ExecutionStream:
         logger.debug(f"Queued execution {execution_id} for stream {self.stream_id}")
         return execution_id
 
+    # Errors that indicate resurrection won't help — the same error will recur.
+    # Includes both configuration/environment errors and deterministic node
+    # failures where the conversation/state hasn't changed.
+    _FATAL_ERROR_PATTERNS: tuple[str, ...] = (
+        # Configuration / environment
+        "credential",
+        "authentication",
+        "unauthorized",
+        "forbidden",
+        "api key",
+        "import error",
+        "module not found",
+        "no module named",
+        "permission denied",
+        "invalid api",
+        "configuration error",
+        # Deterministic node failures — resurrecting at the same node with
+        # the same conversation produces the same result.
+        "node stalled",
+        "ghost empty stream",
+        "max iterations",
+    )
+
+    @classmethod
+    def _is_fatal_error(cls, error: str | None) -> bool:
+        """Return True if the error is life-threatening (no point resurrecting)."""
+        if not error:
+            return False
+        error_lower = error.lower()
+        return any(pat in error_lower for pat in cls._FATAL_ERROR_PATTERNS)
+
     async def _run_execution(self, ctx: ExecutionContext) -> None:
-        """Run a single execution within the stream."""
+        """Run a single execution within the stream.
+
+        Supports automatic resurrection: when the execution fails with a
+        non-fatal error, it restarts from the failed node up to
+        ``entry_spec.max_resurrections`` times (default 3).
+        """
         execution_id = ctx.id
 
         # When sharing a session with another entry point (resume_session_id),
         # skip writing initial/final session state — the primary execution
         # owns the state.json and _write_progress() keeps memory up-to-date.
         _is_shared_session = bool(ctx.session_state and ctx.session_state.get("resume_session_id"))
+
+        max_resurrections = self.entry_spec.max_resurrections
+        _resurrection_count = 0
+        _current_session_state = ctx.session_state
+        _current_input_data = ctx.input_data
 
         # Acquire semaphore to limit concurrency
         async with self._semaphore:
@@ -445,49 +601,114 @@ class ExecutionStream:
                         store=self._runtime_log_store, agent_id=self.graph.id
                     )
 
-                # Create executor for this execution.
-                # Each execution gets its own storage under sessions/{exec_id}/
-                # so conversations, spillover, and data files are all scoped
-                # to this execution.  The executor sets data_dir via execution
-                # context (contextvars) so data tools and spillover share the
-                # same session-scoped directory.
-                exec_storage = self._storage.base_path / "sessions" / execution_id
-                executor = GraphExecutor(
-                    runtime=runtime_adapter,
-                    llm=self._llm,
-                    tools=self._tools,
-                    tool_executor=self._tool_executor,
-                    event_bus=self._scoped_event_bus,
-                    stream_id=self.stream_id,
-                    storage_path=exec_storage,
-                    runtime_logger=runtime_logger,
-                    loop_config=self.graph.loop_config,
-                    accounts_prompt=self._accounts_prompt,
-                    accounts_data=self._accounts_data,
-                    tool_provider_map=self._tool_provider_map,
-                )
-                # Track executor so inject_input() can reach EventLoopNode instances
-                self._active_executors[execution_id] = executor
-
-                # Write initial session state
-                if not _is_shared_session:
-                    await self._write_session_state(execution_id, ctx)
+                # Derive storage from session_store (graph-specific for secondary
+                # graphs) so that all files — conversations, state, checkpoints,
+                # data — land under the graph's own sessions/ directory, not the
+                # primary worker's.
+                if self._session_store:
+                    exec_storage = self._session_store.sessions_dir / execution_id
+                else:
+                    exec_storage = self._storage.base_path / "sessions" / execution_id
 
                 # Create modified graph with entry point
                 # We need to override the entry_node to use our entry point
                 modified_graph = self._create_modified_graph()
 
-                # Execute
-                result = await executor.execute(
-                    graph=modified_graph,
-                    goal=self.goal,
-                    input_data=ctx.input_data,
-                    session_state=ctx.session_state,
-                    checkpoint_config=self._checkpoint_config,
-                )
+                # Write initial session state
+                if not _is_shared_session:
+                    await self._write_session_state(execution_id, ctx)
 
-                # Clean up executor reference
-                self._active_executors.pop(execution_id, None)
+                # --- Resurrection loop ---
+                # Each iteration creates a fresh executor. On non-fatal failure,
+                # the executor's session_state (memory + resume_from) carries
+                # forward so the next attempt resumes at the failed node.
+                while True:
+                    # Create executor for this execution.
+                    # Each execution gets its own storage under sessions/{exec_id}/
+                    # so conversations, spillover, and data files are all scoped
+                    # to this execution.  The executor sets data_dir via execution
+                    # context (contextvars) so data tools and spillover share the
+                    # same session-scoped directory.
+                    executor = GraphExecutor(
+                        runtime=runtime_adapter,
+                        llm=self._llm,
+                        tools=self._tools,
+                        tool_executor=self._tool_executor,
+                        event_bus=self._scoped_event_bus,
+                        stream_id=self.stream_id,
+                        execution_id=execution_id,
+                        storage_path=exec_storage,
+                        runtime_logger=runtime_logger,
+                        loop_config=self.graph.loop_config,
+                        accounts_prompt=self._accounts_prompt,
+                        accounts_data=self._accounts_data,
+                        tool_provider_map=self._tool_provider_map,
+                    )
+                    # Track executor so inject_input() can reach EventLoopNode instances
+                    self._active_executors[execution_id] = executor
+
+                    # Execute
+                    result = await executor.execute(
+                        graph=modified_graph,
+                        goal=self.goal,
+                        input_data=_current_input_data,
+                        session_state=_current_session_state,
+                        checkpoint_config=self._checkpoint_config,
+                    )
+
+                    # Clean up executor reference
+                    self._active_executors.pop(execution_id, None)
+
+                    # Check if resurrection is appropriate
+                    if (
+                        not result.success
+                        and not result.paused_at
+                        and _resurrection_count < max_resurrections
+                        and result.session_state
+                        and not self._is_fatal_error(result.error)
+                    ):
+                        _resurrection_count += 1
+                        logger.warning(
+                            "Execution %s failed (%s) — resurrecting (%d/%d) from node '%s'",
+                            execution_id,
+                            (result.error or "unknown")[:200],
+                            _resurrection_count,
+                            max_resurrections,
+                            result.session_state.get("resume_from", "?"),
+                        )
+
+                        # Emit resurrection event
+                        if self._scoped_event_bus:
+                            from framework.runtime.event_bus import AgentEvent, EventType
+
+                            await self._scoped_event_bus.publish(
+                                AgentEvent(
+                                    type=EventType.EXECUTION_RESURRECTED,
+                                    stream_id=self.stream_id,
+                                    execution_id=execution_id,
+                                    data={
+                                        "attempt": _resurrection_count,
+                                        "max_resurrections": max_resurrections,
+                                        "error": (result.error or "")[:500],
+                                        "resume_from": result.session_state.get("resume_from"),
+                                    },
+                                )
+                            )
+
+                        # Resume from the failed node with preserved memory
+                        _current_session_state = {
+                            **result.session_state,
+                            "resume_session_id": execution_id,
+                        }
+                        # On resurrection, input_data is already in memory —
+                        # pass empty so we don't overwrite intermediate results.
+                        _current_input_data = {}
+
+                        # Brief cooldown before resurrection
+                        await asyncio.sleep(2.0)
+                        continue
+
+                    break  # success, fatal failure, or resurrections exhausted
 
                 # Store result with retention
                 self._record_execution_result(execution_id, result)
@@ -509,7 +730,7 @@ class ExecutionStream:
                 if not _is_shared_session:
                     await self._write_session_state(execution_id, ctx, result=result)
 
-                # Emit completion/failure event
+                # Emit completion/failure/pause event
                 if self._scoped_event_bus:
                     if result.success:
                         await self._scoped_event_bus.emit_execution_completed(
@@ -517,6 +738,16 @@ class ExecutionStream:
                             execution_id=execution_id,
                             output=result.output,
                             correlation_id=ctx.correlation_id,
+                        )
+                    elif result.paused_at:
+                        # The executor returns paused_at on CancelledError but
+                        # does NOT emit execution_paused itself — we must emit
+                        # it here so the frontend can transition out of "running".
+                        await self._scoped_event_bus.emit_execution_paused(
+                            stream_id=self.stream_id,
+                            node_id=result.paused_at,
+                            reason=result.error or "Execution paused",
+                            execution_id=execution_id,
                         )
                     else:
                         await self._scoped_event_bus.emit_execution_failed(
@@ -565,6 +796,25 @@ class ExecutionStream:
                     else:
                         await self._write_session_state(
                             execution_id, ctx, error="Execution cancelled"
+                        )
+
+                # Emit SSE event so the frontend knows the execution stopped.
+                # The executor does NOT emit on CancelledError, so there is no
+                # risk of double-emitting.
+                if self._scoped_event_bus:
+                    if has_result and result.paused_at:
+                        await self._scoped_event_bus.emit_execution_paused(
+                            stream_id=self.stream_id,
+                            node_id=result.paused_at,
+                            reason="Execution cancelled",
+                            execution_id=execution_id,
+                        )
+                    else:
+                        await self._scoped_event_bus.emit_execution_failed(
+                            stream_id=self.stream_id,
+                            execution_id=execution_id,
+                            error="Execution cancelled",
+                            correlation_id=ctx.correlation_id,
                         )
 
                 # Don't re-raise - we've handled it and saved state
@@ -817,10 +1067,11 @@ class ExecutionStream:
         task = self._execution_tasks.get(execution_id)
         if task and not task.done():
             task.cancel()
-            try:
-                await task
-            except asyncio.CancelledError:
-                pass
+            # Wait briefly for the task to finish. Don't block indefinitely —
+            # the task may be stuck in a long LLM API call that doesn't
+            # respond to cancellation quickly. The cancellation is already
+            # requested; the task will clean up in the background.
+            done, _ = await asyncio.wait({task}, timeout=5.0)
             return True
         return False
 

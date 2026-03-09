@@ -4,7 +4,7 @@
 #
 # Run from anywhere inside the hive repo. Generates ~/.gemini/antigravity/mcp_config.json
 # based on .agent/mcp_config.json template, with absolute paths so the IDE can
-# connect to agent-builder and tools MCP servers without manual path editing.
+# connect to tools MCP servers without manual path editing.
 #
 set -e
 
@@ -56,6 +56,6 @@ fi
 
 echo ""
 echo "Next: Restart Antigravity IDE so it loads the MCP config."
-echo "      Then open this repo; agent-builder and tools should appear."
+echo "      Then open this repo; tools should appear."
 echo ""
 echo "For Claude Code, run: $0 --claude"

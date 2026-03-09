@@ -561,7 +561,7 @@ class TestGraphSpecValidation:
             edges=[],
         )
 
-        errors = graph.validate()
+        errors = graph.validate()["errors"]
         assert any("nonexistent-node" in e for e in errors)
 
         # Invalid isolation level
@@ -582,7 +582,7 @@ class TestGraphSpecValidation:
             edges=[],
         )
 
-        errors2 = graph2.validate()
+        errors2 = graph2.validate()["errors"]
         assert any("isolation_level" in e for e in errors2)
 
         # Invalid trigger type
@@ -602,7 +602,7 @@ class TestGraphSpecValidation:
             edges=[],
         )
 
-        errors3 = graph3.validate()
+        errors3 = graph3.validate()["errors"]
         assert any("trigger_type" in e for e in errors3)
 
 
@@ -817,6 +817,149 @@ class TestTimerEntryPoints:
             # Task should still be running (it will try to trigger and likely fail
             # since there's no LLM, but the task itself continues)
             assert not runtime._timer_tasks[0].done()
+        finally:
+            await runtime.stop()
+
+
+# === Cancel All Tasks Tests ===
+
+
+class TestCancelAllTasks:
+    """Tests for cancel_all_tasks and cancel_all_tasks_async."""
+
+    @pytest.mark.asyncio
+    async def test_cancel_all_tasks_async_returns_false_when_no_tasks(
+        self, sample_graph, sample_goal, temp_storage
+    ):
+        """Test that cancel_all_tasks_async returns False with no running tasks."""
+        runtime = AgentRuntime(
+            graph=sample_graph,
+            goal=sample_goal,
+            storage_path=temp_storage,
+        )
+
+        entry_spec = EntryPointSpec(
+            id="webhook",
+            name="Webhook",
+            entry_node="process-webhook",
+            trigger_type="webhook",
+        )
+        runtime.register_entry_point(entry_spec)
+        await runtime.start()
+
+        try:
+            result = await runtime.cancel_all_tasks_async()
+            assert result is False
+        finally:
+            await runtime.stop()
+
+    @pytest.mark.asyncio
+    async def test_cancel_all_tasks_async_cancels_running_task(
+        self, sample_graph, sample_goal, temp_storage
+    ):
+        """Test that cancel_all_tasks_async cancels a running task and returns True."""
+        runtime = AgentRuntime(
+            graph=sample_graph,
+            goal=sample_goal,
+            storage_path=temp_storage,
+        )
+
+        entry_spec = EntryPointSpec(
+            id="webhook",
+            name="Webhook",
+            entry_node="process-webhook",
+            trigger_type="webhook",
+        )
+        runtime.register_entry_point(entry_spec)
+        await runtime.start()
+
+        try:
+            # Inject a fake running task into the stream
+            stream = runtime._streams["webhook"]
+
+            async def hang_forever():
+                await asyncio.get_event_loop().create_future()
+
+            fake_task = asyncio.ensure_future(hang_forever())
+            stream._execution_tasks["fake-exec"] = fake_task
+
+            result = await runtime.cancel_all_tasks_async()
+            assert result is True
+
+            # Let the CancelledError propagate
+            try:
+                await fake_task
+            except asyncio.CancelledError:
+                pass
+            assert fake_task.cancelled()
+
+            # Clean up
+            del stream._execution_tasks["fake-exec"]
+        finally:
+            await runtime.stop()
+
+    @pytest.mark.asyncio
+    async def test_cancel_all_tasks_async_cancels_multiple_tasks_across_streams(
+        self, sample_graph, sample_goal, temp_storage
+    ):
+        """Test that cancel_all_tasks_async cancels tasks across multiple streams."""
+        runtime = AgentRuntime(
+            graph=sample_graph,
+            goal=sample_goal,
+            storage_path=temp_storage,
+        )
+
+        # Register two entry points so we get two streams
+        runtime.register_entry_point(
+            EntryPointSpec(
+                id="stream-a",
+                name="Stream A",
+                entry_node="process-webhook",
+                trigger_type="webhook",
+            )
+        )
+        runtime.register_entry_point(
+            EntryPointSpec(
+                id="stream-b",
+                name="Stream B",
+                entry_node="process-webhook",
+                trigger_type="webhook",
+            )
+        )
+        await runtime.start()
+
+        try:
+
+            async def hang_forever():
+                await asyncio.get_event_loop().create_future()
+
+            stream_a = runtime._streams["stream-a"]
+            stream_b = runtime._streams["stream-b"]
+
+            # Two tasks in stream A, one task in stream B
+            task_a1 = asyncio.ensure_future(hang_forever())
+            task_a2 = asyncio.ensure_future(hang_forever())
+            task_b1 = asyncio.ensure_future(hang_forever())
+
+            stream_a._execution_tasks["exec-a1"] = task_a1
+            stream_a._execution_tasks["exec-a2"] = task_a2
+            stream_b._execution_tasks["exec-b1"] = task_b1
+
+            result = await runtime.cancel_all_tasks_async()
+            assert result is True
+
+            # Let CancelledErrors propagate
+            for task in [task_a1, task_a2, task_b1]:
+                try:
+                    await task
+                except asyncio.CancelledError:
+                    pass
+                assert task.cancelled()
+
+            # Clean up
+            del stream_a._execution_tasks["exec-a1"]
+            del stream_a._execution_tasks["exec-a2"]
+            del stream_b._execution_tasks["exec-b1"]
         finally:
             await runtime.stop()
 

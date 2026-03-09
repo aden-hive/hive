@@ -48,7 +48,13 @@ def register_tools(mcp: FastMCP) -> None:
                 secure_cwd = session_root
 
             result = subprocess.run(
-                command, shell=True, cwd=secure_cwd, capture_output=True, text=True, timeout=60
+                command,
+                shell=True,
+                cwd=secure_cwd,
+                capture_output=True,
+                text=True,
+                timeout=60,
+                encoding="utf-8",
             )
 
             return {

@@ -66,8 +66,8 @@ export EXA_API_KEY="..."
 # Run agents without LLM calls (structure-only validation)
 export MOCK_MODE=1
 
-# Custom credentials storage path (default: ~/.aden/credentials)
-export ADEN_CREDENTIALS_PATH="/custom/path"
+# Fernet encryption key for credential store at ~/.hive/credentials
+export HIVE_CREDENTIAL_KEY="your-fernet-key"
 
 # Custom agent storage path (default: /tmp)
 export AGENT_STORAGE_PATH="/custom/storage"
@@ -116,10 +116,10 @@ MCP (Model Context Protocol) servers are configured in `.mcp.json` at the projec
 ```json
 {
   "mcpServers": {
-    "agent-builder": {
+    "coder-tools": {
       "command": "uv",
-      "args": ["run", "-m", "framework.mcp.agent_builder_server"],
-      "cwd": "core"
+      "args": ["run", "coder_tools_server.py", "--stdio"],
+      "cwd": "tools"
     },
     "tools": {
       "command": "uv",
@@ -130,7 +130,7 @@ MCP (Model Context Protocol) servers are configured in `.mcp.json` at the projec
 }
 ```
 
-The tools MCP server exposes tools including web search, PDF reading, CSV processing, and file system operations.
+The `coder-tools` server provides agent scaffolding via `initialize_agent_package` and related tools. The `tools` MCP server exposes tools including web search, PDF reading, CSV processing, and file system operations.
 
 ## Storage
 

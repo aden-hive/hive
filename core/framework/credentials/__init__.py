@@ -42,6 +42,14 @@ For Vault integration:
     from core.framework.credentials.vault import HashiCorpVaultStorage
 """
 
+from .key_storage import (
+    delete_aden_api_key,
+    generate_and_save_credential_key,
+    load_aden_api_key,
+    load_credential_key,
+    save_aden_api_key,
+    save_credential_key,
+)
 from .models import (
     CredentialDecryptionError,
     CredentialError,
@@ -63,7 +71,7 @@ from .setup import (
     CredentialSetupSession,
     MissingCredential,
     SetupResult,
-    detect_missing_credentials_from_nodes,
+    load_agent_nodes,
     run_credential_setup_cli,
 )
 from .storage import (
@@ -75,7 +83,12 @@ from .storage import (
 )
 from .store import CredentialStore
 from .template import TemplateResolver
-from .validation import ensure_credential_key_env, validate_agent_credentials
+from .validation import (
+    CredentialStatus,
+    CredentialValidationResult,
+    ensure_credential_key_env,
+    validate_agent_credentials,
+)
 
 # Aden sync components (lazy import to avoid httpx dependency when not needed)
 # Usage: from core.framework.credentials.aden import AdenSyncProvider
@@ -127,14 +140,23 @@ __all__ = [
     "CredentialRefreshError",
     "CredentialValidationError",
     "CredentialDecryptionError",
+    # Key storage (bootstrap credentials)
+    "load_credential_key",
+    "save_credential_key",
+    "generate_and_save_credential_key",
+    "load_aden_api_key",
+    "save_aden_api_key",
+    "delete_aden_api_key",
     # Validation
     "ensure_credential_key_env",
     "validate_agent_credentials",
+    "CredentialStatus",
+    "CredentialValidationResult",
     # Interactive setup
     "CredentialSetupSession",
     "MissingCredential",
     "SetupResult",
-    "detect_missing_credentials_from_nodes",
+    "load_agent_nodes",
     "run_credential_setup_cli",
     # Aden sync (optional - requires httpx)
     "AdenSyncProvider",
