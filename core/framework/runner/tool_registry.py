@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any
 
 from framework.llm.provider import Tool, ToolResult, ToolUse
+from framework.runner.tool_guard import ToolGuard, SecurityPolicy, ToolSecurityError
 
 logger = logging.getLogger(__name__)
 
@@ -51,7 +52,7 @@ class ToolRegistry:
     # Credential directory used for change detection
     _CREDENTIAL_DIR = Path("~/.hive/credentials/credentials").expanduser()
 
-    def __init__(self):
+    def __init__(self, security_policy: SecurityPolicy | None = None):
         self._tools: dict[str, RegisteredTool] = {}
         self._mcp_clients: list[Any] = []  # List of MCPClient instances
         self._session_context: dict[str, Any] = {}  # Auto-injected context for tools
@@ -62,6 +63,10 @@ class ToolRegistry:
         self._mcp_cred_snapshot: set[str] = set()  # Credential filenames at MCP load time
         self._mcp_aden_key_snapshot: str | None = None  # ADEN_API_KEY value at MCP load time
         self._mcp_server_tools: dict[str, set[str]] = {}  # server name -> tool names
+        
+        # Security
+        self.security_policy = security_policy or SecurityPolicy.default()
+        self._guard = ToolGuard(self.security_policy)
 
     def register(
         self,
@@ -254,6 +259,19 @@ class ToolRegistry:
                 return ToolResult(
                     tool_use_id=tool_use.id,
                     content=json.dumps({"error": f"Unknown tool: {tool_use.name}"}),
+                    is_error=True,
+                )
+
+            # Security Validation
+            try:
+                self._guard.validate(tool_use.name, tool_use.input)
+            except ToolSecurityError as e:
+                return ToolResult(
+                    tool_use_id=tool_use.id,
+                    content=json.dumps({
+                        "error": f"Tool execution blocked by security policy: {str(e)}",
+                        "security_reason": e.reason
+                    }),
                     is_error=True,
                 )
 

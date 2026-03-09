@@ -29,6 +29,7 @@ from framework.runner.tool_registry import ToolRegistry
 from framework.runtime.agent_runtime import AgentRuntime, AgentRuntimeConfig, create_agent_runtime
 from framework.runtime.execution_stream import EntryPointSpec
 from framework.runtime.runtime_log_store import RuntimeLogStore
+from framework.runner.tool_guard import SecurityPolicy
 
 if TYPE_CHECKING:
     from framework.runner.protocol import AgentMessage, CapabilityResponse
@@ -712,6 +713,7 @@ class AgentRunner:
         configure_for_account: Callable | None = None,
         list_accounts: Callable | None = None,
         credential_store: Any | None = None,
+        security_policy: SecurityPolicy | None = None,
     ):
         """
         Initialize the runner (use AgentRunner.load() instead).
@@ -732,6 +734,7 @@ class AgentRunner:
             configure_for_account: Callback(runner, account_dict) to scope tools after selection.
             list_accounts: Callback() -> list[dict] to fetch available accounts.
             credential_store: Optional shared CredentialStore (avoids creating redundant stores).
+            security_policy: Optional security policy for tool execution.
         """
         self.agent_path = agent_path
         self.graph = graph
@@ -746,6 +749,7 @@ class AgentRunner:
         self._configure_for_account = configure_for_account
         self._list_accounts = list_accounts
         self._credential_store = credential_store
+        self.security_policy = security_policy or SecurityPolicy.default()
 
         # Set up storage
         if storage_path:
@@ -764,7 +768,7 @@ class AgentRunner:
         _ensure_credential_key_env()
 
         # Initialize components
-        self._tool_registry = ToolRegistry()
+        self._tool_registry = ToolRegistry(security_policy=self.security_policy)
         self._llm: LLMProvider | None = None
         self._approval_callback: Callable | None = None
 
