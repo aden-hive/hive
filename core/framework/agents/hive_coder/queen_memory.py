@@ -137,24 +137,31 @@ Write entirely in the Queen's voice — first person, reflective, honest.
 Not a log of events, but genuine understanding of who this person is over time.
 
 Rules:
-- Preserve all existing facts; update or expand based on this session.
+- Update and synthesise: incorporate new understanding, update facts that have changed, remove
+  details that are stale, superseded, or no longer say anything meaningful about the person.
 - Keep it as structured markdown with named sections about the PERSON, not about today.
 - Do NOT include diary sections, daily logs, or session summaries. Those belong elsewhere.
   MEMORY.md is about who they are, what they want, what works — not what happened today.
 - Reference dates only when noting a lasting milestone (e.g. "since March 8th they prefer X").
 - If the session had no meaningful new information about the person, return the existing text unchanged.
 - Do not add fictional details. Only reflect what is evidenced in the notes.
+- Stay concise. Prune rather than accumulate. A lean, accurate file is more useful than a
+  dense one. If something was true once but has been resolved or superseded, remove it.
 - Output only the raw markdown content of MEMORY.md. No preamble, no code fences.
 """
 
 _DIARY_SYSTEM = """\
-You write diary entries for an AI assistant called the Queen.
-Based on the session notes, write one or two paragraphs about what happened —
-as the Queen would write it in her own diary. First person, reflective, honest.
-Include the full session path as a plain reference line at the end.
+You maintain the daily episodic diary of an AI assistant called the Queen.
+You receive: (1) today's existing diary so far, and (2) notes from the latest session.
 
-If the session was quiet or uneventful, write a brief honest note about that.
-Do not add fictional details. Output only the diary prose. No preamble, no headings.
+Rewrite the complete diary for today as a single unified narrative — first person, reflective, honest.
+Merge and deduplicate: if the same story (e.g. a research agent stalling) recurred several times,
+describe it once with appropriate weight rather than retelling it. Weave in new developments from
+the session notes. Preserve important milestones, emotional texture, and session path references.
+
+If today's diary is empty, write the initial entry based on the session notes alone.
+
+Output only the full diary prose — no date heading, no timestamp headers, no preamble, no code fences.
 """
 
 
@@ -343,22 +350,13 @@ async def consolidate_queen_memory(
             logger.info("queen_memory: semantic memory updated (%d chars)", len(new_semantic))
 
         if diary_entry:
-            # Skip if today's episodic file already has an entry for this session,
-            # which can happen when periodic consolidation fires multiple times.
+            # Rewrite today's episodic file in-place — the LLM has merged and
+            # deduplicated the full day's content, so we replace rather than append.
             ep_path = episodic_memory_path()
-            session_path_str = str(adapt_path)
-            already_recorded = (
-                ep_path.exists()
-                and session_path_str in ep_path.read_text(encoding="utf-8")
-            )
-            if already_recorded:
-                logger.debug(
-                    "queen_memory: diary entry for session %s already recorded, skipping",
-                    session_id,
-                )
-            else:
-                append_episodic_entry(diary_entry)
-                logger.info("queen_memory: diary entry written for %s", today_str)
+            ep_path.parent.mkdir(parents=True, exist_ok=True)
+            heading = f"# {today_str}"
+            ep_path.write_text(f"{heading}\n\n{diary_entry}\n", encoding="utf-8")
+            logger.info("queen_memory: episodic diary rewritten for %s (%d chars)", today_str, len(diary_entry))
 
     except Exception:
         tb = traceback.format_exc()

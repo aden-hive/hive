@@ -46,8 +46,8 @@ class Session:
     judge_task: asyncio.Task | None = None
     escalation_sub: str | None = None
     worker_handoff_sub: str | None = None
-    # Periodic memory consolidation
-    memory_consolidation_task: asyncio.Task | None = None
+    # Memory consolidation subscription (fires on CONTEXT_COMPACTED)
+    memory_consolidation_sub: str | None = None
     # Session directory resumption:
     # When set, _start_queen writes queen conversations to this existing session's
     # directory instead of creating a new one.  This lets cold-restores accumulate
@@ -395,10 +395,13 @@ class SessionManager:
                 pass
             session.worker_handoff_sub = None
 
-        # Stop queen and periodic memory consolidation
-        if session.memory_consolidation_task is not None:
-            session.memory_consolidation_task.cancel()
-            session.memory_consolidation_task = None
+        # Stop queen and memory consolidation subscription
+        if session.memory_consolidation_sub is not None:
+            try:
+                session.event_bus.unsubscribe(session.memory_consolidation_sub)
+            except Exception:
+                pass
+            session.memory_consolidation_sub = None
         if session.queen_task is not None:
             session.queen_task.cancel()
             session.queen_task = None
@@ -822,27 +825,23 @@ class SessionManager:
 
         session.queen_task = asyncio.create_task(_queen_loop())
 
-        # Periodic memory consolidation — runs every 15 minutes regardless of
-        # whether the session ends cleanly. Uses the conversation parts
-        # (always written) so it works even if adapt.md is empty.
+        # Memory consolidation — triggered by context compaction events.
+        # Compaction is a natural signal that "enough has happened to be worth remembering".
         _consolidation_llm = session.llm
         _consolidation_session_dir = queen_dir
 
-        async def _periodic_memory_consolidation() -> None:
+        async def _on_compaction(_event) -> None:
             from framework.agents.hive_coder.queen_memory import consolidate_queen_memory
 
-            while True:
-                try:
-                    await asyncio.sleep(5 * 60)  # 5 minutes
-                except asyncio.CancelledError:
-                    break
-                await consolidate_queen_memory(
-                    session.id, _consolidation_session_dir, _consolidation_llm
-                )
+            await consolidate_queen_memory(
+                session.id, _consolidation_session_dir, _consolidation_llm
+            )
 
-        session.memory_consolidation_task = asyncio.create_task(
-            _periodic_memory_consolidation(),
-            name=f"queen-memory-periodic-{session.id}",
+        from framework.runtime.event_bus import EventType as _ET
+
+        session.memory_consolidation_sub = session.event_bus.subscribe(
+            event_types=[_ET.CONTEXT_COMPACTED],
+            handler=_on_compaction,
         )
 
     # ------------------------------------------------------------------
