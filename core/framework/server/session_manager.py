@@ -524,8 +524,8 @@ class SessionManager:
             register_queen_lifecycle_tools,
         )
 
-        # Start in staging when the caller provided an agent, building otherwise.
-        initial_phase = "staging" if worker_identity else "building"
+        # Start in staging when the caller provided an agent, planning otherwise.
+        initial_phase = "staging" if worker_identity else "planning"
         phase_state = QueenPhaseState(phase=initial_phase, event_bus=session.event_bus)
         session.phase_state = phase_state
 
@@ -558,6 +558,7 @@ class SessionManager:
         # Partition tools into phase-specific sets and import prompt segments
         from framework.agents.hive_coder.nodes import (
             _QUEEN_BUILDING_TOOLS,
+            _QUEEN_PLANNING_TOOLS,
             _QUEEN_RUNNING_TOOLS,
             _QUEEN_STAGING_TOOLS,
             _appendices,
@@ -565,18 +566,22 @@ class SessionManager:
             _package_builder_knowledge,
             _queen_behavior_always,
             _queen_behavior_building,
+            _queen_behavior_planning,
             _queen_behavior_running,
             _queen_behavior_staging,
             _queen_identity_building,
+            _queen_identity_planning,
             _queen_identity_running,
             _queen_identity_staging,
             _queen_phase_7,
             _queen_style,
             _queen_tools_building,
+            _queen_tools_planning,
             _queen_tools_running,
             _queen_tools_staging,
         )
 
+        planning_names = set(_QUEEN_PLANNING_TOOLS)
         building_names = set(_QUEEN_BUILDING_TOOLS)
         staging_names = set(_QUEEN_STAGING_TOOLS)
         running_names = set(_QUEEN_RUNNING_TOOLS)
@@ -592,6 +597,7 @@ class SessionManager:
             )
         logger.info("Queen: registered tools: %s", sorted(registered_names))
 
+        phase_state.planning_tools = [t for t in queen_tools if t.name in planning_names]
         phase_state.building_tools = [t for t in queen_tools if t.name in building_names]
         phase_state.staging_tools = [t for t in queen_tools if t.name in staging_names]
         phase_state.running_tools = [t for t in queen_tools if t.name in running_names]
@@ -607,6 +613,16 @@ class SessionManager:
             )
 
         # Compose phase-specific prompts.
+        _planning_body = (
+            _queen_style
+            + _queen_tools_planning
+            + _queen_behavior_always
+            + _queen_behavior_planning
+            + _package_builder_knowledge
+            + worker_identity
+        )
+        phase_state.prompt_planning = _queen_identity_planning + _planning_body
+
         _building_body = (
             _queen_style
             + _queen_tools_building
@@ -657,7 +673,8 @@ class SessionManager:
                         data={"persona": persona},
                     )
                 )
-            return HookResult(system_prompt=persona + "\n\n" + _building_body)
+            body = _planning_body if phase_state.phase == "planning" else _building_body
+            return HookResult(system_prompt=persona + "\n\n" + body)
 
         initial_prompt_text = phase_state.get_current_prompt()
 

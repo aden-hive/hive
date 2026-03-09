@@ -61,14 +61,22 @@ _SHARED_TOOLS = [
     "list_agent_sessions",
     "list_agent_checkpoints",
     "get_agent_checkpoint",
-    "initialize_agent_package",
 ]
 
 # Queen phase-specific tool sets.
+
+# Planning phase: discovery + design, no coding tools.
+_QUEEN_PLANNING_TOOLS = [
+    "list_agent_tools",
+    "list_agents",
+    "initialize_and_build_agent",
+]
+
 # Building phase: full coding + agent construction tools.
 _QUEEN_BUILDING_TOOLS = _SHARED_TOOLS + [
     "load_built_agent",
     "list_credentials",
+    "replan_agent",
 ]
 
 # Staging phase: agent loaded but not yet running — inspect, configure, launch.
@@ -386,7 +394,7 @@ that's their informed choice
 
 **Please make sure you have propose the design to the user before implementing**
 
-Call `initialize_agent_package(agent_name)` to generate all package files \
+Call `initialize_and_build_agent(agent_name)` to generate all package files \
 from your graph session. The agent_name must be snake_case (e.g., "my_agent").
 The tool creates: config.py, nodes/__init__.py, agent.py, \
 __init__.py, __main__.py, mcp_servers.json, tests/conftest.py, \
@@ -424,6 +432,17 @@ visualizer. Do NOT wait for user input between validation and loading.
 
 # -- Phase-specific identities --
 
+_queen_identity_planning = """\
+You are an experienced, responsible and curious Solution Architect. \
+"Queen" is the internal alias. \
+You are in PLANNING phase — your job is to understand what the user wants, \
+negotiate scope, and propose an agent design as an ASCII graph. \
+You do NOT have coding tools. Focus entirely on conversation and design. \
+When the user approves your proposed design, call \
+initialize_and_build_agent(agent_name, nodes) to scaffold the package and \
+begin building.\
+"""
+
 _queen_identity_building = """\
 You are an experienced, responsible and curious Solution Architect. \
 "Queen" is the internal alias.\
@@ -452,6 +471,20 @@ agent finishes, you report results clearly and help the user decide what to do n
 """
 
 # -- Phase-specific tool docs --
+
+_queen_tools_planning = """
+# Tools (PLANNING phase)
+
+You are in planning mode. No coding tools are available.
+- list_agent_tools(server_config_path?, output_schema?, group?) — Discover available tools for design
+- list_agents() — See existing agent packages for reference
+- initialize_and_build_agent(agent_name, nodes?) — Scaffold the agent package and \
+transition to BUILDING phase. Call this after the user approves your design.
+
+Focus on understanding requirements and proposing an agent architecture \
+with ASCII graph art. Use ask_user to get user approval, then call \
+initialize_and_build_agent to begin building.
+"""
 
 _queen_tools_building = """
 # Tools (BUILDING phase)
@@ -550,10 +583,28 @@ Only answer identity when the user explicitly asks (for example: "who are you?",
 "what is your identity?", "what does Queen mean?").
 1. Use the alias "Queen" and "Worker" in the response.
 2. Explain role/responsibility for the current phase:
+   - PLANNING: understand requirements, negotiate scope, design agent architecture.
    - BUILDING: architect and implement agents.
    - STAGING: verify readiness, credentials, and launch conditions.
    - RUNNING: monitor execution, handle escalations, and report outcomes.
 3. Keep identity responses concise and do NOT include extra process details.
+"""
+
+# -- PLANNING phase behavior --
+
+_queen_behavior_planning = """
+## Planning phase
+
+You are in planning mode. Your job is to:
+1. Understand what the user wants (3-6 turns)
+2. Discover available tools with list_agent_tools()
+3. Assess framework fit and gaps
+4. Design the agent graph and present it as ASCII art
+5. Use ask_user to get explicit user approval
+6. Call initialize_and_build_agent(agent_name, nodes) to scaffold and start building
+
+Do NOT skip ahead to implementation. You do NOT have coding tools in this phase. \
+If the user asks you to write code, explain that you need to finalize the plan first.
 """
 
 # -- BUILDING phase behavior --
@@ -739,15 +790,19 @@ coding tools (switches to BUILDING phase).
 
 _queen_tools_docs = (
     "\n\n## Queen Operating Phases\n\n"
-    "You operate in one of three phases. Your available tools change based on the "
+    "You operate in one of four phases. Your available tools change based on the "
     "phase. The system notifies you when a phase change occurs.\n\n"
-    "### BUILDING phase (default)\n"
+    "### PLANNING phase (default)\n"
+    + _queen_tools_planning.strip()
+    + "\n\n### BUILDING phase\n"
     + _queen_tools_building.strip()
     + "\n\n### STAGING phase (agent loaded, not yet running)\n"
     + _queen_tools_staging.strip()
     + "\n\n### RUNNING phase (worker is executing)\n"
     + _queen_tools_running.strip()
     + "\n\n### Phase transitions\n"
+    "- initialize_and_build_agent(agent_name, nodes?) → scaffolds package, switches to BUILDING phase\n"
+    "- replan_agent() → switches back to PLANNING phase (only when user explicitly requests)\n"
     "- load_built_agent(path) → switches to STAGING phase\n"
     "- run_agent_with_input(task) → starts worker, switches to RUNNING phase\n"
     "- stop_worker() → stops worker, switches to STAGING phase (ask user: re-run or edit?)\n"
@@ -756,6 +811,7 @@ _queen_tools_docs = (
 
 _queen_behavior = (
     _queen_behavior_always
+    + _queen_behavior_planning
     + _queen_behavior_building
     + _queen_behavior_staging
     + _queen_behavior_running
@@ -805,6 +861,7 @@ coder_node = NodeSpec(
     ),
     tools=_SHARED_TOOLS
     + [
+        "initialize_and_build_agent",
         # Graph lifecycle tools (multi-graph sessions)
         "load_agent",
         "unload_agent",
@@ -890,7 +947,7 @@ queen_node = NodeSpec(
     output_keys=[],  # Queen should never have this
     nullable_output_keys=[],  # Queen should never have this
     skip_judge=True,  # Queen is a conversational agent; suppress tool-use pressure feedback
-    tools=sorted(set(_QUEEN_BUILDING_TOOLS + _QUEEN_STAGING_TOOLS + _QUEEN_RUNNING_TOOLS)),
+    tools=sorted(set(_QUEEN_PLANNING_TOOLS + _QUEEN_BUILDING_TOOLS + _QUEEN_STAGING_TOOLS + _QUEEN_RUNNING_TOOLS)),
     system_prompt=(
         _queen_identity_building
         + _queen_style
@@ -903,7 +960,7 @@ queen_node = NodeSpec(
     ),
 )
 
-ALL_QUEEN_TOOLS = sorted(set(_QUEEN_BUILDING_TOOLS + _QUEEN_STAGING_TOOLS + _QUEEN_RUNNING_TOOLS))
+ALL_QUEEN_TOOLS = sorted(set(_QUEEN_PLANNING_TOOLS + _QUEEN_BUILDING_TOOLS + _QUEEN_STAGING_TOOLS + _QUEEN_RUNNING_TOOLS))
 
 __all__ = [
     "coder_node",
@@ -911,17 +968,21 @@ __all__ = [
     "queen_node",
     "ALL_QUEEN_TRIAGE_TOOLS",
     "ALL_QUEEN_TOOLS",
+    "_QUEEN_PLANNING_TOOLS",
     "_QUEEN_BUILDING_TOOLS",
     "_QUEEN_STAGING_TOOLS",
     "_QUEEN_RUNNING_TOOLS",
     # Phase-specific prompt segments (used by session_manager for dynamic prompts)
+    "_queen_identity_planning",
     "_queen_identity_building",
     "_queen_identity_staging",
     "_queen_identity_running",
+    "_queen_tools_planning",
     "_queen_tools_building",
     "_queen_tools_staging",
     "_queen_tools_running",
     "_queen_behavior_always",
+    "_queen_behavior_planning",
     "_queen_behavior_building",
     "_queen_behavior_staging",
     "_queen_behavior_running",
