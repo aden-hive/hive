@@ -40,9 +40,13 @@ export function backendMessageToChatMessage(
   // Use file-mtime created_at (epoch seconds → ms) for cross-conversation
   // ordering; fall back to seq for backwards compatibility.
   const createdAt = msg.created_at ? msg.created_at * 1000 : msg.seq;
+  // For worker messages, use the node_id (phase_id) to show which node responded
+  const sender = msg.role === "user" ? "You" : 
+    (msg._source === "worker" && msg._node_id ? formatAgentDisplayName(msg._node_id) : 
+     agentDisplayName || msg._node_id || "Agent");
   return {
     id: `backend-${msg._node_id}-${msg.seq}`,
-    agent: msg.role === "user" ? "You" : agentDisplayName || msg._node_id || "Agent",
+    agent: sender,
     agentColor: "",
     content: msg.content,
     timestamp: "",

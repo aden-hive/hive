@@ -1238,7 +1238,7 @@ class TestTranscript:
             session_id,
             [
                 {"seq": 0, "role": "user", "content": "greeting: Session started."},
-                {"seq": 1, "role": "user", "content": "hello"},
+                {"seq": 1, "role": "user", "content": "hello", "is_client_input": True},
                 {"seq": 2, "role": "assistant", "content": "hi there"},
             ],
         )
@@ -1267,7 +1267,7 @@ class TestTranscript:
             tmp_path,
             queen_session_id,
             [
-                {"seq": 0, "role": "user", "content": "build me an agent", "created_at": 100.0},
+                {"seq": 0, "role": "user", "content": "build me an agent", "is_client_input": True, "created_at": 100.0},
                 {"seq": 1, "role": "assistant", "content": "on it", "created_at": 101.0},
             ],
             agent_name="test_agent",
@@ -1309,7 +1309,7 @@ class TestTranscript:
             tmp_path,
             session_id,
             [
-                {"seq": 0, "role": "user", "content": "hello"},
+                {"seq": 0, "role": "user", "content": "hello", "is_client_input": True},
                 {
                     "seq": 1,
                     "role": "user",
@@ -1410,7 +1410,7 @@ class TestTranscript:
             tmp_path,
             queen_session_id,
             [
-                {"seq": 0, "role": "user", "content": "start task", "created_at": 100.0},
+                {"seq": 0, "role": "user", "content": "start task", "is_client_input": True, "created_at": 100.0},
             ],
             agent_name="my_agent",
             agent_path=str(tmp_path / ".hive" / "agents" / "my_agent"),

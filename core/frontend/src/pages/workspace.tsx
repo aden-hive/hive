@@ -258,8 +258,10 @@ interface AgentBackendState {
   queenBuilding: boolean;
   /** Queen operating phase — "building" (coding), "staging" (loaded), or "running" (executing) */
   queenPhase: "building" | "staging" | "running";
-  workerRunState: "idle" | "deploying" | "running";
+  workerRunState: "idle" | "deploying" | "running" | "paused";
   currentExecutionId: string | null;
+  /** Worker session ID saved when paused — used for resume */
+  pausedWorkerSessionId: string | null;
   nodeLogs: Record<string, string[]>;
   nodeActionPlans: Record<string, string>;
   subagentReports: { subagent_id: string; message: string; data?: Record<string, unknown>; timestamp: string }[];
@@ -295,6 +297,7 @@ function defaultAgentState(): AgentBackendState {
     queenPhase: "building",
     workerRunState: "idle",
     currentExecutionId: null,
+    pausedWorkerSessionId: null,
     nodeLogs: {},
     nodeActionPlans: {},
     subagentReports: [],
@@ -400,6 +403,15 @@ export default function Workspace() {
     }
 
     return initial;
+  });
+
+  // User-defined tab order (array of tabKey/agentType strings). Initialized from
+  // persisted data; kept in sync via the effect below; updated on drag-to-reorder.
+  const [tabOrder, setTabOrder] = useState<string[]>(() => {
+    const p = loadPersistedTabs();
+    if (p?.tabOrder?.length) return p.tabOrder;
+    if (p?.tabs?.length) return p.tabs.map(t => t.tabKey || t.agentType);
+    return [];
   });
 
   const [activeSessionByAgent, setActiveSessionByAgent] = useState<Record<string, string>>(() => {
@@ -522,6 +534,17 @@ export default function Workspace() {
   const currentError = activeAgentState?.error;
   useEffect(() => { if (!currentError) setDismissedBanner(null); }, [currentError]);
 
+  // Keep tabOrder in sync: add newly opened tabs at the end, remove closed ones.
+  useEffect(() => {
+    const activeKeys = Object.keys(sessionsByAgent).filter(k => (sessionsByAgent[k] || []).length > 0);
+    setTabOrder(prev => {
+      const kept = prev.filter(k => activeKeys.includes(k));
+      const added = activeKeys.filter(k => !prev.includes(k));
+      if (kept.length === prev.length && added.length === 0) return prev;
+      return [...kept, ...added];
+    });
+  }, [sessionsByAgent]);
+
   // Persist tab metadata + session data to localStorage on every relevant change
   useEffect(() => {
     const tabs: PersistedTabState["tabs"] = [];
@@ -542,11 +565,11 @@ export default function Workspace() {
       }
     }
     if (tabs.length > 0) {
-      savePersistedTabs({ tabs, activeSessionByAgent, activeWorker, sessions });
+      savePersistedTabs({ tabs, activeSessionByAgent, activeWorker, sessions, tabOrder });
     } else {
       localStorage.removeItem(TAB_STORAGE_KEY);
     }
-  }, [sessionsByAgent, activeSessionByAgent, activeWorker, agentStates]);
+  }, [sessionsByAgent, activeSessionByAgent, activeWorker, agentStates, tabOrder]);
 
   const handleRun = useCallback(async () => {
     const state = agentStates[activeWorker];
@@ -555,8 +578,18 @@ export default function Workspace() {
     setDismissedBanner(null);
     try {
       updateAgentState(activeWorker, { workerRunState: "deploying" });
-      const result = await executionApi.trigger(state.sessionId, "default", {});
-      updateAgentState(activeWorker, { currentExecutionId: result.execution_id });
+
+      // Resume from paused state if we have a saved worker session ID
+      if (state.workerRunState === "paused" && state.pausedWorkerSessionId) {
+        const result = await executionApi.resume(state.sessionId, state.pausedWorkerSessionId);
+        updateAgentState(activeWorker, {
+          currentExecutionId: result.execution_id,
+          pausedWorkerSessionId: null,
+        });
+      } else {
+        const result = await executionApi.trigger(state.sessionId, "default", {});
+        updateAgentState(activeWorker, { currentExecutionId: result.execution_id });
+      }
     } catch (err) {
       // 424 = credentials required — open the credentials modal
       if (err instanceof ApiError && err.status === 424) {
@@ -933,6 +966,7 @@ export default function Workspace() {
 
       // Restore messages when rejoining an existing session OR cold-restoring from disk.
       let isWorkerRunning = false;
+      let pausedWorkerSessionId: string | null = null;
       let restoredMsgs: ChatMessage[] = [];
       // For cold-restore, use the old session ID. For live resume, use current session.
       const historyId = coldRestoreId ?? (isResumedSession ? session.session_id : undefined);
@@ -950,12 +984,26 @@ export default function Workspace() {
         } catch {
           // Transcript fetch failed — not critical
         }
+      }
 
-        // Check if a worker is currently running (for live resume only)
+      // Check worker execution state for both live resume AND cold restore.
+      // historyId covers both cases: coldRestoreId for cold restore, session_id for live.
+      if (historyId) {
         try {
           const { sessions: workerSessions } = await sessionsApi.workerSessions(historyId);
           const active = workerSessions.find((s) => s.status === "active");
           isWorkerRunning = !!active;
+          if (!isWorkerRunning) {
+            // Find the most recently paused session so Resume restores the right one
+            const paused = workerSessions
+              .filter((s) => s.status === "paused")
+              .sort((a, b) => {
+                const ta = a.started_at ? new Date(a.started_at).getTime() : 0;
+                const tb = b.started_at ? new Date(b.started_at).getTime() : 0;
+                return tb - ta;
+              })[0];
+            if (paused) pausedWorkerSessionId = paused.session_id;
+          }
         } catch {
           // Not critical
         }
@@ -989,7 +1037,11 @@ export default function Workspace() {
         ready: true,
         loading: false,
         queenReady: !!(isResumedSession || hasRestoredContent),
-        ...(isWorkerRunning ? { workerRunState: "running" } : {}),
+        ...(isWorkerRunning
+          ? { workerRunState: "running" }
+          : pausedWorkerSessionId
+          ? { workerRunState: "paused", pausedWorkerSessionId }
+          : {}),
       });
       setHistorySidebarRefreshKey(k => k + 1);
     } catch (err: unknown) {
@@ -1167,7 +1219,12 @@ export default function Workspace() {
         markAllNodesAs(activeWorker, ["running", "looping"], "pending");
         return;
       }
-      updateAgentState(activeWorker, { workerRunState: "idle", currentExecutionId: null });
+      // Successfully paused — save worker session ID for resume
+      updateAgentState(activeWorker, {
+        workerRunState: "paused",
+        pausedWorkerSessionId: state.currentExecutionId,
+        currentExecutionId: null,
+      });
       markAllNodesAs(activeWorker, ["running", "looping"], "pending");
     } catch (err) {
       // Network errors or non-2xx responses — still reset the UI since
@@ -1304,6 +1361,7 @@ export default function Workspace() {
               awaitingInput: false,
               workerRunState: "running",
               currentExecutionId: event.execution_id || agentStates[agentType]?.currentExecutionId || null,
+              pausedWorkerSessionId: null,
               nodeLogs: {},
               subagentReports: [],
               llmSnapshots: {},
@@ -1336,6 +1394,7 @@ export default function Workspace() {
               workerInputMessageId: null,
               workerRunState: "idle",
               currentExecutionId: null,
+              pausedWorkerSessionId: null,
               llmSnapshots: {},
               pendingQuestion: null,
               pendingOptions: null,
@@ -1460,16 +1519,43 @@ export default function Workspace() {
             }
           }
           if (event.type === "execution_paused") {
-            updateAgentState(agentType, { isTyping: false, isStreaming: false, queenIsTyping: false, workerIsTyping: false, awaitingInput: false, workerInputMessageId: null, pendingQuestion: null, pendingOptions: null, pendingQuestionSource: null });
-            if (!isQueen) {
-              updateAgentState(agentType, { workerRunState: "idle", currentExecutionId: null });
+            if (isQueen) {
+              // Queen paused — preserve any active worker question
+              setAgentStates(prev => {
+                const cur = prev[agentType] || defaultAgentState();
+                const keepWorkerQ = cur.pendingQuestionSource === "worker";
+                return { ...prev, [agentType]: {
+                  ...cur,
+                  isTyping: false, isStreaming: false, queenIsTyping: false, workerIsTyping: false,
+                  ...(keepWorkerQ ? {} : { awaitingInput: false, workerInputMessageId: null, pendingQuestion: null, pendingOptions: null, pendingQuestionSource: null }),
+                }};
+              });
+            } else {
+              updateAgentState(agentType, { isTyping: false, isStreaming: false, queenIsTyping: false, workerIsTyping: false, awaitingInput: false, workerInputMessageId: null, pendingQuestion: null, pendingOptions: null, pendingQuestionSource: null });
+              // Transition to "paused" so the Resume button appears
+              updateAgentState(agentType, {
+                workerRunState: "paused",
+                currentExecutionId: null,
+                pausedWorkerSessionId: event.execution_id || agentStates[agentType]?.currentExecutionId || null,
+              });
               markAllNodesAs(agentType, ["running", "looping"], "pending");
             }
           }
           if (event.type === "execution_failed") {
-            updateAgentState(agentType, { isTyping: false, isStreaming: false, queenIsTyping: false, workerIsTyping: false, awaitingInput: false, workerInputMessageId: null, pendingQuestion: null, pendingOptions: null, pendingQuestionSource: null });
-            if (!isQueen) {
-              updateAgentState(agentType, { workerRunState: "idle", currentExecutionId: null });
+            if (isQueen) {
+              // Queen failed — preserve any active worker question
+              setAgentStates(prev => {
+                const cur = prev[agentType] || defaultAgentState();
+                const keepWorkerQ = cur.pendingQuestionSource === "worker";
+                return { ...prev, [agentType]: {
+                  ...cur,
+                  isTyping: false, isStreaming: false, queenIsTyping: false, workerIsTyping: false,
+                  ...(keepWorkerQ ? {} : { awaitingInput: false, workerInputMessageId: null, pendingQuestion: null, pendingOptions: null, pendingQuestionSource: null }),
+                }};
+              });
+            } else {
+              updateAgentState(agentType, { isTyping: false, isStreaming: false, queenIsTyping: false, workerIsTyping: false, awaitingInput: false, workerInputMessageId: null, pendingQuestion: null, pendingOptions: null, pendingQuestionSource: null });
+              updateAgentState(agentType, { workerRunState: "idle", currentExecutionId: null, pausedWorkerSessionId: null });
               if (event.node_id) {
                 updateGraphNodeStatus(agentType, event.node_id, "error");
                 const errMsg = (event.data?.error as string) || "unknown error";
@@ -1500,7 +1586,18 @@ export default function Workspace() {
         case "node_loop_iteration":
           turnCounterRef.current[turnKey] = currentTurn + 1;
           if (isQueen) {
-            updateAgentState(agentType, { isStreaming: false, activeToolCalls: {}, awaitingInput: false, pendingQuestion: null, pendingOptions: null, pendingQuestionSource: null });
+            // Preserve active worker question — queen loop iterations must
+            // not clobber a pending worker ask_user prompt.
+            setAgentStates(prev => {
+              const cur = prev[agentType] || defaultAgentState();
+              const keepWorkerQ = cur.pendingQuestionSource === "worker";
+              return { ...prev, [agentType]: {
+                ...cur,
+                isStreaming: false,
+                activeToolCalls: {},
+                ...(keepWorkerQ ? {} : { awaitingInput: false, pendingQuestion: null, pendingOptions: null, pendingQuestionSource: null }),
+              }};
+            });
           } else {
             updateAgentState(agentType, { isStreaming: false, workerIsTyping: true, activeToolCalls: {}, awaitingInput: false, pendingQuestion: null, pendingOptions: null, pendingQuestionSource: null });
           }
@@ -1790,11 +1887,21 @@ export default function Workspace() {
           const rawPhase = event.data?.phase as string;
           const newPhase: "building" | "staging" | "running" =
             rawPhase === "running" ? "running" : rawPhase === "staging" ? "staging" : "building";
-          updateAgentState(agentType, {
-            queenPhase: newPhase,
-            queenBuilding: newPhase === "building",
-            // Sync workerRunState so the RunButton reflects the phase
-            workerRunState: newPhase === "running" ? "running" : "idle",
+          // Use updater form to avoid overwriting "paused" when queen
+          // transitions to staging after a pause (switch_to_staging fires
+          // queen_phase_changed which would otherwise clobber the paused state).
+          setAgentStates(prev => {
+            const cur = prev[agentType] || defaultAgentState();
+            const workerRunState =
+              cur.workerRunState === "paused" ? "paused"
+              : newPhase === "running" ? "running"
+              : "idle";
+            return { ...prev, [agentType]: {
+              ...cur,
+              queenPhase: newPhase,
+              queenBuilding: newPhase === "building",
+              workerRunState,
+            }};
           });
           break;
         }
@@ -1815,6 +1922,7 @@ export default function Workspace() {
             displayName,
             queenBuilding: false,
             workerRunState: "idle",
+            pausedWorkerSessionId: null,
             graphId: null,
             nodeSpecs: [],
           });
@@ -1886,6 +1994,16 @@ export default function Workspace() {
         hasRunning: session.graphNodes.some(n => n.status === "running" || n.status === "looping"),
       };
     });
+
+  // Sort by user-defined tabOrder; unknown tabs append at the end.
+  const orderedAgentTabs = [...agentTabs].sort((a, b) => {
+    const ai = tabOrder.indexOf(a.agentType);
+    const bi = tabOrder.indexOf(b.agentType);
+    if (ai === -1 && bi === -1) return 0;
+    if (ai === -1) return 1;
+    if (bi === -1) return -1;
+    return ai - bi;
+  });
 
   // --- handleSend ---
   const handleSend = useCallback((text: string, thread: string) => {
@@ -2322,9 +2440,9 @@ export default function Workspace() {
   return (
     <div className="flex flex-col h-screen bg-background overflow-hidden">
       <TopBar
-        tabs={agentTabs}
+        tabs={orderedAgentTabs}
         onTabClick={(agentType) => {
-          const tab = agentTabs.find(t => t.agentType === agentType);
+          const tab = orderedAgentTabs.find(t => t.agentType === agentType);
           if (tab) {
             setActiveWorker(agentType);
             setActiveSessionByAgent(prev => ({ ...prev, [agentType]: tab.sessionId }));
@@ -2332,6 +2450,7 @@ export default function Workspace() {
           }
         }}
         onCloseTab={closeAgentTab}
+        onReorderTabs={setTabOrder}
         afterTabs={
           <>
             <button
@@ -2460,6 +2579,7 @@ export default function Workspace() {
                 queenPhase={activeAgentState?.queenPhase ?? "building"}
                 pendingQuestion={activeAgentState?.awaitingInput ? activeAgentState.pendingQuestion : null}
                 pendingOptions={activeAgentState?.awaitingInput ? activeAgentState.pendingOptions : null}
+                pendingQuestionSource={activeAgentState?.awaitingInput ? activeAgentState.pendingQuestionSource : null}
                 onQuestionSubmit={
                   activeAgentState?.pendingQuestionSource === "queen"
                     ? handleQueenQuestionAnswer

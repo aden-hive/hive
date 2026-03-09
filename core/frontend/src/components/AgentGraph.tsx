@@ -20,7 +20,7 @@ export interface GraphNode {
   edgeLabels?: Record<string, string>;
 }
 
-type RunState = "idle" | "deploying" | "running";
+type RunState = "idle" | "deploying" | "running" | "paused";
 
 interface AgentGraphProps {
   nodes: GraphNode[];
@@ -59,6 +59,8 @@ const RunButton = memo(function RunButton({ runState, disabled, onRun, onPause, 
           ? "bg-amber-500/15 text-amber-400 border border-amber-500/40 hover:bg-amber-500/25 active:scale-95 cursor-pointer"
           : runState === "running"
           ? "bg-green-500/15 text-green-400 border border-green-500/30 cursor-pointer"
+          : runState === "paused"
+          ? "bg-amber-500/10 text-amber-400 border border-amber-500/30 hover:bg-amber-500/20 hover:border-amber-500/40 active:scale-95 cursor-pointer"
           : runState === "deploying"
           ? "bg-primary/10 text-primary border border-primary/20 cursor-default"
           : disabled
@@ -72,10 +74,12 @@ const RunButton = memo(function RunButton({ runState, disabled, onRun, onPause, 
         <Pause className="w-3 h-3 fill-current" />
       ) : runState === "running" ? (
         <CheckCircle2 className="w-3 h-3" />
+      ) : runState === "paused" ? (
+        <Play className="w-3 h-3 fill-current" />
       ) : (
         <Play className="w-3 h-3 fill-current" />
       )}
-      {runState === "deploying" ? "Deploying\u2026" : showPause ? "Pause" : runState === "running" ? "Running" : "Run"}
+      {runState === "deploying" ? "Deploying\u2026" : showPause ? "Pause" : runState === "running" ? "Running" : runState === "paused" ? "Resume" : "Run"}
     </button>
   );
 });
@@ -152,7 +156,7 @@ export default function AgentGraph({ nodes, title: _title, onNodeClick, onRun, o
   const runBtnRef = useRef<HTMLButtonElement>(null);
 
   const handleRun = () => {
-    if (runState !== "idle") return;
+    if (runState !== "idle" && runState !== "paused") return;
     if (onRun) {
       onRun();
     } else {

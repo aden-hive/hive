@@ -28,10 +28,10 @@ export type HistorySession = {
   created_at: number;
   agent_name?: string | null;
   agent_path?: string | null;
-  /** Snippet of the last assistant message — for sidebar preview. */
+  /** Snippet of the last visible message — for sidebar preview. */
   last_message?: string | null;
-  /** Total number of client-facing messages in this session. */
-  message_count?: number;
+  /** Role of the last visible message (user or assistant). */
+  last_role?: string | null;
 };
 
 const LABEL_STORE_KEY = "hive:history-labels";
@@ -79,25 +79,6 @@ function formatDateTime(createdAt: number, sessionId: string): string {
   });
 }
 
-/**
- * Deduplicate sessions by agent_path — keep only the most recent session
- * per agent. Sessions are already sorted newest-first by the backend.
- * Sessions without an agent_path (new-agent / queen-only) are kept individually.
- */
-function deduplicateByAgent(sessions: HistorySession[]): HistorySession[] {
-  const seen = new Set<string>();
-  const result: HistorySession[] = [];
-  for (const s of sessions) {
-    // Group key: use agent_path when present, otherwise use session_id (unique)
-    const key = s.agent_path ? s.agent_path.replace(/\/$/, "") : `__no_agent__${s.session_id}`;
-    if (!seen.has(key)) {
-      seen.add(key);
-      result.push(s);
-    }
-    // Additional sessions for the same agent are silently skipped
-  }
-  return result;
-}
 
 function groupByDate(sessions: HistorySession[]): { label: string; items: HistorySession[] }[] {
   const now = new Date();
@@ -200,17 +181,15 @@ function HistoryRow({ session: s, label, isActive, isLive, onOpen, onRename, onD
             <div className={`text-[11px] font-medium truncate leading-tight ${isActive ? "text-foreground" : "text-foreground/80"}`}>
               {label}
             </div>
-            {/* Message preview — most recent assistant message */}
+            {/* Last message preview with role prefix */}
             {s.last_message && (
-              <div className="text-[10px] text-muted-foreground/50 mt-0.5 leading-tight line-clamp-2 break-words">
+              <div className="text-[10px] text-muted-foreground/50 mt-0.5 leading-tight line-clamp-1 break-words">
+                <span className="font-medium text-muted-foreground/70">{s.last_role === "user" ? "You" : (s.agent_name || "Agent")}:</span>{" "}
                 {s.last_message}
               </div>
             )}
             <div className="flex items-center gap-1.5 mt-0.5">
               <div className="text-[10px] text-muted-foreground/40">{dateStr}</div>
-              {(s.message_count ?? 0) > 0 && (
-                <span className="text-[9px] text-muted-foreground/30">· {s.message_count} msgs</span>
-              )}
             </div>
             {isLive && (
               <span className="text-[9px] text-emerald-500/80 font-semibold uppercase tracking-wide">live</span>
@@ -325,12 +304,11 @@ export default function HistorySidebar({ onOpen, onNewChat, openSessionIds = [],
     });
   };
 
-  // ── Deduplicate & render ────────────────────────────────────────────────────
+  // ── Render ───────────────────────────────────────────────────────────────────
 
-  // Deduplicate: show only the most-recent session per agent_path.
+  // All sessions are shown — each conversation is independent regardless of agent.
   // rawSessions is already sorted newest-first by the backend.
-  const sessions = deduplicateByAgent(rawSessions);
-  const groups = groupByDate(sessions);
+  const groups = groupByDate(rawSessions);
 
   return (
     <div
@@ -380,7 +358,7 @@ export default function HistorySidebar({ onOpen, onNewChat, openSessionIds = [],
             <div className="flex items-center justify-center py-8">
               <Loader2 className="w-4 h-4 animate-spin text-muted-foreground/40" />
             </div>
-          ) : sessions.length === 0 ? (
+          ) : rawSessions.length === 0 ? (
             <div className="px-4 py-12 text-center text-[11px] text-muted-foreground/40 leading-relaxed">
               No previous
               <br />
@@ -433,7 +411,7 @@ export default function HistorySidebar({ onOpen, onNewChat, openSessionIds = [],
               <Plus className="w-3 h-3" />
             </button>
           )}
-          {sessions.slice(0, 30).map((s) => {
+          {rawSessions.slice(0, 30).map((s) => {
             const isLive = s.live || openSessionIds.includes(s.session_id);
             return (
               <button

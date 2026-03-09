@@ -284,7 +284,14 @@ async def handle_resume(request: web.Request) -> web.Response:
         }
     else:
         progress = state.get("progress", {})
-        paused_at = progress.get("paused_at") or progress.get("resume_from")
+        # paused_at is written by SessionState; current_node is written by
+        # _write_progress() on node transitions — use it as fallback so
+        # resume works even if the richer state was never flushed.
+        paused_at = (
+            progress.get("paused_at")
+            or progress.get("resume_from")
+            or progress.get("current_node")
+        )
         resume_session_state = {
             "resume_session_id": worker_session_id,
             "memory": state.get("memory", {}),
@@ -305,6 +312,18 @@ async def handle_resume(request: web.Request) -> web.Response:
         input_data=input_data,
         session_state=resume_session_state,
     )
+
+    # Cancel queen's in-progress LLM turn so it picks up the phase change cleanly
+    if session.queen_executor:
+        node = session.queen_executor.node_registry.get("queen")
+        if node and hasattr(node, "cancel_current_turn"):
+            node.cancel_current_turn()
+
+    # Switch queen to running phase and resume paused timers
+    if session.phase_state is not None:
+        await session.phase_state.switch_to_running(source="frontend")
+    if session.worker_runtime:
+        session.worker_runtime.resume_timers()
 
     return web.json_response(
         {
@@ -357,8 +376,8 @@ async def handle_pause(request: web.Request) -> web.Response:
     runtime.pause_timers()
 
     # Switch to staging (agent still loaded, ready to re-run)
-    if session.mode_state is not None:
-        await session.mode_state.switch_to_staging(source="frontend")
+    if session.phase_state is not None:
+        await session.phase_state.switch_to_staging(source="frontend")
 
     return web.json_response(
         {

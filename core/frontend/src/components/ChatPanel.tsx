@@ -1,5 +1,5 @@
-import { memo, useState, useRef, useEffect } from "react";
-import { Send, Square, Crown, Cpu, Check, Loader2 } from "lucide-react";
+import { memo, useState, useRef, useEffect, useMemo } from "react";
+import { Send, Square, Crown, Cpu, Check, Loader2, ChevronDown } from "lucide-react";
 import MarkdownContent from "@/components/MarkdownContent";
 import QuestionWidget from "@/components/QuestionWidget";
 
@@ -38,6 +38,8 @@ interface ChatPanelProps {
   onQuestionSubmit?: (answer: string, isOther: boolean) => void;
   /** Called when user dismisses the pending question without answering */
   onQuestionDismiss?: () => void;
+  /** Where the pending question originated — affects accent color */
+  pendingQuestionSource?: "queen" | "worker" | null;
   /** Queen operating phase — shown as a tag on queen messages */
   queenPhase?: "building" | "staging" | "running";
 }
@@ -144,6 +146,105 @@ function ToolActivityRow({ content }: { content: string }) {
   );
 }
 
+/** A run of consecutive worker messages that can be collapsed/expanded. */
+interface WorkerGroup {
+  kind: "worker-group";
+  /** Display name of the worker (from first message) */
+  workerName: string;
+  messages: ChatMessage[];
+}
+
+/** Either a single non-worker message or a collapsible worker group */
+type RenderItem =
+  | { kind: "single"; msg: ChatMessage }
+  | WorkerGroup;
+
+/** Group consecutive worker messages into collapsible runs.
+ *  Queen messages, user messages, system, and tool_status stay as singles. */
+function groupMessages(msgs: ChatMessage[]): RenderItem[] {
+  const items: RenderItem[] = [];
+  let currentGroup: WorkerGroup | null = null;
+
+  for (const msg of msgs) {
+    const isWorkerMsg = msg.role === "worker" && msg.type !== "user" && msg.type !== "system";
+    if (isWorkerMsg) {
+      if (currentGroup && currentGroup.workerName === msg.agent) {
+        currentGroup.messages.push(msg);
+      } else {
+        // Flush previous group
+        if (currentGroup) items.push(currentGroup);
+        currentGroup = { kind: "worker-group", workerName: msg.agent, messages: [msg] };
+      }
+    } else {
+      // Flush any open worker group
+      if (currentGroup) {
+        items.push(currentGroup);
+        currentGroup = null;
+      }
+      items.push({ kind: "single", msg });
+    }
+  }
+  if (currentGroup) items.push(currentGroup);
+  return items;
+}
+
+function CollapsibleWorkerThread({ group, queenPhase }: { group: WorkerGroup; queenPhase?: string }) {
+  // Auto-collapse groups with >1 message; single-message groups stay open
+  const [collapsed, setCollapsed] = useState(group.messages.length > 1);
+
+  // Last message is always shown (even when collapsed) as a preview
+  const lastMsg = group.messages[group.messages.length - 1];
+  const hiddenCount = group.messages.length - 1;
+
+  if (group.messages.length === 1) {
+    // Single worker message — render normally, no collapse UI
+    return <MessageBubble msg={group.messages[0]} queenPhase={queenPhase as any} />;
+  }
+
+  return (
+    <div className="relative">
+      {/* Collapse/expand toggle */}
+      <button
+        onClick={() => setCollapsed((c) => !c)}
+        className="flex items-center gap-1.5 text-[11px] font-medium mb-1 px-1 py-0.5 rounded hover:bg-muted/40 transition-colors"
+        style={{ color: workerColor }}
+      >
+        <ChevronDown
+          className={`w-3 h-3 transition-transform duration-200 ${collapsed ? "-rotate-90" : ""}`}
+          style={{ color: workerColor }}
+        />
+        <Cpu className="w-3 h-3" style={{ color: workerColor }} />
+        <span>{group.workerName}</span>
+        <span className="text-muted-foreground font-normal">
+          {collapsed
+            ? `\u2014 ${hiddenCount} step${hiddenCount > 1 ? "s" : ""} hidden`
+            : `\u2014 ${group.messages.length} steps`}
+        </span>
+      </button>
+
+      {/* Expanded: show all messages */}
+      {!collapsed && (
+        <div className="space-y-2 pl-4 border-l-2 ml-1 mb-1" style={{ borderColor: `${workerColor}30` }}>
+          {group.messages.map((msg) => (
+            <div key={msg.id} className="text-[13px]">
+              <MessageBubble msg={msg} queenPhase={queenPhase as any} />
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Collapsed: show only the last message as preview */}
+      {collapsed && (
+        <div className="pl-4 border-l-2 ml-1 opacity-80" style={{ borderColor: `${workerColor}30` }}>
+          <div className="text-[13px]">
+            <MessageBubble msg={lastMsg} queenPhase={queenPhase as any} />
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 const MessageBubble = memo(function MessageBubble({ msg, queenPhase }: { msg: ChatMessage; queenPhase?: "building" | "staging" | "running" }) {
   const isUser = msg.type === "user";
   const isQueen = msg.role === "queen";
@@ -220,7 +321,7 @@ const MessageBubble = memo(function MessageBubble({ msg, queenPhase }: { msg: Ch
   );
 }, (prev, next) => prev.msg.id === next.msg.id && prev.msg.content === next.msg.content && prev.queenPhase === next.queenPhase);
 
-export default function ChatPanel({ messages, onSend, isWaiting, isWorkerWaiting, isBusy, activeThread, disabled, onCancel, pendingQuestion, pendingOptions, onQuestionSubmit, onQuestionDismiss, queenPhase }: ChatPanelProps) {
+export default function ChatPanel({ messages, onSend, isWaiting, isWorkerWaiting, isBusy, activeThread, disabled, onCancel, pendingQuestion, pendingOptions, onQuestionSubmit, onQuestionDismiss, pendingQuestionSource, queenPhase }: ChatPanelProps) {
   const [input, setInput] = useState("");
   const [readMap, setReadMap] = useState<Record<string, number>>({});
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -232,6 +333,9 @@ export default function ChatPanel({ messages, onSend, isWaiting, isWorkerWaiting
     if (m.type === "system" && !m.thread) return false;
     return m.thread === activeThread;
   });
+
+  // Group consecutive worker messages into collapsible runs
+  const renderItems = useMemo(() => groupMessages(threadMessages), [threadMessages]);
 
   // Mark current thread as read
   useEffect(() => {
@@ -278,11 +382,33 @@ export default function ChatPanel({ messages, onSend, isWaiting, isWorkerWaiting
 
       {/* Messages */}
       <div ref={scrollRef} onScroll={handleScroll} className="flex-1 overflow-auto px-5 py-4 space-y-3">
-        {threadMessages.map((msg) => (
-          <div key={msg.id}>
-            <MessageBubble msg={msg} queenPhase={queenPhase} />
-          </div>
-        ))}
+        {renderItems.map((item) => {
+          if (item.kind === "worker-group") {
+            const groupKey = item.messages.map((m) => m.id).join("|");
+            return (
+              <div key={groupKey}>
+                <CollapsibleWorkerThread group={item} queenPhase={queenPhase} />
+              </div>
+            );
+          }
+          return (
+            <div key={item.msg.id}>
+              <MessageBubble msg={item.msg} queenPhase={queenPhase} />
+            </div>
+          );
+        })}
+
+        {/* Inline worker question widget — flows naturally in the chat */}
+        {pendingQuestion && pendingOptions && onQuestionSubmit && pendingQuestionSource === "worker" && (
+          <QuestionWidget
+            question={pendingQuestion}
+            options={pendingOptions}
+            onSubmit={onQuestionSubmit}
+            onDismiss={onQuestionDismiss}
+            source="worker"
+            inline
+          />
+        )}
 
         {/* Show typing indicator while waiting for first queen response (disabled + empty chat) */}
         {(isWaiting || (disabled && threadMessages.length === 0)) && (
@@ -329,13 +455,14 @@ export default function ChatPanel({ messages, onSend, isWaiting, isWorkerWaiting
         <div ref={bottomRef} />
       </div>
 
-      {/* Input area — question widget replaces textarea when a question is pending */}
-      {pendingQuestion && pendingOptions && onQuestionSubmit ? (
+      {/* Input area — queen question replaces textarea; worker questions are inline above */}
+      {pendingQuestion && pendingOptions && onQuestionSubmit && pendingQuestionSource === "queen" ? (
         <QuestionWidget
           question={pendingQuestion}
           options={pendingOptions}
           onSubmit={onQuestionSubmit}
           onDismiss={onQuestionDismiss}
+          source="queen"
         />
       ) : (
         <form onSubmit={handleSubmit} className="p-4">

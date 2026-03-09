@@ -1031,6 +1031,9 @@ class SessionManager:
             return False
         if message.get("role") == "tool":
             return False
+        # For user messages, only show those explicitly marked as client input
+        if message.get("role") == "user":
+            return message.get("is_client_input", False)
         # Filter tool-only assistant messages (no user-visible text).
         # Keep assistant messages that have tool_calls BUT also have non-empty
         # content — the queen frequently writes conversational text AND calls a
@@ -1232,7 +1235,11 @@ class SessionManager:
 
     @staticmethod
     def list_cold_sessions() -> list[dict]:
-        """Return metadata for every queen session directory on disk, newest first."""
+        """Return metadata for every queen session directory on disk, newest first.
+
+        Reads meta.json per session and only the last few conversation parts
+        (in reverse) to find the most recent client-visible message for preview.
+        """
         queen_sessions_dir = Path.home() / ".hive" / "queen" / "session"
         if not queen_sessions_dir.exists():
             return []
@@ -1266,40 +1273,35 @@ class SessionManager:
                 except (json.JSONDecodeError, OSError):
                     pass
 
-            # Build a quick preview of the last human/assistant exchange.
-            # We read all conversation parts, filter to client-facing messages,
-            # and return the last assistant message content as a snippet.
-            last_message: str | None = None
-            message_count: int = 0
             convs_dir = d / "conversations"
-            if convs_dir.exists():
+            parts_dir = convs_dir / "parts"
+            has_messages = parts_dir.exists()
+
+            # Read only the last few part files in reverse to find the most
+            # recent client-visible message — avoids scanning all parts.
+            last_message: str | None = None
+            last_role: str | None = None
+            if has_messages:
                 try:
-                    all_parts: list[dict] = []
-                    for node_id, part_file in SessionManager._iter_conversation_part_files(convs_dir):
+                    part_files = sorted(parts_dir.glob("*.json"), reverse=True)
+                    # Check at most 15 files from the end to find a visible message
+                    for pf in part_files[:15]:
                         try:
-                            part = json.loads(part_file.read_text(encoding="utf-8"))
-                            if node_id is not None:
-                                part.setdefault("_node_id", node_id)
-                            part.setdefault("created_at", part_file.stat().st_mtime)
-                            all_parts.append(part)
+                            part = json.loads(pf.read_text(encoding="utf-8"))
                         except (json.JSONDecodeError, OSError):
                             continue
-                    # Filter to client-facing messages only
-                    client_msgs = [p for p in all_parts if SessionManager.is_client_visible_message(p)]
-                    client_msgs.sort(key=lambda m: m.get("created_at", m.get("seq", 0)))
-                    message_count = len(client_msgs)
-                    # Last assistant message as preview snippet
-                    for msg in reversed(client_msgs):
-                        content = msg.get("content") or ""
+                        if not SessionManager.is_client_visible_message(part):
+                            continue
+                        content = part.get("content") or ""
                         if isinstance(content, list):
-                            # Anthropic-style content blocks
                             content = " ".join(
                                 b.get("text", "")
                                 for b in content
                                 if isinstance(b, dict) and b.get("type") == "text"
                             )
-                        if content and msg.get("role") == "assistant":
-                            last_message = content[:120].strip()
+                        if content and isinstance(content, str) and content.strip():
+                            last_message = content.strip()[:120]
+                            last_role = part.get("role")
                             break
                 except OSError:
                     pass
@@ -1309,12 +1311,12 @@ class SessionManager:
                     "session_id": d.name,
                     "cold": True,  # caller overrides for live sessions
                     "live": False,
-                    "has_messages": convs_dir.exists() and message_count > 0,
+                    "has_messages": has_messages,
                     "created_at": created_at,
                     "agent_name": agent_name,
                     "agent_path": agent_path,
                     "last_message": last_message,
-                    "message_count": message_count,
+                    "last_role": last_role,
                 }
             )
 

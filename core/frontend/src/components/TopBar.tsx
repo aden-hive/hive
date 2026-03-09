@@ -24,9 +24,11 @@ interface TopBarProps {
   afterTabs?: React.ReactNode;
   /** Right-side slot for page-specific controls (e.g. credentials). */
   children?: React.ReactNode;
+  /** Called with the new ordered array of agentType strings after a drag-reorder. */
+  onReorderTabs?: (agentTypes: string[]) => void;
 }
 
-export default function TopBar({ tabs: tabsProp, onTabClick, onCloseTab, canCloseTabs, afterTabs, children }: TopBarProps) {
+export default function TopBar({ tabs: tabsProp, onTabClick, onCloseTab, canCloseTabs, afterTabs, children, onReorderTabs }: TopBarProps) {
   const navigate = useNavigate();
 
   // Fallback: read persisted tabs when no live tabs provided
@@ -36,6 +38,10 @@ export default function TopBar({ tabs: tabsProp, onTabClick, onCloseTab, canClos
 
   const tabs: TopBarTab[] = tabsProp ?? deriveTabs(persisted);
   const showClose = canCloseTabs ?? true;
+
+  // Drag-to-reorder state
+  const [dragIndex, setDragIndex] = useState<number | null>(null);
+  const [dropIndex, setDropIndex] = useState<number | null>(null);
 
   const handleTabClick = useCallback((agentType: string) => {
     if (onTabClick) {
@@ -98,15 +104,34 @@ export default function TopBar({ tabs: tabsProp, onTabClick, onCloseTab, canClos
           <>
             <span className="text-border text-xs flex-shrink-0">|</span>
             <div className="flex items-center gap-0.5 min-w-0 overflow-x-auto scrollbar-hide">
-              {tabs.map((tab) => (
+              {tabs.map((tab, i) => (
                 <button
                   key={tab.agentType}
                   onClick={() => handleTabClick(tab.agentType)}
+                  draggable={!!onReorderTabs}
+                  onDragStart={onReorderTabs ? () => setDragIndex(i) : undefined}
+                  onDragEnd={onReorderTabs ? () => { setDragIndex(null); setDropIndex(null); } : undefined}
+                  onDragOver={onReorderTabs ? (e) => { e.preventDefault(); setDropIndex(i); } : undefined}
+                  onDrop={onReorderTabs ? (e) => {
+                    e.preventDefault();
+                    if (dragIndex !== null && dragIndex !== i) {
+                      const newOrder = tabs.map(t => t.agentType);
+                      const [removed] = newOrder.splice(dragIndex, 1);
+                      newOrder.splice(i, 0, removed);
+                      onReorderTabs(newOrder);
+                    }
+                    setDragIndex(null);
+                    setDropIndex(null);
+                  } : undefined}
                   className={`group flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-colors whitespace-nowrap flex-shrink-0 ${
                     tab.isActive
                       ? "bg-primary/15 text-primary"
                       : "text-muted-foreground hover:text-foreground hover:bg-muted/50"
-                  }`}
+                  } ${onReorderTabs ? "cursor-grab active:cursor-grabbing" : ""} ${
+                    dragIndex !== null && dropIndex === i && dragIndex !== i
+                      ? "border-l-2 border-primary"
+                      : ""
+                  } ${dragIndex === i ? "opacity-40" : ""}`}
                 >
                   {tab.hasRunning && (
                     <span className="relative flex h-1.5 w-1.5 flex-shrink-0">
