@@ -19,6 +19,7 @@ import os
 import re
 import subprocess
 import sys
+import textwrap
 import time
 from pathlib import Path
 
@@ -1220,11 +1221,13 @@ def run_agent_tests(
 def validate_agent_package(agent_name: str) -> str:
     """Run structural validation checks on a built agent package in one call.
 
-    Executes 4 steps and reports all results (does not stop on first failure):
+    Executes 5 steps and reports all results (does not stop on first failure):
       1. Class validation — checks graph structure and entry_points contract
-      2. Graph validation — loads the agent graph without credential checks
-      3. Tool validation — checks declared tools exist in MCP servers
-      4. Tests — runs the agent's pytest suite
+      2. Node completeness — every NodeSpec in nodes/ must be in the nodes list,
+         and GCU nodes must be referenced in a parent's sub_agents
+      3. Graph validation — loads the agent graph without credential checks
+      4. Tool validation — checks declared tools exist in MCP servers
+      5. Tests — runs the agent's pytest suite
 
     Note: Credential validation is intentionally skipped here (building phase).
     Credentials are validated at run time by run_agent_with_input() preflight.
@@ -1275,6 +1278,62 @@ def validate_agent_package(agent_name: str) -> str:
             steps["class_validation"]["error"] = proc.stderr.strip()[:2000]
     except Exception as e:
         steps["class_validation"] = {"passed": False, "error": str(e)}
+
+    # Step A2: Node completeness — every NodeSpec in nodes/ must be in the nodes list
+    try:
+        _check_template = textwrap.dedent("""\
+            import importlib, json
+            agent = importlib.import_module('{agent_name}')
+            nodes_mod = importlib.import_module('{agent_name}.nodes')
+            graph_ids = {{n.id for n in agent.nodes}}
+            defined = {{}}
+            for attr in dir(nodes_mod):
+                obj = getattr(nodes_mod, attr)
+                if hasattr(obj, 'id') and hasattr(obj, 'node_type'):
+                    defined[obj.id] = attr
+            orphaned = set(defined) - graph_ids
+            errors = [
+                f"Node '{{nid}}' ({{defined[nid]}}) defined in nodes/ but not in nodes list"
+                for nid in sorted(orphaned)
+            ]
+            sub_refs = set()
+            for n in agent.nodes:
+                for sa in getattr(n, 'sub_agents', []) or []:
+                    sub_refs.add(sa)
+            for n in agent.nodes:
+                if n.node_type == 'gcu' and n.id not in sub_refs:
+                    errors.append(
+                        f"GCU node '{{n.id}}' not referenced in any node's sub_agents list"
+                    )
+            print(json.dumps({{'valid': len(errors) == 0, 'errors': errors}}))
+        """)
+        check_script = _check_template.format(agent_name=agent_name)
+        proc = subprocess.run(
+            ["uv", "run", "python", "-c", check_script],
+            capture_output=True,
+            text=True,
+            timeout=30,
+            env=env,
+            cwd=PROJECT_ROOT,
+            stdin=subprocess.DEVNULL,
+        )
+        if proc.returncode == 0:
+            result = json.loads(proc.stdout.strip())
+            steps["node_completeness"] = {
+                "passed": result["valid"],
+                "output": "; ".join(result["errors"])
+                if result["errors"]
+                else "All defined nodes are in the graph",
+            }
+            if not result["valid"]:
+                steps["node_completeness"]["errors"] = result["errors"]
+        else:
+            steps["node_completeness"] = {
+                "passed": False,
+                "error": proc.stderr.strip()[:2000],
+            }
+    except Exception as e:
+        steps["node_completeness"] = {"passed": False, "error": str(e)}
 
     # Step B: Graph validation (subprocess for import isolation)
     # Credentials are checked at run time (run_agent_with_input preflight),
@@ -1743,33 +1802,6 @@ class {class_name}:
         for ep_id, nid in self.entry_points.items():
             if nid not in node_ids:
                 errors.append(f"Entry point '{{ep_id}}' references unknown node '{{nid}}'")
-
-        # Check for nodes defined in nodes/ but not included in the graph
-        import importlib
-        _nodes_mod = importlib.import_module(".nodes", self.__class__.__module__.rsplit(".", 1)[0])
-        defined_nodes = {{}}
-        for attr in dir(_nodes_mod):
-            obj = getattr(_nodes_mod, attr)
-            if hasattr(obj, "id") and hasattr(obj, "node_type"):
-                defined_nodes[obj.id] = attr
-        orphaned = set(defined_nodes.keys()) - node_ids
-        for nid in orphaned:
-            errors.append(
-                f"Node '{{nid}}' ({{defined_nodes[nid]}}) is defined in nodes/ "
-                f"but not included in the nodes list"
-            )
-
-        # GCU nodes must be referenced as sub_agents
-        sub_agent_refs = set()
-        for n in self.nodes:
-            for sa in getattr(n, "sub_agents", []) or []:
-                sub_agent_refs.add(sa)
-        for n in self.nodes:
-            if n.node_type == "gcu" and n.id not in sub_agent_refs:
-                errors.append(
-                    f"GCU node '{{n.id}}' is not referenced in any node's "
-                    f"sub_agents list"
-                )
 
         return {{"valid": len(errors) == 0, "errors": errors, "warnings": warnings}}
 
