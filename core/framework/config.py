@@ -65,7 +65,7 @@ def get_available_providers() -> dict[str, dict[str, Any]]:
             "name": "Google Gemini",
             "api_key": gemini_key,
             "status": "available",
-            "models": ["gemini-2.5-flash","gemini-3-flash-preview", "gemini-3.1-pro-preview"],
+            "models": ["gemini-3-flash-preview", "gemini-3.1-pro-preview"],
             "default_model": "gemini-3-flash-preview",
             "free_tier": True
         }
@@ -152,21 +152,21 @@ def get_available_providers() -> dict[str, dict[str, Any]]:
 
 def format_provider_menu(providers: dict) -> str:
     """Format available providers into a user-friendly menu."""
-    menu = "\nAvailable LLM Providers:\n"
-    menu += "=" * 60 + "\n"
+    menu = "\n Available LLM Providers:\n"
+    menu += "═" * 60 + "\n"
     
     for idx, (provider_id, info) in enumerate(providers.items(), 1):
-        free_tag = " (FREE TIER)" if info.get("free_tier") else ""
-        status_icon = "[OK]" if info["status"] == "available" else "[?]"
+        free_tag = "  FREE TIER" if info.get("free_tier") else "⚠️"
+        status_icon = "" if info["status"] == "available" else "⚠️"
         menu += f"\n{idx}. {status_icon} {info['name']}{free_tag}"
         menu += f"\n   Models: {', '.join(info['models'][:3])}"
         if len(info['models']) > 3:
             menu += f" and {len(info['models'])-3} more"
         if info["status"] == "needs_check":
-            menu += "\n   (Will verify credits when used)"
+            menu += "\n     Will verify credits when used"
         menu += "\n"
     
-    menu += "\n" + "=" * 60
+    menu += "\n" + "═" * 60
     menu += "\n0. Keep using current selection and show error"
     return menu
 
@@ -421,7 +421,7 @@ def save_provider_selection(provider: str, model: str, api_key: str | None = Non
     with open(HIVE_CONFIG_FILE, "w") as f:
         json.dump(config, f, indent=2)
     
-    logger.info(f"Saved provider selection: {provider} with model {model}")
+    logger.info(f" Saved provider selection: {provider} with model {model}")
 
 
 # ---------------------------------------------------------------------------
@@ -464,13 +464,13 @@ def debug_llm_config() -> dict[str, Any]:
     
     # Check environment variables
     env_status = {
-        "GEMINI_API_KEY": "present" if os.environ.get("GEMINI_API_KEY") else "missing",
-        "ANTHROPIC_API_KEY": "present" if os.environ.get("ANTHROPIC_API_KEY") else "missing",
-        "OPENAI_API_KEY": "present" if os.environ.get("OPENAI_API_KEY") else "missing",
-        "GROQ_API_KEY": "present" if os.environ.get("GROQ_API_KEY") else "missing",
-        "CEREBRAS_API_KEY": "present" if os.environ.get("CEREBRAS_API_KEY") else "missing",
-        "DEEPSEEK_API_KEY": "present" if os.environ.get("DEEPSEEK_API_KEY") else "missing",
-        "MISTRAL_API_KEY": "present" if os.environ.get("MISTRAL_API_KEY") else "missing",
+        "GEMINI_API_KEY": "✓" if os.environ.get("GEMINI_API_KEY") else "✗",
+        "ANTHROPIC_API_KEY": "✓" if os.environ.get("ANTHROPIC_API_KEY") else "✗",
+        "OPENAI_API_KEY": "✓" if os.environ.get("OPENAI_API_KEY") else "✗",
+        "GROQ_API_KEY": "✓" if os.environ.get("GROQ_API_KEY") else "✗",
+        "CEREBRAS_API_KEY": "✓" if os.environ.get("CEREBRAS_API_KEY") else "✗",
+        "DEEPSEEK_API_KEY": "✓" if os.environ.get("DEEPSEEK_API_KEY") else "✗",
+        "MISTRAL_API_KEY": "✓" if os.environ.get("MISTRAL_API_KEY") else "✗",
     }
     
     # Get the actual model that will be used
@@ -492,7 +492,7 @@ def debug_llm_config() -> dict[str, Any]:
     }
     
     # Log the configuration
-    logger.info("LLM Configuration Debug:")
+    logger.info(" LLM Configuration Debug:")
     logger.info(json.dumps(debug_info, indent=2))
     
     return debug_info
@@ -535,10 +535,10 @@ def validate_llm_config() -> tuple[bool, list[str]]:
     
     is_valid = len(issues) == 0
     if is_valid:
-        logger.info("LLM configuration is valid")
+        logger.info(" LLM configuration is valid")
     else:
-        logger.warning("LLM configuration has issues:")
+        logger.warning(" LLM configuration has issues:")
         for issue in issues:
-            logger.warning(f"  * {issue}")
+            logger.warning(f"  • {issue}")
     
     return is_valid, issues
