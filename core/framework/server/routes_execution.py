@@ -347,7 +347,7 @@ async def handle_pause(request: web.Request) -> web.Response:
 
             for exec_id in list(stream.active_execution_ids):
                 try:
-                    ok = await stream.cancel_execution(exec_id)
+                    ok = await stream.cancel_execution(exec_id, reason="Execution paused by user")
                     if ok:
                         cancelled.append(exec_id)
                 except Exception:
@@ -357,8 +357,8 @@ async def handle_pause(request: web.Request) -> web.Response:
     runtime.pause_timers()
 
     # Switch to staging (agent still loaded, ready to re-run)
-    if session.mode_state is not None:
-        await session.mode_state.switch_to_staging(source="frontend")
+    if session.phase_state is not None:
+        await session.phase_state.switch_to_staging(source="frontend")
 
     return web.json_response(
         {
@@ -400,7 +400,9 @@ async def handle_stop(request: web.Request) -> web.Response:
                     if hasattr(node, "cancel_current_turn"):
                         node.cancel_current_turn()
 
-            cancelled = await stream.cancel_execution(execution_id)
+            cancelled = await stream.cancel_execution(
+                execution_id, reason="Execution stopped by user"
+            )
             if cancelled:
                 # Cancel queen's in-progress LLM turn
                 if session.queen_executor:

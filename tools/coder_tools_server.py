@@ -3,7 +3,7 @@
 Coder Tools MCP Server — OpenCode-inspired coding tools.
 
 Provides rich file I/O, fuzzy-match editing, git snapshots, and shell execution
-for the hive_coder agent. Modeled after opencode's tool architecture.
+for the queen agent. Modeled after opencode's tool architecture.
 
 All paths scoped to a configurable project root for safety.
 
@@ -1252,6 +1252,53 @@ def validate_agent_package(agent_name: str) -> str:
         path_parts.append(pythonpath)
     env["PYTHONPATH"] = os.pathsep.join(path_parts)
 
+    # Step 0: Module contract — __init__.py must expose goal, nodes, edges
+    try:
+        _contract_script = textwrap.dedent("""\
+            import importlib, json
+            mod = importlib.import_module('{agent_name}')
+            missing = [a for a in ('goal', 'nodes', 'edges') if getattr(mod, a, None) is None]
+            if missing:
+                print(json.dumps({{
+                    'valid': False,
+                    'error': (
+                        "Module '{agent_name}' is missing module-level attributes: "
+                        + ", ".join(missing) + ". "
+                        "Fix: in {agent_name}/__init__.py, add "
+                        "'from .agent import " + ", ".join(missing) + "' "
+                        "so that 'import {agent_name}' exposes them at package level."
+                    )
+                }}))
+            else:
+                print(json.dumps({{'valid': True}}))
+        """).format(agent_name=agent_name)
+        proc = subprocess.run(
+            ["uv", "run", "python", "-c", _contract_script],
+            capture_output=True,
+            text=True,
+            timeout=30,
+            env=env,
+            cwd=PROJECT_ROOT,
+            stdin=subprocess.DEVNULL,
+        )
+        if proc.returncode == 0:
+            result = json.loads(proc.stdout.strip())
+            steps["module_contract"] = {
+                "passed": result["valid"],
+                "output": result.get("error", "goal, nodes, edges exported correctly"),
+            }
+        else:
+            steps["module_contract"] = {
+                "passed": False,
+                "error": (
+                    f"Failed to import '{agent_name}': {proc.stderr.strip()[:1000]}. "
+                    f"Fix: ensure {agent_name}/__init__.py exists and can be imported "
+                    f"without errors (check syntax, missing dependencies, relative imports)."
+                ),
+            }
+    except Exception as e:
+        steps["module_contract"] = {"passed": False, "error": str(e)}
+
     # Step A: Class validation (subprocess for import isolation)
     try:
         proc = subprocess.run(
@@ -1321,9 +1368,11 @@ def validate_agent_package(agent_name: str) -> str:
             result = json.loads(proc.stdout.strip())
             steps["node_completeness"] = {
                 "passed": result["valid"],
-                "output": "; ".join(result["errors"])
-                if result["errors"]
-                else "All defined nodes are in the graph",
+                "output": (
+                    "; ".join(result["errors"])
+                    if result["errors"]
+                    else "All defined nodes are in the graph"
+                ),
             }
             if not result["valid"]:
                 steps["node_completeness"]["errors"] = result["errors"]
@@ -1434,7 +1483,7 @@ def _node_var_name(node_id: str) -> str:
 
 
 @mcp.tool()
-def initialize_agent_package(agent_name: str, nodes: str | None = None) -> str:
+def initialize_and_build_agent(agent_name: str, nodes: str | None = None) -> str:
     """Scaffold a new agent package with placeholder files.
 
     Creates exports/{agent_name}/ with all files needed for a runnable agent:
@@ -1985,6 +2034,9 @@ def runner_loaded():
 ''',
     )
 
+    # Build list of all generated file paths for the caller.
+    all_file_paths = [info["path"] for info in files_written.values()]
+
     return json.dumps(
         {
             "success": True,
@@ -1994,10 +2046,33 @@ def runner_loaded():
             "nodes": node_list,
             "files_written": files_written,
             "file_count": len(files_written),
+            "files": all_file_paths,
             "next_steps": [
-                f"Customize node definitions in exports/{agent_name}/nodes/__init__.py",
-                f"Define goal and edges in exports/{agent_name}/agent.py",
-                f'Run validate_agent_package("{agent_name}") to check structure',
+                (
+                    "IMPORTANT: All generated files are structurally complete "
+                    "with correct imports, class definition, validate() method, "
+                    "and __init__.py exports. Use edit_file to customize TODO "
+                    "placeholders — do NOT use write_file to rewrite entire files, "
+                    "as this will break imports and structure."
+                ),
+                (
+                    f"Use edit_file to customize system prompts, tools, "
+                    f"input_keys, output_keys, and success_criteria in "
+                    f"exports/{agent_name}/nodes/__init__.py"
+                ),
+                (
+                    f"Use edit_file to customize goal description, "
+                    f"success_criteria values, constraint values, edge "
+                    f"definitions, and identity_prompt in "
+                    f"exports/{agent_name}/agent.py"
+                ),
+                (
+                    "Do NOT modify: imports at top of agent.py, the class "
+                    "definition, validate() method, _build_graph()/_setup()/"
+                    "lifecycle methods, or __init__.py exports — they are "
+                    "already correct."
+                ),
+                f'Run validate_agent_package("{agent_name}") to verify structure',
             ],
         },
         indent=2,
