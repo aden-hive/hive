@@ -764,15 +764,7 @@ stages, tools, and edges from the loaded worker. Do NOT enter the \
 agent building workflow — you are describing what already exists, not \
 building something new.
 
-## Modifying the loaded worker
-
-When the user asks to change, modify, or update the loaded worker \
-(e.g., "change the report node", "add a node", "delete node X"):
-
-**Default: use stop_worker_and_plan().** Most modification requests need \
-discussion first — what to change, why, and how. Only skip planning if \
-the user gave you an explicit, unambiguous instruction (e.g., "delete node X", \
-"change the model to gpt-4o").
+## Fixing or Modifying the loaded worker
 
 Use stop_worker_and_plan() when:
 - The user says "modify", "improve", "fix", or "change" without specifics
@@ -868,9 +860,9 @@ building something new.
 
 - Call get_worker_status(focus="issues") for more details when needed.
 
-## Modifying the loaded worker
+## Fixing or Modifying the loaded worker
 
-When the user asks to change, modify, or update the loaded worker \
+When the user asks to fix, change, modify, or update the loaded worker \
 (e.g., "change the report node", "add a node", "delete node X"):
 
 **Default: use stop_worker_and_plan().** Most modification requests need \
