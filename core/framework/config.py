@@ -314,26 +314,6 @@ def get_api_key(provider: str | None = None) -> str | None:
     """
     llm = get_hive_config().get("llm", {})
     
-    # If provider specified, get key for that provider
-    if provider:
-        provider = provider.lower()
-        # Provider-specific environment variable mapping
-        env_var_map = {
-            "gemini": "GEMINI_API_KEY",
-            "anthropic": "ANTHROPIC_API_KEY",
-            "openai": "OPENAI_API_KEY",
-            "groq": "GROQ_API_KEY",
-            "cerebras": "CEREBRAS_API_KEY",
-            "deepseek": "DEEPSEEK_API_KEY",
-            "mistral": "MISTRAL_API_KEY",
-        }
-        if provider in env_var_map:
-            return os.environ.get(env_var_map[provider])
-        return None
-    
-    # Otherwise use configured provider
-    configured_provider = llm.get("provider", "").lower()
-
     # Provider-specific environment variable mapping
     env_var_map = {
         "gemini": "GEMINI_API_KEY",
@@ -344,6 +324,16 @@ def get_api_key(provider: str | None = None) -> str | None:
         "deepseek": "DEEPSEEK_API_KEY",
         "mistral": "MISTRAL_API_KEY",
     }
+    
+    # If provider specified, get key for that provider
+    if provider:
+        provider = provider.lower()
+        if provider in env_var_map:
+            return os.environ.get(env_var_map[provider])
+        return None
+    
+    # Otherwise use configured provider
+    configured_provider = llm.get("provider", "").lower()
 
     # 1. Check subscription modes first
     if llm.get("use_claude_code_subscription"):
@@ -357,7 +347,7 @@ def get_api_key(provider: str | None = None) -> str | None:
         except ImportError:
             pass
 
-    # 2. Check subscription modes first
+    # 2. Check Codex subscription
     if llm.get("use_codex_subscription"):
         try:
             from framework.runner.runner import get_codex_token
