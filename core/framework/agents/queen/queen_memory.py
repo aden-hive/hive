@@ -74,11 +74,7 @@ def format_for_injection() -> str:
         return ""
 
     body = "\n\n---\n\n".join(parts)
-    return (
-        "--- Your Cross-Session Memory ---\n\n"
-        + body
-        + "\n\n--- End Cross-Session Memory ---"
-    )
+    return "--- Your Cross-Session Memory ---\n\n" + body + "\n\n--- End Cross-Session Memory ---"
 
 
 _SEED_TEMPLATE = """\
@@ -143,7 +139,8 @@ Rules:
 - Do NOT include diary sections, daily logs, or session summaries. Those belong elsewhere.
   MEMORY.md is about who they are, what they want, what works — not what happened today.
 - Reference dates only when noting a lasting milestone (e.g. "since March 8th they prefer X").
-- If the session had no meaningful new information about the person, return the existing text unchanged.
+- If the session had no meaningful new information about the person,
+  return the existing text unchanged.
 - Do not add fictional details. Only reflect what is evidenced in the notes.
 - Stay concise. Prune rather than accumulate. A lean, accurate file is more useful than a
   dense one. If something was true once but has been resolved or superseded, remove it.
@@ -154,14 +151,16 @@ _DIARY_SYSTEM = """\
 You maintain the daily episodic diary of an AI assistant called the Queen.
 You receive: (1) today's existing diary so far, and (2) notes from the latest session.
 
-Rewrite the complete diary for today as a single unified narrative — first person, reflective, honest.
+Rewrite the complete diary for today as a single unified narrative —
+first person, reflective, honest.
 Merge and deduplicate: if the same story (e.g. a research agent stalling) recurred several times,
 describe it once with appropriate weight rather than retelling it. Weave in new developments from
 the session notes. Preserve important milestones, emotional texture, and session path references.
 
 If today's diary is empty, write the initial entry based on the session notes alone.
 
-Output only the full diary prose — no date heading, no timestamp headers, no preamble, no code fences.
+Output only the full diary prose — no date heading, no timestamp headers,
+no preamble, no code fences.
 """
 
 
@@ -195,10 +194,7 @@ def read_session_context(session_dir: Path, max_messages: int = 80) -> str:
                 if role == "tool":
                     continue  # skip verbose tool results
                 if role == "assistant" and tool_calls and not content:
-                    names = [
-                        tc.get("function", {}).get("name", "?")
-                        for tc in tool_calls
-                    ]
+                    names = [tc.get("function", {}).get("name", "?") for tc in tool_calls]
                     lines.append(f"[queen calls: {', '.join(names)}]")
                 elif content:
                     label = "user" if role == "user" else "queen"
@@ -299,9 +295,7 @@ async def consolidate_queen_memory(
                 len(session_context),
             )
             session_context = await _compact_context(session_context, llm)
-            logger.info(
-                "queen_memory: compacted to %d chars", len(session_context)
-            )
+            logger.info("queen_memory: compacted to %d chars", len(session_context))
 
         existing_semantic = read_semantic_memory()
         today_journal = read_episodic_memory()
@@ -356,7 +350,11 @@ async def consolidate_queen_memory(
             ep_path.parent.mkdir(parents=True, exist_ok=True)
             heading = f"# {today_str}"
             ep_path.write_text(f"{heading}\n\n{diary_entry}\n", encoding="utf-8")
-            logger.info("queen_memory: episodic diary rewritten for %s (%d chars)", today_str, len(diary_entry))
+            logger.info(
+                "queen_memory: episodic diary rewritten for %s (%d chars)",
+                today_str,
+                len(diary_entry),
+            )
 
     except Exception:
         tb = traceback.format_exc()

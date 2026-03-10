@@ -136,7 +136,8 @@ _QUEEN_RUNNING_TOOLS = [
 # additions.
 # ---------------------------------------------------------------------------
 
-_shared_building_knowledge = """\
+_shared_building_knowledge = (
+    """\
 # Shared Rules (Planning & Building)
 
 ## Paths (MANDATORY)
@@ -162,7 +163,9 @@ generate a clickable file URI for the user
 
 IMPORTANT: Do NOT tell workers to use read_file, write_file, edit_file, \
 search_files, or list_directory — those are YOUR tools, not theirs.
-""" + _gcu_section
+"""
+    + _gcu_section
+)
 
 _planning_knowledge = """\
 **A responsible engineer doesn't jump into building. First, \
@@ -374,7 +377,7 @@ Get user approval before implementing.
 ## 4: Get User Confirmation by ask_user
 
 **WAIT for user response.** You MUST get explicit user approval before \
-calling `initialize_and_build_agent`. 
+calling `initialize_and_build_agent`.
 - If **Proceed**: Move to implementing (call `initialize_and_build_agent`)
 - If **Adjust scope**: Discuss what to change, update your notes, re-assess if needed
 - If **More questions**: Answer them honestly, then ask again
@@ -935,7 +938,7 @@ _queen_tools_docs = (
     "- run_agent_with_input(task) → starts worker, switches to RUNNING phase\n"
     "- stop_worker() → stops worker, switches to STAGING phase (ask user: re-run or edit?)\n"
     "- stop_worker_and_edit() → stops worker (if running), switches to BUILDING phase\n"
-    "- stop_worker_and_plan() → stops worker (if running), switches to PLANNING phase for diagnosis\n"
+    "- stop_worker_and_plan() → stops worker (if running), switches to PLANNING phase\n"
 )
 
 _queen_behavior = (

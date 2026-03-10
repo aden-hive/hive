@@ -1417,7 +1417,6 @@ def cmd_tui(args: argparse.Namespace) -> int:
     return 0
 
 
-
 def _extract_python_agent_metadata(agent_path: Path) -> tuple[str, str]:
     """Extract name and description from a Python-based agent's config.py.
 

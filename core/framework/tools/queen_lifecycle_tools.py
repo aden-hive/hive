@@ -469,9 +469,7 @@ def register_queen_lifecycle_tools(
 
                 for exec_id in list(stream.active_execution_ids):
                     try:
-                        ok = await stream.cancel_execution(
-                            exec_id, reason=reason
-                        )
+                        ok = await stream.cancel_execution(exec_id, reason=reason)
                         if ok:
                             cancelled.append(exec_id)
                     except Exception as e:
@@ -519,8 +517,7 @@ def register_queen_lifecycle_tools(
         # Nudge the queen to start coding instead of blocking for user input.
         if phase_state is not None and phase_state.inject_notification:
             await phase_state.inject_notification(
-                "[PHASE CHANGE] Switched to BUILDING phase. "
-                "Start implementing the changes now."
+                "[PHASE CHANGE] Switched to BUILDING phase. Start implementing the changes now."
             )
         return json.dumps(result)
 
@@ -1631,37 +1628,37 @@ def register_queen_lifecycle_tools(
                 if parent_dir not in _sys.path:
                     _sys.path.insert(0, parent_dir)
                 # Evict stale cached modules
-                stale = [
-                    n for n in _sys.modules
-                    if n == pkg_name or n.startswith(f"{pkg_name}.")
-                ]
+                stale = [n for n in _sys.modules if n == pkg_name or n.startswith(f"{pkg_name}.")]
                 for n in stale:
                     del _sys.modules[n]
 
                 mod = importlib.import_module(pkg_name)
                 missing_attrs = [
-                    attr for attr in ("goal", "nodes", "edges")
-                    if getattr(mod, attr, None) is None
+                    attr for attr in ("goal", "nodes", "edges") if getattr(mod, attr, None) is None
                 ]
                 if missing_attrs:
-                    return json.dumps({
-                        "error": (
-                            f"Agent module '{pkg_name}' is missing module-level "
-                            f"attributes: {', '.join(missing_attrs)}. "
-                            f"Fix: in {pkg_name}/__init__.py, add "
-                            f"'from .agent import {', '.join(missing_attrs)}' "
-                            f"so that 'import {pkg_name}' exposes them at package level."
-                        )
-                    })
-            except Exception as pre_err:
-                return json.dumps({
-                    "error": (
-                        f"Failed to import agent module '{resolved_path.name}': {pre_err}. "
-                        f"Fix: ensure {resolved_path.name}/__init__.py exists and can be "
-                        f"imported without errors (check syntax, missing dependencies, "
-                        f"and relative imports)."
+                    return json.dumps(
+                        {
+                            "error": (
+                                f"Agent module '{pkg_name}' is missing module-level "
+                                f"attributes: {', '.join(missing_attrs)}. "
+                                f"Fix: in {pkg_name}/__init__.py, add "
+                                f"'from .agent import {', '.join(missing_attrs)}' "
+                                f"so that 'import {pkg_name}' exposes them at package level."
+                            )
+                        }
                     )
-                })
+            except Exception as pre_err:
+                return json.dumps(
+                    {
+                        "error": (
+                            f"Failed to import agent module '{resolved_path.name}': {pre_err}. "
+                            f"Fix: ensure {resolved_path.name}/__init__.py exists and can be "
+                            f"imported without errors (check syntax, missing dependencies, "
+                            f"and relative imports)."
+                        )
+                    }
+                )
 
             try:
                 updated_session = await session_manager.load_worker(
@@ -1679,9 +1676,7 @@ def register_queen_lifecycle_tools(
                         if node.tools:
                             missing = set(node.tools) - available_tool_names
                             if missing:
-                                missing_by_node[f"{node.name} (id={node.id})"] = sorted(
-                                    missing
-                                )
+                                missing_by_node[f"{node.name} (id={node.id})"] = sorted(missing)
                     if missing_by_node:
                         # Unload the broken worker
                         try:
@@ -1689,8 +1684,7 @@ def register_queen_lifecycle_tools(
                         except Exception:
                             pass
                         details = "; ".join(
-                            f"Node '{k}' missing {v}"
-                            for k, v in missing_by_node.items()
+                            f"Node '{k}' missing {v}" for k, v in missing_by_node.items()
                         )
                         return json.dumps(
                             {

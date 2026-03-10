@@ -33,6 +33,6 @@ def write_to_diary(entry: str) -> str:
     return "Diary entry recorded."
 
 
-def register_queen_memory_tools(registry: "ToolRegistry") -> None:
+def register_queen_memory_tools(registry: ToolRegistry) -> None:
     """Register the episodic memory tool into the queen's tool registry."""
     registry.register_function(write_to_diary)

@@ -802,9 +802,7 @@ class ExecutionStream:
                 # Emit SSE event so the frontend knows the execution stopped.
                 # The executor does NOT emit on CancelledError, so there is no
                 # risk of double-emitting.
-                cancel_reason = self._cancel_reasons.pop(
-                    execution_id, "Execution cancelled"
-                )
+                cancel_reason = self._cancel_reasons.pop(execution_id, "Execution cancelled")
                 if self._scoped_event_bus:
                     if has_result and result.paused_at:
                         await self._scoped_event_bus.emit_execution_paused(
@@ -1058,9 +1056,7 @@ class ExecutionStream:
         """Get execution context."""
         return self._active_executions.get(execution_id)
 
-    async def cancel_execution(
-        self, execution_id: str, *, reason: str | None = None
-    ) -> bool:
+    async def cancel_execution(self, execution_id: str, *, reason: str | None = None) -> bool:
         """
         Cancel a running execution.
 

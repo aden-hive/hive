@@ -347,9 +347,7 @@ async def handle_pause(request: web.Request) -> web.Response:
 
             for exec_id in list(stream.active_execution_ids):
                 try:
-                    ok = await stream.cancel_execution(
-                        exec_id, reason="Execution paused by user"
-                    )
+                    ok = await stream.cancel_execution(exec_id, reason="Execution paused by user")
                     if ok:
                         cancelled.append(exec_id)
                 except Exception:

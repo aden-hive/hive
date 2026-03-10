@@ -42,7 +42,6 @@ async def create_queen(
         _appendices,
         _building_knowledge,
         _planning_knowledge,
-        _shared_building_knowledge,
         _queen_behavior_always,
         _queen_behavior_building,
         _queen_behavior_planning,
@@ -58,6 +57,7 @@ async def create_queen(
         _queen_tools_planning,
         _queen_tools_running,
         _queen_tools_staging,
+        _shared_building_knowledge,
     )
     from framework.agents.queen.nodes.thinking_hook import select_expert_persona
     from framework.graph.event_loop_node import HookContext, HookResult
