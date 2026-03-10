@@ -47,7 +47,7 @@ This is the recommended way to create your first agent.
 # Setup already done via quickstart.sh above
 
 # Start Claude Code and build an agent
-Use the coder-tools initialize_agent_package tool
+Use the coder-tools initialize_and_build_agent tool
 ```
 
 Follow the interactive prompts to:
@@ -173,7 +173,7 @@ PYTHONPATH=exports uv run python -m my_agent test --type success
 1. **Dashboard**: Run `hive open` to launch the web dashboard, or `hive tui` for the terminal UI
 2. **Detailed Setup**: See [environment-setup.md](./environment-setup.md)
 3. **Developer Guide**: See [developer-guide.md](./developer-guide.md)
-4. **Build Agents**: Use the coder-tools `initialize_agent_package` tool in Claude Code
+4. **Build Agents**: Use the coder-tools `initialize_and_build_agent` tool in Claude Code
 5. **Custom Tools**: Learn to integrate MCP servers
 6. **Join Community**: [Discord](https://discord.com/invite/MXE49hrKDk)
 

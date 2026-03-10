@@ -130,7 +130,7 @@ MCP (Model Context Protocol) servers are configured in `.mcp.json` at the projec
 }
 ```
 
-The `coder-tools` server provides agent scaffolding via `initialize_agent_package` and related tools. The `tools` MCP server exposes tools including web search, PDF reading, CSV processing, and file system operations.
+The `coder-tools` server provides agent scaffolding via `initialize_and_build_agent` and related tools. The `tools` MCP server exposes tools including web search, PDF reading, CSV processing, and file system operations.
 
 ## Storage
 

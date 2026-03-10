@@ -23,7 +23,7 @@ Done. For details, prerequisites, and troubleshooting, read on.
 
 ## What you get after setup
 
-- **coder-tools** – Create and manage agents (scaffolding via `initialize_agent_package`, file I/O, tool discovery).
+- **coder-tools** – Create and manage agents (scaffolding via `initialize_and_build_agent`, file I/O, tool discovery).
 - **tools** – File operations, web search, and other agent tools.
 - **Documentation** – Guided docs for building and testing agents.
 

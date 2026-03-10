@@ -1,4 +1,4 @@
-"""Test fixtures for Hive Coder agent."""
+"""Test fixtures for Queen agent."""
 
 import sys
 from pathlib import Path
