@@ -16,6 +16,13 @@ def get_hive_config() -> dict[str, Any]:
     except (json.JSONDecodeError, OSError) as e:
         logger.warning("Failed to load Hive config %s: %s", HIVE_CONFIG_FILE, e)
         return {}
+
+def get_preferred_model() -> str:
+    """Return the user's preferred LLM model string (e.g. 'anthropic/claude-sonnet-4-20250514')."""
+    llm = get_hive_config().get("llm", {})
+    if llm.get("provider") and llm.get("model"):
+        return f"{llm['provider']}/{llm['model']}"
+    return "anthropic/claude-sonnet-4-20250514"
 def get_available_providers() -> dict[str, dict[str, Any]]:
     available = {}
     gemini_key = os.environ.get("GEMINI_API_KEY")
@@ -184,8 +191,22 @@ def get_preferred_model() -> str:
         return f"{env_provider}/{default_model}"
     logger.warning("No LLM provider configured. Defaulting to Gemini (free tier). Run ./quickstart.sh to configure your preferred provider.")
     return "gemini-3-flash-preview"
+
 def get_max_tokens() -> int:
     return get_hive_config().get("llm", {}).get("max_tokens", DEFAULT_MAX_TOKENS)
+
+def get_api_key() -> str | None:
+    """Return the API key, supporting env var, Claude Code subscription, Codex, and ZAI Code.
+
+    Priority:
+    1. Claude Code subscription (``use_claude_code_subscription: true``)
+       reads the OAuth token from ``~/.claude/.credentials.json``.
+    2. Codex subscription (``use_codex_subscription: true``)
+       reads the OAuth token from macOS Keychain or ``~/.codex/auth.json``.
+    3. Environment variable named in ``api_key_env_var``.
+    """
+    llm = get_hive_config().get("llm", {})
+
 def get_api_key(provider: str | None = None) -> str | None:
     llm = get_hive_config().get("llm", {})
     env_var_map = {
@@ -203,6 +224,7 @@ def get_api_key(provider: str | None = None) -> str | None:
             return os.environ.get(env_var_map[provider])
         return None
     configured_provider = llm.get("provider", "").lower()
+
     if llm.get("use_claude_code_subscription"):
         try:
             from framework.runner.runner import get_claude_code_token
@@ -211,6 +233,7 @@ def get_api_key(provider: str | None = None) -> str | None:
                 return token
         except ImportError:
             pass
+
     if llm.get("use_codex_subscription"):
         try:
             from framework.runner.runner import get_codex_token
@@ -219,6 +242,9 @@ def get_api_key(provider: str | None = None) -> str | None:
                 return token
         except ImportError:
             pass
+    api_key_env_var = llm.get("api_key_env_var")
+    if api_key_env_var:
+        return os.environ.get(api_key_env_var)
     if configured_provider in env_var_map:
         env_var = env_var_map[configured_provider]
         api_key = os.environ.get(env_var)
@@ -238,12 +264,31 @@ def get_gcu_enabled() -> bool:
 def get_api_base() -> str | None:
     llm = get_hive_config().get("llm", {})
     if llm.get("use_codex_subscription"):
+        # Codex subscription routes through the ChatGPT backend, not api.openai.com.
         return "https://chatgpt.com/backend-api/codex"
     provider = llm.get("provider", "").lower()
     if provider == "minimax":
         return "https://api.minimax.io/v1"
     return llm.get("api_base")
 def get_llm_extra_kwargs() -> dict[str, Any]:
+    """Return extra kwargs for LiteLLMProvider (e.g. OAuth headers).
+
+    When ``use_claude_code_subscription`` is enabled, returns
+    ``extra_headers`` with the OAuth Bearer token so that litellm's
+    built-in Anthropic OAuth handler adds the required beta headers.
+
+    When ``use_codex_subscription`` is enabled, returns
+    ``extra_headers`` with the Bearer token, ``ChatGPT-Account-Id``,
+    and ``store=False`` (required by the ChatGPT backend).
+    """
+    llm = get_hive_config().get("llm", {})
+    if llm.get("use_claude_code_subscription"):
+        api_key = get_api_key()
+        if api_key:
+            return {
+                "extra_headers": {"authorization": f"Bearer {api_key}"},
+            }
+
     llm = get_hive_config().get("llm", {})
     extra_kwargs = {}
     if llm.get("use_claude_code_subscription"):
@@ -254,18 +299,34 @@ def get_llm_extra_kwargs() -> dict[str, Any]:
     if llm.get("use_codex_subscription"):
         api_key = get_api_key()
         if api_key:
-            headers = {
+            headers: dict[str, str] = {
                 "Authorization": f"Bearer {api_key}",
                 "User-Agent": "CodexBar",
             }
             try:
                 from framework.runner.runner import get_codex_account_id
+
                 account_id = get_codex_account_id()
                 if account_id:
                     headers["ChatGPT-Account-Id"] = account_id
-                    logger.debug(f"Added ChatGPT-Account-Id: {account_id}")
             except ImportError:
                 pass
+            return {
+                "extra_headers": headers,
+                "store": False,
+                "allowed_openai_params": ["store"],
+            }
+    return {}
+
+
+# ---------------------------------------------------------------------------
+# RuntimeConfig – shared across agent templates
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class RuntimeConfig:
+    """Agent runtime configuration loaded from ~/.hive/configuration.json."""
             extra_kwargs["extra_headers"] = headers
             extra_kwargs["store"] = False
             extra_kwargs["allowed_openai_params"] = ["store"]
@@ -279,7 +340,7 @@ class RuntimeConfig:
     api_key: str | None = field(default_factory=get_api_key)
     api_base: str | None = field(default_factory=get_api_base)
     extra_kwargs: dict[str, Any] = field(default_factory=get_llm_extra_kwargs)
-    
+
     def __post_init__(self):
         logger.debug(f"RuntimeConfig initialized with model: {self.model}")
         if self.api_base:
