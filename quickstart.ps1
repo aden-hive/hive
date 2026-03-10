@@ -318,9 +318,14 @@ Write-Step -Number "1" -Text "Step 1: Checking Python..."
 
 # On Windows "python3.x" aliases don't exist; prefer "python" then "python3"
 $PythonCmd = $null
-foreach ($candidate in @("python", "python3", "python3.13", "python3.12", "python3.11")) {
+foreach ($candidate in @("python", "python3", "python3.13", "python3.12", "python3.11", "py")) {
     try {
-        $ver = & $candidate -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')" 2>$null
+        if ($candidate -eq "py") {
+            $ver = & py -3 -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')" 2>$null
+        } else {
+            $ver = & $candidate -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')" 2>$null
+        }
+
         if ($LASTEXITCODE -eq 0 -and $ver) {
             $parts = $ver.Split(".")
             $major = [int]$parts[0]
