@@ -1322,8 +1322,8 @@ class EventLoopNode(NodeProtocol):
                 # Auto-block beyond grace -- fall through to judge (6i)
 
             # 6h''. Worker wait for queen guidance
-            # If a worker escalates with wait_for_response=true, pause here and
-            # skip judge evaluation until queen injects guidance.
+            # When a worker escalates, pause here and skip judge evaluation
+            # until the queen injects guidance.
             if queen_input_requested:
                 if self._shutdown:
                     await self._publish_loop_completed(
@@ -1802,8 +1802,8 @@ class EventLoopNode(NodeProtocol):
         ``ask_user`` during this turn.  This separation lets the caller treat
         synthetic tools as framework concerns rather than tool-execution concerns.
         ``queen_input_requested`` is True when the worker called
-        ``escalate(wait_for_response=true)`` and should wait for
-        queen guidance before judge evaluation.
+        ``escalate`` and should wait for queen guidance before judge
+        evaluation.
 
         ``logged_tool_calls`` accumulates ALL tool calls across inner iterations
         (real tools, set_output, and discarded calls) for L3 logging.  Unlike
@@ -2124,7 +2124,6 @@ class EventLoopNode(NodeProtocol):
                     # --- Framework-level escalate handling ---
                     reason = str(tc.tool_input.get("reason", "")).strip()
                     context = str(tc.tool_input.get("context", "")).strip()
-                    # Always wait for queen guidance
 
                     if stream_id in ("queen", "judge"):
                         result = ToolResult(
