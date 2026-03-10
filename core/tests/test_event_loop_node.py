@@ -763,7 +763,7 @@ class TestClientFacingBlocking:
 class TestEscalate:
     @pytest.mark.asyncio
     async def test_escalate_emits_event(self, runtime, node_spec, memory):
-        """escalate() should publish ESCALATION_REQUESTED."""
+        """escalate() should publish ESCALATION_REQUESTED and block for queen guidance."""
         node_spec.output_keys = []
         llm = MockStreamingLLM(
             scenarios=[
@@ -772,7 +772,6 @@ class TestEscalate:
                     {
                         "reason": "tool failure",
                         "context": "HTTP 401 from upstream",
-                        "wait_for_response": False,
                     },
                     tool_use_id="escalate_1",
                 ),
@@ -789,6 +788,12 @@ class TestEscalate:
 
         ctx = build_ctx(runtime, node_spec, memory, llm, stream_id="worker")
         node = EventLoopNode(event_bus=bus, config=LoopConfig(max_iterations=5))
+
+        async def queen_reply():
+            await asyncio.sleep(0.05)
+            await node.inject_event("Acknowledged, proceed.")
+
+        task = asyncio.create_task(queen_reply())
 
         async def queen_reply():
             await asyncio.sleep(0.05)
@@ -815,7 +820,6 @@ class TestEscalate:
                     {
                         "reason": "blocked",
                         "context": "dependency missing",
-                        "wait_for_response": False,
                     },
                     tool_use_id="escalate_1",
                 ),
@@ -856,7 +860,7 @@ class TestEscalate:
 
     @pytest.mark.asyncio
     async def test_escalate_waits_for_queen_input_and_skips_judge(self, runtime, node_spec, memory):
-        """wait_for_response=true should block for queen input before judge evaluation."""
+        """escalate() should block for queen input before judge evaluation."""
         node_spec.output_keys = ["result"]
         llm = MockStreamingLLM(
             scenarios=[
@@ -865,7 +869,6 @@ class TestEscalate:
                     {
                         "reason": "need direction",
                         "context": "conflicting constraints",
-                        "wait_for_response": True,
                     },
                     tool_use_id="escalate_1",
                 ),

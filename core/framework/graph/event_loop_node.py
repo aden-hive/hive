@@ -168,7 +168,7 @@ class LoopConfig:
     max_tool_calls_per_turn: int = 30
     judge_every_n_turns: int = 1
     stall_detection_threshold: int = 3
-    stall_similarity_threshold: float = 0.7
+    stall_similarity_threshold: float = 0.85
     max_history_tokens: int = 32_000
     store_prefix: str = ""
 
@@ -1335,8 +1335,8 @@ class EventLoopNode(NodeProtocol):
                 # Auto-block beyond grace -- fall through to judge (6i)
 
             # 6h''. Worker wait for queen guidance
-            # If a worker escalates with wait_for_response=true, pause here and
-            # skip judge evaluation until queen injects guidance.
+            # When a worker escalates, pause here and skip judge evaluation
+            # until the queen injects guidance.
             if queen_input_requested:
                 if self._shutdown:
                     await self._publish_loop_completed(
@@ -1818,8 +1818,8 @@ class EventLoopNode(NodeProtocol):
         ``ask_user`` during this turn.  This separation lets the caller treat
         synthetic tools as framework concerns rather than tool-execution concerns.
         ``queen_input_requested`` is True when the worker called
-        ``escalate(wait_for_response=true)`` and should wait for
-        queen guidance before judge evaluation.
+        ``escalate`` and should wait for queen guidance before judge
+        evaluation.
 
         ``logged_tool_calls`` accumulates ALL tool calls across inner iterations
         (real tools, set_output, and discarded calls) for L3 logging.  Unlike
@@ -2140,7 +2140,6 @@ class EventLoopNode(NodeProtocol):
                     # --- Framework-level escalate handling ---
                     reason = str(tc.tool_input.get("reason", "")).strip()
                     context = str(tc.tool_input.get("context", "")).strip()
-                    # Always wait for queen guidance
 
                     if stream_id in ("queen", "judge"):
                         result = ToolResult(
@@ -2994,8 +2993,10 @@ class EventLoopNode(NodeProtocol):
     def _is_stalled(self, recent_responses: list[str]) -> bool:
         """Detect stall using n-gram similarity.
 
-        Detects when N consecutive responses have similarity >= threshold.
-        This catches phrases like "I'm still stuck" vs "I'm stuck".
+        Detects when ALL N consecutive responses are mutually similar
+        (>= threshold).  A single dissimilar response resets the signal.
+        This catches phrases like "I'm still stuck" vs "I'm stuck"
+        without false-positives on "attempt 1" vs "attempt 2".
         """
         if len(recent_responses) < self._config.stall_detection_threshold:
             return False
@@ -3003,13 +3004,11 @@ class EventLoopNode(NodeProtocol):
             return False
 
         threshold = self._config.stall_similarity_threshold
-        # Check similarity against all recent responses (excluding self)
-        for i, resp in enumerate(recent_responses):
-            # Compare against all previous responses
-            for prev in recent_responses[:i]:
-                if self._ngram_similarity(resp, prev) >= threshold:
-                    return True
-        return False
+        # Every consecutive pair must be similar
+        for i in range(1, len(recent_responses)):
+            if self._ngram_similarity(recent_responses[i], recent_responses[i - 1]) < threshold:
+                return False
+        return True
 
     @staticmethod
     def _is_transient_error(exc: BaseException) -> bool:
@@ -3088,10 +3087,11 @@ class EventLoopNode(NodeProtocol):
         self,
         recent_tool_fingerprints: list[list[tuple[str, str]]],
     ) -> tuple[bool, str]:
-        """Detect doom loop using n-gram similarity on tool inputs.
+        """Detect doom loop via exact fingerprint match.
 
-        Detects when N consecutive turns have similar tool calls.
-        Similarity applies to the canonicalized tool input strings.
+        Detects when N consecutive turns invoke the same tools with
+        identical (canonicalized) arguments.  Different arguments mean
+        different work, so only exact matches count.
 
         Returns (is_doom_loop, description).
         """
@@ -3104,23 +3104,12 @@ class EventLoopNode(NodeProtocol):
         if not first:
             return False, ""
 
-        # Convert a turn's list of (name, args) pairs to a single comparable string.
-        def _turn_sig(fp: list[tuple[str, str]]) -> str:
-            return "|".join(f"{name}:{args}" for name, args in fp)
-
-        first_sig = _turn_sig(first)
-        similarity_threshold = self._config.stall_similarity_threshold
-        similar_count = sum(
-            1
-            for fp in recent_tool_fingerprints
-            if self._ngram_similarity(_turn_sig(fp), first_sig) >= similarity_threshold
-        )
-
-        if similar_count >= threshold:
-            tool_names = [name for fp in recent_tool_fingerprints for name, _ in fp]
+        # All turns in the window must match the first exactly
+        if all(fp == first for fp in recent_tool_fingerprints[1:]):
+            tool_names = [name for name, _ in first]
             desc = (
-                f"Doom loop detected: {similar_count}/{len(recent_tool_fingerprints)} "
-                f"consecutive similar tool calls ({', '.join(tool_names)})"
+                f"Doom loop detected: {len(recent_tool_fingerprints)} "
+                f"identical consecutive tool calls ({', '.join(tool_names)})"
             )
             return True, desc
         return False, ""
