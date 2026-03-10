@@ -350,3 +350,147 @@ def register_tools(
             "created_time": data.get("created_time", ""),
             "last_edited_time": data.get("last_edited_time", ""),
         }
+
+    @mcp.tool()
+    def notion_update_page(
+        page_id: str,
+        properties_json: str,
+    ) -> dict[str, Any]:
+        """
+        Update properties on an existing Notion page.
+
+        Args:
+            page_id: Notion page ID (required)
+            properties_json: Properties to update as JSON string.
+                e.g. '{"Status": {"select": {"name": "Done"}}}'
+                or '{"Priority": {"number": 1}}'
+
+        Returns:
+            Dict with updated page (id, url) or error
+        """
+        import json as json_mod
+
+        token = _get_credentials(credentials)
+        if not token:
+            return _auth_error()
+        if not page_id or not properties_json:
+            return {"error": "page_id and properties_json are required"}
+
+        try:
+            props = json_mod.loads(properties_json)
+        except json_mod.JSONDecodeError:
+            return {"error": "properties_json is not valid JSON"}
+
+        data = _request("patch", f"/pages/{page_id}", token, json={"properties": props})
+        if "error" in data:
+            return data
+
+        return {
+            "id": data.get("id", ""),
+            "url": data.get("url", ""),
+            "status": "updated",
+        }
+
+    @mcp.tool()
+    def notion_archive_page(
+        page_id: str,
+        archived: bool = True,
+    ) -> dict[str, Any]:
+        """
+        Archive or unarchive a Notion page.
+
+        Args:
+            page_id: Notion page ID (required)
+            archived: True to archive, False to restore (default True)
+
+        Returns:
+            Dict with page status or error
+        """
+        token = _get_credentials(credentials)
+        if not token:
+            return _auth_error()
+        if not page_id:
+            return {"error": "page_id is required"}
+
+        data = _request("patch", f"/pages/{page_id}", token, json={"archived": archived})
+        if "error" in data:
+            return data
+
+        return {
+            "id": data.get("id", ""),
+            "archived": data.get("archived", archived),
+            "status": "archived" if archived else "restored",
+        }
+
+    @mcp.tool()
+    def notion_append_blocks(
+        page_id: str,
+        content: str,
+        block_type: str = "paragraph",
+    ) -> dict[str, Any]:
+        """
+        Append content blocks to an existing Notion page.
+
+        Args:
+            page_id: Notion page ID to append to (required)
+            content: Text content to append (required). For multiple blocks,
+                separate with newlines.
+            block_type: Block type to create: "paragraph", "heading_1",
+                "heading_2", "heading_3", "bulleted_list_item",
+                "numbered_list_item", "to_do", "quote", "callout"
+                (default "paragraph")
+
+        Returns:
+            Dict with appended block info or error
+        """
+        token = _get_credentials(credentials)
+        if not token:
+            return _auth_error()
+        if not page_id or not content:
+            return {"error": "page_id and content are required"}
+
+        valid_types = {
+            "paragraph",
+            "heading_1",
+            "heading_2",
+            "heading_3",
+            "bulleted_list_item",
+            "numbered_list_item",
+            "to_do",
+            "quote",
+            "callout",
+        }
+        if block_type not in valid_types:
+            return {
+                "error": f"Invalid block_type: {block_type!r}",
+                "help": f"Must be one of: {', '.join(sorted(valid_types))}",
+            }
+
+        lines = [line for line in content.split("\n") if line.strip()]
+        children = []
+        for line in lines:
+            block: dict[str, Any] = {
+                "object": "block",
+                "type": block_type,
+                block_type: {
+                    "rich_text": [{"type": "text", "text": {"content": line}}],
+                },
+            }
+            if block_type == "to_do":
+                block[block_type]["checked"] = False
+            children.append(block)
+
+        data = _request(
+            "patch",
+            f"/blocks/{page_id}/children",
+            token,
+            json={"children": children},
+        )
+        if "error" in data:
+            return data
+
+        return {
+            "page_id": page_id,
+            "blocks_added": len(children),
+            "status": "appended",
+        }
