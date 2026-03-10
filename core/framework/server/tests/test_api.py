@@ -1084,7 +1084,10 @@ class TestQueenHistory:
                 {
                     "seq": 1.5,
                     "role": "user",
-                    "content": '[User dismissed the question: "Ready when you are. What would you like to work on?"]',
+                    "content": (
+                        '[User dismissed the question: "Ready when you are. '
+                        'What would you like to work on?"]'
+                    ),
                     "is_client_input": True,
                 },
                 {"seq": 2, "role": "assistant", "content": "Here is the report"},
@@ -1110,13 +1113,27 @@ class TestQueenHistory:
 
     @pytest.mark.asyncio
     async def test_client_visible_message_filters_bootstrap_and_dismissed_prompts(self):
-        assert SessionManager.is_client_visible_message({"role": "user", "content": "greeting: Session started."}) is False
-        assert SessionManager.is_client_visible_message(
-            {"role": "user", "content": '[User dismissed the question: "What would you like to do?"]'}
-        ) is False
-        assert SessionManager.is_client_visible_message(
-            {"role": "assistant", "content": "Here is the report"}
-        ) is True
+        assert (
+            SessionManager.is_client_visible_message(
+                {"role": "user", "content": "greeting: Session started."}
+            )
+            is False
+        )
+        assert (
+            SessionManager.is_client_visible_message(
+                {
+                    "role": "user",
+                    "content": '[User dismissed the question: "What would you like to do?"]',
+                }
+            )
+            is False
+        )
+        assert (
+            SessionManager.is_client_visible_message(
+                {"role": "assistant", "content": "Here is the report"}
+            )
+            is True
+        )
 
     @pytest.mark.asyncio
     async def test_get_messages_client_only(self, tmp_agent_dir):
@@ -1267,7 +1284,13 @@ class TestTranscript:
             tmp_path,
             queen_session_id,
             [
-                {"seq": 0, "role": "user", "content": "build me an agent", "is_client_input": True, "created_at": 100.0},
+                {
+                    "seq": 0,
+                    "role": "user",
+                    "content": "build me an agent",
+                    "is_client_input": True,
+                    "created_at": 100.0,
+                },
                 {"seq": 1, "role": "assistant", "content": "on it", "created_at": 101.0},
             ],
             agent_name="test_agent",
@@ -1278,7 +1301,13 @@ class TestTranscript:
             "test_agent",
             worker_session_id,
             [
-                {"seq": 0, "role": "user", "content": "do the task", "is_client_input": True, "created_at": 102.0},
+                {
+                    "seq": 0,
+                    "role": "user",
+                    "content": "do the task",
+                    "is_client_input": True,
+                    "created_at": 102.0,
+                },
                 {"seq": 1, "role": "assistant", "content": "done!", "created_at": 103.0},
                 {"seq": 2, "role": "tool", "content": "tool output", "created_at": 103.5},
             ],
@@ -1334,7 +1363,9 @@ class TestTranscript:
             assert msgs[1]["content"] == "let me help"
 
     @pytest.mark.asyncio
-    async def test_transcript_keeps_assistant_with_tool_calls_and_content(self, tmp_path, monkeypatch):
+    async def test_transcript_keeps_assistant_with_tool_calls_and_content(
+        self, tmp_path, monkeypatch
+    ):
         """Queen assistant messages that have tool_calls AND non-empty content
         must be kept — this is what the user sees streamed live (e.g. ask_user
         with a preamble).  Tool-only messages (empty content) are still filtered."""
@@ -1350,16 +1381,36 @@ class TestTranscript:
                     "seq": 1,
                     "role": "assistant",
                     "content": "Hello! What would you like to do?",
-                    "tool_calls": [{"id": "call_1", "type": "function", "function": {"name": "ask_user", "arguments": "{\"question\": \"What next?\"}"}}],
+                    "tool_calls": [
+                        {
+                            "id": "call_1",
+                            "type": "function",
+                            "function": {
+                                "name": "ask_user",
+                                "arguments": '{"question": "What next?"}',
+                            },
+                        }
+                    ],
                 },
-                {"seq": 2, "role": "tool", "content": "Waiting for user input...", "tool_use_id": "call_1"},
+                {
+                    "seq": 2,
+                    "role": "tool",
+                    "content": "Waiting for user input...",
+                    "tool_use_id": "call_1",
+                },
                 {"seq": 3, "role": "user", "content": "run it", "is_client_input": True},
                 # Internal tool call with no user-visible text — must be filtered
                 {
                     "seq": 4,
                     "role": "assistant",
                     "content": "",
-                    "tool_calls": [{"id": "call_2", "type": "function", "function": {"name": "get_worker_status", "arguments": "{}"}}],
+                    "tool_calls": [
+                        {
+                            "id": "call_2",
+                            "type": "function",
+                            "function": {"name": "get_worker_status", "arguments": "{}"},
+                        }
+                    ],
                 },
                 {"seq": 5, "role": "tool", "content": "Worker is idle.", "tool_use_id": "call_2"},
                 # Queen responds with text + ask_user again
@@ -1367,7 +1418,16 @@ class TestTranscript:
                     "seq": 6,
                     "role": "assistant",
                     "content": "Worker is ready. Starting now.",
-                    "tool_calls": [{"id": "call_3", "type": "function", "function": {"name": "ask_user", "arguments": "{\"question\": \"Confirm?\"}"}}],
+                    "tool_calls": [
+                        {
+                            "id": "call_3",
+                            "type": "function",
+                            "function": {
+                                "name": "ask_user",
+                                "arguments": '{"question": "Confirm?"}',
+                            },
+                        }
+                    ],
                 },
             ],
         )
@@ -1378,7 +1438,8 @@ class TestTranscript:
             assert resp.status == 200
             msgs = (await resp.json())["messages"]
             # greeting filtered; tool-only assistant filtered; tool msgs filtered
-            # Kept: seq1 (assistant+content+ask_user), seq3 (user), seq6 (assistant+content+ask_user)
+            # Kept: seq1 (assistant+content+ask_user), seq3 (user),
+            # seq6 (assistant+content+ask_user)
             assert len(msgs) == 3
             assert msgs[0]["role"] == "assistant"
             assert msgs[0]["content"] == "Hello! What would you like to do?"
@@ -1410,7 +1471,13 @@ class TestTranscript:
             tmp_path,
             queen_session_id,
             [
-                {"seq": 0, "role": "user", "content": "start task", "is_client_input": True, "created_at": 100.0},
+                {
+                    "seq": 0,
+                    "role": "user",
+                    "content": "start task",
+                    "is_client_input": True,
+                    "created_at": 100.0,
+                },
             ],
             agent_name="my_agent",
             agent_path=str(tmp_path / ".hive" / "agents" / "my_agent"),
@@ -1420,8 +1487,19 @@ class TestTranscript:
             "my_agent",
             worker_session_id,
             [
-                {"seq": 0, "role": "user", "content": "greeting: Session started.", "created_at": 101.0},
-                {"seq": 1, "role": "user", "content": "work on it", "is_client_input": True, "created_at": 102.0},
+                {
+                    "seq": 0,
+                    "role": "user",
+                    "content": "greeting: Session started.",
+                    "created_at": 101.0,
+                },
+                {
+                    "seq": 1,
+                    "role": "user",
+                    "content": "work on it",
+                    "is_client_input": True,
+                    "created_at": 102.0,
+                },
                 {"seq": 2, "role": "assistant", "content": "all done", "created_at": 103.0},
             ],
             status="completed",

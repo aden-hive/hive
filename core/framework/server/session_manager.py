@@ -1116,9 +1116,7 @@ class SessionManager:
         transcript: list[dict] = []
 
         # --- Queen messages ---
-        queen_convs = (
-            Path.home() / ".hive" / "queen" / "session" / session_id / "conversations"
-        )
+        queen_convs = Path.home() / ".hive" / "queen" / "session" / session_id / "conversations"
         if queen_convs.exists():
             for node_id, part_file in SessionManager._iter_conversation_part_files(queen_convs):
                 try:
@@ -1173,24 +1171,23 @@ class SessionManager:
             if best_ws is not None:
                 ws_convs = best_ws / "conversations"
                 if ws_convs.exists():
-                    for node_id, part_file in SessionManager._iter_conversation_part_files(ws_convs):
+                    for (
+                        node_id,
+                        part_file,
+                    ) in SessionManager._iter_conversation_part_files(ws_convs):
                         try:
-                            part = json.loads(
-                                part_file.read_text(encoding="utf-8")
+                            part = json.loads(part_file.read_text(encoding="utf-8"))
+                            part["_node_id"] = (
+                                node_id if node_id is not None else part.get("phase_id")
                             )
-                            part["_node_id"] = node_id if node_id is not None else part.get("phase_id")
-                            part.setdefault(
-                                "created_at", part_file.stat().st_mtime
-                            )
+                            part.setdefault("created_at", part_file.stat().st_mtime)
                             part["_source"] = "worker"
                             transcript.append(part)
                         except (json.JSONDecodeError, OSError):
                             continue
 
         # --- Filter ---
-        visible = [
-            m for m in transcript if SessionManager.is_client_visible_message(m)
-        ]
+        visible = [m for m in transcript if SessionManager.is_client_visible_message(m)]
 
         # Worker-specific filtering: include all visible worker messages
         result: list[dict] = []

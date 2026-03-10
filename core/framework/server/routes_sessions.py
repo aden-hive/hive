@@ -64,7 +64,12 @@ def _resolve_worker_session_context(request: web.Request):
 
     cold_info = SessionManager.get_cold_session_info(sid)
     if cold_info is None:
-        return None, None, None, web.json_response({"error": f"Session '{sid}' not found"}, status=404)
+        return (
+            None,
+            None,
+            None,
+            web.json_response({"error": f"Session '{sid}' not found"}, status=404),
+        )
 
     cold_agent_path = cold_info.get("agent_path")
     if not cold_agent_path:
@@ -73,7 +78,12 @@ def _resolve_worker_session_context(request: web.Request):
     try:
         validated_agent_path = validate_agent_path(cold_agent_path)
     except ValueError:
-        return None, cold_info, None, web.json_response({"error": "Invalid agent path in session metadata"}, status=400)
+        return (
+            None,
+            cold_info,
+            None,
+            web.json_response({"error": "Invalid agent path in session metadata"}, status=400),
+        )
 
     cold_sessions_dir = Path.home() / ".hive" / "agents" / validated_agent_path.name / "sessions"
     return cold_sessions_dir, cold_info, None, None
@@ -669,9 +679,7 @@ async def handle_messages(request: web.Request) -> web.Response:
             # client-facing. In that case, keep only visible user input and assistant
             # replies, and drop internal control chatter via is_client_visible_message().
             all_messages = [
-                m
-                for m in visible_messages
-                if m["role"] == "user" or m["role"] == "assistant"
+                m for m in visible_messages if m["role"] == "user" or m["role"] == "assistant"
             ]
 
     return web.json_response({"messages": all_messages})
@@ -708,11 +716,7 @@ async def handle_queen_messages(request: web.Request) -> web.Response:
     all_messages.sort(key=lambda m: m.get("created_at", m.get("seq", 0)))
 
     # Filter to client-facing messages only
-    all_messages = [
-        m
-        for m in all_messages
-        if SessionManager.is_client_visible_message(m)
-    ]
+    all_messages = [m for m in all_messages if SessionManager.is_client_visible_message(m)]
 
     return web.json_response({"messages": all_messages, "session_id": session_id})
 
@@ -741,9 +745,7 @@ async def handle_transcript(request: web.Request) -> web.Response:
             worker_sessions_dir = sessions_dir(live_session)
         if live_session.runner and hasattr(live_session.runner, "graph"):
             client_facing_nodes = {
-                node.id
-                for node in live_session.runner.graph.nodes
-                if node.client_facing
+                node.id for node in live_session.runner.graph.nodes if node.client_facing
             }
     else:
         # Cold session — resolve from disk metadata.
@@ -757,9 +759,7 @@ async def handle_transcript(request: web.Request) -> web.Response:
             if cold_agent_path:
                 agent_name = Path(cold_agent_path).name
                 if agent_name:
-                    worker_sessions_dir = (
-                        Path.home() / ".hive" / "agents" / agent_name / "sessions"
-                    )
+                    worker_sessions_dir = Path.home() / ".hive" / "agents" / agent_name / "sessions"
 
     transcript = SessionManager.build_transcript(
         session_id,

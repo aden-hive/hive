@@ -798,9 +798,7 @@ class ExecutionStream:
                 if has_result and result.paused_at:
                     await self._write_session_state(execution_id, ctx, result=result)
                 elif not _is_shared_session:
-                    await self._write_session_state(
-                        execution_id, ctx, error="Execution cancelled"
-                    )
+                    await self._write_session_state(execution_id, ctx, error="Execution cancelled")
 
                 # Emit SSE event so the frontend knows the execution stopped.
                 # The executor does NOT emit on CancelledError, so there is no

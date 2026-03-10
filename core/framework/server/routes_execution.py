@@ -288,9 +288,7 @@ async def handle_resume(request: web.Request) -> web.Response:
         # _write_progress() on node transitions — use it as fallback so
         # resume works even if the richer state was never flushed.
         paused_at = (
-            progress.get("paused_at")
-            or progress.get("resume_from")
-            or progress.get("current_node")
+            progress.get("paused_at") or progress.get("resume_from") or progress.get("current_node")
         )
         resume_session_state = {
             "resume_session_id": worker_session_id,
