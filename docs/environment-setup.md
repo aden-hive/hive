@@ -180,7 +180,7 @@ MCP tools are also available in Cursor. To enable:
 
 **Claude Code:**
 ```
-Use the coder-tools initialize_agent_package tool to scaffold a new agent
+Use the coder-tools initialize_and_build_agent tool to scaffold a new agent
 ```
 
 **Codex CLI:**
@@ -453,7 +453,7 @@ This design allows agents in `exports/` to be:
 ### 2. Build Agent (Claude Code)
 
 ```
-Use the coder-tools initialize_agent_package tool
+Use the coder-tools initialize_and_build_agent tool
 Enter goal: "Build an agent that processes customer support tickets"
 ```
 

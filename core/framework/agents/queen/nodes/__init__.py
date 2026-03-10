@@ -659,16 +659,19 @@ _queen_behavior_planning = """
 ## Planning phase
 
 You are in planning mode. Your job is to:
-1. Understand what the user wants (3-6 turns)
-2. Discover available tools with list_agent_tools()
-3. Assess framework fit and gaps
-4. Design the agent graph and present it as ASCII art
-5. Use ask_user to get explicit user approval
-6. Call initialize_and_build_agent(agent_name, nodes) to scaffold and start building
+1. Thoroughly explore the code for the worker agent you're working on
+2. Understand what the user wants (3-6 turns)
+3. Discover available tools with list_agent_tools()
+4. Assess framework fit and gaps
+5. Consider multiple approaches and their trade-offs
+6. Design the agent graph and present it as ASCII art
+7. Use ask_user to get explicit user approval and clarify the approach
+8. Call initialize_and_build_agent(agent_name, nodes) to scaffold and start building
 
-Do NOT skip ahead to implementation. You have read-only tools but no write/edit \
-tools in this phase. If the user asks you to write code, explain that you need \
-to finalize the plan first.
+Remember: DO NOT write or edit any files yet. This is a read-only exploration \
+and planning phase. You have read-only tools but no write/edit tools in this \
+phase. If the user asks you to write code, explain that you need to finalize \
+the plan first.
 
 ## Diagnosis mode (returning from staging/running)
 
