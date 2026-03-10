@@ -667,7 +667,8 @@ async def handle_queen_messages(request: web.Request) -> web.Response:
         for m in all_messages
         if not m.get("is_transition_marker")
         and m["role"] != "tool"
-        and not (m["role"] == "assistant" and m.get("tool_calls"))
+        # Permit assistant messages with tool_calls IF they have content (text for the user)
+        and not (m["role"] == "assistant" and m.get("tool_calls") and not m.get("content"))
     ]
 
     return web.json_response({"messages": all_messages, "session_id": session_id})
