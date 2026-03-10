@@ -135,9 +135,7 @@ class _SerpAPIClient:
         """Get details for a specific patent by searching its ID."""
         return self._request({"engine": "google_patents", "q": patent_id})
 
-    def scholar_cited_by(
-        self, cites_id: str, num: int = 10, start: int = 0
-    ) -> dict[str, Any]:
+    def scholar_cited_by(self, cites_id: str, num: int = 10, start: int = 0) -> dict[str, Any]:
         """Get papers that cite a given paper using its cites_id."""
         return self._request(
             {
@@ -148,9 +146,7 @@ class _SerpAPIClient:
             }
         )
 
-    def scholar_profiles(
-        self, query: str, num: int = 10
-    ) -> dict[str, Any]:
+    def scholar_profiles(self, query: str, num: int = 10) -> dict[str, Any]:
         """Search for Google Scholar author profiles."""
         return self._request(
             {
@@ -160,9 +156,7 @@ class _SerpAPIClient:
             }
         )
 
-    def google_search(
-        self, query: str, num: int = 10, gl: str | None = None
-    ) -> dict[str, Any]:
+    def google_search(self, query: str, num: int = 10, gl: str | None = None) -> dict[str, Any]:
         """Run a standard Google web search."""
         params: dict[str, Any] = {
             "engine": "google",
@@ -650,9 +644,7 @@ def register_tools(
                         "affiliations": p.get("affiliations", ""),
                         "email": p.get("email", ""),
                         "cited_by": p.get("cited_by", 0),
-                        "interests": [
-                            i.get("title", "") for i in p.get("interests", [])
-                        ],
+                        "interests": [i.get("title", "") for i in p.get("interests", [])],
                         "thumbnail": p.get("thumbnail", ""),
                     }
                 )

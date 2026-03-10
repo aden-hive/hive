@@ -450,9 +450,15 @@ def register_tools(
             return {"error": "page_id and content are required"}
 
         valid_types = {
-            "paragraph", "heading_1", "heading_2", "heading_3",
-            "bulleted_list_item", "numbered_list_item", "to_do",
-            "quote", "callout",
+            "paragraph",
+            "heading_1",
+            "heading_2",
+            "heading_3",
+            "bulleted_list_item",
+            "numbered_list_item",
+            "to_do",
+            "quote",
+            "callout",
         }
         if block_type not in valid_types:
             return {

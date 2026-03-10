@@ -505,9 +505,7 @@ def register_tools(
 
         body: dict[str, Any] = {"transition": {"id": transition_id}}
         if comment:
-            body["update"] = {
-                "comment": [{"add": {"body": _text_to_adf(comment)}}]
-            }
+            body["update"] = {"comment": [{"add": {"body": _text_to_adf(comment)}}]}
 
         url = f"{_base_url(domain)}/issue/{issue_key}/transitions"
         data = _request("post", url, email, token, json=body)

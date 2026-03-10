@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import os
 import time
+from datetime import UTC
 from typing import TYPE_CHECKING, Literal
 
 import httpx
@@ -425,9 +426,9 @@ def register_tools(
         if not query or len(query) > 500:
             return {"error": "Query must be 1-500 characters"}
 
-        from datetime import datetime, timedelta, timezone
+        from datetime import datetime, timedelta
 
-        start_date = (datetime.now(timezone.utc) - timedelta(days=days_back)).strftime(
+        start_date = (datetime.now(UTC) - timedelta(days=days_back)).strftime(
             "%Y-%m-%dT00:00:00.000Z"
         )
 

@@ -410,7 +410,7 @@ def register_tools(mcp: FastMCP, credentials: Any = None) -> None:
         # Include any x-amz-meta-* custom metadata
         for header, value in resp.headers.items():
             if header.lower().startswith("x-amz-meta-"):
-                meta_key = header[len("x-amz-meta-"):]
+                meta_key = header[len("x-amz-meta-") :]
                 metadata[f"meta_{meta_key}"] = value
         return metadata
 
@@ -462,9 +462,7 @@ def register_tools(mcp: FastMCP, credentials: Any = None) -> None:
             for k, v in sorted_params
         )
 
-        canonical_request = (
-            f"GET\n{path}\n{canonical_qs}\nhost:{host}\n\nhost\nUNSIGNED-PAYLOAD"
-        )
+        canonical_request = f"GET\n{path}\n{canonical_qs}\nhost:{host}\n\nhost\nUNSIGNED-PAYLOAD"
 
         string_to_sign = (
             f"AWS4-HMAC-SHA256\n{amz_date}\n{credential_scope}\n"
@@ -476,10 +474,7 @@ def register_tools(mcp: FastMCP, credentials: Any = None) -> None:
             signing_key, string_to_sign.encode("utf-8"), hashlib.sha256
         ).hexdigest()
 
-        presigned_url = (
-            f"https://{host}{path}?{canonical_qs}"
-            f"&X-Amz-Signature={signature}"
-        )
+        presigned_url = f"https://{host}{path}?{canonical_qs}&X-Amz-Signature={signature}"
 
         return {
             "url": presigned_url,

@@ -53,9 +53,7 @@ def _get(endpoint: str, token: str, params: dict | None = None) -> dict[str, Any
 
 def _delete(endpoint: str, token: str) -> dict[str, Any]:
     try:
-        resp = httpx.delete(
-            f"{HUB_API}/{endpoint}", headers=_headers(token), timeout=30.0
-        )
+        resp = httpx.delete(f"{HUB_API}/{endpoint}", headers=_headers(token), timeout=30.0)
         if resp.status_code == 401:
             return {"error": "Unauthorized. Check your DOCKER_HUB_TOKEN."}
         if resp.status_code == 404:
