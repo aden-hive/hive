@@ -1,19 +1,38 @@
-"""Anthropic Claude LLM provider - backward compatible wrapper around LiteLLM."""
+"""Anthropic Claude LLM provider - Now respects user's configuration."""
 
+import json
 import os
+import logging
+from pathlib import Path
 from typing import Any
 
 from framework.llm.litellm import LiteLLMProvider
 from framework.llm.provider import LLMProvider, LLMResponse, Tool
 
+logger = logging.getLogger(__name__)
+
+
+def _get_llm_config():
+    """Get current LLM configuration from ~/.hive/config.json."""
+    config_path = Path.home() / ".hive" / "config.json"
+    if config_path.exists():
+        try:
+            with open(config_path) as f:
+                config = json.load(f)
+                return config.get("llm", {})
+        except Exception as e:
+            logger.debug(f"Failed to read config: {e}")
+    
+    # Fallback to environment
+    return {
+        "provider": os.environ.get("MODEL_PROVIDER", "").lower(),
+        "model": os.environ.get("LITELLM_MODEL", ""),
+        "api_key": os.environ.get("ANTHROPIC_API_KEY", ""),
+    }
+
 
 def _get_api_key_from_credential_store() -> str | None:
-    """Get API key from CredentialStoreAdapter or environment.
-
-    Priority:
-    1. CredentialStoreAdapter (supports encrypted storage + env vars)
-    2. os.environ fallback
-    """
+    """Get API key from CredentialStoreAdapter or environment."""
     try:
         from aden_tools.credentials import CredentialStoreAdapter
 
@@ -27,37 +46,53 @@ def _get_api_key_from_credential_store() -> str | None:
 
 class AnthropicProvider(LLMProvider):
     """
-    Anthropic Claude LLM provider.
-
-    This is a backward-compatible wrapper that internally uses LiteLLMProvider.
-    Existing code using AnthropicProvider will continue to work unchanged,
-    while benefiting from LiteLLM's unified interface and features.
+    Anthropic Claude LLM provider - Now respects user's configuration.
+    
+    This provider will only work if the user has selected Anthropic as their
+    LLM provider. Otherwise, it raises a clear error.
     """
 
     def __init__(
         self,
         api_key: str | None = None,
-        model: str = "claude-haiku-4-5-20251001",
+        model: str | None = None,
     ):
-        """
-        Initialize the Anthropic provider.
-
-        Args:
-            api_key: Anthropic API key. If not provided, uses CredentialStoreAdapter
-                     or ANTHROPIC_API_KEY env var.
-            model: Model to use (default: claude-haiku-4-5-20251001)
-        """
-        # Delegate to LiteLLMProvider internally.
-        self.api_key = api_key or _get_api_key_from_credential_store()
-        if not self.api_key:
+        """Initialize with user's configuration."""
+        # Get user's LLM configuration
+        config = _get_llm_config()
+        selected_provider = config.get("provider", "").lower()
+        
+        # Check if user actually wants Anthropic
+        if selected_provider and selected_provider not in ["anthropic", "claude"]:
             raise ValueError(
-                "Anthropic API key required. Set ANTHROPIC_API_KEY env var or pass api_key."
+                f"❌ AnthropicProvider used but your LLM provider is set to '{selected_provider}'. "
+                f"This usually means a bug in the code is forcing Anthropic when it shouldn't.\n\n"
+                f"To fix this:\n"
+                f"1. Run './quickstart.sh' again\n"
+                f"2. Select your desired provider (Gemini, Groq, etc.)\n"
+                f"3. If the error persists, please report this issue."
             )
-
-        self.model = model
-
+        
+        # For Anthropic users, get the API key
+        self.api_key = api_key or _get_api_key_from_credential_store()
+        if not self.api_key and selected_provider == "anthropic":
+            raise ValueError(
+                "Anthropic API key required but not found. "
+                "Please set ANTHROPIC_API_KEY environment variable or configure it in quickstart."
+            )
+        
+        # Use model from config, or passed model, or fallback
+        self.model = (
+            model or 
+            config.get("model") or 
+            os.environ.get("LITELLM_MODEL") or
+            "claude-3-haiku-20240307"  # Safe fallback
+        )
+        
+        logger.info(f"Initializing AnthropicProvider with model: {self.model}")
+        
         self._provider = LiteLLMProvider(
-            model=model,
+            model=self.model,
             api_key=self.api_key,
         )
 
