@@ -982,7 +982,11 @@ class _StripeClient:
             "reason": d.reason,
             "status": d.status,
             "created": d.created,
-            "evidence_due_by": getattr(d, "evidence_details", {}).get("due_by") if hasattr(d, "evidence_details") and d.evidence_details else None,
+            "evidence_due_by": (
+                getattr(d, "evidence_details", {}).get("due_by")
+                if hasattr(d, "evidence_details") and d.evidence_details
+                else None
+            ),
         }
 
     # --- Events ---
@@ -1006,7 +1010,11 @@ class _StripeClient:
                     "id": e.id,
                     "type": e.type,
                     "created": e.created,
-                    "object_id": e.data.object.get("id") if hasattr(e.data, "object") and isinstance(e.data.object, dict) else getattr(getattr(e.data, "object", None), "id", None),
+                    "object_id": (
+                        e.data.object.get("id")
+                        if hasattr(e.data, "object") and isinstance(e.data.object, dict)
+                        else getattr(getattr(e.data, "object", None), "id", None)
+                    ),
                 }
                 for e in result.data
             ],

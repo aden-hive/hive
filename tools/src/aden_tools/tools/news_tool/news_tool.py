@@ -562,12 +562,19 @@ def register_tools(
                     "size": limit_value,
                 }
             )
-            result = _try_provider(
-                lambda **_: (
-                    lambda r: _newsdata_error(r) if r.status_code != 200
-                    else {"results": _parse_newsdata_results(r.json()), "total": len(_parse_newsdata_results(r.json())), "provider": "newsdata"}
-                )(httpx.get(NEWSDATA_URL, params=params, timeout=30.0))
-            )
+
+            def _fetch_latest():
+                r = httpx.get(NEWSDATA_URL, params=params, timeout=30.0)
+                if r.status_code != 200:
+                    return _newsdata_error(r)
+                articles = _parse_newsdata_results(r.json())
+                return {
+                    "results": articles,
+                    "total": len(articles),
+                    "provider": "newsdata",
+                }
+
+            result = _try_provider(_fetch_latest)
             if "error" not in result:
                 return result
 

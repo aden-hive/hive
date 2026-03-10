@@ -370,7 +370,12 @@ def register_tools(
         client = _get_client()
         if isinstance(client, dict):
             return client
-        result = client.search(query=query, model_types="cards", cards_limit=limit, board_id=board_id)
+        result = client.search(
+            query=query,
+            model_types="cards",
+            cards_limit=limit,
+            board_id=board_id,
+        )
         if isinstance(result, dict) and "error" in result:
             return result
         cards = result.get("cards", [])

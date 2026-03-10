@@ -313,7 +313,8 @@ def register_tools(mcp: FastMCP, credentials: Any = None) -> None:
         Args:
             details_json: JSON array of person objects. Each object should have
                 at least one of: email, linkedinUrl, or firstName+lastName+companyDomain.
-                Example: [{"email": "j@acme.com"}, {"firstName": "Jane", "lastName": "Doe", "companyDomain": "acme.com"}]
+                Example: [{"email": "j@acme.com"},
+                {"firstName": "Jane", "lastName": "Doe", "companyDomain": "acme.com"}]
         """
         import json as _json
 

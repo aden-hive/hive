@@ -410,7 +410,8 @@ def register_tools(
             # Result is a list of search results
             if isinstance(result, list):
                 return {"records": result, "count": len(result)}
-            return {"records": result.get("searchRecords", []), "count": len(result.get("searchRecords", []))}
+            records = result.get("searchRecords", [])
+            return {"records": records, "count": len(records)}
         except httpx.TimeoutException:
             return {"error": "Request timed out"}
         except httpx.RequestError as e:

@@ -676,7 +676,8 @@ def register_tools(
 
         Args:
             details_json: JSON array of objects, each with lookup keys.
-                e.g. '[{"email": "john@acme.com"}, {"first_name": "Jane", "last_name": "Doe", "domain": "acme.com"}]'
+                e.g. '[{"email": "john@acme.com"},
+                {"first_name": "Jane", "last_name": "Doe", "domain": "acme.com"}]'
 
         Returns:
             Dict with enrichment results for each person

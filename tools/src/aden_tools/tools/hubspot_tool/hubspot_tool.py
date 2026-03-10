@@ -173,7 +173,8 @@ class _HubSpotClient:
     ) -> dict[str, Any]:
         """Create an association between two CRM objects.
 
-        API ref: PUT /crm/v4/objects/{fromObjectType}/{fromObjectId}/associations/{toObjectType}/{toObjectId}
+        API ref: PUT /crm/v4/objects/{fromObjectType}/{fromObjectId}/
+        associations/{toObjectType}/{toObjectId}
         """
         body = [
             {
@@ -578,7 +579,10 @@ def register_tools(
             Dict with deletion status or error
         """
         if object_type not in ("contacts", "companies", "deals"):
-            return {"error": f"Unsupported object_type: {object_type!r}. Use contacts, companies, or deals."}
+            return {
+                "error": f"Unsupported object_type: {object_type!r}. "
+                "Use contacts, companies, or deals."
+            }
         client = _get_client(account)
         if isinstance(client, dict):
             return client
@@ -660,8 +664,10 @@ def register_tools(
             return client
         try:
             return client.create_association(
-                from_object_type, from_object_id,
-                to_object_type, to_object_id,
+                from_object_type,
+                from_object_id,
+                to_object_type,
+                to_object_id,
                 association_type_id=association_type_id,
             )
         except httpx.TimeoutException:
