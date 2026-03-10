@@ -134,7 +134,7 @@ class SubagentJudge:
     async def evaluate(self, context: dict[str, Any]) -> JudgeVerdict:
         missing = context.get("missing_keys", [])
         if not missing:
-            return JudgeVerdict(action="ACCEPT")
+            return JudgeVerdict(action="ACCEPT", feedback="")
 
         iteration = context.get("iteration", 0)
         remaining = self._max_iterations - iteration - 1
@@ -2921,7 +2921,7 @@ class EventLoopNode(NodeProtocol):
                     feedback=verdict.feedback or "Phase criteria not met.",
                 )
 
-        return JudgeVerdict(action="ACCEPT")
+        return JudgeVerdict(action="ACCEPT", feedback="")
 
     # -------------------------------------------------------------------
     # Helpers
