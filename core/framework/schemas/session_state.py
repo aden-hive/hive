@@ -134,6 +134,9 @@ class SessionState(BaseModel):
     # Input data (for debugging/replay)
     input_data: dict[str, Any] = Field(default_factory=dict)
 
+    # Process ID of the owning process (for cross-process stale session detection)
+    pid: int | None = None
+
     # Isolation level (from ExecutionContext)
     isolation_level: str = "shared"
 

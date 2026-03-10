@@ -278,10 +278,19 @@ class SessionManager:
         When a new runtime starts, any on-disk session still marked 'active'
         is from a process that no longer exists. 'Paused' sessions are left
         intact so they remain resumable.
+
+        Two-layer protection against corrupting live sessions:
+        1. In-memory: skip any session ID currently tracked in self._sessions
+           (guaranteed alive in this process).
+        2. PID validation: if state.json contains a ``pid`` field, check whether
+           that process is still running on the host. If it is, the session is
+           owned by another healthy worker process, so leave it alone.
         """
         sessions_path = Path.home() / ".hive" / "agents" / agent_path.name / "sessions"
         if not sessions_path.exists():
             return
+
+        live_session_ids = set(self._sessions.keys())
 
         for d in sessions_path.iterdir():
             if not d.is_dir() or not d.name.startswith("session_"):
@@ -293,6 +302,26 @@ class SessionManager:
                 state = json.loads(state_path.read_text(encoding="utf-8"))
                 if state.get("status") != "active":
                     continue
+
+                # Layer 1: skip sessions that are alive in this process
+                session_id = state.get("session_id", d.name)
+                if session_id in live_session_ids or d.name in live_session_ids:
+                    logger.debug(
+                        "Skipping live in-memory session '%s' during stale cleanup",
+                        d.name,
+                    )
+                    continue
+
+                # Layer 2: skip sessions whose owning process is still alive
+                recorded_pid = state.get("pid")
+                if recorded_pid is not None and self._is_pid_alive(recorded_pid):
+                    logger.debug(
+                        "Skipping session '%s' — owning process %d is still running",
+                        d.name,
+                        recorded_pid,
+                    )
+                    continue
+
                 state["status"] = "cancelled"
                 state.setdefault("result", {})["error"] = "Stale session: runtime restarted"
                 state.setdefault("timestamps", {})["updated_at"] = datetime.now().isoformat()
@@ -302,6 +331,34 @@ class SessionManager:
                 )
             except (json.JSONDecodeError, OSError) as e:
                 logger.warning("Failed to clean up stale session %s: %s", d.name, e)
+
+    @staticmethod
+    def _is_pid_alive(pid: int) -> bool:
+        """Check whether a process with the given PID is still running."""
+        import os
+        import platform
+
+        if platform.system() == "Windows":
+            import ctypes
+
+            # PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+            kernel32 = ctypes.windll.kernel32
+            handle = kernel32.OpenProcess(0x1000, False, pid)
+            if not handle:
+                # 5 is ERROR_ACCESS_DENIED, meaning the process exists but is protected
+                return kernel32.GetLastError() == 5
+
+            exit_code = ctypes.c_ulong()
+            kernel32.GetExitCodeProcess(handle, ctypes.byref(exit_code))
+            kernel32.CloseHandle(handle)
+            # 259 is STILL_ACTIVE
+            return exit_code.value == 259
+        else:
+            try:
+                os.kill(pid, 0)
+            except OSError:
+                return False
+            return True
 
     async def load_worker(
         self,

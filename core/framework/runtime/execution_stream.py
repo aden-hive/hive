@@ -9,6 +9,7 @@ Each stream has:
 
 import asyncio
 import logging
+import os
 import time
 import uuid
 from collections import OrderedDict
@@ -962,6 +963,9 @@ class ExecutionStream:
             # Handle error case
             if error:
                 state.result.error = error
+
+            # Stamp the owning process ID for cross-process stale detection
+            state.pid = os.getpid()
 
             # Write state.json
             await self._session_store.write_state(execution_id, state)
