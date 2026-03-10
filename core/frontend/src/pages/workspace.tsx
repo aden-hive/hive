@@ -992,7 +992,10 @@ export default function Workspace() {
       let pausedWorkerSessionId: string | null = null;
       let restoredMsgs: ChatMessage[] = [];
       // For cold-restore, use the old session ID. For live resume, use current session.
-      const historyId = coldRestoreId ?? (isResumedSession ? session.session_id : undefined);
+      // Only fetch old transcript when this tab previously had its own backend session.
+      // Fresh tabs (from addAgentSession) have storedSessionId=undefined — even if 409
+      // fires, they should start blank and only show new messages from SSE.
+      const historyId = coldRestoreId ?? (isResumedSession && storedSessionId ? session.session_id : undefined);
 
       // For LIVE resume (not cold restore), fetch the full transcript now.
       // For cold restore they were already pre-fetched above (before create) so we skip to avoid

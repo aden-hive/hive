@@ -43,9 +43,9 @@ export function backendMessageToChatMessage(
   const createdAt = msg.created_at ? msg.created_at * 1000 : undefined;
   const seq = msg.seq;
   // For worker messages, use the node_id (phase_id) to show which node responded
-  const sender = msg.role === "user" ? "You" : 
-    (msg._source === "worker" && msg._node_id ? formatAgentDisplayName(msg._node_id) : 
-     agentDisplayName || msg._node_id || "Agent");
+  const sender = msg.role === "user" ? "You" :
+    (msg._source === "worker" && msg._node_id ? formatAgentDisplayName(msg._node_id) :
+      agentDisplayName || msg._node_id || "Agent");
 
   // Strip the [Worker asked: "..." | Options: ...] prefix that is prepended when
   // a user answers "Other" on a worker question widget and the answer is routed
