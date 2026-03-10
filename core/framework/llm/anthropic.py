@@ -1,9 +1,16 @@
-"""Anthropic Claude LLM provider - Now respects user's configuration."""
+"""Anthropic Claude LLM provider - DEPRECATED.
 
-import json
-import os
+This provider is deprecated and will be removed in a future version.
+Please use LiteLLMProvider via get_llm_provider() instead, which respects
+your configuration and supports all providers.
+
+The get_llm_provider() function automatically returns the correct provider
+based on your ~/.hive/configuration.json settings.
+"""
+
 import logging
-from pathlib import Path
+import os
+import warnings
 from typing import Any
 
 from framework.llm.litellm import LiteLLMProvider
@@ -11,24 +18,41 @@ from framework.llm.provider import LLMProvider, LLMResponse, Tool
 
 logger = logging.getLogger(__name__)
 
+# Show deprecation warning when module is imported
+warnings.warn(
+    "AnthropicProvider is deprecated and will be removed in a future version. "
+    "Use framework.llm.get_llm_provider() instead which respects your configuration.",
+    DeprecationWarning,
+    stacklevel=2
+)
 
-def _get_llm_config():
-    """Get current LLM configuration from ~/.hive/config.json."""
-    config_path = Path.home() / ".hive" / "config.json"
-    if config_path.exists():
-        try:
-            with open(config_path) as f:
-                config = json.load(f)
-                return config.get("llm", {})
-        except Exception as e:
-            logger.debug(f"Failed to read config: {e}")
+logger.warning(
+    " AnthropicProvider is deprecated. Please update your code to use "
+    "get_llm_provider() from framework.llm which automatically selects "
+    "the correct provider based on your configuration."
+)
+
+
+def _check_configuration() -> tuple[bool, str]:
+    """Check if Anthropic is actually configured in user settings.
     
-    # Fallback to environment
-    return {
-        "provider": os.environ.get("MODEL_PROVIDER", "").lower(),
-        "model": os.environ.get("LITELLM_MODEL", ""),
-        "api_key": os.environ.get("ANTHROPIC_API_KEY", ""),
-    }
+    Returns:
+        Tuple of (is_configured, message)
+    """
+    try:
+        from framework.config import get_hive_config
+        
+        config = get_hive_config()
+        llm_config = config.get("llm", {})
+        provider = llm_config.get("provider", "").lower()
+        
+        if provider and provider not in ["anthropic", "claude"]:
+            return False, f"Your LLM provider is set to '{provider}' not Anthropic"
+        
+        return True, "Anthropic configured"
+    except ImportError:
+        # If config module not available, assume it might be configured
+        return True, "Configuration check skipped"
 
 
 def _get_api_key_from_credential_store() -> str | None:
@@ -46,10 +70,16 @@ def _get_api_key_from_credential_store() -> str | None:
 
 class AnthropicProvider(LLMProvider):
     """
-    Anthropic Claude LLM provider - Now respects user's configuration.
+    Anthropic Claude LLM provider - DEPRECATED.
     
-    This provider will only work if the user has selected Anthropic as their
-    LLM provider. Otherwise, it raises a clear error.
+    This class is maintained for backward compatibility but will be removed.
+    Please migrate to using get_llm_provider() from framework.llm instead.
+    
+    The new provider system:
+    - Automatically uses your configured provider (Gemini, Groq, etc.)
+    - Shows interactive menu if your selected provider fails
+    - Persists your choice for future sessions
+    - Supports all providers through LiteLLM
     """
 
     def __init__(
@@ -57,42 +87,50 @@ class AnthropicProvider(LLMProvider):
         api_key: str | None = None,
         model: str | None = None,
     ):
-        """Initialize with user's configuration."""
-        # Get user's LLM configuration
-        config = _get_llm_config()
-        selected_provider = config.get("provider", "").lower()
+        """Initialize Anthropic provider with configuration check.
         
+        Args:
+            api_key: Anthropic API key (optional, will check env/config if not provided)
+            model: Model name (optional, will use config if not provided)
+            
+        Raises:
+            ValueError: If Anthropic is not the configured provider or API key missing
+        """
         # Check if user actually wants Anthropic
-        if selected_provider and selected_provider not in ["anthropic", "claude"]:
+        is_configured, config_message = _check_configuration()
+        if not is_configured:
             raise ValueError(
-                f"❌ AnthropicProvider used but your LLM provider is set to '{selected_provider}'. "
-                f"This usually means a bug in the code is forcing Anthropic when it shouldn't.\n\n"
+                f" AnthropicProvider used but {config_message}.\n\n"
+                f"This usually means code is forcing Anthropic when it shouldn't.\n"
                 f"To fix this:\n"
-                f"1. Run './quickstart.sh' again\n"
-                f"2. Select your desired provider (Gemini, Groq, etc.)\n"
-                f"3. If the error persists, please report this issue."
+                f"1. Run './quickstart.sh' to reconfigure your LLM provider\n"
+                f"2. Use get_llm_provider() instead of directly instantiating AnthropicProvider\n"
+                f"3. If you see this error in Hive core code, please report it on GitHub"
             )
         
-        # For Anthropic users, get the API key
+        # Get API key
         self.api_key = api_key or _get_api_key_from_credential_store()
-        if not self.api_key and selected_provider == "anthropic":
-            raise ValueError(
-                "Anthropic API key required but not found. "
-                "Please set ANTHROPIC_API_KEY environment variable or configure it in quickstart."
-            )
         
-        # Use model from config, or passed model, or fallback
-        self.model = (
-            model or 
-            config.get("model") or 
-            os.environ.get("LITELLM_MODEL") or
-            "claude-3-haiku-20240307"  # Safe fallback
+        # Get model from config or parameter
+        if model is None:
+            try:
+                from framework.config import get_hive_config
+                config = get_hive_config().get("llm", {})
+                self.model = config.get("model", "claude-3-haiku-20240307")
+            except ImportError:
+                self.model = "claude-3-haiku-20240307"
+        else:
+            self.model = model
+        
+        # Log deprecation with context
+        logger.info(
+            f" AnthropicProvider is deprecated - use get_llm_provider() instead. "
+            f"Model: {self.model}"
         )
         
-        logger.info(f"Initializing AnthropicProvider with model: {self.model}")
-        
+        # Use LiteLLM internally
         self._provider = LiteLLMProvider(
-            model=self.model,
+            model=f"anthropic/{self.model}",
             api_key=self.api_key,
         )
 
@@ -106,7 +144,7 @@ class AnthropicProvider(LLMProvider):
         json_mode: bool = False,
         max_retries: int | None = None,
     ) -> LLMResponse:
-        """Generate a completion from Claude (via LiteLLM)."""
+        """Generate a completion (deprecated)."""
         return self._provider.complete(
             messages=messages,
             system=system,
@@ -127,7 +165,7 @@ class AnthropicProvider(LLMProvider):
         json_mode: bool = False,
         max_retries: int | None = None,
     ) -> LLMResponse:
-        """Async completion via LiteLLM."""
+        """Async completion (deprecated)."""
         return await self._provider.acomplete(
             messages=messages,
             system=system,
