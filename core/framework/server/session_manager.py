@@ -46,6 +46,8 @@ class Session:
     judge_task: asyncio.Task | None = None
     escalation_sub: str | None = None
     worker_handoff_sub: str | None = None
+    # Memory consolidation subscription (fires on CONTEXT_COMPACTED)
+    memory_consolidation_sub: str | None = None
     # Session directory resumption:
     # When set, _start_queen writes queen conversations to this existing session's
     # directory instead of creating a new one.  This lets cold-restores accumulate
@@ -379,6 +381,11 @@ class SessionManager:
         if session is None:
             return False
 
+        # Capture session data for memory consolidation before teardown
+        _llm = getattr(session, "llm", None)
+        _storage_id = getattr(session, "queen_resume_from", None) or session_id
+        _session_dir = Path.home() / ".hive" / "queen" / "session" / _storage_id
+
         # Stop judge
         self._stop_judge(session)
         if session.worker_handoff_sub is not None:
@@ -388,7 +395,13 @@ class SessionManager:
                 pass
             session.worker_handoff_sub = None
 
-        # Stop queen
+        # Stop queen and memory consolidation subscription
+        if session.memory_consolidation_sub is not None:
+            try:
+                session.event_bus.unsubscribe(session.memory_consolidation_sub)
+            except Exception:
+                pass
+            session.memory_consolidation_sub = None
         if session.queen_task is not None:
             session.queen_task.cancel()
             session.queen_task = None
@@ -400,6 +413,17 @@ class SessionManager:
                 await session.runner.cleanup_async()
             except Exception as e:
                 logger.error("Error cleaning up worker: %s", e)
+
+        # Final memory consolidation — fire-and-forget so teardown isn't blocked.
+        if _llm is not None and _session_dir.exists():
+            import asyncio
+
+            from framework.agents.queen.queen_memory import consolidate_queen_memory
+
+            asyncio.create_task(
+                consolidate_queen_memory(session_id, _session_dir, _llm),
+                name=f"queen-memory-consolidation-{session_id}",
+            )
 
         logger.info("Session '%s' stopped", session_id)
         return True
@@ -505,6 +529,25 @@ class SessionManager:
             worker_identity=worker_identity,
             queen_dir=queen_dir,
             initial_prompt=initial_prompt,
+        )
+
+        # Memory consolidation — triggered by context compaction events.
+        # Compaction is a natural signal that "enough has happened to be worth remembering".
+        _consolidation_llm = session.llm
+        _consolidation_session_dir = queen_dir
+
+        async def _on_compaction(_event) -> None:
+            from framework.agents.queen.queen_memory import consolidate_queen_memory
+
+            await consolidate_queen_memory(
+                session.id, _consolidation_session_dir, _consolidation_llm
+            )
+
+        from framework.runtime.event_bus import EventType as _ET
+
+        session.memory_consolidation_sub = session.event_bus.subscribe(
+            event_types=[_ET.CONTEXT_COMPACTED],
+            handler=_on_compaction,
         )
 
     # ------------------------------------------------------------------

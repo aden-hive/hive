@@ -87,6 +87,7 @@ _QUEEN_BUILDING_TOOLS = _SHARED_TOOLS + [
     "load_built_agent",
     "list_credentials",
     "replan_agent",
+    "write_to_diary",  # Episodic memory — available in all phases
 ]
 
 # Staging phase: agent loaded but not yet running — inspect, configure, launch.
@@ -103,6 +104,7 @@ _QUEEN_STAGING_TOOLS = [
     "run_agent_with_input",
     "stop_worker_and_edit",
     "stop_worker_and_plan",
+    "write_to_diary",  # Episodic memory — available in all phases
 ]
 
 # Running phase: worker is executing — monitor and control.
@@ -123,6 +125,7 @@ _QUEEN_RUNNING_TOOLS = [
     # Monitoring
     "get_worker_health_summary",
     "notify_operator",
+    "write_to_diary",  # Episodic memory — available in all phases
 ]
 
 
@@ -704,6 +707,23 @@ Do NOT start the full discovery workflow (tool discovery, gap analysis) in \
 diagnosis mode — you already have a built agent, you just need to fix it.
 """
 
+_queen_memory_instructions = """
+## Your Cross-Session Memory
+
+Your cross-session memory appears in context under \
+"--- Your Cross-Session Memory ---". \
+Read it at the start of each conversation. If you know this person from past \
+sessions, pick up where you left off — reference what you built together, \
+what they care about, how things went.
+
+You keep a diary. Use write_to_diary() when something worth remembering \
+happens: a pipeline went live, the user shared something important, a goal \
+was reached or abandoned. Write in first person, as you actually experienced \
+it. One or two paragraphs is enough.
+"""
+
+_queen_behavior_always = _queen_behavior_always + _queen_memory_instructions
+
 # -- BUILDING phase behavior --
 
 _queen_behavior_building = """
@@ -1055,7 +1075,6 @@ __all__ = [
     "_queen_tools_staging",
     "_queen_tools_running",
     "_queen_behavior_always",
-    "_queen_behavior_planning",
     "_queen_behavior_building",
     "_queen_behavior_staging",
     "_queen_behavior_running",

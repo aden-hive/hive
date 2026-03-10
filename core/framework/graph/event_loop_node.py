@@ -350,6 +350,7 @@ class EventLoopNode(NodeProtocol):
         self._awaiting_input = False
         self._shutdown = False
         self._stream_task: asyncio.Task | None = None
+        self._tool_task: asyncio.Task | None = None  # gather task while tools run
         # Track which nodes already have an action plan emitted (skip on revisit)
         self._action_plan_emitted: set[str] = set()
         # Monotonic counter for spillover file naming (web_search_1.txt, etc.)
@@ -480,23 +481,32 @@ class EventLoopNode(NodeProtocol):
                 # If it doesn't exist yet, seed it with available context.
                 if self._config.spillover_dir:
                     _adapt_path = Path(self._config.spillover_dir) / "adapt.md"
-                    if not _adapt_path.exists() and ctx.accounts_prompt:
+                    if not _adapt_path.exists():
                         _adapt_path.parent.mkdir(parents=True, exist_ok=True)
-                        _adapt_path.write_text(
-                            f"## Identity\n{ctx.accounts_prompt}\n",
-                            encoding="utf-8",
+                        seed = (
+                            f"## Identity\n{ctx.accounts_prompt}\n"
+                            if ctx.accounts_prompt
+                            else "# Session Working Memory\n"
                         )
+                        _adapt_path.write_text(seed, encoding="utf-8")
                     if _adapt_path.exists():
                         _adapt_text = _adapt_path.read_text(encoding="utf-8").strip()
                         if _adapt_text:
                             system_prompt = (
                                 f"{system_prompt}\n\n"
-                                f"--- Your Memory ---\n{_adapt_text}\n--- End Memory ---\n\n"
-                                'Maintain your memory by calling save_data("adapt.md", ...) '
-                                'or edit_data("adapt.md", ...) as you work.\n'
-                                "IMMEDIATELY save: user rules about which account/identity to use, "
-                                "behavioral constraints, and preferences. "
-                                "Also record session history, decisions, and working notes."
+                                "--- Session Working Memory ---\n"
+                                f"{_adapt_text}\n"
+                                "--- End Session Working Memory ---\n\n"
+                                "Maintain your session working memory by calling "
+                                'save_data("adapt.md", ...) or edit_data("adapt.md", ...)'
+                                " as you work.\n"
+                                "This is session-scoped scratch space. "
+                                "IMMEDIATELY save: account/identity rules, "
+                                "behavioral constraints, and preferences specific to "
+                                "this session. Also record current task state, "
+                                "decisions, and working notes. "
+                                "For lasting knowledge about the user, use "
+                                "update_queen_memory() and append_queen_journal() instead."
                             )
 
                 conversation = NodeConversation(
@@ -1706,14 +1716,16 @@ class EventLoopNode(NodeProtocol):
         self._input_ready.set()
 
     def cancel_current_turn(self) -> None:
-        """Cancel the current LLM streaming turn instantly.
+        """Cancel the current LLM streaming turn or in-progress tool calls instantly.
 
         Unlike signal_shutdown() which permanently stops the event loop,
-        this only kills the in-progress HTTP stream via task.cancel().
+        this only kills the in-progress HTTP stream or tool gather task.
         The queen stays alive for the next user message.
         """
         if self._stream_task and not self._stream_task.done():
             self._stream_task.cancel()
+        if self._tool_task and not self._tool_task.done():
+            self._tool_task.cancel()
 
     async def _await_user_input(
         self,
@@ -2254,10 +2266,16 @@ class EventLoopNode(NodeProtocol):
                     _dur = round(time.time() - _s, 3)
                     return _r, _iso, _dur
 
-                timed_results = await asyncio.gather(
-                    *(_timed_execute(tc) for tc in pending_real),
-                    return_exceptions=True,
+                self._tool_task = asyncio.ensure_future(
+                    asyncio.gather(
+                        *(_timed_execute(tc) for tc in pending_real),
+                        return_exceptions=True,
+                    )
                 )
+                try:
+                    timed_results = await self._tool_task
+                finally:
+                    self._tool_task = None
                 # gather(return_exceptions=True) captures CancelledError
                 # as a return value instead of propagating it.  Re-raise
                 # so stop_worker actually stops the execution.
