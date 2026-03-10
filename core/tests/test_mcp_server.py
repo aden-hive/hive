@@ -40,5 +40,3 @@ class TestMCPDependencies:
         from mcp.server import FastMCP
 
         assert FastMCP is not None
-
-
