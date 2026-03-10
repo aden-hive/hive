@@ -41,8 +41,6 @@ async def create_queen(
         _QUEEN_STAGING_TOOLS,
         _appendices,
         _building_knowledge,
-        _gcu_building_section,
-        _gcu_planning_section,
         _planning_knowledge,
         _shared_building_knowledge,
         _queen_behavior_always,
@@ -156,7 +154,6 @@ async def create_queen(
         + _queen_behavior_always
         + _queen_behavior_planning
         + _planning_knowledge
-        + _gcu_planning_section
         + worker_identity
     )
     phase_state.prompt_planning = _queen_identity_planning + _planning_body
@@ -168,7 +165,6 @@ async def create_queen(
         + _queen_behavior_always
         + _queen_behavior_building
         + _building_knowledge
-        + _gcu_building_section
         + _queen_phase_7
         + _appendices
         + worker_identity

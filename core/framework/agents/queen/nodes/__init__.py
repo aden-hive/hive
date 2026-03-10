@@ -35,15 +35,8 @@ def _build_appendices() -> str:
 # Shared appendices — appended to every coding node's system prompt.
 _appendices = _build_appendices()
 
-# GCU first-class section (when GCU is enabled).
-# Placed prominently in the main prompt body, not as an appendix.
-_gcu_building_section = (
-    ("\n\n# GCU Nodes — Browser Automation\n\n" + _gcu_guide)
-    if _is_gcu_enabled() and _gcu_guide
-    else ""
-)
-
-_gcu_planning_section = (
+# GCU guide — shared between planning and building via _shared_building_knowledge.
+_gcu_section = (
     ("\n\n# GCU Nodes — Browser Automation\n\n" + _gcu_guide)
     if _is_gcu_enabled() and _gcu_guide
     else ""
@@ -166,7 +159,7 @@ generate a clickable file URI for the user
 
 IMPORTANT: Do NOT tell workers to use read_file, write_file, edit_file, \
 search_files, or list_directory — those are YOUR tools, not theirs.
-"""
+""" + _gcu_section
 
 _planning_knowledge = """\
 **A responsible engineer doesn't jump into building. First, \
@@ -1020,7 +1013,6 @@ queen_node = NodeSpec(
         _queen_identity_building
         + _queen_style
         + _package_builder_knowledge
-        + _gcu_building_section  # GCU as first-class citizen (not appendix)
         + _queen_tools_docs
         + _queen_behavior
         + _queen_phase_7
@@ -1062,6 +1054,5 @@ __all__ = [
     "_building_knowledge",
     "_package_builder_knowledge",
     "_appendices",
-    "_gcu_building_section",
-    "_gcu_planning_section",
+    "_gcu_section",
 ]

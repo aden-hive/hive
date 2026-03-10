@@ -1623,7 +1623,39 @@ def register_queen_lifecycle_tools(
                 )
                 info = updated_session.worker_info
 
-                # Switch to staging phase after successful load
+                # Validate that all tools declared by nodes are registered
+                loaded_runtime = _get_runtime()
+                if loaded_runtime is not None:
+                    available_tool_names = {t.name for t in loaded_runtime._tools}
+                    missing_by_node: dict[str, list[str]] = {}
+                    for node in loaded_runtime.graph.nodes:
+                        if node.tools:
+                            missing = set(node.tools) - available_tool_names
+                            if missing:
+                                missing_by_node[f"{node.name} (id={node.id})"] = sorted(
+                                    missing
+                                )
+                    if missing_by_node:
+                        # Unload the broken worker
+                        try:
+                            await session_manager.unload_worker(manager_session_id)
+                        except Exception:
+                            pass
+                        details = "; ".join(
+                            f"Node '{k}' missing {v}"
+                            for k, v in missing_by_node.items()
+                        )
+                        return json.dumps(
+                            {
+                                "error": (
+                                    f"Tool validation failed: {details}. "
+                                    "Fix node tool declarations or add the missing "
+                                    "tools, then try loading again."
+                                )
+                            }
+                        )
+
+                # Switch to staging phase after successful load + validation
                 if phase_state is not None:
                     await phase_state.switch_to_staging()
 
