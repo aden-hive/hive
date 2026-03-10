@@ -109,7 +109,7 @@ def _session_to_live_dict(session) -> dict:
         "loaded_at": session.loaded_at,
         "uptime_seconds": round(time.time() - session.loaded_at, 1),
         "intro_message": getattr(session.runner, "intro_message", "") or "",
-        "queen_phase": phase_state.phase if phase_state else "building",
+        "queen_phase": phase_state.phase if phase_state else "planning",
     }
 
 

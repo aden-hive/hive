@@ -255,8 +255,9 @@ interface AgentBackendState {
   /** The message ID of the current worker input request (for inline reply box) */
   workerInputMessageId: string | null;
   queenBuilding: boolean;
-  /** Queen operating phase — "building" (coding), "staging" (loaded), or "running" (executing) */
-  queenPhase: "building" | "staging" | "running";
+  /** Queen operating phase — "planning" (design), "building" (coding), "staging" (loaded), or "running" (executing) */
+  queenPhase: "planning" | "building" | "staging" | "running";
+  /** Worker operating state — "idle" (not running), "deploying" (loading), "running" (executing), or "paused" (suspended) */
   workerRunState: "idle" | "deploying" | "running" | "paused";
   currentExecutionId: string | null;
   /** Worker session ID saved when paused — used for resume */
@@ -293,7 +294,7 @@ function defaultAgentState(): AgentBackendState {
     awaitingInput: false,
     workerInputMessageId: null,
     queenBuilding: false,
-    queenPhase: "building",
+    queenPhase: "planning",
     workerRunState: "idle",
     currentExecutionId: null,
     pausedWorkerSessionId: null,
@@ -956,7 +957,7 @@ export default function Workspace() {
       // failed, the throw inside the catch exits the outer try block.
       const session = liveSession!;
       const displayName = formatAgentDisplayName(session.worker_name || agentType);
-      const initialPhase = session.queen_phase || (session.has_worker ? "staging" : "building");
+      const initialPhase = session.queen_phase || (session.has_worker ? "staging" : "planning");
       updateAgentState(agentType, {
         sessionId: session.session_id,
         displayName,
@@ -1924,8 +1925,11 @@ export default function Workspace() {
 
         case "queen_phase_changed": {
           const rawPhase = event.data?.phase as string;
-          const newPhase: "building" | "staging" | "running" =
-            rawPhase === "running" ? "running" : rawPhase === "staging" ? "staging" : "building";
+          const newPhase: "planning" | "building" | "staging" | "running" =
+            rawPhase === "running" ? "running"
+            : rawPhase === "staging" ? "staging"
+            : rawPhase === "planning" ? "planning"
+            : "building";
           // Use updater form to avoid overwriting "paused" when queen
           // transitions to staging after a pause (switch_to_staging fires
           // queen_phase_changed which would otherwise clobber the paused state).

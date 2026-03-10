@@ -445,8 +445,8 @@ class AdenTUI(App):
         agent_name = runner.agent_path.name
         self.notify(f"Agent loaded: {agent_name}", severity="information", timeout=3)
 
-        # Load health judge + queen for worker agents (skip for hive_coder itself)
-        if agent_name != "hive_coder":
+        # Load health judge + queen for worker agents (skip for queen itself)
+        if agent_name != "queen":
             await self._load_judge_and_queen(runner._storage_path)
 
     async def _load_judge_and_queen(self, storage_path) -> None:
@@ -515,18 +515,18 @@ class AdenTUI(App):
             #    worker.  Escalation tickets from the judge are injected
             #    as messages into this conversation.
             # ---------------------------------------------------------------
-            import framework.agents.hive_coder as _hive_coder_pkg
-            from framework.agents.hive_coder.agent import queen_goal, queen_graph
+            import framework.agents.queen as _queen_pkg
+            from framework.agents.queen.agent import queen_goal, queen_graph
 
             # Queen gets lifecycle tools, monitoring tools, AND coding tools
-            # from the hive_coder's coder-tools MCP server.  This spawns a
+            # from the queen's coder-tools MCP server.  This spawns a
             # separate MCP process so the queen can read/write files, run
             # commands, discover tools, etc. independently of the worker.
             queen_registry = ToolRegistry()
 
-            # Coding tools from hive_coder's MCP config (coder_tools_server).
-            hive_coder_dir = Path(_hive_coder_pkg.__file__).parent
-            mcp_config = hive_coder_dir / "mcp_servers.json"
+            # Coding tools from queen's MCP config (coder_tools_server).
+            queen_dir = Path(_queen_pkg.__file__).parent
+            mcp_config = queen_dir / "mcp_servers.json"
             if mcp_config.exists():
                 try:
                     queen_registry.load_mcp_config(mcp_config)
@@ -556,7 +556,7 @@ class AdenTUI(App):
             queen_tool_executor = queen_registry.get_executor()
 
             # Partition tools into phase-specific sets
-            from framework.agents.hive_coder.nodes import (
+            from framework.agents.queen.nodes import (
                 _QUEEN_BUILDING_TOOLS,
                 _QUEEN_RUNNING_TOOLS,
                 _QUEEN_STAGING_TOOLS,

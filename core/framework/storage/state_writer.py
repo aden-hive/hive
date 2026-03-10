@@ -53,6 +53,8 @@ class StateWriter:
         # Write to new format if enabled
         if self.dual_write_enabled:
             try:
+                # Stamp the owning process ID for cross-process stale detection
+                state.pid = os.getpid()
                 await self.new.write_state(session_id, state)
                 logger.debug(f"Wrote state.json for session {session_id}")
             except Exception as e:

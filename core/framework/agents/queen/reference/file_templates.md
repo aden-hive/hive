@@ -559,7 +559,7 @@ if __name__ == "__main__":
 
 ## mcp_servers.json
 
-> **Auto-generated.** `initialize_agent_package` creates this file with hive-tools
+> **Auto-generated.** `initialize_and_build_agent` creates this file with hive-tools
 > as the default. Only edit manually to add additional MCP servers.
 
 ```json

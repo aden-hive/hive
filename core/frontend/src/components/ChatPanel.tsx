@@ -43,7 +43,7 @@ interface ChatPanelProps {
   /** Where the pending question originated — affects accent color */
   pendingQuestionSource?: "queen" | "worker" | null;
   /** Queen operating phase — shown as a tag on queen messages */
-  queenPhase?: "building" | "staging" | "running";
+  queenPhase?: "planning" | "building" | "staging" | "running";
 }
 
 const queenColor = "hsl(45,95%,58%)";
@@ -245,7 +245,7 @@ function CollapsibleWorkerThread({ group, queenPhase }: { group: WorkerGroup; qu
   );
 }
 
-const MessageBubble = memo(function MessageBubble({ msg, queenPhase }: { msg: ChatMessage; queenPhase?: "building" | "staging" | "running" }) {
+const MessageBubble = memo(function MessageBubble({ msg, queenPhase }: { msg: ChatMessage; queenPhase?: "planning" | "building" | "staging" | "running" }) {
   const isUser = msg.type === "user";
   const isQueen = msg.role === "queen";
   const color = getColor(msg.agent, msg.role);
@@ -305,7 +305,9 @@ const MessageBubble = memo(function MessageBubble({ msg, queenPhase }: { msg: Ch
                 ? "running phase"
                 : queenPhase === "staging"
                   ? "staging phase"
-                  : "building phase"
+                  : queenPhase === "planning"
+                    ? "planning phase"
+                    : "building phase"
               : "Worker"}
           </span>
         </div>

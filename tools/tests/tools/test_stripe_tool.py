@@ -1089,7 +1089,7 @@ class TestToolRegistration:
         mcp = MagicMock()
         mcp.tool.return_value = lambda fn: fn
         register_tools(mcp)
-        assert mcp.tool.call_count == 51
+        assert mcp.tool.call_count == 54
 
     def test_no_credentials_returns_error(self):
         mcp = MagicMock()
@@ -1596,7 +1596,7 @@ class TestCredentialSpec:
         from aden_tools.credentials import CREDENTIAL_SPECS
 
         spec = CREDENTIAL_SPECS["stripe"]
-        assert len(spec.tools) == 51
+        assert len(spec.tools) == 54
 
     def test_stripe_spec_tools_include_core_methods(self):
         from aden_tools.credentials import CREDENTIAL_SPECS

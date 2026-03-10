@@ -68,6 +68,7 @@ class MCPClient:
         self._read_stream = None
         self._write_stream = None
         self._stdio_context = None  # Context manager for stdio_client
+        self._errlog_handle = None  # Track errlog file handle for cleanup
         self._http_client: httpx.Client | None = None
         self._tools: dict[str, MCPTool] = {}
         self._connected = False
@@ -200,7 +201,8 @@ class MCPClient:
                         if os.name == "nt":
                             errlog = sys.stderr
                         else:
-                            errlog = open(os.devnull, "w")  # noqa: SIM115
+                            self._errlog_handle = open(os.devnull, "w")
+                            errlog = self._errlog_handle
                         self._stdio_context = stdio_client(server_params, errlog=errlog)
                         (
                             self._read_stream,
@@ -475,6 +477,15 @@ class MCPClient:
         finally:
             self._stdio_context = None
 
+        # Third: close errlog file handle if we opened one
+        if self._errlog_handle is not None:
+            try:
+                self._errlog_handle.close()
+            except Exception as e:
+                logger.debug(f"Error closing errlog handle: {e}")
+            finally:
+                self._errlog_handle = None
+
     def disconnect(self) -> None:
         """Disconnect from the MCP server."""
         # Clean up persistent STDIO connection
@@ -545,6 +556,7 @@ class MCPClient:
             self._write_stream = None
             self._loop = None
             self._loop_thread = None
+            self._errlog_handle = None
 
         # Clean up HTTP client
         if self._http_client:

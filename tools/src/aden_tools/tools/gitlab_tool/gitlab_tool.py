@@ -86,6 +86,32 @@ def _post(
         return {"error": f"GitLab request failed: {e!s}"}
 
 
+def _put(
+    base_url: str, path: str, token: str, json: dict[str, Any] | None = None
+) -> dict[str, Any] | list:
+    """Make an authenticated PUT to the GitLab API."""
+    try:
+        resp = httpx.put(
+            f"{base_url}/api/v4{path}",
+            headers={"PRIVATE-TOKEN": token, "Content-Type": "application/json"},
+            json=json or {},
+            timeout=30.0,
+        )
+        if resp.status_code == 401:
+            return {"error": "Unauthorized. Check your GitLab token."}
+        if resp.status_code == 403:
+            return {"error": "Forbidden. Insufficient permissions."}
+        if resp.status_code == 404:
+            return {"error": "Not found."}
+        if resp.status_code not in (200, 201):
+            return {"error": f"GitLab API error {resp.status_code}: {resp.text[:500]}"}
+        return resp.json()
+    except httpx.TimeoutException:
+        return {"error": "Request to GitLab timed out"}
+    except Exception as e:
+        return {"error": f"GitLab request failed: {e!s}"}
+
+
 def _auth_error() -> dict[str, Any]:
     return {
         "error": "GITLAB_TOKEN not set",
@@ -398,3 +424,151 @@ def register_tools(
                 }
             )
         return {"merge_requests": mrs, "count": len(mrs)}
+
+    @mcp.tool()
+    def gitlab_update_issue(
+        project_id: str,
+        issue_iid: int,
+        title: str = "",
+        description: str = "",
+        state_event: str = "",
+        labels: str = "",
+        assignee_ids: str = "",
+    ) -> dict[str, Any]:
+        """
+        Update an existing GitLab issue.
+
+        Args:
+            project_id: Project ID or URL-encoded path (required)
+            issue_iid: Issue internal ID within the project (required)
+            title: New issue title (optional)
+            description: New issue description (optional)
+            state_event: Transition: "close" or "reopen" (optional)
+            labels: Comma-separated label names to replace (optional)
+            assignee_ids: Comma-separated user IDs to assign (optional)
+
+        Returns:
+            Dict with updated issue (iid, title, state, web_url)
+        """
+        base_url, token = _get_credentials(credentials)
+        if not token:
+            return _auth_error()
+        if not project_id or not issue_iid:
+            return {"error": "project_id and issue_iid are required"}
+
+        body: dict[str, Any] = {}
+        if title:
+            body["title"] = title
+        if description:
+            body["description"] = description
+        if state_event:
+            body["state_event"] = state_event
+        if labels:
+            body["labels"] = labels
+        if assignee_ids:
+            body["assignee_ids"] = [int(x.strip()) for x in assignee_ids.split(",") if x.strip()]
+
+        if not body:
+            return {"error": "At least one field to update is required"}
+
+        data = _put(base_url, f"/projects/{project_id}/issues/{issue_iid}", token, json=body)
+        if isinstance(data, dict) and "error" in data:
+            return data
+        if not isinstance(data, dict):
+            return {"error": "Unexpected response format"}
+
+        return {
+            "iid": data.get("iid"),
+            "title": data.get("title", ""),
+            "state": data.get("state", ""),
+            "web_url": data.get("web_url", ""),
+            "status": "updated",
+        }
+
+    @mcp.tool()
+    def gitlab_get_merge_request(
+        project_id: str,
+        merge_request_iid: int,
+    ) -> dict[str, Any]:
+        """
+        Get details about a specific merge request.
+
+        Args:
+            project_id: Project ID or URL-encoded path (required)
+            merge_request_iid: MR internal ID within the project (required)
+
+        Returns:
+            Dict with MR details (title, description, state, branches, author, reviewers)
+        """
+        base_url, token = _get_credentials(credentials)
+        if not token:
+            return _auth_error()
+        if not project_id or not merge_request_iid:
+            return {"error": "project_id and merge_request_iid are required"}
+
+        data = _get(base_url, f"/projects/{project_id}/merge_requests/{merge_request_iid}", token)
+        if isinstance(data, dict) and "error" in data:
+            return data
+        if not isinstance(data, dict):
+            return {"error": "Unexpected response format"}
+
+        reviewers = [r.get("username", "") for r in data.get("reviewers", [])]
+        return {
+            "iid": data.get("iid"),
+            "title": data.get("title", ""),
+            "description": (data.get("description") or "")[:1000],
+            "state": data.get("state", ""),
+            "source_branch": data.get("source_branch", ""),
+            "target_branch": data.get("target_branch", ""),
+            "author": (data.get("author") or {}).get("username", ""),
+            "reviewers": reviewers,
+            "merge_status": data.get("merge_status", ""),
+            "has_conflicts": data.get("has_conflicts", False),
+            "changes_count": data.get("changes_count"),
+            "web_url": data.get("web_url", ""),
+            "created_at": data.get("created_at", ""),
+            "updated_at": data.get("updated_at", ""),
+            "merged_at": data.get("merged_at"),
+        }
+
+    @mcp.tool()
+    def gitlab_create_merge_request_note(
+        project_id: str,
+        merge_request_iid: int,
+        body: str,
+    ) -> dict[str, Any]:
+        """
+        Add a comment (note) to a GitLab merge request.
+
+        Args:
+            project_id: Project ID or URL-encoded path (required)
+            merge_request_iid: MR internal ID within the project (required)
+            body: Comment text (required, supports markdown)
+
+        Returns:
+            Dict with created note (id, body, author, created_at)
+        """
+        base_url, token = _get_credentials(credentials)
+        if not token:
+            return _auth_error()
+        if not project_id or not merge_request_iid or not body:
+            return {"error": "project_id, merge_request_iid, and body are required"}
+
+        data = _post(
+            base_url,
+            f"/projects/{project_id}/merge_requests/{merge_request_iid}/notes",
+            token,
+            json={"body": body},
+        )
+        if isinstance(data, dict) and "error" in data:
+            return data
+        if not isinstance(data, dict):
+            return {"error": "Unexpected response format"}
+
+        return {
+            "id": data.get("id"),
+            "body": (data.get("body") or "")[:500],
+            "author": (data.get("author") or {}).get("username", ""),
+            "created_at": data.get("created_at", ""),
+            "status": "created",
+        }
