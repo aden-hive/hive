@@ -31,6 +31,10 @@ logger = logging.getLogger(__name__)
 RATE_LIMIT_MAX_RETRIES = 10
 RATE_LIMIT_BACKOFF_BASE = 2  # seconds
 
+EMPTY_STREAM_MAX_RETRIES = 3
+STREAM_TRANSIENT_MAX_RETRIES = 3
+STREAM_TRANSIENT_BACKOFF_BASE = 2  # seconds
+
 # Directory for dumping failed requests
 FAILED_REQUESTS_DIR = Path.home() / ".hive" / "failed_requests"
 
@@ -82,6 +86,33 @@ def _dump_failed_request(
         json.dump(dump_data, f, indent=2, default=str)
 
     return str(filepath)
+
+
+def _is_stream_transient_error(e: Exception) -> bool:
+    """Check if an exception is a transient streaming error worth retrying."""
+    transient_types: tuple[type[Exception], ...] = (
+        ConnectionError,
+        TimeoutError,
+    )
+    try:
+        import httpx
+
+        transient_types = (
+            *transient_types,
+            httpx.ConnectError,
+            httpx.ReadTimeout,
+            httpx.RemoteProtocolError,
+        )
+    except ImportError:
+        pass
+    if litellm is not None:
+        try:
+            from litellm.exceptions import APIConnectionError, Timeout
+
+            transient_types = (*transient_types, APIConnectionError, Timeout)
+        except ImportError:
+            pass
+    return isinstance(e, transient_types)
 
 
 class LiteLLMProvider(LLMProvider):
@@ -493,7 +524,11 @@ class LiteLLMProvider(LLMProvider):
         if tools:
             kwargs["tools"] = [self._tool_to_openai_format(t) for t in tools]
 
-        for attempt in range(RATE_LIMIT_MAX_RETRIES + 1):
+        empty_stream_attempts = 0
+        transient_attempts = 0
+        rate_limit_attempts = 0
+
+        while True:
             # Post-stream events (ToolCall, TextEnd, Finish) are buffered
             # because they depend on the full stream.  TextDeltaEvents are
             # yielded immediately so callers see tokens in real time.
@@ -571,7 +606,7 @@ class LiteLLMProvider(LLMProvider):
                 # (If text deltas were yielded above, has_content is True
                 # and we skip the retry path — nothing was yielded in vain.)
                 has_content = accumulated_text or tool_calls_acc
-                if not has_content and attempt < RATE_LIMIT_MAX_RETRIES:
+                if not has_content:
                     # If the conversation ends with an assistant or tool
                     # message, an empty stream is expected — the LLM has
                     # nothing new to say.  Don't burn retries on this;
@@ -591,45 +626,68 @@ class LiteLLMProvider(LLMProvider):
                         for event in tail_events:
                             yield event
                         return
-                    wait = RATE_LIMIT_BACKOFF_BASE * (2**attempt)
-                    token_count, token_method = _estimate_tokens(
-                        self.model,
-                        full_messages,
-                    )
-                    dump_path = _dump_failed_request(
-                        model=self.model,
-                        kwargs=kwargs,
-                        error_type="empty_stream",
-                        attempt=attempt,
-                    )
-                    logger.warning(
-                        f"[stream-retry] {self.model} returned empty stream — "
-                        f"~{token_count} tokens ({token_method}). "
-                        f"Request dumped to: {dump_path}. "
-                        f"Retrying in {wait}s "
-                        f"(attempt {attempt + 1}/{RATE_LIMIT_MAX_RETRIES})"
-                    )
-                    await asyncio.sleep(wait)
-                    continue
 
-                # Success (or final attempt) — flush remaining events.
+                    if empty_stream_attempts < EMPTY_STREAM_MAX_RETRIES:
+                        wait = RATE_LIMIT_BACKOFF_BASE * (2**empty_stream_attempts)
+                        token_count, token_method = _estimate_tokens(
+                            self.model,
+                            full_messages,
+                        )
+                        dump_path = _dump_failed_request(
+                            model=self.model,
+                            kwargs=kwargs,
+                            error_type="empty_stream",
+                            attempt=empty_stream_attempts,
+                        )
+                        logger.warning(
+                            f"[stream-retry] {self.model} returned empty stream — "
+                            f"~{token_count} tokens ({token_method}). "
+                            f"Request dumped to: {dump_path}. "
+                            f"Retrying in {wait}s "
+                            f"(attempt {empty_stream_attempts + 1}/{EMPTY_STREAM_MAX_RETRIES})"
+                        )
+                        empty_stream_attempts += 1
+                        await asyncio.sleep(wait)
+                        continue
+
+                    # Exhausted empty-stream retries — give up.
+                    logger.error(
+                        f"[stream-retry] GAVE UP on {self.model} after "
+                        f"{EMPTY_STREAM_MAX_RETRIES} empty-stream retries."
+                    )
+
+                # Success (or exhausted empty-stream retries) — flush remaining events.
                 for event in tail_events:
                     yield event
                 return
 
             except RateLimitError as e:
-                if attempt < RATE_LIMIT_MAX_RETRIES:
-                    wait = RATE_LIMIT_BACKOFF_BASE * (2**attempt)
+                if rate_limit_attempts < RATE_LIMIT_MAX_RETRIES:
+                    wait = RATE_LIMIT_BACKOFF_BASE * (2**rate_limit_attempts)
                     logger.warning(
                         f"[stream-retry] {self.model} rate limited (429): {e!s}. "
                         f"Retrying in {wait}s "
-                        f"(attempt {attempt + 1}/{RATE_LIMIT_MAX_RETRIES})"
+                        f"(attempt {rate_limit_attempts + 1}/{RATE_LIMIT_MAX_RETRIES})"
                     )
+                    rate_limit_attempts += 1
                     await asyncio.sleep(wait)
                     continue
                 yield StreamErrorEvent(error=str(e), recoverable=False)
                 return
 
             except Exception as e:
+                if (
+                    _is_stream_transient_error(e)
+                    and transient_attempts < STREAM_TRANSIENT_MAX_RETRIES
+                ):
+                    wait = STREAM_TRANSIENT_BACKOFF_BASE * (2**transient_attempts)
+                    logger.warning(
+                        f"[stream-retry] {self.model} transient error: {e!s}. "
+                        f"Retrying in {wait}s "
+                        f"(attempt {transient_attempts + 1}/{STREAM_TRANSIENT_MAX_RETRIES})"
+                    )
+                    transient_attempts += 1
+                    await asyncio.sleep(wait)
+                    continue
                 yield StreamErrorEvent(error=str(e), recoverable=False)
                 return
