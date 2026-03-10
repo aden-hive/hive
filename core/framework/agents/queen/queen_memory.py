@@ -319,7 +319,7 @@ async def consolidate_queen_memory(
             len(user_msg) // 4,
         )
 
-        from framework.agents.hive_coder.config import default_config
+        from framework.agents.queen.config import default_config
 
         semantic_resp, diary_resp = await asyncio.gather(
             llm.acomplete(
