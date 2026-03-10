@@ -514,6 +514,12 @@ def register_queen_lifecycle_tools(
             "Use your coding tools to modify the agent, then call "
             "load_built_agent(path) to stage it again."
         )
+        # Nudge the queen to start coding instead of blocking for user input.
+        if phase_state is not None and phase_state.inject_notification:
+            await phase_state.inject_notification(
+                "[PHASE CHANGE] Switched to BUILDING phase. "
+                "Start implementing the changes now."
+            )
         return json.dumps(result)
 
     _stop_edit_tool = Tool(
@@ -609,19 +615,54 @@ def register_queen_lifecycle_tools(
             """Wrapper: scaffold or just switch to building phase."""
             agent_name = (inputs.get("agent_name") or "").strip()
 
-            # No agent_name → just switch to building (for fixing existing agent)
+            # No agent_name → try to fall back to the session's current agent,
+            # or fail with actionable guidance.
             if not agent_name:
-                runtime = _get_runtime()
-                if runtime is None:
+                # Try to resolve agent_name from the current session
+                fallback_path = getattr(session, "worker_path", None)
+                if fallback_path is not None:
+                    agent_name = Path(fallback_path).name
+                else:
+                    # Server path: check SessionManager
+                    if session_manager is not None and manager_session_id:
+                        srv_session = session_manager.get_session(manager_session_id)
+                        if srv_session and getattr(srv_session, "worker_path", None):
+                            fallback_path = srv_session.worker_path
+                            agent_name = Path(fallback_path).name
+
+                if not agent_name:
                     return json.dumps(
-                        {"error": "No worker loaded. Provide agent_name to scaffold a new agent."}
+                        {
+                            "error": (
+                                "No agent_name provided and no agent loaded in this session. "
+                                "To fix: call list_agents() to find the agent name, then call "
+                                "initialize_and_build_agent(agent_name='<name>') to scaffold it."
+                            )
+                        }
                     )
+
+                # Fall back succeeded — switch to building without scaffolding
+                logger.info(
+                    "initialize_and_build_agent: no agent_name provided, "
+                    "falling back to session agent '%s'",
+                    agent_name,
+                )
                 if phase_state is not None:
                     await phase_state.switch_to_building(source="tool")
+                    if phase_state.inject_notification:
+                        await phase_state.inject_notification(
+                            "[PHASE CHANGE] Switched to BUILDING phase. "
+                            "Start implementing the fix now."
+                        )
                 return json.dumps(
                     {
                         "status": "editing",
                         "phase": "building",
+                        "agent_name": agent_name,
+                        "warning": (
+                            f"No agent_name provided — using session agent '{agent_name}'. "
+                            f"Agent files are at exports/{agent_name}/."
+                        ),
                         "message": (
                             "Switched to BUILDING phase. Full coding tools restored. "
                             "Implement the fix, then call load_built_agent(path) to reload."
@@ -643,6 +684,13 @@ def register_queen_lifecycle_tools(
                 if parsed.get("success", True):
                     if phase_state is not None:
                         await phase_state.switch_to_building(source="tool")
+                        # Inject a continuation message so the queen starts
+                        # building immediately instead of blocking for user input.
+                        if phase_state.inject_notification:
+                            await phase_state.inject_notification(
+                                "[PHASE CHANGE] Agent scaffolded and switched to BUILDING phase. "
+                                "Start implementing the agent nodes now."
+                            )
             except (json.JSONDecodeError, KeyError, TypeError):
                 pass
             return result_str

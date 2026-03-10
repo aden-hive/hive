@@ -35,15 +35,21 @@ def _build_appendices() -> str:
 # Shared appendices — appended to every coding node's system prompt.
 _appendices = _build_appendices()
 
-# GCU first-class section for building phase (when GCU is enabled).
-# This is placed prominently in the main prompt body, not as an appendix.
+# GCU first-class section (when GCU is enabled).
+# Placed prominently in the main prompt body, not as an appendix.
 _gcu_building_section = (
     ("\n\n# GCU Nodes — Browser Automation\n\n" + _gcu_guide)
     if _is_gcu_enabled() and _gcu_guide
     else ""
 )
 
-# Tools available to both coder (worker) and queen.
+_gcu_planning_section = (
+    ("\n\n# GCU Nodes — Browser Automation\n\n" + _gcu_guide)
+    if _is_gcu_enabled() and _gcu_guide
+    else ""
+)
+
+# Tools available to phases.
 _SHARED_TOOLS = [
     # File I/O
     "read_file",
@@ -335,7 +341,7 @@ use box-drawing characters and clear flow arrows:
 │  gather                 │
 │  subagent: gcu_search   │
 │  input:  user_request   │
-│  tools: web_search,     │
+│  tools: load_data,      │
 │         save_data       │
 └────────────┬────────────┘
              │ on_success
@@ -1057,4 +1063,5 @@ __all__ = [
     "_package_builder_knowledge",
     "_appendices",
     "_gcu_building_section",
+    "_gcu_planning_section",
 ]
