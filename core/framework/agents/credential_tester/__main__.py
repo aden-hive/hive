@@ -54,42 +54,6 @@ def cli():
 @cli.command()
 @click.option("--verbose", "-v", is_flag=True)
 @click.option("--debug", is_flag=True)
-def tui(verbose, debug):
-    """Launch TUI to test a credential interactively."""
-    setup_logging(verbose=verbose, debug=debug)
-
-    try:
-        from framework.tui.app import AdenTUI
-    except ImportError:
-        click.echo("TUI requires 'textual'. Install with: pip install textual")
-        sys.exit(1)
-
-    agent = CredentialTesterAgent()
-    account = pick_account(agent)
-    if account is None:
-        sys.exit(1)
-
-    agent.select_account(account)
-    provider = account.get("provider", "?")
-    alias = account.get("alias", "?")
-    click.echo(f"\nTesting {provider}/{alias}...\n")
-
-    async def run_tui():
-        agent._setup()
-        runtime = agent._agent_runtime
-        await runtime.start()
-        try:
-            app = AdenTUI(runtime)
-            await app.run_async()
-        finally:
-            await runtime.stop()
-
-    asyncio.run(run_tui())
-
-
-@cli.command()
-@click.option("--verbose", "-v", is_flag=True)
-@click.option("--debug", is_flag=True)
 def shell(verbose, debug):
     """Interactive CLI session to test a credential."""
     setup_logging(verbose=verbose, debug=debug)
