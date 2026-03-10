@@ -374,8 +374,6 @@ class TestSessionCRUD:
         app = _make_app_with_session(session)
         async with TestClient(TestServer(app)) as client:
             resp = await client.get("/api/sessions/test_agent")
-            if resp.status != 200:
-                print(f"DEBUG: Response body: {await resp.text()}")
             assert resp.status == 200
             data = await resp.json()
             assert data["session_id"] == "test_agent"
