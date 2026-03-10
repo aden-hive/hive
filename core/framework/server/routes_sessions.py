@@ -731,7 +731,7 @@ async def handle_delete_history_session(request: web.Request) -> web.Response:
 
 async def handle_discover(request: web.Request) -> web.Response:
     """GET /api/discover — discover agents from filesystem."""
-    from framework.tui.screens.agent_picker import discover_agents
+    from framework.agents.discovery import discover_agents
 
     manager = _get_manager(request)
     loaded_paths = {str(s.worker_path) for s in manager.list_sessions() if s.worker_path}
