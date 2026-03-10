@@ -684,6 +684,7 @@ class EventLoopNode(NodeProtocol):
                         queen_input_requested,
                         request_system_prompt,
                         request_messages,
+                        reported_to_parent,
                     ) = await self._run_single_turn(
                         ctx, conversation, tools, iteration, accumulator
                     )
@@ -885,6 +886,7 @@ class EventLoopNode(NodeProtocol):
                 and not outputs_set
                 and not user_input_requested
                 and not queen_input_requested
+                and not reported_to_parent
             )
             if truly_empty and accumulator is not None:
                 missing = self._get_missing_output_keys(
@@ -1803,12 +1805,13 @@ class EventLoopNode(NodeProtocol):
         bool,
         str,
         list[dict[str, Any]],
+        bool,
     ]:
         """Run a single LLM turn with streaming and tool execution.
 
         Returns (assistant_text, real_tool_results, outputs_set, token_counts, logged_tool_calls,
         user_input_requested, ask_user_prompt, ask_user_options, queen_input_requested,
-        system_prompt, messages).
+        system_prompt, messages, reported_to_parent).
 
         ``real_tool_results`` contains only results from actual tools (web_search,
         etc.), NOT from synthetic framework tools such as ``set_output``,
@@ -1840,6 +1843,7 @@ class EventLoopNode(NodeProtocol):
         ask_user_prompt = ""
         ask_user_options: list[str] | None = None
         queen_input_requested = False
+        reported_to_parent = False
         # Accumulate ALL tool calls across inner iterations for L3 logging.
         # Unlike real_tool_results (reset each inner iteration), this persists.
         logged_tool_calls: list[dict] = []
@@ -1993,6 +1997,7 @@ class EventLoopNode(NodeProtocol):
                     queen_input_requested,
                     final_system_prompt,
                     final_messages,
+                    reported_to_parent,
                 )
 
             # Execute tool calls — framework tools (set_output, ask_user)
@@ -2194,6 +2199,7 @@ class EventLoopNode(NodeProtocol):
 
                 elif tc.tool_name == "report_to_parent":
                     # --- Report from sub-agent to parent (optionally blocking) ---
+                    reported_to_parent = True
                     msg = tc.tool_input.get("message", "")
                     data = tc.tool_input.get("data")
                     wait = tc.tool_input.get("wait_for_response", False)
@@ -2475,6 +2481,7 @@ class EventLoopNode(NodeProtocol):
                     queen_input_requested,
                     final_system_prompt,
                     final_messages,
+                    reported_to_parent,
                 )
 
             # --- Mid-turn pruning: prevent context blowup within a single turn ---
@@ -2506,6 +2513,7 @@ class EventLoopNode(NodeProtocol):
                     queen_input_requested,
                     final_system_prompt,
                     final_messages,
+                    reported_to_parent,
                 )
 
             # Tool calls processed -- loop back to stream with updated conversation
