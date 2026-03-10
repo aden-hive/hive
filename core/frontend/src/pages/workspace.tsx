@@ -255,8 +255,8 @@ interface AgentBackendState {
   /** The message ID of the current worker input request (for inline reply box) */
   workerInputMessageId: string | null;
   queenBuilding: boolean;
-  /** Queen operating mode — "building" (coding), "staging" (loaded), or "running" (executing) */
-  queenMode: "building" | "staging" | "running";
+  /** Queen operating phase — "planning" (design), "building" (coding), "staging" (loaded), or "running" (executing) */
+  queenPhase: "planning" | "building" | "staging" | "running";
   workerRunState: "idle" | "deploying" | "running";
   currentExecutionId: string | null;
   nodeLogs: Record<string, string[]>;
@@ -291,7 +291,7 @@ function defaultAgentState(): AgentBackendState {
     awaitingInput: false,
     workerInputMessageId: null,
     queenBuilding: false,
-    queenMode: "building",
+    queenPhase: "planning",
     workerRunState: "idle",
     currentExecutionId: null,
     nodeLogs: {},
@@ -337,6 +337,11 @@ export default function Workspace() {
         // tabKey is the actual key used in sessionsByAgent (may contain "::" suffix).
         // Fall back to agentType for tabs persisted before this field was added.
         const tabKey = tab.tabKey || tab.agentType;
+        // Skip new-agent tabs when starting fresh from home with a prompt
+        // to avoid creating duplicate sessions
+        if (initialPrompt && hasExplicitAgent && (tab.agentType === "new-agent" || tab.agentType.startsWith("new-agent-"))) {
+          continue;
+        }
         if (!initial[tabKey]) initial[tabKey] = [];
         const session = createSession(tab.agentType, tab.label);
         session.id = tab.id;
@@ -410,7 +415,15 @@ export default function Workspace() {
       }
     }
     if (persisted) {
-      const restored = { ...persisted.activeSessionByAgent };
+      let restored = { ...persisted.activeSessionByAgent };
+      // Remove stale new-agent-* entries when starting fresh from home
+      if (initialPrompt && hasExplicitAgent) {
+        restored = Object.fromEntries(
+          Object.entries(restored).filter(([key]) =>
+            key !== "new-agent" && !key.startsWith("new-agent-")
+          )
+        );
+      }
       const urlSessions = sessionsByAgent[initialAgent];
       if (urlSessions?.length) {
         // When a prompt was submitted from home, activate the newly created
@@ -590,6 +603,10 @@ export default function Workspace() {
     // agentType may be a unique composite key ("exports/foo::sessionId") for additional
     // tabs — extract the real agent path for selector checks and API calls.
     const agentPath = baseAgentType(agentType);
+    // Ref-based guard: prevents double-load from React StrictMode (must be first check)
+    if (loadingRef.current.has(agentType)) return;
+    loadingRef.current.add(agentType);
+
     if (agentPath === "new-agent" || agentType.startsWith("new-agent-")) {
       // Create a queen-only session (no worker) for agent building
       updateAgentState(agentType, { loading: true, error: null, ready: false, sessionId: null });
@@ -721,10 +738,6 @@ export default function Workspace() {
       }
       return;
     }
-
-    // Ref-based guard: prevents double-load from React StrictMode
-    if (loadingRef.current.has(agentType)) return;
-    loadingRef.current.add(agentType);
 
     updateAgentState(agentType, { loading: true, error: null, ready: false, sessionId: null });
 
@@ -879,12 +892,12 @@ export default function Workspace() {
       // failed, the throw inside the catch exits the outer try block.
       const session = liveSession!;
       const displayName = formatAgentDisplayName(session.worker_name || agentType);
-      const initialMode = session.queen_mode || (session.has_worker ? "staging" : "building");
+      const initialPhase = session.queen_phase || (session.has_worker ? "staging" : "planning");
       updateAgentState(agentType, {
         sessionId: session.session_id,
         displayName,
-        queenMode: initialMode,
-        queenBuilding: initialMode === "building",
+        queenPhase: initialPhase,
+        queenBuilding: initialPhase === "building",
       });
 
       // Update the session label + backendSessionId.  Also set historySourceId
@@ -964,12 +977,19 @@ export default function Workspace() {
       // If no messages were actually restored, lift the intro suppression gate
       if (restoredMsgs.length === 0 && !coldRestoreId) suppressIntroRef.current.delete(agentType);
 
+      // Mark queenReady immediately only when resuming a session that already
+      // has messages (live resume or cold restore).  For a fresh session the
+      // queen still needs to process the thinking hook before its first
+      // response, so leave queenReady false and let the SSE handler flip it
+      // on the first queen event — this keeps the "Connecting to queen..."
+      // loading indicator visible until the queen actually responds.
+      const hasRestoredContent = restoredMsgs.length > 0 || !!coldRestoreId;
       updateAgentState(agentType, {
         sessionId: session.session_id,
         displayName,
         ready: true,
         loading: false,
-        queenReady: true,
+        queenReady: !!(isResumedSession || hasRestoredContent),
         ...(isWorkerRunning ? { workerRunState: "running" } : {}),
       });
     } catch (err: unknown) {
@@ -980,13 +1000,16 @@ export default function Workspace() {
     }
   }, [updateAgentState, initialPrompt]);
 
-  // Auto-load agents when new tabs appear in sessionsByAgent
+  // Auto-load agents when new tabs appear in sessionsByAgent.
+  // Only eagerly load the active tab — background tabs are deferred until the
+  // user switches to them to avoid creating duplicate backend sessions on mount.
   useEffect(() => {
     for (const agentType of Object.keys(sessionsByAgent)) {
       if (agentStates[agentType]?.sessionId || agentStates[agentType]?.loading || agentStates[agentType]?.error) continue;
+      if (agentType !== activeWorker) continue;
       loadAgentForType(agentType);
     }
-  }, [sessionsByAgent, agentStates, loadAgentForType, updateAgentState]);
+  }, [sessionsByAgent, agentStates, loadAgentForType, updateAgentState, activeWorker]);
 
   // --- Fetch graph topology when a session becomes ready ---
   const fetchGraphForAgent = useCallback(async (agentType: string, sessionId: string, knownGraphId?: string) => {
@@ -1256,16 +1279,17 @@ export default function Workspace() {
       // Backend event timestamp for correct queen/worker message ordering
       const eventCreatedAt = event.timestamp ? new Date(event.timestamp).getTime() : Date.now();
 
-      // Mark queen as ready on the first queen SSE event
-      if (isQueen && !agentStates[agentType]?.queenReady) {
-        updateAgentState(agentType, { queenReady: true });
-      }
+      // Mark queen as ready on the first queen SSE event.
+      // Deferred to individual event handlers below so we can batch it with
+      // other state updates (e.g. queenIsTyping) and avoid a flash frame
+      // where queenReady=true but queenIsTyping=false.
+      const shouldMarkQueenReady = isQueen && !agentStates[agentType]?.queenReady;
 
       switch (event.type) {
         case "execution_started":
           if (isQueen) {
             turnCounterRef.current[turnKey] = currentTurn + 1;
-            updateAgentState(agentType, { isTyping: true, queenIsTyping: true });
+            updateAgentState(agentType, { isTyping: true, queenIsTyping: true, ...(shouldMarkQueenReady && { queenReady: true }) });
           } else {
             // Warn if prior LLM snapshots are being dropped (edge case: execution_completed never arrived)
             const priorSnapshots = agentStates[agentType]?.llmSnapshots || {};
@@ -1527,7 +1551,7 @@ export default function Workspace() {
         case "tool_call_started": {
           console.log('[TOOL_PILL] tool_call_started received:', { isQueen, nodeId: event.node_id, streamId: event.stream_id, agentType, executionId: event.execution_id, toolName: event.data?.tool_name });
 
-          // queenBuilding is now driven by queen_mode_changed events
+          // queenBuilding is now driven by queen_phase_changed events
 
           if (event.node_id) {
             if (!isQueen) {
@@ -1762,15 +1786,18 @@ export default function Workspace() {
           break;
         }
 
-        case "queen_mode_changed": {
-          const rawMode = event.data?.mode as string;
-          const newMode: "building" | "staging" | "running" =
-            rawMode === "running" ? "running" : rawMode === "staging" ? "staging" : "building";
+        case "queen_phase_changed": {
+          const rawPhase = event.data?.phase as string;
+          const newPhase: "planning" | "building" | "staging" | "running" =
+            rawPhase === "running" ? "running"
+            : rawPhase === "staging" ? "staging"
+            : rawPhase === "planning" ? "planning"
+            : "building";
           updateAgentState(agentType, {
-            queenMode: newMode,
-            queenBuilding: newMode === "building",
-            // Sync workerRunState so the RunButton reflects the mode
-            workerRunState: newMode === "running" ? "running" : "idle",
+            queenPhase: newPhase,
+            queenBuilding: newPhase === "building",
+            // Sync workerRunState so the RunButton reflects the phase
+            workerRunState: newPhase === "running" ? "running" : "idle",
           });
           break;
         }
@@ -1819,6 +1846,8 @@ export default function Workspace() {
         }
 
         default:
+          // Fallback: ensure queenReady is set even for unexpected first events
+          if (shouldMarkQueenReady) updateAgentState(agentType, { queenReady: true });
           break;
       }
     },
@@ -2352,7 +2381,7 @@ export default function Workspace() {
               onPause={handlePause}
               runState={activeAgentState?.workerRunState ?? "idle"}
               building={activeAgentState?.queenBuilding ?? false}
-              queenMode={activeAgentState?.queenMode ?? "building"}
+              queenPhase={activeAgentState?.queenPhase ?? "building"}
             />
           </div>
         </div>
@@ -2422,7 +2451,7 @@ export default function Workspace() {
                   (activeAgentState?.loading ?? true) ||
                   !(activeAgentState?.queenReady)
                 }
-                queenMode={activeAgentState?.queenMode ?? "building"}
+                queenPhase={activeAgentState?.queenPhase ?? "building"}
                 pendingQuestion={activeAgentState?.awaitingInput ? activeAgentState.pendingQuestion : null}
                 pendingOptions={activeAgentState?.awaitingInput ? activeAgentState.pendingOptions : null}
                 onQuestionSubmit={

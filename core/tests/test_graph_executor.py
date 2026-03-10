@@ -59,6 +59,7 @@ async def test_executor_single_node_success():
         ],
         edges=[],
         entry_node="n1",
+        terminal_nodes=["n1"],
     )
 
     executor = GraphExecutor(
@@ -114,6 +115,7 @@ async def test_executor_single_node_failure():
         ],
         edges=[],
         entry_node="n1",
+        terminal_nodes=["n1"],
     )
 
     executor = GraphExecutor(
@@ -191,6 +193,7 @@ async def test_executor_skips_events_for_event_loop_nodes():
         ],
         edges=[],
         entry_node="el1",
+        terminal_nodes=["el1"],
     )
 
     executor = GraphExecutor(
@@ -229,6 +232,7 @@ async def test_executor_no_events_without_event_bus():
         ],
         edges=[],
         entry_node="n1",
+        terminal_nodes=["n1"],
     )
 
     # No event_bus passed — should not crash

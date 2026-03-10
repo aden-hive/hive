@@ -178,6 +178,51 @@ class _BrevoClient:
         )
         return self._handle_response(response)
 
+    def list_contacts(
+        self,
+        limit: int = 50,
+        offset: int = 0,
+        modified_since: str | None = None,
+    ) -> dict[str, Any]:
+        """List contacts with pagination."""
+        params: dict[str, Any] = {"limit": limit, "offset": offset}
+        if modified_since:
+            params["modifiedSince"] = modified_since
+        response = httpx.get(
+            f"{BREVO_API_BASE}/contacts",
+            headers=self._headers,
+            params=params,
+            timeout=30.0,
+        )
+        return self._handle_response(response)
+
+    def delete_contact(self, email: str) -> dict[str, Any]:
+        """Delete a contact by email."""
+        response = httpx.delete(
+            f"{BREVO_API_BASE}/contacts/{email}",
+            headers=self._headers,
+            timeout=30.0,
+        )
+        return self._handle_response(response)
+
+    def list_email_campaigns(
+        self,
+        status: str | None = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> dict[str, Any]:
+        """List email campaigns."""
+        params: dict[str, Any] = {"limit": limit, "offset": offset}
+        if status:
+            params["status"] = status
+        response = httpx.get(
+            f"{BREVO_API_BASE}/emailCampaigns",
+            headers=self._headers,
+            params=params,
+            timeout=30.0,
+        )
+        return self._handle_response(response)
+
 
 def register_tools(
     mcp: FastMCP,
@@ -416,6 +461,134 @@ def register_tools(
             if "error" in result:
                 return result
             return {"success": True, "email": email}
+        except httpx.TimeoutException:
+            return {"error": "Request timed out"}
+        except httpx.RequestError as e:
+            return {"error": f"Network error: {e}"}
+
+    @mcp.tool()
+    def brevo_list_contacts(
+        limit: int = 50,
+        offset: int = 0,
+        modified_since: str = "",
+    ) -> dict:
+        """
+        List contacts in Brevo with pagination.
+
+        Args:
+            limit: Number of contacts per page (default 50, max 1000)
+            offset: Pagination offset (default 0)
+            modified_since: Filter by modification date (ISO 8601, optional)
+
+        Returns:
+            Dict with contacts list and total count
+        """
+        client = _get_client()
+        if isinstance(client, dict):
+            return client
+        try:
+            result = client.list_contacts(
+                limit=max(1, min(limit, 1000)),
+                offset=offset,
+                modified_since=modified_since or None,
+            )
+            if "error" in result:
+                return result
+            contacts = result.get("contacts", [])
+            return {
+                "count": len(contacts),
+                "total": result.get("count", len(contacts)),
+                "contacts": [
+                    {
+                        "id": c.get("id"),
+                        "email": c.get("email"),
+                        "first_name": (c.get("attributes") or {}).get("FIRSTNAME"),
+                        "last_name": (c.get("attributes") or {}).get("LASTNAME"),
+                        "list_ids": c.get("listIds", []),
+                        "email_blacklisted": c.get("emailBlacklisted", False),
+                        "modified_at": c.get("modifiedAt"),
+                    }
+                    for c in contacts
+                ],
+            }
+        except httpx.TimeoutException:
+            return {"error": "Request timed out"}
+        except httpx.RequestError as e:
+            return {"error": f"Network error: {e}"}
+
+    @mcp.tool()
+    def brevo_delete_contact(email: str) -> dict:
+        """
+        Delete a contact from Brevo by email address.
+
+        Args:
+            email: Email address of the contact to delete
+
+        Returns:
+            Dict with success status or error
+        """
+        client = _get_client()
+        if isinstance(client, dict):
+            return client
+        if not email or "@" not in email:
+            return {"error": "Invalid email address"}
+        try:
+            result = client.delete_contact(email)
+            if "error" in result:
+                return result
+            return {"success": True, "email": email, "status": "deleted"}
+        except httpx.TimeoutException:
+            return {"error": "Request timed out"}
+        except httpx.RequestError as e:
+            return {"error": f"Network error: {e}"}
+
+    @mcp.tool()
+    def brevo_list_email_campaigns(
+        status: str = "",
+        limit: int = 50,
+        offset: int = 0,
+    ) -> dict:
+        """
+        List email campaigns from Brevo.
+
+        Args:
+            status: Filter by status: 'draft', 'sent', 'queued', 'suspended',
+                'inProcess', 'archive' (optional)
+            limit: Number per page (default 50, max 1000)
+            offset: Pagination offset (default 0)
+
+        Returns:
+            Dict with campaigns list (name, subject, status, stats)
+        """
+        client = _get_client()
+        if isinstance(client, dict):
+            return client
+        try:
+            result = client.list_email_campaigns(
+                status=status or None,
+                limit=max(1, min(limit, 1000)),
+                offset=offset,
+            )
+            if "error" in result:
+                return result
+            campaigns = result.get("campaigns", [])
+            return {
+                "count": len(campaigns),
+                "total": result.get("count", len(campaigns)),
+                "campaigns": [
+                    {
+                        "id": c.get("id"),
+                        "name": c.get("name"),
+                        "subject": c.get("subject"),
+                        "status": c.get("status"),
+                        "type": c.get("type"),
+                        "created_at": c.get("createdAt"),
+                        "scheduled_at": c.get("scheduledAt"),
+                        "statistics": c.get("statistics", {}).get("globalStats", {}),
+                    }
+                    for c in campaigns
+                ],
+            }
         except httpx.TimeoutException:
             return {"error": "Request timed out"}
         except httpx.RequestError as e:

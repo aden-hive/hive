@@ -561,7 +561,7 @@ The runtime logger automatically flags issues based on execution metrics:
 
 ### Attention Categories
 
-Used by `/hive-debugger` skill for issue categorization:
+Used for runtime issue categorization:
 
 1. **Missing Outputs**: Node didn't set required output keys
 2. **Tool Errors**: Tool calls failed (API errors, timeouts)
@@ -690,7 +690,7 @@ rm -rf session_2025*
 
 **Documentation:**
 - `EXECUTION_STORAGE_REDESIGN.md` - Unified session storage design
-- `/.claude/skills/hive-debugger/SKILL.md` - Interactive debugging skill
+- `docs/developer-guide.md` - Debugging and troubleshooting workflows
 
 **Related:**
 - `core/framework/schemas/session_state.py` - Session state schema

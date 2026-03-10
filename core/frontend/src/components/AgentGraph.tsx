@@ -31,7 +31,7 @@ interface AgentGraphProps {
   version?: string;
   runState?: RunState;
   building?: boolean;
-  queenMode?: "building" | "staging" | "running";
+  queenPhase?: "planning" | "building" | "staging" | "running";
 }
 
 // --- Extracted RunButton so hover state survives parent re-renders ---
@@ -146,7 +146,7 @@ function truncateLabel(label: string, availablePx: number, fontSize: number): st
   return label.slice(0, Math.max(maxChars - 1, 1)) + "\u2026";
 }
 
-export default function AgentGraph({ nodes, title: _title, onNodeClick, onRun, onPause, version, runState: externalRunState, building, queenMode }: AgentGraphProps) {
+export default function AgentGraph({ nodes, title: _title, onNodeClick, onRun, onPause, version, runState: externalRunState, building, queenPhase }: AgentGraphProps) {
   const [localRunState, setLocalRunState] = useState<RunState>("idle");
   const runState = externalRunState ?? localRunState;
   const runBtnRef = useRef<HTMLButtonElement>(null);
@@ -278,7 +278,7 @@ export default function AgentGraph({ nodes, title: _title, onNodeClick, onRun, o
               </span>
             )}
           </div>
-          <RunButton runState={runState} disabled={nodes.length === 0 || queenMode === "building"} onRun={handleRun} onPause={onPause ?? (() => {})} btnRef={runBtnRef} />
+          <RunButton runState={runState} disabled={nodes.length === 0 || queenPhase === "building" || queenPhase === "planning"} onRun={handleRun} onPause={onPause ?? (() => {})} btnRef={runBtnRef} />
         </div>
         <div className="flex-1 flex items-center justify-center px-5">
           {building ? (

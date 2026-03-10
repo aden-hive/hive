@@ -39,7 +39,7 @@ DEFAULT_EVENT_TYPES = [
     EventType.WORKER_LOADED,
     EventType.CREDENTIALS_REQUIRED,
     EventType.SUBAGENT_REPORT,
-    EventType.QUEEN_MODE_CHANGED,
+    EventType.QUEEN_PHASE_CHANGED,
 ]
 
 # Keepalive interval in seconds
@@ -93,7 +93,7 @@ async def handle_events(request: web.Request) -> web.StreamResponse:
         "node_loop_started",
         "credentials_required",
         "worker_loaded",
-        "queen_mode_changed",
+        "queen_phase_changed",
     }
 
     client_disconnected = asyncio.Event()
@@ -179,6 +179,12 @@ async def handle_events(request: web.Request) -> web.StreamResponse:
                     break
             except (ConnectionResetError, ConnectionError, _AiohttpConnReset):
                 close_reason = "client_disconnected"
+                break
+            except RuntimeError as exc:
+                if "closing transport" in str(exc).lower():
+                    close_reason = "client_disconnected"
+                else:
+                    close_reason = f"error: {exc}"
                 break
             except Exception as exc:
                 close_reason = f"error: {exc}"

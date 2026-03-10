@@ -293,3 +293,128 @@ def register_tools(
             "resources": resources,
             "total_count": data.get("total_count", 0),
         }
+
+    @mcp.tool()
+    def cloudinary_get_usage() -> dict[str, Any]:
+        """
+        Get current Cloudinary account usage and limits.
+
+        Returns:
+            Dict with storage, bandwidth, transformations usage and limits
+        """
+        cloud, key, secret = _get_credentials(credentials)
+        if not cloud or not key or not secret:
+            return _auth_error()
+
+        url = f"{_base_url(cloud)}/usage"
+        data = _request("get", url, key, secret)
+        if "error" in data:
+            return data
+
+        return {
+            "plan": data.get("plan", ""),
+            "storage": {
+                "used_bytes": (data.get("storage") or {}).get("usage", 0),
+                "limit_bytes": (data.get("storage") or {}).get("limit", 0),
+                "used_percent": (data.get("storage") or {}).get("used_percent", 0),
+            },
+            "bandwidth": {
+                "used_bytes": (data.get("bandwidth") or {}).get("usage", 0),
+                "limit_bytes": (data.get("bandwidth") or {}).get("limit", 0),
+                "used_percent": (data.get("bandwidth") or {}).get("used_percent", 0),
+            },
+            "transformations": {
+                "used": (data.get("transformations") or {}).get("usage", 0),
+                "limit": (data.get("transformations") or {}).get("limit", 0),
+                "used_percent": (data.get("transformations") or {}).get("used_percent", 0),
+            },
+            "resources": data.get("resources", 0),
+            "derived_resources": data.get("derived_resources", 0),
+            "last_updated": data.get("last_updated", ""),
+        }
+
+    @mcp.tool()
+    def cloudinary_rename_resource(
+        from_public_id: str,
+        to_public_id: str,
+        resource_type: str = "image",
+        overwrite: bool = False,
+    ) -> dict[str, Any]:
+        """
+        Rename a resource in Cloudinary.
+
+        Args:
+            from_public_id: Current public ID (required)
+            to_public_id: New public ID (required)
+            resource_type: Type: image, video, raw (default image)
+            overwrite: Whether to overwrite if target exists (default False)
+
+        Returns:
+            Dict with rename result
+        """
+        cloud, key, secret = _get_credentials(credentials)
+        if not cloud or not key or not secret:
+            return _auth_error()
+        if not from_public_id or not to_public_id:
+            return {"error": "from_public_id and to_public_id are required"}
+
+        url = f"{_base_url(cloud)}/{resource_type}/rename"
+        form_data: dict[str, Any] = {
+            "from_public_id": from_public_id,
+            "to_public_id": to_public_id,
+        }
+        if overwrite:
+            form_data["overwrite"] = "true"
+
+        data = _request("post", url, key, secret, data=form_data)
+        if "error" in data:
+            return data
+
+        return {
+            "public_id": data.get("public_id", ""),
+            "secure_url": data.get("secure_url", ""),
+            "format": data.get("format", ""),
+            "status": "renamed",
+        }
+
+    @mcp.tool()
+    def cloudinary_add_tag(
+        tag: str,
+        public_ids: str,
+        resource_type: str = "image",
+    ) -> dict[str, Any]:
+        """
+        Add a tag to one or more Cloudinary resources.
+
+        Args:
+            tag: Tag name to add (required)
+            public_ids: Comma-separated public IDs (required, up to 1000)
+            resource_type: Type: image, video, raw (default image)
+
+        Returns:
+            Dict with tagged public IDs
+        """
+        cloud, key, secret = _get_credentials(credentials)
+        if not cloud or not key or not secret:
+            return _auth_error()
+        if not tag or not public_ids:
+            return {"error": "tag and public_ids are required"}
+
+        ids = [pid.strip() for pid in public_ids.split(",") if pid.strip()]
+        url = f"{_base_url(cloud)}/{resource_type}/tags"
+        body = {
+            "tag": tag,
+            "public_ids": ids,
+            "command": "add",
+        }
+        data = _request(
+            "post", url, key, secret, json=body, headers={"Content-Type": "application/json"}
+        )
+        if "error" in data:
+            return data
+
+        return {
+            "tag": tag,
+            "public_ids": data.get("public_ids", ids),
+            "status": "tagged",
+        }
