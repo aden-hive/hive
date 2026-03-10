@@ -630,12 +630,33 @@ class GraphSpec(BaseModel):
                 "Consider adding a termination point where execution ends."
             )
 
+        # Check for duplicate edge IDs
+        seen_edge_ids: set[str] = set()
+        for edge in self.edges:
+            if edge.id in seen_edge_ids:
+                errors.append(f"Duplicate edge ID: '{edge.id}'")
+            seen_edge_ids.add(edge.id)
+
         # Check edge references
         for edge in self.edges:
             if not self.get_node(edge.source):
                 errors.append(f"Edge '{edge.id}' references missing source '{edge.source}'")
             if not self.get_node(edge.target):
                 errors.append(f"Edge '{edge.id}' references missing target '{edge.target}'")
+
+            # Warn on unconditional self-loops
+            if edge.source == edge.target and edge.condition == EdgeCondition.ALWAYS:
+                warnings.append(
+                    f"Edge '{edge.id}' is an unconditional self-loop on '{edge.source}'. "
+                    "This will loop until max_steps is reached."
+                )
+
+            # Error on CONDITIONAL edges without condition_expr
+            if edge.condition == EdgeCondition.CONDITIONAL and not edge.condition_expr:
+                errors.append(
+                    f"Edge '{edge.id}' has condition=CONDITIONAL but no condition_expr. "
+                    "The edge will never fire."
+                )
 
         # Check for unreachable nodes
         # Start with main entry node and all entry points (for pause/resume architecture)
