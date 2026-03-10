@@ -1252,6 +1252,53 @@ def validate_agent_package(agent_name: str) -> str:
         path_parts.append(pythonpath)
     env["PYTHONPATH"] = os.pathsep.join(path_parts)
 
+    # Step 0: Module contract — __init__.py must expose goal, nodes, edges
+    try:
+        _contract_script = textwrap.dedent("""\
+            import importlib, json
+            mod = importlib.import_module('{agent_name}')
+            missing = [a for a in ('goal', 'nodes', 'edges') if getattr(mod, a, None) is None]
+            if missing:
+                print(json.dumps({{
+                    'valid': False,
+                    'error': (
+                        "Module '{agent_name}' is missing module-level attributes: "
+                        + ", ".join(missing) + ". "
+                        "Fix: in {agent_name}/__init__.py, add "
+                        "'from .agent import " + ", ".join(missing) + "' "
+                        "so that 'import {agent_name}' exposes them at package level."
+                    )
+                }}))
+            else:
+                print(json.dumps({{'valid': True}}))
+        """).format(agent_name=agent_name)
+        proc = subprocess.run(
+            ["uv", "run", "python", "-c", _contract_script],
+            capture_output=True,
+            text=True,
+            timeout=30,
+            env=env,
+            cwd=PROJECT_ROOT,
+            stdin=subprocess.DEVNULL,
+        )
+        if proc.returncode == 0:
+            result = json.loads(proc.stdout.strip())
+            steps["module_contract"] = {
+                "passed": result["valid"],
+                "output": result.get("error", "goal, nodes, edges exported correctly"),
+            }
+        else:
+            steps["module_contract"] = {
+                "passed": False,
+                "error": (
+                    f"Failed to import '{agent_name}': {proc.stderr.strip()[:1000]}. "
+                    f"Fix: ensure {agent_name}/__init__.py exists and can be imported "
+                    f"without errors (check syntax, missing dependencies, relative imports)."
+                ),
+            }
+    except Exception as e:
+        steps["module_contract"] = {"passed": False, "error": str(e)}
+
     # Step A: Class validation (subprocess for import isolation)
     try:
         proc = subprocess.run(

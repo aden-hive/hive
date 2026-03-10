@@ -1618,6 +1618,51 @@ def register_queen_lifecycle_tools(
             if not resolved_path.exists():
                 return json.dumps({"error": f"Agent path does not exist: {agent_path}"})
 
+            # Pre-check: verify the module exports goal/nodes/edges before
+            # attempting the full load.  This gives the queen an actionable
+            # error message instead of a cryptic ImportError or TypeError.
+            try:
+                import importlib
+                import sys as _sys
+
+                pkg_name = resolved_path.name
+                parent_dir = str(resolved_path.resolve().parent)
+                # Temporarily put parent on sys.path for import
+                if parent_dir not in _sys.path:
+                    _sys.path.insert(0, parent_dir)
+                # Evict stale cached modules
+                stale = [
+                    n for n in _sys.modules
+                    if n == pkg_name or n.startswith(f"{pkg_name}.")
+                ]
+                for n in stale:
+                    del _sys.modules[n]
+
+                mod = importlib.import_module(pkg_name)
+                missing_attrs = [
+                    attr for attr in ("goal", "nodes", "edges")
+                    if getattr(mod, attr, None) is None
+                ]
+                if missing_attrs:
+                    return json.dumps({
+                        "error": (
+                            f"Agent module '{pkg_name}' is missing module-level "
+                            f"attributes: {', '.join(missing_attrs)}. "
+                            f"Fix: in {pkg_name}/__init__.py, add "
+                            f"'from .agent import {', '.join(missing_attrs)}' "
+                            f"so that 'import {pkg_name}' exposes them at package level."
+                        )
+                    })
+            except Exception as pre_err:
+                return json.dumps({
+                    "error": (
+                        f"Failed to import agent module '{resolved_path.name}': {pre_err}. "
+                        f"Fix: ensure {resolved_path.name}/__init__.py exists and can be "
+                        f"imported without errors (check syntax, missing dependencies, "
+                        f"and relative imports)."
+                    )
+                })
+
             try:
                 updated_session = await session_manager.load_worker(
                     manager_session_id,
