@@ -101,14 +101,20 @@ class QueenPhaseState:
         return list(self.building_tools)
 
     def get_current_prompt(self) -> str:
-        """Return the system prompt for the current phase."""
+        """Return the system prompt for the current phase, with fresh memory appended."""
         if self.phase == "planning":
-            return self.prompt_planning
-        if self.phase == "running":
-            return self.prompt_running
-        if self.phase == "staging":
-            return self.prompt_staging
-        return self.prompt_building
+            base = self.prompt_planning
+        elif self.phase == "running":
+            base = self.prompt_running
+        elif self.phase == "staging":
+            base = self.prompt_staging
+        else:
+            base = self.prompt_building
+
+        from framework.agents.queen.queen_memory import format_for_injection
+
+        memory = format_for_injection()
+        return base + ("\n\n" + memory if memory else "")
 
     async def _emit_phase_event(self) -> None:
         """Publish a QUEEN_PHASE_CHANGED event so the frontend updates the tag."""

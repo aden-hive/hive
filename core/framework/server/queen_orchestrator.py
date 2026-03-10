@@ -137,6 +137,11 @@ async def create_queen(
     phase_state.staging_tools = [t for t in queen_tools if t.name in staging_names]
     phase_state.running_tools = [t for t in queen_tools if t.name in running_names]
 
+    # ---- Cross-session memory ----------------------------------------
+    from framework.agents.queen.queen_memory import seed_if_missing
+
+    seed_if_missing()
+
     # ---- Compose phase-specific prompts ------------------------------
     _orig_node = _queen_graph.nodes[0]
 
@@ -203,8 +208,7 @@ async def create_queen(
                     data={"persona": persona},
                 )
             )
-        body = _planning_body if phase_state.phase == "planning" else _building_body
-        return HookResult(system_prompt=persona + "\n\n" + body)
+        return HookResult(system_prompt=persona + "\n\n" + phase_state.get_current_prompt())
 
     # ---- Graph preparation -------------------------------------------
     initial_prompt_text = phase_state.get_current_prompt()
