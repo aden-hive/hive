@@ -433,23 +433,40 @@ When a user says "my agent is failing" or "debug this agent":
 
 **Please make sure you have propose the design to the user before implementing**
 
-Call `initialize_and_build_agent(agent_name)` to generate all package files \
-from your graph session. The agent_name must be snake_case (e.g., "my_agent").
+Call `initialize_and_build_agent(agent_name, nodes)` to generate all package \
+files. The agent_name must be snake_case (e.g., "my_agent"). Pass node names \
+as comma-separated string (e.g., "gather,process,review").
 The tool creates: config.py, nodes/__init__.py, agent.py, \
-__init__.py, __main__.py, mcp_servers.json, tests/conftest.py, \
-agent.json, README.md.
+__init__.py, __main__.py, mcp_servers.json, tests/conftest.py.
+
+The generated files are **structurally complete** with correct imports, \
+class definition, `validate()` method, `default_agent` export, and \
+`__init__.py` re-exports. They pass validation as-is.
 
 `mcp_servers.json` is auto-generated with hive-tools as the default. \
 Do NOT manually create or overwrite `mcp_servers.json`.
 
-After initialization, review and customize if needed:
-- System prompts in nodes/__init__.py
-- CLI options in __main__.py
-- Identity prompt in agent.py
-- For async entry points (timers/webhooks), add AsyncEntryPointSpec \
-and AgentRuntimeConfig to agent.py manually
+### Customizing generated files
 
-Do NOT manually write these files from scratch — always use the tool.
+**CRITICAL: Use `edit_file` to customize TODO placeholders. \
+NEVER use `write_file` to rewrite generated files from scratch. \
+Rewriting breaks imports, class structure, and causes validation failures.**
+
+Safe to edit with `edit_file`:
+- System prompts, tools, input_keys, output_keys, success_criteria in \
+nodes/__init__.py
+- Goal description, success criteria values, constraint values, edge \
+definitions, identity_prompt in agent.py
+- CLI options in __main__.py
+- For async entry points (timers/webhooks), add AsyncEntryPointSpec \
+and AgentRuntimeConfig to agent.py
+
+Do NOT modify or rewrite:
+- Import statements at top of agent.py (they are correct)
+- The agent class definition, `validate()`, `_build_graph()`, `_setup()`, \
+or lifecycle methods (start/stop/run)
+- `__init__.py` exports (all required variables are already re-exported)
+- `default_agent = ClassName()` at bottom of agent.py
 
 ## 6. Verify and Load
 

@@ -2034,6 +2034,9 @@ def runner_loaded():
 ''',
     )
 
+    # Build list of all generated file paths for the caller.
+    all_file_paths = [info["path"] for info in files_written.values()]
+
     return json.dumps(
         {
             "success": True,
@@ -2043,10 +2046,33 @@ def runner_loaded():
             "nodes": node_list,
             "files_written": files_written,
             "file_count": len(files_written),
+            "files": all_file_paths,
             "next_steps": [
-                f"Customize node definitions in exports/{agent_name}/nodes/__init__.py",
-                f"Define goal and edges in exports/{agent_name}/agent.py",
-                f'Run validate_agent_package("{agent_name}") to check structure',
+                (
+                    "IMPORTANT: All generated files are structurally complete "
+                    "with correct imports, class definition, validate() method, "
+                    "and __init__.py exports. Use edit_file to customize TODO "
+                    "placeholders — do NOT use write_file to rewrite entire files, "
+                    "as this will break imports and structure."
+                ),
+                (
+                    f"Use edit_file to customize system prompts, tools, "
+                    f"input_keys, output_keys, and success_criteria in "
+                    f"exports/{agent_name}/nodes/__init__.py"
+                ),
+                (
+                    f"Use edit_file to customize goal description, "
+                    f"success_criteria values, constraint values, edge "
+                    f"definitions, and identity_prompt in "
+                    f"exports/{agent_name}/agent.py"
+                ),
+                (
+                    "Do NOT modify: imports at top of agent.py, the class "
+                    "definition, validate() method, _build_graph()/_setup()/"
+                    "lifecycle methods, or __init__.py exports — they are "
+                    "already correct."
+                ),
+                f'Run validate_agent_package("{agent_name}") to verify structure',
             ],
         },
         indent=2,
