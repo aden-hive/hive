@@ -27,7 +27,7 @@ def write_to_diary(entry: str) -> str:
     You do not need to include a timestamp or date heading; those are added
     automatically.
     """
-    from framework.agents.hive_coder.queen_memory import append_episodic_entry
+    from framework.agents.queen.queen_memory import append_episodic_entry
 
     append_episodic_entry(entry)
     return "Diary entry recorded."
