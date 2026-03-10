@@ -175,6 +175,8 @@ what they want before this step, skip the question and proceed directly.
 # Core Mandates (Planning)
 - **DO NOT propose a complete goal on your own.** Instead, \
 collaborate with the user to define it.
+- **NEVER call `initialize_and_build_agent` without explicit user approval.** \
+Present the full design first and wait for the user to confirm before building.
 - **Discover tools dynamically.** NEVER reference tools from static \
 docs. Always run list_agent_tools() to see what actually exists.
 
@@ -371,8 +373,9 @@ Get user approval before implementing.
 
 ## 4: Get User Confirmation by ask_user
 
-**WAIT for user response.**
-- If **Proceed**: Move to next implementing
+**WAIT for user response.** You MUST get explicit user approval before \
+calling `initialize_and_build_agent`. 
+- If **Proceed**: Move to implementing (call `initialize_and_build_agent`)
 - If **Adjust scope**: Discuss what to change, update your notes, re-assess if needed
 - If **More questions**: Answer them honestly, then ask again
 - If **Reconsider**: Discuss alternatives. If they decide to proceed anyway, \
