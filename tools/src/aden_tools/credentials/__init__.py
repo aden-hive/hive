@@ -77,6 +77,7 @@ from .databricks import DATABRICKS_CREDENTIALS
 from .discord import DISCORD_CREDENTIALS
 from .docker_hub import DOCKER_HUB_CREDENTIALS
 from .email import EMAIL_CREDENTIALS
+from .freshdesk import FRESHDESK_CREDENTIALS
 from .gcp_vision import GCP_VISION_CREDENTIALS
 from .github import GITHUB_CREDENTIALS
 from .gitlab import GITLAB_CREDENTIALS
@@ -220,6 +221,7 @@ CREDENTIAL_SPECS = {
     **ZENDESK_CREDENTIALS,
     **ZOHO_CRM_CREDENTIALS,
     **ZOOM_CREDENTIALS,
+    **FRESHDESK_CREDENTIALS,
 }
 
 __all__ = [
@@ -313,4 +315,5 @@ __all__ = [
     "ZENDESK_CREDENTIALS",
     "ZOHO_CRM_CREDENTIALS",
     "ZOOM_CREDENTIALS",
+    "FRESHDESK_CREDENTIALS",
 ]
