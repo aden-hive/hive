@@ -439,7 +439,7 @@ def register_queen_lifecycle_tools(
 
     # --- stop_worker ----------------------------------------------------------
 
-    async def stop_worker() -> str:
+    async def stop_worker(*, reason: str = "Stopped by queen") -> str:
         """Cancel all active worker executions across all graphs.
 
         Stops the worker immediately. Returns the IDs of cancelled executions.
@@ -469,7 +469,9 @@ def register_queen_lifecycle_tools(
 
                 for exec_id in list(stream.active_execution_ids):
                     try:
-                        ok = await stream.cancel_execution(exec_id)
+                        ok = await stream.cancel_execution(
+                            exec_id, reason=reason
+                        )
                         if ok:
                             cancelled.append(exec_id)
                     except Exception as e:

@@ -1604,7 +1604,7 @@ class GraphExecutor:
             # Return with paused status
             return ExecutionResult(
                 success=False,
-                error="Execution paused by user",
+                error="Execution cancelled",
                 output=saved_memory,
                 steps_executed=steps,
                 total_tokens=total_tokens,
