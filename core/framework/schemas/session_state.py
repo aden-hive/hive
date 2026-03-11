@@ -165,7 +165,7 @@ class SessionState(BaseModel):
         aren't set, the executor falls back to the graph entry point —
         so we don't gate on those. Even catastrophic failures are resumable.
         """
-        return self.status != SessionStatus.COMPLETED
+        return self.status not in (SessionStatus.COMPLETED, SessionStatus.CANCELLED)
 
     @computed_field
     @property
@@ -173,7 +173,7 @@ class SessionState(BaseModel):
         """Can this session be resumed from a checkpoint?"""
         # ANY session with checkpoints can be resumed (not just failed ones)
         # This enables: pause/resume, iterative execution, continuation after completion
-        return self.status not in (SessionStatus.COMPLETED, SessionStatus.CANCELLED)
+        return self.checkpoint_enabled and self.latest_checkpoint_id is not None
 
     @classmethod
     def from_execution_result(
