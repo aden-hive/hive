@@ -90,6 +90,17 @@ def get_api_key() -> str | None:
         except ImportError:
             pass
 
+    # Kimi Code subscription: read API key from ~/.kimi/config.toml
+    if llm.get("use_kimi_code_subscription"):
+        try:
+            from framework.runner.runner import get_kimi_code_token
+
+            token = get_kimi_code_token()
+            if token:
+                return token
+        except ImportError:
+            pass
+
     # Standard env-var path (covers ZAI Code and all API-key providers)
     api_key_env_var = llm.get("api_key_env_var")
     if api_key_env_var:
@@ -108,6 +119,9 @@ def get_api_base() -> str | None:
     if llm.get("use_codex_subscription"):
         # Codex subscription routes through the ChatGPT backend, not api.openai.com.
         return "https://chatgpt.com/backend-api/codex"
+    if llm.get("use_kimi_code_subscription"):
+        # Kimi Code uses an Anthropic-compatible endpoint (no /v1 suffix).
+        return "https://api.kimi.com/coding"
     return llm.get("api_base")
 
 
