@@ -56,7 +56,9 @@ def check_openai_compatible(api_key: str, endpoint: str, name: str) -> dict:
     return {"valid": False, "message": f"{name} API returned status {r.status_code}"}
 
 
-def check_minimax(api_key: str, api_base: str = "https://api.minimax.io/v1", **_: str) -> dict:
+def check_minimax(
+    api_key: str, api_base: str = "https://api.minimax.io/v1", **_: str
+) -> dict:
     """Validate via chatcompletion_v2 endpoint with empty messages.
 
     MiniMax doesn't support GET /models; their native endpoint is
