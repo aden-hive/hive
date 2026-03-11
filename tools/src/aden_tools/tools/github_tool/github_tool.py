@@ -270,6 +270,25 @@ class _GitHubClient:
         )
         return self._handle_response(response)
 
+    def create_comment(
+        self,
+        owner: str,
+        repo: str,
+        issue_number: int,
+        body: str,
+    ) -> dict[str, Any]:
+        """Create a comment on an issue or pull request."""
+        owner = _sanitize_path_param(owner, "owner")
+        repo = _sanitize_path_param(repo, "repo")
+        payload: dict[str, Any] = {"body": body}
+        response = httpx.post(
+            f"{GITHUB_API_BASE}/repos/{owner}/{repo}/issues/{issue_number}/comments",
+            headers=self._headers,
+            json=payload,
+            timeout=30.0,
+        )
+        return self._handle_response(response)
+
     # --- Pull Requests ---
 
     def list_pull_requests(
@@ -845,6 +864,36 @@ def register_tools(
             return client
         try:
             return client.update_issue(owner, repo, issue_number, title, body, state, labels)
+        except httpx.TimeoutException:
+            return {"error": "Request timed out"}
+        except httpx.RequestError as e:
+            return {"error": _sanitize_error_message(e)}
+
+    @mcp.tool()
+    def github_create_comment(
+        owner: str,
+        repo: str,
+        issue_number: int,
+        body: str,
+        account: str = "",
+    ) -> dict:
+        """
+        Create a comment on a GitHub issue or pull request.
+
+        Args:
+            owner: Repository owner
+            repo: Repository name
+            issue_number: Issue or pull request number
+            body: Comment body (supports Markdown)
+
+        Returns:
+            Dict with created comment information or error
+        """
+        client = _get_client(account)
+        if isinstance(client, dict):
+            return client
+        try:
+            return client.create_comment(owner, repo, issue_number, body)
         except httpx.TimeoutException:
             return {"error": "Request timed out"}
         except httpx.RequestError as e:
