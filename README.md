@@ -111,7 +111,7 @@ This sets up:
 - **LLM provider** - Interactive default model configuration
 - All required Python dependencies with `uv`
 
-- At last, it will initiate the open hive interface in your browser
+- If the frontend build succeeds, it will automatically open the Hive dashboard in your browser. If the build fails, run: cd core/frontend && npm run build, then relaunch with hive open
 
 > **Tip:** To reopen the dashboard later, run `hive open` from the project directory.
 
