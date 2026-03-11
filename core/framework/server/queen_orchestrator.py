@@ -269,6 +269,8 @@ async def create_queen(
                     return
                 if phase_state.phase == "running":
                     if event.type == EventType.EXECUTION_COMPLETED:
+                        # Mark worker as configured after first successful run
+                        session.worker_configured = True
                         output = event.data.get("output", {})
                         output_summary = ""
                         if output:

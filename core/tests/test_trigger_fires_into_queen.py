@@ -242,14 +242,14 @@ async def test_remove_trigger_cleans_up_webhook_subscription() -> None:
 
 def test_run_agent_with_input_in_running_tools() -> None:
     """run_agent_with_input must be available to the queen in RUNNING phase."""
-    from framework.agents.hive_coder.nodes import _QUEEN_RUNNING_TOOLS
+    from framework.agents.queen.nodes import _QUEEN_RUNNING_TOOLS
 
     assert "run_agent_with_input" in _QUEEN_RUNNING_TOOLS
 
 
 def test_system_prompt_uses_correct_tool_name() -> None:
     """Trigger handling rules must reference run_agent_with_input, not start_worker()."""
-    from framework.agents.hive_coder.nodes import (
+    from framework.agents.queen.nodes import (
         _queen_behavior_running,
         _queen_behavior_staging,
     )
