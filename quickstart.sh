@@ -321,7 +321,7 @@ echo ""
 IMPORT_ERRORS=0
 
 # Batch check all imports in single process (reduces subprocess spawning overhead)
-CHECK_RESULT=$(uv run python scripts/check_requirements.py framework aden_tools litellm framework.mcp.agent_builder_server 2>/dev/null)
+CHECK_RESULT=$(uv run python scripts/check_requirements.py framework aden_tools litellm 2>/dev/null)
 CHECK_EXIT=$?
 
 # Parse and display results
@@ -337,8 +337,7 @@ try:
     modules = [
         ('framework', 'framework imports OK', True),
         ('aden_tools', 'aden_tools imports OK', True),
-        ('litellm', 'litellm imports OK', False),
-        ('framework.mcp.agent_builder_server', 'MCP server module OK', True)
+        ('litellm', 'litellm imports OK', False)
     ]
     import_errors = 0
     for mod, label, required in modules:
@@ -385,6 +384,7 @@ if [ "$USE_ASSOC_ARRAYS" = true ]; then
     declare -A PROVIDER_NAMES=(
         ["ANTHROPIC_API_KEY"]="Anthropic (Claude)"
         ["OPENAI_API_KEY"]="OpenAI (GPT)"
+        ["MINIMAX_API_KEY"]="MiniMax"
         ["GEMINI_API_KEY"]="Google Gemini"
         ["GOOGLE_API_KEY"]="Google AI"
         ["GROQ_API_KEY"]="Groq"
@@ -397,6 +397,7 @@ if [ "$USE_ASSOC_ARRAYS" = true ]; then
     declare -A PROVIDER_IDS=(
         ["ANTHROPIC_API_KEY"]="anthropic"
         ["OPENAI_API_KEY"]="openai"
+        ["MINIMAX_API_KEY"]="minimax"
         ["GEMINI_API_KEY"]="gemini"
         ["GOOGLE_API_KEY"]="google"
         ["GROQ_API_KEY"]="groq"
@@ -409,6 +410,7 @@ if [ "$USE_ASSOC_ARRAYS" = true ]; then
     declare -A DEFAULT_MODELS=(
         ["anthropic"]="claude-haiku-4-5-20251001"
         ["openai"]="gpt-5-mini"
+        ["minimax"]="MiniMax-M2.5"
         ["gemini"]="gemini-3-flash-preview"
         ["groq"]="moonshotai/kimi-k2-instruct-0905"
         ["cerebras"]="zai-glm-4.7"
@@ -502,13 +504,13 @@ if [ "$USE_ASSOC_ARRAYS" = true ]; then
     }
 else
     # Bash 3.2 - use parallel indexed arrays
-    PROVIDER_ENV_VARS=(ANTHROPIC_API_KEY OPENAI_API_KEY GEMINI_API_KEY GOOGLE_API_KEY GROQ_API_KEY CEREBRAS_API_KEY MISTRAL_API_KEY TOGETHER_API_KEY DEEPSEEK_API_KEY)
-    PROVIDER_DISPLAY_NAMES=("Anthropic (Claude)" "OpenAI (GPT)" "Google Gemini" "Google AI" "Groq" "Cerebras" "Mistral" "Together AI" "DeepSeek")
-    PROVIDER_ID_LIST=(anthropic openai gemini google groq cerebras mistral together deepseek)
+    PROVIDER_ENV_VARS=(ANTHROPIC_API_KEY OPENAI_API_KEY MINIMAX_API_KEY GEMINI_API_KEY GOOGLE_API_KEY GROQ_API_KEY CEREBRAS_API_KEY MISTRAL_API_KEY TOGETHER_API_KEY DEEPSEEK_API_KEY)
+    PROVIDER_DISPLAY_NAMES=("Anthropic (Claude)" "OpenAI (GPT)" "MiniMax" "Google Gemini" "Google AI" "Groq" "Cerebras" "Mistral" "Together AI" "DeepSeek")
+    PROVIDER_ID_LIST=(anthropic openai minimax gemini google groq cerebras mistral together deepseek)
 
     # Default models by provider id (parallel arrays)
-    MODEL_PROVIDER_IDS=(anthropic openai gemini groq cerebras mistral together_ai deepseek)
-    MODEL_DEFAULTS=("claude-haiku-4-5-20251001" "gpt-5-mini" "gemini-3-flash-preview" "moonshotai/kimi-k2-instruct-0905" "zai-glm-4.7" "mistral-large-latest" "meta-llama/Llama-3.3-70B-Instruct-Turbo" "deepseek-chat")
+    MODEL_PROVIDER_IDS=(anthropic openai minimax gemini groq cerebras mistral together_ai deepseek)
+    MODEL_DEFAULTS=("claude-haiku-4-5-20251001" "gpt-5-mini" "MiniMax-M2.5" "gemini-3-flash-preview" "moonshotai/kimi-k2-instruct-0905" "zai-glm-4.7" "mistral-large-latest" "meta-llama/Llama-3.3-70B-Instruct-Turbo" "deepseek-chat")
 
     # Helper: get provider display name for an env var
     get_provider_name() {
@@ -817,6 +819,18 @@ if [ -n "${ZAI_API_KEY:-}" ]; then
     ZAI_CRED_DETECTED=true
 fi
 
+MINIMAX_CRED_DETECTED=false
+if [ -n "${MINIMAX_API_KEY:-}" ]; then
+    MINIMAX_CRED_DETECTED=true
+fi
+
+KIMI_CRED_DETECTED=false
+if [ -f "$HOME/.kimi/config.toml" ]; then
+    KIMI_CRED_DETECTED=true
+elif [ -n "${KIMI_API_KEY:-}" ]; then
+    KIMI_CRED_DETECTED=true
+fi
+
 # Detect API key providers
 if [ "$USE_ASSOC_ARRAYS" = true ]; then
     for env_var in "${!PROVIDER_NAMES[@]}"; do
@@ -852,6 +866,8 @@ try:
     sub = ''
     if llm.get('use_claude_code_subscription'): sub = 'claude_code'
     elif llm.get('use_codex_subscription'): sub = 'codex'
+    elif llm.get('use_kimi_code_subscription'): sub = 'kimi_code'
+    elif llm.get('provider', '') == 'minimax' or 'api.minimax.io' in llm.get('api_base', ''): sub = 'minimax_code'
     elif 'api.z.ai' in llm.get('api_base', ''): sub = 'zai_code'
     print(f'PREV_SUB_MODE={sub}')
 except Exception:
@@ -867,6 +883,7 @@ if [ -n "$PREV_SUB_MODE" ] || [ -n "$PREV_PROVIDER" ]; then
         claude_code) [ "$CLAUDE_CRED_DETECTED" = true ] && PREV_CRED_VALID=true ;;
         zai_code)    [ "$ZAI_CRED_DETECTED" = true ] && PREV_CRED_VALID=true ;;
         codex)       [ "$CODEX_CRED_DETECTED" = true ] && PREV_CRED_VALID=true ;;
+        kimi_code)   [ "$KIMI_CRED_DETECTED" = true ] && PREV_CRED_VALID=true ;;
         *)
             # API key provider — check if the env var is set
             if [ -n "$PREV_ENV_VAR" ] && [ -n "${!PREV_ENV_VAR}" ]; then
@@ -880,14 +897,18 @@ if [ -n "$PREV_SUB_MODE" ] || [ -n "$PREV_PROVIDER" ]; then
             claude_code) DEFAULT_CHOICE=1 ;;
             zai_code)    DEFAULT_CHOICE=2 ;;
             codex)       DEFAULT_CHOICE=3 ;;
+            minimax_code) DEFAULT_CHOICE=4 ;;
+            kimi_code)   DEFAULT_CHOICE=5 ;;
         esac
         if [ -z "$DEFAULT_CHOICE" ]; then
             case "$PREV_PROVIDER" in
-                anthropic) DEFAULT_CHOICE=4 ;;
-                openai)    DEFAULT_CHOICE=5 ;;
-                gemini)    DEFAULT_CHOICE=6 ;;
-                groq)      DEFAULT_CHOICE=7 ;;
-                cerebras)  DEFAULT_CHOICE=8 ;;
+                anthropic) DEFAULT_CHOICE=6 ;;
+                openai)    DEFAULT_CHOICE=7 ;;
+                gemini)    DEFAULT_CHOICE=8 ;;
+                groq)      DEFAULT_CHOICE=9 ;;
+                cerebras)  DEFAULT_CHOICE=10 ;;
+                minimax)   DEFAULT_CHOICE=4 ;;
+                kimi)      DEFAULT_CHOICE=5 ;;
             esac
         fi
     fi
@@ -919,14 +940,28 @@ else
     echo -e "  ${CYAN}3)${NC} OpenAI Codex Subscription  ${DIM}(use your Codex/ChatGPT Plus plan)${NC}"
 fi
 
+# 4) MiniMax
+if [ "$MINIMAX_CRED_DETECTED" = true ]; then
+    echo -e "  ${CYAN}4)${NC} MiniMax Coding Key         ${DIM}(use your MiniMax coding key)${NC}  ${GREEN}(credential detected)${NC}"
+else
+    echo -e "  ${CYAN}4)${NC} MiniMax Coding Key         ${DIM}(use your MiniMax coding key)${NC}"
+fi
+
+# 5) Kimi Code
+if [ "$KIMI_CRED_DETECTED" = true ]; then
+    echo -e "  ${CYAN}5)${NC} Kimi Code Subscription     ${DIM}(use your Kimi Code plan)${NC}  ${GREEN}(credential detected)${NC}"
+else
+    echo -e "  ${CYAN}5)${NC} Kimi Code Subscription     ${DIM}(use your Kimi Code plan)${NC}"
+fi
+
 echo ""
 echo -e "  ${CYAN}${BOLD}API key providers:${NC}"
 
-# 4-8) API key providers — show (credential detected) if key already set
+# 6-10) API key providers — show (credential detected) if key already set
 PROVIDER_MENU_ENVS=(ANTHROPIC_API_KEY OPENAI_API_KEY GEMINI_API_KEY GROQ_API_KEY CEREBRAS_API_KEY)
 PROVIDER_MENU_NAMES=("Anthropic (Claude) - Recommended" "OpenAI (GPT)" "Google Gemini - Free tier available" "Groq - Fast, free tier" "Cerebras - Fast, free tier")
 for idx in 0 1 2 3 4; do
-    num=$((idx + 4))
+    num=$((idx + 6))
     env_var="${PROVIDER_MENU_ENVS[$idx]}"
     if [ -n "${!env_var}" ]; then
         echo -e "  ${CYAN}$num)${NC} ${PROVIDER_MENU_NAMES[$idx]}  ${GREEN}(credential detected)${NC}"
@@ -935,7 +970,7 @@ for idx in 0 1 2 3 4; do
     fi
 done
 
-echo -e "  ${CYAN}9)${NC} Skip for now"
+echo -e "  ${CYAN}11)${NC} Skip for now"
 echo ""
 
 if [ -n "$DEFAULT_CHOICE" ]; then
@@ -945,15 +980,15 @@ fi
 
 while true; do
     if [ -n "$DEFAULT_CHOICE" ]; then
-        read -r -p "Enter choice (1-9) [$DEFAULT_CHOICE]: " choice || true
+        read -r -p "Enter choice (1-11) [$DEFAULT_CHOICE]: " choice || true
         choice="${choice:-$DEFAULT_CHOICE}"
     else
-        read -r -p "Enter choice (1-9): " choice || true
+        read -r -p "Enter choice (1-11): " choice || true
     fi
-    if [[ "$choice" =~ ^[0-9]+$ ]] && [ "$choice" -ge 1 ] && [ "$choice" -le 9 ]; then
+    if [[ "$choice" =~ ^[0-9]+$ ]] && [ "$choice" -ge 1 ] && [ "$choice" -le 11 ]; then
         break
     fi
-    echo -e "${RED}Invalid choice. Please enter 1-9${NC}"
+    echo -e "${RED}Invalid choice. Please enter 1-11${NC}"
 done
 
 case $choice in
@@ -1017,36 +1052,64 @@ case $choice in
         fi
         ;;
     4)
+        # MiniMax Coding Key
+        SUBSCRIPTION_MODE="minimax_code"
+        SELECTED_ENV_VAR="MINIMAX_API_KEY"
+        SELECTED_PROVIDER_ID="minimax"
+        SELECTED_MODEL="MiniMax-M2.5"
+        SELECTED_MAX_TOKENS=32768
+        SELECTED_API_BASE="https://api.minimax.io/v1"
+        PROVIDER_NAME="MiniMax"
+        SIGNUP_URL="https://platform.minimax.io/user-center/basic-information/interface-key"
+        echo ""
+        echo -e "${GREEN}⬢${NC} Using MiniMax coding key"
+        echo -e "  ${DIM}Model: MiniMax-M2.5 | API: api.minimax.io${NC}"
+        ;;
+    5)
+        # Kimi Code Subscription
+        SUBSCRIPTION_MODE="kimi_code"
+        SELECTED_PROVIDER_ID="kimi"
+        SELECTED_ENV_VAR="KIMI_API_KEY"
+        SELECTED_MODEL="kimi-k2.5"
+        SELECTED_MAX_TOKENS=32768
+        SELECTED_API_BASE="https://api.kimi.com/coding"
+        PROVIDER_NAME="Kimi"
+        SIGNUP_URL="https://www.kimi.com/code"
+        echo ""
+        echo -e "${GREEN}⬢${NC} Using Kimi Code subscription"
+        echo -e "  ${DIM}Model: kimi-k2.5 | API: api.kimi.com/coding${NC}"
+        ;;
+    6)
         SELECTED_ENV_VAR="ANTHROPIC_API_KEY"
         SELECTED_PROVIDER_ID="anthropic"
         PROVIDER_NAME="Anthropic"
         SIGNUP_URL="https://console.anthropic.com/settings/keys"
         ;;
-    5)
+    7)
         SELECTED_ENV_VAR="OPENAI_API_KEY"
         SELECTED_PROVIDER_ID="openai"
         PROVIDER_NAME="OpenAI"
         SIGNUP_URL="https://platform.openai.com/api-keys"
         ;;
-    6)
+    8)
         SELECTED_ENV_VAR="GEMINI_API_KEY"
         SELECTED_PROVIDER_ID="gemini"
         PROVIDER_NAME="Google Gemini"
         SIGNUP_URL="https://aistudio.google.com/apikey"
         ;;
-    7)
+    9)
         SELECTED_ENV_VAR="GROQ_API_KEY"
         SELECTED_PROVIDER_ID="groq"
         PROVIDER_NAME="Groq"
         SIGNUP_URL="https://console.groq.com/keys"
         ;;
-    8)
+    10)
         SELECTED_ENV_VAR="CEREBRAS_API_KEY"
         SELECTED_PROVIDER_ID="cerebras"
         PROVIDER_NAME="Cerebras"
         SIGNUP_URL="https://cloud.cerebras.ai/"
         ;;
-    9)
+    11)
         echo ""
         echo -e "${YELLOW}Skipped.${NC} An LLM API key is required to test and use worker agents."
         echo -e "Add your API key later by running:"
@@ -1059,7 +1122,7 @@ case $choice in
 esac
 
 # For API-key providers: prompt for key (allow replacement if already set)
-if [ -z "$SUBSCRIPTION_MODE" ] && [ -n "$SELECTED_ENV_VAR" ]; then
+if { [ -z "$SUBSCRIPTION_MODE" ] || [ "$SUBSCRIPTION_MODE" = "minimax_code" ] || [ "$SUBSCRIPTION_MODE" = "kimi_code" ]; } && [ -n "$SELECTED_ENV_VAR" ]; then
     while true; do
         CURRENT_KEY="${!SELECTED_ENV_VAR}"
         if [ -n "$CURRENT_KEY" ]; then
@@ -1087,7 +1150,11 @@ if [ -z "$SUBSCRIPTION_MODE" ] && [ -n "$SELECTED_ENV_VAR" ]; then
             echo -e "${GREEN}⬢${NC} API key saved to $SHELL_RC_FILE"
             # Health check the new key
             echo -n "  Verifying API key... "
-            HC_RESULT=$(uv run python "$SCRIPT_DIR/scripts/check_llm_key.py" "$SELECTED_PROVIDER_ID" "$API_KEY" 2>/dev/null) || true
+            if { [ "$SUBSCRIPTION_MODE" = "minimax_code" ] || [ "$SUBSCRIPTION_MODE" = "kimi_code" ]; } && [ -n "${SELECTED_API_BASE:-}" ]; then
+                HC_RESULT=$(uv run python "$SCRIPT_DIR/scripts/check_llm_key.py" "$SELECTED_PROVIDER_ID" "$API_KEY" "$SELECTED_API_BASE" 2>/dev/null) || true
+            else
+                HC_RESULT=$(uv run python "$SCRIPT_DIR/scripts/check_llm_key.py" "$SELECTED_PROVIDER_ID" "$API_KEY" 2>/dev/null) || true
+            fi
             HC_VALID=$(echo "$HC_RESULT" | $PYTHON_CMD -c "import json,sys; print(json.loads(sys.stdin.read()).get('valid',''))" 2>/dev/null) || true
             HC_MSG=$(echo "$HC_RESULT" | $PYTHON_CMD -c "import json,sys; print(json.loads(sys.stdin.read()).get('message',''))" 2>/dev/null) || true
             if [ "$HC_VALID" = "True" ]; then
@@ -1201,6 +1268,10 @@ if [ -n "$SELECTED_PROVIDER_ID" ]; then
         save_configuration "$SELECTED_PROVIDER_ID" "" "$SELECTED_MODEL" "$SELECTED_MAX_TOKENS" "" "" "true" > /dev/null
     elif [ "$SUBSCRIPTION_MODE" = "zai_code" ]; then
         save_configuration "$SELECTED_PROVIDER_ID" "$SELECTED_ENV_VAR" "$SELECTED_MODEL" "$SELECTED_MAX_TOKENS" "" "https://api.z.ai/api/coding/paas/v4" > /dev/null
+    elif [ "$SUBSCRIPTION_MODE" = "minimax_code" ]; then
+        save_configuration "$SELECTED_PROVIDER_ID" "$SELECTED_ENV_VAR" "$SELECTED_MODEL" "$SELECTED_MAX_TOKENS" "" "$SELECTED_API_BASE" > /dev/null
+    elif [ "$SUBSCRIPTION_MODE" = "kimi_code" ]; then
+        save_configuration "$SELECTED_PROVIDER_ID" "$SELECTED_ENV_VAR" "$SELECTED_MODEL" "$SELECTED_MAX_TOKENS" "" "$SELECTED_API_BASE" > /dev/null
     else
         save_configuration "$SELECTED_PROVIDER_ID" "$SELECTED_ENV_VAR" "$SELECTED_MODEL" "$SELECTED_MAX_TOKENS" > /dev/null
     fi
@@ -1348,41 +1419,7 @@ else
     echo -e "${YELLOW}--${NC}"
 fi
 
-echo -n "  ⬡ skills... "
-if [ -d "$SCRIPT_DIR/.claude/skills" ]; then
-    SKILL_COUNT=$(ls -1d "$SCRIPT_DIR/.claude/skills"/*/ 2>/dev/null | wc -l)
-    echo -e "${GREEN}${SKILL_COUNT} found${NC}"
-else
-    echo -e "${YELLOW}--${NC}"
-fi
 
-echo -n "  ⬡ codex CLI... "
-if command -v codex > /dev/null 2>&1; then
-    CODEX_VERSION=$(codex --version 2>/dev/null | head -1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' || echo "0.0.0")
-    # Compare version >= 0.101.0
-    CODEX_MAJOR=$(echo "$CODEX_VERSION" | cut -d. -f1)
-    CODEX_MINOR=$(echo "$CODEX_VERSION" | cut -d. -f2)
-    if [ "$CODEX_MAJOR" -gt 0 ] 2>/dev/null || { [ "$CODEX_MAJOR" -eq 0 ] && [ "$CODEX_MINOR" -ge 101 ]; } 2>/dev/null; then
-        echo -e "${GREEN}${CODEX_VERSION}${NC}"
-        CODEX_AVAILABLE=true
-    else
-        echo -e "${YELLOW}${CODEX_VERSION} (upgrade to 0.101.0+)${NC}"
-        CODEX_AVAILABLE=false
-    fi
-else
-    echo -e "${YELLOW}--${NC}"
-    CODEX_AVAILABLE=false
-fi
-
-echo -n "  ⬡ local settings... "
-if [ -f "$SCRIPT_DIR/.claude/settings.local.json" ]; then
-    echo -e "${GREEN}ok${NC}"
-elif [ -f "$SCRIPT_DIR/.claude/settings.local.json.example" ]; then
-    cp "$SCRIPT_DIR/.claude/settings.local.json.example" "$SCRIPT_DIR/.claude/settings.local.json"
-    echo -e "${GREEN}copied from example${NC}"
-else
-    echo -e "${YELLOW}--${NC}"
-fi
 
 echo -n "  ⬡ credential store... "
 if [ -n "$HIVE_CREDENTIAL_KEY" ] && [ -d "$HOME/.hive/credentials/credentials" ]; then
@@ -1465,6 +1502,9 @@ if [ -n "$SELECTED_PROVIDER_ID" ]; then
     elif [ "$SUBSCRIPTION_MODE" = "zai_code" ]; then
         echo -e "  ${GREEN}⬢${NC} ZAI Code Subscription → ${DIM}$SELECTED_MODEL${NC}"
         echo -e "  ${DIM}API: api.z.ai (OpenAI-compatible)${NC}"
+    elif [ "$SUBSCRIPTION_MODE" = "minimax_code" ]; then
+        echo -e "  ${GREEN}⬢${NC} MiniMax Coding Key → ${DIM}$SELECTED_MODEL${NC}"
+        echo -e "  ${DIM}API: api.minimax.io/v1 (OpenAI-compatible)${NC}"
     else
         echo -e "  ${CYAN}$SELECTED_PROVIDER_ID${NC} → ${DIM}$SELECTED_MODEL${NC}"
     fi

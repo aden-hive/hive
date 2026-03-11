@@ -81,7 +81,15 @@ SEARCH_CREDENTIALS = {
     ),
     "exa_search": CredentialSpec(
         env_var="EXA_API_KEY",
-        tools=["exa_search", "exa_find_similar", "exa_get_contents", "exa_answer"],
+        tools=[
+            "exa_search",
+            "exa_find_similar",
+            "exa_get_contents",
+            "exa_answer",
+            "exa_search_news",
+            "exa_search_papers",
+            "exa_search_companies",
+        ],
         node_types=[],
         required=True,
         startup_required=False,

@@ -59,7 +59,7 @@ Full rewrite of account listing and configuration:
 
 ---
 
-### Modified: `core/framework/mcp/agent_builder_server.py`
+### Modified: `core/framework/builder/package_generator.py`
 
 - `store_credential(name, value, alias="default", ...)` — added `alias` param; now delegates to `LocalCredentialRegistry.save_account()` with auto health check; returns `status` and `identity`
 - `list_stored_credentials()` — delegates to `LocalCredentialRegistry.list_accounts()`; returns `credential_id`, `alias`, `status`, `identity`, `last_validated`

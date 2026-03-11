@@ -48,7 +48,7 @@ def _get_manager(request: web.Request) -> SessionManager:
 def _session_to_live_dict(session) -> dict:
     """Serialize a live Session to the session-primary JSON shape."""
     info = session.worker_info
-    mode_state = getattr(session, "mode_state", None)
+    phase_state = getattr(session, "phase_state", None)
     return {
         "session_id": session.id,
         "worker_id": session.worker_id,
@@ -61,7 +61,7 @@ def _session_to_live_dict(session) -> dict:
         "loaded_at": session.loaded_at,
         "uptime_seconds": round(time.time() - session.loaded_at, 1),
         "intro_message": getattr(session.runner, "intro_message", "") or "",
-        "queen_mode": mode_state.mode if mode_state else "building",
+        "queen_phase": phase_state.phase if phase_state else "planning",
     }
 
 
@@ -731,7 +731,7 @@ async def handle_delete_history_session(request: web.Request) -> web.Response:
 
 async def handle_discover(request: web.Request) -> web.Response:
     """GET /api/discover — discover agents from filesystem."""
-    from framework.tui.screens.agent_picker import discover_agents
+    from framework.agents.discovery import discover_agents
 
     manager = _get_manager(request)
     loaded_paths = {str(s.worker_path) for s in manager.list_sessions() if s.worker_path}

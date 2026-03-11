@@ -561,7 +561,7 @@ class TestGraphSpecValidation:
             edges=[],
         )
 
-        errors = graph.validate()
+        errors = graph.validate()["errors"]
         assert any("nonexistent-node" in e for e in errors)
 
         # Invalid isolation level
@@ -582,7 +582,7 @@ class TestGraphSpecValidation:
             edges=[],
         )
 
-        errors2 = graph2.validate()
+        errors2 = graph2.validate()["errors"]
         assert any("isolation_level" in e for e in errors2)
 
         # Invalid trigger type
@@ -602,7 +602,7 @@ class TestGraphSpecValidation:
             edges=[],
         )
 
-        errors3 = graph3.validate()
+        errors3 = graph3.validate()["errors"]
         assert any("trigger_type" in e for e in errors3)
 
 

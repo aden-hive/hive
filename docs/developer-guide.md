@@ -101,38 +101,31 @@ Get API keys:
 ./quickstart.sh
 ```
 
-This installs agent-related Claude Code skills:
-
-- `/hive` - Complete workflow for building agents
-- `/hive-create` - Step-by-step agent building
-- `/hive-concepts` - Fundamental agent concepts
-- `/hive-patterns` - Best practices and design patterns
-- `/hive-test` - Test and validate agents
+This sets up the MCP tools and workflows for building agents.
 
 ### Cursor IDE Support
 
-Skills are also available in Cursor. To enable:
+MCP tools are also available in Cursor. To enable:
 
 1. Open Command Palette (`Cmd+Shift+P` / `Ctrl+Shift+P`)
 2. Run `MCP: Enable` to enable MCP servers
 3. Restart Cursor to load the MCP servers from `.cursor/mcp.json`
-4. Type `/` in Agent chat and search for skills (e.g., `/hive-create`)
+4. Open Agent chat and verify MCP tools are available
 
 ### Codex CLI Support
 
 Hive supports [OpenAI Codex CLI](https://github.com/openai/codex) (v0.101.0+).
 
 Configuration files are tracked in git:
-- `.codex/config.toml` — MCP server config (`agent-builder`)
-- `.agents/skills/` — Symlinks to Hive skills
+- `.codex/config.toml` — MCP server config
 
 To use Codex with Hive:
 1. Run `codex` in the repo root
-2. Type `use hive` to start the agent workflow
+2. Start the configured MCP-assisted workflow
 
 Example:
 ```
-codex> use hive
+Start Codex in the repo root and use the configured MCP tools
 ```
 
 
@@ -143,7 +136,7 @@ To enable Opencode integration:
 2. Configure MCP servers in `.opencode/mcp.json`
 3. Restart Opencode to load the MCP servers
 4. Switch to the Hive agent
-* **Tools:** Accesses `agent-builder` and standard `tools` via standard MCP protocols over stdio.
+* **Tools:** Accesses `coder-tools` and standard `tools` via standard MCP protocols over stdio.
 
 ### Verify Setup
 
@@ -153,7 +146,7 @@ uv run python -c "import framework; print('✓ framework OK')"
 uv run python -c "import aden_tools; print('✓ aden_tools OK')"
 uv run python -c "import litellm; print('✓ litellm OK')"
 
-# Run an agent (after building one via /hive-create)
+# Run an agent (after building one with coder-tools)
 PYTHONPATH=exports uv run python -m your_agent_name validate
 ```
 
@@ -176,17 +169,8 @@ hive/                                    # Repository root
 │   ├── PULL_REQUEST_TEMPLATE.md         # PR description template
 │   └── CODEOWNERS                       # Auto-assign reviewers
 │
-├── .claude/                             # Claude Code Skills
-│   └── skills/                          # Skills for building
-│       ├── hive/                        # Complete workflow
-│       ├── hive-create/                 # Step-by-step build guide
-│       ├── hive-concepts/               # Fundamental concepts
-│       ├── hive-patterns/               # Best practices
-│       └── hive-test/                   # Test and validate agents
 ├── .codex/                              # Codex CLI project config
 │   └── config.toml                      # Codex MCP server definitions
-├── .agents/                             # Shared skill mountpoint
-│   └── skills/                          # Symlinks to Hive skills
 │
 ├── core/                                # CORE FRAMEWORK PACKAGE
 │   ├── framework/                       # Main package code
@@ -222,7 +206,7 @@ hive/                                    # Repository root
 │   └── README.md                        # Tools documentation
 │
 ├── exports/                             # AGENT PACKAGES (user-created, gitignored)
-│   └── your_agent_name/                 # Created via /hive-create
+│   └── your_agent_name/                 # Created via coder-tools workflow
 │
 ├── examples/                            # Example agents
 │   └── templates/                       # Pre-built template agents
@@ -251,19 +235,16 @@ hive/                                    # Repository root
 
 ## Building Agents
 
-### Using Claude Code Skills
+### Using Coder Tools Workflow
 
-The fastest way to build agents is using the Claude Code skills:
+The fastest way to build agents is with the configured MCP workflow:
 
 ```bash
-# Install skills (one-time)
+# Install dependencies (one-time)
 ./quickstart.sh
 
 # Build a new agent
-claude> /hive
-
-# Test the agent
-claude> /hive-test
+Use the coder-tools MCP tools from your IDE agent chat (e.g., initialize_and_build_agent)
 ```
 
 ### Agent Development Workflow
@@ -271,19 +252,19 @@ claude> /hive-test
 1. **Define Your Goal**
 
    ```
-   claude> /hive
+   Use the coder-tools initialize_and_build_agent tool
    Enter goal: "Build an agent that processes customer support tickets"
    ```
 
 2. **Design the Workflow**
 
-   - The skill guides you through defining nodes
+   - The workflow guides you through defining nodes
    - Each node is a unit of work (LLM call with event_loop)
    - Edges define how execution flows
 
 3. **Generate the Agent**
 
-   - The skill generates a complete Python package in `exports/`
+   - The workflow generates a complete Python package in `exports/`
    - Includes: `agent.json`, `tools.py`, `README.md`
 
 4. **Validate the Agent**
@@ -293,8 +274,9 @@ claude> /hive-test
    ```
 
 5. **Test the Agent**
-   ```
-   claude> /hive-test
+   Run tests with:
+   ```bash
+   PYTHONPATH=exports uv run python -m your_agent_name test
    ```
 
 ### Manual Agent Development
@@ -351,11 +333,11 @@ hive run exports/my_agent --tui
 
 ## Testing Agents
 
-### Using the Testing Agent Skill
+### Using Built-in Test Commands
 
 ```bash
 # Run tests for an agent
-claude> /hive-test
+PYTHONPATH=exports uv run python -m agent_name test
 ```
 
 This generates and runs:
@@ -573,7 +555,7 @@ uv add <package>
 
 ```bash
 # Option 1: Use Claude Code skill (recommended)
-claude> /hive
+Use the coder-tools initialize_and_build_agent tool
 
 # Option 2: Create manually
 # Note: exports/ is initially empty (gitignored). Create your agent directory:
@@ -581,7 +563,7 @@ mkdir -p exports/my_new_agent
 cd exports/my_new_agent
 # Create agent.json, tools.py, README.md (see Agent Package Structure below)
 
-# Option 3: Use the agent builder MCP tools (advanced)
+# Option 3: Use the coder-tools MCP tools (advanced)
 # See core/MCP_BUILDER_TOOLS_GUIDE.md
 ```
 
