@@ -74,42 +74,25 @@ Install `make` using:
 
 ```bash
 sudo apt install make
+```
 
-uv: command not found
-
-Install uv using:
-
-curl -LsSf https://astral.sh/uv/install.sh | sh
-source ~/.bashrc
-
-ruff: not found
-
-If linting fails due to a missing ruff command, install it with:
-
-uv tool install ruff
-
-WSL Path Recommendation
-
-When using WSL, it is recommended to clone the repository inside your Linux home directory (e.g., ~/hive) instead of under /mnt/c/... to avoid potential performance and permission issues.
-
-
----
-
-# ✅ Why This Is Good
-
-- Clear
-- Professional tone
-- No unnecessary explanation
-- Under micro-fix size
-- Based on real contributor experience
-- Won’t annoy maintainers
-
----
-
-Now:
+### `uv: command not found`
+Install `uv` using:
 
 ```bash
-git checkout -b docs/setup-troubleshooting
+curl -LsSf https://astral.sh/uv/install.sh | sh
+source ~/.bashrc
+```
+
+### `ruff: not found`
+If linting fails due to a missing `ruff` command, install it with:
+
+```bash
+uv tool install ruff
+```
+
+### WSL Path Recommendation
+When using WSL, it is recommended to clone the repository inside your Linux home directory (e.g., ~/hive) instead of under /mnt/c/... to avoid potential performance and permission issues.
 
 ## Commit Convention
 
