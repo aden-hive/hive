@@ -1058,24 +1058,24 @@ export default function Workspace() {
     }
   }, [agentStates, fetchGraphForAgent]);
 
-  // Poll entry points every second for agents with timers to keep
-  // next_fire_in countdowns fresh without re-fetching the full topology.
+  // Poll entry points every second to keep next_fire_in countdowns fresh
+  // and discover dynamically created triggers (via set_trigger).
   useEffect(() => {
     const id = setInterval(async () => {
       for (const [agentType, sessions] of Object.entries(sessionsByAgent)) {
         const session = sessions[0];
         if (!session) continue;
-        const timerNodes = session.graphNodes.filter(
-          (n) => n.nodeType === "trigger" && n.triggerType === "timer",
-        );
-        if (timerNodes.length === 0) continue;
         const state = agentStates[agentType];
         if (!state?.sessionId) continue;
         try {
           const { entry_points } = await sessionsApi.entryPoints(state.sessionId);
+          // Skip non-manual triggers only
+          const triggerEps = entry_points.filter(ep => ep.trigger_type !== "manual");
+          if (triggerEps.length === 0) continue;
+
           const fireMap = new Map<string, number>();
           const taskMap = new Map<string, string>();
-          for (const ep of entry_points) {
+          for (const ep of triggerEps) {
             if (ep.next_fire_in != null) {
               fireMap.set(`__trigger_${ep.id}`, ep.next_fire_in);
             }
@@ -1083,11 +1083,14 @@ export default function Workspace() {
               taskMap.set(`__trigger_${ep.id}`, ep.task);
             }
           }
-          if (fireMap.size === 0 && taskMap.size === 0) continue;
+
           setSessionsByAgent((prev) => {
             const ss = prev[agentType];
             if (!ss?.length) return prev;
-            const updated = ss[0].graphNodes.map((n) => {
+            const existingIds = new Set(ss[0].graphNodes.map(n => n.id));
+
+            // Update existing trigger nodes
+            let updated = ss[0].graphNodes.map((n) => {
               if (n.nodeType !== "trigger") return n;
               const nfi = fireMap.get(n.id);
               const task = taskMap.get(n.id);
@@ -1101,8 +1104,33 @@ export default function Workspace() {
                 },
               };
             });
+
+            // Discover new triggers not yet in the graph
+            const entryNode = ss[0].graphNodes.find(n => n.nodeType !== "trigger")?.id;
+            const newNodes: GraphNode[] = [];
+            for (const ep of triggerEps) {
+              const nodeId = `__trigger_${ep.id}`;
+              if (existingIds.has(nodeId)) continue;
+              newNodes.push({
+                id: nodeId,
+                label: ep.name || ep.id,
+                status: "pending",
+                nodeType: "trigger",
+                triggerType: ep.trigger_type,
+                triggerConfig: {
+                  ...ep.trigger_config,
+                  ...(ep.next_fire_in != null ? { next_fire_in: ep.next_fire_in } : {}),
+                  ...(ep.task ? { task: ep.task } : {}),
+                },
+                ...(entryNode ? { next: [entryNode] } : {}),
+              });
+            }
+            if (newNodes.length > 0) {
+              updated = [...newNodes, ...updated];
+            }
+
             // Skip update if nothing changed
-            if (updated.every((n, idx) => n === ss[0].graphNodes[idx])) return prev;
+            if (newNodes.length === 0 && updated.every((n, idx) => n === ss[0].graphNodes[idx])) return prev;
             return {
               ...prev,
               [agentType]: ss.map((s, i) => (i === 0 ? { ...s, graphNodes: updated } : s)),
@@ -1863,7 +1891,42 @@ export default function Workspace() {
         case "trigger_activated": {
           const triggerId = event.data?.trigger_id as string;
           if (triggerId) {
-            updateGraphNodeStatus(agentType, `__trigger_${triggerId}`, "running");
+            const nodeId = `__trigger_${triggerId}`;
+            // If the trigger node doesn't exist yet (dynamically created via set_trigger),
+            // synthesize it before updating status.
+            setSessionsByAgent(prev => {
+              const sessions = prev[agentType] || [];
+              const activeId = activeSessionRef.current[agentType] || sessions[0]?.id;
+              return {
+                ...prev,
+                [agentType]: sessions.map(s => {
+                  if (s.id !== activeId) return s;
+                  const exists = s.graphNodes.some(n => n.id === nodeId);
+                  if (exists) {
+                    return {
+                      ...s,
+                      graphNodes: s.graphNodes.map(n =>
+                        n.id === nodeId ? { ...n, status: "running" as const } : n,
+                      ),
+                    };
+                  }
+                  // Synthesize new trigger node at the front of the graph
+                  const triggerType = (event.data?.trigger_type as string) || "timer";
+                  const triggerConfig = (event.data?.trigger_config as Record<string, unknown>) || {};
+                  const entryNode = s.graphNodes.find(n => n.nodeType !== "trigger")?.id;
+                  const newNode: GraphNode = {
+                    id: nodeId,
+                    label: triggerId,
+                    status: "running",
+                    nodeType: "trigger",
+                    triggerType,
+                    triggerConfig,
+                    ...(entryNode ? { next: [entryNode] } : {}),
+                  };
+                  return { ...s, graphNodes: [newNode, ...s.graphNodes] };
+                }),
+              };
+            });
           }
           break;
         }
@@ -1904,9 +1967,56 @@ export default function Workspace() {
           break;
         }
 
-        case "trigger_available":
-        case "trigger_removed":
+        case "trigger_available": {
+          const triggerId = event.data?.trigger_id as string;
+          if (triggerId) {
+            const nodeId = `__trigger_${triggerId}`;
+            setSessionsByAgent(prev => {
+              const sessions = prev[agentType] || [];
+              const activeId = activeSessionRef.current[agentType] || sessions[0]?.id;
+              return {
+                ...prev,
+                [agentType]: sessions.map(s => {
+                  if (s.id !== activeId) return s;
+                  if (s.graphNodes.some(n => n.id === nodeId)) return s;
+                  const triggerType = (event.data?.trigger_type as string) || "timer";
+                  const triggerConfig = (event.data?.trigger_config as Record<string, unknown>) || {};
+                  const entryNode = s.graphNodes.find(n => n.nodeType !== "trigger")?.id;
+                  const newNode: GraphNode = {
+                    id: nodeId,
+                    label: triggerId,
+                    status: "pending",
+                    nodeType: "trigger",
+                    triggerType,
+                    triggerConfig,
+                    ...(entryNode ? { next: [entryNode] } : {}),
+                  };
+                  return { ...s, graphNodes: [newNode, ...s.graphNodes] };
+                }),
+              };
+            });
+          }
           break;
+        }
+
+        case "trigger_removed": {
+          const triggerId = event.data?.trigger_id as string;
+          if (triggerId) {
+            const nodeId = `__trigger_${triggerId}`;
+            setSessionsByAgent(prev => {
+              const sessions = prev[agentType] || [];
+              const activeId = activeSessionRef.current[agentType] || sessions[0]?.id;
+              return {
+                ...prev,
+                [agentType]: sessions.map(s => {
+                  if (s.id !== activeId) return s;
+                  return { ...s, graphNodes: s.graphNodes.filter(n => n.id !== nodeId) };
+                }),
+              };
+            });
+          }
+          break;
+        }
 
         default:
           // Fallback: ensure queenReady is set even for unexpected first events

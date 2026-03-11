@@ -229,7 +229,7 @@ async def handle_get_live_session(request: web.Request) -> web.Response:
             }
             for ep in rt.get_entry_points()
         ]
-        # Append hoisted triggers (stripped from worker runtime, stored on session)
+        # Append triggers from triggers.json (stored on session)
         runner = getattr(session, "runner", None)
         graph_entry = runner.graph.entry_node if runner else ""
         for t in getattr(session, "available_triggers", {}).values():
@@ -383,7 +383,7 @@ async def handle_session_entry_points(request: web.Request) -> web.Response:
         }
         for ep in eps
     ]
-    # Append hoisted triggers (stripped from worker runtime, stored on session)
+    # Append triggers from triggers.json (stored on session)
     runner = getattr(session, "runner", None)
     graph_entry = runner.graph.entry_node if runner else ""
     for t in getattr(session, "available_triggers", {}).values():
@@ -430,12 +430,14 @@ async def handle_update_trigger_task(request: web.Request) -> web.Response:
 
     tdef.task = task
 
-    # Persist if trigger is currently active
-    if trigger_id in getattr(session, "active_trigger_ids", set()):
-        from framework.tools.queen_lifecycle_tools import _persist_active_triggers
+    # Persist to session state and agent definition
+    from framework.tools.queen_lifecycle_tools import _persist_active_triggers, _save_trigger_to_agent
 
+    if trigger_id in getattr(session, "active_trigger_ids", set()):
         session_id = request.match_info["session_id"]
         await _persist_active_triggers(session, session_id)
+
+    _save_trigger_to_agent(session, trigger_id, tdef)
 
     return web.json_response(
         {

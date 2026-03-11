@@ -117,7 +117,7 @@ async def handle_list_nodes(request: web.Request) -> web.Response:
         }
         for ep in reg.entry_points.values()
     ]
-    # Append hoisted triggers (stripped from worker runtime, stored on session)
+    # Append triggers from triggers.json (stored on session)
     for t in getattr(session, "available_triggers", {}).values():
         entry = {
             "id": t.id,

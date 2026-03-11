@@ -50,7 +50,7 @@ class Session:
     worker_handoff_sub: str | None = None
     # Memory consolidation subscription (fires on CONTEXT_COMPACTED)
     memory_consolidation_sub: str | None = None
-    # Trigger definitions hoisted from worker (available but inactive)
+    # Trigger definitions loaded from agent's triggers.json (available but inactive)
     available_triggers: dict[str, TriggerDefinition] = field(default_factory=dict)
     # Active trigger tracking (IDs currently firing + their asyncio tasks)
     active_trigger_ids: set[str] = field(default_factory=set)
@@ -257,30 +257,28 @@ class SessionManager:
 
             runtime = runner._agent_runtime
 
-            # Auto-hoist: extract timer/webhook triggers from worker graph
-            # and store as available (inactive) trigger definitions on the session.
-            # Strip them from the worker runtime so it doesn't start its own loops.
-            if runtime:
-                for ep in runner.graph.async_entry_points:
-                    if ep.trigger_type in ("timer", "webhook"):
-                        session.available_triggers[ep.id] = TriggerDefinition(
-                            id=ep.id,
-                            trigger_type=ep.trigger_type,
-                            trigger_config=ep.trigger_config,
-                            description=ep.name,
-                            task=getattr(ep, "task", ""),
-                        )
-                        runtime.unregister_entry_point(ep.id)
-                        logger.info(
-                            "Hoisted trigger '%s' (%s) from worker to queen",
-                            ep.id,
-                            ep.trigger_type,
-                        )
+            # Load triggers from the agent's triggers.json definition file.
+            from framework.tools.queen_lifecycle_tools import _read_agent_triggers_json
 
-                if session.available_triggers:
-                    await self._emit_trigger_events(
-                        session, "available", session.available_triggers
+            for tdata in _read_agent_triggers_json(agent_path):
+                tid = tdata.get("id", "")
+                ttype = tdata.get("trigger_type", "")
+                if tid and ttype in ("timer", "webhook"):
+                    session.available_triggers[tid] = TriggerDefinition(
+                        id=tid,
+                        trigger_type=ttype,
+                        trigger_config=tdata.get("trigger_config", {}),
+                        description=tdata.get("name", tid),
+                        task=tdata.get("task", ""),
                     )
+                    logger.info(
+                        "Loaded trigger '%s' (%s) from triggers.json", tid, ttype
+                    )
+
+            if session.available_triggers:
+                await self._emit_trigger_events(
+                    session, "available", session.available_triggers
+                )
 
             # Start runtime on event loop
             if runtime and not runtime.is_running:
@@ -507,7 +505,7 @@ class SessionManager:
         session.active_webhook_subs.clear()
         session.active_trigger_ids.clear()
 
-        # Clean up hoisted triggers
+        # Clean up triggers
         if session.available_triggers:
             await self._emit_trigger_events(session, "removed", session.available_triggers)
             session.available_triggers.clear()
