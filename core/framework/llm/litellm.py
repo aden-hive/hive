@@ -115,6 +115,7 @@ if litellm is not None:
     _patch_litellm_metadata_nonetype()
 
 RATE_LIMIT_MAX_RETRIES = 10
+STREAM_TRANSIENT_MAX_RETRIES = 3
 RATE_LIMIT_BACKOFF_BASE = 2  # seconds
 RATE_LIMIT_MAX_DELAY = 120  # seconds - cap to prevent absurd waits
 MINIMAX_API_BASE = "https://api.minimax.io/v1"
@@ -927,6 +928,11 @@ class LiteLLMProvider(LLMProvider):
             kwargs.pop("max_tokens", None)
             kwargs.pop("stream_options", None)
 
+        # Independent retry counters — each path has its own budget
+        empty_stream_attempts = 0
+        transient_attempts = 0
+        rate_limit_attempts = 0
+
         for attempt in range(RATE_LIMIT_MAX_RETRIES + 1):
             # Post-stream events (ToolCall, TextEnd, Finish) are buffered
             # because they depend on the full stream.  TextDeltaEvents are
@@ -1053,17 +1059,12 @@ class LiteLLMProvider(LLMProvider):
                             yield event
                         return
 
-                    # Empty stream — always retry regardless of last message
-                    # role.  Ghost empty streams after tool results are NOT
-                    # expected no-ops; they create infinite loops when the
-                    # conversation doesn't change between iterations.
-                    # After retries, return the empty result and let the
-                    # caller (EventLoopNode) decide how to handle it.
                     last_role = next(
                         (m["role"] for m in reversed(full_messages) if m.get("role") != "system"),
                         None,
                     )
-                    if attempt < EMPTY_STREAM_MAX_RETRIES:
+                    if empty_stream_attempts < EMPTY_STREAM_MAX_RETRIES:
+                        empty_stream_attempts += 1
                         token_count, token_method = _estimate_tokens(
                             self.model,
                             full_messages,
@@ -1072,7 +1073,7 @@ class LiteLLMProvider(LLMProvider):
                             model=self.model,
                             kwargs=kwargs,
                             error_type="empty_stream",
-                            attempt=attempt,
+                            attempt=empty_stream_attempts,
                         )
                         logger.warning(
                             f"[stream-retry] {self.model} returned empty stream "
@@ -1080,15 +1081,11 @@ class LiteLLMProvider(LLMProvider):
                             f"~{token_count} tokens ({token_method}). "
                             f"Request dumped to: {dump_path}. "
                             f"Retrying in {EMPTY_STREAM_RETRY_DELAY}s "
-                            f"(attempt {attempt + 1}/{EMPTY_STREAM_MAX_RETRIES})"
+                            f"(attempt {empty_stream_attempts}/{EMPTY_STREAM_MAX_RETRIES})"
                         )
                         await asyncio.sleep(EMPTY_STREAM_RETRY_DELAY)
                         continue
 
-                    # All retries exhausted — log and return the empty
-                    # result.  EventLoopNode's empty response guard will
-                    # accept if all outputs are set, or handle the ghost
-                    # stream case if outputs are still missing.
                     logger.error(
                         f"[stream] {self.model} returned empty stream after "
                         f"{EMPTY_STREAM_MAX_RETRIES} retries "
@@ -1101,12 +1098,13 @@ class LiteLLMProvider(LLMProvider):
                 return
 
             except RateLimitError as e:
-                if attempt < RATE_LIMIT_MAX_RETRIES:
-                    wait = _compute_retry_delay(attempt, exception=e)
+                if rate_limit_attempts < RATE_LIMIT_MAX_RETRIES:
+                    rate_limit_attempts += 1
+                    wait = _compute_retry_delay(rate_limit_attempts, exception=e)
                     logger.warning(
                         f"[stream-retry] {self.model} rate limited (429): {e!s}. "
                         f"Retrying in {wait:.1f}s "
-                        f"(attempt {attempt + 1}/{RATE_LIMIT_MAX_RETRIES})"
+                        f"(attempt {rate_limit_attempts}/{RATE_LIMIT_MAX_RETRIES})"
                     )
                     await asyncio.sleep(wait)
                     continue
@@ -1114,13 +1112,14 @@ class LiteLLMProvider(LLMProvider):
                 return
 
             except Exception as e:
-                if _is_stream_transient_error(e) and attempt < RATE_LIMIT_MAX_RETRIES:
-                    wait = _compute_retry_delay(attempt, exception=e)
+                if _is_stream_transient_error(e) and transient_attempts < STREAM_TRANSIENT_MAX_RETRIES:
+                    transient_attempts += 1
+                    wait = _compute_retry_delay(transient_attempts, exception=e)
                     logger.warning(
                         f"[stream-retry] {self.model} transient error "
                         f"({type(e).__name__}): {e!s}. "
                         f"Retrying in {wait:.1f}s "
-                        f"(attempt {attempt + 1}/{RATE_LIMIT_MAX_RETRIES})"
+                        f"(attempt {transient_attempts}/{STREAM_TRANSIENT_MAX_RETRIES})"
                     )
                     await asyncio.sleep(wait)
                     continue
