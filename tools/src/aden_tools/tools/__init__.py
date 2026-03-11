@@ -138,7 +138,7 @@ from .youtube_transcript_tool import register_tools as register_youtube_transcri
 from .zendesk_tool import register_tools as register_zendesk
 from .zoho_crm_tool import register_tools as register_zoho_crm
 from .zoom_tool import register_tools as register_zoom
-
+from .osha_safety_tool import register_tools as register_osha_safety
 
 def _register_verified(
     mcp: FastMCP,
@@ -210,6 +210,7 @@ def _register_unverified(
     """Register unverified (new/community) tools."""
     # --- No credentials ---
     register_duckduckgo(mcp)
+    register_osha_safety(mcp)
     register_yahoo_finance(mcp)
     register_youtube_transcript(mcp)
 
