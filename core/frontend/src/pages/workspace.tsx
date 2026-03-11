@@ -372,6 +372,13 @@ export default function Workspace() {
     if (initial[initialAgent]?.length) {
       return initial;
     }
+    // Also check for existing tabs with instance suffixes (e.g. "agentType::instanceId")
+    const existingKey = Object.keys(initial).find(
+      k => baseAgentType(k) === initialAgent && initial[k]?.length > 0
+    );
+    if (existingKey && !initialPrompt) {
+      return initial;
+    }
 
     // If the user submitted a new prompt from the home page, always create
     // a fresh session so the prompt isn't lost into an existing session.
@@ -644,6 +651,35 @@ export default function Workspace() {
 
         let restoredMessageCount = 0;
 
+        // Before creating a new session, check if there's already a live backend
+        // session for this queen-only agent that no open tab owns.
+        if (!liveSession && !coldRestoreId) {
+          try {
+            const { sessions: allLive } = await sessionsApi.list();
+            const existing = allLive.find(s => !s.has_worker && !s.agent_path);
+            if (existing) {
+              const alreadyOwned = Object.values(sessionsRef.current).flat()
+                .some(s => s.backendSessionId === existing.session_id);
+              if (!alreadyOwned) {
+                liveSession = existing;
+              }
+            }
+          } catch { /* proceed to create */ }
+
+          // If no live session, check history for a cold queen-only session
+          if (!liveSession) {
+            try {
+              const { sessions: allHistory } = await sessionsApi.history();
+              const coldMatch = allHistory.find(
+                s => !s.agent_path && s.has_messages
+              );
+              if (coldMatch) {
+                coldRestoreId = coldMatch.session_id;
+              }
+            } catch { /* proceed to create fresh */ }
+          }
+        }
+
         if (!liveSession) {
           // Fetch conversation history from disk BEFORE creating the new session.
           // SKIP if messages were already pre-populated by handleHistoryOpen.
@@ -776,6 +812,37 @@ export default function Workspace() {
         }
       }
 
+      // No stored session — check for a live or cold session for this agent
+      // that we can reuse (e.g., tab was closed but backend session survived,
+      // or server restarted with conversation files on disk).
+      if (!liveSession && !coldRestoreId) {
+        try {
+          const { sessions: allLive } = await sessionsApi.list();
+          const existingLive = allLive.find(s => s.agent_path === agentPath);
+          if (existingLive) {
+            const alreadyOwned = Object.values(sessionsRef.current).flat()
+              .some(s => s.backendSessionId === existingLive.session_id);
+            if (!alreadyOwned) {
+              liveSession = existingLive;
+              isResumedSession = true;
+            }
+          }
+        } catch { /* proceed */ }
+
+        // If no live session, check history for a cold session to restore
+        if (!liveSession) {
+          try {
+            const { sessions: allHistory } = await sessionsApi.history();
+            const coldMatch = allHistory.find(
+              s => s.agent_path === agentPath && s.has_messages
+            );
+            if (coldMatch) {
+              coldRestoreId = coldMatch.session_id;
+            }
+          } catch { /* proceed to create fresh */ }
+        }
+      }
+
       if (!liveSession) {
         // Reconnect failed — clear stale cached messages from localStorage restore.
         // NEVER wipe when: (a) doing a cold restore (we'll restore from disk) or
@@ -827,7 +894,7 @@ export default function Workspace() {
         // The user never expects a greeting when reopening a session.
         if (coldRestoreId) suppressIntroRef.current.add(agentType);
 
-        try {
+        if (!liveSession) try {
           // Pass coldRestoreId as queenResumeFrom so the backend writes queen
           // messages into the ORIGINAL session's directory — all conversation
           // history accumulates in one place across server restarts.
