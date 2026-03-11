@@ -1,8 +1,14 @@
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { Crown, X } from "lucide-react";
-import { loadPersistedTabs, savePersistedTabs, TAB_STORAGE_KEY, type PersistedTabState } from "@/lib/tab-persistence";
+import {
+  loadPersistedTabs,
+  savePersistedTabs,
+  TAB_STORAGE_KEY,
+  type PersistedTabState,
+} from "@/lib/tab-persistence";
 import { sessionsApi } from "@/api/sessions";
+import ThemeToggle from "./ThemeToggle";
 
 export interface TopBarTab {
   agentType: string;
@@ -20,125 +26,116 @@ interface TopBarProps {
   children?: React.ReactNode;
 }
 
-export default function TopBar({ tabs: tabsProp, onTabClick, onCloseTab, canCloseTabs, afterTabs, children }: TopBarProps) {
+export default function TopBar({
+  tabs: tabsProp,
+  onTabClick,
+  onCloseTab,
+  canCloseTabs,
+  afterTabs,
+  children,
+}: TopBarProps) {
   const navigate = useNavigate();
-
-  /* ---------------- THEME TOGGLE ---------------- */
-
-  const [theme, setTheme] = useState("dark");
-
-  useEffect(() => {
-    const savedTheme = localStorage.getItem("theme") || "dark";
-    setTheme(savedTheme);
-
-    if (savedTheme === "dark") {
-      document.documentElement.classList.add("dark");
-    }
-  }, []);
-
-  const toggleTheme = () => {
-    const newTheme = theme === "dark" ? "light" : "dark";
-
-    setTheme(newTheme);
-
-    if (newTheme === "dark") {
-      document.documentElement.classList.add("dark");
-    } else {
-      document.documentElement.classList.remove("dark");
-    }
-
-    localStorage.setItem("theme", newTheme);
-  };
 
   /* ---------------- EXISTING CODE ---------------- */
 
   const [persisted, setPersisted] = useState<PersistedTabState | null>(() =>
-    tabsProp ? null : loadPersistedTabs()
+    tabsProp ? null : loadPersistedTabs(),
   );
 
   const tabs: TopBarTab[] = tabsProp ?? deriveTabs(persisted);
   const showClose = canCloseTabs ?? true;
 
-  const handleTabClick = useCallback((agentType: string) => {
-    if (onTabClick) {
-      onTabClick(agentType);
-    } else {
-      navigate(`/workspace?agent=${encodeURIComponent(agentType)}`);
-    }
-  }, [onTabClick, navigate]);
+  const handleTabClick = useCallback(
+    (agentType: string) => {
+      if (onTabClick) {
+        onTabClick(agentType);
+      } else {
+        navigate(`/workspace?agent=${encodeURIComponent(agentType)}`);
+      }
+    },
+    [onTabClick, navigate],
+  );
 
-  const handleCloseTab = useCallback((agentType: string, e: React.MouseEvent) => {
-    e.stopPropagation();
-    if (onCloseTab) {
-      onCloseTab(agentType);
-      return;
-    }
-
-    sessionsApi.list()
-      .then(({ sessions }) => {
-        const match = sessions.find(s => s.agent_path === agentType);
-        if (match) return sessionsApi.stop(match.session_id);
-      })
-      .catch(() => {});
-
-    setPersisted(prev => {
-      if (!prev) return null;
-      const nextTabs = prev.tabs.filter(t => t.agentType !== agentType);
-
-      if (nextTabs.length === 0) {
-        localStorage.removeItem(TAB_STORAGE_KEY);
-        return null;
+  const handleCloseTab = useCallback(
+    (agentType: string, e: React.MouseEvent) => {
+      e.stopPropagation();
+      if (onCloseTab) {
+        onCloseTab(agentType);
+        return;
       }
 
-      const removedIds = new Set(prev.tabs.filter(t => t.agentType === agentType).map(t => t.id));
-      const nextSessions = { ...prev.sessions };
-      for (const id of removedIds) delete nextSessions[id];
+      sessionsApi
+        .list()
+        .then(({ sessions }) => {
+          const match = sessions.find((s) => s.agent_path === agentType);
+          if (match) return sessionsApi.stop(match.session_id);
+        })
+        .catch(() => {});
 
-      const nextActiveSession = { ...prev.activeSessionByAgent };
-      delete nextActiveSession[agentType];
+      setPersisted((prev) => {
+        if (!prev) return null;
+        const nextTabs = prev.tabs.filter((t) => t.agentType !== agentType);
 
-      const nextActiveWorker = prev.activeWorker === agentType
-        ? nextTabs[0].agentType
-        : prev.activeWorker;
+        if (nextTabs.length === 0) {
+          localStorage.removeItem(TAB_STORAGE_KEY);
+          return null;
+        }
 
-      const nextState: PersistedTabState = {
-        tabs: nextTabs,
-        activeSessionByAgent: nextActiveSession,
-        activeWorker: nextActiveWorker,
-        sessions: nextSessions,
-      };
+        const removedIds = new Set(
+          prev.tabs.filter((t) => t.agentType === agentType).map((t) => t.id),
+        );
+        const nextSessions = { ...prev.sessions };
+        for (const id of removedIds) delete nextSessions[id];
 
-      savePersistedTabs(nextState);
-      return nextState;
-    });
+        const nextActiveSession = { ...prev.activeSessionByAgent };
+        delete nextActiveSession[agentType];
 
-  }, [onCloseTab]);
+        const nextActiveWorker =
+          prev.activeWorker === agentType
+            ? nextTabs[0].agentType
+            : prev.activeWorker;
+
+        const nextState: PersistedTabState = {
+          tabs: nextTabs,
+          activeSessionByAgent: nextActiveSession,
+          activeWorker: nextActiveWorker,
+          sessions: nextSessions,
+        };
+
+        savePersistedTabs(nextState);
+        return nextState;
+      });
+    },
+    [onCloseTab],
+  );
 
   return (
-    <div className="relative h-12 flex items-center justify-between px-5 border-b border-border/60 bg-card/50 backdrop-blur-sm flex-shrink-0">
-
+    <div className="relative h-12 flex items-center justify-between px-5 border-b border-border/60 bg-card/50 backdrop-blur-sm">
       <div className="flex items-center gap-3 min-w-0">
-        <button onClick={() => navigate("/")} className="flex items-center gap-2 hover:opacity-80 transition-opacity flex-shrink-0">
+        <button
+          onClick={() => navigate("/")}
+          className="flex items-center gap-2 hover:opacity-80 transition-opacity"
+        >
           <Crown className="w-4 h-4 text-primary" />
           <span className="text-sm font-semibold text-primary">Open Hive</span>
         </button>
 
         {tabs.length > 0 && (
           <>
-            <span className="text-border text-xs flex-shrink-0">|</span>
+            <span className="text-border text-xs">|</span>
             <div className="flex items-center gap-0.5 min-w-0 overflow-x-auto scrollbar-hide">
               {tabs.map((tab) => (
                 <button
                   key={tab.agentType}
                   onClick={() => handleTabClick(tab.agentType)}
-                  className={`group flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-colors whitespace-nowrap flex-shrink-0 ${
+                  className={`group flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-colors whitespace-nowrap ${
                     tab.isActive
                       ? "bg-primary/15 text-primary"
                       : "text-muted-foreground hover:text-foreground hover:bg-muted/50"
                   }`}
                 >
                   {tab.hasRunning && (
-                    <span className="relative flex h-1.5 w-1.5 flex-shrink-0">
+                    <span className="relative flex h-1.5 w-1.5 ">
                       <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary opacity-60" />
                       <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-primary" />
                     </span>
@@ -148,7 +145,7 @@ export default function TopBar({ tabs: tabsProp, onTabClick, onCloseTab, canClos
 
                   {showClose && (
                     <X
-                      className="w-3 h-3 opacity-0 group-hover:opacity-60 hover:!opacity-100 transition-opacity"
+                      className="w-3 h-3 opacity-0 group-hover:opacity-60 transition-opacity"
                       onClick={(e) => handleCloseTab(tab.agentType, e)}
                     />
                   )}
@@ -161,19 +158,12 @@ export default function TopBar({ tabs: tabsProp, onTabClick, onCloseTab, canClos
         )}
       </div>
 
-      <div className="flex items-center gap-2 flex-shrink-0">
-
+      <div className="flex items-center gap-2">
         {/* THEME BUTTON */}
-        <button
-          onClick={toggleTheme}
-          className="px-3 py-1 text-xs border rounded-md"
-        >
-          {theme === "dark" ? "☀" : "🌙"}
-        </button>
+        <ThemeToggle />
 
         {children}
       </div>
-
     </div>
   );
 }
@@ -191,9 +181,10 @@ function deriveTabs(persisted: PersistedTabState | null): TopBarTab[] {
 
     const sessionData = persisted.sessions?.[tab.id];
 
-    const hasRunning = sessionData?.graphNodes?.some(
-      (n) => n.status === "running" || n.status === "looping"
-    ) ?? false;
+    const hasRunning =
+      sessionData?.graphNodes?.some(
+        (n) => n.status === "running" || n.status === "looping",
+      ) ?? false;
 
     tabs.push({
       agentType: tab.agentType,
