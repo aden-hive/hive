@@ -970,13 +970,13 @@ class TestEscalationFlow:
         )
 
     @pytest.mark.asyncio
-    async def test_wait_for_response_emits_client_events(
+    async def test_wait_for_response_emits_escalation_event(
         self,
         runtime,
         parent_node_spec,
         subagent_node_spec,
     ):
-        """Escalation should emit CLIENT_OUTPUT_DELTA and CLIENT_INPUT_REQUESTED events."""
+        """Escalation should emit ESCALATION_REQUESTED to the queen."""
         from framework.graph.event_loop_node import _EscalationReceiver
 
         bus = EventBus()
@@ -986,7 +986,7 @@ class TestEscalationFlow:
             bus_events.append(event)
 
         bus.subscribe(
-            event_types=[EventType.CLIENT_OUTPUT_DELTA, EventType.CLIENT_INPUT_REQUESTED],
+            event_types=[EventType.ESCALATION_REQUESTED],
             handler=handler,
         )
 
@@ -1034,16 +1034,12 @@ class TestEscalationFlow:
         await node._execute_subagent(ctx, "researcher", "Navigate page with CAPTCHA")
         await injector
 
-        # Should have emitted both events
-        output_deltas = [e for e in bus_events if e.type == EventType.CLIENT_OUTPUT_DELTA]
-        input_requests = [e for e in bus_events if e.type == EventType.CLIENT_INPUT_REQUESTED]
+        # Should have emitted ESCALATION_REQUESTED
+        escalation_events = [e for e in bus_events if e.type == EventType.ESCALATION_REQUESTED]
 
-        assert len(output_deltas) >= 1, "Should emit CLIENT_OUTPUT_DELTA with the message"
-        assert output_deltas[0].data["content"] == "CAPTCHA detected on page"
-        assert output_deltas[0].node_id == "parent"  # Shows as parent talking
-
-        assert len(input_requests) >= 1, "Should emit CLIENT_INPUT_REQUESTED for routing"
-        assert ":escalation:" in input_requests[0].node_id  # Escalation ID for routing
+        assert len(escalation_events) >= 1, "Should emit ESCALATION_REQUESTED"
+        assert escalation_events[0].data["context"] == "CAPTCHA detected on page"
+        assert ":escalation:" in escalation_events[0].node_id
 
     @pytest.mark.asyncio
     async def test_non_blocking_report_still_works(
