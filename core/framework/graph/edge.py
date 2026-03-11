@@ -376,28 +376,8 @@ class GraphSpec(BaseModel):
             edges=[...],
         )
 
-    For multi-entry-point agents (concurrent streams):
-        GraphSpec(
-            id="support-agent-graph",
-            goal_id="support-001",
-            entry_node="process-webhook",  # Default entry
-            async_entry_points=[
-                AsyncEntryPointSpec(
-                    id="webhook",
-                    name="Zendesk Webhook",
-                    entry_node="process-webhook",
-                    trigger_type="webhook",
-                ),
-                AsyncEntryPointSpec(
-                    id="api",
-                    name="API Handler",
-                    entry_node="process-request",
-                    trigger_type="api",
-                ),
-            ],
-            nodes=[...],
-            edges=[...],
-        )
+    Triggers (timer, webhook, event) are now defined in ``triggers.json``
+    alongside the agent directory, not embedded in the graph spec.
     """
 
     id: str
@@ -409,12 +389,6 @@ class GraphSpec(BaseModel):
     entry_points: dict[str, str] = Field(
         default_factory=dict,
         description="Named entry points for resuming execution. Format: {name: node_id}",
-    )
-    async_entry_points: list[AsyncEntryPointSpec] = Field(
-        default_factory=list,
-        description=(
-            "Asynchronous entry points for concurrent execution streams (used with AgentRuntime)"
-        ),
     )
     terminal_nodes: list[str] = Field(
         default_factory=list, description="IDs of nodes that end execution"
@@ -492,17 +466,6 @@ class GraphSpec(BaseModel):
         for node in self.nodes:
             if node.id == node_id:
                 return node
-        return None
-
-    def has_async_entry_points(self) -> bool:
-        """Check if this graph uses async entry points (multi-stream execution)."""
-        return len(self.async_entry_points) > 0
-
-    def get_async_entry_point(self, entry_point_id: str) -> AsyncEntryPointSpec | None:
-        """Get an async entry point by ID."""
-        for ep in self.async_entry_points:
-            if ep.id == entry_point_id:
-                return ep
         return None
 
     def get_outgoing_edges(self, node_id: str) -> list[EdgeSpec]:
@@ -595,37 +558,6 @@ class GraphSpec(BaseModel):
         if not self.get_node(self.entry_node):
             errors.append(f"Entry node '{self.entry_node}' not found")
 
-        # Check async entry points
-        seen_entry_ids = set()
-        for entry_point in self.async_entry_points:
-            # Check for duplicate IDs
-            if entry_point.id in seen_entry_ids:
-                errors.append(f"Duplicate async entry point ID: '{entry_point.id}'")
-            seen_entry_ids.add(entry_point.id)
-
-            # Check entry node exists
-            if not self.get_node(entry_point.entry_node):
-                errors.append(
-                    f"Async entry point '{entry_point.id}' references "
-                    f"missing node '{entry_point.entry_node}'"
-                )
-
-            # Validate isolation level
-            valid_isolation = {"isolated", "shared", "synchronized"}
-            if entry_point.isolation_level not in valid_isolation:
-                errors.append(
-                    f"Async entry point '{entry_point.id}' has invalid isolation_level "
-                    f"'{entry_point.isolation_level}'. Valid: {valid_isolation}"
-                )
-
-            # Validate trigger type
-            valid_triggers = {"webhook", "api", "timer", "event", "manual"}
-            if entry_point.trigger_type not in valid_triggers:
-                errors.append(
-                    f"Async entry point '{entry_point.id}' has invalid trigger_type "
-                    f"'{entry_point.trigger_type}'. Valid: {valid_triggers}"
-                )
-
         # Check terminal nodes exist
         for term in self.terminal_nodes:
             if not self.get_node(term):
@@ -654,10 +586,6 @@ class GraphSpec(BaseModel):
         for entry_point_node in self.entry_points.values():
             to_visit.append(entry_point_node)
 
-        # Add all async entry points as valid starting points
-        for async_entry in self.async_entry_points:
-            to_visit.append(async_entry.entry_node)
-
         # Traverse from all entry points
         while to_visit:
             current = to_visit.pop()
@@ -674,17 +602,12 @@ class GraphSpec(BaseModel):
                 for sub_agent_id in sub_agents:
                     reachable.add(sub_agent_id)
 
-        # Build set of async entry point nodes for quick lookup
-        async_entry_nodes = {ep.entry_node for ep in self.async_entry_points}
-
         for node in self.nodes:
             if node.id not in reachable:
-                # Skip if node is a pause node, entry point target, or async entry
-                # (pause/resume architecture and async entry points make reachable)
+                # Skip if node is a pause node or entry point target
                 if (
                     node.id in self.pause_nodes
                     or node.id in self.entry_points.values()
-                    or node.id in async_entry_nodes
                 ):
                     continue
                 errors.append(f"Node '{node.id}' is unreachable from entry")

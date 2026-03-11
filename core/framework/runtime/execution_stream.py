@@ -1002,8 +1002,8 @@ class ExecutionStream:
     def _create_modified_graph(self) -> "GraphSpec":
         """Create a graph with the entry point overridden.
 
-        Preserves the original graph's entry_points and async_entry_points
-        so that validation correctly considers ALL entry nodes reachable.
+        Preserves the original graph's entry_points so that validation
+        correctly considers ALL entry nodes reachable.
         Each stream only executes from its own entry_node, but the full
         graph must validate with all entry points accounted for.
         """
@@ -1028,7 +1028,6 @@ class ExecutionStream:
             version=self.graph.version,
             entry_node=self.entry_spec.entry_node,  # Use our entry point
             entry_points=merged_entry_points,
-            async_entry_points=self.graph.async_entry_points,
             terminal_nodes=self.graph.terminal_nodes,
             pause_nodes=self.graph.pause_nodes,
             nodes=self.graph.nodes,

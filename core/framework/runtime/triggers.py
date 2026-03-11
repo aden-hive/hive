@@ -10,7 +10,7 @@ from typing import Any
 class TriggerDefinition:
     """A registered trigger that can be activated on the queen runtime.
 
-    Trigger *definitions* come from the worker's ``async_entry_points``.
+    Trigger *definitions* come from the worker's ``triggers.json``.
     Activation state is per-session (persisted in ``SessionState.active_triggers``).
     """
 

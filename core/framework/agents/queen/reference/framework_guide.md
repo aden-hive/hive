@@ -31,8 +31,7 @@ module-level variables via `getattr()`:
 | `conversation_mode` | no | not passed | Isolated mode (no context carryover) |
 | `identity_prompt` | no | not passed | No agent-level identity |
 | `loop_config` | no | `{}` | No iteration limits |
-| `async_entry_points` | no | `[]` | No async triggers (timers, webhooks, events) |
-| `runtime_config` | no | `None` | No webhook server |
+| `triggers.json` (file) | no | not present | No triggers (timers, webhooks) |
 
 **CRITICAL:** `__init__.py` MUST import and re-export ALL of these from
 `agent.py`. Missing exports silently fall back to defaults, causing
@@ -257,44 +256,28 @@ Multiple ON_SUCCESS edges from same source → parallel execution via asyncio.ga
 
 Judge is the SOLE acceptance mechanism — no ad-hoc framework gating.
 
-## Async Entry Points (Webhooks, Timers, Events)
+## Triggers (Timers, Webhooks)
 
-For agents that react to external events, use `AsyncEntryPointSpec`:
+For agents that react to external events, create a `triggers.json` file
+in the agent's export directory:
 
-```python
-from framework.graph.edge import AsyncEntryPointSpec
-from framework.runtime.agent_runtime import AgentRuntimeConfig
-
-# Timer trigger (cron or interval)
-async_entry_points = [
-    AsyncEntryPointSpec(
-        id="daily-check",
-        name="Daily Check",
-        entry_node="process",
-        trigger_type="timer",
-        trigger_config={"cron": "0 9 * * *"},  # daily at 9am
-        isolation_level="shared",
-    )
+```json
+[
+  {
+    "id": "daily-check",
+    "name": "Daily Check",
+    "trigger_type": "timer",
+    "trigger_config": {"cron": "0 9 * * *"},
+    "task": "Run the daily check process"
+  }
 ]
-
-# Webhook server (optional)
-runtime_config = AgentRuntimeConfig(
-    webhook_host="127.0.0.1",
-    webhook_port=8080,
-    webhook_routes=[{"source_id": "gmail", "path": "/webhooks/gmail", "methods": ["POST"]}],
-)
 ```
 
 ### Key Fields
-- `trigger_type`: `"timer"`, `"event"`, `"webhook"`, `"manual"`
+- `trigger_type`: `"timer"` or `"webhook"`
 - `trigger_config`: `{"cron": "0 9 * * *"}` or `{"interval_minutes": 20}`
-- `isolation_level`: `"shared"` (recommended), `"isolated"`, `"synchronized"`
-- `event_types`: For event triggers, e.g., `["webhook_received"]`
-
-### Exports Required
-Both `async_entry_points` and `runtime_config` must be exported from `__init__.py`.
-
-See `exports/gmail_inbox_guardian/agent.py` for complete example.
+- `task`: describes what the worker should do when the trigger fires
+- Triggers can also be created/removed at runtime via `set_trigger` / `remove_trigger` queen tools
 
 ## Tool Discovery
 

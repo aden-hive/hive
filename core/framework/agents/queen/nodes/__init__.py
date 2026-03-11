@@ -476,8 +476,8 @@ nodes/__init__.py
 - Goal description, success criteria values, constraint values, edge \
 definitions, identity_prompt in agent.py
 - CLI options in __main__.py
-- For async entry points (timers/webhooks), add AsyncEntryPointSpec \
-and AgentRuntimeConfig to agent.py
+- For triggers (timers/webhooks), add entries to triggers.json in the \
+agent's export directory
 
 Do NOT modify or rewrite:
 - Import statements at top of agent.py (they are correct)

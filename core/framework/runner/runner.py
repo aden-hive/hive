@@ -16,7 +16,6 @@ from framework.credentials.validation import (
 from framework.graph import Goal
 from framework.graph.edge import (
     DEFAULT_MAX_TOKENS,
-    AsyncEntryPointSpec,
     EdgeCondition,
     EdgeSpec,
     GraphSpec,
@@ -570,9 +569,6 @@ class AgentInfo:
     constraints: list[dict]
     required_tools: list[str]
     has_tools_module: bool
-    # Multi-entry-point support
-    async_entry_points: list[dict] = field(default_factory=list)
-    is_multi_entry_point: bool = False
 
 
 @dataclass
@@ -630,22 +626,6 @@ def load_agent_export(data: str | dict) -> tuple[GraphSpec, Goal]:
         )
         edges.append(edge)
 
-    # Build AsyncEntryPointSpec objects for multi-entry-point support
-    async_entry_points = []
-    for aep_data in graph_data.get("async_entry_points", []):
-        async_entry_points.append(
-            AsyncEntryPointSpec(
-                id=aep_data["id"],
-                name=aep_data.get("name", aep_data["id"]),
-                entry_node=aep_data["entry_node"],
-                trigger_type=aep_data.get("trigger_type", "manual"),
-                trigger_config=aep_data.get("trigger_config", {}),
-                isolation_level=aep_data.get("isolation_level", "shared"),
-                priority=aep_data.get("priority", 0),
-                max_concurrent=aep_data.get("max_concurrent", 10),
-            )
-        )
-
     # Build GraphSpec
     graph = GraphSpec(
         id=graph_data.get("id", "agent-graph"),
@@ -653,7 +633,6 @@ def load_agent_export(data: str | dict) -> tuple[GraphSpec, Goal]:
         version=graph_data.get("version", "1.0.0"),
         entry_node=graph_data.get("entry_node", ""),
         entry_points=graph_data.get("entry_points", {}),  # Support pause/resume architecture
-        async_entry_points=async_entry_points,  # Support multi-entry-point agents
         terminal_nodes=graph_data.get("terminal_nodes", []),
         pause_nodes=graph_data.get("pause_nodes", []),  # Support pause/resume architecture
         nodes=nodes,
@@ -805,8 +784,6 @@ class AgentRunner:
 
         # AgentRuntime — unified execution path for all agents
         self._agent_runtime: AgentRuntime | None = None
-        self._uses_async_entry_points = self.graph.has_async_entry_points()
-
         # Pre-load validation: structural checks + credentials.
         # Fails fast with actionable guidance — no MCP noise on screen.
         run_preload_validation(
@@ -943,7 +920,6 @@ class AgentRunner:
                 "version": "1.0.0",
                 "entry_node": getattr(agent_module, "entry_node", nodes[0].id),
                 "entry_points": getattr(agent_module, "entry_points", {}),
-                "async_entry_points": getattr(agent_module, "async_entry_points", []),
                 "terminal_nodes": getattr(agent_module, "terminal_nodes", []),
                 "pause_nodes": getattr(agent_module, "pause_nodes", []),
                 "nodes": nodes,
@@ -1429,21 +1405,7 @@ class AgentRunner:
         event_bus=None,
     ) -> None:
         """Set up multi-entry-point execution using AgentRuntime."""
-        # Convert AsyncEntryPointSpec to EntryPointSpec for AgentRuntime
         entry_points = []
-        for async_ep in self.graph.async_entry_points:
-            ep = EntryPointSpec(
-                id=async_ep.id,
-                name=async_ep.name,
-                entry_node=async_ep.entry_node,
-                trigger_type=async_ep.trigger_type,
-                trigger_config=async_ep.trigger_config,
-                isolation_level=async_ep.isolation_level,
-                priority=async_ep.priority,
-                max_concurrent=async_ep.max_concurrent,
-                max_resurrections=async_ep.max_resurrections,
-            )
-            entry_points.append(ep)
 
         # Always create a primary entry point for the graph's entry node.
         # For multi-entry-point agents this ensures the primary path (e.g.
@@ -1750,19 +1712,6 @@ class AgentRunner:
             for edge in self.graph.edges
         ]
 
-        # Build async entry points info
-        async_entry_points_info = [
-            {
-                "id": ep.id,
-                "name": ep.name,
-                "entry_node": ep.entry_node,
-                "trigger_type": ep.trigger_type,
-                "isolation_level": ep.isolation_level,
-                "max_concurrent": ep.max_concurrent,
-            }
-            for ep in self.graph.async_entry_points
-        ]
-
         return AgentInfo(
             name=self.graph.id,
             description=self.graph.description,
@@ -1789,8 +1738,6 @@ class AgentRunner:
             ],
             required_tools=sorted(required_tools),
             has_tools_module=(self.agent_path / "tools.py").exists(),
-            async_entry_points=async_entry_points_info,
-            is_multi_entry_point=self._uses_async_entry_points,
         )
 
     def validate(self) -> ValidationResult:
@@ -2105,18 +2052,6 @@ Respond with JSON only:
                 trigger_type="manual",
                 isolation_level="shared",
             )
-        for aep in runner.graph.async_entry_points:
-            entry_points[aep.id] = EntryPointSpec(
-                id=aep.id,
-                name=aep.name,
-                entry_node=aep.entry_node,
-                trigger_type=aep.trigger_type,
-                trigger_config=aep.trigger_config,
-                isolation_level=aep.isolation_level,
-                priority=aep.priority,
-                max_concurrent=aep.max_concurrent,
-            )
-
         await runtime.add_graph(
             graph_id=gid,
             graph=runner.graph,
