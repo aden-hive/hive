@@ -23,6 +23,7 @@ import json
 import os
 import re
 import subprocess
+import sys
 import tempfile
 from collections.abc import Callable
 from pathlib import Path
@@ -965,16 +966,25 @@ def register_file_tools(
         try:
             if before_write:
                 before_write()
-            original_mode = os.stat(resolved).st_mode
             fd, tmp_path = tempfile.mkstemp(dir=os.path.dirname(resolved))
             fd_open = True
             try:
-                if hasattr(os, "fchmod"):
-                    os.fchmod(fd, original_mode)
+                match sys.platform:
+                    case "win32":
+                        pass  # ACL preservation handled by atomic_replace below
+                    case _:
+                        original_mode = os.stat(resolved).st_mode
+                        os.fchmod(fd, original_mode)
                 with os.fdopen(fd, "w", encoding=encoding, newline="") as f:
                     fd_open = False
                     f.write(joined)
-                os.replace(tmp_path, resolved)
+                match sys.platform:
+                    case "win32":
+                        from aden_tools._win32_atomic import atomic_replace
+
+                        atomic_replace(resolved, tmp_path)
+                    case _:
+                        os.replace(tmp_path, resolved)
             except BaseException:
                 if fd_open:
                     os.close(fd)
