@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { DraftGraph as DraftGraphData, DraftNode } from "@/api/types";
 
 interface DraftGraphProps {
@@ -6,13 +6,12 @@ interface DraftGraphProps {
   onNodeClick?: (node: DraftNode) => void;
 }
 
-// Layout constants — tuned for a ~300px panel (276px after px-3 padding)
-const NODE_W = 150;
-const NODE_H = 48;
-const GAP_Y = 44;
-const TOP_Y = 24;
-const MARGIN_X = 12;
-const GAP_X = 12;
+// Layout constants — tuned for a ~500px panel (484px after px-2 padding)
+const NODE_H = 52;
+const GAP_Y = 48;
+const TOP_Y = 28;
+const MARGIN_X = 16;
+const GAP_X = 16;
 
 function truncateLabel(label: string, availablePx: number, fontSize: number): string {
   const avgCharW = fontSize * 0.58;
@@ -41,10 +40,9 @@ function FlowchartShape({
   color: string;
   selected: boolean;
 }) {
-  const fill = `${color}18`;
+  const fill = selected ? `${color}28` : `${color}18`;
   const stroke = selected ? color : `${color}80`;
-  const strokeWidth = selected ? 2 : 1.2;
-  const common = { fill, stroke, strokeWidth };
+  const common = { fill, stroke, strokeWidth: 1.2 };
 
   switch (shape) {
     case "stadium":
@@ -88,8 +86,8 @@ function FlowchartShape({
       const d = `M ${x} ${y + 4 + off} Q ${x} ${y + off}, ${x + 8} ${y + off} L ${x + w - 8 - off} ${y + off} Q ${x + w - off} ${y + off}, ${x + w - off} ${y + 4 + off} L ${x + w - off} ${y + h - 8} C ${x + (w - off) * 0.75} ${y + h + 2}, ${x + (w - off) * 0.25} ${y + h - 10}, ${x} ${y + h - 4} Z`;
       return (
         <g>
-          <rect x={x + off * 2} y={y} width={w - off * 2} height={h - off} rx={4} fill={fill} stroke={stroke} strokeWidth={strokeWidth} opacity={0.4} />
-          <rect x={x + off} y={y + off / 2} width={w - off} height={h - off} rx={4} fill={fill} stroke={stroke} strokeWidth={strokeWidth} opacity={0.6} />
+          <rect x={x + off * 2} y={y} width={w - off * 2} height={h - off} rx={4} fill={fill} stroke={stroke} strokeWidth={1.2} opacity={0.4} />
+          <rect x={x + off} y={y + off / 2} width={w - off} height={h - off} rx={4} fill={fill} stroke={stroke} strokeWidth={1.2} opacity={0.6} />
           <path d={d} {...common} />
         </g>
       );
@@ -100,8 +98,8 @@ function FlowchartShape({
       return (
         <g>
           <rect x={x} y={y} width={w} height={h} rx={4} {...common} />
-          <line x1={x + inset} y1={y} x2={x + inset} y2={y + h} stroke={stroke} strokeWidth={strokeWidth} />
-          <line x1={x + w - inset} y1={y} x2={x + w - inset} y2={y + h} stroke={stroke} strokeWidth={strokeWidth} />
+          <line x1={x + inset} y1={y} x2={x + inset} y2={y + h} stroke={stroke} strokeWidth={1.2} />
+          <line x1={x + w - inset} y1={y} x2={x + w - inset} y2={y + h} stroke={stroke} strokeWidth={1.2} />
         </g>
       );
     }
@@ -153,7 +151,7 @@ function FlowchartShape({
             {...common}
           />
           <ellipse cx={x + w / 2} cy={y + ry} rx={w / 2} ry={ry} {...common} />
-          <ellipse cx={x + w / 2} cy={y + h - ry} rx={w / 2} ry={ry} fill={fill} stroke={stroke} strokeWidth={strokeWidth} />
+          <ellipse cx={x + w / 2} cy={y + h - ry} rx={w / 2} ry={ry} fill={fill} stroke={stroke} strokeWidth={1.2} />
         </g>
       );
     }
@@ -270,6 +268,21 @@ function Tooltip({ node, style }: { node: DraftNode; style: React.CSSProperties 
 export default function DraftGraph({ draft, onNodeClick }: DraftGraphProps) {
   const [hoveredNode, setHoveredNode] = useState<string | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const [containerW, setContainerW] = useState(484);
+
+  // Measure actual container width so layout fills it exactly
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver((entries) => {
+      const w = entries[0]?.contentRect.width;
+      if (w && w > 0) setContainerW(w);
+    });
+    ro.observe(el);
+    // Capture initial width
+    setContainerW(el.clientWidth || 484);
+    return () => ro.disconnect();
+  }, []);
 
   const { nodes, edges } = draft;
 
@@ -312,7 +325,7 @@ export default function DraftGraph({ draft, onNodeClick }: DraftGraphProps) {
   // Layer-based layout — compute viewBox dimensions in SVG units
   const layout = useMemo(() => {
     if (nodes.length === 0) {
-      return { layers: [] as number[], cols: [] as number[], maxCols: 1, nodeW: NODE_W, firstColX: MARGIN_X };
+      return { layers: [] as number[], cols: [] as number[], maxCols: 1, nodeW: 200, firstColX: MARGIN_X };
     }
 
     const parents = new Map<number, number[]>();
@@ -339,11 +352,11 @@ export default function DraftGraph({ draft, onNodeClick }: DraftGraphProps) {
       maxCols = Math.max(maxCols, group.length);
     });
 
-    // Compute node width to fit available space
+    // Compute node width to fill available space (max 360px to stay readable)
     const backEdgeMargin = backEdges.length > 0 ? 30 + backEdges.length * 14 : 8;
     const totalMargin = MARGIN_X * 2 + backEdgeMargin;
-    const availW = 276 - totalMargin; // 276 = 300px panel - 24px container padding
-    const nodeW = Math.min(NODE_W, Math.floor((availW - (maxCols - 1) * GAP_X) / maxCols));
+    const availW = containerW - totalMargin;
+    const nodeW = Math.min(360, Math.floor((availW - (maxCols - 1) * GAP_X) / maxCols));
     const colSpacing = nodeW + GAP_X;
     const totalNodesW = maxCols * nodeW + (maxCols - 1) * GAP_X;
     const firstColX = MARGIN_X + (availW - totalNodesW) / 2;
@@ -367,10 +380,8 @@ export default function DraftGraph({ draft, onNodeClick }: DraftGraphProps) {
       }
     });
 
-    const svgW = totalNodesW + totalMargin;
-
-    return { layers, cols, maxCols, nodeW, colSpacing, firstColX, svgW, backEdgeMargin };
-  }, [nodes, forwardEdges, backEdges.length]);
+    return { layers, cols, maxCols, nodeW, colSpacing, firstColX };
+  }, [nodes, forwardEdges, backEdges.length, containerW]);
 
   if (nodes.length === 0) {
     return (
@@ -391,7 +402,7 @@ export default function DraftGraph({ draft, onNodeClick }: DraftGraphProps) {
     );
   }
 
-  const { layers, cols, nodeW, colSpacing, firstColX, svgW } = layout;
+  const { layers, cols, nodeW, colSpacing, firstColX } = layout;
 
   const nodePos = (i: number) => ({
     x: firstColX + cols[i] * (colSpacing ?? nodeW + GAP_X),
@@ -449,11 +460,11 @@ export default function DraftGraph({ draft, onNodeClick }: DraftGraphProps) {
             x={(startX + toCenterX) / 2}
             y={midY - 3}
             fill="hsl(220,10%,45%)"
-            fontSize={8}
+            fontSize={9}
             fontStyle="italic"
             textAnchor="middle"
           >
-            {truncateLabel(edge.label, 60, 8)}
+            {truncateLabel(edge.label, 80, 9)}
           </text>
         )}
       </g>
@@ -488,9 +499,13 @@ export default function DraftGraph({ draft, onNodeClick }: DraftGraphProps) {
   const renderNode = (node: DraftNode, i: number) => {
     const pos = nodePos(i);
     const isHovered = hoveredNode === node.id;
-    const fontSize = 10.5;
-    const labelAvailW = nodeW - 16;
+    const fontSize = 13;
+    const labelAvailW = nodeW - 28;
     const displayLabel = truncateLabel(node.name, labelAvailW, fontSize);
+    const descAvailW = nodeW - 24;
+    const descLabel = node.description
+      ? truncateLabel(node.description, descAvailW, 9.5)
+      : node.flowchart_type.replace(/_/g, " ");
     const textX = pos.x + nodeW / 2;
     const textY = pos.y + NODE_H / 2;
 
@@ -516,7 +531,7 @@ export default function DraftGraph({ draft, onNodeClick }: DraftGraphProps) {
 
         <text
           x={textX}
-          y={textY - 3}
+          y={textY - 5}
           fill={isHovered ? "hsl(0,0%,92%)" : "hsl(0,0%,78%)"}
           fontSize={fontSize}
           fontWeight={500}
@@ -529,13 +544,12 @@ export default function DraftGraph({ draft, onNodeClick }: DraftGraphProps) {
         <text
           x={textX}
           y={textY + 11}
-          fill="hsl(220,10%,45%)"
-          fontSize={8}
+          fill="hsl(220,10%,50%)"
+          fontSize={9.5}
           textAnchor="middle"
           dominantBaseline="middle"
-          fontStyle="italic"
         >
-          {node.flowchart_type.replace(/_/g, " ")}
+          {descLabel}
         </text>
       </g>
     );
@@ -569,7 +583,7 @@ export default function DraftGraph({ draft, onNodeClick }: DraftGraphProps) {
       <div ref={containerRef} className="flex-1 overflow-y-auto overflow-x-hidden px-2 pb-2 relative">
         <svg
           width="100%"
-          viewBox={`0 0 ${svgW} ${totalH}`}
+          viewBox={`0 0 ${containerW} ${totalH}`}
           preserveAspectRatio="xMidYMin meet"
           className="select-none"
           style={{ fontFamily: "'Inter', system-ui, sans-serif" }}
@@ -580,7 +594,7 @@ export default function DraftGraph({ draft, onNodeClick }: DraftGraphProps) {
 
           {/* Legend */}
           <g transform={`translate(${MARGIN_X}, ${svgHeight + 4})`}>
-            <text fill="hsl(220,10%,40%)" fontSize={8} fontWeight={600} y={4}>
+            <text fill="hsl(220,10%,40%)" fontSize={9} fontWeight={600} y={4}>
               LEGEND
             </text>
             {usedTypes.map(([type, meta], i) => (
@@ -594,7 +608,7 @@ export default function DraftGraph({ draft, onNodeClick }: DraftGraphProps) {
                   color={meta.color}
                   selected={false}
                 />
-                <text x={22} y={9} fill="hsl(220,10%,55%)" fontSize={8.5}>
+                <text x={22} y={9} fill="hsl(220,10%,55%)" fontSize={9.5}>
                   {type.replace(/_/g, " ")}
                 </text>
               </g>

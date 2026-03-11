@@ -904,13 +904,6 @@ export default function Workspace() {
         queenBuilding: initialPhase === "building",
       });
 
-      // If resuming in planning phase, fetch any existing draft graph
-      if (initialPhase === "planning") {
-        graphsApi.draftGraph(session.session_id).then(({ draft }) => {
-          if (draft) updateAgentState(agentType, { draftGraph: draft });
-        }).catch(() => {});
-      }
-
       // Update the session label + backendSessionId.  Also set historySourceId
       // so the sidebar "already-open" check works even after cold-revive changes
       // backendSessionId to a new live session ID.
@@ -1066,6 +1059,22 @@ export default function Workspace() {
       fetchGraphForAgent(agentType, state.sessionId);
     }
   }, [agentStates, fetchGraphForAgent]);
+
+  // --- Fetch draft graph when a session is in planning phase ---
+  // Covers initial load, tab switches, reconnects, and cold restores.
+  const fetchedDraftSessionsRef = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    for (const [agentType, state] of Object.entries(agentStates)) {
+      if (!state.sessionId || !state.ready) continue;
+      if (state.queenPhase !== "planning") continue;
+      if (state.draftGraph) continue; // already have it
+      if (fetchedDraftSessionsRef.current.has(state.sessionId)) continue;
+      fetchedDraftSessionsRef.current.add(state.sessionId);
+      graphsApi.draftGraph(state.sessionId).then(({ draft }) => {
+        if (draft) updateAgentState(agentType, { draftGraph: draft });
+      }).catch(() => {});
+    }
+  }, [agentStates, updateAgentState]);
 
   // Poll entry points every second for agents with timers to keep
   // next_fire_in countdowns fresh without re-fetching the full topology.
@@ -1809,9 +1818,14 @@ export default function Workspace() {
             queenBuilding: newPhase === "building",
             // Sync workerRunState so the RunButton reflects the phase
             workerRunState: newPhase === "running" ? "running" : "idle",
-            // Clear draft graph once we leave planning
+            // Clear draft graph once we leave planning; also clear dedup ref
+            // so re-entering planning can refetch
             ...(newPhase !== "planning" ? { draftGraph: null } : {}),
           });
+          if (newPhase !== "planning") {
+            const sid = agentStates[agentType]?.sessionId;
+            if (sid) fetchedDraftSessionsRef.current.delete(sid);
+          }
           break;
         }
 
@@ -2393,7 +2407,7 @@ export default function Workspace() {
       <div className="flex flex-1 min-h-0">
 
         {/* ── Pipeline graph + chat ──────────────────────────────────── */}
-        <div className="w-[300px] min-w-[240px] bg-card/30 flex flex-col border-r border-border/30">
+        <div className={`${activeAgentState?.queenPhase === "planning" && activeAgentState?.draftGraph ? "w-[500px] min-w-[400px]" : "w-[300px] min-w-[240px]"} bg-card/30 flex flex-col border-r border-border/30 transition-[width] duration-200`}>
           <div className="flex-1 min-h-0">
             {activeAgentState?.queenPhase === "planning" && activeAgentState.draftGraph ? (
               <DraftGraph draft={activeAgentState.draftGraph} />
