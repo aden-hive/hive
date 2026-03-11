@@ -150,6 +150,7 @@ echo -e "${GREEN}⬢${NC} Python $PYTHON_VERSION"
 echo ""
 
 # Check for uv (install automatically if missing)
+UV_JUST_INSTALLED=false
 if ! command -v uv &> /dev/null; then
     echo -e "${YELLOW}  uv not found. Installing...${NC}"
     if ! command -v curl &> /dev/null; then
@@ -167,6 +168,7 @@ if ! command -v uv &> /dev/null; then
         exit 1
     fi
     echo -e "${GREEN}  ✓ uv installed successfully${NC}"
+    UV_JUST_INSTALLED=true
 fi
 
 UV_VERSION=$(uv --version)
@@ -662,6 +664,29 @@ detect_shell_rc() {
 
 SHELL_RC_FILE=$(detect_shell_rc)
 SHELL_NAME=$(basename "$SHELL")
+
+# If uv was just installed, ensure ~/.local/bin is persisted in the user's shell rc
+if [ "$UV_JUST_INSTALLED" = true ]; then
+    if ! grep -q '\.local/bin' "$SHELL_RC_FILE" 2>/dev/null; then
+        echo ""
+        echo -e "${YELLOW}  ⚠ uv was installed to ~/.local/bin but this directory is not in your shell PATH.${NC}"
+        echo -e "${DIM}    Without this, 'uv' won't be available in new terminal sessions.${NC}"
+        echo ""
+        if prompt_yes_no "  Add ~/.local/bin to PATH in $SHELL_RC_FILE?"; then
+            echo '' >> "$SHELL_RC_FILE"
+            echo '# Added by Hive quickstart — uv package manager' >> "$SHELL_RC_FILE"
+            echo 'export PATH="$HOME/.local/bin:$PATH"' >> "$SHELL_RC_FILE"
+            echo -e "${GREEN}  ✓ PATH updated in $SHELL_RC_FILE${NC}"
+            echo -e "${DIM}    Run 'source $SHELL_RC_FILE' or open a new terminal to apply.${NC}"
+        else
+            echo ""
+            echo -e "${YELLOW}  To add it manually, run:${NC}"
+            echo -e "     ${CYAN}echo 'export PATH=\"\$HOME/.local/bin:\$PATH\"' >> $SHELL_RC_FILE${NC}"
+            echo -e "     ${CYAN}source $SHELL_RC_FILE${NC}"
+        fi
+        echo ""
+    fi
+fi
 
 # Prompt the user to choose a model for their selected provider.
 # Sets SELECTED_MODEL and SELECTED_MAX_TOKENS.
@@ -1469,8 +1494,8 @@ if echo "$PATH" | grep -q "$HOME/.local/bin"; then
     echo -e "${GREEN}  ✓ ~/.local/bin is in PATH${NC}"
 else
     echo -e "${YELLOW}  ⚠ Add ~/.local/bin to your PATH:${NC}"
-    echo -e "     ${DIM}echo 'export PATH=\"\$HOME/.local/bin:\$PATH\"' >> ~/.bashrc${NC}"
-    echo -e "     ${DIM}source ~/.bashrc${NC}"
+    echo -e "     ${DIM}echo 'export PATH=\"\$HOME/.local/bin:\$PATH\"' >> $SHELL_RC_FILE${NC}"
+    echo -e "     ${DIM}source $SHELL_RC_FILE${NC}"
 fi
 
 echo ""
@@ -1551,6 +1576,9 @@ fi
 
 # Auto-launch dashboard if frontend was built
 if [ "$FRONTEND_BUILT" = true ]; then
+    echo -e "${BOLD}Verify your setup (in a new terminal):${NC}"
+    echo -e "     ${CYAN}command -v uv && uv --version && command -v hive${NC}"
+    echo ""
     echo -e "${BOLD}Launching dashboard...${NC}"
     echo ""
     echo -e "  ${DIM}Starting server on http://localhost:8787${NC}"
@@ -1582,6 +1610,10 @@ else
     echo -e "  Launch the interactive dashboard to browse and run agents:"
     echo -e "  You can start an example agent or an agent built by yourself:"
     echo -e "     ${CYAN}hive open${NC}"
+    echo ""
+    echo -e "${BOLD}Verify your setup:${NC}"
+    echo -e "  ${DIM}Run this in a new terminal to confirm everything is working:${NC}"
+    echo -e "     ${CYAN}command -v uv && uv --version && command -v hive${NC}"
     echo ""
     echo -e "${DIM}Run ./quickstart.sh again to reconfigure.${NC}"
     echo ""
