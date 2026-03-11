@@ -123,7 +123,7 @@ class EventType(StrEnum):
     # Custom events
     CUSTOM = "custom"
 
-    # Escalation (agent requests handoff to hive_coder)
+    # Escalation (agent requests handoff to queen)
     ESCALATION_REQUESTED = "escalation_requested"
 
     # Worker health monitoring (judge → queen → operator)
@@ -983,7 +983,7 @@ class EventBus:
         context: str = "",
         execution_id: str | None = None,
     ) -> None:
-        """Emit escalation requested event (agent wants hive_coder)."""
+        """Emit escalation requested event (agent wants queen)."""
         await self.publish(
             AgentEvent(
                 type=EventType.ESCALATION_REQUESTED,

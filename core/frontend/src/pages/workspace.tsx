@@ -255,8 +255,8 @@ interface AgentBackendState {
   /** The message ID of the current worker input request (for inline reply box) */
   workerInputMessageId: string | null;
   queenBuilding: boolean;
-  /** Queen operating phase — "building" (coding), "staging" (loaded), or "running" (executing) */
-  queenPhase: "building" | "staging" | "running";
+  /** Queen operating phase — "planning" (design), "building" (coding), "staging" (loaded), or "running" (executing) */
+  queenPhase: "planning" | "building" | "staging" | "running";
   workerRunState: "idle" | "deploying" | "running";
   currentExecutionId: string | null;
   nodeLogs: Record<string, string[]>;
@@ -291,7 +291,7 @@ function defaultAgentState(): AgentBackendState {
     awaitingInput: false,
     workerInputMessageId: null,
     queenBuilding: false,
-    queenPhase: "building",
+    queenPhase: "planning",
     workerRunState: "idle",
     currentExecutionId: null,
     nodeLogs: {},
@@ -894,7 +894,7 @@ export default function Workspace() {
       // failed, the throw inside the catch exits the outer try block.
       const session = liveSession!;
       const displayName = formatAgentDisplayName(session.worker_name || agentType);
-      const initialPhase = session.queen_phase || (session.has_worker ? "staging" : "building");
+      const initialPhase = session.queen_phase || (session.has_worker ? "staging" : "planning");
       updateAgentState(agentType, {
         sessionId: session.session_id,
         displayName,
@@ -1803,8 +1803,11 @@ export default function Workspace() {
 
         case "queen_phase_changed": {
           const rawPhase = event.data?.phase as string;
-          const newPhase: "building" | "staging" | "running" =
-            rawPhase === "running" ? "running" : rawPhase === "staging" ? "staging" : "building";
+          const newPhase: "planning" | "building" | "staging" | "running" =
+            rawPhase === "running" ? "running"
+            : rawPhase === "staging" ? "staging"
+            : rawPhase === "planning" ? "planning"
+            : "building";
           updateAgentState(agentType, {
             queenPhase: newPhase,
             queenBuilding: newPhase === "building",

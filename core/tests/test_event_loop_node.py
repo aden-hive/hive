@@ -763,7 +763,7 @@ class TestClientFacingBlocking:
 class TestEscalate:
     @pytest.mark.asyncio
     async def test_escalate_emits_event(self, runtime, node_spec, memory):
-        """escalate() should publish ESCALATION_REQUESTED."""
+        """escalate() should publish ESCALATION_REQUESTED and block for queen guidance."""
         node_spec.output_keys = []
         llm = MockStreamingLLM(
             scenarios=[
@@ -772,7 +772,6 @@ class TestEscalate:
                     {
                         "reason": "tool failure",
                         "context": "HTTP 401 from upstream",
-                        "wait_for_response": False,
                     },
                     tool_use_id="escalate_1",
                 ),
@@ -789,7 +788,20 @@ class TestEscalate:
 
         ctx = build_ctx(runtime, node_spec, memory, llm, stream_id="worker")
         node = EventLoopNode(event_bus=bus, config=LoopConfig(max_iterations=5))
+
+        async def queen_reply():
+            await asyncio.sleep(0.05)
+            await node.inject_event("Acknowledged, proceed.")
+
+        task = asyncio.create_task(queen_reply())
+
+        async def queen_reply():
+            await asyncio.sleep(0.05)
+            await node.inject_event("Acknowledged, proceed.")
+
+        task = asyncio.create_task(queen_reply())
         result = await node.execute(ctx)
+        await task
 
         assert result.success is True
         assert len(received) == 1
@@ -808,7 +820,6 @@ class TestEscalate:
                     {
                         "reason": "blocked",
                         "context": "dependency missing",
-                        "wait_for_response": False,
                     },
                     tool_use_id="escalate_1",
                 ),
@@ -827,7 +838,14 @@ class TestEscalate:
 
         ctx = build_ctx(runtime, node_spec, memory, llm, stream_id="worker")
         node = EventLoopNode(event_bus=bus, config=LoopConfig(max_iterations=5))
+
+        async def queen_reply():
+            await asyncio.sleep(0.05)
+            await node.inject_event("Queen acknowledges escalation.")
+
+        task = asyncio.create_task(queen_reply())
         result = await node.execute(ctx)
+        await task
 
         assert result.success is True
         queen_node.inject_event.assert_awaited_once()
@@ -842,7 +860,7 @@ class TestEscalate:
 
     @pytest.mark.asyncio
     async def test_escalate_waits_for_queen_input_and_skips_judge(self, runtime, node_spec, memory):
-        """wait_for_response=true should block for queen input before judge evaluation."""
+        """escalate() should block for queen input before judge evaluation."""
         node_spec.output_keys = ["result"]
         llm = MockStreamingLLM(
             scenarios=[
@@ -851,7 +869,6 @@ class TestEscalate:
                     {
                         "reason": "need direction",
                         "context": "conflicting constraints",
-                        "wait_for_response": True,
                     },
                     tool_use_id="escalate_1",
                 ),
@@ -1756,9 +1773,9 @@ class TestIsToolDoomLoop:
 
     def test_different_args_no_doom(self):
         node = EventLoopNode(config=LoopConfig(tool_doom_loop_threshold=3))
-        fp1 = [("search", '{"q": "a"}')]
-        fp2 = [("search", '{"q": "b"}')]
-        fp3 = [("search", '{"q": "c"}')]
+        fp1 = [("search", '{"q": "deploy kubernetes cluster to production"}')]
+        fp2 = [("read_file", '{"path": "/etc/nginx/nginx.conf"}')]
+        fp3 = [("execute", '{"command": "SELECT * FROM users WHERE active=true"}')]
         is_doom, _ = node._is_tool_doom_loop([fp1, fp2, fp3])
         assert is_doom is False
 
@@ -1886,6 +1903,7 @@ class TestToolDoomLoopIntegration:
             config=LoopConfig(
                 max_iterations=10,
                 tool_doom_loop_threshold=3,
+                stall_similarity_threshold=1.0,  # disable fuzzy stall detection
             ),
         )
         result = await node.execute(ctx)
@@ -1941,6 +1959,7 @@ class TestToolDoomLoopIntegration:
             config=LoopConfig(
                 max_iterations=10,
                 tool_doom_loop_threshold=3,
+                stall_similarity_threshold=1.0,  # disable fuzzy stall detection
             ),
         )
         result = await node.execute(ctx)
@@ -2005,6 +2024,7 @@ class TestToolDoomLoopIntegration:
             config=LoopConfig(
                 max_iterations=10,
                 tool_doom_loop_threshold=3,
+                stall_similarity_threshold=1.0,  # disable fuzzy stall detection
             ),
         )
         result = await node.execute(ctx)
@@ -2056,6 +2076,7 @@ class TestToolDoomLoopIntegration:
             config=LoopConfig(
                 max_iterations=10,
                 tool_doom_loop_enabled=False,
+                stall_similarity_threshold=1.0,  # disable fuzzy stall detection
             ),
         )
         result = await node.execute(ctx)
@@ -2144,6 +2165,7 @@ class TestToolDoomLoopIntegration:
             config=LoopConfig(
                 max_iterations=10,
                 tool_doom_loop_threshold=3,
+                stall_similarity_threshold=1.0,  # disable fuzzy stall detection
             ),
         )
         result = await node.execute(ctx)
@@ -2206,6 +2228,7 @@ class TestToolDoomLoopIntegration:
             config=LoopConfig(
                 max_iterations=10,
                 tool_doom_loop_threshold=3,
+                stall_similarity_threshold=1.0,  # disable fuzzy stall detection
             ),
         )
         result = await node.execute(ctx)

@@ -88,6 +88,7 @@ class _EscalationReceiver:
     def __init__(self) -> None:
         self._event = asyncio.Event()
         self._response: str | None = None
+        self._awaiting_input = True  # So inject_worker_message() can prefer us
 
     async def inject_event(self, content: str, *, is_client_input: bool = False) -> None:
         """Called by ExecutionStream.inject_input() when the user responds."""
@@ -116,7 +117,10 @@ class JudgeVerdict:
     """Result of judge evaluation for the event loop."""
 
     action: Literal["ACCEPT", "RETRY", "ESCALATE"]
-    feedback: str = ""
+    # None  = no evaluation happened (skip_judge, tool-continue); not logged.
+    # ""    = evaluated but no feedback; logged with default text.
+    # "..." = evaluated with feedback; logged as-is.
+    feedback: str | None = None
 
 
 @runtime_checkable
@@ -146,7 +150,7 @@ class SubagentJudge:
     async def evaluate(self, context: dict[str, Any]) -> JudgeVerdict:
         missing = context.get("missing_keys", [])
         if not missing:
-            return JudgeVerdict(action="ACCEPT")
+            return JudgeVerdict(action="ACCEPT", feedback="")
 
         iteration = context.get("iteration", 0)
         remaining = self._max_iterations - iteration - 1
@@ -180,7 +184,7 @@ class LoopConfig:
     max_tool_calls_per_turn: int = 30
     judge_every_n_turns: int = 1
     stall_detection_threshold: int = 3
-    stall_similarity_threshold: float = 0.7
+    stall_similarity_threshold: float = 0.85
     max_history_tokens: int = 32_000
     store_prefix: str = ""
 
@@ -363,6 +367,7 @@ class EventLoopNode(NodeProtocol):
         self._awaiting_input = False
         self._shutdown = False
         self._stream_task: asyncio.Task | None = None
+        self._tool_task: asyncio.Task | None = None  # gather task while tools run
         # Track which nodes already have an action plan emitted (skip on revisit)
         self._action_plan_emitted: set[str] = set()
         # Monotonic counter for spillover file naming (web_search_1.txt, etc.)
@@ -493,23 +498,32 @@ class EventLoopNode(NodeProtocol):
                 # If it doesn't exist yet, seed it with available context.
                 if self._config.spillover_dir:
                     _adapt_path = Path(self._config.spillover_dir) / "adapt.md"
-                    if not _adapt_path.exists() and ctx.accounts_prompt:
+                    if not _adapt_path.exists():
                         _adapt_path.parent.mkdir(parents=True, exist_ok=True)
-                        _adapt_path.write_text(
-                            f"## Identity\n{ctx.accounts_prompt}\n",
-                            encoding="utf-8",
+                        seed = (
+                            f"## Identity\n{ctx.accounts_prompt}\n"
+                            if ctx.accounts_prompt
+                            else "# Session Working Memory\n"
                         )
+                        _adapt_path.write_text(seed, encoding="utf-8")
                     if _adapt_path.exists():
                         _adapt_text = _adapt_path.read_text(encoding="utf-8").strip()
                         if _adapt_text:
                             system_prompt = (
                                 f"{system_prompt}\n\n"
-                                f"--- Your Memory ---\n{_adapt_text}\n--- End Memory ---\n\n"
-                                'Maintain your memory by calling save_data("adapt.md", ...) '
-                                'or edit_data("adapt.md", ...) as you work.\n'
-                                "IMMEDIATELY save: user rules about which account/identity to use, "
-                                "behavioral constraints, and preferences. "
-                                "Also record session history, decisions, and working notes."
+                                "--- Session Working Memory ---\n"
+                                f"{_adapt_text}\n"
+                                "--- End Session Working Memory ---\n\n"
+                                "Maintain your session working memory by calling "
+                                'save_data("adapt.md", ...) or edit_data("adapt.md", ...)'
+                                " as you work.\n"
+                                "This is session-scoped scratch space. "
+                                "IMMEDIATELY save: account/identity rules, "
+                                "behavioral constraints, and preferences specific to "
+                                "this session. Also record current task state, "
+                                "decisions, and working notes. "
+                                "For lasting knowledge about the user, use "
+                                "update_queen_memory() and append_queen_journal() instead."
                             )
 
                 conversation = NodeConversation(
@@ -689,6 +703,7 @@ class EventLoopNode(NodeProtocol):
                         queen_input_requested,
                         request_system_prompt,
                         request_messages,
+                        reported_to_parent,
                     ) = await self._run_single_turn(
                         ctx, conversation, tools, iteration, accumulator
                     )
@@ -890,6 +905,7 @@ class EventLoopNode(NodeProtocol):
                 and not outputs_set
                 and not user_input_requested
                 and not queen_input_requested
+                and not reported_to_parent
             )
             if truly_empty and accumulator is not None:
                 missing = self._get_missing_output_keys(
@@ -1340,8 +1356,8 @@ class EventLoopNode(NodeProtocol):
                 # Auto-block beyond grace -- fall through to judge (6i)
 
             # 6h''. Worker wait for queen guidance
-            # If a worker escalates with wait_for_response=true, pause here and
-            # skip judge evaluation until queen injects guidance.
+            # When a worker escalates, pause here and skip judge evaluation
+            # until the queen injects guidance.
             if queen_input_requested:
                 if self._shutdown:
                     await self._publish_loop_completed(
@@ -1483,7 +1499,7 @@ class EventLoopNode(NodeProtocol):
                 continue
 
             # Judge evaluation (should_judge is always True here)
-            verdict = await self._evaluate(
+            verdict = await self._judge_turn(
                 ctx,
                 conversation,
                 accumulator,
@@ -1562,7 +1578,7 @@ class EventLoopNode(NodeProtocol):
                         node_type="event_loop",
                         step_index=iteration,
                         verdict="ACCEPT",
-                        verdict_feedback=verdict.feedback,
+                        verdict_feedback=verdict.feedback or "",
                         tool_calls=logged_tool_calls,
                         llm_text=assistant_text,
                         input_tokens=turn_tokens.get("input", 0),
@@ -1605,7 +1621,7 @@ class EventLoopNode(NodeProtocol):
                         node_type="event_loop",
                         step_index=iteration,
                         verdict="ESCALATE",
-                        verdict_feedback=verdict.feedback,
+                        verdict_feedback=verdict.feedback or "",
                         tool_calls=logged_tool_calls,
                         llm_text=assistant_text,
                         input_tokens=turn_tokens.get("input", 0),
@@ -1617,7 +1633,7 @@ class EventLoopNode(NodeProtocol):
                         node_name=ctx.node_spec.name,
                         node_type="event_loop",
                         success=False,
-                        error=f"Judge escalated: {verdict.feedback}",
+                        error=f"Judge escalated: {verdict.feedback or 'no feedback'}",
                         total_steps=iteration + 1,
                         tokens_used=total_input_tokens + total_output_tokens,
                         input_tokens=total_input_tokens,
@@ -1631,7 +1647,7 @@ class EventLoopNode(NodeProtocol):
                     )
                 return NodeResult(
                     success=False,
-                    error=f"Judge escalated: {verdict.feedback}",
+                    error=f"Judge escalated: {verdict.feedback or 'no feedback'}",
                     output=accumulator.to_dict(),
                     tokens_used=total_input_tokens + total_output_tokens,
                     latency_ms=latency_ms,
@@ -1647,15 +1663,16 @@ class EventLoopNode(NodeProtocol):
                         node_type="event_loop",
                         step_index=iteration,
                         verdict="RETRY",
-                        verdict_feedback=verdict.feedback,
+                        verdict_feedback=verdict.feedback or "",
                         tool_calls=logged_tool_calls,
                         llm_text=assistant_text,
                         input_tokens=turn_tokens.get("input", 0),
                         output_tokens=turn_tokens.get("output", 0),
                         latency_ms=iter_latency_ms,
                     )
-                if verdict.feedback:
-                    await conversation.add_user_message(f"[Judge feedback]: {verdict.feedback}")
+                if verdict.feedback is not None:
+                    fb = verdict.feedback or "[Judge returned RETRY without feedback]"
+                    await conversation.add_user_message(f"[Judge feedback]: {fb}")
                 continue
 
         # 7. Max iterations exhausted
@@ -1729,14 +1746,16 @@ class EventLoopNode(NodeProtocol):
         self._input_ready.set()
 
     def cancel_current_turn(self) -> None:
-        """Cancel the current LLM streaming turn instantly.
+        """Cancel the current LLM streaming turn or in-progress tool calls instantly.
 
         Unlike signal_shutdown() which permanently stops the event loop,
-        this only kills the in-progress HTTP stream via task.cancel().
+        this only kills the in-progress HTTP stream or tool gather task.
         The queen stays alive for the next user message.
         """
         if self._stream_task and not self._stream_task.done():
             self._stream_task.cancel()
+        if self._tool_task and not self._tool_task.done():
+            self._tool_task.cancel()
 
     async def _await_user_input(
         self,
@@ -1814,12 +1833,13 @@ class EventLoopNode(NodeProtocol):
         bool,
         str,
         list[dict[str, Any]],
+        bool,
     ]:
         """Run a single LLM turn with streaming and tool execution.
 
         Returns (assistant_text, real_tool_results, outputs_set, token_counts, logged_tool_calls,
         user_input_requested, ask_user_prompt, ask_user_options, queen_input_requested,
-        system_prompt, messages).
+        system_prompt, messages, reported_to_parent).
 
         ``real_tool_results`` contains only results from actual tools (web_search,
         etc.), NOT from synthetic framework tools such as ``set_output``,
@@ -1829,8 +1849,8 @@ class EventLoopNode(NodeProtocol):
         ``ask_user`` during this turn.  This separation lets the caller treat
         synthetic tools as framework concerns rather than tool-execution concerns.
         ``queen_input_requested`` is True when the worker called
-        ``escalate(wait_for_response=true)`` and should wait for
-        queen guidance before judge evaluation.
+        ``escalate`` and should wait for queen guidance before judge
+        evaluation.
 
         ``logged_tool_calls`` accumulates ALL tool calls across inner iterations
         (real tools, set_output, and discarded calls) for L3 logging.  Unlike
@@ -1851,6 +1871,7 @@ class EventLoopNode(NodeProtocol):
         ask_user_prompt = ""
         ask_user_options: list[str] | None = None
         queen_input_requested = False
+        reported_to_parent = False
         # Accumulate ALL tool calls across inner iterations for L3 logging.
         # Unlike real_tool_results (reset each inner iteration), this persists.
         logged_tool_calls: list[dict] = []
@@ -2004,6 +2025,7 @@ class EventLoopNode(NodeProtocol):
                     queen_input_requested,
                     final_system_prompt,
                     final_messages,
+                    reported_to_parent,
                 )
 
             # Execute tool calls — framework tools (set_output, ask_user)
@@ -2151,7 +2173,6 @@ class EventLoopNode(NodeProtocol):
                     # --- Framework-level escalate handling ---
                     reason = str(tc.tool_input.get("reason", "")).strip()
                     context = str(tc.tool_input.get("context", "")).strip()
-                    # Always wait for queen guidance
 
                     if stream_id in ("queen", "judge"):
                         result = ToolResult(
@@ -2187,7 +2208,7 @@ class EventLoopNode(NodeProtocol):
 
                     result = ToolResult(
                         tool_use_id=tc.tool_use_id,
-                        content="Escalation requested to hive_coder (queen); waiting for guidance.",
+                        content="Escalation requested to queen; waiting for guidance.",
                         is_error=False,
                     )
                     results_by_id[tc.tool_use_id] = result
@@ -2206,6 +2227,7 @@ class EventLoopNode(NodeProtocol):
 
                 elif tc.tool_name == "report_to_parent":
                     # --- Report from sub-agent to parent (optionally blocking) ---
+                    reported_to_parent = True
                     msg = tc.tool_input.get("message", "")
                     data = tc.tool_input.get("data")
                     wait = tc.tool_input.get("wait_for_response", False)
@@ -2277,10 +2299,16 @@ class EventLoopNode(NodeProtocol):
                     _dur = round(time.time() - _s, 3)
                     return _r, _iso, _dur
 
-                timed_results = await asyncio.gather(
-                    *(_timed_execute(tc) for tc in pending_real),
-                    return_exceptions=True,
+                self._tool_task = asyncio.ensure_future(
+                    asyncio.gather(
+                        *(_timed_execute(tc) for tc in pending_real),
+                        return_exceptions=True,
+                    )
                 )
+                try:
+                    timed_results = await self._tool_task
+                finally:
+                    self._tool_task = None
                 # gather(return_exceptions=True) captures CancelledError
                 # as a return value instead of propagating it.  Re-raise
                 # so stop_worker actually stops the execution.
@@ -2481,6 +2509,7 @@ class EventLoopNode(NodeProtocol):
                     queen_input_requested,
                     final_system_prompt,
                     final_messages,
+                    reported_to_parent,
                 )
 
             # --- Mid-turn pruning: prevent context blowup within a single turn ---
@@ -2512,6 +2541,7 @@ class EventLoopNode(NodeProtocol):
                     queen_input_requested,
                     final_system_prompt,
                     final_messages,
+                    reported_to_parent,
                 )
 
             # Tool calls processed -- loop back to stream with updated conversation
@@ -2609,7 +2639,7 @@ class EventLoopNode(NodeProtocol):
         return Tool(
             name="escalate",
             description=(
-                "Escalate to the Hive Coder queen when requesting user input, "
+                "Escalate to the queen when requesting user input, "
                 "blocked by errors, missing "
                 "credentials, or ambiguous constraints that require supervisor "
                 "guidance. Include a concise reason and optional context. "
@@ -2798,7 +2828,7 @@ class EventLoopNode(NodeProtocol):
     # Judge evaluation
     # -------------------------------------------------------------------
 
-    async def _evaluate(
+    async def _judge_turn(
         self,
         ctx: NodeContext,
         conversation: NodeConversation,
@@ -2807,14 +2837,29 @@ class EventLoopNode(NodeProtocol):
         tool_results: list[dict],
         iteration: int,
     ) -> JudgeVerdict:
-        """Evaluate the current state using judge or implicit logic."""
-        # Short-circuit: subagent called report_to_parent(mark_complete=True)
+        """Evaluate the current state using judge or implicit logic.
+
+        Evaluation levels (in order):
+          0. Short-circuits: mark_complete, skip_judge, tool-continue.
+          1. Custom judge (JudgeProtocol) — full authority when set.
+          2. Implicit judge — output-key check + optional conversation-aware
+             quality gate (when ``success_criteria`` is defined).
+
+        Returns a JudgeVerdict.  ``feedback=None`` means no real evaluation
+        happened (skip_judge, tool-continue); the caller must not inject a
+        feedback message.  Any non-None feedback (including ``""``) means a
+        real evaluation occurred and will be logged into the conversation.
+        """
+
+        # --- Level 0: short-circuits (no evaluation) -----------------------
+
         if self._mark_complete_flag:
             return JudgeVerdict(action="ACCEPT")
 
-        # Opt-out: node explicitly disables judge (e.g. conversational queen)
         if ctx.node_spec.skip_judge:
-            return JudgeVerdict(action="RETRY", feedback="")
+            return JudgeVerdict(action="RETRY")  # feedback=None → not logged
+
+        # --- Level 1: custom judge -----------------------------------------
 
         if self._judge is not None:
             context = {
@@ -2829,81 +2874,82 @@ class EventLoopNode(NodeProtocol):
                     accumulator, ctx.node_spec.output_keys, ctx.node_spec.nullable_output_keys
                 ),
             }
-            return await self._judge.evaluate(context)
+            verdict = await self._judge.evaluate(context)
+            # Ensure evaluated RETRY always carries feedback for logging.
+            if verdict.action == "RETRY" and not verdict.feedback:
+                return JudgeVerdict(action="RETRY", feedback="Custom judge returned RETRY.")
+            return verdict
 
-        # Implicit judge: accept when no tool calls and all output keys present
-        if not tool_results:
-            missing = self._get_missing_output_keys(
-                accumulator, ctx.node_spec.output_keys, ctx.node_spec.nullable_output_keys
+        # --- Level 2: implicit judge ---------------------------------------
+
+        # Real tool calls were made — let the agent keep working.
+        if tool_results:
+            return JudgeVerdict(action="RETRY")  # feedback=None → not logged
+
+        missing = self._get_missing_output_keys(
+            accumulator, ctx.node_spec.output_keys, ctx.node_spec.nullable_output_keys
+        )
+
+        if missing:
+            return JudgeVerdict(
+                action="RETRY",
+                feedback=(
+                    f"Task incomplete. Required outputs not yet produced: {missing}. "
+                    f"Follow your system prompt instructions to complete the work."
+                ),
             )
-            if not missing:
-                # Safety check: when ALL output keys are nullable and NONE
-                # have been set, the node produced nothing useful.  Retry
-                # instead of accepting an empty result — this prevents
-                # client-facing nodes from terminating before the user
-                # ever interacts, and non-client-facing nodes from
-                # short-circuiting without doing their work.
-                output_keys = ctx.node_spec.output_keys or []
-                nullable_keys = set(ctx.node_spec.nullable_output_keys or [])
-                all_nullable = output_keys and nullable_keys >= set(output_keys)
-                none_set = not any(accumulator.get(k) is not None for k in output_keys)
-                if all_nullable and none_set:
-                    return JudgeVerdict(
-                        action="RETRY",
-                        feedback=(
-                            f"No output keys have been set yet. "
-                            f"Use set_output to set at least one of: {output_keys}"
-                        ),
-                    )
 
-                # Client-facing nodes with no output keys are meant for
-                # continuous interaction — they should not auto-accept.
-                # Only exit via shutdown, max_iterations, or max_node_visits.
-                # Inject tool-use pressure so models stuck in a
-                # "narrate-instead-of-act" loop get corrective feedback.
-                if not output_keys and ctx.node_spec.client_facing:
-                    return JudgeVerdict(
-                        action="RETRY",
-                        feedback=(
-                            "STOP describing what you will do. "
-                            "You have FULL access to all tools — file creation, "
-                            "shell commands, MCP tools — and you CAN call them "
-                            "directly in your response. Respond ONLY with tool "
-                            "calls, no prose. Execute the task now."
-                        ),
-                    )
+        # All output keys present — run safety checks before accepting.
 
-                # Level 2: conversation-aware quality check (if success_criteria set)
-                if ctx.node_spec.success_criteria and ctx.llm:
-                    from framework.graph.conversation_judge import evaluate_phase_completion
+        output_keys = ctx.node_spec.output_keys or []
+        nullable_keys = set(ctx.node_spec.nullable_output_keys or [])
 
-                    verdict = await evaluate_phase_completion(
-                        llm=ctx.llm,
-                        conversation=conversation,
-                        phase_name=ctx.node_spec.name,
-                        phase_description=ctx.node_spec.description,
-                        success_criteria=ctx.node_spec.success_criteria,
-                        accumulator_state=accumulator.to_dict(),
-                        max_history_tokens=self._config.max_history_tokens,
-                    )
-                    if verdict.action != "ACCEPT":
-                        return JudgeVerdict(
-                            action=verdict.action,
-                            feedback=verdict.feedback or "Phase criteria not met.",
-                        )
+        # All-nullable with nothing set → node produced nothing useful.
+        all_nullable = output_keys and nullable_keys >= set(output_keys)
+        none_set = not any(accumulator.get(k) is not None for k in output_keys)
+        if all_nullable and none_set:
+            return JudgeVerdict(
+                action="RETRY",
+                feedback=(
+                    f"No output keys have been set yet. "
+                    f"Use set_output to set at least one of: {output_keys}"
+                ),
+            )
 
-                return JudgeVerdict(action="ACCEPT")
-            else:
+        # Client-facing with no output keys → continuous interaction node.
+        # Inject tool-use pressure instead of auto-accepting.
+        if not output_keys and ctx.node_spec.client_facing:
+            return JudgeVerdict(
+                action="RETRY",
+                feedback=(
+                    "STOP describing what you will do. "
+                    "You have FULL access to all tools — file creation, "
+                    "shell commands, MCP tools — and you CAN call them "
+                    "directly in your response. Respond ONLY with tool "
+                    "calls, no prose. Execute the task now."
+                ),
+            )
+
+        # Level 2b: conversation-aware quality check (if success_criteria set)
+        if ctx.node_spec.success_criteria and ctx.llm:
+            from framework.graph.conversation_judge import evaluate_phase_completion
+
+            verdict = await evaluate_phase_completion(
+                llm=ctx.llm,
+                conversation=conversation,
+                phase_name=ctx.node_spec.name,
+                phase_description=ctx.node_spec.description,
+                success_criteria=ctx.node_spec.success_criteria,
+                accumulator_state=accumulator.to_dict(),
+                max_history_tokens=self._config.max_history_tokens,
+            )
+            if verdict.action != "ACCEPT":
                 return JudgeVerdict(
-                    action="RETRY",
-                    feedback=(
-                        f"Task incomplete. Required outputs not yet produced: {missing}. "
-                        f"Follow your system prompt instructions to complete the work."
-                    ),
+                    action=verdict.action,
+                    feedback=verdict.feedback or "Phase criteria not met.",
                 )
 
-        # Tool calls were made -- continue loop
-        return JudgeVerdict(action="RETRY", feedback="")
+        return JudgeVerdict(action="ACCEPT", feedback="")
 
     # -------------------------------------------------------------------
     # Helpers
@@ -2983,8 +3029,10 @@ class EventLoopNode(NodeProtocol):
     def _is_stalled(self, recent_responses: list[str]) -> bool:
         """Detect stall using n-gram similarity.
 
-        Detects when N consecutive responses have similarity >= threshold.
-        This catches phrases like "I'm still stuck" vs "I'm stuck".
+        Detects when ALL N consecutive responses are mutually similar
+        (>= threshold).  A single dissimilar response resets the signal.
+        This catches phrases like "I'm still stuck" vs "I'm stuck"
+        without false-positives on "attempt 1" vs "attempt 2".
         """
         if len(recent_responses) < self._config.stall_detection_threshold:
             return False
@@ -2992,13 +3040,11 @@ class EventLoopNode(NodeProtocol):
             return False
 
         threshold = self._config.stall_similarity_threshold
-        # Check similarity against all recent responses (excluding self)
-        for i, resp in enumerate(recent_responses):
-            # Compare against all previous responses
-            for prev in recent_responses[:i]:
-                if self._ngram_similarity(resp, prev) >= threshold:
-                    return True
-        return False
+        # Every consecutive pair must be similar
+        for i in range(1, len(recent_responses)):
+            if self._ngram_similarity(recent_responses[i], recent_responses[i - 1]) < threshold:
+                return False
+        return True
 
     @staticmethod
     def _is_transient_error(exc: BaseException) -> bool:
@@ -3077,10 +3123,11 @@ class EventLoopNode(NodeProtocol):
         self,
         recent_tool_fingerprints: list[list[tuple[str, str]]],
     ) -> tuple[bool, str]:
-        """Detect doom loop using n-gram similarity on tool inputs.
+        """Detect doom loop via exact fingerprint match.
 
-        Detects when N consecutive turns have similar tool calls.
-        Similarity applies to the canonicalized tool input strings.
+        Detects when N consecutive turns invoke the same tools with
+        identical (canonicalized) arguments.  Different arguments mean
+        different work, so only exact matches count.
 
         Returns (is_doom_loop, description).
         """
@@ -3093,23 +3140,12 @@ class EventLoopNode(NodeProtocol):
         if not first:
             return False, ""
 
-        # Convert a turn's list of (name, args) pairs to a single comparable string.
-        def _turn_sig(fp: list[tuple[str, str]]) -> str:
-            return "|".join(f"{name}:{args}" for name, args in fp)
-
-        first_sig = _turn_sig(first)
-        similarity_threshold = self._config.stall_similarity_threshold
-        similar_count = sum(
-            1
-            for fp in recent_tool_fingerprints
-            if self._ngram_similarity(_turn_sig(fp), first_sig) >= similarity_threshold
-        )
-
-        if similar_count >= threshold:
-            tool_names = [name for fp in recent_tool_fingerprints for name, _ in fp]
+        # All turns in the window must match the first exactly
+        if all(fp == first for fp in recent_tool_fingerprints[1:]):
+            tool_names = [name for name, _ in first]
             desc = (
-                f"Doom loop detected: {similar_count}/{len(recent_tool_fingerprints)} "
-                f"consecutive similar tool calls ({', '.join(tool_names)})"
+                f"Doom loop detected: {len(recent_tool_fingerprints)} "
+                f"identical consecutive tool calls ({', '.join(tool_names)})"
             )
             return True, desc
         return False, ""
@@ -4343,22 +4379,18 @@ class EventLoopNode(NodeProtocol):
 
             registry[escalation_id] = receiver
             try:
-                # Stream message to user (parent's node_id so TUI shows parent talking)
-                await self._event_bus.emit_client_output_delta(
-                    stream_id=ctx.node_id,
-                    node_id=ctx.node_id,
-                    content=message,
-                    snapshot=message,
-                    execution_id=ctx.execution_id,
-                )
-                # Request input (escalation_id for routing response back)
-                await self._event_bus.emit_client_input_requested(
-                    stream_id=ctx.node_id,
+                # Escalate to the queen instead of asking the user directly.
+                # The queen handles the request and injects the response via
+                # inject_worker_message(), which finds this receiver through
+                # its _awaiting_input flag.
+                await self._event_bus.emit_escalation_requested(
+                    stream_id=ctx.stream_id or ctx.node_id,
                     node_id=escalation_id,
-                    prompt=message,
+                    reason=f"Subagent report (wait_for_response) from {agent_id}",
+                    context=message,
                     execution_id=ctx.execution_id,
                 )
-                # Block until user responds
+                # Block until queen responds
                 return await receiver.wait()
             finally:
                 registry.pop(escalation_id, None)

@@ -256,3 +256,156 @@ def register_tools(mcp: FastMCP, credentials: Any = None) -> None:
             else None,
             "fiscal_year_start": info.get("FiscalYearStartMonth"),
         }
+
+    @mcp.tool()
+    def quickbooks_list_invoices(
+        status: str = "",
+        customer_id: str = "",
+        max_results: int = 100,
+    ) -> dict:
+        """List invoices from QuickBooks with optional filters.
+
+        Args:
+            status: Filter by status: 'Unpaid', 'Paid', 'Overdue' (optional).
+                Uses Balance > 0 for Unpaid, Balance = 0 for Paid,
+                DueDate < today for Overdue.
+            customer_id: Filter by customer ID (optional).
+            max_results: Maximum results (default 100, max 1000).
+        """
+        cfg = _get_config()
+        if isinstance(cfg, dict):
+            return cfg
+        base_url, token = cfg
+
+        where_parts = []
+        if status == "Unpaid":
+            where_parts.append("Balance > '0'")
+        elif status == "Paid":
+            where_parts.append("Balance = '0'")
+        elif status == "Overdue":
+            import datetime
+
+            today = datetime.date.today().isoformat()
+            where_parts.append(f"DueDate < '{today}' AND Balance > '0'")
+        if customer_id:
+            where_parts.append(f"CustomerRef = '{customer_id}'")
+
+        query = "SELECT * FROM Invoice"
+        if where_parts:
+            query += " WHERE " + " AND ".join(where_parts)
+        query += f" MAXRESULTS {min(max_results, 1000)}"
+
+        url = f"{base_url}/query"
+        data = _get(url, token, params={"query": query, "minorversion": "73"})
+        if "error" in data:
+            return data
+
+        qr = data.get("QueryResponse", {})
+        invoices = qr.get("Invoice", [])
+        return {
+            "count": len(invoices),
+            "invoices": [
+                {
+                    "id": inv.get("Id"),
+                    "doc_number": inv.get("DocNumber"),
+                    "customer_name": (inv.get("CustomerRef") or {}).get("name", ""),
+                    "customer_id": (inv.get("CustomerRef") or {}).get("value", ""),
+                    "total_amt": inv.get("TotalAmt"),
+                    "balance": inv.get("Balance"),
+                    "due_date": inv.get("DueDate"),
+                    "txn_date": inv.get("TxnDate"),
+                    "email_status": inv.get("EmailStatus"),
+                }
+                for inv in invoices
+            ],
+        }
+
+    @mcp.tool()
+    def quickbooks_get_customer(customer_id: str) -> dict:
+        """Get detailed customer information from QuickBooks.
+
+        Args:
+            customer_id: Customer ID (required).
+        """
+        cfg = _get_config()
+        if isinstance(cfg, dict):
+            return cfg
+        base_url, token = cfg
+        if not customer_id:
+            return {"error": "customer_id is required"}
+
+        url = f"{base_url}/customer/{customer_id}"
+        data = _get(url, token, params={"minorversion": "73"})
+        if "error" in data:
+            return data
+
+        c = data.get("Customer", {})
+        email = c.get("PrimaryEmailAddr")
+        phone = c.get("PrimaryPhone")
+        addr = c.get("BillAddr") or {}
+        return {
+            "id": c.get("Id"),
+            "display_name": c.get("DisplayName"),
+            "company_name": c.get("CompanyName"),
+            "given_name": c.get("GivenName"),
+            "family_name": c.get("FamilyName"),
+            "email": email.get("Address") if isinstance(email, dict) else None,
+            "phone": phone.get("FreeFormNumber") if isinstance(phone, dict) else None,
+            "balance": c.get("Balance"),
+            "active": c.get("Active"),
+            "billing_address": {
+                "line1": addr.get("Line1", ""),
+                "city": addr.get("City", ""),
+                "state": addr.get("CountrySubDivisionCode", ""),
+                "postal_code": addr.get("PostalCode", ""),
+                "country": addr.get("Country", ""),
+            },
+            "sync_token": c.get("SyncToken"),
+        }
+
+    @mcp.tool()
+    def quickbooks_create_payment(
+        customer_id: str,
+        total_amt: float,
+        invoice_id: str = "",
+    ) -> dict:
+        """Record a payment in QuickBooks.
+
+        Args:
+            customer_id: Customer ID who is paying (required).
+            total_amt: Payment amount (required).
+            invoice_id: Invoice ID to apply payment to (optional).
+        """
+        cfg = _get_config()
+        if isinstance(cfg, dict):
+            return cfg
+        base_url, token = cfg
+        if not customer_id or total_amt <= 0:
+            return {"error": "customer_id and a positive total_amt are required"}
+
+        body: dict[str, Any] = {
+            "CustomerRef": {"value": customer_id},
+            "TotalAmt": total_amt,
+        }
+        if invoice_id:
+            body["Line"] = [
+                {
+                    "Amount": total_amt,
+                    "LinkedTxn": [{"TxnId": invoice_id, "TxnType": "Invoice"}],
+                }
+            ]
+
+        url = f"{base_url}/payment"
+        data = _post(url, token, body)
+        if "error" in data:
+            return data
+
+        payment = data.get("Payment", {})
+        return {
+            "result": "created",
+            "id": payment.get("Id"),
+            "total_amt": payment.get("TotalAmt"),
+            "customer_id": (payment.get("CustomerRef") or {}).get("value"),
+            "txn_date": payment.get("TxnDate"),
+            "sync_token": payment.get("SyncToken"),
+        }

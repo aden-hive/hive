@@ -65,6 +65,35 @@ You may submit PRs without prior assignment for:
 
 > **Tip:** Installing Claude Code skills is optional for running existing agents, but required if you plan to **build new agents**.
 
+## Troubleshooting Setup Issues
+
+If you encounter issues while setting up the development environment, the following steps may help:
+
+### `make: command not found`
+Install `make` using:
+
+```bash
+sudo apt install make
+```
+
+### `uv: command not found`
+Install `uv` using:
+
+```bash
+curl -LsSf https://astral.sh/uv/install.sh | sh
+source ~/.bashrc
+```
+
+### `ruff: not found`
+If linting fails due to a missing `ruff` command, install it with:
+
+```bash
+uv tool install ruff
+```
+
+### WSL Path Recommendation
+When using WSL, it is recommended to clone the repository inside your Linux home directory (e.g., ~/hive) instead of under /mnt/c/... to avoid potential performance and permission issues.
+
 ## Commit Convention
 
 We follow [Conventional Commits](https://www.conventionalcommits.org/):

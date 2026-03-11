@@ -12,8 +12,8 @@ export interface LiveSession {
   loaded_at: number;
   uptime_seconds: number;
   intro_message?: string;
-  /** Queen operating phase — "building", "staging", or "running" */
-  queen_phase?: "building" | "staging" | "running";
+  /** Queen operating phase — "planning", "building", "staging", or "running" */
+  queen_phase?: "planning" | "building" | "staging" | "running";
   /** Present in 409 conflict responses when worker is still loading */
   loading?: boolean;
 }

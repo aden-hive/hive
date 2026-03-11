@@ -48,6 +48,8 @@ class Session:
     judge_task: asyncio.Task | None = None
     escalation_sub: str | None = None
     worker_handoff_sub: str | None = None
+    # Memory consolidation subscription (fires on CONTEXT_COMPACTED)
+    memory_consolidation_sub: str | None = None
     # Trigger definitions hoisted from worker (available but inactive)
     available_triggers: dict[str, TriggerDefinition] = field(default_factory=dict)
     # Active trigger tracking (IDs currently firing + their asyncio tasks)
@@ -316,10 +318,19 @@ class SessionManager:
         When a new runtime starts, any on-disk session still marked 'active'
         is from a process that no longer exists. 'Paused' sessions are left
         intact so they remain resumable.
+
+        Two-layer protection against corrupting live sessions:
+        1. In-memory: skip any session ID currently tracked in self._sessions
+           (guaranteed alive in this process).
+        2. PID validation: if state.json contains a ``pid`` field, check whether
+           that process is still running on the host. If it is, the session is
+           owned by another healthy worker process, so leave it alone.
         """
         sessions_path = Path.home() / ".hive" / "agents" / agent_path.name / "sessions"
         if not sessions_path.exists():
             return
+
+        live_session_ids = set(self._sessions.keys())
 
         for d in sessions_path.iterdir():
             if not d.is_dir() or not d.name.startswith("session_"):
@@ -331,6 +342,26 @@ class SessionManager:
                 state = json.loads(state_path.read_text(encoding="utf-8"))
                 if state.get("status") != "active":
                     continue
+
+                # Layer 1: skip sessions that are alive in this process
+                session_id = state.get("session_id", d.name)
+                if session_id in live_session_ids or d.name in live_session_ids:
+                    logger.debug(
+                        "Skipping live in-memory session '%s' during stale cleanup",
+                        d.name,
+                    )
+                    continue
+
+                # Layer 2: skip sessions whose owning process is still alive
+                recorded_pid = state.get("pid")
+                if recorded_pid is not None and self._is_pid_alive(recorded_pid):
+                    logger.debug(
+                        "Skipping session '%s' — owning process %d is still running",
+                        d.name,
+                        recorded_pid,
+                    )
+                    continue
+
                 state["status"] = "cancelled"
                 state.setdefault("result", {})["error"] = "Stale session: runtime restarted"
                 state.setdefault("timestamps", {})["updated_at"] = datetime.now().isoformat()
@@ -340,6 +371,34 @@ class SessionManager:
                 )
             except (json.JSONDecodeError, OSError) as e:
                 logger.warning("Failed to clean up stale session %s: %s", d.name, e)
+
+    @staticmethod
+    def _is_pid_alive(pid: int) -> bool:
+        """Check whether a process with the given PID is still running."""
+        import os
+        import platform
+
+        if platform.system() == "Windows":
+            import ctypes
+
+            # PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+            kernel32 = ctypes.windll.kernel32
+            handle = kernel32.OpenProcess(0x1000, False, pid)
+            if not handle:
+                # 5 is ERROR_ACCESS_DENIED, meaning the process exists but is protected
+                return kernel32.GetLastError() == 5
+
+            exit_code = ctypes.c_ulong()
+            kernel32.GetExitCodeProcess(handle, ctypes.byref(exit_code))
+            kernel32.CloseHandle(handle)
+            # 259 is STILL_ACTIVE
+            return exit_code.value == 259
+        else:
+            try:
+                os.kill(pid, 0)
+            except OSError:
+                return False
+            return True
 
     async def load_worker(
         self,
@@ -365,9 +424,9 @@ class SessionManager:
             model=model,
         )
 
-        # Notify queen about the loaded worker (skip for hive_coder itself).
+        # Notify queen about the loaded worker (skip for queen itself).
         # Health judge disabled for simplicity.
-        if agent_path.name != "hive_coder" and session.worker_runtime:
+        if agent_path.name != "queen" and session.worker_runtime:
             # await self._start_judge(session, session.runner._storage_path)
             await self._notify_queen_worker_loaded(session)
 
@@ -478,6 +537,11 @@ class SessionManager:
         if session is None:
             return False
 
+        # Capture session data for memory consolidation before teardown
+        _llm = getattr(session, "llm", None)
+        _storage_id = getattr(session, "queen_resume_from", None) or session_id
+        _session_dir = Path.home() / ".hive" / "queen" / "session" / _storage_id
+
         # Stop judge
         self._stop_judge(session)
         if session.worker_handoff_sub is not None:
@@ -487,7 +551,13 @@ class SessionManager:
                 pass
             session.worker_handoff_sub = None
 
-        # Stop queen
+        # Stop queen and memory consolidation subscription
+        if session.memory_consolidation_sub is not None:
+            try:
+                session.event_bus.unsubscribe(session.memory_consolidation_sub)
+            except Exception:
+                pass
+            session.memory_consolidation_sub = None
         if session.queen_task is not None:
             session.queen_task.cancel()
             session.queen_task = None
@@ -518,6 +588,17 @@ class SessionManager:
                 await session.runner.cleanup_async()
             except Exception as e:
                 logger.error("Error cleaning up worker: %s", e)
+
+        # Final memory consolidation — fire-and-forget so teardown isn't blocked.
+        if _llm is not None and _session_dir.exists():
+            import asyncio
+
+            from framework.agents.queen.queen_memory import consolidate_queen_memory
+
+            asyncio.create_task(
+                consolidate_queen_memory(session_id, _session_dir, _llm),
+                name=f"queen-memory-consolidation-{session_id}",
+            )
 
         logger.info("Session '%s' stopped", session_id)
         return True
@@ -579,13 +660,7 @@ class SessionManager:
         are written to the ORIGINAL session's directory so the full conversation
         history accumulates in one place across server restarts.
         """
-        from framework.agents.hive_coder.agent import (
-            queen_goal,
-            queen_graph as _queen_graph,
-        )
-        from framework.graph.executor import GraphExecutor
-        from framework.runner.tool_registry import ToolRegistry
-        from framework.runtime.core import Runtime
+        from framework.server.queen_orchestrator import create_queen
 
         hive_home = Path.home() / ".hive"
 
@@ -623,285 +698,32 @@ class SessionManager:
         except OSError:
             pass
 
-        # Register MCP coding tools
-        queen_registry = ToolRegistry()
-        import framework.agents.hive_coder as _hive_coder_pkg
-
-        hive_coder_dir = Path(_hive_coder_pkg.__file__).parent
-        mcp_config = hive_coder_dir / "mcp_servers.json"
-        if mcp_config.exists():
-            try:
-                queen_registry.load_mcp_config(mcp_config)
-                logger.info("Queen: loaded MCP tools from %s", mcp_config)
-            except Exception:
-                logger.warning("Queen: MCP config failed to load", exc_info=True)
-
-        # Phase state for building/running phase switching
-        from framework.tools.queen_lifecycle_tools import (
-            QueenPhaseState,
-            register_queen_lifecycle_tools,
-        )
-
-        # Start in staging when the caller provided an agent, building otherwise.
-        initial_phase = "staging" if worker_identity else "building"
-        phase_state = QueenPhaseState(phase=initial_phase, event_bus=session.event_bus)
-        session.phase_state = phase_state
-
-        # Always register lifecycle tools — they check session.worker_runtime
-        # at call time, so they work even if no worker is loaded yet.
-        register_queen_lifecycle_tools(
-            queen_registry,
+        session.queen_task = await create_queen(
             session=session,
-            session_id=session.id,
             session_manager=self,
-            manager_session_id=session.id,
-            phase_state=phase_state,
+            worker_identity=worker_identity,
+            queen_dir=queen_dir,
+            initial_prompt=initial_prompt,
         )
 
-        # Monitoring tools need concrete worker paths — only register when present
-        if session.worker_runtime:
-            from framework.tools.worker_monitoring_tools import register_worker_monitoring_tools
+        # Memory consolidation — triggered by context compaction events.
+        # Compaction is a natural signal that "enough has happened to be worth remembering".
+        _consolidation_llm = session.llm
+        _consolidation_session_dir = queen_dir
 
-            register_worker_monitoring_tools(
-                queen_registry,
-                session.event_bus,
-                session.worker_path,
-                stream_id="queen",
-                worker_graph_id=session.worker_runtime._graph_id,
+        async def _on_compaction(_event) -> None:
+            from framework.agents.queen.queen_memory import consolidate_queen_memory
+
+            await consolidate_queen_memory(
+                session.id, _consolidation_session_dir, _consolidation_llm
             )
 
-        queen_tools = list(queen_registry.get_tools().values())
-        queen_tool_executor = queen_registry.get_executor()
+        from framework.runtime.event_bus import EventType as _ET
 
-        # Partition tools into phase-specific sets and import prompt segments
-        from framework.agents.hive_coder.nodes import (
-            _QUEEN_BUILDING_TOOLS,
-            _QUEEN_RUNNING_TOOLS,
-            _QUEEN_STAGING_TOOLS,
-            _appendices,
-            _gcu_building_section,
-            _package_builder_knowledge,
-            _queen_behavior_always,
-            _queen_behavior_building,
-            _queen_behavior_running,
-            _queen_behavior_staging,
-            _queen_identity_building,
-            _queen_identity_running,
-            _queen_identity_staging,
-            _queen_phase_7,
-            _queen_style,
-            _queen_tools_building,
-            _queen_tools_running,
-            _queen_tools_staging,
+        session.memory_consolidation_sub = session.event_bus.subscribe(
+            event_types=[_ET.CONTEXT_COMPACTED],
+            handler=_on_compaction,
         )
-
-        building_names = set(_QUEEN_BUILDING_TOOLS)
-        staging_names = set(_QUEEN_STAGING_TOOLS)
-        running_names = set(_QUEEN_RUNNING_TOOLS)
-
-        registered_names = {t.name for t in queen_tools}
-        missing_building = building_names - registered_names
-        if missing_building:
-            logger.warning(
-                "Queen: %d/%d building tools NOT registered: %s",
-                len(missing_building),
-                len(building_names),
-                sorted(missing_building),
-            )
-        logger.info("Queen: registered tools: %s", sorted(registered_names))
-
-        phase_state.building_tools = [t for t in queen_tools if t.name in building_names]
-        phase_state.staging_tools = [t for t in queen_tools if t.name in staging_names]
-        phase_state.running_tools = [t for t in queen_tools if t.name in running_names]
-
-        # Build queen graph with adjusted prompt + tools
-        _orig_node = _queen_graph.nodes[0]
-
-        if worker_identity is None:
-            worker_identity = (
-                "\n\n# Worker Profile\n"
-                "No worker agent loaded. You are operating independently.\n"
-                "Handle all tasks directly using your coding tools."
-            )
-
-        # Compose phase-specific prompts.
-        _building_body = (
-            _queen_style
-            + _queen_tools_building
-            + _queen_behavior_always
-            + _queen_behavior_building
-            + _package_builder_knowledge
-            + _gcu_building_section
-            + _queen_phase_7
-            + _appendices
-            + worker_identity
-        )
-        phase_state.prompt_building = _queen_identity_building + _building_body
-        phase_state.prompt_staging = (
-            _queen_identity_staging
-            + _queen_style
-            + _queen_tools_staging
-            + _queen_behavior_always
-            + _queen_behavior_staging
-            + worker_identity
-        )
-        phase_state.prompt_running = (
-            _queen_identity_running
-            + _queen_style
-            + _queen_tools_running
-            + _queen_behavior_always
-            + _queen_behavior_running
-            + worker_identity
-        )
-
-        # Build the session_start hook: selects the best-fit expert persona
-        # from the user's opening message and replaces the identity prefix.
-        from framework.agents.hive_coder.nodes.thinking_hook import select_expert_persona
-        from framework.graph.event_loop_node import HookContext, HookResult
-        from framework.runtime.event_bus import AgentEvent, EventType
-
-        _session_llm = session.llm
-        _session_event_bus = session.event_bus
-
-        async def _persona_hook(ctx: HookContext) -> HookResult | None:
-            persona = await select_expert_persona(ctx.trigger or "", _session_llm)
-            if not persona:
-                return None
-            if _session_event_bus is not None:
-                await _session_event_bus.publish(
-                    AgentEvent(
-                        type=EventType.QUEEN_PERSONA_SELECTED,
-                        stream_id="queen",
-                        data={"persona": persona},
-                    )
-                )
-            return HookResult(system_prompt=persona + "\n\n" + _building_body)
-
-        initial_prompt_text = phase_state.get_current_prompt()
-
-        registered_tool_names = set(queen_registry.get_tools().keys())
-        declared_tools = _orig_node.tools or []
-        available_tools = [t for t in declared_tools if t in registered_tool_names]
-
-        node_updates: dict = {
-            "system_prompt": initial_prompt_text,
-        }
-        if set(available_tools) != set(declared_tools):
-            missing = sorted(set(declared_tools) - registered_tool_names)
-            if missing:
-                logger.warning("Queen: tools not available: %s", missing)
-            node_updates["tools"] = available_tools
-
-        adjusted_node = _orig_node.model_copy(update=node_updates)
-        _queen_loop_config = {
-            **(_queen_graph.loop_config or {}),
-            "hooks": {"session_start": [_persona_hook]},
-        }
-        queen_graph = _queen_graph.model_copy(
-            update={"nodes": [adjusted_node], "loop_config": _queen_loop_config}
-        )
-
-        queen_runtime = Runtime(hive_home / "queen")
-
-        async def _queen_loop():
-            try:
-                executor = GraphExecutor(
-                    runtime=queen_runtime,
-                    llm=session.llm,
-                    tools=queen_tools,
-                    tool_executor=queen_tool_executor,
-                    event_bus=session.event_bus,
-                    stream_id="queen",
-                    storage_path=queen_dir,
-                    loop_config=_queen_loop_config,
-                    execution_id=session.id,
-                    dynamic_tools_provider=phase_state.get_current_tools,
-                    dynamic_prompt_provider=phase_state.get_current_prompt,
-                )
-                session.queen_executor = executor
-
-                # Wire inject_notification so phase switches notify the queen LLM
-                async def _inject_phase_notification(content: str) -> None:
-                    node = executor.node_registry.get("queen")
-                    if node is not None and hasattr(node, "inject_event"):
-                        await node.inject_event(content)
-
-                phase_state.inject_notification = _inject_phase_notification
-
-                # Auto-switch to staging when worker execution finishes naturally
-                # and notify the queen about the termination
-                from framework.runtime.event_bus import EventType as _ET
-
-                async def _on_worker_done(event):
-                    if event.stream_id == "queen":
-                        return
-                    if phase_state.phase == "running":
-                        # Build termination notification for the queen
-                        if event.type == _ET.EXECUTION_COMPLETED:
-                            # Mark worker as configured after first successful run
-                            session.worker_configured = True
-                            output = event.data.get("output", {})
-                            output_summary = ""
-                            if output:
-                                # Summarize key outputs for the queen
-                                for key, value in output.items():
-                                    val_str = str(value)
-                                    if len(val_str) > 200:
-                                        val_str = val_str[:200] + "..."
-                                    output_summary += f"\n  {key}: {val_str}"
-                            _out = output_summary or " (no output keys set)"
-                            notification = (
-                                "[WORKER_TERMINAL] Worker finished successfully.\n"
-                                f"Output:{_out}\n"
-                                "Report this to the user. "
-                                "Ask if they want to continue with another run."
-                            )
-                        else:  # EXECUTION_FAILED
-                            error = event.data.get("error", "Unknown error")
-                            notification = (
-                                "[WORKER_TERMINAL] Worker failed.\n"
-                                f"Error: {error}\n"
-                                "Report this to the user and help them troubleshoot."
-                            )
-
-                        # Inject notification to queen before phase switch
-                        node = executor.node_registry.get("queen")
-                        if node is not None and hasattr(node, "inject_event"):
-                            await node.inject_event(notification)
-
-                        await phase_state.switch_to_staging(source="auto")
-
-                session.event_bus.subscribe(
-                    event_types=[_ET.EXECUTION_COMPLETED, _ET.EXECUTION_FAILED],
-                    handler=_on_worker_done,
-                )
-                self._subscribe_worker_handoffs(session, executor)
-
-                logger.info(
-                    "Queen starting in %s phase with %d tools: %s",
-                    phase_state.phase,
-                    len(phase_state.get_current_tools()),
-                    [t.name for t in phase_state.get_current_tools()],
-                )
-                result = await executor.execute(
-                    graph=queen_graph,
-                    goal=queen_goal,
-                    input_data={"greeting": initial_prompt or "Session started."},
-                    session_state={"resume_session_id": session.id},
-                )
-                if result.success:
-                    logger.warning("Queen executor returned (should be forever-alive)")
-                else:
-                    logger.error(
-                        "Queen executor failed: %s",
-                        result.error or "(no error message)",
-                    )
-            except Exception:
-                logger.error("Queen conversation crashed", exc_info=True)
-            finally:
-                session.queen_executor = None
-
-        session.queen_task = asyncio.create_task(_queen_loop())
 
     # ------------------------------------------------------------------
     # Judge startup / teardown

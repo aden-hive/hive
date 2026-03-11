@@ -72,12 +72,13 @@ class WorkerSessionAdapter:
 class QueenPhaseState:
     """Mutable state container for queen operating phase.
 
-    Three phases: building → staging → running.
+    Four phases: planning → building → staging → running.
     Shared between the dynamic_tools_provider callback and tool handlers
     that trigger phase transitions.
     """
 
-    phase: str = "building"  # "building", "staging", or "running"
+    phase: str = "building"  # "planning", "building", "staging", or "running"
+    planning_tools: list = field(default_factory=list)  # list[Tool]
     building_tools: list = field(default_factory=list)  # list[Tool]
     staging_tools: list = field(default_factory=list)  # list[Tool]
     running_tools: list = field(default_factory=list)  # list[Tool]
@@ -85,12 +86,15 @@ class QueenPhaseState:
     event_bus: Any = None  # EventBus — for emitting QUEEN_PHASE_CHANGED events
 
     # Phase-specific prompts (set by session_manager after construction)
+    prompt_planning: str = ""
     prompt_building: str = ""
     prompt_staging: str = ""
     prompt_running: str = ""
 
     def get_current_tools(self) -> list:
         """Return tools for the current phase."""
+        if self.phase == "planning":
+            return list(self.planning_tools)
         if self.phase == "running":
             return list(self.running_tools)
         if self.phase == "staging":
@@ -98,12 +102,20 @@ class QueenPhaseState:
         return list(self.building_tools)
 
     def get_current_prompt(self) -> str:
-        """Return the system prompt for the current phase."""
-        if self.phase == "running":
-            return self.prompt_running
-        if self.phase == "staging":
-            return self.prompt_staging
-        return self.prompt_building
+        """Return the system prompt for the current phase, with fresh memory appended."""
+        if self.phase == "planning":
+            base = self.prompt_planning
+        elif self.phase == "running":
+            base = self.prompt_running
+        elif self.phase == "staging":
+            base = self.prompt_staging
+        else:
+            base = self.prompt_building
+
+        from framework.agents.queen.queen_memory import format_for_injection
+
+        memory = format_for_injection()
+        return base + ("\n\n" + memory if memory else "")
 
     async def _emit_phase_event(self) -> None:
         """Publish a QUEEN_PHASE_CHANGED event so the frontend updates the tag."""
@@ -129,22 +141,15 @@ class QueenPhaseState:
         tool_names = [t.name for t in self.running_tools]
         logger.info("Queen phase → running (source=%s, tools: %s)", source, tool_names)
         await self._emit_phase_event()
-        if self.inject_notification:
-            if source == "frontend":
-                msg = (
-                    "[PHASE CHANGE] The user clicked Run in the UI. Switched to RUNNING phase. "
-                    "Worker is now executing. You have monitoring/lifecycle tools: "
-                    + ", ".join(tool_names)
-                    + "."
-                )
-            else:
-                msg = (
-                    "[PHASE CHANGE] Switched to RUNNING phase. "
-                    "Worker is executing. You now have monitoring/lifecycle tools: "
-                    + ", ".join(tool_names)
-                    + "."
-                )
-            await self.inject_notification(msg)
+        # Skip notification when source="tool" — the tool result already
+        # contains the phase change info.
+        if self.inject_notification and source != "tool":
+            await self.inject_notification(
+                "[PHASE CHANGE] The user clicked Run in the UI. Switched to RUNNING phase. "
+                "Worker is now executing. You have monitoring/lifecycle tools: "
+                + ", ".join(tool_names)
+                + "."
+            )
 
     async def switch_to_staging(self, source: str = "tool") -> None:
         """Switch to staging phase and notify the queen.
@@ -158,24 +163,19 @@ class QueenPhaseState:
         tool_names = [t.name for t in self.staging_tools]
         logger.info("Queen phase → staging (source=%s, tools: %s)", source, tool_names)
         await self._emit_phase_event()
-        if self.inject_notification:
+        # Skip notification when source="tool" — the tool result already
+        # contains the phase change info.
+        if self.inject_notification and source != "tool":
             if source == "frontend":
                 msg = (
                     "[PHASE CHANGE] The user stopped the worker from the UI. "
                     "Switched to STAGING phase. Agent is still loaded. "
                     "Available tools: " + ", ".join(tool_names) + "."
                 )
-            elif source == "auto":
+            else:
                 msg = (
                     "[PHASE CHANGE] Worker execution completed. Switched to STAGING phase. "
                     "Agent is still loaded. Call run_agent_with_input(task) to run again. "
-                    "Available tools: " + ", ".join(tool_names) + "."
-                )
-            else:
-                msg = (
-                    "[PHASE CHANGE] Switched to STAGING phase. "
-                    "Agent loaded and ready. Call run_agent_with_input(task) to start, "
-                    "or stop_worker_and_edit() to go back to building. "
                     "Available tools: " + ", ".join(tool_names) + "."
                 )
             await self.inject_notification(msg)
@@ -192,11 +192,33 @@ class QueenPhaseState:
         tool_names = [t.name for t in self.building_tools]
         logger.info("Queen phase → building (source=%s, tools: %s)", source, tool_names)
         await self._emit_phase_event()
-        if self.inject_notification:
+        if self.inject_notification and source != "tool":
             await self.inject_notification(
                 "[PHASE CHANGE] Switched to BUILDING phase. "
                 "Lifecycle tools removed. Full coding tools restored. "
                 "Call load_built_agent(path) when ready to stage."
+            )
+
+    async def switch_to_planning(self, source: str = "tool") -> None:
+        """Switch to planning phase and notify the queen.
+
+        Args:
+            source: Who triggered the switch — "tool", "frontend", or "auto".
+        """
+        if self.phase == "planning":
+            return
+        self.phase = "planning"
+        tool_names = [t.name for t in self.planning_tools]
+        logger.info("Queen phase → planning (source=%s, tools: %s)", source, tool_names)
+        await self._emit_phase_event()
+        # Skip notification when source="tool" — the tool result already
+        # contains the phase change info; injecting a duplicate notification
+        # causes the queen to respond twice.
+        if self.inject_notification and source != "tool":
+            await self.inject_notification(
+                "[PHASE CHANGE] Switched to PLANNING phase. "
+                "Coding tools removed. Discuss goals and design with the user. "
+                "Available tools: " + ", ".join(tool_names) + "."
             )
 
 
@@ -665,7 +687,7 @@ def register_queen_lifecycle_tools(
 
     # --- stop_worker ----------------------------------------------------------
 
-    async def stop_worker() -> str:
+    async def stop_worker(*, reason: str = "Stopped by queen") -> str:
         """Cancel all active worker executions across all graphs.
 
         Stops the worker immediately. Returns the IDs of cancelled executions.
@@ -695,7 +717,7 @@ def register_queen_lifecycle_tools(
 
                 for exec_id in list(stream.active_execution_ids):
                     try:
-                        ok = await stream.cancel_execution(exec_id)
+                        ok = await stream.cancel_execution(exec_id, reason=reason)
                         if ok:
                             cancelled.append(exec_id)
                     except Exception as e:
@@ -740,6 +762,11 @@ def register_queen_lifecycle_tools(
             "Use your coding tools to modify the agent, then call "
             "load_built_agent(path) to stage it again."
         )
+        # Nudge the queen to start coding instead of blocking for user input.
+        if phase_state is not None and phase_state.inject_notification:
+            await phase_state.inject_notification(
+                "[PHASE CHANGE] Switched to BUILDING phase. Start implementing the changes now."
+            )
         return json.dumps(result)
 
     _stop_edit_tool = Tool(
@@ -755,6 +782,171 @@ def register_queen_lifecycle_tools(
         "stop_worker_and_edit", _stop_edit_tool, lambda inputs: stop_worker_and_edit()
     )
     tools_registered += 1
+
+    # --- stop_worker_and_plan (Running/Staging → Planning) --------------------
+
+    async def stop_worker_and_plan() -> str:
+        """Stop the worker and switch to planning phase for diagnosis."""
+        stop_result = await stop_worker()
+
+        # Switch to planning phase
+        if phase_state is not None:
+            await phase_state.switch_to_planning(source="tool")
+
+        result = json.loads(stop_result)
+        result["phase"] = "planning"
+        result["message"] = (
+            "Worker stopped. You are now in planning phase. "
+            "Diagnose the issue using read-only tools (checkpoints, logs, sessions), "
+            "discuss a fix plan with the user, then call "
+            "initialize_and_build_agent() to implement the fix."
+        )
+        return json.dumps(result)
+
+    _stop_plan_tool = Tool(
+        name="stop_worker_and_plan",
+        description=(
+            "Stop the worker and switch to planning phase for diagnosis. "
+            "Use this when you need to investigate an issue before fixing it. "
+            "After diagnosis, call initialize_and_build_agent() to switch to building."
+        ),
+        parameters={"type": "object", "properties": {}},
+    )
+    registry.register(
+        "stop_worker_and_plan", _stop_plan_tool, lambda inputs: stop_worker_and_plan()
+    )
+    tools_registered += 1
+
+    # --- replan_agent (Building → Planning) -----------------------------------
+
+    async def replan_agent() -> str:
+        """Switch from building back to planning phase.
+        Only use when the user explicitly asks to re-plan."""
+        if phase_state is not None:
+            if phase_state.phase != "building":
+                return json.dumps(
+                    {"error": f"Cannot replan: currently in {phase_state.phase} phase."}
+                )
+            await phase_state.switch_to_planning(source="tool")
+        return json.dumps(
+            {
+                "status": "replanning",
+                "phase": "planning",
+                "message": (
+                    "Switched to PLANNING phase. Coding tools removed. "
+                    "Discuss the new design with the user."
+                ),
+            }
+        )
+
+    _replan_tool = Tool(
+        name="replan_agent",
+        description=(
+            "Switch from building back to planning phase. "
+            "Only use when the user explicitly asks to re-plan or redesign the agent."
+        ),
+        parameters={"type": "object", "properties": {}},
+    )
+    registry.register("replan_agent", _replan_tool, lambda inputs: replan_agent())
+    tools_registered += 1
+
+    # --- initialize_and_build_agent wrapper (Planning → Building) -------------
+    # With agent_name: scaffold a new agent via MCP tool, then switch to building.
+    # Without agent_name: just switch to building (for fixing an existing loaded agent).
+
+    _existing_init = registry._tools.get("initialize_and_build_agent")
+    if _existing_init is not None:
+        _orig_init_executor = _existing_init.executor
+
+        async def initialize_and_build_agent_wrapper(inputs: dict) -> str:
+            """Wrapper: scaffold or just switch to building phase."""
+            agent_name = (inputs.get("agent_name") or "").strip()
+
+            # No agent_name → try to fall back to the session's current agent,
+            # or fail with actionable guidance.
+            if not agent_name:
+                # Try to resolve agent_name from the current session
+                fallback_path = getattr(session, "worker_path", None)
+                if fallback_path is not None:
+                    agent_name = Path(fallback_path).name
+                else:
+                    # Server path: check SessionManager
+                    if session_manager is not None and manager_session_id:
+                        srv_session = session_manager.get_session(manager_session_id)
+                        if srv_session and getattr(srv_session, "worker_path", None):
+                            fallback_path = srv_session.worker_path
+                            agent_name = Path(fallback_path).name
+
+                if not agent_name:
+                    return json.dumps(
+                        {
+                            "error": (
+                                "No agent_name provided and no agent loaded in this session. "
+                                "To fix: call list_agents() to find the agent name, then call "
+                                "initialize_and_build_agent(agent_name='<name>') to scaffold it."
+                            )
+                        }
+                    )
+
+                # Fall back succeeded — switch to building without scaffolding
+                logger.info(
+                    "initialize_and_build_agent: no agent_name provided, "
+                    "falling back to session agent '%s'",
+                    agent_name,
+                )
+                if phase_state is not None:
+                    await phase_state.switch_to_building(source="tool")
+                    if phase_state.inject_notification:
+                        await phase_state.inject_notification(
+                            "[PHASE CHANGE] Switched to BUILDING phase. "
+                            "Start implementing the fix now."
+                        )
+                return json.dumps(
+                    {
+                        "status": "editing",
+                        "phase": "building",
+                        "agent_name": agent_name,
+                        "warning": (
+                            f"No agent_name provided — using session agent '{agent_name}'. "
+                            f"Agent files are at exports/{agent_name}/."
+                        ),
+                        "message": (
+                            "Switched to BUILDING phase. Full coding tools restored. "
+                            "Implement the fix, then call load_built_agent(path) to reload."
+                        ),
+                    }
+                )
+
+            # Has agent_name → scaffold via MCP tool
+            result = _orig_init_executor(inputs)
+            # Handle both sync and async executors
+            if asyncio.iscoroutine(result) or asyncio.isfuture(result):
+                result = await result
+            # If result is a ToolResult, extract the text content
+            result_str = str(result)
+            if hasattr(result, "content"):
+                result_str = str(result.content)
+            try:
+                parsed = json.loads(result_str)
+                if parsed.get("success", True):
+                    if phase_state is not None:
+                        await phase_state.switch_to_building(source="tool")
+                        # Inject a continuation message so the queen starts
+                        # building immediately instead of blocking for user input.
+                        if phase_state.inject_notification:
+                            await phase_state.inject_notification(
+                                "[PHASE CHANGE] Agent scaffolded and switched to BUILDING phase. "
+                                "Start implementing the agent nodes now."
+                            )
+            except (json.JSONDecodeError, KeyError, TypeError):
+                pass
+            return result_str
+
+        registry.register(
+            "initialize_and_build_agent",
+            _existing_init.tool,
+            lambda inputs: initialize_and_build_agent_wrapper(inputs),
+        )
 
     # --- stop_worker (Running → Staging) -------------------------------------
 
@@ -1502,7 +1694,23 @@ def register_queen_lifecycle_tools(
         if reg is None:
             return json.dumps({"error": "Worker graph not found"})
 
-        # Find an active node that can accept injected input
+        # Prefer nodes that are actively waiting (e.g. escalation receivers
+        # blocked on queen guidance) over the main event-loop node.
+        for stream in reg.streams.values():
+            waiting = stream.get_waiting_nodes()
+            if waiting:
+                target_node_id = waiting[0]["node_id"]
+                ok = await stream.inject_input(target_node_id, content, is_client_input=True)
+                if ok:
+                    return json.dumps(
+                        {
+                            "status": "delivered",
+                            "node_id": target_node_id,
+                            "content_preview": content[:100],
+                        }
+                    )
+
+        # Fallback: inject into any injectable node
         for stream in reg.streams.values():
             injectable = stream.get_injectable_nodes()
             if injectable:
@@ -1671,6 +1879,51 @@ def register_queen_lifecycle_tools(
             if not resolved_path.exists():
                 return json.dumps({"error": f"Agent path does not exist: {agent_path}"})
 
+            # Pre-check: verify the module exports goal/nodes/edges before
+            # attempting the full load.  This gives the queen an actionable
+            # error message instead of a cryptic ImportError or TypeError.
+            try:
+                import importlib
+                import sys as _sys
+
+                pkg_name = resolved_path.name
+                parent_dir = str(resolved_path.resolve().parent)
+                # Temporarily put parent on sys.path for import
+                if parent_dir not in _sys.path:
+                    _sys.path.insert(0, parent_dir)
+                # Evict stale cached modules
+                stale = [n for n in _sys.modules if n == pkg_name or n.startswith(f"{pkg_name}.")]
+                for n in stale:
+                    del _sys.modules[n]
+
+                mod = importlib.import_module(pkg_name)
+                missing_attrs = [
+                    attr for attr in ("goal", "nodes", "edges") if getattr(mod, attr, None) is None
+                ]
+                if missing_attrs:
+                    return json.dumps(
+                        {
+                            "error": (
+                                f"Agent module '{pkg_name}' is missing module-level "
+                                f"attributes: {', '.join(missing_attrs)}. "
+                                f"Fix: in {pkg_name}/__init__.py, add "
+                                f"'from .agent import {', '.join(missing_attrs)}' "
+                                f"so that 'import {pkg_name}' exposes them at package level."
+                            )
+                        }
+                    )
+            except Exception as pre_err:
+                return json.dumps(
+                    {
+                        "error": (
+                            f"Failed to import agent module '{resolved_path.name}': {pre_err}. "
+                            f"Fix: ensure {resolved_path.name}/__init__.py exists and can be "
+                            f"imported without errors (check syntax, missing dependencies, "
+                            f"and relative imports)."
+                        )
+                    }
+                )
+
             try:
                 updated_session = await session_manager.load_worker(
                     manager_session_id,
@@ -1678,7 +1931,36 @@ def register_queen_lifecycle_tools(
                 )
                 info = updated_session.worker_info
 
-                # Switch to staging phase after successful load
+                # Validate that all tools declared by nodes are registered
+                loaded_runtime = _get_runtime()
+                if loaded_runtime is not None:
+                    available_tool_names = {t.name for t in loaded_runtime._tools}
+                    missing_by_node: dict[str, list[str]] = {}
+                    for node in loaded_runtime.graph.nodes:
+                        if node.tools:
+                            missing = set(node.tools) - available_tool_names
+                            if missing:
+                                missing_by_node[f"{node.name} (id={node.id})"] = sorted(missing)
+                    if missing_by_node:
+                        # Unload the broken worker
+                        try:
+                            await session_manager.unload_worker(manager_session_id)
+                        except Exception:
+                            pass
+                        details = "; ".join(
+                            f"Node '{k}' missing {v}" for k, v in missing_by_node.items()
+                        )
+                        return json.dumps(
+                            {
+                                "error": (
+                                    f"Tool validation failed: {details}. "
+                                    "Fix node tool declarations or add the missing "
+                                    "tools, then try loading again."
+                                )
+                            }
+                        )
+
+                # Switch to staging phase after successful load + validation
                 if phase_state is not None:
                     await phase_state.switch_to_staging()
 

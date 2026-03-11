@@ -517,6 +517,41 @@ def get_codex_account_id() -> str | None:
     return None
 
 
+# ---------------------------------------------------------------------------
+# Kimi Code subscription token helpers
+# ---------------------------------------------------------------------------
+
+
+def get_kimi_code_token() -> str | None:
+    """Get the API key from a Kimi Code CLI installation.
+
+    Reads the API key from ``~/.kimi/config.toml``, which is created when
+    the user runs ``kimi /login`` in the Kimi Code CLI.
+
+    Returns:
+        The API key if available, None otherwise.
+    """
+    import tomllib
+
+    config_path = Path.home() / ".kimi" / "config.toml"
+    if not config_path.exists():
+        return None
+
+    try:
+        with open(config_path, "rb") as f:
+            config = tomllib.load(f)
+        providers = config.get("providers", {})
+        # kimi-cli stores credentials under providers.kimi-for-coding
+        for provider_cfg in providers.values():
+            if isinstance(provider_cfg, dict):
+                key = provider_cfg.get("api_key")
+                if key:
+                    return key
+    except Exception:
+        pass
+    return None
+
+
 @dataclass
 class AgentInfo:
     """Information about an exported agent."""
@@ -1104,6 +1139,7 @@ class AgentRunner:
             llm_config = config.get("llm", {})
             use_claude_code = llm_config.get("use_claude_code_subscription", False)
             use_codex = llm_config.get("use_codex_subscription", False)
+            use_kimi_code = llm_config.get("use_kimi_code_subscription", False)
             api_base = llm_config.get("api_base")
 
             api_key = None
@@ -1119,6 +1155,12 @@ class AgentRunner:
                 if not api_key:
                     print("Warning: Codex subscription configured but no token found.")
                     print("Run 'codex' to authenticate, then try again.")
+            elif use_kimi_code:
+                # Get API key from Kimi Code CLI config (~/.kimi/config.toml)
+                api_key = get_kimi_code_token()
+                if not api_key:
+                    print("Warning: Kimi Code subscription configured but no key found.")
+                    print("Run 'kimi /login' to authenticate, then try again.")
 
             if api_key and use_claude_code:
                 # Use litellm's built-in Anthropic OAuth support.
@@ -1148,6 +1190,14 @@ class AgentRunner:
                     extra_headers=extra_headers,
                     store=False,
                     allowed_openai_params=["store"],
+                )
+            elif api_key and use_kimi_code:
+                # Kimi Code subscription uses the Kimi coding API (OpenAI-compatible).
+                # The api_base is set automatically by LiteLLMProvider for kimi/ models.
+                self._llm = LiteLLMProvider(
+                    model=self.model,
+                    api_key=api_key,
+                    api_base=api_base,
                 )
             else:
                 # Local models (e.g. Ollama) don't need an API key
@@ -1314,6 +1364,8 @@ class AgentRunner:
             return "TOGETHER_API_KEY"
         elif model_lower.startswith("minimax/") or model_lower.startswith("minimax-"):
             return "MINIMAX_API_KEY"
+        elif model_lower.startswith("kimi/"):
+            return "KIMI_API_KEY"
         else:
             # Default: assume OpenAI-compatible
             return "OPENAI_API_KEY"
@@ -1334,6 +1386,8 @@ class AgentRunner:
             cred_id = "anthropic"
         elif model_lower.startswith("minimax/") or model_lower.startswith("minimax-"):
             cred_id = "minimax"
+        elif model_lower.startswith("kimi/"):
+            cred_id = "kimi"
         # Add more mappings as providers are added to LLM_CREDENTIALS
 
         if cred_id is None:

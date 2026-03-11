@@ -9,6 +9,7 @@ Each stream has:
 
 import asyncio
 import logging
+import os
 import time
 import uuid
 from collections import OrderedDict
@@ -240,6 +241,7 @@ class ExecutionStream:
         self._active_executions: dict[str, ExecutionContext] = {}
         self._execution_tasks: dict[str, asyncio.Task] = {}
         self._active_executors: dict[str, GraphExecutor] = {}
+        self._cancel_reasons: dict[str, str] = {}
         self._execution_results: OrderedDict[str, ExecutionResult] = OrderedDict()
         self._execution_result_times: dict[str, float] = {}
         self._completion_events: dict[str, asyncio.Event] = {}
@@ -488,7 +490,7 @@ class ExecutionStream:
                         node.signal_shutdown()
                     if hasattr(node, "cancel_current_turn"):
                         node.cancel_current_turn()
-            await self.cancel_execution(eid)
+            await self.cancel_execution(eid, reason="Restarted with new execution")
 
         # When resuming, reuse the original session ID so the execution
         # continues in the same session directory instead of creating a new one.
@@ -825,19 +827,20 @@ class ExecutionStream:
                 # Emit SSE event so the frontend knows the execution stopped.
                 # The executor does NOT emit on CancelledError, so there is no
                 # risk of double-emitting.
+                cancel_reason = self._cancel_reasons.pop(execution_id, "Execution cancelled")
                 if self._scoped_event_bus:
                     if has_result and result.paused_at:
                         await self._scoped_event_bus.emit_execution_paused(
                             stream_id=self.stream_id,
                             node_id=result.paused_at,
-                            reason="Execution cancelled",
+                            reason=cancel_reason,
                             execution_id=execution_id,
                         )
                     else:
                         await self._scoped_event_bus.emit_execution_failed(
                             stream_id=self.stream_id,
                             execution_id=execution_id,
-                            error="Execution cancelled",
+                            error=cancel_reason,
                             correlation_id=ctx.correlation_id,
                         )
 
@@ -985,6 +988,9 @@ class ExecutionStream:
             if error:
                 state.result.error = error
 
+            # Stamp the owning process ID for cross-process stale detection
+            state.pid = os.getpid()
+
             # Write state.json
             await self._session_store.write_state(execution_id, state)
             logger.debug(f"Wrote state.json for session {execution_id} (status={status})")
@@ -1078,18 +1084,24 @@ class ExecutionStream:
         """Get execution context."""
         return self._active_executions.get(execution_id)
 
-    async def cancel_execution(self, execution_id: str) -> bool:
+    async def cancel_execution(self, execution_id: str, *, reason: str | None = None) -> bool:
         """
         Cancel a running execution.
 
         Args:
             execution_id: Execution to cancel
+            reason: Human-readable reason for the cancellation (e.g.
+                "Stopped by queen", "User requested pause"). If not
+                provided, defaults to "Execution cancelled".
 
         Returns:
             True if cancelled, False if not found
         """
         task = self._execution_tasks.get(execution_id)
         if task and not task.done():
+            # Store the reason so the CancelledError handler can use it
+            # when emitting the pause/fail event.
+            self._cancel_reasons[execution_id] = reason or "Execution cancelled"
             task.cancel()
             # Wait briefly for the task to finish. Don't block indefinitely —
             # the task may be stuck in a long LLM API call that doesn't
