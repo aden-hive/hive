@@ -34,73 +34,44 @@ __all__ = [
     "interactive_fallback",
 ]
 
-# Export the new provider selector functions
 try:
-    from framework.llm.provider_selector import interactive_fallback
-
+    from framework.llm.provider_selector import interactive_fallback, quick_provider_check
     __all__.append("interactive_fallback")
-except ImportError:
-    logger.debug("provider_selector not available")
+    __all__.append("quick_provider_check")
+except ImportError as e:
+    logger.debug(f"provider_selector not available: {e}")
 
-# Export LiteLLM provider
 try:
     from framework.llm.litellm import LiteLLMProvider
-
     __all__.append("LiteLLMProvider")
-except ImportError:
-    pass
+except ImportError as e:
+    logger.debug(f"LiteLLMProvider not available: {e}")
 
-# Export Mock provider
 try:
     from framework.llm.mock import MockLLMProvider
-
     __all__.append("MockLLMProvider")
-except ImportError:
-    pass
+except ImportError as e:
+    logger.debug(f"MockLLMProvider not available: {e}")
 
-# Don't auto-export AnthropicProvider - use get_llm_provider instead
 try:
     from framework.llm.anthropic import AnthropicProvider
-
-    # Explicitly NOT adding to __all__ to prevent accidental use
-    logger.warning(
-        "AnthropicProvider is deprecated. Use get_llm_provider() or LiteLLMProvider directly."
-    )
-except ImportError:
-    pass
-
+    logger.warning("AnthropicProvider is deprecated. Use get_llm_provider() or LiteLLMProvider directly.")
+except ImportError as e:
+    logger.debug(f"AnthropicProvider not available: {e}")
 
 def get_llm_provider(config: dict | None = None) -> LLMProvider:
-    """Get the appropriate LLM provider based on user configuration.
-
-    Args:
-        config: Optional config dict. If None, loads from ~/.hive/configuration.json
-
-    Returns:
-        LLMProvider instance configured for the user's selected provider
-    """
     if config is None:
         from framework.config import get_hive_config
-
         config = get_hive_config().get("llm", {})
-
     provider_name = config.get("provider", "").lower()
     model = config.get("model", "")
     api_key = config.get("api_key_env_var")
     api_base = config.get("api_base")
-
-    # Get API key if specified
     if api_key:
         import os
-
         api_key = os.environ.get(api_key)
-
     logger.info(f"Creating LLM provider for: {provider_name} with model: {model}")
-
-    # Always use LiteLLM - it supports everything
     from framework.llm.litellm import LiteLLMProvider
-
-    # Format model correctly
     if provider_name and model:
         if provider_name == "gemini":
             full_model = model
@@ -108,12 +79,8 @@ def get_llm_provider(config: dict | None = None) -> LLMProvider:
             full_model = f"{provider_name}/{model}"
     else:
         full_model = model or "gemini-3-flash-preview"
-
     return LiteLLMProvider(model=full_model, api_key=api_key, api_base=api_base)
 
-
 def get_available_providers() -> dict:
-    """Get all available LLM providers based on environment variables."""
     from framework.config import get_available_providers as _get_providers
-
     return _get_providers()
