@@ -911,6 +911,13 @@ $zaiKey = [System.Environment]::GetEnvironmentVariable("ZAI_API_KEY", "User")
 if (-not $zaiKey) { $zaiKey = $env:ZAI_API_KEY }
 if ($zaiKey) { $ZaiCredDetected = $true }
 
+$KimiCredDetected = $false
+$kimiConfigPath = Join-Path $env:USERPROFILE ".kimi\config.toml"
+if (Test-Path $kimiConfigPath) { $KimiCredDetected = $true }
+$kimiKey = [System.Environment]::GetEnvironmentVariable("KIMI_API_KEY", "User")
+if (-not $kimiKey) { $kimiKey = $env:KIMI_API_KEY }
+if ($kimiKey) { $KimiCredDetected = $true }
+
 # Detect API key providers
 $ProviderMenuEnvVars  = @("ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GEMINI_API_KEY", "GROQ_API_KEY", "CEREBRAS_API_KEY")
 $ProviderMenuNames    = @("Anthropic (Claude) - Recommended", "OpenAI (GPT)", "Google Gemini - Free tier available", "Groq - Fast, free tier", "Cerebras - Fast, free tier")
@@ -938,7 +945,9 @@ if (Test-Path $HiveConfigFile) {
             $PrevEnvVar = if ($prevLlm.api_key_env_var) { $prevLlm.api_key_env_var } else { "" }
             if ($prevLlm.use_claude_code_subscription) { $PrevSubMode = "claude_code" }
             elseif ($prevLlm.use_codex_subscription) { $PrevSubMode = "codex" }
+            elseif ($prevLlm.use_kimi_code_subscription) { $PrevSubMode = "kimi_code" }
             elseif ($prevLlm.api_base -and $prevLlm.api_base -like "*api.z.ai*") { $PrevSubMode = "zai_code" }
+            elseif ($prevLlm.api_base -and $prevLlm.api_base -like "*api.kimi.com*") { $PrevSubMode = "kimi_code" }
         }
     } catch { }
 }
@@ -951,6 +960,7 @@ if ($PrevSubMode -or $PrevProvider) {
         "claude_code" { if ($ClaudeCredDetected) { $prevCredValid = $true } }
         "zai_code"    { if ($ZaiCredDetected)    { $prevCredValid = $true } }
         "codex"       { if ($CodexCredDetected)  { $prevCredValid = $true } }
+        "kimi_code"   { if ($KimiCredDetected)   { $prevCredValid = $true } }
         default {
             if ($PrevEnvVar) {
                 $envVal = [System.Environment]::GetEnvironmentVariable($PrevEnvVar, "Process")
@@ -964,14 +974,16 @@ if ($PrevSubMode -or $PrevProvider) {
             "claude_code" { $DefaultChoice = "1" }
             "zai_code"    { $DefaultChoice = "2" }
             "codex"       { $DefaultChoice = "3" }
+            "kimi_code"   { $DefaultChoice = "4" }
         }
         if (-not $DefaultChoice) {
             switch ($PrevProvider) {
-                "anthropic" { $DefaultChoice = "4" }
-                "openai"    { $DefaultChoice = "5" }
-                "gemini"    { $DefaultChoice = "6" }
-                "groq"      { $DefaultChoice = "7" }
-                "cerebras"  { $DefaultChoice = "8" }
+                "anthropic" { $DefaultChoice = "5" }
+                "openai"    { $DefaultChoice = "6" }
+                "gemini"    { $DefaultChoice = "7" }
+                "groq"      { $DefaultChoice = "8" }
+                "cerebras"  { $DefaultChoice = "9" }
+                "kimi"      { $DefaultChoice = "4" }
             }
         }
     }
@@ -1003,12 +1015,19 @@ Write-Host ") OpenAI Codex Subscription  " -NoNewline
 Write-Color -Text "(use your Codex/ChatGPT Plus plan)" -Color DarkGray -NoNewline
 if ($CodexCredDetected) { Write-Color -Text "  (credential detected)" -Color Green } else { Write-Host "" }
 
+# 4) Kimi Code
+Write-Host "  " -NoNewline
+Write-Color -Text "4" -Color Cyan -NoNewline
+Write-Host ") Kimi Code Subscription     " -NoNewline
+Write-Color -Text "(use your Kimi Code plan)" -Color DarkGray -NoNewline
+if ($KimiCredDetected) { Write-Color -Text "  (credential detected)" -Color Green } else { Write-Host "" }
+
 Write-Host ""
 Write-Color -Text "  API key providers:" -Color Cyan
 
-# 4-8) API key providers
+# 5-9) API key providers
 for ($idx = 0; $idx -lt $ProviderMenuEnvVars.Count; $idx++) {
-    $num = $idx + 4
+    $num = $idx + 5
     $envVal = [System.Environment]::GetEnvironmentVariable($ProviderMenuEnvVars[$idx], "Process")
     if (-not $envVal) { $envVal = [System.Environment]::GetEnvironmentVariable($ProviderMenuEnvVars[$idx], "User") }
     Write-Host "  " -NoNewline
@@ -1018,7 +1037,7 @@ for ($idx = 0; $idx -lt $ProviderMenuEnvVars.Count; $idx++) {
 }
 
 Write-Host "  " -NoNewline
-Write-Color -Text "9" -Color Cyan -NoNewline
+Write-Color -Text "10" -Color Cyan -NoNewline
 Write-Host ") Skip for now"
 Write-Host ""
 
@@ -1029,16 +1048,16 @@ if ($DefaultChoice) {
 
 while ($true) {
     if ($DefaultChoice) {
-        $raw = Read-Host "Enter choice (1-9) [$DefaultChoice]"
+        $raw = Read-Host "Enter choice (1-10) [$DefaultChoice]"
         if ([string]::IsNullOrWhiteSpace($raw)) { $raw = $DefaultChoice }
     } else {
-        $raw = Read-Host "Enter choice (1-9)"
+        $raw = Read-Host "Enter choice (1-10)"
     }
     if ($raw -match '^\d+$') {
         $num = [int]$raw
-        if ($num -ge 1 -and $num -le 9) { break }
+        if ($num -ge 1 -and $num -le 10) { break }
     }
-    Write-Color -Text "Invalid choice. Please enter 1-9" -Color Red
+    Write-Color -Text "Invalid choice. Please enter 1-10" -Color Red
 }
 
 switch ($num) {
@@ -1102,9 +1121,20 @@ switch ($num) {
             Write-Ok "Using OpenAI Codex subscription"
         }
     }
-    { $_ -ge 4 -and $_ -le 8 } {
+    4 {
+        # Kimi Code Subscription
+        $SubscriptionMode   = "kimi_code"
+        $SelectedProviderId = "kimi"
+        $SelectedEnvVar     = "KIMI_API_KEY"
+        $SelectedModel      = "kimi-k2.5"
+        $SelectedMaxTokens  = 32768
+        Write-Host ""
+        Write-Ok "Using Kimi Code subscription"
+        Write-Color -Text "  Model: kimi-k2.5 | API: api.kimi.com/coding" -Color DarkGray
+    }
+    { $_ -ge 5 -and $_ -le 9 } {
         # API key providers
-        $provIdx = $num - 4
+        $provIdx = $num - 5
         $SelectedEnvVar     = $ProviderMenuEnvVars[$provIdx]
         $SelectedProviderId = $ProviderMenuIds[$provIdx]
         $providerName       = $ProviderMenuNames[$provIdx] -replace ' - .*', ''  # strip description
@@ -1175,7 +1205,7 @@ switch ($num) {
             }
         }
     }
-    9 {
+    10 {
         Write-Host ""
         Write-Warn "Skipped. An LLM API key is required to test and use worker agents."
         Write-Host "  Add your API key later by running:"
@@ -1252,6 +1282,70 @@ if ($SubscriptionMode -eq "zai_code") {
     }
 }
 
+# For Kimi Code subscription: prompt for API key with verification + retry
+if ($SubscriptionMode -eq "kimi_code") {
+    while ($true) {
+        $existingKimi = [System.Environment]::GetEnvironmentVariable("KIMI_API_KEY", "User")
+        if (-not $existingKimi) { $existingKimi = $env:KIMI_API_KEY }
+
+        if ($existingKimi) {
+            $masked = $existingKimi.Substring(0, [Math]::Min(4, $existingKimi.Length)) + "..." + $existingKimi.Substring([Math]::Max(0, $existingKimi.Length - 4))
+            Write-Host ""
+            Write-Color -Text "  $([char]0x2B22) Current Kimi key: $masked" -Color Green
+            $apiKey = Read-Host "  Press Enter to keep, or paste a new key to replace"
+        } else {
+            Write-Host ""
+            Write-Host "Get your API key from: " -NoNewline
+            Write-Color -Text "https://www.kimi.com/code" -Color Cyan
+            Write-Host ""
+            $apiKey = Read-Host "Paste your Kimi API key (or press Enter to skip)"
+        }
+
+        if ($apiKey) {
+            [System.Environment]::SetEnvironmentVariable("KIMI_API_KEY", $apiKey, "User")
+            $env:KIMI_API_KEY = $apiKey
+            Write-Host ""
+            Write-Ok "Kimi API key saved as User environment variable"
+
+            # Health check the new key
+            Write-Host "  Verifying Kimi API key... " -NoNewline
+            try {
+                $hcResult = & uv run python (Join-Path $ScriptDir "scripts/check_llm_key.py") "kimi" $apiKey "https://api.kimi.com/coding" 2>$null
+                $hcJson = $hcResult | ConvertFrom-Json
+                if ($hcJson.valid -eq $true) {
+                    Write-Color -Text "ok" -Color Green
+                    break
+                } elseif ($hcJson.valid -eq $false) {
+                    Write-Color -Text "failed" -Color Red
+                    Write-Warn $hcJson.message
+                    [System.Environment]::SetEnvironmentVariable("KIMI_API_KEY", $null, "User")
+                    Remove-Item -Path "Env:\KIMI_API_KEY" -ErrorAction SilentlyContinue
+                    Write-Host ""
+                    Read-Host "  Press Enter to try again"
+                } else {
+                    Write-Color -Text "--" -Color Yellow
+                    Write-Color -Text "  Could not verify key (network issue). The key has been saved." -Color DarkGray
+                    break
+                }
+            } catch {
+                Write-Color -Text "--" -Color Yellow
+                Write-Color -Text "  Could not verify key (network issue). The key has been saved." -Color DarkGray
+                break
+            }
+        } elseif (-not $existingKimi) {
+            Write-Host ""
+            Write-Warn "Skipped. Add your Kimi API key later:"
+            Write-Color -Text "  [System.Environment]::SetEnvironmentVariable('KIMI_API_KEY', 'your-key', 'User')" -Color Cyan
+            $SelectedEnvVar     = ""
+            $SelectedProviderId = ""
+            $SubscriptionMode   = ""
+            break
+        } else {
+            break
+        }
+    }
+}
+
 # Prompt for model if not already selected (manual provider path)
 if ($SelectedProviderId -and -not $SelectedModel) {
     $modelSel = Get-ModelSelection $SelectedProviderId
@@ -1286,6 +1380,9 @@ if ($SelectedProviderId) {
         $config.llm["use_codex_subscription"] = $true
     } elseif ($SubscriptionMode -eq "zai_code") {
         $config.llm["api_base"] = "https://api.z.ai/api/coding/paas/v4"
+        $config.llm["api_key_env_var"] = $SelectedEnvVar
+    } elseif ($SubscriptionMode -eq "kimi_code") {
+        $config.llm["api_base"] = "https://api.kimi.com/coding"
         $config.llm["api_key_env_var"] = $SelectedEnvVar
     } else {
         $config.llm["api_key_env_var"] = $SelectedEnvVar
