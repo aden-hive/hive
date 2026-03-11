@@ -18,7 +18,6 @@ from __future__ import annotations
 import asyncio
 import io
 from collections.abc import AsyncIterator
-from pathlib import Path
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -32,7 +31,6 @@ from framework.llm.stream_events import FinishEvent, TextDeltaEvent, ToolCallEve
 from framework.runner.runner import AgentRunner, ExecutionResult
 from framework.runtime.core import Runtime
 from framework.runtime.event_bus import EventBus, EventType
-
 
 # ---------------------------------------------------------------------------
 # Minimal mock LLM (same pattern as test_event_loop_node.py)
@@ -436,6 +434,7 @@ class TestRateLimitRetryCap:
         """With a tiny wall-time budget, the loop stops after the first retry
         even though RATE_LIMIT_MAX_RETRIES has not been exhausted."""
         from litellm.exceptions import RateLimitError
+
         import framework.llm.litellm as litellm_module
         from framework.llm.litellm import LiteLLMProvider
 
@@ -474,6 +473,7 @@ class TestRateLimitRetryCap:
     async def test_retry_proceeds_within_budget(self):
         """Within the budget, retries still happen normally."""
         from litellm.exceptions import RateLimitError
+
         import framework.llm.litellm as litellm_module
         from framework.llm.litellm import LiteLLMProvider
         from framework.llm.stream_events import StreamErrorEvent
