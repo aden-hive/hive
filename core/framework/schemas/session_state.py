@@ -161,12 +161,11 @@ class SessionState(BaseModel):
     def is_resumable(self) -> bool:
         """Can this session be resumed?
 
-        Every non-completed session is resumable. If resume_from/paused_at
-        aren't set, the executor falls back to the graph entry point —
-        so we don't gate on those. Even catastrophic failures are resumable.
+        Sessions that are COMPLETED or CANCELLED cannot be resumed.
+        All other states (ACTIVE, PAUSED, FAILED) are considered resumable.
         """
-        return self.status != SessionStatus.COMPLETED
-
+        return self.status not in [SessionStatus.COMPLETED, SessionStatus.CANCELLED]
+        
     @computed_field
     @property
     def is_resumable_from_checkpoint(self) -> bool:
