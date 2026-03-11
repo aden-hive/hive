@@ -165,7 +165,7 @@ class SessionState(BaseModel):
         aren't set, the executor falls back to the graph entry point —
         so we don't gate on those. Even catastrophic failures are resumable.
         """
-        return self.status != SessionStatus.COMPLETED
+        return self.status not in (SessionStatus.COMPLETED, SessionStatus.CANCELLED)
 
     @computed_field
     @property
