@@ -1816,8 +1816,9 @@ export default function Workspace() {
         }
 
         case "draft_graph_updated": {
-          const draft = event.data?.draft as DraftGraphData | undefined;
-          if (draft) {
+          // The draft dict is published directly as event.data (not nested under a key)
+          const draft = event.data as unknown as DraftGraphData | undefined;
+          if (draft?.nodes) {
             updateAgentState(agentType, { draftGraph: draft });
           }
           break;

@@ -1,4 +1,4 @@
-import { memo, useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import type { DraftGraph as DraftGraphData, DraftNode } from "@/api/types";
 
 interface DraftGraphProps {
@@ -6,15 +6,13 @@ interface DraftGraphProps {
   onNodeClick?: (node: DraftNode) => void;
 }
 
-// Layout constants (matching AgentGraph spacing)
-const NODE_W = 180;
-const NODE_H = 52;
-const GAP_Y = 52;
-const TOP_Y = 40;
-const MARGIN_LEFT = 20;
-const MARGIN_RIGHT = 50;
-const SVG_BASE_W = 320;
-const GAP_X = 16;
+// Layout constants — tuned for a ~300px panel (276px after px-3 padding)
+const NODE_W = 150;
+const NODE_H = 48;
+const GAP_Y = 44;
+const TOP_Y = 24;
+const MARGIN_X = 12;
+const GAP_X = 12;
 
 function truncateLabel(label: string, availablePx: number, fontSize: number): string {
   const avgCharW = fontSize * 0.58;
@@ -25,7 +23,6 @@ function truncateLabel(label: string, availablePx: number, fontSize: number): st
 
 /**
  * Render an ISO 5807 flowchart shape as an SVG element.
- * Returns the shape path/element positioned at (x, y) with given dimensions.
  */
 function FlowchartShape({
   shape,
@@ -44,39 +41,35 @@ function FlowchartShape({
   color: string;
   selected: boolean;
 }) {
-  const fill = `${color}18`; // ~10% opacity
+  const fill = `${color}18`;
   const stroke = selected ? color : `${color}80`;
   const strokeWidth = selected ? 2 : 1.2;
   const common = { fill, stroke, strokeWidth };
 
   switch (shape) {
-    // Terminal / start / end — stadium (rounded rect with full radius)
     case "stadium":
       return <rect x={x} y={y} width={w} height={h} rx={h / 2} {...common} />;
 
-    // Process — standard rectangle
     case "rectangle":
       return <rect x={x} y={y} width={w} height={h} rx={4} {...common} />;
 
-    // Alternate process — rounded rectangle (larger radius)
     case "rounded_rect":
       return <rect x={x} y={y} width={w} height={h} rx={12} {...common} />;
 
-    // Decision — diamond
     case "diamond": {
       const cx = x + w / 2;
       const cy = y + h / 2;
+      // Keep diamond within bounding box
       return (
         <polygon
-          points={`${cx},${y - 4} ${x + w + 4},${cy} ${cx},${y + h + 4} ${x - 4},${cy}`}
+          points={`${cx},${y} ${x + w},${cy} ${cx},${y + h} ${x},${cy}`}
           {...common}
         />
       );
     }
 
-    // I/O — parallelogram
     case "parallelogram": {
-      const skew = 14;
+      const skew = 12;
       return (
         <polygon
           points={`${x + skew},${y} ${x + w},${y} ${x + w - skew},${y + h} ${x},${y + h}`}
@@ -85,16 +78,14 @@ function FlowchartShape({
       );
     }
 
-    // Document — rectangle with wavy bottom
     case "document": {
-      const d = `M ${x} ${y + 4} Q ${x} ${y}, ${x + 8} ${y} L ${x + w - 8} ${y} Q ${x + w} ${y}, ${x + w} ${y + 4} L ${x + w} ${y + h - 8} C ${x + w * 0.75} ${y + h + 4}, ${x + w * 0.25} ${y + h - 12}, ${x} ${y + h - 4} Z`;
+      const d = `M ${x} ${y + 4} Q ${x} ${y}, ${x + 8} ${y} L ${x + w - 8} ${y} Q ${x + w} ${y}, ${x + w} ${y + 4} L ${x + w} ${y + h - 8} C ${x + w * 0.75} ${y + h + 2}, ${x + w * 0.25} ${y + h - 10}, ${x} ${y + h - 4} Z`;
       return <path d={d} {...common} />;
     }
 
-    // Multi-document
     case "multi_document": {
-      const off = 4;
-      const d = `M ${x} ${y + 4 + off} Q ${x} ${y + off}, ${x + 8} ${y + off} L ${x + w - 8 - off} ${y + off} Q ${x + w - off} ${y + off}, ${x + w - off} ${y + 4 + off} L ${x + w - off} ${y + h - 8} C ${x + (w - off) * 0.75} ${y + h + 4}, ${x + (w - off) * 0.25} ${y + h - 12}, ${x} ${y + h - 4} Z`;
+      const off = 3;
+      const d = `M ${x} ${y + 4 + off} Q ${x} ${y + off}, ${x + 8} ${y + off} L ${x + w - 8 - off} ${y + off} Q ${x + w - off} ${y + off}, ${x + w - off} ${y + 4 + off} L ${x + w - off} ${y + h - 8} C ${x + (w - off) * 0.75} ${y + h + 2}, ${x + (w - off) * 0.25} ${y + h - 10}, ${x} ${y + h - 4} Z`;
       return (
         <g>
           <rect x={x + off * 2} y={y} width={w - off * 2} height={h - off} rx={4} fill={fill} stroke={stroke} strokeWidth={strokeWidth} opacity={0.4} />
@@ -104,9 +95,8 @@ function FlowchartShape({
       );
     }
 
-    // Subprocess / subroutine — double-bordered rectangle
     case "subroutine": {
-      const inset = 8;
+      const inset = 7;
       return (
         <g>
           <rect x={x} y={y} width={w} height={h} rx={4} {...common} />
@@ -116,9 +106,8 @@ function FlowchartShape({
       );
     }
 
-    // Preparation — hexagon
     case "hexagon": {
-      const inset = 16;
+      const inset = 14;
       return (
         <polygon
           points={`${x + inset},${y} ${x + w - inset},${y} ${x + w},${y + h / 2} ${x + w - inset},${y + h} ${x + inset},${y + h} ${x},${y + h / 2}`}
@@ -127,18 +116,16 @@ function FlowchartShape({
       );
     }
 
-    // Manual input — slanted top
     case "manual_input":
       return (
         <polygon
-          points={`${x},${y + 12} ${x + w},${y} ${x + w},${y + h} ${x},${y + h}`}
+          points={`${x},${y + 10} ${x + w},${y} ${x + w},${y + h} ${x},${y + h}`}
           {...common}
         />
       );
 
-    // Manual operation — trapezoid (wider top)
     case "trapezoid": {
-      const inset = 14;
+      const inset = 12;
       return (
         <polygon
           points={`${x},${y} ${x + w},${y} ${x + w - inset},${y + h} ${x + inset},${y + h}`}
@@ -147,21 +134,18 @@ function FlowchartShape({
       );
     }
 
-    // Delay — D-shape (flat left, rounded right)
     case "delay": {
       const d = `M ${x} ${y + 4} Q ${x} ${y}, ${x + 4} ${y} L ${x + w * 0.65} ${y} A ${w * 0.35} ${h / 2} 0 0 1 ${x + w * 0.65} ${y + h} L ${x + 4} ${y + h} Q ${x} ${y + h}, ${x} ${y + h - 4} Z`;
       return <path d={d} {...common} />;
     }
 
-    // Display — pointed left, curved right
     case "display": {
-      const d = `M ${x + 20} ${y} L ${x + w * 0.65} ${y} A ${w * 0.35} ${h / 2} 0 0 1 ${x + w * 0.65} ${y + h} L ${x + 20} ${y + h} L ${x} ${y + h / 2} Z`;
+      const d = `M ${x + 16} ${y} L ${x + w * 0.65} ${y} A ${w * 0.35} ${h / 2} 0 0 1 ${x + w * 0.65} ${y + h} L ${x + 16} ${y + h} L ${x} ${y + h / 2} Z`;
       return <path d={d} {...common} />;
     }
 
-    // Database — cylinder
     case "cylinder": {
-      const ry = 8;
+      const ry = 7;
       return (
         <g>
           <path
@@ -174,29 +158,25 @@ function FlowchartShape({
       );
     }
 
-    // Stored data — partial cylinder (open right)
     case "stored_data": {
-      const d = `M ${x + 16} ${y} L ${x + w} ${y} A 10 ${h / 2} 0 0 0 ${x + w} ${y + h} L ${x + 16} ${y + h} A 10 ${h / 2} 0 0 1 ${x + 16} ${y} Z`;
+      const d = `M ${x + 14} ${y} L ${x + w} ${y} A 10 ${h / 2} 0 0 0 ${x + w} ${y + h} L ${x + 14} ${y + h} A 10 ${h / 2} 0 0 1 ${x + 14} ${y} Z`;
       return <path d={d} {...common} />;
     }
 
-    // Internal storage — rectangle with inner lines
     case "internal_storage":
       return (
         <g>
           <rect x={x} y={y} width={w} height={h} rx={4} {...common} />
-          <line x1={x + 12} y1={y} x2={x + 12} y2={y + h} stroke={stroke} strokeWidth={0.8} opacity={0.5} />
-          <line x1={x} y1={y + 12} x2={x + w} y2={y + 12} stroke={stroke} strokeWidth={0.8} opacity={0.5} />
+          <line x1={x + 10} y1={y} x2={x + 10} y2={y + h} stroke={stroke} strokeWidth={0.8} opacity={0.5} />
+          <line x1={x} y1={y + 10} x2={x + w} y2={y + 10} stroke={stroke} strokeWidth={0.8} opacity={0.5} />
         </g>
       );
 
-    // Connector — circle
     case "circle": {
       const r = Math.min(w, h) / 2 - 2;
       return <circle cx={x + w / 2} cy={y + h / 2} r={r} {...common} />;
     }
 
-    // Off-page connector — pentagon (arrow pointing down)
     case "pentagon":
       return (
         <polygon
@@ -205,7 +185,6 @@ function FlowchartShape({
         />
       );
 
-    // Merge — inverted triangle
     case "triangle_inv":
       return (
         <polygon
@@ -214,7 +193,6 @@ function FlowchartShape({
         />
       );
 
-    // Extract — triangle pointing up
     case "triangle":
       return (
         <polygon
@@ -223,7 +201,6 @@ function FlowchartShape({
         />
       );
 
-    // Sort — hourglass
     case "hourglass":
       return (
         <polygon
@@ -232,7 +209,6 @@ function FlowchartShape({
         />
       );
 
-    // Summing junction — circle with X
     case "circle_cross": {
       const r = Math.min(w, h) / 2 - 2;
       const cx = x + w / 2;
@@ -246,7 +222,6 @@ function FlowchartShape({
       );
     }
 
-    // Or — circle with vertical/horizontal bars
     case "circle_bar": {
       const r = Math.min(w, h) / 2 - 2;
       const cx = x + w / 2;
@@ -260,83 +235,44 @@ function FlowchartShape({
       );
     }
 
-    // Comment / annotation — flag shape
     case "flag": {
-      const d = `M ${x} ${y} L ${x + w} ${y} L ${x + w - 10} ${y + h / 2} L ${x + w} ${y + h} L ${x} ${y + h} Z`;
+      const d = `M ${x} ${y} L ${x + w} ${y} L ${x + w - 8} ${y + h / 2} L ${x + w} ${y + h} L ${x} ${y + h} Z`;
       return <path d={d} {...common} />;
     }
 
-    // Fallback — rounded rect
     default:
       return <rect x={x} y={y} width={w} height={h} rx={8} {...common} />;
   }
 }
 
-// Small info panel shown on hover/click
-const DraftNodeTooltip = memo(function DraftNodeTooltip({
-  node,
-  x,
-  y,
-}: {
-  node: DraftNode;
-  x: number;
-  y: number;
-}) {
+/** HTML tooltip positioned over the graph container */
+function Tooltip({ node, style }: { node: DraftNode; style: React.CSSProperties }) {
   const lines: string[] = [];
   if (node.description) lines.push(node.description);
   if (node.tools.length > 0) lines.push(`Tools: ${node.tools.join(", ")}`);
   if (node.success_criteria) lines.push(`Criteria: ${node.success_criteria}`);
-
   if (lines.length === 0) return null;
 
-  const lineH = 14;
-  const padding = 8;
-  const tipW = 220;
-  // Wrap long lines
-  const wrappedLines = lines.flatMap((l) => {
-    const maxChars = 38;
-    if (l.length <= maxChars) return [l];
-    const parts: string[] = [];
-    for (let i = 0; i < l.length; i += maxChars) {
-      parts.push(l.slice(i, i + maxChars));
-    }
-    return parts;
-  });
-  const tipH = wrappedLines.length * lineH + padding * 2;
-
   return (
-    <g>
-      <rect
-        x={x}
-        y={y}
-        width={tipW}
-        height={tipH}
-        rx={6}
-        fill="hsl(220,15%,12%)"
-        stroke="hsl(220,10%,25%)"
-        strokeWidth={1}
-      />
-      {wrappedLines.map((line, i) => (
-        <text
-          key={i}
-          x={x + padding}
-          y={y + padding + (i + 0.75) * lineH}
-          fill="hsl(220,10%,70%)"
-          fontSize={10.5}
-        >
+    <div
+      className="absolute z-20 pointer-events-none px-2.5 py-2 rounded-md border border-border/40 bg-popover/95 backdrop-blur-sm shadow-lg max-w-[260px]"
+      style={style}
+    >
+      {lines.map((line, i) => (
+        <p key={i} className="text-[10px] text-muted-foreground leading-[1.4] mb-0.5 last:mb-0">
           {line}
-        </text>
+        </p>
       ))}
-    </g>
+    </div>
   );
-});
+}
 
 export default function DraftGraph({ draft, onNodeClick }: DraftGraphProps) {
   const [hoveredNode, setHoveredNode] = useState<string | null>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
 
   const { nodes, edges } = draft;
 
-  // Build adjacency for layout
   const idxMap = useMemo(
     () => Object.fromEntries(nodes.map((n, i) => [n.id, i])),
     [nodes],
@@ -349,7 +285,7 @@ export default function DraftGraph({ draft, onNodeClick }: DraftGraphProps) {
       const fromIdx = idxMap[e.source];
       const toIdx = idxMap[e.target];
       if (fromIdx === undefined || toIdx === undefined) continue;
-      if (toIdx <= fromIdx) continue; // skip back edges
+      if (toIdx <= fromIdx) continue;
       const list = grouped.get(fromIdx) || [];
       list.push({ toIdx, label: e.condition !== "on_success" && e.condition !== "always" ? e.condition : e.description || undefined });
       grouped.set(fromIdx, list);
@@ -373,10 +309,10 @@ export default function DraftGraph({ draft, onNodeClick }: DraftGraphProps) {
     return back;
   }, [edges, idxMap]);
 
-  // Layer-based layout
+  // Layer-based layout — compute viewBox dimensions in SVG units
   const layout = useMemo(() => {
     if (nodes.length === 0) {
-      return { layers: [] as number[], cols: [] as number[], maxCols: 1, nodeW: NODE_W, firstColX: MARGIN_LEFT };
+      return { layers: [] as number[], cols: [] as number[], maxCols: 1, nodeW: NODE_W, firstColX: MARGIN_X };
     }
 
     const parents = new Map<number, number[]>();
@@ -403,11 +339,14 @@ export default function DraftGraph({ draft, onNodeClick }: DraftGraphProps) {
       maxCols = Math.max(maxCols, group.length);
     });
 
-    const usableW = SVG_BASE_W - MARGIN_LEFT - MARGIN_RIGHT;
-    const nodeW = Math.min(NODE_W, Math.floor((usableW - (maxCols - 1) * GAP_X) / maxCols));
+    // Compute node width to fit available space
+    const backEdgeMargin = backEdges.length > 0 ? 30 + backEdges.length * 14 : 8;
+    const totalMargin = MARGIN_X * 2 + backEdgeMargin;
+    const availW = 276 - totalMargin; // 276 = 300px panel - 24px container padding
+    const nodeW = Math.min(NODE_W, Math.floor((availW - (maxCols - 1) * GAP_X) / maxCols));
     const colSpacing = nodeW + GAP_X;
     const totalNodesW = maxCols * nodeW + (maxCols - 1) * GAP_X;
-    const firstColX = MARGIN_LEFT + (usableW - totalNodesW) / 2;
+    const firstColX = MARGIN_X + (availW - totalNodesW) / 2;
 
     const cols = new Array(nodes.length).fill(0);
     layerGroups.forEach((group) => {
@@ -428,18 +367,20 @@ export default function DraftGraph({ draft, onNodeClick }: DraftGraphProps) {
       }
     });
 
-    return { layers, cols, maxCols, nodeW, colSpacing, firstColX };
-  }, [nodes, forwardEdges]);
+    const svgW = totalNodesW + totalMargin;
+
+    return { layers, cols, maxCols, nodeW, colSpacing, firstColX, svgW, backEdgeMargin };
+  }, [nodes, forwardEdges, backEdges.length]);
 
   if (nodes.length === 0) {
     return (
       <div className="flex flex-col h-full">
-        <div className="px-5 pt-4 pb-2">
+        <div className="px-4 pt-4 pb-2">
           <p className="text-[11px] text-muted-foreground font-medium uppercase tracking-wider">
             Draft
           </p>
         </div>
-        <div className="flex-1 flex items-center justify-center px-5">
+        <div className="flex-1 flex items-center justify-center px-4">
           <p className="text-xs text-muted-foreground/60 text-center italic">
             No draft graph yet.
             <br />
@@ -450,7 +391,7 @@ export default function DraftGraph({ draft, onNodeClick }: DraftGraphProps) {
     );
   }
 
-  const { layers, cols, nodeW, colSpacing, firstColX } = layout;
+  const { layers, cols, nodeW, colSpacing, firstColX, svgW } = layout;
 
   const nodePos = (i: number) => ({
     x: firstColX + cols[i] * (colSpacing ?? nodeW + GAP_X),
@@ -458,12 +399,25 @@ export default function DraftGraph({ draft, onNodeClick }: DraftGraphProps) {
   });
 
   const maxLayer = Math.max(...layers);
-  const svgHeight = TOP_Y * 2 + (maxLayer + 1) * NODE_H + maxLayer * GAP_Y + 30;
-  const backEdgeSpace = backEdges.length > 0 ? MARGIN_RIGHT + backEdges.length * 18 : 20;
-  const svgWidth = Math.max(
-    SVG_BASE_W,
-    firstColX + layout.maxCols * nodeW + (layout.maxCols - 1) * GAP_X + backEdgeSpace,
-  );
+  const svgHeight = TOP_Y + (maxLayer + 1) * NODE_H + maxLayer * GAP_Y + 16;
+
+  // Legend
+  const usedTypes = (() => {
+    const seen = new Map<string, { shape: string; color: string }>();
+    for (const n of nodes) {
+      if (!seen.has(n.flowchart_type)) {
+        seen.set(n.flowchart_type, { shape: n.flowchart_shape, color: n.flowchart_color });
+      }
+    }
+    return [...seen.entries()];
+  })();
+  const legendH = usedTypes.length * 18 + 20;
+  const totalH = svgHeight + legendH;
+
+  // Find hovered node for tooltip positioning
+  const hoveredNodeData = hoveredNode ? nodes.find(n => n.id === hoveredNode) : null;
+  const hoveredIdx = hoveredNode ? idxMap[hoveredNode] : -1;
+  const hoveredPos = hoveredIdx >= 0 ? nodePos(hoveredIdx) : null;
 
   const renderEdge = (edge: typeof forwardEdges[number], i: number) => {
     const from = nodePos(edge.fromIdx);
@@ -475,7 +429,7 @@ export default function DraftGraph({ draft, onNodeClick }: DraftGraphProps) {
 
     let startX = fromCenterX;
     if (edge.fanCount > 1) {
-      const spread = nodeW * 0.5;
+      const spread = nodeW * 0.4;
       const step = edge.fanCount > 1 ? spread / (edge.fanCount - 1) : 0;
       startX = fromCenterX - spread / 2 + edge.fanIndex * step;
     }
@@ -487,18 +441,19 @@ export default function DraftGraph({ draft, onNodeClick }: DraftGraphProps) {
       <g key={`fwd-${i}`}>
         <path d={d} fill="none" stroke="hsl(220,10%,30%)" strokeWidth={1.2} />
         <polygon
-          points={`${toCenterX - 3.5},${y2 - 5} ${toCenterX + 3.5},${y2 - 5} ${toCenterX},${y2 - 1}`}
+          points={`${toCenterX - 3},${y2 - 5} ${toCenterX + 3},${y2 - 5} ${toCenterX},${y2 - 1}`}
           fill="hsl(220,10%,35%)"
         />
         {edge.label && (
           <text
-            x={(startX + toCenterX) / 2 + 8}
-            y={midY - 2}
+            x={(startX + toCenterX) / 2}
+            y={midY - 3}
             fill="hsl(220,10%,45%)"
-            fontSize={9}
+            fontSize={8}
             fontStyle="italic"
+            textAnchor="middle"
           >
-            {truncateLabel(edge.label, 80, 9)}
+            {truncateLabel(edge.label, 60, 8)}
           </text>
         )}
       </g>
@@ -509,21 +464,21 @@ export default function DraftGraph({ draft, onNodeClick }: DraftGraphProps) {
     const from = nodePos(edge.fromIdx);
     const to = nodePos(edge.toIdx);
     const rightX = Math.max(from.x, to.x) + nodeW;
-    const rightOffset = 28 + i * 18;
+    const rightOffset = 20 + i * 14;
     const startX = from.x + nodeW;
     const startY = from.y + NODE_H / 2;
     const endX = to.x + nodeW;
     const endY = to.y + NODE_H / 2;
     const curveX = rightX + rightOffset;
-    const r = 12;
+    const r = 10;
 
-    const path = `M ${startX} ${startY} C ${startX + r} ${startY}, ${curveX} ${startY}, ${curveX} ${startY - r} L ${curveX} ${endY + r} C ${curveX} ${endY}, ${endX + r} ${endY}, ${endX + 6} ${endY}`;
+    const path = `M ${startX} ${startY} C ${startX + r} ${startY}, ${curveX} ${startY}, ${curveX} ${startY - r} L ${curveX} ${endY + r} C ${curveX} ${endY}, ${endX + r} ${endY}, ${endX + 5} ${endY}`;
 
     return (
       <g key={`back-${i}`}>
         <path d={path} fill="none" stroke="hsl(220,10%,25%)" strokeWidth={1.2} strokeDasharray="4 3" />
         <polygon
-          points={`${endX + 6},${endY - 3} ${endX + 6},${endY + 3} ${endX},${endY}`}
+          points={`${endX + 5},${endY - 2.5} ${endX + 5},${endY + 2.5} ${endX},${endY}`}
           fill="hsl(220,10%,30%)"
         />
       </g>
@@ -533,11 +488,9 @@ export default function DraftGraph({ draft, onNodeClick }: DraftGraphProps) {
   const renderNode = (node: DraftNode, i: number) => {
     const pos = nodePos(i);
     const isHovered = hoveredNode === node.id;
-    const fontSize = 11.5;
-    const labelAvailW = nodeW - 20;
+    const fontSize = 10.5;
+    const labelAvailW = nodeW - 16;
     const displayLabel = truncateLabel(node.name, labelAvailW, fontSize);
-
-    // Text placement: centered in the bounding box
     const textX = pos.x + nodeW / 2;
     const textY = pos.y + NODE_H / 2;
 
@@ -547,11 +500,10 @@ export default function DraftGraph({ draft, onNodeClick }: DraftGraphProps) {
         onClick={() => onNodeClick?.(node)}
         onMouseEnter={() => setHoveredNode(node.id)}
         onMouseLeave={() => setHoveredNode(null)}
-        style={{ cursor: onNodeClick ? "pointer" : "default" }}
+        style={{ cursor: "pointer" }}
       >
         <title>{`${node.name}\n${node.flowchart_type}`}</title>
 
-        {/* Shape */}
         <FlowchartShape
           shape={node.flowchart_shape}
           x={pos.x}
@@ -562,10 +514,9 @@ export default function DraftGraph({ draft, onNodeClick }: DraftGraphProps) {
           selected={isHovered}
         />
 
-        {/* Label */}
         <text
           x={textX}
-          y={textY - 4}
+          y={textY - 3}
           fill={isHovered ? "hsl(0,0%,92%)" : "hsl(0,0%,78%)"}
           fontSize={fontSize}
           fontWeight={500}
@@ -575,116 +526,94 @@ export default function DraftGraph({ draft, onNodeClick }: DraftGraphProps) {
           {displayLabel}
         </text>
 
-        {/* Flowchart type sub-label */}
         <text
           x={textX}
-          y={textY + 12}
+          y={textY + 11}
           fill="hsl(220,10%,45%)"
-          fontSize={9}
+          fontSize={8}
           textAnchor="middle"
           dominantBaseline="middle"
           fontStyle="italic"
         >
           {node.flowchart_type.replace(/_/g, " ")}
         </text>
-
-        {/* Tooltip on hover */}
-        {isHovered && (
-          <DraftNodeTooltip
-            node={node}
-            x={pos.x + nodeW + 12}
-            y={pos.y}
-          />
-        )}
       </g>
     );
   };
 
-  // Build legend from unique types used in this draft
-  const usedTypes = useMemo(() => {
-    const seen = new Map<string, { shape: string; color: string }>();
-    for (const n of nodes) {
-      if (!seen.has(n.flowchart_type)) {
-        seen.set(n.flowchart_type, {
-          shape: n.flowchart_shape,
-          color: n.flowchart_color,
-        });
-      }
-    }
-    return [...seen.entries()];
-  }, [nodes]);
-
-  const legendH = usedTypes.length * 20 + 16;
-
   return (
     <div className="flex flex-col h-full">
       {/* Header */}
-      <div className="px-5 pt-4 pb-2 flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <p className="text-[11px] text-muted-foreground font-medium uppercase tracking-wider">
-            Draft
-          </p>
-          <span className="text-[10px] font-mono font-medium text-amber-500/60 border border-amber-500/20 rounded px-1 py-0.5 leading-none">
-            planning
-          </span>
-        </div>
+      <div className="px-4 pt-3 pb-1.5 flex items-center gap-2">
+        <p className="text-[11px] text-muted-foreground font-medium uppercase tracking-wider">
+          Draft
+        </p>
+        <span className="text-[9px] font-mono font-medium text-amber-500/60 border border-amber-500/20 rounded px-1 py-0.5 leading-none">
+          planning
+        </span>
       </div>
 
       {/* Agent name + goal */}
-      <div className="px-5 pb-3 border-b border-border/20">
-        <p className="text-xs font-medium text-foreground/80 truncate">
+      <div className="px-4 pb-2.5 border-b border-border/20">
+        <p className="text-[11px] font-medium text-foreground/80 truncate">
           {draft.agent_name}
         </p>
         {draft.goal && (
-          <p className="text-[10.5px] text-muted-foreground/60 mt-0.5 line-clamp-2">
+          <p className="text-[10px] text-muted-foreground/60 mt-0.5 line-clamp-2 leading-snug">
             {draft.goal}
           </p>
         )}
       </div>
 
       {/* Graph */}
-      <div className="flex-1 overflow-y-auto overflow-x-hidden px-3 pb-3 relative">
+      <div ref={containerRef} className="flex-1 overflow-y-auto overflow-x-hidden px-2 pb-2 relative">
         <svg
-          width={svgWidth}
-          height={svgHeight + legendH}
-          viewBox={`0 0 ${svgWidth} ${svgHeight + legendH}`}
+          width="100%"
+          viewBox={`0 0 ${svgW} ${totalH}`}
+          preserveAspectRatio="xMidYMin meet"
           className="select-none"
           style={{ fontFamily: "'Inter', system-ui, sans-serif" }}
         >
-          {/* Edges */}
           {forwardEdges.map((e, i) => renderEdge(e, i))}
           {backEdges.map((e, i) => renderBackEdge(e, i))}
-          {/* Nodes */}
           {nodes.map((n, i) => renderNode(n, i))}
 
           {/* Legend */}
-          <g transform={`translate(${MARGIN_LEFT}, ${svgHeight + 4})`}>
-            <text fill="hsl(220,10%,40%)" fontSize={9} fontWeight={600} y={6}>
+          <g transform={`translate(${MARGIN_X}, ${svgHeight + 4})`}>
+            <text fill="hsl(220,10%,40%)" fontSize={8} fontWeight={600} y={4}>
               LEGEND
             </text>
             {usedTypes.map(([type, meta], i) => (
-              <g key={type} transform={`translate(0, ${16 + i * 20})`}>
+              <g key={type} transform={`translate(0, ${14 + i * 18})`}>
                 <FlowchartShape
                   shape={meta.shape}
                   x={0}
                   y={0}
-                  w={20}
-                  h={14}
+                  w={16}
+                  h={12}
                   color={meta.color}
                   selected={false}
                 />
-                <text
-                  x={28}
-                  y={10}
-                  fill="hsl(220,10%,55%)"
-                  fontSize={9.5}
-                >
+                <text x={22} y={9} fill="hsl(220,10%,55%)" fontSize={8.5}>
                   {type.replace(/_/g, " ")}
                 </text>
               </g>
             ))}
           </g>
         </svg>
+
+        {/* HTML tooltip — rendered outside SVG so it's not clipped */}
+        {hoveredNodeData && hoveredPos && (
+          <Tooltip
+            node={hoveredNodeData}
+            style={{
+              left: 8,
+              right: 8,
+              // Position below the hovered node, scaled to container width
+              top: `calc(${((hoveredPos.y + NODE_H + 4) / totalH) * 100}%)`,
+            }}
+          />
+        )}
       </div>
     </div>
   );
