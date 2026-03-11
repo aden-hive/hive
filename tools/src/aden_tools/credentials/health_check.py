@@ -1125,6 +1125,17 @@ class ExaSearchHealthChecker(BaseHttpHealthChecker):
         return {"query": "test", "numResults": 1}
 
 
+class GlueHealthChecker(BaseHttpHealthChecker):
+    """Health checker for Glue AI GraphQL API OAuth tokens."""
+
+    ENDPOINT = "https://api.gluegroups.com/public/graphql"
+    SERVICE_NAME = "Glue"
+    HTTP_METHOD = "POST"
+
+    def _build_json_body(self, credential_value: str) -> dict:
+        return {"query": "{ me { id name } }"}
+
+
 class GoogleDocsHealthChecker(OAuthBearerHealthChecker):
     """Health checker for Google Docs OAuth tokens."""
 
@@ -1279,6 +1290,7 @@ HEALTH_CHECKERS: dict[str, CredentialHealthChecker] = {
     "lusha_api_key": LushaHealthChecker(),
     "stripe": StripeHealthChecker(),
     "exa_search": ExaSearchHealthChecker(),
+    "glue": GlueHealthChecker(),
     "google_docs": GoogleDocsHealthChecker(),
     "calcom": CalcomHealthChecker(),
     "serpapi": SerpApiHealthChecker(),
