@@ -54,7 +54,12 @@ def _get(
         if resp.status_code == 404:
             return {"error": f"Not found: {path}"}
         if resp.status_code != 200:
-            return {"error": f"HuggingFace API error {resp.status_code}: {resp.text[:500]}"}
+            return {
+                    "error": (
+                    f"HuggingFace Inference API error "
+                    f"{resp.status_code}: {resp.text[:500]}"
+                    )
+            }
         return resp.json()
     except httpx.TimeoutException:
         return {"error": "Request to HuggingFace timed out"}
@@ -82,7 +87,11 @@ def _post(
         if resp.status_code == 404:
             return {"error": f"Model not found: {url}"}
         if resp.status_code == 503:
-            body = resp.json() if resp.headers.get("content-type", "").startswith("application/json") else {}
+            body = (
+                resp.json()
+                if resp.headers.get("content-type", "").startswith("application/json")
+                else {}
+                    )
             estimated = body.get("estimated_time", "unknown")
             return {
                 "error": "Model is loading",
@@ -90,7 +99,12 @@ def _post(
                 "help": "The model is being loaded. Retry after the estimated time.",
             }
         if resp.status_code != 200:
-            return {"error": f"HuggingFace Inference API error {resp.status_code}: {resp.text[:500]}"}
+            return {
+                "error": (
+                    f"HuggingFace Inference API error "
+                    f"{resp.status_code}: {resp.text[:500]}"
+                )
+            }
         return resp.json()
     except httpx.TimeoutException:
         return {"error": "Inference request timed out. Try a smaller input or a faster model."}
@@ -503,7 +517,10 @@ def register_tools(
                 return {"error": "Unauthorized. Check your HUGGINGFACE_TOKEN."}
             if resp.status_code != 200:
                 return {
-                    "error": f"Failed to list endpoints (HTTP {resp.status_code}): {resp.text[:500]}"
+                    "error": (
+                        f"Failed to list endpoints "
+                        f"(HTTP {resp.status_code}): {resp.text[:500]}"
+                    )
                 }
             data = resp.json()
         except httpx.TimeoutException:
@@ -517,12 +534,32 @@ def register_tools(
             endpoints.append(
                 {
                     "name": ep.get("name", ""),
-                    "model": ep.get("model", {}).get("repository", "") if isinstance(ep.get("model"), dict) else ep.get("model", ""),
-                    "status": ep.get("status", {}).get("state", "") if isinstance(ep.get("status"), dict) else ep.get("status", ""),
-                    "url": ep.get("status", {}).get("url", "") if isinstance(ep.get("status"), dict) else "",
+                    "model": (
+                        ep.get("model", {}).get("repository", "")
+                        if isinstance(ep.get("model"), dict)
+                        else ep.get("model", "")
+                    ),
+                    "status": (
+                        ep.get("status", {}).get("state", "")
+                        if isinstance(ep.get("status"), dict)
+                        else ep.get("status", "")
+                    ),
+                    "url": (
+                        ep.get("status", {}).get("url", "")
+                        if isinstance(ep.get("status"), dict)
+                        else ""
+                    ),
                     "type": ep.get("type", ""),
-                    "provider": ep.get("provider", {}).get("vendor", "") if isinstance(ep.get("provider"), dict) else "",
-                    "region": ep.get("provider", {}).get("region", "") if isinstance(ep.get("provider"), dict) else "",
+                    "provider": (
+                        ep.get("provider", {}).get("vendor", "")
+                        if isinstance(ep.get("provider"), dict)
+                        else ""
+                    ),
+                    "region": (
+                        ep.get("provider", {}).get("region", "")
+                        if isinstance(ep.get("provider"), dict)
+                        else ""
+                    ),
                 }
-            )
+                    )
         return {"endpoints": endpoints, "count": len(endpoints)}
