@@ -211,7 +211,7 @@ class SessionState(BaseModel):
             timestamps=SessionTimestamps(
                 started_at=started_at or now,
                 updated_at=now,
-                completed_at=now if not result.paused_at else None,
+                completed_at=now if result.success and not result.paused_at else None,
                 paused_at_time=now if result.paused_at else None,
             ),
             progress=SessionProgress(
