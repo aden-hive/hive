@@ -55,6 +55,16 @@ async def handle_save_credential(request: web.Request) -> web.Response:
 
     Body: {"credential_id": "...", "keys": {"key_name": "value", ...}}
     """
+    # Enforce reasonable payload limits
+    MAX_BODY_BYTES = 65536  # 64KB total body limit
+    MAX_KEYS = 20
+    MAX_KEY_NAME_LEN = 128
+    MAX_KEY_VALUE_LEN = 8192  # 8KB per value is generous for any API key
+
+    content_length = request.content_length
+    if content_length is not None and content_length > MAX_BODY_BYTES:
+        return web.json_response({"error": "Request body too large"}, status=413)
+
     body = await request.json()
 
     credential_id = body.get("credential_id")
@@ -62,6 +72,19 @@ async def handle_save_credential(request: web.Request) -> web.Response:
 
     if not credential_id or not keys or not isinstance(keys, dict):
         return web.json_response({"error": "credential_id and keys are required"}, status=400)
+
+    if len(keys) > MAX_KEYS:
+        return web.json_response({"error": "Too many keys"}, status=400)
+
+    for k, v in keys.items():
+        if not isinstance(v, str):
+            return web.json_response(
+                {"error": f"Key value for '{k}' must be a string"}, status=400
+            )
+        if len(k) > MAX_KEY_NAME_LEN or len(v) > MAX_KEY_VALUE_LEN:
+            return web.json_response(
+                {"error": f"Key '{k}' exceeds size limit"}, status=400
+            )
 
     # ADEN_API_KEY is stored in the encrypted store via key_storage module
     if credential_id == "aden_api_key":
