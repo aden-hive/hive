@@ -1452,7 +1452,23 @@ def register_queen_lifecycle_tools(
         if reg is None:
             return json.dumps({"error": "Worker graph not found"})
 
-        # Find an active node that can accept injected input
+        # Prefer nodes that are actively waiting (e.g. escalation receivers
+        # blocked on queen guidance) over the main event-loop node.
+        for stream in reg.streams.values():
+            waiting = stream.get_waiting_nodes()
+            if waiting:
+                target_node_id = waiting[0]["node_id"]
+                ok = await stream.inject_input(target_node_id, content, is_client_input=True)
+                if ok:
+                    return json.dumps(
+                        {
+                            "status": "delivered",
+                            "node_id": target_node_id,
+                            "content_preview": content[:100],
+                        }
+                    )
+
+        # Fallback: inject into any injectable node
         for stream in reg.streams.values():
             injectable = stream.get_injectable_nodes()
             if injectable:
