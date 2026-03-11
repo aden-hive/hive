@@ -1,0 +1,282 @@
+{
+  "agent": {
+    "id": "deep_research_agent",
+    "name": "Deep Research Agent",
+    "version": "1.0.0",
+    "description": "Interactive research agent that rigorously investigates topics through multi-source search, quality evaluation, and synthesis - with TUI conversation at key checkpoints for user guidance and feedback."
+  },
+  "graph": {
+    "id": "deep-research-agent-graph",
+    "goal_id": "rigorous-interactive-research",
+    "version": "1.0.0",
+    "entry_node": "intake",
+    "entry_points": {
+      "start": "intake"
+    },
+    "pause_nodes": [],
+    "terminal_nodes": [
+      "report"
+    ],
+    "conversation_mode": "continuous",
+    "identity_prompt": "You are a rigorous research agent. You search for information from diverse, authoritative sources, analyze findings critically, and produce well-cited reports. You never fabricate information \u2014 every claim must trace back to a source you actually retrieved.",
+    "nodes": [
+      {
+        "id": "intake",
+        "name": "Research Intake",
+        "description": "Discuss the research topic with the user, clarify scope, and confirm direction",
+        "node_type": "event_loop",
+        "input_keys": [
+          "topic"
+        ],
+        "output_keys": [
+          "research_brief"
+        ],
+        "nullable_output_keys": [],
+        "input_schema": {},
+        "output_schema": {},
+        "success_criteria": "The research brief is specific and actionable: it states the topic, the key questions to answer, the desired scope, and depth.",
+        "system_prompt": "You are a research intake specialist. The user wants to research a topic.\nHave a brief conversation to clarify what they need.\n\n**STEP 1 \u2014 Read and respond (text only, NO tool calls):**\n1. Read the topic provided\n2. If it's vague, ask 1-2 clarifying questions (scope, angle, depth)\n3. If it's already clear, confirm your understanding and ask the user to confirm\n\nKeep it short. Don't over-ask.\n\n**STEP 2 \u2014 After the user confirms, call set_output:**\n- set_output(\"research_brief\", \"A clear paragraph describing exactly what to research, what questions to answer, what scope to cover, and how deep to go.\")",
+        "tools": [],
+        "model": null,
+        "function": null,
+        "routes": {},
+        "max_retries": 3,
+        "retry_on": [],
+        "max_node_visits": 1,
+        "output_model": null,
+        "max_validation_retries": 2,
+        "client_facing": true
+      },
+      {
+        "id": "research",
+        "name": "Research",
+        "description": "Search the web, fetch source content, and compile findings",
+        "node_type": "event_loop",
+        "input_keys": [
+          "research_brief",
+          "feedback"
+        ],
+        "output_keys": [
+          "findings",
+          "sources",
+          "gaps"
+        ],
+        "nullable_output_keys": [
+          "feedback"
+        ],
+        "input_schema": {},
+        "output_schema": {},
+        "success_criteria": "Findings reference at least 3 distinct sources with URLs. Key claims are substantiated by fetched content, not generated.",
+        "system_prompt": "You are a research agent. Given a research brief, find and analyze sources.\n\nIf feedback is provided, this is a follow-up round \u2014 focus on the gaps identified.\n\nWork in phases:\n1. **Search**: Use web_search with 3-5 diverse queries covering different angles.\n   Prioritize authoritative sources (.edu, .gov, established publications).\n2. **Fetch**: Use web_scrape on the most promising URLs (aim for 5-8 sources).\n   Skip URLs that fail. Extract the substantive content.\n3. **Analyze**: Review what you've collected. Identify key findings, themes,\n   and any contradictions between sources.\n\nImportant:\n- Work in batches of 3-4 tool calls at a time \u2014 never more than 10 per turn\n- After each batch, assess whether you have enough material\n- Prefer quality over quantity \u2014 5 good sources beat 15 thin ones\n- Track which URL each finding comes from (you'll need citations later)\n- Call set_output for each key in a SEPARATE turn (not in the same turn as other tool calls)\n\nWhen done, use set_output (one key at a time, separate turns):\n- set_output(\"findings\", \"Structured summary: key findings with source URLs for each claim. Include themes, contradictions, and confidence levels.\")\n- set_output(\"sources\", [{\"url\": \"...\", \"title\": \"...\", \"summary\": \"...\"}])\n- set_output(\"gaps\", \"What aspects of the research brief are NOT well-covered yet, if any.\")",
+        "tools": [
+          "web_search",
+          "web_scrape",
+          "load_data",
+          "save_data",
+          "list_data_files"
+        ],
+        "model": null,
+        "function": null,
+        "routes": {},
+        "max_retries": 3,
+        "retry_on": [],
+        "max_node_visits": 3,
+        "output_model": null,
+        "max_validation_retries": 2,
+        "client_facing": false
+      },
+      {
+        "id": "review",
+        "name": "Review Findings",
+        "description": "Present findings to user and decide whether to research more or write the report",
+        "node_type": "event_loop",
+        "input_keys": [
+          "findings",
+          "sources",
+          "gaps",
+          "research_brief"
+        ],
+        "output_keys": [
+          "needs_more_research",
+          "feedback"
+        ],
+        "nullable_output_keys": [],
+        "input_schema": {},
+        "output_schema": {},
+        "success_criteria": "The user has been presented with findings and has explicitly indicated whether they want more research or are ready for the report.",
+        "system_prompt": "Present the research findings to the user clearly and concisely.\n\n**STEP 1 \u2014 Present (your first message, text only, NO tool calls):**\n1. **Summary** (2-3 sentences of what was found)\n2. **Key Findings** (bulleted, with confidence levels)\n3. **Sources Used** (count and quality assessment)\n4. **Gaps** (what's still unclear or under-covered)\n\nEnd by asking: Are they satisfied, or do they want deeper research? Should we proceed to writing the final report?\n\n**STEP 2 \u2014 After the user responds, call set_output:**\n- set_output(\"needs_more_research\", \"true\")  \u2014 if they want more\n- set_output(\"needs_more_research\", \"false\") \u2014 if they're satisfied\n- set_output(\"feedback\", \"What the user wants explored further, or empty string\")",
+        "tools": [],
+        "model": null,
+        "function": null,
+        "routes": {},
+        "max_retries": 3,
+        "retry_on": [],
+        "max_node_visits": 3,
+        "output_model": null,
+        "max_validation_retries": 2,
+        "client_facing": true
+      },
+      {
+        "id": "report",
+        "name": "Write & Deliver Report",
+        "description": "Write a cited HTML report from the findings and present it to the user",
+        "node_type": "event_loop",
+        "input_keys": [
+          "findings",
+          "sources",
+          "research_brief"
+        ],
+        "output_keys": [
+          "delivery_status"
+        ],
+        "nullable_output_keys": [],
+        "input_schema": {},
+        "output_schema": {},
+        "success_criteria": "An HTML report has been saved, the file link has been presented to the user, and the user has acknowledged receipt.",
+        "system_prompt": "Write a research report as an HTML file and present it to the user.\n\nIMPORTANT: save_data requires TWO separate arguments: filename and data.\nCall it like: save_data(filename=\"report.html\", data=\"<html>...</html>\")\nDo NOT use _raw, do NOT nest arguments inside a JSON string.\n\n**STEP 1 \u2014 Write and save the HTML report (tool calls, NO text to user yet):**\n\nBuild a clean HTML document. Keep the HTML concise \u2014 aim for clarity over length.\nUse minimal embedded CSS (a few lines of style, not a full framework).\n\nReport structure:\n- Title & date\n- Executive Summary (2-3 paragraphs)\n- Key Findings (organized by theme, with [n] citation links)\n- Analysis (synthesis, implications)\n- Conclusion (key takeaways)\n- References (numbered list with clickable URLs)\n\nRequirements:\n- Every factual claim must cite its source with [n] notation\n- Be objective \u2014 present multiple viewpoints where sources disagree\n- Answer the original research questions from the brief\n\nSave the HTML:\n  save_data(filename=\"report.html\", data=\"<html>...</html>\")\n\nThen get the clickable link:\n  serve_file_to_user(filename=\"report.html\", label=\"Research Report\")\n\nIf save_data fails, simplify and shorten the HTML, then retry.\n\n**STEP 2 \u2014 Present the link to the user (text only, NO tool calls):**\n\nTell the user the report is ready and include the file:// URI from\nserve_file_to_user so they can click it to open. Give a brief summary\nof what the report covers. Ask if they have questions.\n\n**STEP 3 \u2014 After the user responds:**\n- Answer follow-up questions from the research material\n- When the user is satisfied: set_output(\"delivery_status\", \"completed\")",
+        "tools": [
+          "save_data",
+          "serve_file_to_user",
+          "load_data",
+          "list_data_files"
+        ],
+        "model": null,
+        "function": null,
+        "routes": {},
+        "max_retries": 3,
+        "retry_on": [],
+        "max_node_visits": 1,
+        "output_model": null,
+        "max_validation_retries": 2,
+        "client_facing": true
+      }
+    ],
+    "edges": [
+      {
+        "id": "intake-to-research",
+        "source": "intake",
+        "target": "research",
+        "condition": "on_success",
+        "condition_expr": null,
+        "priority": 1,
+        "input_mapping": {}
+      },
+      {
+        "id": "research-to-review",
+        "source": "research",
+        "target": "review",
+        "condition": "on_success",
+        "condition_expr": null,
+        "priority": 1,
+        "input_mapping": {}
+      },
+      {
+        "id": "review-to-research-feedback",
+        "source": "review",
+        "target": "research",
+        "condition": "conditional",
+        "condition_expr": "str(needs_more_research).lower() == 'true'",
+        "priority": 2,
+        "input_mapping": {}
+      },
+      {
+        "id": "review-to-report",
+        "source": "review",
+        "target": "report",
+        "condition": "conditional",
+        "condition_expr": "str(needs_more_research).lower() != 'true'",
+        "priority": 1,
+        "input_mapping": {}
+      }
+    ],
+    "max_steps": 100,
+    "max_retries_per_node": 3,
+    "description": "Interactive research agent that rigorously investigates topics through multi-source search, quality evaluation, and synthesis - with TUI conversation at key checkpoints for user guidance and feedback.",
+    "created_at": "2026-02-06T00:00:00.000000"
+  },
+  "goal": {
+    "id": "rigorous-interactive-research",
+    "name": "Rigorous Interactive Research",
+    "description": "Research any topic by searching diverse sources, analyzing findings, and producing a cited report \u2014 with user checkpoints to guide direction.",
+    "status": "draft",
+    "success_criteria": [
+      {
+        "id": "source-diversity",
+        "description": "Use multiple diverse, authoritative sources",
+        "metric": "source_count",
+        "target": ">=5",
+        "weight": 0.25,
+        "met": false
+      },
+      {
+        "id": "citation-coverage",
+        "description": "Every factual claim in the report cites its source",
+        "metric": "citation_coverage",
+        "target": "100%",
+        "weight": 0.25,
+        "met": false
+      },
+      {
+        "id": "user-satisfaction",
+        "description": "User reviews findings before report generation",
+        "metric": "user_approval",
+        "target": "true",
+        "weight": 0.25,
+        "met": false
+      },
+      {
+        "id": "report-completeness",
+        "description": "Final report answers the original research questions",
+        "metric": "question_coverage",
+        "target": "90%",
+        "weight": 0.25,
+        "met": false
+      }
+    ],
+    "constraints": [
+      {
+        "id": "no-hallucination",
+        "description": "Only include information found in fetched sources",
+        "constraint_type": "quality",
+        "category": "accuracy",
+        "check": ""
+      },
+      {
+        "id": "source-attribution",
+        "description": "Every claim must cite its source with a numbered reference",
+        "constraint_type": "quality",
+        "category": "accuracy",
+        "check": ""
+      },
+      {
+        "id": "user-checkpoint",
+        "description": "Present findings to the user before writing the final report",
+        "constraint_type": "functional",
+        "category": "interaction",
+        "check": ""
+      }
+    ],
+    "context": {},
+    "required_capabilities": [],
+    "input_schema": {},
+    "output_schema": {},
+    "version": "1.0.0",
+    "parent_version": null,
+    "evolution_reason": null,
+    "created_at": "2026-02-06 00:00:00.000000",
+    "updated_at": "2026-02-06 00:00:00.000000"
+  },
+  "required_tools": [
+    "list_data_files",
+    "load_data",
+    "save_data",
+    "serve_file_to_user",
+    "web_scrape",
+    "web_search"
+  ],
+  "metadata": {
+    "created_at": "2026-02-06T00:00:00.000000",
+    "node_count": 4,
+    "edge_count": 4
+  }
+}
