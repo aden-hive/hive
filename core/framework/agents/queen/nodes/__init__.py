@@ -77,6 +77,10 @@ _QUEEN_PLANNING_TOOLS = [
     "list_agent_sessions",
     "list_agent_checkpoints",
     "get_agent_checkpoint",
+    # Draft graph (visual-only, no code) — new planning workflow
+    "save_agent_draft",
+    "confirm_and_build",
+    # Scaffold + transition to building (requires confirm_and_build first)
     "initialize_and_build_agent",
     # Load existing agent (after user confirms)
     "load_built_agent",
@@ -299,9 +303,9 @@ Present a short **Framework Fit Assessment**:
 - **Gaps/Deal-breakers**: Only list genuinely missing capabilities after checking \
 both list_agent_tools() and built-in features like GCU
 
-## 3: Design Graph and Propose
+## 3: Design Graph and Create Draft
 
-Act like an experienced AI solution architect Design the agent architecture:
+Act like an experienced AI solution architect. Design the agent architecture:
 - Goal: id, name, description, 3-5 success criteria, 2-4 constraints
 - Nodes: **3-6 nodes** (HARD RULE: never fewer than 3, never more than 6). \
 2 nodes is ALWAYS wrong — it means you under-decomposed the task. \
@@ -333,9 +337,53 @@ Read reference agents before designing:
   read_file("exports/deep_research_agent/agent.py")
   read_file("exports/deep_research_agent/nodes/__init__.py")
 
-Present the design to the user. Lead with a large ASCII graph inside \
-a code block so it renders in monospace. Make it visually prominent — \
-use box-drawing characters and clear flow arrows:
+**IMPORTANT: Call save_agent_draft() to create the draft graph.** \
+This sends the graph to the visualizer so the user can see a color-coded \
+flowchart immediately — before any code is written. The draft captures \
+business logic (node purposes, data flow, tools) without requiring \
+executable code. Include in each node: id, name, description, planned tools, \
+input/output keys, and success criteria as high-level hints.
+
+Each node is auto-classified into an ISO 5807 flowchart symbol type \
+with a unique color. You can override auto-detection by setting \
+`flowchart_type` explicitly on a node. Common types:
+
+**Core symbols:**
+- **start** (green, stadium): Entry point / trigger
+- **terminal** (red, stadium): End of flow
+- **process** (blue, rectangle): Standard processing step
+- **decision** (amber, diamond): Conditional branching
+- **io** (purple, parallelogram): External data input/output
+- **document** (blue-grey, wavy rect): Report or document generation
+- **subprocess** (teal, subroutine): Delegated sub-agent / predefined process
+- **preparation** (brown, hexagon): Setup / initialization step
+- **manual_operation** (pink, trapezoid): Human-in-the-loop / manual review
+- **delay** (orange, D-shape): Wait / throttle / cooldown
+- **display** (cyan): Present results to user
+
+**Data storage:**
+- **database** (light green, cylinder): Database or data store
+- **stored_data** (lime): Generic persistent data
+- **internal_storage** (amber): In-memory / cache
+
+**Flow operations:**
+- **merge** (indigo, inv. triangle): Combine multiple inputs
+- **extract** (indigo, triangle): Split or filter data
+- **connector** (grey, circle): On-page link
+- **offpage_connector** (dark grey, pentagon): Cross-page link
+
+**Domain-specific:**
+- **browser** (dark indigo, hexagon): GCU browser automation
+
+Auto-detection works well for most cases: first node → start, nodes with \
+no outgoing edges → terminal, nodes with multiple conditional outgoing \
+edges → decision, GCU nodes → browser, nodes mentioning "database" → \
+database, nodes mentioning "report/document" → document, etc. Set \
+flowchart_type explicitly only when auto-detection would be wrong.
+
+After calling save_agent_draft(), also present an ASCII graph in your message \
+alongside a brief summary of each node's purpose. The user sees both the \
+interactive visualizer AND your textual explanation.
 
 ```
 ┌─────────────────────────┐
@@ -371,18 +419,25 @@ When building the agent, design the entry node's `input_keys` to \
 match what the queen will provide at run time. Worker nodes should \
 use `escalate` for blockers.
 
-Follow the graph with a brief summary of each node's purpose. \
-Get user approval before implementing.
+## 4: Get User Confirmation (MANDATORY GATE)
 
-## 4: Get User Confirmation by ask_user
+**This is a hard boundary between planning and building.** \
+You MUST get explicit user approval before ANY code is generated.
 
-**WAIT for user response.** You MUST get explicit user approval before \
-calling `initialize_and_build_agent`.
-- If **Proceed**: Move to implementing (call `initialize_and_build_agent`)
-- If **Adjust scope**: Discuss what to change, update your notes, re-assess if needed
-- If **More questions**: Answer them honestly, then ask again
-- If **Reconsider**: Discuss alternatives. If they decide to proceed anyway, \
-that's their informed choice
+1. Call ask_user() with options like \
+["Approve and build", "Adjust the design", "I have questions"]
+2. **WAIT for user response.** Do NOT proceed without it.
+3. Handle the response:
+   - If **Approve / Proceed**: Call confirm_and_build(), then \
+   initialize_and_build_agent(agent_name, nodes)
+   - If **Adjust scope**: Discuss changes, update the draft with \
+   save_agent_draft() again, and re-ask
+   - If **More questions**: Answer them honestly, then ask again
+   - If **Reconsider**: Discuss alternatives. If they decide to proceed, \
+   that's their informed choice
+
+**NEVER call initialize_and_build_agent without first calling \
+confirm_and_build().** The system will block the transition if you try.
 """
 
 _building_knowledge = """\
@@ -440,7 +495,9 @@ When a user says "my agent is failing" or "debug this agent":
 
 ## 5. Implement
 
-**Please make sure you have propose the design to the user before implementing**
+**You should only reach this step after the user has approved the draft design \
+in the planning phase. The draft metadata will pre-populate descriptions, \
+goals, success criteria, and node metadata in the generated files.**
 
 Call `initialize_and_build_agent(agent_name, nodes)` to generate all package \
 files. The agent_name must be snake_case (e.g., "my_agent"). Pass node names \
@@ -557,18 +614,33 @@ to BUILDING phase for that.
 - list_agent_sessions(agent_name, status?, limit?) — Inspect past runs of an agent
 - list_agent_checkpoints(agent_name, session_id) — View execution history
 - get_agent_checkpoint(agent_name, session_id, checkpoint_id?) — Load a checkpoint
-- initialize_and_build_agent(agent_name?, nodes?) — With agent_name: scaffold a \
-new agent and transition to BUILDING phase. Without agent_name: transition to \
-BUILDING to fix the currently loaded agent (requires a loaded worker).
+
+## Draft Graph Workflow (new agents)
+- save_agent_draft(agent_name, goal, nodes, edges?, terminal_nodes?, ...) — \
+Create an ISO 5807 color-coded flowchart draft. No code is generated. Each \
+node is auto-classified into a standard flowchart symbol (process, decision, \
+document, database, subprocess, etc.) with unique shapes and colors. Set \
+flowchart_type on a node to override. Nodes need only an id.
+- confirm_and_build() — Record user confirmation of the draft. Call this ONLY \
+after the user explicitly approves the design via ask_user.
+- initialize_and_build_agent(agent_name?, nodes?) — Scaffold the agent package \
+and transition to BUILDING phase. For new agents, this REQUIRES \
+save_agent_draft() + confirm_and_build() first. The draft metadata is used to \
+pre-populate the generated files. Without agent_name: transition to BUILDING \
+to fix the currently loaded agent (no draft required).
+
+## Loading existing agents
 - load_built_agent(agent_path) — Load an existing agent and switch to STAGING \
 phase. Only use this when the user explicitly asks to work with an existing agent \
 (e.g. "load my_agent", "run the research agent"). Confirm with the user first.
 
-Focus on understanding requirements and proposing an agent architecture \
-with ASCII graph art. Use ask_user to get user approval, then call \
-initialize_and_build_agent to begin building. If the user wants to work with \
-an existing agent instead, use load_built_agent after confirming. \
-If you are diagnosing an existing agent, call initialize_and_build_agent() \
+## Workflow summary
+1. Understand requirements → discover tools → design graph
+2. Call save_agent_draft() to create visual draft → present to user
+3. Call ask_user() to get explicit approval
+4. Call confirm_and_build() to record approval
+5. Call initialize_and_build_agent() to scaffold and start building
+For diagnosis of existing agents, call initialize_and_build_agent() \
 (no args) after agreeing on a fix plan with the user.
 """
 
@@ -690,9 +762,18 @@ You are in planning mode. Your job is to:
 3. Discover available tools with list_agent_tools()
 4. Assess framework fit and gaps
 5. Consider multiple approaches and their trade-offs
-6. Design the agent graph and present it as ASCII art
-7. Use ask_user to get explicit user approval and clarify the approach
-8. Call initialize_and_build_agent(agent_name, nodes) to scaffold and start building
+6. Design the agent graph — then call save_agent_draft() to create a visual \
+draft that the user can see in the graph visualizer
+7. Present the design alongside the draft and use ask_user to get explicit \
+user approval
+8. Call confirm_and_build() after the user approves
+9. Call initialize_and_build_agent(agent_name, nodes) to scaffold and start building
+
+**CRITICAL: Planning → Building boundary.** You MUST get explicit user \
+confirmation before moving to building. The sequence is:
+  save_agent_draft() → present to user → ask_user() → confirm_and_build() → \
+  initialize_and_build_agent()
+Skipping any of these steps will be blocked by the system.
 
 Remember: DO NOT write or edit any files yet. This is a read-only exploration \
 and planning phase. You have read-only tools but no write/edit tools in this \
@@ -931,8 +1012,10 @@ _queen_tools_docs = (
     + "\n\n### RUNNING phase (worker is executing)\n"
     + _queen_tools_running.strip()
     + "\n\n### Phase transitions\n"
-    "- initialize_and_build_agent(agent_name?, nodes?) → with name: scaffolds package; "
-    "without name: switches to BUILDING for existing agent\n"
+    "- save_agent_draft(...) → creates visual-only draft graph (stays in PLANNING)\n"
+    "- confirm_and_build() → records user approval of draft (stays in PLANNING)\n"
+    "- initialize_and_build_agent(agent_name?, nodes?) → scaffolds package + switches to "
+    "BUILDING (requires draft + confirmation for new agents)\n"
     "- replan_agent() → switches back to PLANNING phase (only when user explicitly requests)\n"
     "- load_built_agent(path) → switches to STAGING phase\n"
     "- run_agent_with_input(task) → starts worker, switches to RUNNING phase\n"

@@ -84,6 +84,12 @@ class QueenPhaseState:
     inject_notification: Any = None  # async (str) -> None
     event_bus: Any = None  # EventBus — for emitting QUEEN_PHASE_CHANGED events
 
+    # Draft graph created during planning phase (lightweight, loose-validation).
+    # Stored here so it persists across turns and can be consumed by building.
+    draft_graph: dict | None = None
+    # Whether the user has confirmed the draft and approved moving to building.
+    build_confirmed: bool = False
+
     # Phase-specific prompts (set by session_manager after construction)
     prompt_planning: str = ""
     prompt_building: str = ""
@@ -608,6 +614,497 @@ def register_queen_lifecycle_tools(
     registry.register("replan_agent", _replan_tool, lambda inputs: replan_agent())
     tools_registered += 1
 
+    # --- save_agent_draft (Planning phase — declarative graph preview) ---------
+    # Creates a lightweight draft graph with nodes, edges, and business metadata.
+    # Loose validation: only requires names and descriptions. Emits an event
+    # so the frontend can render the graph during planning (before any code).
+
+    # Classical flowchart symbols per ISO 5807 / ANSI standards.
+    # Each type maps to a standard shape and a unique color for the
+    # frontend renderer.  Shapes use Mermaid-compatible names where
+    # possible so the frontend can render them directly.
+    _FLOWCHART_TYPES = {
+        # ── Core symbols (ISO 5807 §4) ──────────────────────────
+        # Terminator — rounded rectangle (stadium shape)
+        "start":            {"shape": "stadium",       "color": "#4CAF50"},  # green
+        "terminal":         {"shape": "stadium",       "color": "#F44336"},  # red
+        # Process — rectangle
+        "process":          {"shape": "rectangle",     "color": "#2196F3"},  # blue
+        # Decision — diamond
+        "decision":         {"shape": "diamond",       "color": "#FF9800"},  # amber
+        # Data (Input/Output) — parallelogram
+        "io":               {"shape": "parallelogram", "color": "#9C27B0"},  # purple
+        # Document — rectangle with wavy bottom
+        "document":         {"shape": "document",      "color": "#607D8B"},  # blue-grey
+        # Multi-document — stacked documents
+        "multi_document":   {"shape": "multi_document", "color": "#78909C"}, # blue-grey light
+        # Predefined process / subroutine — rectangle with double vertical bars
+        "subprocess":       {"shape": "subroutine",    "color": "#009688"},  # teal
+        # Preparation — hexagon
+        "preparation":      {"shape": "hexagon",       "color": "#795548"},  # brown
+        # Manual input — trapezoid with slanted top
+        "manual_input":     {"shape": "manual_input",  "color": "#E91E63"},  # pink
+        # Manual operation — inverted trapezoid
+        "manual_operation": {"shape": "trapezoid",     "color": "#AD1457"},  # dark pink
+        # Delay — half-rounded rectangle (D-shape)
+        "delay":            {"shape": "delay",         "color": "#FF5722"},  # deep orange
+        # Display — rounded rectangle with pointed left
+        "display":          {"shape": "display",       "color": "#00BCD4"},  # cyan
+        # ── Data storage symbols ────────────────────────────────
+        # Database / direct access storage — cylinder
+        "database":         {"shape": "cylinder",      "color": "#8BC34A"},  # light green
+        # Stored data — generic data store
+        "stored_data":      {"shape": "stored_data",   "color": "#CDDC39"},  # lime
+        # Internal storage — rectangle with cross-hatch
+        "internal_storage": {"shape": "internal_storage", "color": "#FFC107"}, # amber light
+        # ── Connectors ──────────────────────────────────────────
+        # On-page connector — small circle
+        "connector":        {"shape": "circle",        "color": "#9E9E9E"},  # grey
+        # Off-page connector — pentagon / home-plate
+        "offpage_connector": {"shape": "pentagon",     "color": "#757575"},  # dark grey
+        # ── Flow operations ─────────────────────────────────────
+        # Merge — inverted triangle
+        "merge":            {"shape": "triangle_inv",  "color": "#3F51B5"},  # indigo
+        # Extract — upward triangle
+        "extract":          {"shape": "triangle",      "color": "#5C6BC0"},  # indigo light
+        # Sort — hourglass / double triangle
+        "sort":             {"shape": "hourglass",     "color": "#7986CB"},  # indigo lighter
+        # Collate — merged hourglass
+        "collate":          {"shape": "hourglass_inv", "color": "#9FA8DA"},  # indigo lightest
+        # Summing junction — circle with cross
+        "summing_junction": {"shape": "circle_cross",  "color": "#F06292"},  # pink light
+        # Or — circle with horizontal bar
+        "or":               {"shape": "circle_bar",    "color": "#CE93D8"},  # purple light
+        # ── Domain-specific (Hive agent context) ────────────────
+        # Browser automation (GCU) — mapped to preparation/hexagon
+        "browser":          {"shape": "hexagon",       "color": "#1A237E"},  # dark indigo
+        # Comment / annotation — flag shape
+        "comment":          {"shape": "flag",          "color": "#BDBDBD"},  # light grey
+        # Alternate process — rounded rectangle
+        "alternate_process": {"shape": "rounded_rect", "color": "#42A5F5"}, # light blue
+    }
+
+    def _classify_flowchart_node(
+        node: dict,
+        index: int,
+        total: int,
+        edges: list[dict],
+        terminal_ids: set[str],
+    ) -> str:
+        """Auto-detect the ISO 5807 flowchart type for a draft node.
+
+        Priority: explicit override > structural detection > heuristic > default.
+        """
+        # Explicit override from the queen
+        explicit = node.get("flowchart_type", "").strip()
+        if explicit and explicit in _FLOWCHART_TYPES:
+            return explicit
+
+        node_id = node["id"]
+        node_type = node.get("node_type", "event_loop")
+        node_tools = set(node.get("tools") or [])
+        desc = (node.get("description") or "").lower()
+        name = (node.get("name") or "").lower()
+
+        # GCU / browser automation nodes → hexagon
+        if node_type == "gcu":
+            return "browser"
+
+        # Entry node (first node or no incoming edges) → start terminator
+        incoming = {e["target"] for e in edges}
+        if index == 0 or (node_id not in incoming and index == 0):
+            return "start"
+
+        # Terminal node → end terminator
+        if node_id in terminal_ids:
+            return "terminal"
+
+        # Decision node: has outgoing edges with branching conditions → diamond
+        outgoing = [e for e in edges if e["source"] == node_id]
+        if len(outgoing) >= 2:
+            conditions = {e.get("condition", "on_success") for e in outgoing}
+            if len(conditions) > 1 or conditions - {"on_success"}:
+                return "decision"
+
+        # Sub-agent / subprocess nodes → subroutine (double-bordered rect)
+        if node.get("sub_agents"):
+            return "subprocess"
+
+        # Database / data store nodes → cylinder
+        db_tool_hints = {"query_database", "sql_query", "read_table", "write_table",
+                         "save_data", "load_data"}
+        db_desc_hints = {"database", "data store", "storage", "persist", "cache"}
+        if node_tools & db_tool_hints or any(h in desc for h in db_desc_hints):
+            return "database"
+
+        # Document generation nodes → document shape
+        doc_tool_hints = {"generate_report", "create_document", "write_report",
+                          "render_template", "export_pdf"}
+        doc_desc_hints = {"report", "document", "summary", "write up", "writeup"}
+        if node_tools & doc_tool_hints or any(h in desc for h in doc_desc_hints):
+            return "document"
+
+        # I/O nodes: external data ingestion or delivery → parallelogram
+        io_tool_hints = {"serve_file_to_user", "send_email", "post_message",
+                         "upload_file", "download_file", "fetch_url",
+                         "post_to_slack", "send_notification"}
+        io_desc_hints = {"deliver", "send", "output", "notify", "publish"}
+        if node_tools & io_tool_hints or any(h in desc for h in io_desc_hints):
+            return "io"
+
+        # Manual / human-in-the-loop nodes → trapezoid
+        manual_desc_hints = {"human review", "manual", "approval", "human-in-the-loop",
+                             "user review", "manual check"}
+        if any(h in desc for h in manual_desc_hints) or any(h in name for h in manual_desc_hints):
+            return "manual_operation"
+
+        # Preparation / setup nodes → hexagon
+        prep_desc_hints = {"setup", "initialize", "prepare", "configure", "provision"}
+        if any(h in desc for h in prep_desc_hints) or any(h in name for h in prep_desc_hints):
+            return "preparation"
+
+        # Delay / wait nodes → D-shape
+        delay_desc_hints = {"wait", "delay", "pause", "cooldown", "throttle", "sleep"}
+        if any(h in desc for h in delay_desc_hints):
+            return "delay"
+
+        # Merge nodes → inverted triangle
+        merge_desc_hints = {"merge", "combine", "aggregate", "consolidate"}
+        if any(h in desc for h in merge_desc_hints) or any(h in name for h in merge_desc_hints):
+            return "merge"
+
+        # Display nodes → display shape
+        display_desc_hints = {"display", "show", "present", "render", "visualize"}
+        display_tool_hints = {"serve_file_to_user", "display_results"}
+        if node_tools & display_tool_hints or any(h in name for h in display_desc_hints):
+            return "display"
+
+        # Default: process (rectangle)
+        return "process"
+
+    async def save_agent_draft(
+        *,
+        agent_name: str,
+        goal: str,
+        nodes: list[dict],
+        edges: list[dict] | None = None,
+        description: str = "",
+        success_criteria: list[str] | None = None,
+        constraints: list[str] | None = None,
+        terminal_nodes: list[str] | None = None,
+    ) -> str:
+        """Save a declarative draft of the agent graph during planning.
+
+        This creates a lightweight, visual-only graph for the user to review.
+        No executable code is generated. Nodes need only an id, name, and
+        description. Tools, input/output keys, and system prompts are optional
+        metadata hints — they will be fully specified during the building phase.
+
+        Each node is classified into a classical flowchart component type
+        (start, terminal, process, decision, io, subprocess, browser, manual)
+        with a unique color. The queen can override auto-detection by setting
+        flowchart_type explicitly on a node.
+        """
+        # Loose validation: each node needs at minimum an id
+        validated_nodes = []
+        for i, n in enumerate(nodes):
+            if not isinstance(n, dict):
+                return json.dumps({"error": f"Node {i} must be a dict, got {type(n).__name__}"})
+            node_id = n.get("id", "").strip()
+            if not node_id:
+                return json.dumps({"error": f"Node {i} is missing 'id'"})
+            validated_nodes.append({
+                "id": node_id,
+                "name": n.get("name", node_id.replace("-", " ").replace("_", " ").title()),
+                "description": n.get("description", ""),
+                "node_type": n.get("node_type", "event_loop"),
+                # Optional business-logic hints (not validated yet)
+                "tools": n.get("tools", []),
+                "input_keys": n.get("input_keys", []),
+                "output_keys": n.get("output_keys", []),
+                "success_criteria": n.get("success_criteria", ""),
+                "sub_agents": n.get("sub_agents", []),
+                # Explicit flowchart override (preserved for classification)
+                "flowchart_type": n.get("flowchart_type", ""),
+            })
+
+        validated_edges = []
+        if edges:
+            for i, e in enumerate(edges):
+                if not isinstance(e, dict):
+                    return json.dumps({"error": f"Edge {i} must be a dict"})
+                validated_edges.append({
+                    "id": e.get("id", f"edge-{i}"),
+                    "source": e.get("source", ""),
+                    "target": e.get("target", ""),
+                    "condition": e.get("condition", "on_success"),
+                    "description": e.get("description", ""),
+                })
+
+        # Determine terminal nodes: explicit list, or nodes with no outgoing edges
+        terminal_ids: set[str] = set(terminal_nodes or [])
+        if not terminal_ids:
+            sources = {e["source"] for e in validated_edges}
+            all_ids = {n["id"] for n in validated_nodes}
+            terminal_ids = all_ids - sources
+            # If all nodes have outgoing edges (loop graph), mark the last as terminal
+            if not terminal_ids and validated_nodes:
+                terminal_ids = {validated_nodes[-1]["id"]}
+
+        # Classify each node into a flowchart component type with color
+        total = len(validated_nodes)
+        for i, node in enumerate(validated_nodes):
+            fc_type = _classify_flowchart_node(
+                node, i, total, validated_edges, terminal_ids,
+            )
+            fc_meta = _FLOWCHART_TYPES[fc_type]
+            node["flowchart_type"] = fc_type
+            node["flowchart_shape"] = fc_meta["shape"]
+            node["flowchart_color"] = fc_meta["color"]
+
+        draft = {
+            "agent_name": agent_name.strip(),
+            "goal": goal.strip(),
+            "description": description.strip(),
+            "success_criteria": success_criteria or [],
+            "constraints": constraints or [],
+            "nodes": validated_nodes,
+            "edges": validated_edges,
+            "entry_node": validated_nodes[0]["id"] if validated_nodes else "",
+            "terminal_nodes": sorted(terminal_ids),
+            # Color legend for the frontend
+            "flowchart_legend": {
+                fc_type: {"shape": meta["shape"], "color": meta["color"]}
+                for fc_type, meta in _FLOWCHART_TYPES.items()
+            },
+        }
+
+        # Store the draft in phase state
+        if phase_state is not None:
+            phase_state.draft_graph = draft
+            phase_state.build_confirmed = False  # reset confirmation
+
+        # Emit event so the frontend can render the draft graph
+        bus = getattr(session, "event_bus", None)
+        if bus is not None:
+            await bus.publish(
+                AgentEvent(
+                    type=EventType.DRAFT_GRAPH_UPDATED,
+                    stream_id="queen",
+                    data=draft,
+                )
+            )
+
+        return json.dumps({
+            "status": "draft_saved",
+            "agent_name": draft["agent_name"],
+            "node_count": len(validated_nodes),
+            "edge_count": len(validated_edges),
+            "node_types": {n["id"]: n["flowchart_type"] for n in validated_nodes},
+            "message": (
+                "Draft graph saved and sent to the visualizer. "
+                "The user can now see the color-coded flowchart. "
+                "Present this design to the user and get their approval. "
+                "When the user confirms, call confirm_and_build() to proceed."
+            ),
+        })
+
+    _draft_tool = Tool(
+        name="save_agent_draft",
+        description=(
+            "Save a declarative draft of the agent graph during planning. "
+            "Creates a color-coded flowchart with nodes, edges, and business metadata. "
+            "Each node is auto-classified into a classical flowchart type "
+            "(start, terminal, process, decision, io, subprocess, browser, manual) "
+            "with unique colors. No code is generated."
+        ),
+        parameters={
+            "type": "object",
+            "properties": {
+                "agent_name": {
+                    "type": "string",
+                    "description": "Snake_case name for the agent (e.g. 'research_agent')",
+                },
+                "goal": {
+                    "type": "string",
+                    "description": "High-level goal description for the agent",
+                },
+                "description": {
+                    "type": "string",
+                    "description": "Brief description of what the agent does",
+                },
+                "nodes": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "id": {"type": "string", "description": "Kebab-case node identifier"},
+                            "name": {"type": "string", "description": "Human-readable name"},
+                            "description": {
+                                "type": "string",
+                                "description": "What this node does (business logic)",
+                            },
+                            "node_type": {
+                                "type": "string",
+                                "enum": ["event_loop", "gcu"],
+                                "description": "Node type (default: event_loop)",
+                            },
+                            "flowchart_type": {
+                                "type": "string",
+                                "enum": [
+                                    "start", "terminal", "process", "decision",
+                                    "io", "document", "multi_document",
+                                    "subprocess", "preparation",
+                                    "manual_input", "manual_operation",
+                                    "delay", "display",
+                                    "database", "stored_data", "internal_storage",
+                                    "connector", "offpage_connector",
+                                    "merge", "extract", "sort", "collate",
+                                    "summing_junction", "or",
+                                    "browser", "comment", "alternate_process",
+                                ],
+                                "description": (
+                                    "ISO 5807 flowchart symbol type. Auto-detected if omitted. "
+                                    "Core: start (green stadium), terminal (red stadium), "
+                                    "process (blue rect), decision (amber diamond), "
+                                    "io (purple parallelogram), document (grey wavy rect), "
+                                    "subprocess (teal subroutine), preparation (brown hexagon), "
+                                    "manual_operation (pink trapezoid), delay (orange D-shape), "
+                                    "display (cyan), database (green cylinder), "
+                                    "merge (indigo triangle), browser (dark indigo hexagon)"
+                                ),
+                            },
+                            "tools": {
+                                "type": "array",
+                                "items": {"type": "string"},
+                                "description": "Planned tools (hints, not validated yet)",
+                            },
+                            "input_keys": {
+                                "type": "array",
+                                "items": {"type": "string"},
+                                "description": "Expected input memory keys (hints)",
+                            },
+                            "output_keys": {
+                                "type": "array",
+                                "items": {"type": "string"},
+                                "description": "Expected output memory keys (hints)",
+                            },
+                            "success_criteria": {
+                                "type": "string",
+                                "description": "What success looks like for this node",
+                            },
+                        },
+                        "required": ["id"],
+                    },
+                    "description": "List of nodes with at minimum an id",
+                },
+                "edges": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "source": {"type": "string"},
+                            "target": {"type": "string"},
+                            "condition": {
+                                "type": "string",
+                                "enum": [
+                                    "always",
+                                    "on_success",
+                                    "on_failure",
+                                    "conditional",
+                                    "llm_decide",
+                                ],
+                            },
+                            "description": {"type": "string"},
+                        },
+                        "required": ["source", "target"],
+                    },
+                    "description": "Connections between nodes",
+                },
+                "terminal_nodes": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": (
+                        "Node IDs that are terminal (end) nodes. "
+                        "Auto-detected from edges if omitted."
+                    ),
+                },
+                "success_criteria": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Agent-level success criteria",
+                },
+                "constraints": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Agent-level constraints",
+                },
+            },
+            "required": ["agent_name", "goal", "nodes"],
+        },
+    )
+    registry.register(
+        "save_agent_draft",
+        _draft_tool,
+        lambda inputs: save_agent_draft(**inputs),
+    )
+    tools_registered += 1
+
+    # --- confirm_and_build (Planning → Building gate) -------------------------
+    # Explicit user confirmation is required before transitioning from planning
+    # to building. This tool records that confirmation and proceeds.
+
+    async def confirm_and_build() -> str:
+        """Confirm the draft and transition from planning to building phase.
+
+        This tool should ONLY be called after the user has explicitly approved
+        the draft graph design via ask_user. It gates the planning→building
+        transition so the user always has a chance to review before code is written.
+        """
+        if phase_state is None:
+            return json.dumps({"error": "Phase state not available."})
+
+        if phase_state.phase != "planning":
+            return json.dumps(
+                {"error": f"Cannot confirm_and_build: currently in {phase_state.phase} phase."}
+            )
+
+        if phase_state.draft_graph is None:
+            return json.dumps({
+                "error": (
+                    "No draft graph saved. Call save_agent_draft() first to create "
+                    "a draft, present it to the user, and get their approval."
+                )
+            })
+
+        phase_state.build_confirmed = True
+        return json.dumps({
+            "status": "confirmed",
+            "agent_name": phase_state.draft_graph.get("agent_name", ""),
+            "message": (
+                "User has confirmed the design. Now call "
+                "initialize_and_build_agent(agent_name, nodes) to scaffold the "
+                "agent package and start building. The draft metadata will be "
+                "used to pre-populate the generated files."
+            ),
+        })
+
+    _confirm_tool = Tool(
+        name="confirm_and_build",
+        description=(
+            "Confirm the draft graph design and approve transition to building phase. "
+            "ONLY call this after the user has explicitly approved the design via ask_user. "
+            "After confirmation, call initialize_and_build_agent() to scaffold and build."
+        ),
+        parameters={"type": "object", "properties": {}},
+    )
+    registry.register(
+        "confirm_and_build",
+        _confirm_tool,
+        lambda inputs: confirm_and_build(),
+    )
+    tools_registered += 1
+
     # --- initialize_and_build_agent wrapper (Planning → Building) -------------
     # With agent_name: scaffold a new agent via MCP tool, then switch to building.
     # Without agent_name: just switch to building (for fixing an existing loaded agent).
@@ -619,6 +1116,32 @@ def register_queen_lifecycle_tools(
         async def initialize_and_build_agent_wrapper(inputs: dict) -> str:
             """Wrapper: scaffold or just switch to building phase."""
             agent_name = (inputs.get("agent_name") or "").strip()
+
+            # Gate: when in planning phase and creating a new agent,
+            # require the user to have confirmed the draft first.
+            if (
+                agent_name
+                and phase_state is not None
+                and phase_state.phase == "planning"
+                and not phase_state.build_confirmed
+            ):
+                if phase_state.draft_graph is None:
+                    return json.dumps({
+                        "error": (
+                            "Cannot transition to building without a draft. "
+                            "Call save_agent_draft() first to create a visual draft of the "
+                            "graph, present it to the user for review, then call "
+                            "confirm_and_build() after the user approves."
+                        )
+                    })
+                return json.dumps({
+                    "error": (
+                        "The user has not confirmed the draft design yet. "
+                        "Present the draft to the user and call ask_user() to get "
+                        "their approval. Then call confirm_and_build() before "
+                        "calling initialize_and_build_agent()."
+                    )
+                })
 
             # No agent_name → try to fall back to the session's current agent,
             # or fail with actionable guidance.
@@ -675,8 +1198,15 @@ def register_queen_lifecycle_tools(
                     }
                 )
 
-            # Has agent_name → scaffold via MCP tool
-            result = _orig_init_executor(inputs)
+            # Has agent_name → scaffold via MCP tool.
+            # If a draft exists, pass its metadata so the scaffolder can
+            # pre-populate descriptions, goals, and node metadata.
+            scaffold_inputs = dict(inputs)
+            draft = phase_state.draft_graph if phase_state else None
+            if draft and draft.get("agent_name") == agent_name:
+                scaffold_inputs["_draft"] = draft
+
+            result = _orig_init_executor(scaffold_inputs)
             # Handle both sync and async executors
             if asyncio.iscoroutine(result) or asyncio.isfuture(result):
                 result = await result
@@ -689,12 +1219,22 @@ def register_queen_lifecycle_tools(
                 if parsed.get("success", True):
                     if phase_state is not None:
                         await phase_state.switch_to_building(source="tool")
+                        # Reset draft state after successful scaffolding
+                        phase_state.build_confirmed = False
                         # Inject a continuation message so the queen starts
                         # building immediately instead of blocking for user input.
+                        draft_hint = ""
+                        if draft:
+                            draft_hint = (
+                                " The draft metadata has been used to pre-populate "
+                                "node descriptions, goal, and success criteria. "
+                                "Review and refine the generated files."
+                            )
                         if phase_state.inject_notification:
                             await phase_state.inject_notification(
                                 "[PHASE CHANGE] Agent scaffolded and switched to BUILDING phase. "
                                 "Start implementing the agent nodes now."
+                                + draft_hint
                             )
             except (json.JSONDecodeError, KeyError, TypeError):
                 pass

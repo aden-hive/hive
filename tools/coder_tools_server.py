@@ -1483,7 +1483,11 @@ def _node_var_name(node_id: str) -> str:
 
 
 @mcp.tool()
-def initialize_and_build_agent(agent_name: str, nodes: str | None = None) -> str:
+def initialize_and_build_agent(
+    agent_name: str,
+    nodes: str | None = None,
+    _draft: dict | None = None,
+) -> str:
     """Scaffold a new agent package with placeholder files.
 
     Creates exports/{agent_name}/ with all files needed for a runnable agent:
@@ -1500,6 +1504,8 @@ def initialize_and_build_agent(agent_name: str, nodes: str | None = None) -> str
         nodes: Comma-separated node names (snake_case or kebab-case).
                If omitted, a single 'start' node is created.
                Example: 'intake,process,review'
+        _draft: Internal. Draft graph metadata from planning phase, used to
+                pre-populate descriptions, goals, and node metadata.
 
     Returns:
         JSON with files written and next steps.
@@ -1518,6 +1524,15 @@ def initialize_and_build_agent(agent_name: str, nodes: str | None = None) -> str
         )
 
     node_list = [n.strip() for n in nodes.split(",") if n.strip()] if nodes else ["start"]
+
+    # Build draft node lookup for pre-populating metadata from planning phase
+    _draft_nodes: dict[str, dict] = {}
+    if _draft and _draft.get("nodes"):
+        for dn in _draft["nodes"]:
+            _draft_nodes[dn.get("id", "")] = dn
+
+    # Extract top-level draft metadata early so it's available for all templates
+    _draft_desc = (_draft.get("description") or "") if _draft else ""
 
     class_name = _snake_to_camel(agent_name)
     human_name = agent_name.replace("_", " ").title()
@@ -1583,7 +1598,7 @@ default_config = RuntimeConfig()
 class AgentMetadata:
     name: str = "{human_name}"
     version: str = "1.0.0"
-    description: str = "TODO: Add agent description."
+    description: str = "{_draft_desc or 'TODO: Add agent description.'}"
     intro_message: str = "TODO: Add intro message."
 
 
@@ -1598,22 +1613,33 @@ metadata = AgentMetadata()
         var = _node_var_name(node_id)
         node_var_names.append(var)
         is_first = node_id == entry_node
+
+        # Use draft metadata to pre-populate if available
+        dn = _draft_nodes.get(node_id, {})
+        node_name = dn.get("name") or node_id.replace("_", " ").replace("-", " ").title()
+        node_desc = dn.get("description") or "TODO: Describe what this node does."
+        node_type = dn.get("node_type") or "event_loop"
+        node_tools = dn.get("tools") or []
+        node_input_keys = dn.get("input_keys") or []
+        node_output_keys = dn.get("output_keys") or []
+        node_sc = dn.get("success_criteria") or "TODO: Define success criteria."
+
         node_specs.append(f'''\
 {var} = NodeSpec(
     id="{node_id}",
-    name="{node_id.replace("_", " ").replace("-", " ").title()}",
-    description="TODO: Describe what this node does.",
-    node_type="event_loop",
+    name="{node_name}",
+    description="{node_desc}",
+    node_type="{node_type}",
     client_facing={is_first},
     max_node_visits=0,
-    input_keys=[],
-    output_keys=[],
+    input_keys={node_input_keys!r},
+    output_keys={node_output_keys!r},
     nullable_output_keys=[],
-    success_criteria="TODO: Define success criteria.",
+    success_criteria="{node_sc}",
     system_prompt="""\\
 TODO: Add system prompt for this node.
 """,
-    tools=[],
+    tools={node_tools!r},
 )''')
 
     nodes_init = f'''\
@@ -1631,10 +1657,29 @@ __all__ = {node_var_names!r}
     node_imports = ", ".join(node_var_names)
     nodes_list = ", ".join(node_var_names)
 
+    # Use draft edges if available, otherwise generate linear edges
+    _draft_edges = _draft.get("edges", []) if _draft else []
     edge_defs = []
-    for i in range(len(node_list) - 1):
-        src, tgt = node_list[i], node_list[i + 1]
-        edge_defs.append(f"""\
+    if _draft_edges:
+        for de in _draft_edges:
+            eid = de.get("id", f"{de.get('source', '')}-to-{de.get('target', '')}")
+            src = de.get("source", "")
+            tgt = de.get("target", "")
+            cond = de.get("condition", "on_success").upper()
+            desc = de.get("description", "")
+            desc_line = f'\n        description="{desc}",' if desc else ""
+            edge_defs.append(f"""\
+    EdgeSpec(
+        id="{eid}",
+        source="{src}",
+        target="{tgt}",
+        condition=EdgeCondition.{cond},{desc_line}
+        priority=1,
+    ),""")
+    else:
+        for i in range(len(node_list) - 1):
+            src, tgt = node_list[i], node_list[i + 1]
+            edge_defs.append(f"""\
     EdgeSpec(
         id="{src}-to-{tgt}",
         source="{src}",
@@ -1643,6 +1688,55 @@ __all__ = {node_var_names!r}
         priority=1,
     ),""")
     edges_str = "\n".join(edge_defs) if edge_defs else "    # TODO: Add edges"
+
+    # Pre-populate goal from draft metadata
+    _draft_goal = (_draft.get("goal") or "TODO: Describe the agent's goal.") if _draft else "TODO: Describe the agent's goal."
+    _draft_sc = (_draft.get("success_criteria") or []) if _draft else []
+    _draft_constraints = (_draft.get("constraints") or []) if _draft else []
+
+    # Build success criteria entries
+    if _draft_sc:
+        sc_entries = "\n".join(
+            f'''\
+        SuccessCriterion(
+            id="sc-{i+1}",
+            description="{sc}",
+            metric="TODO",
+            target="TODO",
+            weight=1.0,
+        ),'''
+            for i, sc in enumerate(_draft_sc)
+        )
+    else:
+        sc_entries = '''\
+        SuccessCriterion(
+            id="sc-1",
+            description="TODO: Define success criterion.",
+            metric="TODO",
+            target="TODO",
+            weight=1.0,
+        ),'''
+
+    # Build constraint entries
+    if _draft_constraints:
+        constraint_entries = "\n".join(
+            f'''\
+        Constraint(
+            id="c-{i+1}",
+            description="{c}",
+            constraint_type="hard",
+            category="functional",
+        ),'''
+            for i, c in enumerate(_draft_constraints)
+        )
+    else:
+        constraint_entries = '''\
+        Constraint(
+            id="c-1",
+            description="TODO: Define constraint.",
+            constraint_type="hard",
+            category="functional",
+        ),'''
 
     _write(
         "agent.py",
@@ -1667,23 +1761,12 @@ from .nodes import {node_imports}
 goal = Goal(
     id="{agent_name}-goal",
     name="{human_name}",
-    description="TODO: Describe the agent's goal.",
+    description="{_draft_goal}",
     success_criteria=[
-        SuccessCriterion(
-            id="sc-1",
-            description="TODO: Define success criterion.",
-            metric="TODO",
-            target="TODO",
-            weight=1.0,
-        ),
+{sc_entries}
     ],
     constraints=[
-        Constraint(
-            id="c-1",
-            description="TODO: Define constraint.",
-            constraint_type="hard",
-            category="functional",
-        ),
+{constraint_entries}
     ],
 )
 

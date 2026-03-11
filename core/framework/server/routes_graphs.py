@@ -234,8 +234,23 @@ async def handle_node_tools(request: web.Request) -> web.Response:
     return web.json_response({"tools": tools_out})
 
 
+async def handle_draft_graph(request: web.Request) -> web.Response:
+    """Return the current draft graph from planning phase (if any)."""
+    session, err = resolve_session(request)
+    if err:
+        return err
+
+    phase_state = getattr(session, "phase_state", None)
+    if phase_state is None or phase_state.draft_graph is None:
+        return web.json_response({"draft": None})
+
+    return web.json_response({"draft": phase_state.draft_graph})
+
+
 def register_routes(app: web.Application) -> None:
     """Register graph/node inspection routes."""
+    # Draft graph (planning phase — visual only, no loaded worker required)
+    app.router.add_get("/api/sessions/{session_id}/draft-graph", handle_draft_graph)
     # Session-primary routes
     app.router.add_get("/api/sessions/{session_id}/graphs/{graph_id}/nodes", handle_list_nodes)
     app.router.add_get(

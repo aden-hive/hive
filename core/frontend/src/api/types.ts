@@ -191,6 +191,44 @@ export interface GraphTopology {
   entry_points?: EntryPoint[];
 }
 
+// --- Draft graph types (planning phase) ---
+
+export interface DraftNode {
+  id: string;
+  name: string;
+  description: string;
+  node_type: string;
+  tools: string[];
+  input_keys: string[];
+  output_keys: string[];
+  success_criteria: string;
+  sub_agents: string[];
+  flowchart_type: string;
+  flowchart_shape: string;
+  flowchart_color: string;
+}
+
+export interface DraftEdge {
+  id: string;
+  source: string;
+  target: string;
+  condition: string;
+  description: string;
+}
+
+export interface DraftGraph {
+  agent_name: string;
+  goal: string;
+  description: string;
+  success_criteria: string[];
+  constraints: string[];
+  nodes: DraftNode[];
+  edges: DraftEdge[];
+  entry_node: string;
+  terminal_nodes: string[];
+  flowchart_legend: Record<string, { shape: string; color: string }>;
+}
+
 export interface NodeCriteria {
   node_id: string;
   success_criteria: string | null;
@@ -276,7 +314,8 @@ export type EventTypeName =
   | "worker_loaded"
   | "credentials_required"
   | "queen_phase_changed"
-  | "subagent_report";
+  | "subagent_report"
+  | "draft_graph_updated";
 
 export interface AgentEvent {
   type: EventTypeName;

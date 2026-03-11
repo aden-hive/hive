@@ -3,6 +3,7 @@ import ReactDOM from "react-dom";
 import { useSearchParams, useNavigate } from "react-router-dom";
 import { Plus, KeyRound, Sparkles, Layers, ChevronLeft, Bot, Loader2, WifiOff, X } from "lucide-react";
 import AgentGraph, { type GraphNode, type NodeStatus } from "@/components/AgentGraph";
+import DraftGraph from "@/components/DraftGraph";
 import ChatPanel, { type ChatMessage } from "@/components/ChatPanel";
 import TopBar from "@/components/TopBar";
 import { TAB_STORAGE_KEY, loadPersistedTabs, savePersistedTabs, type PersistedTabState } from "@/lib/tab-persistence";
@@ -13,7 +14,7 @@ import { executionApi } from "@/api/execution";
 import { graphsApi } from "@/api/graphs";
 import { sessionsApi } from "@/api/sessions";
 import { useMultiSSE } from "@/hooks/use-sse";
-import type { LiveSession, AgentEvent, DiscoverEntry, Message, NodeSpec } from "@/api/types";
+import type { LiveSession, AgentEvent, DiscoverEntry, Message, NodeSpec, DraftGraph as DraftGraphData } from "@/api/types";
 import { backendMessageToChatMessage, sseEventToChatMessage, formatAgentDisplayName } from "@/lib/chat-helpers";
 import { topologyToGraphNodes } from "@/lib/graph-converter";
 import { ApiError } from "@/api/client";
@@ -257,6 +258,8 @@ interface AgentBackendState {
   queenBuilding: boolean;
   /** Queen operating phase — "planning" (design), "building" (coding), "staging" (loaded), or "running" (executing) */
   queenPhase: "planning" | "building" | "staging" | "running";
+  /** Draft graph from planning phase (before code generation) */
+  draftGraph: DraftGraphData | null;
   workerRunState: "idle" | "deploying" | "running";
   currentExecutionId: string | null;
   nodeLogs: Record<string, string[]>;
@@ -292,6 +295,7 @@ function defaultAgentState(): AgentBackendState {
     workerInputMessageId: null,
     queenBuilding: false,
     queenPhase: "planning",
+    draftGraph: null,
     workerRunState: "idle",
     currentExecutionId: null,
     nodeLogs: {},
@@ -899,6 +903,13 @@ export default function Workspace() {
         queenPhase: initialPhase,
         queenBuilding: initialPhase === "building",
       });
+
+      // If resuming in planning phase, fetch any existing draft graph
+      if (initialPhase === "planning") {
+        graphsApi.draftGraph(session.session_id).then(({ draft }) => {
+          if (draft) updateAgentState(agentType, { draftGraph: draft });
+        }).catch(() => {});
+      }
 
       // Update the session label + backendSessionId.  Also set historySourceId
       // so the sidebar "already-open" check works even after cold-revive changes
@@ -1798,7 +1809,17 @@ export default function Workspace() {
             queenBuilding: newPhase === "building",
             // Sync workerRunState so the RunButton reflects the phase
             workerRunState: newPhase === "running" ? "running" : "idle",
+            // Clear draft graph once we leave planning
+            ...(newPhase !== "planning" ? { draftGraph: null } : {}),
           });
+          break;
+        }
+
+        case "draft_graph_updated": {
+          const draft = event.data?.draft as DraftGraphData | undefined;
+          if (draft) {
+            updateAgentState(agentType, { draftGraph: draft });
+          }
           break;
         }
 
@@ -2373,16 +2394,20 @@ export default function Workspace() {
         {/* ── Pipeline graph + chat ──────────────────────────────────── */}
         <div className="w-[300px] min-w-[240px] bg-card/30 flex flex-col border-r border-border/30">
           <div className="flex-1 min-h-0">
-            <AgentGraph
-              nodes={currentGraph.nodes}
-              title={currentGraph.title}
-              onNodeClick={(node) => setSelectedNode(prev => prev?.id === node.id ? null : node)}
-              onRun={handleRun}
-              onPause={handlePause}
-              runState={activeAgentState?.workerRunState ?? "idle"}
-              building={activeAgentState?.queenBuilding ?? false}
-              queenPhase={activeAgentState?.queenPhase ?? "building"}
-            />
+            {activeAgentState?.queenPhase === "planning" && activeAgentState.draftGraph ? (
+              <DraftGraph draft={activeAgentState.draftGraph} />
+            ) : (
+              <AgentGraph
+                nodes={currentGraph.nodes}
+                title={currentGraph.title}
+                onNodeClick={(node) => setSelectedNode(prev => prev?.id === node.id ? null : node)}
+                onRun={handleRun}
+                onPause={handlePause}
+                runState={activeAgentState?.workerRunState ?? "idle"}
+                building={activeAgentState?.queenBuilding ?? false}
+                queenPhase={activeAgentState?.queenPhase ?? "building"}
+              />
+            )}
           </div>
         </div>
         <div className="flex-1 min-w-0 flex">

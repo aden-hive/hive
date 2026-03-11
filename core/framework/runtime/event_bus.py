@@ -137,6 +137,9 @@ class EventType(StrEnum):
     WORKER_LOADED = "worker_loaded"
     CREDENTIALS_REQUIRED = "credentials_required"
 
+    # Draft graph (planning phase — lightweight graph preview)
+    DRAFT_GRAPH_UPDATED = "draft_graph_updated"
+
     # Queen phase changes (building <-> staging <-> running)
     QUEEN_PHASE_CHANGED = "queen_phase_changed"
 

@@ -40,6 +40,7 @@ DEFAULT_EVENT_TYPES = [
     EventType.CREDENTIALS_REQUIRED,
     EventType.SUBAGENT_REPORT,
     EventType.QUEEN_PHASE_CHANGED,
+    EventType.DRAFT_GRAPH_UPDATED,
 ]
 
 # Keepalive interval in seconds
