@@ -605,10 +605,7 @@ class GraphSpec(BaseModel):
         for node in self.nodes:
             if node.id not in reachable:
                 # Skip if node is a pause node or entry point target
-                if (
-                    node.id in self.pause_nodes
-                    or node.id in self.entry_points.values()
-                ):
+                if node.id in self.pause_nodes or node.id in self.entry_points.values():
                     continue
                 errors.append(f"Node '{node.id}' is unreachable from entry")
 

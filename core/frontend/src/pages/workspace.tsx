@@ -894,7 +894,7 @@ export default function Workspace() {
         // The user never expects a greeting when reopening a session.
         if (coldRestoreId) suppressIntroRef.current.add(agentType);
 
-        if (!liveSession) try {
+        try {
           // Pass coldRestoreId as queenResumeFrom so the backend writes queen
           // messages into the ORIGINAL session's directory — all conversation
           // history accumulates in one place across server restarts.

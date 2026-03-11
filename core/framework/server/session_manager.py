@@ -268,14 +268,10 @@ class SessionManager:
                         description=tdata.get("name", tid),
                         task=tdata.get("task", ""),
                     )
-                    logger.info(
-                        "Loaded trigger '%s' (%s) from triggers.json", tid, ttype
-                    )
+                    logger.info("Loaded trigger '%s' (%s) from triggers.json", tid, ttype)
 
             if session.available_triggers:
-                await self._emit_trigger_events(
-                    session, "available", session.available_triggers
-                )
+                await self._emit_trigger_events(session, "available", session.available_triggers)
 
             # Start runtime on event loop
             if runtime and not runtime.is_running:

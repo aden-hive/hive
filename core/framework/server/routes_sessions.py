@@ -431,7 +431,10 @@ async def handle_update_trigger_task(request: web.Request) -> web.Response:
     tdef.task = task
 
     # Persist to session state and agent definition
-    from framework.tools.queen_lifecycle_tools import _persist_active_triggers, _save_trigger_to_agent
+    from framework.tools.queen_lifecycle_tools import (
+        _persist_active_triggers,
+        _save_trigger_to_agent,
+    )
 
     if trigger_id in getattr(session, "active_trigger_ids", set()):
         session_id = request.match_info["session_id"]
