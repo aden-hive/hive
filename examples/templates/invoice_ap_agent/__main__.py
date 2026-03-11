@@ -1,0 +1,129 @@
+"""CLI entry point for Invoice & AP Automation Agent."""
+
+import asyncio
+import json
+import logging
+import sys
+
+import click
+
+from .agent import InvoiceAPAgent, default_agent
+
+
+def setup_logging(verbose=False, debug=False):
+    if debug:
+        level, fmt = logging.DEBUG, "%(asctime)s %(name)s: %(message)s"
+    elif verbose:
+        level, fmt = logging.INFO, "%(message)s"
+    else:
+        level, fmt = logging.WARNING, "%(levelname)s: %(message)s"
+    logging.basicConfig(level=level, format=fmt, stream=sys.stderr)
+
+
+@click.group()
+@click.version_option(version="1.0.0")
+def cli():
+    """Invoice & AP Automation Agent — extract, validate, approve, and post invoices."""
+    pass
+
+
+@cli.command()
+@click.option("--invoice", "-i", "invoice_input", help="Invoice file path or content")
+@click.option("--verbose", "-v", is_flag=True)
+def run(invoice_input, verbose):
+    """Execute the agent to process an invoice."""
+    setup_logging(verbose=verbose)
+    result = asyncio.run(default_agent.run({"invoice_source": invoice_input or ""}))
+    click.echo(
+        json.dumps(
+            {"success": result.success, "output": result.output},
+            indent=2,
+            default=str,
+        )
+    )
+    sys.exit(0 if result.success else 1)
+
+
+@cli.command()
+@click.option("--verbose", "-v", is_flag=True)
+def tui(verbose):
+    """Launch TUI dashboard."""
+    from pathlib import Path
+
+    from framework.llm import LiteLLMProvider
+    from framework.runner.tool_registry import ToolRegistry
+    from framework.runtime.agent_runtime import create_agent_runtime
+    from framework.runtime.execution_stream import EntryPointSpec
+    from framework.tui.app import AdenTUI
+
+    async def run_tui():
+        agent = InvoiceAPAgent()
+        agent._tool_registry = ToolRegistry()
+        storage = Path.home() / ".hive" / "agents" / "invoice_ap_agent"
+        storage.mkdir(parents=True, exist_ok=True)
+        mcp_cfg = Path(__file__).parent / "mcp_servers.json"
+        if mcp_cfg.exists():
+            agent._tool_registry.load_mcp_config(mcp_cfg)
+        llm = LiteLLMProvider(
+            model=agent.config.model,
+            api_key=agent.config.api_key,
+            api_base=agent.config.api_base,
+        )
+        runtime = create_agent_runtime(
+            graph=agent._build_graph(),
+            goal=agent.goal,
+            storage_path=storage,
+            entry_points=[
+                EntryPointSpec(
+                    id="start",
+                    name="Process Invoice",
+                    entry_node="intake",
+                    trigger_type="manual",
+                    isolation_level="isolated",
+                )
+            ],
+            llm=llm,
+            tools=list(agent._tool_registry.get_tools().values()),
+            tool_executor=agent._tool_registry.get_executor(),
+        )
+        await runtime.start()
+        try:
+            app = AdenTUI(runtime)
+            await app.run_async()
+        finally:
+            await runtime.stop()
+
+    asyncio.run(run_tui())
+
+
+@cli.command()
+def info():
+    """Show agent info."""
+    data = default_agent.info()
+    click.echo(
+        f"Agent: {data['name']}\nVersion: {data['version']}\nDescription: {data['description']}"
+    )
+    click.echo(f"Nodes: {', '.join(data['nodes'])}")
+    click.echo(f"Client-facing: {', '.join(data['client_facing_nodes'])}")
+    click.echo(f"HITL Gate: {data.get('hitl_gate', 'N/A')}")
+
+
+@cli.command()
+def validate():
+    """Validate agent structure."""
+    v = default_agent.validate()
+    if v["valid"]:
+        click.echo("Agent is valid")
+        if v.get("warnings"):
+            click.echo("Warnings:")
+            for w in v["warnings"]:
+                click.echo(f"  {w}")
+    else:
+        click.echo("Errors:")
+        for e in v["errors"]:
+            click.echo(f"  {e}")
+    sys.exit(0 if v["valid"] else 1)
+
+
+if __name__ == "__main__":
+    cli()
