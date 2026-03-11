@@ -94,6 +94,15 @@ def sessions_dir(session: Session) -> Path:
     return Path.home() / ".hive" / "agents" / agent_name / "sessions"
 
 
+def queen_session_dir(session: Session) -> Path:
+    """Resolve the queen session directory (chat, uploads, etc.).
+
+    Works for any session; storage is ~/.hive/queen/session/{session_id}.
+    """
+    storage_id = getattr(session, "queen_resume_from", None) or session.id
+    return Path.home() / ".hive" / "queen" / "session" / storage_id
+
+
 # Allowed CORS origins (localhost on any port)
 _CORS_ORIGINS = {"http://localhost", "http://127.0.0.1"}
 

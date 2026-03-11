@@ -1,7 +1,22 @@
 import { memo, useState, useRef, useEffect } from "react";
-import { Send, Square, Crown, Cpu, Check, Loader2 } from "lucide-react";
+import { Send, Square, Crown, Cpu, Check, Loader2, Plus, X } from "lucide-react";
 import MarkdownContent from "@/components/MarkdownContent";
 import QuestionWidget from "@/components/QuestionWidget";
+
+const ALLOWED_EXTENSIONS = [".pdf", ".doc", ".docx", ".txt"];
+const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10 MB
+const MAX_ATTACHMENTS = 5;
+
+function isFileAllowed(file: File): { ok: true } | { ok: false; error: string } {
+  const ext = "." + (file.name.split(".").pop() || "").toLowerCase();
+  if (!ALLOWED_EXTENSIONS.includes(ext)) {
+    return { ok: false, error: `"${file.name}": use PDF, DOC, DOCX, or TXT` };
+  }
+  if (file.size > MAX_FILE_SIZE) {
+    return { ok: false, error: `"${file.name}": max size 10 MB` };
+  }
+  return { ok: true };
+}
 
 export interface ChatMessage {
   id: string;
@@ -19,7 +34,7 @@ export interface ChatMessage {
 
 interface ChatPanelProps {
   messages: ChatMessage[];
-  onSend: (message: string, thread: string) => void;
+  onSend: (message: string, thread: string, files?: File[]) => void;
   isWaiting?: boolean;
   /** When true a worker is thinking (not yet streaming) */
   isWorkerWaiting?: boolean;
@@ -224,11 +239,15 @@ const MessageBubble = memo(function MessageBubble({ msg, queenPhase }: { msg: Ch
 
 export default function ChatPanel({ messages, onSend, isWaiting, isWorkerWaiting, isBusy, activeThread, disabled, onCancel, pendingQuestion, pendingOptions, onQuestionSubmit, onQuestionDismiss, queenPhase }: ChatPanelProps) {
   const [input, setInput] = useState("");
+  const [attachments, setAttachments] = useState<File[]>([]);
+  const [attachError, setAttachError] = useState<string | null>(null);
+  const [isDragging, setIsDragging] = useState(false);
   const [readMap, setReadMap] = useState<Record<string, number>>({});
   const bottomRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const stickToBottom = useRef(true);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const threadMessages = messages.filter((m) => {
     if (m.type === "system" && !m.thread) return false;
@@ -263,13 +282,45 @@ export default function ChatPanel({ messages, onSend, isWaiting, isWorkerWaiting
     stickToBottom.current = true;
   }, [activeThread]);
 
+  const addFiles = (files: FileList | null) => {
+    if (!files?.length) return;
+    setAttachError(null);
+    const next: File[] = [];
+    const errs: string[] = [];
+    for (let i = 0; i < files.length && attachments.length + next.length < MAX_ATTACHMENTS; i++) {
+      const file = files[i];
+      const result = isFileAllowed(file);
+      if (result.ok) next.push(file);
+      else errs.push(result.error);
+    }
+    if (files.length > 0 && next.length === 0 && errs.length > 0) {
+      setAttachError(errs[0]);
+      return;
+    }
+    if (attachments.length + next.length > MAX_ATTACHMENTS) {
+      setAttachError(`Max ${MAX_ATTACHMENTS} files`);
+    }
+    setAttachments((prev) => [...prev, ...next].slice(0, MAX_ATTACHMENTS));
+  };
+
+  const removeAttachment = (index: number) => {
+    setAttachments((prev) => prev.filter((_, i) => i !== index));
+    setAttachError(null);
+  };
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!input.trim()) return;
-    onSend(input.trim(), activeThread);
+    const text = input.trim();
+    if (!text && attachments.length === 0) return;
+    onSend(text, activeThread, attachments.length > 0 ? attachments : undefined);
     setInput("");
+    setAttachments([]);
+    setAttachError(null);
     if (textareaRef.current) textareaRef.current.style.height = "auto";
   };
+
+  const canSend = (input.trim().length > 0 || attachments.length > 0) && !disabled;
+  const isDropTarget = isDragging && !disabled;
 
   return (
     <div className="flex flex-col h-full min-w-0">
@@ -341,44 +392,123 @@ export default function ChatPanel({ messages, onSend, isWaiting, isWorkerWaiting
         />
       ) : (
         <form onSubmit={handleSubmit} className="p-4">
-          <div className="flex items-center gap-3 bg-muted/40 rounded-xl px-4 py-2.5 border border-border focus-within:border-primary/40 transition-colors">
-            <textarea
-              ref={textareaRef}
-              rows={1}
-              value={input}
-              onChange={(e) => {
-                setInput(e.target.value);
-                const ta = e.target;
-                ta.style.height = "auto";
-                ta.style.height = `${Math.min(ta.scrollHeight, 160)}px`;
-              }}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" && !e.shiftKey) {
-                  e.preventDefault();
-                  handleSubmit(e);
-                }
-              }}
-              placeholder={disabled ? "Connecting to agent..." : "Message Queen Bee..."}
-              disabled={disabled}
-              className="flex-1 bg-transparent text-sm text-foreground outline-none placeholder:text-muted-foreground disabled:opacity-50 disabled:cursor-not-allowed resize-none overflow-y-auto"
-            />
-            {isBusy && onCancel ? (
+          <div
+            className={`flex flex-col gap-2 rounded-xl border transition-colors ${isDropTarget ? "border-primary bg-primary/5" : "border-border bg-muted/40"}`}
+            onDragOver={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              if (!disabled) setIsDragging(true);
+            }}
+            onDragLeave={(e) => {
+              e.preventDefault();
+              if (!e.currentTarget.contains(e.relatedTarget as Node)) setIsDragging(false);
+            }}
+            onDrop={(e) => {
+              e.preventDefault();
+              setIsDragging(false);
+              if (disabled) return;
+              addFiles(e.dataTransfer.files);
+            }}
+          >
+            {attachments.length > 0 && (
+              <div className="flex flex-wrap items-center gap-2 px-4 pt-2">
+                {attachments.map((file, i) => (
+                  <span
+                    key={`${file.name}-${file.size}-${i}`}
+                    className="inline-flex items-center gap-1.5 text-xs bg-muted/80 text-foreground rounded-lg pl-2.5 pr-1 py-1 border border-border"
+                  >
+                    <span className="max-w-[120px] truncate" title={file.name}>{file.name}</span>
+                    <button
+                      type="button"
+                      onClick={() => removeAttachment(i)}
+                      className="p-0.5 rounded hover:bg-muted-foreground/20"
+                      aria-label="Remove attachment"
+                    >
+                      <X className="w-3 h-3" />
+                    </button>
+                  </span>
+                ))}
+                {attachError && (
+                  <span className="text-xs text-destructive" role="alert">{attachError}</span>
+                )}
+              </div>
+            )}
+            <div className="flex items-center gap-3 px-4 py-2.5">
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept=".pdf,.doc,.docx,.txt"
+                multiple
+                className="hidden"
+                onChange={(e) => {
+                  addFiles(e.target.files);
+                  e.target.value = "";
+                }}
+              />
               <button
                 type="button"
-                onClick={onCancel}
-                className="p-2 rounded-lg bg-amber-500/15 text-amber-400 border border-amber-500/40 hover:bg-amber-500/25 transition-colors"
+                onClick={() => fileInputRef.current?.click()}
+                disabled={disabled || attachments.length >= MAX_ATTACHMENTS}
+                className="p-2 rounded-lg text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-40 disabled:cursor-not-allowed"
+                title="Upload files (PDF, DOC, DOCX, or TXT — max 10 MB, drag & drop supported)"
               >
-                <Square className="w-4 h-4" />
+                <Plus className="w-4 h-4" />
               </button>
-            ) : (
-              <button
-                type="submit"
-                disabled={!input.trim() || disabled}
-                className="p-2 rounded-lg bg-primary text-primary-foreground disabled:opacity-30 hover:opacity-90 transition-opacity"
-              >
-                <Send className="w-4 h-4" />
-              </button>
-            )}
+              <textarea
+                ref={textareaRef}
+                rows={1}
+                value={input}
+                onChange={(e) => {
+                  setInput(e.target.value);
+                  const ta = e.target;
+                  ta.style.height = "auto";
+                  ta.style.height = `${Math.min(ta.scrollHeight, 160)}px`;
+                }}
+                onDragOver={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  if (!disabled) setIsDragging(true);
+                }}
+                onDragLeave={(e) => {
+                  e.preventDefault();
+                  if (!(e.currentTarget as HTMLTextAreaElement).contains(e.relatedTarget as Node)) {
+                    setIsDragging(false);
+                  }
+                }}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  setIsDragging(false);
+                  if (disabled) return;
+                  addFiles(e.dataTransfer.files);
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && !e.shiftKey) {
+                    e.preventDefault();
+                    handleSubmit(e);
+                  }
+                }}
+                placeholder={disabled ? "Connecting to agent..." : "Message Queen Bee... (or attach files)"}
+                disabled={disabled}
+                className="flex-1 bg-transparent text-sm text-foreground outline-none placeholder:text-muted-foreground disabled:opacity-50 disabled:cursor-not-allowed resize-none overflow-y-auto"
+              />
+              {isBusy && onCancel ? (
+                <button
+                  type="button"
+                  onClick={onCancel}
+                  className="p-2 rounded-lg bg-amber-500/15 text-amber-400 border border-amber-500/40 hover:bg-amber-500/25 transition-colors"
+                >
+                  <Square className="w-4 h-4" />
+                </button>
+              ) : (
+                <button
+                  type="submit"
+                  disabled={!canSend}
+                  className="p-2 rounded-lg bg-primary text-primary-foreground disabled:opacity-30 hover:opacity-90 transition-opacity"
+                >
+                  <Send className="w-4 h-4" />
+                </button>
+              )}
+            </div>
           </div>
         </form>
       )}

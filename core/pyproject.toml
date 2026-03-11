@@ -16,7 +16,11 @@ dependencies = [
 
 [project.optional-dependencies]
 webhook = ["aiohttp>=3.9.0"]
-server = ["aiohttp>=3.9.0"]
+server = [
+  "aiohttp>=3.9.0",
+  "pypdf>=4.0.0",
+  "python-docx>=1.0.0",
+]
 testing = [
   "pytest>=8.0",
   "pytest-asyncio>=0.23",

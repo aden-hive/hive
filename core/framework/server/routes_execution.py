@@ -8,7 +8,13 @@ from typing import Any
 from aiohttp import web
 
 from framework.credentials.validation import validate_agent_credentials
-from framework.server.app import resolve_session, safe_path_segment, sessions_dir
+from framework.server.app import queen_session_dir, resolve_session, safe_path_segment, sessions_dir
+from framework.server.file_uploads import (
+    MAX_FILES_PER_UPLOAD,
+    build_message_with_attachments,
+    save_upload,
+    validate_file,
+)
 from framework.server.routes_sessions import _credential_error_response
 
 logger = logging.getLogger(__name__)
@@ -108,7 +114,7 @@ async def handle_chat(request: web.Request) -> web.Response:
     The input box is permanently connected to the queen agent.
     Worker input is handled separately via /worker-input.
 
-    Body: {"message": "hello"}
+    Body: {"message": "hello", "attachment_ids": ["id1", "id2"]?}
     """
     session, err = resolve_session(request)
     if err:
@@ -116,9 +122,17 @@ async def handle_chat(request: web.Request) -> web.Response:
 
     body = await request.json()
     message = body.get("message", "")
+    attachment_ids = body.get("attachment_ids") or []
 
-    if not message:
-        return web.json_response({"error": "message is required"}, status=400)
+    if not message and not attachment_ids:
+        return web.json_response({"error": "message or attachment_ids required"}, status=400)
+
+    # If we have attachments, prepend their extracted text to the message
+    if attachment_ids:
+        uploads_dir = queen_session_dir(session) / "uploads"
+        message = build_message_with_attachments(message or "", uploads_dir, attachment_ids)
+    else:
+        message = message or ""
 
     queen_executor = session.queen_executor
     if queen_executor is not None:
@@ -145,6 +159,70 @@ async def handle_chat(request: web.Request) -> web.Response:
     except Exception as e:
         logger.error("Failed to revive queen: %s", e)
         return web.json_response({"error": "Queen not available"}, status=503)
+
+
+async def handle_upload(request: web.Request) -> web.Response:
+    """POST /api/sessions/{session_id}/uploads — upload file(s) for chat attachments.
+
+    Multipart form with one or more "file" parts. Returns list of {file_id, filename, size}.
+    """
+    session, err = resolve_session(request)
+    if err:
+        return err
+
+    uploads_dir = queen_session_dir(session) / "uploads"
+    results = []
+    errors = []
+
+    try:
+        reader = await request.multipart()
+        count = 0
+        async for part in reader:
+            if part.name != "file":
+                continue
+            count += 1
+            if count > MAX_FILES_PER_UPLOAD:
+                errors.append(f"Maximum {MAX_FILES_PER_UPLOAD} files per upload")
+                break
+            filename = part.filename or "attachment"
+            # Safe path: no path separators in filename
+            if "/" in filename or "\\" in filename:
+                filename = filename.replace("\\", "/").split("/")[-1]
+            data = b""
+            while True:
+                chunk = await part.read()
+                if not chunk:
+                    break
+                data += chunk
+                if len(data) > 10 * 1024 * 1024:  # 10 MB
+                    errors.append(f"{filename}: file too large")
+                    data = b""
+                    break
+            if not data:
+                if not any(filename in e for e in errors):
+                    errors.append(f"{filename}: empty or too large")
+                continue
+            content_type = part.headers.get("Content-Type")
+            try:
+                validate_file(filename, content_type, len(data))
+            except ValueError as e:
+                errors.append(f"{filename}: {e}")
+                continue
+            try:
+                file_id, _path = save_upload(uploads_dir, filename, data)
+                results.append({"file_id": file_id, "filename": filename, "size": len(data)})
+            except Exception as e:
+                errors.append(f"{filename}: {e}")
+    except Exception as e:
+        logger.exception("Upload failed: %s", e)
+        return web.json_response({"error": str(e)}, status=400)
+
+    if errors and not results:
+        return web.json_response(
+            {"error": "Upload failed", "details": errors},
+            status=400,
+        )
+    return web.json_response({"files": results, "errors": errors if errors else None})
 
 
 async def handle_queen_context(request: web.Request) -> web.Response:
@@ -497,6 +575,7 @@ def register_routes(app: web.Application) -> None:
     app.router.add_post("/api/sessions/{session_id}/trigger", handle_trigger)
     app.router.add_post("/api/sessions/{session_id}/inject", handle_inject)
     app.router.add_post("/api/sessions/{session_id}/chat", handle_chat)
+    app.router.add_post("/api/sessions/{session_id}/uploads", handle_upload)
     app.router.add_post("/api/sessions/{session_id}/queen-context", handle_queen_context)
     app.router.add_post("/api/sessions/{session_id}/worker-input", handle_worker_input)
     app.router.add_post("/api/sessions/{session_id}/pause", handle_pause)

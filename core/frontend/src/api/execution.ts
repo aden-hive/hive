@@ -34,8 +34,32 @@ export const executionApi = {
       graph_id: graphId,
     }),
 
-  chat: (sessionId: string, message: string) =>
-    api.post<ChatResult>(`/sessions/${sessionId}/chat`, { message }),
+  chat: (sessionId: string, message: string, attachmentIds?: string[]) =>
+    api.post<ChatResult>(`/sessions/${sessionId}/chat`, {
+      message,
+      ...(attachmentIds?.length ? { attachment_ids: attachmentIds } : {}),
+    }),
+
+  /** Upload files for chat attachments. Returns file_ids to pass to chat(). */
+  uploadFiles: async (
+    sessionId: string,
+    files: File[],
+  ): Promise<{ files: { file_id: string; filename: string; size: number }[]; errors?: string[] }> => {
+    const { ApiError } = await import("./client");
+    const formData = new FormData();
+    for (const f of files) formData.append("file", f);
+    const res = await fetch(`/api/sessions/${sessionId}/uploads`, {
+      method: "POST",
+      body: formData,
+      // Do not set Content-Type — browser sets multipart boundary
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      const msg = data.details ? `${data.error}: ${(data.details as string[]).join("; ")}` : (data.error as string) || res.statusText;
+      throw new ApiError(res.status, { error: msg, ...data });
+    }
+    return data;
+  },
 
   /** Queue context for the queen without triggering an LLM response. */
   queenContext: (sessionId: string, message: string) =>

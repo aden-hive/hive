@@ -1891,7 +1891,7 @@ export default function Workspace() {
     });
 
   // --- handleSend ---
-  const handleSend = useCallback((text: string, thread: string) => {
+  const handleSend = useCallback((text: string, thread: string, files?: File[]) => {
     if (!activeSession) return;
     const state = agentStates[activeWorker];
 
@@ -1967,22 +1967,61 @@ export default function Workspace() {
     suppressIntroRef.current.delete(activeWorker);
     updateAgentState(activeWorker, { isTyping: true, queenIsTyping: true });
 
-    if (state?.sessionId && state?.ready) {
-      executionApi.chat(state.sessionId, text).catch((err: unknown) => {
-        const errMsg = err instanceof Error ? err.message : String(err);
-        const errorChatMsg: ChatMessage = {
-          id: makeId(), agent: "System", agentColor: "",
-          content: `Failed to send message: ${errMsg}`,
-          timestamp: "", type: "system", thread, createdAt: Date.now(),
-        };
-        setSessionsByAgent(prev => ({
-          ...prev,
-          [activeWorker]: prev[activeWorker].map(s =>
-            s.id === activeSession.id ? { ...s, messages: [...s.messages, errorChatMsg] } : s
-          ),
-        }));
-        updateAgentState(activeWorker, { isTyping: false, isStreaming: false, queenIsTyping: false });
-      });
+    const sessionId = state?.sessionId;
+    if (sessionId && state?.ready) {
+      (async () => {
+        let attachmentIds: string[] | undefined;
+        if (files?.length) {
+          try {
+            const up = await executionApi.uploadFiles(sessionId, files);
+            attachmentIds = up.files.map((f) => f.file_id);
+            if (up.errors?.length) {
+              const errPreview = up.errors.slice(0, 2).join("; ");
+              const errorChatMsg: ChatMessage = {
+                id: makeId(), agent: "System", agentColor: "",
+                content: `Some files could not be uploaded: ${errPreview}`,
+                timestamp: "", type: "system", thread, createdAt: Date.now(),
+              };
+              setSessionsByAgent(prev => ({
+                ...prev,
+                [activeWorker]: prev[activeWorker].map(s =>
+                  s.id === activeSession.id ? { ...s, messages: [...s.messages, errorChatMsg] } : s
+                ),
+              }));
+            }
+          } catch (err: unknown) {
+            const errMsg = err instanceof Error ? err.message : String(err);
+            const errorChatMsg: ChatMessage = {
+              id: makeId(), agent: "System", agentColor: "",
+              content: `Upload failed: ${errMsg}`,
+              timestamp: "", type: "system", thread, createdAt: Date.now(),
+            };
+            setSessionsByAgent(prev => ({
+              ...prev,
+              [activeWorker]: prev[activeWorker].map(s =>
+                s.id === activeSession.id ? { ...s, messages: [...s.messages, errorChatMsg] } : s
+              ),
+            }));
+            updateAgentState(activeWorker, { isTyping: false, isStreaming: false, queenIsTyping: false });
+            return;
+          }
+        }
+        executionApi.chat(sessionId, text, attachmentIds).catch((err: unknown) => {
+          const errMsg = err instanceof Error ? err.message : String(err);
+          const errorChatMsg: ChatMessage = {
+            id: makeId(), agent: "System", agentColor: "",
+            content: `Failed to send message: ${errMsg}`,
+            timestamp: "", type: "system", thread, createdAt: Date.now(),
+          };
+          setSessionsByAgent(prev => ({
+            ...prev,
+            [activeWorker]: prev[activeWorker].map(s =>
+              s.id === activeSession.id ? { ...s, messages: [...s.messages, errorChatMsg] } : s
+            ),
+          }));
+          updateAgentState(activeWorker, { isTyping: false, isStreaming: false, queenIsTyping: false });
+        });
+      })();
     } else {
       const errorMsg: ChatMessage = {
         id: makeId(), agent: "System", agentColor: "",
