@@ -1302,8 +1302,6 @@ export default function Workspace() {
   const handleSSEEvent = useCallback(
     (agentType: string, event: AgentEvent) => {
       const streamId = event.stream_id;
-      if (streamId === "judge") return;
-
       const isQueen = streamId === "queen";
       if (isQueen) console.log('[QUEEN] handleSSEEvent:', event.type, 'agentType:', agentType);
       // Drop queen message content while suppressing the auto-intro after a cold-restore.
@@ -2342,7 +2340,7 @@ export default function Workspace() {
   const closeAgentTab = useCallback((agentType: string) => {
     setSelectedNode(null);
     // Pause worker execution if running (saves checkpoint), then kill the
-    // entire backend session so the queen and judge don't keep running.
+    // entire backend session so the queen doesn't keep running.
     const state = agentStates[agentType];
     if (state?.sessionId) {
       const pausePromise = (state.currentExecutionId && state.workerRunState === "running")

@@ -7,7 +7,6 @@ Architecture:
 - Session owns EventBus + LLM, shared with queen and worker
 - Queen is always present once a session starts
 - Worker is optional — loaded into an existing session
-- Judge is active only when a worker is loaded
 """
 
 import asyncio
@@ -44,8 +43,7 @@ class Session:
     worker_info: Any | None = None  # AgentInfo
     # Queen phase state (building/staging/running)
     phase_state: Any = None  # QueenPhaseState
-    # Judge (active when worker is loaded)
-    judge_task: asyncio.Task | None = None
+    # Escalation subscriptions
     escalation_sub: str | None = None
     worker_handoff_sub: str | None = None
     # Memory consolidation subscription (fires on CONTEXT_COMPACTED)
@@ -217,8 +215,8 @@ class SessionManager:
     ) -> None:
         """Load a worker agent into a session (core logic).
 
-        Sets up the runner, runtime, and session fields. Does NOT start the
-        judge or notify the queen — callers handle those steps.
+        Sets up the runner, runtime, and session fields. Does NOT notify
+        the queen — callers handle that step.
         """
         from framework.runner import AgentRunner
 
@@ -407,7 +405,7 @@ class SessionManager:
     ) -> Session:
         """Load a worker agent into an existing session (with running queen).
 
-        Starts the worker runtime, health judge, and notifies the queen.
+        Starts the worker runtime and notifies the queen.
         """
         agent_path = Path(agent_path)
 
@@ -423,9 +421,7 @@ class SessionManager:
         )
 
         # Notify queen about the loaded worker (skip for queen itself).
-        # Health judge disabled for simplicity.
         if agent_path.name != "queen" and session.worker_runtime:
-            # await self._start_judge(session, session.runner._storage_path)
             await self._notify_queen_worker_loaded(session)
 
         # Restore previously active triggers from persisted session state
@@ -479,9 +475,6 @@ class SessionManager:
             return False
         if session.worker_runtime is None:
             return False
-
-        # Stop judge + escalation
-        self._stop_judge(session)
 
         # Cleanup worker
         if session.runner:
@@ -540,8 +533,6 @@ class SessionManager:
         _storage_id = getattr(session, "queen_resume_from", None) or session_id
         _session_dir = Path.home() / ".hive" / "queen" / "session" / _storage_id
 
-        # Stop judge
-        self._stop_judge(session)
         if session.worker_handoff_sub is not None:
             try:
                 session.event_bus.unsubscribe(session.worker_handoff_sub)
@@ -607,7 +598,7 @@ class SessionManager:
 
     async def _handle_worker_handoff(self, session: Session, executor: Any, event: Any) -> None:
         """Route worker escalation events into the queen conversation."""
-        if event.stream_id in ("queen", "judge"):
+        if event.stream_id == "queen":
             return
 
         reason = str(event.data.get("reason", "")).strip()
@@ -722,116 +713,6 @@ class SessionManager:
             event_types=[_ET.CONTEXT_COMPACTED],
             handler=_on_compaction,
         )
-
-    # ------------------------------------------------------------------
-    # Judge startup / teardown
-    # ------------------------------------------------------------------
-
-    async def _start_judge(
-        self,
-        session: Session,
-        worker_storage_path: str | Path,
-    ) -> None:
-        """Start the health judge for a session's worker."""
-        from framework.graph.executor import GraphExecutor
-        from framework.monitoring import judge_goal, judge_graph
-        from framework.runner.tool_registry import ToolRegistry
-        from framework.runtime.core import Runtime
-        from framework.runtime.event_bus import EventType as _ET
-        from framework.tools.worker_monitoring_tools import register_worker_monitoring_tools
-
-        worker_storage_path = Path(worker_storage_path)
-
-        try:
-            # Monitoring tools
-            monitoring_registry = ToolRegistry()
-            register_worker_monitoring_tools(
-                monitoring_registry,
-                session.event_bus,
-                worker_storage_path,
-                worker_graph_id=session.worker_runtime._graph_id,
-            )
-
-            hive_home = Path.home() / ".hive"
-            judge_dir = hive_home / "judge" / "session" / session.id
-            judge_dir.mkdir(parents=True, exist_ok=True)
-
-            judge_runtime = Runtime(hive_home / "judge")
-            monitoring_tools = list(monitoring_registry.get_tools().values())
-            monitoring_executor = monitoring_registry.get_executor()
-
-            async def _judge_loop():
-                interval = 300  # 5 minutes between checks
-                # Wait before the first check — let the worker actually do something
-                await asyncio.sleep(interval)
-                while True:
-                    try:
-                        executor = GraphExecutor(
-                            runtime=judge_runtime,
-                            llm=session.llm,
-                            tools=monitoring_tools,
-                            tool_executor=monitoring_executor,
-                            event_bus=session.event_bus,
-                            stream_id="judge",
-                            storage_path=judge_dir,
-                            loop_config=judge_graph.loop_config,
-                        )
-                        await executor.execute(
-                            graph=judge_graph,
-                            goal=judge_goal,
-                            input_data={
-                                "event": {"source": "timer", "reason": "scheduled"},
-                            },
-                            session_state={"resume_session_id": session.id},
-                        )
-                    except Exception:
-                        logger.error("Health judge tick failed", exc_info=True)
-                    await asyncio.sleep(interval)
-
-            session.judge_task = asyncio.create_task(_judge_loop())
-
-            # Escalation: judge → queen
-            async def _on_escalation(event):
-                ticket = event.data.get("ticket", {})
-                executor = session.queen_executor
-                if executor is None:
-                    logger.warning("Escalation received but queen executor is None")
-                    return
-                node = executor.node_registry.get("queen")
-                if node is not None and hasattr(node, "inject_event"):
-                    msg = "[ESCALATION TICKET from Health Judge]\n" + json.dumps(
-                        ticket, indent=2, ensure_ascii=False
-                    )
-                    await node.inject_event(msg)
-                else:
-                    logger.warning("Escalation received but queen node not ready")
-
-            session.escalation_sub = session.event_bus.subscribe(
-                event_types=[_ET.WORKER_ESCALATION_TICKET],
-                handler=_on_escalation,
-            )
-
-            logger.info("Judge started for session '%s'", session.id)
-
-        except Exception as e:
-            logger.error(
-                "Failed to start judge for session '%s': %s",
-                session.id,
-                e,
-                exc_info=True,
-            )
-
-    def _stop_judge(self, session: Session) -> None:
-        """Cancel judge task and unsubscribe escalation events."""
-        if session.judge_task is not None:
-            session.judge_task.cancel()
-            session.judge_task = None
-        if session.escalation_sub is not None:
-            try:
-                session.event_bus.unsubscribe(session.escalation_sub)
-            except Exception:
-                pass
-            session.escalation_sub = None
 
     # ------------------------------------------------------------------
     # Queen notifications

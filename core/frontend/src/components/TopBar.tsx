@@ -51,7 +51,7 @@ export default function TopBar({ tabs: tabsProp, onTabClick, onCloseTab, canClos
       onCloseTab(agentType);
       return;
     }
-    // Kill the backend session (queen/judge/worker) even outside workspace
+    // Kill the backend session (queen/worker) even outside workspace
     sessionsApi.list()
       .then(({ sessions }) => {
         const match = sessions.find(s => s.agent_path === agentType);
