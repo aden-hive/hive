@@ -1574,7 +1574,14 @@ class AgentRunner:
         has_client_facing = any(n.client_facing for n in self.graph.nodes)
         sub_ids: list[str] = []
 
-        if has_client_facing and sys.stdin.isatty():
+        if has_client_facing and not sys.stdin.isatty():
+            logger.warning(
+                "Agent has client-facing nodes but stdin is not a terminal. "
+                "Input will be read from stdin (pipe/redirect). "
+                "If the agent hangs, it is waiting for user input on stdin."
+            )
+
+        if has_client_facing:
             from framework.runtime.event_bus import EventType
 
             runtime = self._agent_runtime
@@ -1594,10 +1601,15 @@ class AgentRunner:
                     loop = asyncio.get_event_loop()
                     user_input = await loop.run_in_executor(None, input, "\n>>> ")
                 except EOFError:
-                    user_input = ""
+                    logger.warning(
+                        "stdin reached EOF (non-TTY mode). "
+                        "This agent requires interactive input. Use `hive tui` instead."
+                    )
+                    runtime.signal_node_shutdown(node_id)
+                    return
 
                 # Inject into the waiting EventLoopNode via runtime
-                await runtime.inject_input(node_id, user_input)
+                await runtime.inject_input(node_id, user_input, is_client_input=True)
 
             sub_ids.append(
                 runtime.subscribe_to_events(

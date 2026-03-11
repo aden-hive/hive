@@ -71,6 +71,15 @@ def register_commands(subparsers: argparse._SubParsersAction) -> None:
         default=None,
         help="Resume from a specific checkpoint (requires --resume-session)",
     )
+    run_parser.add_argument(
+        "--non-interactive",
+        "-n",
+        action="store_true",
+        help=(
+            "Fail immediately if the agent has client_facing nodes that require "
+            "interactive input. Use `hive tui` for interactive agents."
+        ),
+    )
     run_parser.set_defaults(func=cmd_run)
 
     # info command
@@ -434,6 +443,20 @@ def cmd_run(args: argparse.Namespace) -> int:
     except FileNotFoundError as e:
         print(f"Error: {e}", file=sys.stderr)
         return 1
+
+    # Fail fast if --non-interactive is set and the agent has client_facing nodes
+    if getattr(args, "non_interactive", False):
+        interactive_nodes = [n.name for n in runner.graph.nodes if n.client_facing]
+        if interactive_nodes:
+            nodes_str = ", ".join(interactive_nodes)
+            print(
+                f"Error: This agent has interactive nodes ({nodes_str}) and cannot "
+                "run in non-interactive mode.\n"
+                "  Use `hive tui` for interactive sessions.\n"
+                "  To run headlessly, set client_facing=False in your agent definition.",
+                file=sys.stderr,
+            )
+            return 1
 
     # Prompt before starting (allows credential updates)
     if sys.stdin.isatty() and not args.quiet:

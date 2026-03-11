@@ -1442,6 +1442,25 @@ class AgentRuntime:
                     return True
         return False
 
+    def signal_node_shutdown(self, node_id: str) -> bool:
+        """Signal a specific node to exit its loop cleanly.
+
+        Used when stdin hits EOF in non-TTY mode to avoid degraded empty-string loops.
+        Returns True if the node was found and signaled.
+        """
+        target = self._active_graph_id
+        if target in self._graphs:
+            for stream in self._graphs[target].streams.values():
+                if stream.signal_node_shutdown(node_id):
+                    return True
+        for gid, reg in self._graphs.items():
+            if gid == target:
+                continue
+            for stream in reg.streams.values():
+                if stream.signal_node_shutdown(node_id):
+                    return True
+        return False
+
     async def get_goal_progress(self) -> dict[str, Any]:
         """
         Evaluate goal progress across all streams.

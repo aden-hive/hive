@@ -225,6 +225,43 @@ The differences are in the **access pattern**, not the runtime behavior.
 
 ---
 
+## Run Modes and `client_facing` Nodes
+
+A node with `client_facing=True` streams its LLM output to the end user in real time and can call `ask_user()` to block and wait for a reply. Whether that works depends on how the agent is launched:
+
+| Run mode | stdin available | `client_facing` works? |
+|---|---|---|
+| `hive tui` | yes (TUI widget) | yes — intended use case |
+| `hive run` (interactive terminal) | yes (shell prompt) | yes — reads from terminal |
+| `hive run -f file.json` (headless) | no (pipe/redirect) | partial — reads from stdin if pipe attached; fails cleanly on EOF |
+| `hive run ... --non-interactive` | n/a | no — fails immediately with clear error before any LLM calls |
+| HTTP server (`POST /chat`) | n/a | yes — injected via `/inject` endpoint |
+| CI / Docker (no stdin) | EOF | no — signals clean shutdown after EOF with warning |
+
+### Headless execution with `client_facing` agents
+
+Running a `client_facing` agent headlessly (e.g., `hive run -f input.json` in CI or Docker) will either:
+
+- **Read from stdin** if a pipe is attached: `echo "my answer" | hive run my_agent/ -f input.json`
+- **Signal clean shutdown** if stdin hits EOF, logging: `stdin reached EOF (non-TTY mode). This agent requires interactive input. Use hive tui instead.`
+
+To detect incompatibility early — before any LLM calls are made — use `--non-interactive`:
+
+```bash
+hive run my_agent/ -f input.json --non-interactive
+# Error: This agent has interactive nodes (intake) and cannot run in non-interactive mode.
+#   Use `hive tui` for interactive sessions.
+#   To run headlessly, set client_facing=False in your agent definition.
+```
+
+This exits immediately with code 1, consuming no API credits.
+
+### Designing agents for headless execution
+
+If your agent needs to run in CI or other non-interactive environments, set `client_facing=False` on all nodes and pass inputs via `--input` / `--input-file`. The node logic should read from `input_data` directly rather than calling `ask_user()`.
+
+---
+
 ## The AgentManager Bridge
 
 The only component unique to the HTTP server. It manages the lifecycle of multiple loaded agents within a single process.

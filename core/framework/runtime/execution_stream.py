@@ -425,6 +425,18 @@ class ExecutionStream:
                 return True
         return False
 
+    def signal_node_shutdown(self, node_id: str) -> bool:
+        """Signal a specific EventLoopNode to exit cleanly (e.g. on EOF).
+
+        Returns True if the node was found and signaled, False otherwise.
+        """
+        for executor in self._active_executors.values():
+            node = executor.node_registry.get(node_id)
+            if node is not None and hasattr(node, "signal_shutdown"):
+                node.signal_shutdown()
+                return True
+        return False
+
     async def execute(
         self,
         input_data: dict[str, Any],

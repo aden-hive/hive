@@ -117,6 +117,11 @@ if litellm is not None:
 RATE_LIMIT_MAX_RETRIES = 10
 RATE_LIMIT_BACKOFF_BASE = 2  # seconds
 RATE_LIMIT_MAX_DELAY = 120  # seconds - cap to prevent absurd waits
+# Total wall-clock budget for all rate-limit retries in a single stream call.
+# With 10 retries × up to 120 s each the uncapped worst case is ~20 min per
+# call; three node-layer stream retries multiply that to ~60 min.  This cap
+# guarantees the streaming retry loop gives up after at most 5 minutes total.
+RATE_LIMIT_MAX_RETRY_WALL_TIME = 300  # seconds
 MINIMAX_API_BASE = "https://api.minimax.io/v1"
 # Kimi For Coding uses an Anthropic-compatible endpoint (no /v1 suffix).
 # Claude Code integration uses this format; the /v1 OpenAI-compatible endpoint
@@ -927,6 +932,7 @@ class LiteLLMProvider(LLMProvider):
             kwargs.pop("max_tokens", None)
             kwargs.pop("stream_options", None)
 
+        _retry_start = time.monotonic()
         for attempt in range(RATE_LIMIT_MAX_RETRIES + 1):
             # Post-stream events (ToolCall, TextEnd, Finish) are buffered
             # because they depend on the full stream.  TextDeltaEvents are
@@ -1101,26 +1107,39 @@ class LiteLLMProvider(LLMProvider):
                 return
 
             except RateLimitError as e:
-                if attempt < RATE_LIMIT_MAX_RETRIES:
+                elapsed = time.monotonic() - _retry_start
+                if attempt < RATE_LIMIT_MAX_RETRIES and elapsed < RATE_LIMIT_MAX_RETRY_WALL_TIME:
                     wait = _compute_retry_delay(attempt, exception=e)
                     logger.warning(
                         f"[stream-retry] {self.model} rate limited (429): {e!s}. "
                         f"Retrying in {wait:.1f}s "
-                        f"(attempt {attempt + 1}/{RATE_LIMIT_MAX_RETRIES})"
+                        f"(attempt {attempt + 1}/{RATE_LIMIT_MAX_RETRIES}, "
+                        f"elapsed {elapsed:.0f}s/{RATE_LIMIT_MAX_RETRY_WALL_TIME}s)"
                     )
                     await asyncio.sleep(wait)
                     continue
+                if elapsed >= RATE_LIMIT_MAX_RETRY_WALL_TIME:
+                    logger.warning(
+                        f"[stream-retry] {self.model} rate-limit retry budget exhausted "
+                        f"({elapsed:.0f}s >= {RATE_LIMIT_MAX_RETRY_WALL_TIME}s). Giving up."
+                    )
                 yield StreamErrorEvent(error=str(e), recoverable=False)
                 return
 
             except Exception as e:
-                if _is_stream_transient_error(e) and attempt < RATE_LIMIT_MAX_RETRIES:
+                elapsed = time.monotonic() - _retry_start
+                if (
+                    _is_stream_transient_error(e)
+                    and attempt < RATE_LIMIT_MAX_RETRIES
+                    and elapsed < RATE_LIMIT_MAX_RETRY_WALL_TIME
+                ):
                     wait = _compute_retry_delay(attempt, exception=e)
                     logger.warning(
                         f"[stream-retry] {self.model} transient error "
                         f"({type(e).__name__}): {e!s}. "
                         f"Retrying in {wait:.1f}s "
-                        f"(attempt {attempt + 1}/{RATE_LIMIT_MAX_RETRIES})"
+                        f"(attempt {attempt + 1}/{RATE_LIMIT_MAX_RETRIES}, "
+                        f"elapsed {elapsed:.0f}s/{RATE_LIMIT_MAX_RETRY_WALL_TIME}s)"
                     )
                     await asyncio.sleep(wait)
                     continue
