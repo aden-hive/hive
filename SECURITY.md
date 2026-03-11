@@ -39,8 +39,8 @@ We consider security research conducted in accordance with this policy to be:
 ## Security Best Practices for Users
 
 1. **Keep Updated**: Always run the latest version
-2. **Secure Configuration**: Review `config.yaml` settings, especially in production
-3. **Environment Variables**: Never commit `.env` files or `config.yaml` with secrets
+2. **Secure Configuration**: Review `configuration.json` settings, especially in production
+3. **Environment Variables**: Never commit `.env` files or `configuration.json` with secrets
 4. **Network Security**: Use HTTPS in production, configure firewalls appropriately
 5. **Database Security**: Use strong passwords, limit network access
 
