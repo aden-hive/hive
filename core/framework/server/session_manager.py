@@ -43,8 +43,7 @@ class Session:
     worker_info: Any | None = None  # AgentInfo
     # Queen phase state (building/staging/running)
     phase_state: Any = None  # QueenPhaseState
-    # Escalation subscriptions
-    escalation_sub: str | None = None
+    # Worker handoff subscription
     worker_handoff_sub: str | None = None
     # Memory consolidation subscription (fires on CONTEXT_COMPACTED)
     memory_consolidation_sub: str | None = None

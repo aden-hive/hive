@@ -884,7 +884,6 @@ NOT ask the user directly.
 You wake up when:
 - The user explicitly addresses you
 - A worker escalation arrives (`[WORKER_ESCALATION_REQUEST]`)
-- An escalation ticket arrives from the judge
 - The worker finishes (`[WORKER_TERMINAL]`)
 
 If the user asks for progress, call get_worker_status() ONCE and report. \
@@ -1038,8 +1037,8 @@ ticket_triage_node = NodeSpec(
     id="ticket_triage",
     name="Ticket Triage",
     description=(
-        "Queen's triage node. Receives an EscalationTicket from the Health Judge "
-        "via event-driven entry point and decides: dismiss or notify the operator."
+        "Queen's triage node. Receives an EscalationTicket via event-driven "
+        "entry point and decides: dismiss or notify the operator."
     ),
     node_type="event_loop",
     client_facing=True,  # Operator can chat with queen once connected (Ctrl+Q)
@@ -1053,8 +1052,8 @@ ticket_triage_node = NodeSpec(
     ),
     tools=["notify_operator"],
     system_prompt="""\
-You are the Queen. The Worker Health Judge has escalated a worker \
-issue to you. The ticket is in your memory under key "ticket". Read it carefully.
+You are the Queen. A worker health issue has been escalated to you. \
+The ticket is in your memory under key "ticket". Read it carefully.
 
 ## Dismiss criteria — do NOT call notify_operator:
 - severity is "low" AND steps_since_last_accept < 8
@@ -1093,7 +1092,7 @@ queen_node = NodeSpec(
     description=(
         "User's primary interactive interface with full coding capability. "
         "Can build agents directly or delegate to the worker. Manages the "
-        "worker agent lifecycle and triages health escalations from the judge."
+        "worker agent lifecycle."
     ),
     node_type="event_loop",
     client_facing=True,

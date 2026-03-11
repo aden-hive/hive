@@ -104,7 +104,7 @@ class EventType(StrEnum):
     NODE_STALLED = "node_stalled"
     NODE_TOOL_DOOM_LOOP = "node_tool_doom_loop"
 
-    # Judge decisions
+    # Judge decisions (implicit judge in event loop nodes)
     JUDGE_VERDICT = "judge_verdict"
 
     # Output tracking
@@ -126,7 +126,7 @@ class EventType(StrEnum):
     # Escalation (agent requests handoff to queen)
     ESCALATION_REQUESTED = "escalation_requested"
 
-    # Worker health monitoring (judge → queen → operator)
+    # Worker health monitoring
     WORKER_ESCALATION_TICKET = "worker_escalation_ticket"
     QUEEN_INTERVENTION_REQUESTED = "queen_intervention_requested"
 
@@ -1001,7 +1001,7 @@ class EventBus:
         ticket: dict,
         execution_id: str | None = None,
     ) -> None:
-        """Emitted by health judge when worker shows a degradation pattern."""
+        """Emitted when worker shows a degradation pattern."""
         await self.publish(
             AgentEvent(
                 type=EventType.WORKER_ESCALATION_TICKET,

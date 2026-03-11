@@ -1359,8 +1359,8 @@ class AgentRuntime:
                 allowed_keys = set(entry_node.input_keys)
 
         # Search primary graph's streams for an active session.
-        # Skip isolated streams (e.g. health judge) — they have their own
-        # session directories and must never be used as a shared session.
+        # Skip isolated streams — they have their own session directories
+        # and must never be used as a shared session.
         all_streams: list[tuple[str, ExecutionStream]] = []
         for _gid, reg in self._graphs.items():
             for ep_id, stream in reg.streams.items():
