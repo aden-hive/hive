@@ -333,7 +333,7 @@ class LiteLLMProvider(LLMProvider):
         # Messages API handler and routes to that endpoint — no special headers needed.
         _original_model = model
         if model.lower().startswith("kimi/"):
-            model = "anthropic/" + model[len("kimi/"):]
+            model = "anthropic/" + model[len("kimi/") :]
             # Normalise api_base: litellm's Anthropic handler appends /v1/messages,
             # so the base must be https://api.kimi.com/coding (no /v1 suffix).
             # Strip a trailing /v1 in case the user's saved config has the old value.
