@@ -49,7 +49,7 @@ Write-Host "Using Python: $PythonCmd" -ForegroundColor Green
 Write-Host ""
 
 # Define modules to check
-$modules = @("framework", "aden_tools", "litellm", "framework.mcp.agent_builder_server")
+$modules = @("framework", "aden_tools", "litellm")
 
 # Benchmark old approach (individual subprocess calls)
 Write-Host "Testing OLD approach (individual subprocess calls)..." -ForegroundColor Yellow

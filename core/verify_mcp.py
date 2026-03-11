@@ -101,23 +101,7 @@ def main():
     else:
         success("all installed")
 
-    # Check 3: MCP server module
-    check("MCP server module")
-    try:
-        subprocess.run(
-            [sys.executable, "-c", "from framework.mcp import agent_builder_server"],
-            capture_output=True,
-            text=True,
-            check=True,
-            encoding="utf-8",
-        )
-        success("loads successfully")
-    except subprocess.CalledProcessError as e:
-        error("failed to import")
-        logger.error(f"  Error: {e.stderr}")
-        all_checks_passed = False
-
-    # Check 4: MCP configuration file
+    # Check 3: MCP configuration file
     check("MCP configuration file")
     mcp_config = script_dir / ".mcp.json"
     if mcp_config.exists():
@@ -125,14 +109,14 @@ def main():
             with open(mcp_config, encoding="utf-8") as f:
                 config = json.load(f)
 
-            if "mcpServers" in config and "agent-builder" in config["mcpServers"]:
-                server_config = config["mcpServers"]["agent-builder"]
+            if "mcpServers" in config:
                 success("found and valid")
-                logger.info(f"  Command: {server_config.get('command')}")
-                logger.info(f"  Args: {' '.join(server_config.get('args', []))}")
-                logger.info(f"  CWD: {server_config.get('cwd')}")
+                for name, server_config in config.get("mcpServers", {}).items():
+                    logger.info(f"  Server: {name}")
+                    logger.info(f"    Command: {server_config.get('command')}")
+                    logger.info(f"    Args: {' '.join(server_config.get('args', []))}")
             else:
-                warning("exists but missing agent-builder config")
+                warning("exists but missing mcpServers config")
                 all_checks_passed = False
         except json.JSONDecodeError:
             error("invalid JSON format")
@@ -140,9 +124,8 @@ def main():
     else:
         warning("not found (optional)")
         logger.info(f"  Location would be: {mcp_config}")
-        logger.info("  Run setup_mcp.py to create it")
 
-    # Check 5: Framework modules
+    # Check 4: Framework modules
     check("core framework modules")
     modules_to_check = [
         "framework.runtime.core",
@@ -170,46 +153,12 @@ def main():
     else:
         success(f"all {len(modules_to_check)} modules OK")
 
-    # Check 6: Test MCP server startup (quick test)
-    check("MCP server startup")
-    try:
-        # Try to import and instantiate the MCP server
-        result = subprocess.run(
-            [
-                sys.executable,
-                "-c",
-                "from framework.mcp.agent_builder_server import mcp; print('OK')",
-            ],
-            capture_output=True,
-            text=True,
-            check=True,
-            timeout=5,
-            encoding="utf-8",
-        )
-        if "OK" in result.stdout:
-            success("server can start")
-        else:
-            warning("unexpected output")
-    except subprocess.TimeoutExpired:
-        warning("server startup slow (might be OK)")
-    except subprocess.CalledProcessError as e:
-        error("server failed to start")
-        logger.error(f"  Error: {e.stderr}")
-        all_checks_passed = False
-
     logger.info("")
     logger.info("=" * 40)
     if all_checks_passed:
         logger.info(f"{Colors.GREEN}✓ All checks passed!{Colors.NC}")
         logger.info("")
-        logger.info("Your MCP server is ready to use.")
-        logger.info("")
-        logger.info(f"{Colors.BLUE}To start the server:{Colors.NC}")
-        logger.info("  uv run python -m framework.mcp.agent_builder_server")
-        logger.info("")
-        logger.info(f"{Colors.BLUE}To use with Claude Desktop:{Colors.NC}")
-        logger.info("  Add the configuration from .mcp.json to your")
-        logger.info("  Claude Desktop MCP settings")
+        logger.info("Your framework is ready to use.")
     else:
         logger.info(f"{Colors.RED}✗ Some checks failed{Colors.NC}")
         logger.info("")

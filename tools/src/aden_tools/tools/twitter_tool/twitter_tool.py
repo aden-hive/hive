@@ -219,3 +219,139 @@ def register_tools(mcp: FastMCP, credentials: Any = None) -> None:
             tweet["author_name"] = users[0].get("name")
             tweet["author_username"] = users[0].get("username")
         return tweet
+
+    @mcp.tool()
+    def twitter_get_user_followers(
+        user_id: str,
+        max_results: int = 25,
+    ) -> dict:
+        """Get followers of a Twitter/X user.
+
+        Args:
+            user_id: Twitter user ID (numeric string). Get from twitter_get_user.
+            max_results: Number of results (1-100, default 25).
+        """
+        headers = _get_headers()
+        if headers is None:
+            return {
+                "error": "X_BEARER_TOKEN is required",
+                "help": "Set X_BEARER_TOKEN environment variable",
+            }
+        if not user_id:
+            return {"error": "user_id is required"}
+
+        params: dict[str, Any] = {
+            "max_results": max(1, min(max_results, 100)),
+            "user.fields": USER_FIELDS,
+        }
+
+        data = _get(f"/users/{user_id}/followers", headers, params)
+        if "error" in data:
+            return data
+
+        followers = []
+        for u in data.get("data", []):
+            metrics = u.get("public_metrics", {})
+            followers.append(
+                {
+                    "id": u.get("id"),
+                    "name": u.get("name"),
+                    "username": u.get("username"),
+                    "description": (u.get("description") or "")[:200],
+                    "followers_count": metrics.get("followers_count", 0),
+                    "following_count": metrics.get("following_count", 0),
+                    "verified": u.get("verified"),
+                }
+            )
+        return {"count": len(followers), "followers": followers}
+
+    @mcp.tool()
+    def twitter_get_tweet_replies(
+        tweet_id: str,
+        max_results: int = 10,
+    ) -> dict:
+        """Get replies to a specific tweet using search.
+
+        Args:
+            tweet_id: Tweet ID to get replies for (numeric string).
+            max_results: Number of results (10-100, default 10).
+        """
+        headers = _get_headers()
+        if headers is None:
+            return {
+                "error": "X_BEARER_TOKEN is required",
+                "help": "Set X_BEARER_TOKEN environment variable",
+            }
+        if not tweet_id:
+            return {"error": "tweet_id is required"}
+
+        params: dict[str, Any] = {
+            "query": f"conversation_id:{tweet_id} is:reply",
+            "max_results": max(10, min(max_results, 100)),
+            "tweet.fields": TWEET_FIELDS,
+            "expansions": "author_id",
+            "user.fields": "name,username",
+        }
+
+        data = _get("/tweets/search/recent", headers, params)
+        if "error" in data:
+            return data
+
+        users_map = {}
+        for u in data.get("includes", {}).get("users", []):
+            users_map[u["id"]] = {"name": u.get("name"), "username": u.get("username")}
+
+        replies = []
+        for t in data.get("data", []):
+            reply = _extract_tweet(t)
+            author = users_map.get(t.get("author_id"), {})
+            reply["author_name"] = author.get("name")
+            reply["author_username"] = author.get("username")
+            replies.append(reply)
+
+        return {"tweet_id": tweet_id, "count": len(replies), "replies": replies}
+
+    @mcp.tool()
+    def twitter_get_list_tweets(
+        list_id: str,
+        max_results: int = 10,
+    ) -> dict:
+        """Get recent tweets from a Twitter/X list.
+
+        Args:
+            list_id: Twitter list ID (numeric string).
+            max_results: Number of results (1-100, default 10).
+        """
+        headers = _get_headers()
+        if headers is None:
+            return {
+                "error": "X_BEARER_TOKEN is required",
+                "help": "Set X_BEARER_TOKEN environment variable",
+            }
+        if not list_id:
+            return {"error": "list_id is required"}
+
+        params: dict[str, Any] = {
+            "max_results": max(1, min(max_results, 100)),
+            "tweet.fields": TWEET_FIELDS,
+            "expansions": "author_id",
+            "user.fields": "name,username",
+        }
+
+        data = _get(f"/lists/{list_id}/tweets", headers, params)
+        if "error" in data:
+            return data
+
+        users_map = {}
+        for u in data.get("includes", {}).get("users", []):
+            users_map[u["id"]] = {"name": u.get("name"), "username": u.get("username")}
+
+        tweets = []
+        for t in data.get("data", []):
+            tweet = _extract_tweet(t)
+            author = users_map.get(t.get("author_id"), {})
+            tweet["author_name"] = author.get("name")
+            tweet["author_username"] = author.get("username")
+            tweets.append(tweet)
+
+        return {"list_id": list_id, "count": len(tweets), "tweets": tweets}

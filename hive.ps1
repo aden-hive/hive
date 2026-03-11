@@ -78,5 +78,6 @@ if (-not $env:HIVE_CREDENTIAL_KEY) {
 }
 
 # ── Run the Hive CLI ────────────────────────────────────────────────
-
+# PYTHONUTF8=1: use UTF-8 for default encoding (fixes charmap decode errors on Windows)
+$env:PYTHONUTF8 = "1"
 & uv run hive @args

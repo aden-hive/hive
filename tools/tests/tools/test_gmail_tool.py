@@ -542,3 +542,193 @@ class TestCreateLabel:
 
         assert "error" in result
         assert "Request failed" in result["error"]
+
+
+# ---------------------------------------------------------------------------
+# gmail_create_draft
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def create_draft_fn(gmail_tools):
+    return gmail_tools["gmail_create_draft"]
+
+
+def _orig_message_response(
+    thread_id: str = "thread123",
+    message_id_header: str = "<orig-msg-id@mail.gmail.com>",
+    subject: str = "Hello there",
+    from_addr: str = "sender@example.com",
+    body_html: str = "<p>Original body</p>",
+) -> MagicMock:
+    """Mock response for fetching an original message (format=full)."""
+    import base64
+
+    encoded_body = base64.urlsafe_b64encode(body_html.encode()).decode()
+    return _mock_response(
+        200,
+        {
+            "threadId": thread_id,
+            "payload": {
+                "mimeType": "text/html",
+                "headers": [
+                    {"name": "Message-ID", "value": message_id_header},
+                    {"name": "Subject", "value": subject},
+                    {"name": "From", "value": from_addr},
+                    {"name": "Date", "value": "Mon, 1 Jan 2024 12:00:00 +0000"},
+                ],
+                "body": {"data": encoded_body},
+                "parts": [],
+            },
+        },
+    )
+
+
+class TestGmailCreateDraft:
+    """Tests for gmail_create_draft tool."""
+
+    # -- new draft (no reply) -------------------------------------------------
+
+    def test_no_credentials(self, create_draft_fn, monkeypatch):
+        monkeypatch.delenv("GOOGLE_ACCESS_TOKEN", raising=False)
+        result = create_draft_fn(html="<p>Hi</p>", to="a@b.com", subject="Hey")
+        assert "error" in result
+        assert "Gmail credentials not configured" in result["error"]
+
+    def test_missing_to(self, create_draft_fn, monkeypatch):
+        monkeypatch.setenv("GOOGLE_ACCESS_TOKEN", "tok")
+        result = create_draft_fn(html="<p>Hi</p>", subject="Hey")
+        assert "error" in result
+        assert "to" in result["error"].lower()
+
+    def test_missing_subject(self, create_draft_fn, monkeypatch):
+        monkeypatch.setenv("GOOGLE_ACCESS_TOKEN", "tok")
+        result = create_draft_fn(html="<p>Hi</p>", to="a@b.com")
+        assert "error" in result
+        assert "subject" in result["error"].lower()
+
+    def test_missing_html(self, create_draft_fn, monkeypatch):
+        monkeypatch.setenv("GOOGLE_ACCESS_TOKEN", "tok")
+        result = create_draft_fn(html="", to="a@b.com", subject="Hey")
+        assert "error" in result
+        assert "html" in result["error"].lower()
+
+    def test_new_draft_happy_path(self, create_draft_fn, monkeypatch):
+        monkeypatch.setenv("GOOGLE_ACCESS_TOKEN", "tok")
+        mock_resp = _mock_response(200, {"id": "draft1", "message": {"id": "msg1"}})
+        with patch(HTTPX_MODULE, return_value=mock_resp) as mock_req:
+            result = create_draft_fn(html="<p>Hi</p>", to="a@b.com", subject="Hey")
+
+        assert result["success"] is True
+        assert result["draft_id"] == "draft1"
+        assert result["message_id"] == "msg1"
+        assert "thread_id" not in result
+        # threadId should NOT be in the API body
+        body = mock_req.call_args[1]["json"]
+        assert "threadId" not in body["message"]
+
+    # -- reply draft ----------------------------------------------------------
+
+    def test_reply_draft_happy_path(self, create_draft_fn, monkeypatch):
+        monkeypatch.setenv("GOOGLE_ACCESS_TOKEN", "tok")
+        orig_resp = _orig_message_response()
+        draft_resp = _mock_response(200, {"id": "draft2", "message": {"id": "msg2"}})
+
+        calls = [orig_resp, draft_resp]
+        with patch(HTTPX_MODULE, side_effect=calls) as mock_req:
+            result = create_draft_fn(
+                html="<p>Reply</p>",
+                reply_to_message_id="origmsg123",
+            )
+
+        assert result["success"] is True
+        assert result["draft_id"] == "draft2"
+        assert result["thread_id"] == "thread123"
+
+        # Verify draft API call has threadId
+        draft_call = mock_req.call_args_list[1]
+        body = draft_call[1]["json"]
+        assert body["message"]["threadId"] == "thread123"
+
+        # Verify MIME headers and quoted body
+        import base64
+        import email
+
+        raw = base64.urlsafe_b64decode(body["message"]["raw"])
+        mime = email.message_from_bytes(raw)
+        assert mime["In-Reply-To"] == "<orig-msg-id@mail.gmail.com>"
+        assert mime["References"] == "<orig-msg-id@mail.gmail.com>"
+        assert mime["To"] == "sender@example.com"
+        assert mime["Subject"] == "Re: Hello there"
+
+        # Verify quoted original body is embedded
+        mime_body = mime.get_payload(decode=True)
+        if mime_body is None:
+            # multipart — find the html part
+            for part in mime.walk():
+                if part.get_content_type() == "text/html":
+                    mime_body = part.get_payload(decode=True)
+                    break
+        decoded_body = mime_body.decode("utf-8") if mime_body else ""
+        assert "<p>Reply</p>" in decoded_body
+        assert "gmail_quote" in decoded_body
+        assert "<p>Original body</p>" in decoded_body
+        assert "blockquote" in decoded_body
+
+    def test_reply_draft_subject_already_re(self, create_draft_fn, monkeypatch):
+        monkeypatch.setenv("GOOGLE_ACCESS_TOKEN", "tok")
+        orig_resp = _orig_message_response(subject="Re: Hello there")
+        draft_resp = _mock_response(200, {"id": "d3", "message": {"id": "m3"}})
+
+        with patch(HTTPX_MODULE, side_effect=[orig_resp, draft_resp]):
+            result = create_draft_fn(html="<p>x</p>", reply_to_message_id="origmsg")
+
+        # Extract subject from result — it should not be "Re: Re: Hello there"
+        assert result["success"] is True
+        # Check via MIME is covered by test_reply_draft_subject_no_double_re below.
+
+    def test_reply_draft_subject_no_double_re(self, create_draft_fn, monkeypatch):
+        monkeypatch.setenv("GOOGLE_ACCESS_TOKEN", "tok")
+        orig_resp = _orig_message_response(subject="Re: Hello there")
+        draft_resp = _mock_response(200, {"id": "d4", "message": {"id": "m4"}})
+
+        with patch(HTTPX_MODULE, side_effect=[orig_resp, draft_resp]) as mock_req:
+            create_draft_fn(html="<p>x</p>", reply_to_message_id="origmsg")
+
+        import base64
+        import email
+
+        body = mock_req.call_args_list[1][1]["json"]
+        raw = base64.urlsafe_b64decode(body["message"]["raw"])
+        mime = email.message_from_bytes(raw)
+        assert mime["Subject"] == "Re: Hello there"
+
+    def test_reply_draft_fetch_401(self, create_draft_fn, monkeypatch):
+        monkeypatch.setenv("GOOGLE_ACCESS_TOKEN", "tok")
+        orig_resp = _mock_response(401)
+        with patch(HTTPX_MODULE, return_value=orig_resp):
+            result = create_draft_fn(html="<p>x</p>", reply_to_message_id="origmsg")
+        assert "error" in result
+        assert "token" in result["error"].lower()
+
+    def test_reply_draft_fetch_404(self, create_draft_fn, monkeypatch):
+        monkeypatch.setenv("GOOGLE_ACCESS_TOKEN", "tok")
+        orig_resp = _mock_response(404)
+        with patch(HTTPX_MODULE, return_value=orig_resp):
+            result = create_draft_fn(html="<p>x</p>", reply_to_message_id="origmsg")
+        assert "error" in result
+
+    def test_reply_draft_network_error_on_fetch(self, create_draft_fn, monkeypatch):
+        monkeypatch.setenv("GOOGLE_ACCESS_TOKEN", "tok")
+        with patch(HTTPX_MODULE, side_effect=httpx.HTTPError("timeout")):
+            result = create_draft_fn(html="<p>x</p>", reply_to_message_id="origmsg")
+        assert "error" in result
+        assert "fetch" in result["error"].lower()
+
+    def test_reply_draft_api_error_on_create(self, create_draft_fn, monkeypatch):
+        monkeypatch.setenv("GOOGLE_ACCESS_TOKEN", "tok")
+        orig_resp = _orig_message_response()
+        draft_resp = _mock_response(500, text="internal error")
+        with patch(HTTPX_MODULE, side_effect=[orig_resp, draft_resp]):
+            result = create_draft_fn(html="<p>x</p>", reply_to_message_id="origmsg")
+        assert "error" in result

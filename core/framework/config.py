@@ -6,6 +6,7 @@ helper functions.
 """
 
 import json
+import logging
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -18,6 +19,7 @@ from framework.graph.edge import DEFAULT_MAX_TOKENS
 # ---------------------------------------------------------------------------
 
 HIVE_CONFIG_FILE = Path.home() / ".hive" / "configuration.json"
+logger = logging.getLogger(__name__)
 
 
 def get_hive_config() -> dict[str, Any]:
@@ -27,7 +29,12 @@ def get_hive_config() -> dict[str, Any]:
     try:
         with open(HIVE_CONFIG_FILE, encoding="utf-8-sig") as f:
             return json.load(f)
-    except (json.JSONDecodeError, OSError):
+    except (json.JSONDecodeError, OSError) as e:
+        logger.warning(
+            "Failed to load Hive config %s: %s",
+            HIVE_CONFIG_FILE,
+            e,
+        )
         return {}
 
 
@@ -83,6 +90,17 @@ def get_api_key() -> str | None:
         except ImportError:
             pass
 
+    # Kimi Code subscription: read API key from ~/.kimi/config.toml
+    if llm.get("use_kimi_code_subscription"):
+        try:
+            from framework.runner.runner import get_kimi_code_token
+
+            token = get_kimi_code_token()
+            if token:
+                return token
+        except ImportError:
+            pass
+
     # Standard env-var path (covers ZAI Code and all API-key providers)
     api_key_env_var = llm.get("api_key_env_var")
     if api_key_env_var:
@@ -92,7 +110,7 @@ def get_api_key() -> str | None:
 
 def get_gcu_enabled() -> bool:
     """Return whether GCU (browser automation) is enabled in user config."""
-    return get_hive_config().get("gcu_enabled", False)
+    return get_hive_config().get("gcu_enabled", True)
 
 
 def get_api_base() -> str | None:
@@ -101,6 +119,9 @@ def get_api_base() -> str | None:
     if llm.get("use_codex_subscription"):
         # Codex subscription routes through the ChatGPT backend, not api.openai.com.
         return "https://chatgpt.com/backend-api/codex"
+    if llm.get("use_kimi_code_subscription"):
+        # Kimi Code uses an Anthropic-compatible endpoint (no /v1 suffix).
+        return "https://api.kimi.com/coding"
     return llm.get("api_base")
 
 

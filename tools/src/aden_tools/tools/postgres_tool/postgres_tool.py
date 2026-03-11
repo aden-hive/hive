@@ -532,3 +532,223 @@ def register_tools(
                 },
             )
             return _error_response("Failed to explain query")
+
+    @mcp.tool()
+    def pg_get_table_stats(schema: str = "public") -> dict:
+        """
+        Get row counts and size statistics for tables in a schema.
+
+        Args:
+            schema: Schema name (default 'public')
+
+        Returns:
+            dict with table stats: name, estimated_rows, total_size, index_size
+        """
+        database_url = _get_database_url(credentials)
+        if not database_url:
+            return _missing_credential_response()
+
+        try:
+            with _get_connection(database_url) as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        """
+                        SELECT
+                            t.tablename AS table_name,
+                            c.reltuples::bigint AS estimated_rows,
+                            pg_size_pretty(pg_total_relation_size(
+                                quote_ident(t.schemaname) || '.' || quote_ident(t.tablename)
+                            )) AS total_size,
+                            pg_size_pretty(pg_indexes_size(
+                                quote_ident(t.schemaname) || '.' || quote_ident(t.tablename)
+                            )) AS index_size,
+                            pg_total_relation_size(
+                                quote_ident(t.schemaname) || '.' || quote_ident(t.tablename)
+                            ) AS total_bytes
+                        FROM pg_tables t
+                        JOIN pg_class c ON c.relname = t.tablename
+                        JOIN pg_namespace n ON n.oid = c.relnamespace
+                            AND n.nspname = t.schemaname
+                        WHERE t.schemaname = %s
+                        ORDER BY pg_total_relation_size(
+                            quote_ident(t.schemaname) || '.' || quote_ident(t.tablename)
+                        ) DESC
+                        """,
+                        (schema,),
+                    )
+                    rows = cur.fetchall()
+
+            result = [
+                {
+                    "table": r[0],
+                    "estimated_rows": r[1],
+                    "total_size": r[2],
+                    "index_size": r[3],
+                    "total_bytes": r[4],
+                }
+                for r in rows
+            ]
+
+            return {"schema": schema, "result": result, "success": True}
+
+        except psycopg.Error:
+            return _error_response("Failed to get table stats")
+
+    @mcp.tool()
+    def pg_list_indexes(schema: str, table: str) -> dict:
+        """
+        List indexes on a specific table.
+
+        Args:
+            schema: Schema name
+            table: Table name
+
+        Returns:
+            dict with indexes: name, columns, unique, type, size
+        """
+        database_url = _get_database_url(credentials)
+        if not database_url:
+            return _missing_credential_response()
+
+        try:
+            with _get_connection(database_url) as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        """
+                        SELECT
+                            i.relname AS index_name,
+                            array_to_string(array_agg(a.attname ORDER BY k.n), ', ') AS columns,
+                            ix.indisunique AS is_unique,
+                            ix.indisprimary AS is_primary,
+                            am.amname AS index_type,
+                            pg_size_pretty(pg_relation_size(i.oid)) AS index_size
+                        FROM pg_index ix
+                        JOIN pg_class t ON t.oid = ix.indrelid
+                        JOIN pg_class i ON i.oid = ix.indexrelid
+                        JOIN pg_namespace n ON n.oid = t.relnamespace
+                        JOIN pg_am am ON am.oid = i.relam
+                        CROSS JOIN LATERAL unnest(ix.indkey) WITH ORDINALITY AS k(attnum, n)
+                        JOIN pg_attribute a ON a.attrelid = t.oid AND a.attnum = k.attnum
+                        WHERE n.nspname = %s AND t.relname = %s
+                        GROUP BY i.relname, ix.indisunique, ix.indisprimary, am.amname, i.oid
+                        ORDER BY i.relname
+                        """,
+                        (schema, table),
+                    )
+                    rows = cur.fetchall()
+
+            result = [
+                {
+                    "name": r[0],
+                    "columns": r[1],
+                    "unique": r[2],
+                    "primary": r[3],
+                    "type": r[4],
+                    "size": r[5],
+                }
+                for r in rows
+            ]
+
+            return {"schema": schema, "table": table, "result": result, "success": True}
+
+        except psycopg.Error:
+            return _error_response("Failed to list indexes")
+
+    @mcp.tool()
+    def pg_get_foreign_keys(schema: str, table: str) -> dict:
+        """
+        Get foreign key relationships for a table.
+
+        Shows both outgoing (this table references) and incoming (other tables
+        reference this table) foreign key constraints.
+
+        Args:
+            schema: Schema name
+            table: Table name
+
+        Returns:
+            dict with outgoing and incoming foreign keys
+        """
+        database_url = _get_database_url(credentials)
+        if not database_url:
+            return _missing_credential_response()
+
+        try:
+            with _get_connection(database_url) as conn:
+                with conn.cursor() as cur:
+                    # Outgoing foreign keys (this table references others)
+                    cur.execute(
+                        """
+                        SELECT
+                            tc.constraint_name,
+                            kcu.column_name,
+                            ccu.table_schema AS ref_schema,
+                            ccu.table_name AS ref_table,
+                            ccu.column_name AS ref_column
+                        FROM information_schema.table_constraints tc
+                        JOIN information_schema.key_column_usage kcu
+                            ON tc.constraint_name = kcu.constraint_name
+                            AND tc.table_schema = kcu.table_schema
+                        JOIN information_schema.constraint_column_usage ccu
+                            ON ccu.constraint_name = tc.constraint_name
+                        WHERE tc.constraint_type = 'FOREIGN KEY'
+                            AND tc.table_schema = %s
+                            AND tc.table_name = %s
+                        ORDER BY tc.constraint_name
+                        """,
+                        (schema, table),
+                    )
+                    outgoing = [
+                        {
+                            "constraint": r[0],
+                            "column": r[1],
+                            "references_schema": r[2],
+                            "references_table": r[3],
+                            "references_column": r[4],
+                        }
+                        for r in cur.fetchall()
+                    ]
+
+                    # Incoming foreign keys (other tables reference this table)
+                    cur.execute(
+                        """
+                        SELECT
+                            tc.constraint_name,
+                            tc.table_schema AS source_schema,
+                            tc.table_name AS source_table,
+                            kcu.column_name AS source_column,
+                            ccu.column_name AS referenced_column
+                        FROM information_schema.table_constraints tc
+                        JOIN information_schema.key_column_usage kcu
+                            ON tc.constraint_name = kcu.constraint_name
+                            AND tc.table_schema = kcu.table_schema
+                        JOIN information_schema.constraint_column_usage ccu
+                            ON ccu.constraint_name = tc.constraint_name
+                        WHERE tc.constraint_type = 'FOREIGN KEY'
+                            AND ccu.table_schema = %s
+                            AND ccu.table_name = %s
+                        ORDER BY tc.constraint_name
+                        """,
+                        (schema, table),
+                    )
+                    incoming = [
+                        {
+                            "constraint": r[0],
+                            "source_schema": r[1],
+                            "source_table": r[2],
+                            "source_column": r[3],
+                            "referenced_column": r[4],
+                        }
+                        for r in cur.fetchall()
+                    ]
+
+            return {
+                "schema": schema,
+                "table": table,
+                "outgoing": outgoing,
+                "incoming": incoming,
+                "success": True,
+            }
+
+        except psycopg.Error:
+            return _error_response("Failed to get foreign keys")

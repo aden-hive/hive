@@ -145,7 +145,7 @@ Implement the core execution engine where every Agent operates as an isolated, a
     - [x] SharedState manager (runtime/shared_state.py)
     - [x] Session-based storage (storage/session_store.py)
     - [x] Isolation levels: ISOLATED, SHARED, SYNCHRONIZED
-- [ ] **Default Monitoring Hooks**
+- [x] **Default Monitoring Hooks**
     - [ ] Performance metrics collection
     - [ ] Resource usage tracking
     - [ ] Health check endpoints
@@ -218,7 +218,7 @@ Implement the Goal Creation Session via the Queen Bee and the dynamic Worker Age
     - [x] Test case generation
     - [x] Test case validation for worker agent
 - [x] **Agent Creation Flow**
-    - [x] Hive Coder reads templates and discovers tools (mcp/agent_builder_server.py)
+    - [x] Hive Coder reads templates and discovers tools (builder/package_generator.py)
     - [x] Generates agent.py, nodes/__init__.py, config.py
     - [x] MCP server configuration discovery
     - [x] Dynamic tool binding
@@ -312,11 +312,11 @@ Ship essential framework utilities: Node validation, HITL (Human-in-the-loop pau
     - [x] Pause/approve workflow
     - [x] State saved to checkpoint
     - [x] Resume with HITLResponse merged into context
-- [x] **TUI Integration**
-    - [x] Chat REPL with streaming support (tui/app.py)
-    - [x] Multi-graph session management
-    - [x] User presence detection
-    - [x] Real-time log viewing
+- [x] ~~**TUI Integration**~~ *(deprecated — see AGENTS.md; use `hive open` browser UI instead)*
+    - [x] ~~Chat REPL with streaming support (tui/app.py)~~
+    - [x] ~~Multi-graph session management~~
+    - [x] ~~User presence detection~~
+    - [x] ~~Real-time log viewing~~
 - [x] **Node Lifecycle Management**
     - [x] Start/stop/pause/resume in execution stream
     - [x] State persistence via checkpoint store
@@ -330,7 +330,7 @@ Ship essential framework utilities: Node validation, HITL (Human-in-the-loop pau
 Port popular tools, and build out the Runtime Log, Audit Trail, Excel, and Email integrations.
 
 - [x] **File Operations (36+ tools)**
-    - [x] read_file, write_file, edit_file (mcp/agent_builder_server.py)
+    - [x] read_file, write_file, edit_file (builder/package_generator.py)
     - [x] list_directory, search_files
     - [x] apply_diff / apply_patch for code modification (tools/file_system_toolkits/)
     - [x] data_tools (CSV/Excel parsing)
@@ -435,7 +435,7 @@ Enforce session-local memory isolation to prevent data bleed between concurrent 
 Implement File I/O support, streaming mode, and allow users to supply custom functions as libraries/nodes.
 
 - [x] **File I/O**
-    - [x] File read/write operations (mcp/agent_builder_server.py)
+    - [x] File read/write operations (builder/package_generator.py)
     - [x] File system navigation
     - [x] Directory listing and search
 - [x] **Execution Streaming**
@@ -443,7 +443,7 @@ Implement File I/O support, streaming mode, and allow users to supply custom fun
     - [x] Token-by-token output via event bus
     - [x] Tool call streaming
 - [x] **Custom Tool Integration**
-    - [x] MCP server discovery (mcp/agent_builder_server.py)
+    - [x] MCP server discovery (builder/package_generator.py)
     - [x] Dynamic tool binding
     - [x] Custom tool registration
 - [ ] **Streaming Mode Enhancements**
@@ -461,7 +461,7 @@ Implement File I/O support, streaming mode, and allow users to supply custom fun
 Add semantic search capabilities and an interactive file system for frontend product integration.
 
 - [x] **File Search**
-    - [x] search_files tool (mcp/agent_builder_server.py)
+    - [x] search_files tool (builder/package_generator.py)
     - [x] Directory traversal
 - [ ] **Semantic Search**
     - [ ] Semantic indexing of files
@@ -538,11 +538,11 @@ Release CLI tools specifically for rapid memory management and credential store 
     - [x] test-run, test-debug, test-list, test-stats (testing/cli.py)
     - [x] Pytest integration
     - [x] Test categorization
-- [x] **TUI (Terminal UI)**
-    - [x] Interactive chat with streaming (tui/app.py)
-    - [x] Multi-graph management UI
-    - [x] Log pane for real-time output
-    - [x] Keyboard shortcuts (Ctrl+C, Ctrl+D, etc.)
+- [x] ~~**TUI (Terminal UI)**~~ *(deprecated — see AGENTS.md; use `hive open` browser UI instead)*
+    - [x] ~~Interactive chat with streaming (tui/app.py)~~
+    - [x] ~~Multi-graph management UI~~
+    - [x] ~~Log pane for real-time output~~
+    - [x] ~~Keyboard shortcuts (Ctrl+C, Ctrl+D, etc.)~~
 - [ ] **Memory Management CLI**
     - [ ] Memory inspection commands
     - [ ] Memory cleanup utilities
@@ -590,7 +590,7 @@ Write the Quick Start guide, detailed tool usage documentation, and set up the M
     - [x] README with examples
     - [x] Contributing guidelines
     - [x] GitHub Page setup
-- [ ] **Tool Usage Documentation**
+- [x] **Tool Usage Documentation**
     - [ ] Comprehensive tool documentation
     - [ ] Tool integration examples
     - [ ] Best practices guide
@@ -643,7 +643,7 @@ Expose basic REST/WebSocket endpoints for external control (Start, Stop, Pause, 
     - [x] Load/unload/start/restart in AgentRuntime
     - [x] State persistence
     - [x] Recovery mechanisms
-- [ ] **REST API Endpoints**
+- [x] **REST API Endpoints**
     - [ ] Start endpoint for agent execution
     - [ ] Stop endpoint for graceful shutdown
     - [ ] Pause endpoint for execution suspension
@@ -661,7 +661,7 @@ Implement automated test execution, agent version control, and mandatory test-pa
     - [x] Test framework with pytest integration (testing/)
     - [x] Test result reporting
     - [x] Test CLI commands (test-run, test-debug, etc.)
-- [ ] **Automated Testing Pipeline**
+- [x] **Automated Testing Pipeline**
     - [ ] CI integration (GitHub Actions, etc.)
     - [ ] Mandatory test-passing gates
     - [ ] Coverage reporting
@@ -735,7 +735,7 @@ Ship ~20 ready-to-use templates including GTM Sales, Marketing, Analytics, Train
 Build a lightweight local server (e.g., FastAPI or Node) that securely exposes the Hive framework's core Event Bus and Memory Layer to the local browser environment.
 
 - [x] **MCP Server Foundation**
-    - [x] FastMCP server implementation (mcp/agent_builder_server.py)
+    - [x] FastMCP server implementation (builder/package_generator.py)
     - [x] Agent builder tools exposed
     - [x] Port 4001 exposed in Docker
 - [x] **Event Bus Architecture**
@@ -776,12 +776,14 @@ Implement an interactive, drag-and-drop canvas (using libraries like React Flow)
 ### TUI to GUI Upgrade
 Port the existing Terminal User Interface (TUI) into a rich web application, allowing users to interact directly with the Queen Bee / Coding Agent via a browser chat interface.
 
-- [x] **TUI Foundation**
-    - [x] Terminal chat interface (tui/app.py)
-    - [x] Streaming support
-    - [x] Multi-graph management
-    - [x] Log pane display
-    - [x] Keyboard shortcuts
+> **Note:** The TUI (`hive tui` / `tui/app.py`) is deprecated and no longer maintained (see AGENTS.md). The items below reflect legacy work completed before deprecation. New development should target the browser-based GUI (`hive open`).
+
+- [x] ~~**TUI Foundation**~~ *(deprecated)*
+    - [x] ~~Terminal chat interface (tui/app.py)~~
+    - [x] ~~Streaming support~~
+    - [x] ~~Multi-graph management~~
+    - [x] ~~Log pane display~~
+    - [x] ~~Keyboard shortcuts~~
 - [ ] **Web Application**
     - [ ] Modern web UI framework setup (React/Vue/Svelte)
     - [ ] Responsive design implementation
@@ -802,7 +804,7 @@ Create a UI component to inspect the Shared Memory and Write-Through Conversatio
 
 - [x] **Runtime Logs Tool**
     - [x] Inspect agent session logs (tools/runtime_logs_tool/)
-    - [x] Session state retrieval (mcp/agent_builder_server.py)
+    - [x] Session state retrieval (builder/package_generator.py)
 - [ ] **Memory Inspector UI**
     - [ ] Shared Memory visualization
     - [ ] Conversation memory view (NodeConversation display)
@@ -873,7 +875,7 @@ Build native frontend configurations to easily connect Open Hive's backend to lo
     - [ ] Node.js runtime support
     - [ ] Browser runtime support
 - [ ] **Platform Compatibility**
-    - [ ] Windows support improvements
+    - [x] Windows support improvements
     - [ ] macOS optimization
     - [ ] Linux distribution support
 

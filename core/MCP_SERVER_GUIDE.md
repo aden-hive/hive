@@ -1,17 +1,16 @@
-# MCP Server Guide - Agent Builder
+# MCP Server Guide - Agent Building Tools
 
-This guide covers the MCP (Model Context Protocol) server for building goal-driven agents.
+> **Note:** The standalone `agent-builder` MCP server (`framework.mcp.agent_builder_server`) has been replaced. Agent building is now done via the `coder-tools` server's `initialize_and_build_agent` tool, with underlying logic in `tools/coder_tools_server.py`.
+
+This guide covers the MCP tools available for building goal-driven agents.
 
 ## Setup
 
 ### Quick Setup
 
 ```bash
-# Using the setup script (recommended)
-python setup_mcp.py
-
-# Or using bash
-./setup_mcp.sh
+# Run the quickstart script (recommended)
+./quickstart.sh
 ```
 
 ### Manual Configuration
@@ -21,10 +20,10 @@ Add to your MCP client configuration (e.g., Claude Desktop):
 ```json
 {
   "mcpServers": {
-    "agent-builder": {
-      "command": "python",
-      "args": ["-m", "framework.mcp.agent_builder_server"],
-      "cwd": "/path/to/goal-agent"
+    "coder-tools": {
+      "command": "uv",
+      "args": ["run", "coder_tools_server.py", "--stdio"],
+      "cwd": "/path/to/hive/tools"
     }
   }
 }
