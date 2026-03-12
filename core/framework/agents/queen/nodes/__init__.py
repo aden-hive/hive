@@ -338,11 +338,23 @@ Read reference agents before designing:
   read_file("exports/deep_research_agent/agent.py")
   read_file("exports/deep_research_agent/nodes/__init__.py")
 
-**IMPORTANT: Call save_agent_draft() to create the draft graph.** \
-This sends the graph to the visualizer so the user can see a color-coded \
-flowchart immediately — before any code is written. The draft captures \
-business logic (node purposes, data flow, tools) without requiring \
-executable code. Include in each node: id, name, description, planned tools, \
+**IMPORTANT: Call save_agent_draft() early and often.** \
+The flowchart is a live collaboration artifact, not a final deliverable. \
+Call save_agent_draft() as soon as you have a rough shape — even before \
+all details are finalized. Then **update it interactively** as the \
+conversation progresses:
+
+- After the user gives feedback ("add a validation step", "split that node") \
+→ immediately call save_agent_draft() with the updated graph so they see \
+the change reflected in the visualizer.
+- After you refine your understanding of requirements → update the draft.
+- When the user asks "what about X?" and it changes the design → update.
+- Don't wait until everything is perfect — iterate visually with the user.
+
+The flowchart is the shared canvas. Every structural change should be \
+visible to the user immediately. The draft captures business logic \
+(node purposes, data flow, tools) without requiring executable code. \
+Include in each node: id, name, description, planned tools, \
 input/output keys, and success criteria as high-level hints.
 
 Each node is auto-classified into an ISO 5807 flowchart symbol type \
@@ -375,12 +387,15 @@ with a unique color. You can override auto-detection by setting \
 
 **Domain-specific:**
 - **browser** (dark indigo, hexagon): GCU browser automation
+- **subagent** (dark teal, subroutine): Planning-only sub-agent delegation \
+(dissolved into parent's sub_agents at build time)
 
 Auto-detection works well for most cases: first node → start, nodes with \
 no outgoing edges → terminal, nodes with multiple conditional outgoing \
 edges → decision, GCU nodes → browser, nodes mentioning "database" → \
 database, nodes mentioning "report/document" → document, etc. Set \
-flowchart_type explicitly only when auto-detection would be wrong.
+flowchart_type explicitly only when auto-detection would be wrong. \
+Note: `subagent` is never auto-detected — you must set it explicitly.
 
 ## Decision Nodes — Planning-Only Conditional Branching
 
@@ -417,6 +432,31 @@ gather → [Valid data?] →Yes→ transform → deliver
 ```
 In the draft: the `[Valid data?]` node has `flowchart_type: "decision"`, \
 `decision_clause: "Data passes validation checks?"`, with labeled yes/no edges.
+
+## Sub-Agent Nodes — Planning-Only Delegation
+
+Sub-agent nodes (dark teal subroutines) are **planning-only** visual elements \
+that show which nodes delegate to sub-agents. At `confirm_and_build()`, \
+sub-agent nodes are **dissolved** into their parent node:
+
+- The sub-agent node's ID is added to the predecessor's `sub_agents` list
+- The sub-agent node and its connecting edge are removed
+- At runtime, the parent node can invoke the sub-agent via `delegate_to_sub_agent`
+
+**Rules for sub-agent nodes:**
+- Set `flowchart_type: "subagent"` explicitly (never auto-detected)
+- Connect from the managing parent node to the sub-agent node
+- Sub-agent nodes must be **leaf nodes** — no outgoing edges
+- The sub-agent node's ID must match a real node ID in the runtime graph \
+(the node it represents will be invokable as a sub-agent)
+
+**How to show delegation in the flowchart:**
+```
+research → (deep_searcher)   ← subagent node, leaf
+research → [Enough results?] ← decision node
+```
+After dissolution: `research` node gets `sub_agents: ["deep_searcher"]` \
+and `success_criteria: "Enough results?"`.
 
 After calling save_agent_draft(), also present an ASCII graph in your message \
 alongside a brief summary of each node's purpose. The user sees both the \
@@ -659,11 +699,12 @@ node is auto-classified into a standard flowchart symbol (process, decision, \
 document, database, subprocess, etc.) with unique shapes and colors. Set \
 flowchart_type on a node to override. Nodes need only an id. \
 Use decision nodes (flowchart_type: "decision", with decision_clause and \
-labeled yes/no edges) to make conditional branching explicit in the flowchart.
+labeled yes/no edges) to make conditional branching explicit. \
+Use subagent nodes (flowchart_type: "subagent") as leaf nodes connected \
+to a parent to show sub-agent delegation visually.
 - confirm_and_build() — Record user confirmation of the draft. Dissolves \
-decision nodes into runtime-compatible structures (merging clauses into \
-predecessor criteria and rewiring edges). Call this ONLY after the user \
-explicitly approves the design via ask_user.
+planning-only nodes (decision → predecessor criteria; subagent → predecessor \
+sub_agents list). Call this ONLY after the user explicitly approves via ask_user.
 - initialize_and_build_agent(agent_name?, nodes?) — Scaffold the agent package \
 and transition to BUILDING phase. For new agents, this REQUIRES \
 save_agent_draft() + confirm_and_build() first. The draft metadata is used to \
@@ -696,6 +737,14 @@ list_agents, list_agent_sessions, \
 list_agent_checkpoints, get_agent_checkpoint
 - load_built_agent(agent_path) — Load the agent and switch to STAGING phase
 - list_credentials(credential_id?) — List authorized credentials
+- save_agent_draft(...) — **Re-draft the flowchart during building.** When \
+called during building, planning-only nodes (decision, subagent) are \
+dissolved automatically — no re-confirmation needed. The user sees the \
+updated flowchart immediately. Use this when you make structural changes \
+(add/remove nodes, change edges) so the flowchart stays in sync.
+- replan_agent() — Switch back to PLANNING phase. The previous draft is \
+restored (with decision/subagent nodes intact) so you can edit it. Use \
+when the user requests a major redesign that needs their approval.
 
 When you finish building an agent, call load_built_agent(path) to stage it.
 """
@@ -803,16 +852,24 @@ You are in planning mode. Your job is to:
 3. Discover available tools with list_agent_tools()
 4. Assess framework fit and gaps
 5. Consider multiple approaches and their trade-offs
-6. Design the agent graph — then call save_agent_draft() to create a visual \
-draft that the user can see in the graph visualizer
-7. Present the design alongside the draft and use ask_user to get explicit \
-user approval
-8. Call confirm_and_build() after the user approves
-9. Call initialize_and_build_agent(agent_name, nodes) to scaffold and start building
+6. Design the agent graph — call save_agent_draft() **as soon as you have a \
+rough shape**, even before finalizing all details
+7. **Iterate on the draft interactively** — every time the user gives feedback \
+that changes the structure, call save_agent_draft() again so they see the \
+update in real-time. The flowchart is a live collaboration tool.
+8. When the design is stable, use ask_user to get explicit approval
+9. Call confirm_and_build() after the user approves
+10. Call initialize_and_build_agent(agent_name, nodes) to scaffold and start building
+
+**The flowchart is your shared whiteboard.** Don't describe changes in text \
+and then ask "should I update the draft?" — just update it. If the user says \
+"add a validation step," immediately call save_agent_draft() with the new \
+node added. If they say "remove that," update and re-draft. The user should \
+see every structural change reflected in the visualizer as you discuss it.
 
 **CRITICAL: Planning → Building boundary.** You MUST get explicit user \
 confirmation before moving to building. The sequence is:
-  save_agent_draft() → present to user → ask_user() → confirm_and_build() → \
+  save_agent_draft() → iterate with user → ask_user() → confirm_and_build() → \
   initialize_and_build_agent()
 Skipping any of these steps will be blocked by the system.
 
@@ -867,6 +924,21 @@ run_agent_with_input(task) (if in staging) or load then run (if in building)
 subtasks to justify delegation.
 - Building, modifying, or configuring agents is ALWAYS your job. Never \
 delegate agent construction to the worker, even as a "research" subtask.
+
+## Keeping the flowchart in sync during building
+
+When you make structural changes to the agent (add/remove/rename nodes, \
+change edges, modify sub-agent assignments), call save_agent_draft() to \
+update the flowchart. During building, this auto-dissolves planning-only \
+nodes without needing user re-confirmation. The user sees the updated \
+flowchart immediately.
+
+- **Minor changes** (add a node, rename, adjust edges): call \
+save_agent_draft() with the updated graph and keep building.
+- **Major redesign** (user requests fundamental restructuring): call \
+replan_agent() to go back to planning. The previous draft is restored \
+so you can edit it with the user rather than starting from scratch. \
+After they approve, confirm_and_build() → continue building.
 """
 
 # -- STAGING phase behavior --
