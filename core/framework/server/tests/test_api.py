@@ -1504,6 +1504,62 @@ class TestCredentials:
             store = app["credential_store"]
             assert store.get_key("test_cred", "api_key") == "new-value"
 
+    @pytest.mark.asyncio
+    async def test_delete_aden_api_key_not_found(self):
+        """DELETE aden_api_key when the key doesn't exist returns 404."""
+        from unittest.mock import patch
+
+        app = self._make_app()
+        async with TestClient(TestServer(app)) as client:
+            with patch(
+                "framework.credentials.key_storage.delete_aden_api_key",
+                return_value=False,
+            ):
+                resp = await client.delete("/api/credentials/aden_api_key")
+            assert resp.status == 404
+            data = await resp.json()
+            assert "error" in data
+
+    @pytest.mark.asyncio
+    async def test_delete_aden_api_key_success(self):
+        """DELETE aden_api_key when the key exists returns 200 + deleted: true."""
+        from unittest.mock import patch
+
+        app = self._make_app()
+        async with TestClient(TestServer(app)) as client:
+            with patch(
+                "framework.credentials.key_storage.delete_aden_api_key",
+                return_value=True,
+            ):
+                resp = await client.delete("/api/credentials/aden_api_key")
+            assert resp.status == 200
+            data = await resp.json()
+            assert data["deleted"] is True
+
+    @pytest.mark.asyncio
+    async def test_check_agent_exception_returns_generic_error(self):
+        """handle_check_agent 500 must NOT leak raw exception text."""
+        from unittest.mock import patch
+
+        app = self._make_app()
+        secret_msg = "secret db password in /opt/hive/creds.json"
+        async with TestClient(TestServer(app)) as client:
+            with patch(
+                "framework.server.routes_credentials.validate_agent_path",
+                return_value=Path("/fake/agent"),
+            ), patch(
+                "framework.credentials.setup.load_agent_nodes",
+                side_effect=RuntimeError(secret_msg),
+            ):
+                resp = await client.post(
+                    "/api/credentials/check-agent",
+                    json={"agent_path": "/fake/agent", "verify": False},
+                )
+            assert resp.status == 500
+            data = await resp.json()
+            assert secret_msg not in json.dumps(data)
+            assert data["error"] == "Internal server error while checking credentials"
+
 
 class TestSSEFormat:
     """Tests for SSE event wire format -- events must be unnamed (data-only)
