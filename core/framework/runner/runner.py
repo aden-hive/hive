@@ -1248,12 +1248,17 @@ class AgentRunner:
                             f"(e.g. 'ollama serve' for Ollama)."
                         )
                     api_key_env = self._get_api_key_env_var(self.model)
-                    hint = (
-                        f"Set it with: export {api_key_env}=your-api-key"
-                        if api_key_env
-                        else "Configure an API key for your LLM provider."
-                    )
-                    raise CredentialError(f"LLM API key not found for model '{self.model}'. {hint}")
+                    if api_key_env:
+                        raise CredentialError(
+                            f"{api_key_env} is not configured. "
+                            f"Please set it before running Hive.\n"
+                            f"Set it with: export {api_key_env}=your-api-key"
+                        )
+                    else:
+                        raise CredentialError(
+                            "LLM API key is not configured. "
+                            "Please configure an API key for your LLM provider before running Hive."
+                        )
 
         # For GCU nodes: auto-register GCU MCP server if needed, then expand tool lists
         has_gcu_nodes = any(node.node_type == "gcu" for node in self.graph.nodes)
