@@ -632,6 +632,127 @@ class TestExecuteCommandTool:
         assert "HELLO WORLD" in result["stdout"]
 
 
+class TestExecuteCommandToolCopyrightValidation:
+    """Tests for copyright validation in execute_command_tool."""
+
+    @pytest.fixture
+    def execute_command_fn(self, mcp):
+        from aden_tools.tools.file_system_toolkits.execute_command_tool import register_tools
+
+        register_tools(mcp)
+        return mcp._tool_manager._tools["execute_command_tool"].fn
+
+    def test_detect_ytdlp_download(self, execute_command_fn, mock_workspace, mock_secure_path):
+        """Detection of yt-dlp command with YouTube URL is blocked."""
+        result = execute_command_fn(
+            command="yt-dlp https://youtube.com/watch?v=abc123 -o song.mp3", **mock_workspace
+        )
+
+        assert "error" in result
+        assert "copyrighted" in result
+        assert result["copyrighted"] is True
+        assert "Cannot download copyrighted content" in result["error"]
+
+    def test_detect_youtube_dl_download(self, execute_command_fn, mock_workspace, mock_secure_path):
+        """Detection of youtube-dl command is blocked."""
+        result = execute_command_fn(
+            command="youtube-dl https://youtube.com/watch?v=abc123", **mock_workspace
+        )
+
+        assert "error" in result
+        assert result["copyrighted"] is True
+        assert "Cannot download copyrighted content" in result["error"]
+
+    def test_extract_artist_song_from_filename(self, execute_command_fn, mock_workspace, mock_secure_path):
+        """Extraction of 'Artist - Song.mp3' from filename works correctly."""
+        result = execute_command_fn(
+            command="yt-dlp https://youtube.com/watch?v=abc -o 'Queen - Bohemian Rhapsody.mp3'",
+            **mock_workspace,
+        )
+
+        assert "error" in result
+        assert result["copyrighted"] is True
+        assert result["artist"] == "Queen"
+        assert result["song"] == "Bohemian Rhapsody"
+        assert "Queen" in result["error"]
+        assert "Bohemian Rhapsody" in result["error"]
+
+    def test_extract_artist_song_from_command(self, execute_command_fn, mock_workspace, mock_secure_path):
+        """Extraction when artist/song info is in command text works."""
+        result = execute_command_fn(
+            command="yt-dlp https://youtube.com/watch?v=abc -o 'song.mp3' download song by artist",
+            **mock_workspace,
+        )
+
+        assert "error" in result
+        assert result["copyrighted"] is True
+        # Should extract from command text if available
+        assert "artist" in result
+
+    def test_block_youtube_download(self, execute_command_fn, mock_workspace, mock_secure_path):
+        """YouTube downloads are blocked."""
+        result = execute_command_fn(
+            command="yt-dlp https://youtube.com/watch?v=abc123", **mock_workspace
+        )
+
+        assert "error" in result
+        assert result["copyrighted"] is True
+        assert result["platform"] == "YouTube"
+
+    def test_block_soundcloud_download(self, execute_command_fn, mock_workspace, mock_secure_path):
+        """SoundCloud downloads are blocked."""
+        result = execute_command_fn(
+            command="yt-dlp https://soundcloud.com/user/track", **mock_workspace
+        )
+
+        assert "error" in result
+        assert result["copyrighted"] is True
+        assert result["platform"] == "SoundCloud"
+
+    def test_allow_non_media_commands(self, execute_command_fn, mock_workspace, mock_secure_path):
+        """Regular commands (echo, ls, etc.) are not blocked."""
+        result = execute_command_fn(command="echo 'Hello World'", **mock_workspace)
+
+        assert result["success"] is True
+        assert "copyrighted" not in result
+        assert "error" not in result or "copyright" not in result.get("error", "").lower()
+
+    def test_allow_non_download_media_commands(
+        self, execute_command_fn, mock_workspace, mock_secure_path
+    ):
+        """Media-related commands that aren't downloads are allowed."""
+        result = execute_command_fn(command="ffmpeg -i input.mp4 output.mp3", **mock_workspace)
+
+        # Should not be blocked (conversion, not download)
+        assert "copyrighted" not in result or result.get("copyrighted") is False
+
+    def test_copyright_error_format(self, execute_command_fn, mock_workspace, mock_secure_path):
+        """Error message format matches requirements."""
+        result = execute_command_fn(
+            command="yt-dlp https://youtube.com/watch?v=abc -o 'Artist - Song.mp3'", **mock_workspace
+        )
+
+        assert "error" in result
+        assert "copyrighted" in result
+        assert "artist" in result
+        assert "song" in result
+        assert "platform" in result
+        assert result["copyrighted"] is True
+        assert "Cannot download copyrighted content" in result["error"]
+
+    def test_unknown_artist_handling(self, execute_command_fn, mock_workspace, mock_secure_path):
+        """When artist cannot be extracted, uses 'Unknown Artist'."""
+        result = execute_command_fn(
+            command="yt-dlp https://youtube.com/watch?v=abc -o 'song.mp3'", **mock_workspace
+        )
+
+        assert "error" in result
+        assert result["copyrighted"] is True
+        # Should still include artist field, even if unknown
+        assert "artist" in result
+        assert "Unknown Artist" in result["error"] or result["artist"] is not None
+
+
 class TestApplyDiffTool:
     """Tests for apply_diff tool."""
 
