@@ -1,8 +1,9 @@
 """
 Browser session management.
 
-Manages Playwright browser instances with support for multiple profiles,
-each with independent browser context and multiple tabs.
+Connects to system-installed Chrome/Edge via CDP for browser automation.
+Each session launches a Chrome subprocess with ``--remote-debugging-port``
+and connects Playwright as a CDP client.
 
 Supports three session types:
 - Standard: Single browser with ephemeral or persistent context
@@ -165,43 +166,45 @@ VALID_WAIT_UNTIL = {"commit", "domcontentloaded", "load", "networkidle"}
 # ---------------------------------------------------------------------------
 # Shared browser for agent contexts
 # ---------------------------------------------------------------------------
-# All agent sessions share this single browser process. Created via
-# chromium.launch() (not persistent context) so we can call
-# browser.new_context() multiple times with different storage states.
+# All agent sessions share this single Chrome process + CDP connection.
+# We can call browser.new_context() multiple times with different storage states.
 
 _shared_browser: Browser | None = None
 _shared_playwright: Any = None
+_shared_chrome_process: Any = None  # ChromeProcess | None (avoid circular import)
+_shared_cdp_port: int | None = None
 
-# Chrome flags shared between all browser launches
-_CHROME_ARGS = [
-    "--no-sandbox",
-    "--disable-setuid-sandbox",
-    "--disable-dev-shm-usage",
-    "--disable-blink-features=AutomationControlled",
-    "--no-first-run",
-    "--no-default-browser-check",
-]
+_DEFAULT_VIEWPORT = {"width": 1920, "height": 1080}
 
 
 async def get_shared_browser(headless: bool = True) -> Browser:
     """Get or create the shared browser instance for agent contexts."""
-    global _shared_browser, _shared_playwright
+    global _shared_browser, _shared_playwright, _shared_chrome_process, _shared_cdp_port
 
     if _shared_browser and _shared_browser.is_connected():
         return _shared_browser
 
-    _shared_playwright = await async_playwright().start()
-    _shared_browser = await _shared_playwright.chromium.launch(
+    from .chrome_launcher import launch_chrome
+    from .port_manager import allocate_port
+
+    cdp_port = allocate_port("__shared__")
+    _shared_cdp_port = cdp_port
+    _shared_chrome_process = await launch_chrome(
+        cdp_port=cdp_port,
+        user_data_dir=None,  # ephemeral
         headless=headless,
-        args=_CHROME_ARGS,
     )
-    logger.info("Started shared browser for agent contexts")
+    _shared_playwright = await async_playwright().start()
+    _shared_browser = await _shared_playwright.chromium.connect_over_cdp(
+        _shared_chrome_process.cdp_url
+    )
+    logger.info("Started shared browser for agent contexts (system Chrome)")
     return _shared_browser
 
 
 async def close_shared_browser() -> None:
     """Close the shared browser and clean up all agent contexts."""
-    global _shared_browser, _shared_playwright
+    global _shared_browser, _shared_playwright, _shared_chrome_process, _shared_cdp_port
 
     if _shared_browser:
         await _shared_browser.close()
@@ -211,6 +214,16 @@ async def close_shared_browser() -> None:
     if _shared_playwright:
         await _shared_playwright.stop()
         _shared_playwright = None
+
+    if _shared_chrome_process:
+        await _shared_chrome_process.kill()
+        _shared_chrome_process = None
+
+    if _shared_cdp_port is not None:
+        from .port_manager import release_port
+
+        release_port(_shared_cdp_port)
+        _shared_cdp_port = None
 
 
 @dataclass
@@ -245,6 +258,9 @@ class BrowserSession:
     # Session type: "standard" (default) or "agent" (ephemeral context from shared browser)
     session_type: str = "standard"
 
+    # Chrome subprocess handle (standard sessions only)
+    _chrome_process: Any = None  # ChromeProcess | None
+
     def _is_running(self) -> bool:
         """Check if browser is currently running."""
         if self.session_type == "agent":
@@ -254,9 +270,7 @@ class BrowserSession:
                 and self.browser is not None
                 and self.browser.is_connected()
             )
-        if self.persistent:
-            # Persistent context doesn't have a separate browser object
-            return self.context is not None
+        # Both persistent and ephemeral now have a browser object via CDP
         return self.browser is not None and self.browser.is_connected()
 
     async def _health_check(self) -> None:
@@ -316,6 +330,13 @@ class BrowserSession:
                 pass
             self._playwright = None
 
+        if self._chrome_process:
+            try:
+                await self._chrome_process.kill()
+            except Exception:
+                pass
+            self._chrome_process = None
+
         self.pages.clear()
         self.active_page_id = None
         self.console_messages.clear()
@@ -343,18 +364,11 @@ class BrowserSession:
                     "cdp_port": self.cdp_port,
                 }
 
+            from .chrome_launcher import launch_chrome
+            from .port_manager import allocate_port
+
             self._playwright = await async_playwright().start()
             self.persistent = persistent
-
-            # Common Chrome flags
-            chrome_args = [
-                "--no-sandbox",
-                "--disable-setuid-sandbox",
-                "--disable-dev-shm-usage",
-                "--disable-blink-features=AutomationControlled",
-                "--no-first-run",
-                "--no-default-browser-check",
-            ]
 
             if persistent:
                 # Get storage path from environment (set by AgentRunner)
@@ -370,33 +384,40 @@ class BrowserSession:
                     )
 
                 self.user_data_dir.mkdir(parents=True, exist_ok=True)
+            else:
+                self.user_data_dir = None  # chrome_launcher creates a temp dir
 
-                # Allocate CDP port
-                from .port_manager import allocate_port
+            # Allocate CDP port for system Chrome
+            self.cdp_port = allocate_port(self.profile)
 
-                self.cdp_port = allocate_port(self.profile)
-                chrome_args.append(f"--remote-debugging-port={self.cdp_port}")
+            logger.info(
+                f"Starting {'persistent' if persistent else 'ephemeral'} browser: "
+                f"profile={self.profile}, user_data_dir={self.user_data_dir}, "
+                f"cdp_port={self.cdp_port}"
+            )
 
-                logger.info(
-                    f"Starting persistent browser: profile={self.profile}, "
-                    f"user_data_dir={self.user_data_dir}, cdp_port={self.cdp_port}"
-                )
+            # Launch system Chrome and connect via CDP
+            self._chrome_process = await launch_chrome(
+                cdp_port=self.cdp_port,
+                user_data_dir=self.user_data_dir,
+                headless=headless,
+                extra_args=[f"--user-agent={BROWSER_USER_AGENT}"],
+            )
+            self.browser = await self._playwright.chromium.connect_over_cdp(
+                self._chrome_process.cdp_url
+            )
+            self.context = self.browser.contexts[0]
 
-                # Use launch_persistent_context for true Chrome profile persistence
-                # Note: Returns BrowserContext directly, no separate Browser object
-                self.context = await self._playwright.chromium.launch_persistent_context(
-                    user_data_dir=str(self.user_data_dir),
-                    headless=headless,
-                    viewport={"width": 1920, "height": 1080},
-                    user_agent=BROWSER_USER_AGENT,
-                    locale="en-US",
-                    args=chrome_args,
-                )
-                self.browser = None  # No separate browser object with persistent context
+            # Inject stealth script to hide automation detection
+            await self.context.add_init_script(STEALTH_SCRIPT)
 
-                # Inject stealth script to hide automation detection
-                await self.context.add_init_script(STEALTH_SCRIPT)
+            # Set viewport on existing pages (CDP default context doesn't
+            # inherit viewport settings like launch_persistent_context did)
+            viewport = _DEFAULT_VIEWPORT
+            for page in self.context.pages:
+                await page.set_viewport_size(viewport)
 
+            if persistent:
                 # Register existing pages from restored session
                 for page in self.context.pages:
                     target_id = f"tab_{id(page)}"
@@ -413,21 +434,6 @@ class BrowserSession:
                     # Only set branded content if it's a blank/new tab page
                     if url in ("", "about:blank", "chrome://newtab/"):
                         await first_page.set_content(HIVE_START_PAGE)
-            else:
-                # Ephemeral mode - original behavior
-                logger.info(f"Starting ephemeral browser: profile={self.profile}")
-                self.browser = await self._playwright.chromium.launch(
-                    headless=headless,
-                    args=chrome_args,
-                )
-                self.context = await self.browser.new_context(
-                    viewport={"width": 1920, "height": 1080},
-                    user_agent=BROWSER_USER_AGENT,
-                    locale="en-US",
-                )
-
-                # Inject stealth script to hide automation detection
-                await self.context.add_init_script(STEALTH_SCRIPT)
 
             # Health check: confirm the browser is actually responsive
             try:
@@ -474,6 +480,11 @@ class BrowserSession:
                 if self._playwright:
                     await self._playwright.stop()
                     self._playwright = None
+
+                # Kill the Chrome subprocess
+                if self._chrome_process:
+                    await self._chrome_process.kill()
+                    self._chrome_process = None
             else:
                 self.browser = None  # Drop reference to shared browser
 
@@ -518,7 +529,7 @@ class BrowserSession:
         # Create an isolated context stamped with the snapshot
         context = await browser.new_context(
             storage_state=storage_state,
-            viewport={"width": 1920, "height": 1080},
+            viewport=_DEFAULT_VIEWPORT,
             user_agent=BROWSER_USER_AGENT,
             locale="en-US",
         )
