@@ -842,6 +842,19 @@ You wake up when:
 If the user asks for progress, call get_worker_status() ONCE and report. \
 If the summary mentions issues, follow up with get_worker_status(focus="issues").
 
+## Subagent delegations (browser automation, GCU)
+
+When the worker delegates to a subagent (e.g., GCU browser automation), expect it \
+to take 2-5 minutes. During this time:
+- Progress will show 0% — this is NORMAL. The subagent only calls set_output at the end.
+- Check get_worker_status(focus="full") for "subagent_activity" — this shows the \
+subagent's latest reasoning text and confirms it is making real progress.
+- Do NOT conclude the subagent is stuck just because progress is 0% or because \
+you see repeated browser_click/browser_snapshot calls — that is the expected \
+pattern for web scraping.
+- Only intervene if: the subagent has been running for 5+ minutes with no new \
+subagent_activity updates, OR the judge escalates.
+
 ## Handling worker termination ([WORKER_TERMINAL])
 
 When you receive a `[WORKER_TERMINAL]` event, the worker has finished:
