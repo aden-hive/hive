@@ -15,6 +15,8 @@ export interface ChatMessage {
   thread?: string;
   /** Epoch ms when this message was first created — used for ordering queen/worker interleaving */
   createdAt?: number;
+  /** Queen phase active when this message was created */
+  phase?: "planning" | "building" | "staging" | "running";
 }
 
 interface ChatPanelProps {
@@ -212,13 +214,13 @@ const MessageBubble = memo(function MessageBubble({ msg, queenPhase }: { msg: Ch
             }`}
           >
             {isQueen
-              ? queenPhase === "running"
+              ? ((msg.phase ?? queenPhase) === "running"
                 ? "running phase"
-                : queenPhase === "staging"
+                : (msg.phase ?? queenPhase) === "staging"
                   ? "staging phase"
-                  : queenPhase === "planning"
+                  : (msg.phase ?? queenPhase) === "planning"
                     ? "planning phase"
-                    : "building phase"
+                    : "building phase")
               : "Worker"}
           </span>
         </div>
@@ -232,7 +234,7 @@ const MessageBubble = memo(function MessageBubble({ msg, queenPhase }: { msg: Ch
       </div>
     </div>
   );
-}, (prev, next) => prev.msg.id === next.msg.id && prev.msg.content === next.msg.content && prev.queenPhase === next.queenPhase);
+}, (prev, next) => prev.msg.id === next.msg.id && prev.msg.content === next.msg.content && prev.msg.phase === next.msg.phase && prev.queenPhase === next.queenPhase);
 
 export default function ChatPanel({ messages, onSend, isWaiting, isWorkerWaiting, isBusy, activeThread, disabled, onCancel, pendingQuestion, pendingOptions, onQuestionSubmit, onQuestionDismiss, queenPhase }: ChatPanelProps) {
   const [input, setInput] = useState("");

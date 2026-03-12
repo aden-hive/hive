@@ -14,7 +14,7 @@ import { graphsApi } from "@/api/graphs";
 import { sessionsApi } from "@/api/sessions";
 import { useMultiSSE } from "@/hooks/use-sse";
 import type { LiveSession, AgentEvent, DiscoverEntry, NodeSpec } from "@/api/types";
-import { sseEventToChatMessage, formatAgentDisplayName, extractLastPhase } from "@/lib/chat-helpers";
+import { sseEventToChatMessage, formatAgentDisplayName } from "@/lib/chat-helpers";
 import { topologyToGraphNodes } from "@/lib/graph-converter";
 import { ApiError } from "@/api/client";
 
@@ -259,13 +259,24 @@ async function restoreSessionMessages(
     const { events } = await sessionsApi.eventsHistory(sessionId);
     if (events.length > 0) {
       const messages: ChatMessage[] = [];
+      let runningPhase: ChatMessage["phase"] = undefined;
       for (const evt of events) {
+        // Track phase transitions so each message gets the phase it was created in
+        const p = evt.type === "queen_phase_changed" ? evt.data?.phase as string
+          : evt.type === "node_loop_iteration" ? evt.data?.phase as string | undefined
+          : undefined;
+        if (p && ["planning", "building", "staging", "running"].includes(p)) {
+          runningPhase = p as ChatMessage["phase"];
+        }
         const msg = sseEventToChatMessage(evt, thread, agentDisplayName);
         if (!msg) continue;
-        if (evt.stream_id === "queen") msg.role = "queen";
+        if (evt.stream_id === "queen") {
+          msg.role = "queen";
+          msg.phase = runningPhase;
+        }
         messages.push(msg);
       }
-      return { messages, restoredPhase: extractLastPhase(events) };
+      return { messages, restoredPhase: runningPhase ?? null };
     }
   } catch {
     // Event log not available — session will start fresh.
@@ -539,6 +550,10 @@ export default function Workspace() {
   // Using a ref avoids stale-closure bugs when multiple SSE events
   // arrive in the same React batch.
   const turnCounterRef = useRef<Record<string, number>>({});
+  // Per-agent queen phase ref — used to stamp each message with the phase
+  // it was created in (avoids stale-closure when phase change and message
+  // events arrive in the same React batch).
+  const queenPhaseRef = useRef<Record<string, string>>({});
 
   // Synchronous ref to suppress the queen's auto-intro SSE messages
   // after a cold-restore (where we already restored the conversation from disk).
@@ -796,6 +811,7 @@ export default function Workspace() {
         if (restoredMessageCount === 0) suppressIntroRef.current.delete(agentType);
 
         const qPhase = restoredPhase || liveSession.queen_phase || "planning";
+        queenPhaseRef.current[agentType] = qPhase;
         updateAgentState(agentType, {
           sessionId: liveSession.session_id,
           displayName: "Queen Bee",
@@ -979,6 +995,7 @@ export default function Workspace() {
       const session = liveSession!;
       const displayName = formatAgentDisplayName(session.worker_name || agentType);
       const initialPhase = restoredPhase || session.queen_phase || (session.has_worker ? "staging" : "planning");
+      queenPhaseRef.current[agentType] = initialPhase;
       updateAgentState(agentType, {
         sessionId: session.session_id,
         displayName,
@@ -1507,7 +1524,10 @@ export default function Workspace() {
           const chatMsg = sseEventToChatMessage(event, agentType, displayName, currentTurn);
           if (isQueen) console.log('[QUEEN] chatMsg:', chatMsg?.id, chatMsg?.content?.slice(0, 50), 'turn:', currentTurn);
           if (chatMsg && !suppressQueenMessages) {
-            if (isQueen) chatMsg.role = role;
+            if (isQueen) {
+              chatMsg.role = role;
+              chatMsg.phase = queenPhaseRef.current[agentType] as ChatMessage["phase"];
+            }
             upsertChatMessage(agentType, chatMsg, {
               reconcileOptimisticUser: event.type === "client_input_received",
             });
@@ -1944,6 +1964,7 @@ export default function Workspace() {
             : rawPhase === "staging" ? "staging"
             : rawPhase === "planning" ? "planning"
             : "building";
+          queenPhaseRef.current[agentType] = newPhase;
           updateAgentState(agentType, {
             queenPhase: newPhase,
             queenBuilding: newPhase === "building",
