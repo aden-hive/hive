@@ -31,6 +31,21 @@ You may submit PRs without prior assignment for:
   | Typos & Documentation & Linting | Refactoring for "clean code" |
   | No logic/API/DB changes | New features (even tiny ones) |
 
+## Prerequisites
+
+Before setting up the development environment, ensure you have the following:
+
+- **Python 3.11+** — Required for all framework code and agent development
+- **LLM provider API key** — At least one of the following is required for real agent execution:
+  - `ANTHROPIC_API_KEY` (Anthropic Claude — primary provider)
+  - `OPENAI_API_KEY` (OpenAI GPT models via LiteLLM)
+  - `CEREBRAS_API_KEY` (Cerebras — used by output cleaner and some nodes)
+  - `GROQ_API_KEY` (Groq — fast inference)
+  - Any [100+ LiteLLM-supported provider](https://docs.litellm.ai/docs/providers)
+- **ripgrep** (`rg`) — Optional, but recommended for faster code search in some agents
+
+See [docs/configuration.md](docs/configuration.md) for full setup details including how to configure your LLM provider and environment variables.
+
 ## Getting Started
 
 1. Fork the repository
