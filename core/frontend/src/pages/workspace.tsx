@@ -2548,7 +2548,17 @@ export default function Workspace() {
         agentLabel={activeWorkerLabel}
         agentPath={credentialAgentPath || (!activeWorker.startsWith("new-agent") ? activeWorker : undefined)}
         open={credentialsOpen}
-        onClose={() => { setCredentialsOpen(false); setCredentialAgentPath(null); setDismissedBanner(null); }}
+        onClose={() => {
+          setCredentialsOpen(false);
+          setCredentialAgentPath(null);
+          setDismissedBanner(null);
+          // Clear stale credential error — modal re-validates on every open,
+          // so closing it is an intentional "I'm done here". If credentials
+          // are still missing, the next agent run will re-trigger the 424.
+          if (agentStates[activeWorker]?.error === "credentials_required") {
+            updateAgentState(activeWorker, { error: null });
+          }
+        }}
         credentials={activeSession?.credentials || []}
         onCredentialChange={() => {
           // Clear credential error so the auto-load effect retries session creation
