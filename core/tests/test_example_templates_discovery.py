@@ -5,7 +5,7 @@ with correct metadata, especially tool_count > 0. This prevents regressions
 where missing agent.json manifests cause the discovery system to fall back to
 incomplete AST parsing, resulting in tool_count = 0.
 
-See: https://github.com/helix-hive/hive/issues/XXXX
+See: https://github.com/aden-hive/hive/issues/6272
 """
 
 from pathlib import Path
