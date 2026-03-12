@@ -2,6 +2,25 @@ import ast
 import operator
 from typing import Any
 
+# Maximum allowed exponent to prevent resource exhaustion.
+# Edge conditions are evaluated by the graph executor and may originate
+# from LLM-generated code, so we cap the exponent to a safe range.
+_MAX_SAFE_EXPONENT = 1000
+
+
+def _safe_pow(base: Any, exp: Any) -> Any:
+    """Power operator with bounds to prevent denial-of-service.
+
+    Without limits, expressions like ``10 ** 10 ** 10`` consume unbounded
+    CPU and memory, freezing the graph executor for all agents on the runtime.
+    """
+    if isinstance(exp, (int, float)) and abs(exp) > _MAX_SAFE_EXPONENT:
+        raise ValueError(
+            f"Exponent {exp} exceeds safe limit ({_MAX_SAFE_EXPONENT})"
+        )
+    return operator.pow(base, exp)
+
+
 # Safe operators whitelist
 SAFE_OPERATORS = {
     ast.Add: operator.add,
@@ -10,7 +29,7 @@ SAFE_OPERATORS = {
     ast.Div: operator.truediv,
     ast.FloorDiv: operator.floordiv,
     ast.Mod: operator.mod,
-    ast.Pow: operator.pow,
+    ast.Pow: _safe_pow,
     ast.LShift: operator.lshift,
     ast.RShift: operator.rshift,
     ast.BitOr: operator.or_,
@@ -115,11 +134,25 @@ class SafeEvalVisitor(ast.NodeVisitor):
         return True
 
     def visit_BoolOp(self, node: ast.BoolOp) -> Any:
-        values = [self.visit(v) for v in node.values]
+        # Use lazy evaluation to match Python's short-circuit semantics.
+        # Without this, ``False and (10 ** 10 ** 10)`` would still evaluate
+        # the right side, and guard patterns like
+        # ``x is not None and len(x) > 0`` would raise on the right side
+        # when the left side is falsy.
         if isinstance(node.op, ast.And):
-            return all(values)
+            result: Any = True
+            for v in node.values:
+                result = self.visit(v)
+                if not result:
+                    return result
+            return result
         elif isinstance(node.op, ast.Or):
-            return any(values)
+            result = False
+            for v in node.values:
+                result = self.visit(v)
+                if result:
+                    return result
+            return result
         raise ValueError(f"Boolean operator {type(node.op).__name__} is not allowed")
 
     def visit_IfExp(self, node: ast.IfExp) -> Any:
