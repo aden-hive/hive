@@ -742,6 +742,17 @@ def cmd_dispatch(args: argparse.Namespace) -> int:
     if args.agents:
         # Use specific agents
         for agent_name in args.agents:
+            # Guard against full paths: if the name contains path separators
+            # (e.g. "exports/my_agent"), it will be doubled with agents_dir
+            agent_name_path = Path(agent_name)
+            if len(agent_name_path.parts) > 1:
+                print(
+                    f"Error: --agents expects agent names, not paths. "
+                    f"Use: --agents {agent_name_path.name} "
+                    f"instead of --agents {agent_name}",
+                    file=sys.stderr,
+                )
+                return 1
             agent_path = agents_dir / agent_name
             if not _is_valid_agent_dir(agent_path):
                 print(f"Agent not found: {agent_path}", file=sys.stderr)

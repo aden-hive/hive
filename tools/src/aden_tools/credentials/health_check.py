@@ -1345,7 +1345,6 @@ HEALTH_CHECKERS: dict[str, CredentialHealthChecker] = {
     "github": GitHubHealthChecker(),
     "gitlab_token": GitLabHealthChecker(),
     "google": GoogleHealthChecker(),
-    "google_docs": GoogleDocsHealthChecker(),
     "google_maps": GoogleMapsHealthChecker(),
     "google_search": GoogleSearchHealthChecker(),
     "google_search_console": GoogleSearchConsoleHealthChecker(),
