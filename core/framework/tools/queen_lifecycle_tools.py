@@ -2195,7 +2195,23 @@ def register_queen_lifecycle_tools(
         if reg is None:
             return json.dumps({"error": "Worker graph not found"})
 
-        # Find an active node that can accept injected input
+        # Prefer nodes that are actively waiting (e.g. escalation receivers
+        # blocked on queen guidance) over the main event-loop node.
+        for stream in reg.streams.values():
+            waiting = stream.get_waiting_nodes()
+            if waiting:
+                target_node_id = waiting[0]["node_id"]
+                ok = await stream.inject_input(target_node_id, content, is_client_input=True)
+                if ok:
+                    return json.dumps(
+                        {
+                            "status": "delivered",
+                            "node_id": target_node_id,
+                            "content_preview": content[:100],
+                        }
+                    )
+
+        # Fallback: inject into any injectable node
         for stream in reg.streams.values():
             injectable = stream.get_injectable_nodes()
             if injectable:
@@ -2247,6 +2263,15 @@ def register_queen_lifecycle_tools(
         Returns credential IDs, aliases, status, and identity metadata.
         Never returns secret values. Optionally filter by credential_id.
         """
+        # Load shell config vars into os.environ — same first step as check-agent.
+        # Ensures keys set in ~/.zshrc/~/.bashrc are visible to is_available() checks.
+        try:
+            from framework.credentials.validation import ensure_credential_key_env
+
+            ensure_credential_key_env()
+        except Exception:
+            pass
+
         try:
             # Primary: CredentialStoreAdapter sees both Aden OAuth and local accounts
             from aden_tools.credentials import CredentialStoreAdapter
@@ -2254,13 +2279,24 @@ def register_queen_lifecycle_tools(
             store = CredentialStoreAdapter.default()
             all_accounts = store.get_all_account_info()
 
-            # Filter by credential_id / provider if requested
+            # Filter by credential_id / provider if requested.
+            # A spec name like "gmail_oauth" maps to provider "google" via
+            # credential_id field — resolve that alias before filtering.
             if credential_id:
+                try:
+                    from aden_tools.credentials import CREDENTIAL_SPECS
+
+                    spec = CREDENTIAL_SPECS.get(credential_id)
+                    resolved_provider = (
+                        (spec.credential_id or credential_id) if spec else credential_id
+                    )
+                except Exception:
+                    resolved_provider = credential_id
                 all_accounts = [
                     a
                     for a in all_accounts
                     if a.get("credential_id", "").startswith(credential_id)
-                    or a.get("provider", "") == credential_id
+                    or a.get("provider", "") in (credential_id, resolved_provider)
                 ]
 
             return json.dumps(
@@ -2277,12 +2313,42 @@ def register_queen_lifecycle_tools(
 
         # Fallback: local encrypted store only
         try:
+            from framework.credentials.local.models import LocalAccountInfo
             from framework.credentials.local.registry import LocalCredentialRegistry
+            from framework.credentials.storage import EncryptedFileStorage
 
             registry = LocalCredentialRegistry.default()
             accounts = registry.list_accounts(
                 credential_id=credential_id or None,
             )
+
+            # Also include flat-file credentials saved by the GUI (no "/" separator).
+            # LocalCredentialRegistry.list_accounts() skips these — read them directly.
+            seen_cred_ids = {info.credential_id for info in accounts}
+            storage = EncryptedFileStorage()
+            for storage_id in storage.list_all():
+                if "/" in storage_id:
+                    continue  # already handled by LocalCredentialRegistry above
+                if credential_id and storage_id != credential_id:
+                    continue
+                if storage_id in seen_cred_ids:
+                    continue
+                try:
+                    cred_obj = storage.load(storage_id)
+                except Exception:
+                    continue
+                if cred_obj is None:
+                    continue
+                accounts.append(
+                    LocalAccountInfo(
+                        credential_id=storage_id,
+                        alias="default",
+                        status="unknown",
+                        identity=cred_obj.identity,
+                        last_validated=cred_obj.last_refreshed,
+                        created_at=cred_obj.created_at,
+                    )
+                )
 
             credentials = []
             for info in accounts:

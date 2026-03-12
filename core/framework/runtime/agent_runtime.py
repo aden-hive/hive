@@ -1531,6 +1531,11 @@ class AgentRuntime:
                 for executor in stream._active_executors.values():
                     for node_id, node in executor.node_registry.items():
                         if getattr(node, "_awaiting_input", False):
+                            # Skip escalation receivers — those are handled
+                            # by the queen via inject_worker_message(), not
+                            # by the user directly.
+                            if ":escalation:" in node_id:
+                                continue
                             return node_id, graph_id
         return None, None
 
