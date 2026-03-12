@@ -307,6 +307,28 @@ Present a short **Framework Fit Assessment**:
 - **Gaps/Deal-breakers**: Only list genuinely missing capabilities after checking \
 both list_agent_tools() and built-in features like GCU
 
+### Credential Check (MANDATORY)
+
+The summary from list_agent_tools() includes `credentials_required` and \
+`credentials_available` per provider. **Before designing the graph**, check \
+which providers the design will need and whether credentials are available.
+
+For each provider whose tools you plan to use and where \
+`credentials_available` is false:
+- Tell the user which credential is missing and what it's needed for
+- Ask if they have access to set it up (e.g., API key, OAuth, service account)
+- If they don't have access, adjust the design to work without that provider \
+or suggest alternatives
+
+**Do NOT proceed to the design step with tools that require unavailable \
+credentials without the user acknowledging it.** Finding out at runtime that \
+credentials are missing wastes everyone's time. Surface this early.
+
+Example:
+> "The design needs Google Sheets tools, but the `google` credential isn't \
+configured yet. Do you have a Google service account or OAuth credentials \
+you can set up? If not, I can use CSV file output instead."
+
 ## 3: Design Graph and Create Draft
 
 Act like an experienced AI solution architect. Design the agent architecture:

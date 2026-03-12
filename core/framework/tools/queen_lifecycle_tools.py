@@ -95,6 +95,9 @@ class QueenPhaseState:
     # Built during decision-node dissolution at confirm_and_build().
     flowchart_map: dict[str, list[str]] | None = None
 
+    # Agent path — set after scaffolding so the frontend can query credentials
+    agent_path: str | None = None
+
     # Phase-specific prompts (set by session_manager after construction)
     prompt_planning: str = ""
     prompt_building: str = ""
@@ -130,11 +133,14 @@ class QueenPhaseState:
     async def _emit_phase_event(self) -> None:
         """Publish a QUEEN_PHASE_CHANGED event so the frontend updates the tag."""
         if self.event_bus is not None:
+            data: dict = {"phase": self.phase}
+            if self.agent_path:
+                data["agent_path"] = self.agent_path
             await self.event_bus.publish(
                 AgentEvent(
                     type=EventType.QUEEN_PHASE_CHANGED,
                     stream_id="queen",
-                    data={"phase": self.phase},
+                    data=data,
                 )
             )
 
@@ -652,6 +658,144 @@ def register_queen_lifecycle_tools(
     registry.register("replan_agent", _replan_tool, lambda inputs: replan_agent())
     tools_registered += 1
 
+    # --- Flowchart file persistence -------------------------------------------
+    # The flowchart is saved as flowchart.json in the agent's folder so it
+    # survives restarts and is available when loading any agent.
+
+    FLOWCHART_FILENAME = "flowchart.json"
+
+    def _save_flowchart_file(
+        agent_path: Path | str | None,
+        original_draft: dict,
+        flowchart_map: dict[str, list[str]] | None,
+    ) -> None:
+        """Persist the flowchart to the agent's folder."""
+        if agent_path is None:
+            return
+        p = Path(agent_path)
+        if not p.is_dir():
+            return
+        try:
+            target = p / FLOWCHART_FILENAME
+            target.write_text(
+                json.dumps(
+                    {"original_draft": original_draft, "flowchart_map": flowchart_map},
+                    indent=2,
+                ),
+                encoding="utf-8",
+            )
+            logger.debug("Flowchart saved to %s", target)
+        except Exception:
+            logger.warning("Failed to save flowchart to %s", p, exc_info=True)
+
+    def _load_flowchart_file(
+        agent_path: Path | str | None,
+    ) -> tuple[dict | None, dict[str, list[str]] | None]:
+        """Load flowchart from the agent's folder. Returns (original_draft, flowchart_map)."""
+        if agent_path is None:
+            return None, None
+        target = Path(agent_path) / FLOWCHART_FILENAME
+        if not target.is_file():
+            return None, None
+        try:
+            data = json.loads(target.read_text(encoding="utf-8"))
+            return data.get("original_draft"), data.get("flowchart_map")
+        except Exception:
+            logger.warning("Failed to load flowchart from %s", target, exc_info=True)
+            return None, None
+
+    def _synthesize_draft_from_runtime(
+        runtime_nodes: list,
+        runtime_edges: list,
+        agent_name: str = "",
+        goal_name: str = "",
+    ) -> tuple[dict, dict[str, list[str]]]:
+        """Generate a flowchart draft from a loaded runtime graph.
+
+        Used for agents that were never planned through the draft workflow
+        (e.g., hand-coded or loaded from "my agents"). Produces a valid
+        DraftGraph structure with auto-classified flowchart types.
+        """
+        nodes: list[dict] = []
+        edges: list[dict] = []
+        node_ids = {n.id for n in runtime_nodes}
+
+        # Build edge dicts first (needed for classification)
+        for i, re in enumerate(runtime_edges):
+            edges.append({
+                "id": f"edge-{i}",
+                "source": re.source,
+                "target": re.target,
+                "condition": str(re.condition.value) if hasattr(re.condition, "value") else str(re.condition),
+                "description": getattr(re, "description", "") or "",
+                "label": "",
+            })
+
+        # Terminal detection
+        sources = {e["source"] for e in edges}
+        terminal_ids = node_ids - sources
+        if not terminal_ids and runtime_nodes:
+            terminal_ids = {runtime_nodes[-1].id}
+
+        # Build node dicts with classification
+        total = len(runtime_nodes)
+        for i, rn in enumerate(runtime_nodes):
+            node: dict = {
+                "id": rn.id,
+                "name": rn.name,
+                "description": rn.description or "",
+                "node_type": getattr(rn, "node_type", "event_loop") or "event_loop",
+                "tools": list(rn.tools) if rn.tools else [],
+                "input_keys": list(rn.input_keys) if rn.input_keys else [],
+                "output_keys": list(rn.output_keys) if rn.output_keys else [],
+                "success_criteria": getattr(rn, "success_criteria", "") or "",
+                "sub_agents": list(rn.sub_agents) if getattr(rn, "sub_agents", None) else [],
+            }
+            fc_type = _classify_flowchart_node(node, i, total, edges, terminal_ids)
+            fc_meta = _FLOWCHART_TYPES[fc_type]
+            node["flowchart_type"] = fc_type
+            node["flowchart_shape"] = fc_meta["shape"]
+            node["flowchart_color"] = fc_meta["color"]
+            nodes.append(node)
+
+        # Add visual edges from parent nodes to their sub_agents.
+        # Sub-agents are connected via the sub_agents field, not via EdgeSpec,
+        # so they'd appear as disconnected islands without this.
+        edge_counter = len(edges)
+        for node in nodes:
+            for sa_id in node.get("sub_agents") or []:
+                if sa_id in node_ids:
+                    edges.append({
+                        "id": f"edge-subagent-{edge_counter}",
+                        "source": node["id"],
+                        "target": sa_id,
+                        "condition": "always",
+                        "description": "sub-agent delegation",
+                        "label": "delegate",
+                    })
+                    edge_counter += 1
+
+        # 1:1 flowchart map (no dissolution happened)
+        fmap = {n["id"]: [n["id"]] for n in nodes}
+
+        draft = {
+            "agent_name": agent_name,
+            "goal": goal_name,
+            "description": "",
+            "success_criteria": [],
+            "constraints": [],
+            "nodes": nodes,
+            "edges": edges,
+            "entry_node": nodes[0]["id"] if nodes else "",
+            "terminal_nodes": sorted(terminal_ids),
+            "flowchart_legend": {
+                fc_type: {"shape": meta["shape"], "color": meta["color"]}
+                for fc_type, meta in _FLOWCHART_TYPES.items()
+            },
+        }
+
+        return draft, fmap
+
     # --- save_agent_draft (Planning phase — declarative graph preview) ---------
     # Creates a lightweight draft graph with nodes, edges, and business metadata.
     # Loose validation: only requires names and descriptions. Emits an event
@@ -1151,6 +1295,20 @@ def register_queen_lifecycle_tools(
                 phase_state.draft_graph = converted
                 phase_state.flowchart_map = fmap
                 # Do NOT reset build_confirmed — we're already building.
+                # Persist to agent folder
+                save_path = getattr(session, "worker_path", None)
+                if save_path is None:
+                    # Worker not loaded yet — resolve from draft name
+                    draft_name = draft.get("agent_name", "")
+                    if draft_name:
+                        candidate = Path("exports") / draft_name
+                        if candidate.is_dir():
+                            save_path = candidate
+                _save_flowchart_file(
+                    save_path,
+                    phase_state.original_draft_graph,
+                    fmap,
+                )
             else:
                 # During planning: store raw draft, await user confirmation.
                 phase_state.draft_graph = draft
@@ -1426,6 +1584,9 @@ def register_queen_lifecycle_tools(
         phase_state.draft_graph = converted
         phase_state.flowchart_map = fmap
 
+        # Note: flowchart file is persisted later, in initialize_and_build_agent
+        # (after the agent folder is scaffolded) or in load_built_agent.
+
         dissolved_count = len(original_nodes) - len(converted.get("nodes", []))
         decision_count = sum(
             1 for n in original_nodes if n.get("flowchart_type") == "decision"
@@ -1547,6 +1708,8 @@ def register_queen_lifecycle_tools(
                     agent_name,
                 )
                 if phase_state is not None:
+                    if fallback_path:
+                        phase_state.agent_path = str(fallback_path)
                     await phase_state.switch_to_building(source="tool")
                     if phase_state.inject_notification:
                         await phase_state.inject_notification(
@@ -1589,9 +1752,18 @@ def register_queen_lifecycle_tools(
                 parsed = json.loads(result_str)
                 if parsed.get("success", True):
                     if phase_state is not None:
+                        # Set agent_path so the frontend can query credentials
+                        phase_state.agent_path = str(Path("exports") / agent_name)
                         await phase_state.switch_to_building(source="tool")
                         # Reset draft state after successful scaffolding
                         phase_state.build_confirmed = False
+                        # Persist flowchart now that the agent folder exists
+                        if phase_state.original_draft_graph and phase_state.flowchart_map:
+                            _save_flowchart_file(
+                                Path("exports") / agent_name,
+                                phase_state.original_draft_graph,
+                                phase_state.flowchart_map,
+                            )
                         # Inject a continuation message so the queen starts
                         # building immediately instead of blocking for user input.
                         draft_hint = ""
@@ -2679,31 +2851,56 @@ def register_queen_lifecycle_tools(
                             }
                         )
 
-                # Emit flowchart map to frontend if draft exists (so overlay
-                # renders immediately after load without waiting for a poll).
-                if (
-                    phase_state is not None
-                    and phase_state.original_draft_graph is not None
-                    and phase_state.flowchart_map is not None
-                ):
-                    bus = phase_state.event_bus
-                    if bus is not None:
-                        try:
-                            await bus.publish(
-                                AgentEvent(
-                                    type=EventType.FLOWCHART_MAP_UPDATED,
-                                    stream_id="queen",
-                                    data={
-                                        "map": phase_state.flowchart_map,
-                                        "original_draft": phase_state.original_draft_graph,
-                                    },
-                                )
+                # Ensure we have a flowchart for this agent — try in order:
+                # 1. Already in phase_state (from planning workflow)
+                # 2. Load from flowchart.json in the agent folder
+                # 3. Synthesize from the runtime graph
+                if phase_state is not None:
+                    if phase_state.original_draft_graph is None:
+                        # Try loading from file
+                        file_draft, file_map = _load_flowchart_file(resolved_path)
+                        if file_draft is not None:
+                            phase_state.original_draft_graph = file_draft
+                            phase_state.flowchart_map = file_map
+                        elif loaded_runtime is not None:
+                            # Synthesize from runtime graph
+                            goal = loaded_runtime.goal
+                            synth_draft, synth_map = _synthesize_draft_from_runtime(
+                                list(loaded_runtime.graph.nodes),
+                                list(loaded_runtime.graph.edges),
+                                agent_name=resolved_path.name,
+                                goal_name=goal.name if goal else "",
                             )
-                        except Exception:
-                            logger.warning("Failed to emit flowchart map", exc_info=True)
+                            phase_state.original_draft_graph = synth_draft
+                            phase_state.flowchart_map = synth_map
+                            # Persist the synthesized flowchart so it's
+                            # available on next load without re-synthesis
+                            _save_flowchart_file(resolved_path, synth_draft, synth_map)
+
+                    # Emit to frontend
+                    if (
+                        phase_state.original_draft_graph is not None
+                        and phase_state.flowchart_map is not None
+                    ):
+                        bus = phase_state.event_bus
+                        if bus is not None:
+                            try:
+                                await bus.publish(
+                                    AgentEvent(
+                                        type=EventType.FLOWCHART_MAP_UPDATED,
+                                        stream_id="queen",
+                                        data={
+                                            "map": phase_state.flowchart_map,
+                                            "original_draft": phase_state.original_draft_graph,
+                                        },
+                                    )
+                                )
+                            except Exception:
+                                logger.warning("Failed to emit flowchart map", exc_info=True)
 
                 # Switch to staging phase after successful load + validation
                 if phase_state is not None:
+                    phase_state.agent_path = str(resolved_path)
                     await phase_state.switch_to_staging()
 
                 worker_name = info.name if info else updated_session.worker_id

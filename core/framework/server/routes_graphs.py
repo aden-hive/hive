@@ -250,21 +250,45 @@ async def handle_draft_graph(request: web.Request) -> web.Response:
 async def handle_flowchart_map(request: web.Request) -> web.Response:
     """Return the flowchart→runtime node mapping and the original (pre-dissolution) draft.
 
-    Available after confirm_and_build() dissolves decision nodes. Used by the
-    frontend to overlay runtime execution status onto the user-facing flowchart.
+    Available after confirm_and_build() dissolves decision nodes, or loaded
+    from the agent's flowchart.json file, or synthesized from the runtime graph.
     """
     session, err = resolve_session(request)
     if err:
         return err
 
     phase_state = getattr(session, "phase_state", None)
-    if phase_state is None:
-        return web.json_response({"map": None, "original_draft": None})
 
-    return web.json_response({
-        "map": phase_state.flowchart_map,
-        "original_draft": phase_state.original_draft_graph,
-    })
+    # Fast path: already in memory
+    if phase_state is not None and phase_state.original_draft_graph is not None:
+        return web.json_response({
+            "map": phase_state.flowchart_map,
+            "original_draft": phase_state.original_draft_graph,
+        })
+
+    # Try loading from flowchart.json in the agent folder
+    worker_path = getattr(session, "worker_path", None)
+    if worker_path is not None:
+        from pathlib import Path
+
+        target = Path(worker_path) / "flowchart.json"
+        if target.is_file():
+            try:
+                data = json.loads(target.read_text(encoding="utf-8"))
+                original_draft = data.get("original_draft")
+                fmap = data.get("flowchart_map")
+                # Cache in phase_state for future requests
+                if phase_state is not None and original_draft:
+                    phase_state.original_draft_graph = original_draft
+                    phase_state.flowchart_map = fmap
+                return web.json_response({
+                    "map": fmap,
+                    "original_draft": original_draft,
+                })
+            except Exception:
+                logger.warning("Failed to read flowchart.json from %s", worker_path)
+
+    return web.json_response({"map": None, "original_draft": None})
 
 
 def register_routes(app: web.Application) -> None:

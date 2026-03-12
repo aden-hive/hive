@@ -277,6 +277,8 @@ interface AgentBackendState {
   workerIsTyping: boolean;
   llmSnapshots: Record<string, string>;
   activeToolCalls: Record<string, { name: string; done: boolean; streamId: string }>;
+  /** Agent folder path — set after scaffolding, used for credential queries */
+  agentPath: string | null;
   /** Structured question text from ask_user with options */
   pendingQuestion: string | null;
   /** Predefined choices from ask_user (1-3 items); UI appends "Other" */
@@ -302,6 +304,7 @@ function defaultAgentState(): AgentBackendState {
     draftGraph: null,
     originalDraft: null,
     flowchartMap: null,
+    agentPath: null,
     workerRunState: "idle",
     currentExecutionId: null,
     nodeLogs: {},
@@ -1069,16 +1072,33 @@ export default function Workspace() {
   // --- Fetch draft graph when a session is in planning phase ---
   // Covers initial load, tab switches, reconnects, and cold restores.
   const fetchedDraftSessionsRef = useRef<Set<string>>(new Set());
+  const fetchedFlowchartMapSessionsRef = useRef<Set<string>>(new Set());
   useEffect(() => {
     for (const [agentType, state] of Object.entries(agentStates)) {
       if (!state.sessionId || !state.ready) continue;
-      if (state.queenPhase !== "planning") continue;
-      if (state.draftGraph) continue; // already have it
-      if (fetchedDraftSessionsRef.current.has(state.sessionId)) continue;
-      fetchedDraftSessionsRef.current.add(state.sessionId);
-      graphsApi.draftGraph(state.sessionId).then(({ draft }) => {
-        if (draft) updateAgentState(agentType, { draftGraph: draft });
-      }).catch(() => {});
+
+      if (state.queenPhase === "planning") {
+        // Fetch draft graph for planning phase
+        if (state.draftGraph) continue;
+        if (fetchedDraftSessionsRef.current.has(state.sessionId)) continue;
+        fetchedDraftSessionsRef.current.add(state.sessionId);
+        graphsApi.draftGraph(state.sessionId).then(({ draft }) => {
+          if (draft) updateAgentState(agentType, { draftGraph: draft });
+        }).catch(() => {});
+      } else {
+        // Fetch flowchart map for non-planning phases (staging, running, building)
+        if (state.originalDraft) continue; // already have it
+        if (fetchedFlowchartMapSessionsRef.current.has(state.sessionId)) continue;
+        fetchedFlowchartMapSessionsRef.current.add(state.sessionId);
+        graphsApi.flowchartMap(state.sessionId).then(({ map, original_draft }) => {
+          if (original_draft) {
+            updateAgentState(agentType, {
+              flowchartMap: map,
+              originalDraft: original_draft,
+            });
+          }
+        }).catch(() => {});
+      }
     }
   }, [agentStates, updateAgentState]);
 
@@ -1814,6 +1834,7 @@ export default function Workspace() {
 
         case "queen_phase_changed": {
           const rawPhase = event.data?.phase as string;
+          const eventAgentPath = (event.data?.agent_path as string) || null;
           const newPhase: "planning" | "building" | "staging" | "running" =
             rawPhase === "running" ? "running"
             : rawPhase === "staging" ? "staging"
@@ -1824,21 +1845,29 @@ export default function Workspace() {
             queenBuilding: newPhase === "building",
             // Sync workerRunState so the RunButton reflects the phase
             workerRunState: newPhase === "running" ? "running" : "idle",
-            // Clear draft graph once we leave planning; also clear dedup ref
-            // so re-entering planning can refetch
-            ...(newPhase !== "planning" ? { draftGraph: null } : {}),
+            // Clear draft graph once we leave planning; also clear dedup refs
+            // so re-entering planning or re-fetching flowchart map works
+            ...(newPhase !== "planning" ? { draftGraph: null } : { originalDraft: null, flowchartMap: null }),
+            // Store agent path for credential queries
+            ...(eventAgentPath ? { agentPath: eventAgentPath } : {}),
           });
-          if (newPhase !== "planning") {
+          {
             const sid = agentStates[agentType]?.sessionId;
             if (sid) {
-              fetchedDraftSessionsRef.current.delete(sid);
-              // Fetch the flowchart map (original draft + dissolution mapping)
-              graphsApi.flowchartMap(sid).then(({ map, original_draft }) => {
-                updateAgentState(agentType, {
-                  flowchartMap: map,
-                  originalDraft: original_draft,
-                });
-              }).catch(() => {});
+              if (newPhase !== "planning") {
+                fetchedDraftSessionsRef.current.delete(sid);
+                fetchedFlowchartMapSessionsRef.current.delete(sid);
+                // Fetch the flowchart map (original draft + dissolution mapping)
+                graphsApi.flowchartMap(sid).then(({ map, original_draft }) => {
+                  updateAgentState(agentType, {
+                    flowchartMap: map,
+                    originalDraft: original_draft,
+                  });
+                }).catch(() => {});
+              } else {
+                fetchedDraftSessionsRef.current.delete(sid);
+                fetchedFlowchartMapSessionsRef.current.delete(sid);
+              }
             }
           }
           break;
@@ -2622,7 +2651,7 @@ export default function Workspace() {
       <CredentialsModal
         agentType={activeWorker}
         agentLabel={activeWorkerLabel}
-        agentPath={credentialAgentPath || (!activeWorker.startsWith("new-agent") ? activeWorker : undefined)}
+        agentPath={credentialAgentPath || activeAgentState?.agentPath || (!activeWorker.startsWith("new-agent") ? activeWorker : undefined)}
         open={credentialsOpen}
         onClose={() => { setCredentialsOpen(false); setCredentialAgentPath(null); setDismissedBanner(null); }}
         credentials={activeSession?.credentials || []}
