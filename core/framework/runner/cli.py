@@ -243,6 +243,12 @@ def register_commands(subparsers: argparse._SubParsersAction) -> None:
         action="store_true",
         help="Open dashboard in browser after server starts",
     )
+    serve_parser.add_argument(
+        "--verbose", "-v", action="store_true", help="Enable INFO log level"
+    )
+    serve_parser.add_argument(
+        "--debug", action="store_true", help="Enable DEBUG log level"
+    )
     serve_parser.set_defaults(func=cmd_serve)
 
     # open command (serve + auto-open browser)
@@ -279,6 +285,12 @@ def register_commands(subparsers: argparse._SubParsersAction) -> None:
         type=str,
         default=None,
         help="LLM model for preloaded agents",
+    )
+    open_parser.add_argument(
+        "--verbose", "-v", action="store_true", help="Enable INFO log level"
+    )
+    open_parser.add_argument(
+        "--debug", action="store_true", help="Enable DEBUG log level"
     )
     open_parser.set_defaults(func=cmd_open)
 
@@ -1635,7 +1647,10 @@ def cmd_serve(args: argparse.Namespace) -> int:
 
     from framework.observability import configure_logging
 
-    configure_logging(level="INFO")
+    if getattr(args, "debug", False):
+        configure_logging(level="DEBUG")
+    else:
+        configure_logging(level="INFO")
 
     model = getattr(args, "model", None)
     app = create_app(model=model)

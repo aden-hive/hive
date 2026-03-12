@@ -1035,20 +1035,34 @@ class LiteLLMProvider(LLMProvider):
                             tail_events.append(TextEndEvent(full_text=accumulated_text))
 
                         usage = getattr(chunk, "usage", None)
+                        logger.debug(
+                            "[tokens] finish-chunk raw usage: %r (type=%s)",
+                            usage,
+                            type(usage).__name__,
+                        )
+                        cached_tokens = 0
                         if usage:
                             input_tokens = getattr(usage, "prompt_tokens", 0) or 0
                             output_tokens = getattr(usage, "completion_tokens", 0) or 0
+                            _details = getattr(usage, "prompt_tokens_details", None)
+                            cached_tokens = (
+                                getattr(_details, "cached_tokens", 0) or 0
+                                if _details is not None
+                                else getattr(usage, "cache_read_input_tokens", 0) or 0
+                            )
                             logger.debug(
-                                "[tokens] finish-chunk usage: input=%d output=%d model=%s",
+                                "[tokens] finish-chunk usage: input=%d output=%d cached=%d model=%s",
                                 input_tokens,
                                 output_tokens,
+                                cached_tokens,
                                 self.model,
                             )
 
                         logger.debug(
-                            "[tokens] finish event: input=%d output=%d stop=%s model=%s",
+                            "[tokens] finish event: input=%d output=%d cached=%d stop=%s model=%s",
                             input_tokens,
                             output_tokens,
+                            cached_tokens,
                             choice.finish_reason,
                             self.model,
                         )
@@ -1057,9 +1071,53 @@ class LiteLLMProvider(LLMProvider):
                                 stop_reason=choice.finish_reason,
                                 input_tokens=input_tokens,
                                 output_tokens=output_tokens,
+                                cached_tokens=cached_tokens,
                                 model=self.model,
                             )
                         )
+
+                # Fallback: LiteLLM strips usage from yielded chunks before
+                # returning them to us, but appends the original chunk (with
+                # usage intact) to response.chunks first.  Use LiteLLM's own
+                # calculate_total_usage() on that accumulated list.
+                if input_tokens == 0 and output_tokens == 0:
+                    try:
+                        from litellm.litellm_core_utils.streaming_handler import (
+                            calculate_total_usage,
+                        )
+
+                        _chunks = getattr(response, "chunks", None)
+                        if _chunks:
+                            _usage = calculate_total_usage(chunks=_chunks)
+                            input_tokens = _usage.prompt_tokens or 0
+                            output_tokens = _usage.completion_tokens or 0
+                            _details = getattr(_usage, "prompt_tokens_details", None)
+                            cached_tokens = (
+                                getattr(_details, "cached_tokens", 0) or 0
+                                if _details is not None
+                                else getattr(_usage, "cache_read_input_tokens", 0) or 0
+                            )
+                            logger.debug(
+                                "[tokens] post-loop chunks fallback:"
+                                " input=%d output=%d cached=%d model=%s",
+                                input_tokens,
+                                output_tokens,
+                                cached_tokens,
+                                self.model,
+                            )
+                            # Patch the FinishEvent already queued with 0 tokens
+                            for _i, _ev in enumerate(tail_events):
+                                if isinstance(_ev, FinishEvent) and _ev.input_tokens == 0:
+                                    tail_events[_i] = FinishEvent(
+                                        stop_reason=_ev.stop_reason,
+                                        input_tokens=input_tokens,
+                                        output_tokens=output_tokens,
+                                        cached_tokens=cached_tokens,
+                                        model=_ev.model,
+                                    )
+                                    break
+                    except Exception as _e:
+                        logger.debug("[tokens] chunks fallback failed: %s", _e)
 
                 # Check whether the stream produced any real content.
                 # (If text deltas were yielded above, has_content is True

@@ -712,6 +712,7 @@ class EventLoopNode(NodeProtocol):
                         model=turn_tokens.get("model", ""),
                         input_tokens=turn_tokens.get("input", 0),
                         output_tokens=turn_tokens.get("output", 0),
+                        cached_tokens=turn_tokens.get("cached", 0),
                         execution_id=execution_id,
                         iteration=iteration,
                     )
@@ -1833,7 +1834,7 @@ class EventLoopNode(NodeProtocol):
         stream_id = ctx.stream_id or ctx.node_id
         node_id = ctx.node_id
         execution_id = ctx.execution_id or ""
-        token_counts: dict[str, int] = {"input": 0, "output": 0}
+        token_counts: dict[str, int] = {"input": 0, "output": 0, "cached": 0}
         tool_call_count = 0
         final_text = ""
         final_system_prompt = conversation.system_prompt
@@ -1914,6 +1915,7 @@ class EventLoopNode(NodeProtocol):
                     elif isinstance(event, FinishEvent):
                         token_counts["input"] += event.input_tokens
                         token_counts["output"] += event.output_tokens
+                        token_counts["cached"] += event.cached_tokens
                         token_counts["stop_reason"] = event.stop_reason
                         token_counts["model"] = event.model
 
@@ -4031,6 +4033,7 @@ class EventLoopNode(NodeProtocol):
         model: str,
         input_tokens: int,
         output_tokens: int,
+        cached_tokens: int = 0,
         execution_id: str = "",
         iteration: int | None = None,
     ) -> None:
@@ -4042,6 +4045,7 @@ class EventLoopNode(NodeProtocol):
                 model=model,
                 input_tokens=input_tokens,
                 output_tokens=output_tokens,
+                cached_tokens=cached_tokens,
                 execution_id=execution_id,
                 iteration=iteration,
             )
