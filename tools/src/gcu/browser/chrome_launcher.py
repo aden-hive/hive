@@ -33,6 +33,7 @@ _CHROME_ARGS = [
     "--no-default-browser-check",
     "--disable-session-crashed-bubble",
     "--noerrdialogs",
+    "--no-startup-window",
 ]
 
 # Sandbox flags are only needed on Linux (Docker, CI). On macOS they
