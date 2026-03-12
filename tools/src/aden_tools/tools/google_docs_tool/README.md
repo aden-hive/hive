@@ -31,7 +31,8 @@ export GOOGLE_ACCESS_TOKEN="your-access-token"
 
 ### Required OAuth Scopes
 
-- `https://www.googleapis.com/auth/drive.file` - Access to files created/opened by the app
+- `https://www.googleapis.com/auth/documents` - Google Docs API (create, read, edit documents)
+- `https://www.googleapis.com/auth/drive.file` - Google Drive API (export, comments)
 
 ## Available Tools
 
