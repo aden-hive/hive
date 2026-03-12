@@ -486,6 +486,7 @@ class BrowserSession:
             )
 
             # Launch system Chrome and connect via CDP
+            logger.info("start(): launching Chrome...")
             try:
                 self._chrome_process = await launch_chrome(
                     cdp_port=self.cdp_port,
@@ -493,6 +494,7 @@ class BrowserSession:
                     headless=headless,
                     extra_args=[f"--user-agent={BROWSER_USER_AGENT}"],
                 )
+                logger.info("start(): Chrome launched, connecting CDP...")
                 self.browser = await self._playwright.chromium.connect_over_cdp(
                     self._chrome_process.cdp_url
                 )
@@ -503,7 +505,7 @@ class BrowserSession:
 
             self.context = self.browser.contexts[0]
             logger.info(
-                f"CDP connected: contexts={len(self.browser.contexts)}, "
+                f"start(): CDP connected: contexts={len(self.browser.contexts)}, "
                 f"pages={len(self.context.pages)}"
             )
 
@@ -512,8 +514,7 @@ class BrowserSession:
 
             # Close ALL pages/contexts Chrome opened on startup (session
             # restore, about:blank, new-tab page, etc.) and create a single
-            # clean page we fully control.  This avoids the macOS issue where
-            # Chrome's own visible tab is not the one Playwright sees.
+            # clean page we fully control.
             viewport = _get_viewport()
 
             for ctx in self.browser.contexts[1:]:
@@ -522,15 +523,16 @@ class BrowserSession:
                 except Exception:
                     pass
 
-            # Close every initial page so we start with a blank slate
+            logger.info("start(): closing %d initial pages...", len(self.context.pages))
             for page in list(self.context.pages):
                 try:
                     await page.close()
                 except Exception:
                     pass
 
+            logger.info("start(): creating new page...")
             first_page = await self.context.new_page()
-            logger.info("Created clean page for session")
+            logger.info("start(): setting viewport...")
             await first_page.set_viewport_size(viewport)
 
             # Register the clean page
@@ -538,10 +540,15 @@ class BrowserSession:
             self._register_page(first_page, target_id)
 
             # Set branded Hive start page on the initial tab
-            logger.info("Setting Hive start page content")
+            logger.info("start(): setting Hive start page content...")
             await first_page.set_content(HIVE_START_PAGE)
 
+            # Auto-track pages opened by popups / target="_blank" links
+            # (attached after setup so it doesn't fire during startup)
+            self.context.on("page", self._handle_popup_page)
+
             # Health check: confirm the browser is actually responsive
+            logger.info("start(): running health check...")
             try:
                 await self._health_check()
             except Exception as exc:
@@ -647,6 +654,10 @@ class BrowserSession:
             context=context,
             session_type="agent",
         )
+
+        # Auto-track pages opened by popups / target="_blank" links
+        context.on("page", session._handle_popup_page)
+
         logger.info(f"Created agent session '{agent_id}' from profile '{source_session.profile}'")
         return session
 
@@ -778,8 +789,28 @@ class BrowserSession:
             else:
                 logger.warning("Active tab %s closed, no remaining tabs", target_id)
 
+    def _handle_popup_page(self, page: Page) -> None:
+        """Auto-register pages opened by popups or target="_blank" links.
+
+        Attached as a persistent listener via ``context.on("page", ...)``.
+        Skips pages already tracked (e.g. created by ``open_tab``).
+        """
+        # context.on("page") fires for ALL new pages, including ones
+        # created explicitly by open_tab / _open_tab_background.
+        # Check identity to avoid double-registration.
+        for existing in self.pages.values():
+            if existing is page:
+                return
+        target_id = f"tab_{id(page)}"
+        self._register_page(page, target_id, set_active=False)
+        logger.info("Auto-registered popup page: %s (url=%s)", target_id, page.url)
+
     def _register_page(self, page: Page, target_id: str, *, set_active: bool = True) -> None:
         """Register a page in the session with all necessary event listeners."""
+        if target_id in self.pages:
+            if set_active:
+                self.active_page_id = target_id
+            return
         self.pages[target_id] = page
         self.console_messages[target_id] = []
         page.on("console", lambda msg, tid=target_id: self._capture_console(tid, msg))
