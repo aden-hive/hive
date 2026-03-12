@@ -2447,34 +2447,32 @@ export default function Workspace() {
     }
   }, [sessionsByAgent, activeWorker, navigate, agentStates]);
 
-  // Create a new session for any agent type (used by NewTabPopover)
+  // Open a tab for an agent type. If a tab already exists, switch to it
+  // instead of creating a duplicate — each agent gets one session.
   const addAgentSession = useCallback((agentType: string, agentLabel?: string) => {
-    // Count all existing open tabs for this base agent type (first tab uses agentType
-    // as key; subsequent tabs use "agentType::frontendSessionId" as unique keys).
-    const existingTabCount = Object.keys(sessionsByAgent).filter(
+    // Check if there's already an open tab for this agent
+    const existingTabKey = Object.keys(sessionsByAgent).find(
       k => baseAgentType(k) === agentType && (sessionsByAgent[k] || []).length > 0,
-    ).length;
-
-    const newIndex = existingTabCount + 1;
-    const existingCreds = sessionsByAgent[agentType]?.[0]?.credentials;
-    const displayLabel = agentLabel || formatAgentDisplayName(agentType);
-    const label = newIndex === 1 ? displayLabel : `${displayLabel} #${newIndex}`;
-    const newSession = createSession(agentType, label, existingCreds);
-
-    // First tab keeps agentType as its key (backward-compatible with all existing
-    // logic).  Additional tabs get a unique key so each has its own isolated
-    // agentStates slot, its own backend session, and its own tab-bar entry.
-    const tabKey = existingTabCount === 0 ? agentType : `${agentType}::${newSession.id}`;
-    if (tabKey !== agentType) {
-      newSession.tabKey = tabKey;
+    );
+    if (existingTabKey) {
+      // Switch to the existing tab
+      setActiveWorker(existingTabKey);
+      const existing = sessionsByAgent[existingTabKey]?.[0];
+      if (existing) {
+        setActiveSessionByAgent(prev => ({ ...prev, [existingTabKey]: existing.id }));
+      }
+      return;
     }
+
+    const displayLabel = agentLabel || formatAgentDisplayName(agentType);
+    const newSession = createSession(agentType, displayLabel);
 
     setSessionsByAgent(prev => ({
       ...prev,
-      [tabKey]: [newSession],
+      [agentType]: [newSession],
     }));
-    setActiveSessionByAgent(prev => ({ ...prev, [tabKey]: newSession.id }));
-    setActiveWorker(tabKey);
+    setActiveSessionByAgent(prev => ({ ...prev, [agentType]: newSession.id }));
+    setActiveWorker(agentType);
   }, [sessionsByAgent]);
 
   // Open a history session: switch to its existing tab, or open a new tab.
