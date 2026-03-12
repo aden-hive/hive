@@ -883,19 +883,30 @@ IMPORTANT: Only auto-handle if the user has NOT explicitly told you how to handl
 escalations. If the user gave you instructions (e.g., "just retry on errors", \
 "skip any auth issues"), follow those instructions instead.
 
+CRITICAL — escalation relay protocol:
+When an escalation requires user input (auth blocks, human review), the worker \
+or its subagent is BLOCKED and waiting for your response. You MUST follow this \
+exact two-step sequence:
+  Step 1: call ask_user() to get the user's answer.
+  Step 2: call inject_worker_message() with the user's answer IMMEDIATELY after.
+If you skip Step 2, the worker/subagent stays blocked FOREVER and the task hangs. \
+NEVER respond to the user without also calling inject_worker_message() to unblock \
+the worker. Even if the user says "skip" or "cancel", you must still relay that \
+decision via inject_worker_message() so the worker can clean up.
+
 **Auth blocks / credential issues:**
 - ALWAYS ask the user (unless user explicitly told you how to handle this).
 - The worker cannot proceed without valid credentials.
 - Explain which credential is missing or invalid.
-- Use ask_user to get guidance: "Provide credentials", "Skip this task", "Stop and edit agent"
-- Use inject_worker_message() to relay user decisions back to the worker.
+- Step 1: ask_user for guidance — "Provide credentials", "Skip this task", "Stop and edit agent"
+- Step 2: inject_worker_message() with the user's response to unblock the worker.
 
 **Need human review / approval:**
 - ALWAYS ask the user (unless user explicitly told you how to handle this).
 - The worker is explicitly requesting human judgment.
 - Present the context clearly (what decision is needed, what are the options).
-- Use ask_user with the actual decision options.
-- Use inject_worker_message() to relay user decisions back to the worker.
+- Step 1: ask_user with the actual decision options.
+- Step 2: inject_worker_message() with the user's decision to unblock the worker.
 
 **Errors / unexpected failures:**
 - Explain what went wrong in plain terms.
@@ -903,6 +914,7 @@ escalations. If the user gave you instructions (e.g., "just retry on errors", \
 - Or offer: "Diagnose the issue" → use stop_worker_and_plan() to investigate first.
 - Or offer: "Retry as-is", "Skip this task", "Abort run"
 - (Skip asking if user explicitly told you to auto-retry or auto-skip errors.)
+- If the escalation had wait_for_response: inject_worker_message() with the decision.
 
 **Informational / progress updates:**
 - Acknowledge briefly and let the worker continue.
