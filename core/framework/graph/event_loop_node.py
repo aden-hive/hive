@@ -4436,7 +4436,7 @@ class EventLoopNode(NodeProtocol):
             )
 
         subagent_node = EventLoopNode(
-            event_bus=None,  # Subagents don't emit events to parent's bus
+            event_bus=self._event_bus,  # Subagent events visible to Queen via shared bus
             judge=SubagentJudge(task=task, max_iterations=max_iter),
             config=LoopConfig(
                 max_iterations=max_iter,  # Tighter budget
