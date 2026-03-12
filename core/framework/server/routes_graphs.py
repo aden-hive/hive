@@ -247,10 +247,32 @@ async def handle_draft_graph(request: web.Request) -> web.Response:
     return web.json_response({"draft": phase_state.draft_graph})
 
 
+async def handle_flowchart_map(request: web.Request) -> web.Response:
+    """Return the flowchart→runtime node mapping and the original (pre-dissolution) draft.
+
+    Available after confirm_and_build() dissolves decision nodes. Used by the
+    frontend to overlay runtime execution status onto the user-facing flowchart.
+    """
+    session, err = resolve_session(request)
+    if err:
+        return err
+
+    phase_state = getattr(session, "phase_state", None)
+    if phase_state is None:
+        return web.json_response({"map": None, "original_draft": None})
+
+    return web.json_response({
+        "map": phase_state.flowchart_map,
+        "original_draft": phase_state.original_draft_graph,
+    })
+
+
 def register_routes(app: web.Application) -> None:
     """Register graph/node inspection routes."""
     # Draft graph (planning phase — visual only, no loaded worker required)
     app.router.add_get("/api/sessions/{session_id}/draft-graph", handle_draft_graph)
+    # Flowchart map (post-dissolution — maps runtime nodes to original draft nodes)
+    app.router.add_get("/api/sessions/{session_id}/flowchart-map", handle_flowchart_map)
     # Session-primary routes
     app.router.add_get("/api/sessions/{session_id}/graphs/{graph_id}/nodes", handle_list_nodes)
     app.router.add_get(

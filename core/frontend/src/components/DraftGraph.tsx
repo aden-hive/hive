@@ -1,9 +1,16 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { DraftGraph as DraftGraphData, DraftNode } from "@/api/types";
+import type { GraphNode } from "./AgentGraph";
+
+type DraftNodeStatus = "pending" | "running" | "complete" | "error";
 
 interface DraftGraphProps {
   draft: DraftGraphData;
   onNodeClick?: (node: DraftNode) => void;
+  /** Runtime node ID → list of original draft node IDs (post-dissolution mapping). */
+  flowchartMap?: Record<string, string[]>;
+  /** Current runtime graph nodes with live status (for overlay during execution). */
+  runtimeNodes?: GraphNode[];
 }
 
 // Layout constants — tuned for a ~500px panel (484px after px-2 padding)
@@ -265,7 +272,7 @@ function Tooltip({ node, style }: { node: DraftNode; style: React.CSSProperties 
   );
 }
 
-export default function DraftGraph({ draft, onNodeClick }: DraftGraphProps) {
+export default function DraftGraph({ draft, onNodeClick, flowchartMap, runtimeNodes }: DraftGraphProps) {
   const [hoveredNode, setHoveredNode] = useState<string | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const [containerW, setContainerW] = useState(484);
@@ -284,6 +291,36 @@ export default function DraftGraph({ draft, onNodeClick }: DraftGraphProps) {
     return () => ro.disconnect();
   }, []);
 
+  // Compute draft node statuses from runtime overlay
+  const nodeStatuses = useMemo<Record<string, DraftNodeStatus>>(() => {
+    if (!flowchartMap || !runtimeNodes?.length) return {};
+    // Invert map: draftNodeId → runtimeNodeId
+    const draftToRuntime: Record<string, string> = {};
+    for (const [runtimeId, draftIds] of Object.entries(flowchartMap)) {
+      for (const did of draftIds) {
+        draftToRuntime[did] = runtimeId;
+      }
+    }
+    // Build runtime status lookup
+    const runtimeStatus: Record<string, DraftNodeStatus> = {};
+    for (const rn of runtimeNodes) {
+      const s = rn.status;
+      runtimeStatus[rn.id] =
+        s === "running" || s === "looping" ? "running"
+        : s === "complete" ? "complete"
+        : s === "error" ? "error"
+        : "pending";
+    }
+    // Map to draft nodes
+    const result: Record<string, DraftNodeStatus> = {};
+    for (const [draftId, runtimeId] of Object.entries(draftToRuntime)) {
+      result[draftId] = runtimeStatus[runtimeId] ?? "pending";
+    }
+    return result;
+  }, [flowchartMap, runtimeNodes]);
+
+  const hasStatusOverlay = Object.keys(nodeStatuses).length > 0;
+
   const { nodes, edges } = draft;
 
   const idxMap = useMemo(
@@ -300,7 +337,7 @@ export default function DraftGraph({ draft, onNodeClick }: DraftGraphProps) {
       if (fromIdx === undefined || toIdx === undefined) continue;
       if (toIdx <= fromIdx) continue;
       const list = grouped.get(fromIdx) || [];
-      list.push({ toIdx, label: e.condition !== "on_success" && e.condition !== "always" ? e.condition : e.description || undefined });
+      list.push({ toIdx, label: e.label || (e.condition !== "on_success" && e.condition !== "always" ? e.condition : e.description || undefined) });
       grouped.set(fromIdx, list);
     }
     for (const [fromIdx, targets] of grouped) {
@@ -496,9 +533,18 @@ export default function DraftGraph({ draft, onNodeClick }: DraftGraphProps) {
     );
   };
 
+  const STATUS_COLORS: Record<DraftNodeStatus, string> = {
+    running: "#F59E0B",  // amber
+    complete: "#22C55E", // green
+    error: "#EF4444",    // red
+    pending: "",         // no overlay
+  };
+
   const renderNode = (node: DraftNode, i: number) => {
     const pos = nodePos(i);
     const isHovered = hoveredNode === node.id;
+    const status = nodeStatuses[node.id] as DraftNodeStatus | undefined;
+    const statusColor = status ? STATUS_COLORS[status] : "";
     const fontSize = 13;
     const labelAvailW = nodeW - 28;
     const displayLabel = truncateLabel(node.name, labelAvailW, fontSize);
@@ -518,6 +564,25 @@ export default function DraftGraph({ draft, onNodeClick }: DraftGraphProps) {
         style={{ cursor: "pointer" }}
       >
         <title>{`${node.name}\n${node.flowchart_type}`}</title>
+
+        {/* Status glow ring (runtime overlay) */}
+        {hasStatusOverlay && statusColor && (
+          <rect
+            x={pos.x - 3}
+            y={pos.y - 3}
+            width={nodeW + 6}
+            height={NODE_H + 6}
+            rx={8}
+            fill="none"
+            stroke={statusColor}
+            strokeWidth={2}
+            opacity={status === "running" ? 0.8 : 0.6}
+          >
+            {status === "running" && (
+              <animate attributeName="opacity" values="0.4;0.9;0.4" dur="1.5s" repeatCount="indefinite" />
+            )}
+          </rect>
+        )}
 
         <FlowchartShape
           shape={node.flowchart_shape}
@@ -551,6 +616,20 @@ export default function DraftGraph({ draft, onNodeClick }: DraftGraphProps) {
         >
           {descLabel}
         </text>
+
+        {/* Status dot indicator */}
+        {hasStatusOverlay && statusColor && (
+          <circle
+            cx={pos.x + nodeW - 6}
+            cy={pos.y + 6}
+            r={4}
+            fill={statusColor}
+          >
+            {status === "running" && (
+              <animate attributeName="r" values="3;5;3" dur="1s" repeatCount="indefinite" />
+            )}
+          </circle>
+        )}
       </g>
     );
   };
@@ -560,10 +639,10 @@ export default function DraftGraph({ draft, onNodeClick }: DraftGraphProps) {
       {/* Header */}
       <div className="px-4 pt-3 pb-1.5 flex items-center gap-2">
         <p className="text-[11px] text-muted-foreground font-medium uppercase tracking-wider">
-          Draft
+          {hasStatusOverlay ? "Flowchart" : "Draft"}
         </p>
-        <span className="text-[9px] font-mono font-medium text-amber-500/60 border border-amber-500/20 rounded px-1 py-0.5 leading-none">
-          planning
+        <span className={`text-[9px] font-mono font-medium rounded px-1 py-0.5 leading-none border ${hasStatusOverlay ? "text-emerald-500/60 border-emerald-500/20" : "text-amber-500/60 border-amber-500/20"}`}>
+          {hasStatusOverlay ? "live" : "planning"}
         </span>
       </div>
 

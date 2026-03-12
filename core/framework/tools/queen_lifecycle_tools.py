@@ -89,6 +89,11 @@ class QueenPhaseState:
     draft_graph: dict | None = None
     # Whether the user has confirmed the draft and approved moving to building.
     build_confirmed: bool = False
+    # Original draft preserved for flowchart display during runtime (pre-dissolution).
+    original_draft_graph: dict | None = None
+    # Mapping from runtime node IDs → list of original draft flowchart node IDs.
+    # Built during decision-node dissolution at confirm_and_build().
+    flowchart_map: dict[str, list[str]] | None = None
 
     # Phase-specific prompts (set by session_manager after construction)
     prompt_planning: str = ""
@@ -782,6 +787,168 @@ def register_queen_lifecycle_tools(
         # Default: process (rectangle)
         return "process"
 
+    def _dissolve_decision_nodes(
+        draft: dict,
+    ) -> tuple[dict, dict[str, list[str]]]:
+        """Convert planning-only decision nodes into runtime-compatible structures.
+
+        Decision nodes (flowchart diamonds) are dissolved by:
+        1. Merging the decision clause into the predecessor node's success_criteria.
+        2. Rewiring the decision's yes/no outgoing edges as on_success/on_failure
+           edges from the predecessor.
+        3. Removing the decision node from the graph.
+
+        Returns (converted_draft, flowchart_map) where flowchart_map maps
+        runtime node IDs → list of original draft node IDs they absorbed.
+        """
+        import copy as _copy
+
+        nodes: list[dict] = _copy.deepcopy(draft.get("nodes", []))
+        edges: list[dict] = _copy.deepcopy(draft.get("edges", []))
+
+        # Index helpers
+        node_by_id: dict[str, dict] = {n["id"]: n for n in nodes}
+
+        def _incoming(nid: str) -> list[dict]:
+            return [e for e in edges if e["target"] == nid]
+
+        def _outgoing(nid: str) -> list[dict]:
+            return [e for e in edges if e["source"] == nid]
+
+        # Identify decision nodes
+        decision_ids = [
+            n["id"] for n in nodes if n.get("flowchart_type") == "decision"
+        ]
+
+        # Track which draft nodes each runtime node absorbed
+        absorbed: dict[str, list[str]] = {}  # runtime_id → [draft_ids...]
+
+        # Process decisions in node-list order (topological for linear graphs)
+        for d_id in decision_ids:
+            d_node = node_by_id.get(d_id)
+            if d_node is None:
+                continue  # already removed by a prior dissolution
+
+            in_edges = _incoming(d_id)
+            out_edges = _outgoing(d_id)
+
+            # Classify outgoing edges into yes/no branches
+            yes_edge: dict | None = None
+            no_edge: dict | None = None
+
+            for oe in out_edges:
+                lbl = (oe.get("label") or "").lower().strip()
+                cond = (oe.get("condition") or "").lower().strip()
+                desc = (oe.get("description") or "").lower().strip()
+
+                if lbl in ("yes", "true", "pass") or cond == "on_success":
+                    yes_edge = oe
+                elif lbl in ("no", "false", "fail") or cond == "on_failure":
+                    no_edge = oe
+
+            # Fallback: if exactly 2 outgoing and couldn't classify, assign by order
+            if len(out_edges) == 2 and (yes_edge is None or no_edge is None):
+                if yes_edge is None and no_edge is None:
+                    yes_edge, no_edge = out_edges[0], out_edges[1]
+                elif yes_edge is None:
+                    yes_edge = [e for e in out_edges if e is not no_edge][0]
+                else:
+                    no_edge = [e for e in out_edges if e is not yes_edge][0]
+
+            # Decision clause: prefer decision_clause, fall back to description/name
+            clause = (
+                d_node.get("decision_clause")
+                or d_node.get("description")
+                or d_node.get("name")
+                or d_id
+            ).strip()
+
+            predecessors = [node_by_id[e["source"]] for e in in_edges if e["source"] in node_by_id]
+
+            if not predecessors:
+                # Decision at start: convert to regular process node
+                d_node["flowchart_type"] = "process"
+                fc_meta = _FLOWCHART_TYPES["process"]
+                d_node["flowchart_shape"] = fc_meta["shape"]
+                d_node["flowchart_color"] = fc_meta["color"]
+                if not d_node.get("success_criteria"):
+                    d_node["success_criteria"] = clause
+                # Rewire outgoing edges to on_success/on_failure
+                if yes_edge:
+                    yes_edge["condition"] = "on_success"
+                if no_edge:
+                    no_edge["condition"] = "on_failure"
+                absorbed[d_id] = absorbed.get(d_id, [d_id])
+                continue
+
+            # Dissolve: merge into each predecessor
+            for pred in predecessors:
+                pid = pred["id"]
+
+                # Merge decision clause into predecessor's success_criteria
+                existing = (pred.get("success_criteria") or "").strip()
+                if existing:
+                    pred["success_criteria"] = f"{existing}; then evaluate: {clause}"
+                else:
+                    pred["success_criteria"] = clause
+
+                # Remove the edge from predecessor → decision
+                edges[:] = [e for e in edges if not (e["source"] == pid and e["target"] == d_id)]
+
+                # Wire predecessor → yes/no targets
+                edge_counter = len(edges)
+                if yes_edge:
+                    edges.append({
+                        "id": f"edge-dissolved-{edge_counter}",
+                        "source": pid,
+                        "target": yes_edge["target"],
+                        "condition": "on_success",
+                        "description": yes_edge.get("description", ""),
+                        "label": yes_edge.get("label", "Yes"),
+                    })
+                    edge_counter += 1
+                if no_edge:
+                    edges.append({
+                        "id": f"edge-dissolved-{edge_counter}",
+                        "source": pid,
+                        "target": no_edge["target"],
+                        "condition": "on_failure",
+                        "description": no_edge.get("description", ""),
+                        "label": no_edge.get("label", "No"),
+                    })
+
+                # Record absorption
+                prev_absorbed = absorbed.get(pid, [pid])
+                if d_id not in prev_absorbed:
+                    prev_absorbed.append(d_id)
+                absorbed[pid] = prev_absorbed
+
+            # Remove decision node and all its edges
+            edges[:] = [e for e in edges if e["source"] != d_id and e["target"] != d_id]
+            nodes[:] = [n for n in nodes if n["id"] != d_id]
+            del node_by_id[d_id]
+
+        # Build complete flowchart_map (identity for non-absorbed nodes)
+        flowchart_map: dict[str, list[str]] = {}
+        for n in nodes:
+            nid = n["id"]
+            flowchart_map[nid] = absorbed.get(nid, [nid])
+
+        # Rebuild terminal_nodes (decision targets may have changed)
+        sources = {e["source"] for e in edges}
+        all_ids = {n["id"] for n in nodes}
+        terminal_ids = all_ids - sources
+        if not terminal_ids and nodes:
+            terminal_ids = {nodes[-1]["id"]}
+
+        converted = dict(draft)
+        converted["nodes"] = nodes
+        converted["edges"] = edges
+        converted["terminal_nodes"] = sorted(terminal_ids)
+        converted["entry_node"] = nodes[0]["id"] if nodes else ""
+
+        return converted, flowchart_map
+
     async def save_agent_draft(
         *,
         agent_name: str,
@@ -824,6 +991,8 @@ def register_queen_lifecycle_tools(
                 "output_keys": n.get("output_keys", []),
                 "success_criteria": n.get("success_criteria", ""),
                 "sub_agents": n.get("sub_agents", []),
+                # Decision nodes: the yes/no question to evaluate
+                "decision_clause": n.get("decision_clause", ""),
                 # Explicit flowchart override (preserved for classification)
                 "flowchart_type": n.get("flowchart_type", ""),
             })
@@ -839,6 +1008,7 @@ def register_queen_lifecycle_tools(
                     "target": e.get("target", ""),
                     "condition": e.get("condition", "on_success"),
                     "description": e.get("description", ""),
+                    "label": e.get("label", ""),
                 })
 
         # Determine terminal nodes: explicit list, or nodes with no outgoing edges
@@ -993,6 +1163,14 @@ def register_queen_lifecycle_tools(
                                 "type": "string",
                                 "description": "What success looks like for this node",
                             },
+                            "decision_clause": {
+                                "type": "string",
+                                "description": (
+                                    "For decision nodes only: the yes/no question to "
+                                    "evaluate (e.g. 'Is amount > $100?'). Used during "
+                                    "dissolution to set the predecessor's success_criteria."
+                                ),
+                            },
                         },
                         "required": ["id"],
                     },
@@ -1016,6 +1194,13 @@ def register_queen_lifecycle_tools(
                                 ],
                             },
                             "description": {"type": "string"},
+                            "label": {
+                                "type": "string",
+                                "description": (
+                                    "Short edge label shown on the flowchart "
+                                    "(e.g. 'Yes', 'No', 'Retry')"
+                                ),
+                            },
                         },
                         "required": ["source", "target"],
                     },
@@ -1078,12 +1263,30 @@ def register_queen_lifecycle_tools(
             })
 
         phase_state.build_confirmed = True
+
+        # Preserve original draft for flowchart display during runtime,
+        # then dissolve decision nodes into runtime-compatible structures.
+        import copy as _copy
+
+        phase_state.original_draft_graph = _copy.deepcopy(phase_state.draft_graph)
+        converted, fmap = _dissolve_decision_nodes(phase_state.draft_graph)
+        phase_state.draft_graph = converted
+        phase_state.flowchart_map = fmap
+
+        dissolved_count = (
+            len(phase_state.original_draft_graph.get("nodes", []))
+            - len(converted.get("nodes", []))
+        )
+
         return json.dumps({
             "status": "confirmed",
             "agent_name": phase_state.draft_graph.get("agent_name", ""),
+            "decision_nodes_dissolved": dissolved_count,
+            "flowchart_map": fmap,
             "message": (
-                "User has confirmed the design. Now call "
-                "initialize_and_build_agent(agent_name, nodes) to scaffold the "
+                "User has confirmed the design. "
+                + (f"{dissolved_count} decision node(s) dissolved into predecessor criteria. " if dissolved_count else "")
+                + "Now call initialize_and_build_agent(agent_name, nodes) to scaffold the "
                 "agent package and start building. The draft metadata will be "
                 "used to pre-populate the generated files."
             ),

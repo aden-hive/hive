@@ -203,6 +203,8 @@ export interface DraftNode {
   output_keys: string[];
   success_criteria: string;
   sub_agents: string[];
+  /** For decision nodes: the yes/no question evaluated during dissolution. */
+  decision_clause?: string;
   flowchart_type: string;
   flowchart_shape: string;
   flowchart_color: string;
@@ -214,6 +216,8 @@ export interface DraftEdge {
   target: string;
   condition: string;
   description: string;
+  /** Short label shown on the flowchart edge (e.g. "Yes", "No"). */
+  label?: string;
 }
 
 export interface DraftGraph {
@@ -227,6 +231,14 @@ export interface DraftGraph {
   entry_node: string;
   terminal_nodes: string[];
   flowchart_legend: Record<string, { shape: string; color: string }>;
+}
+
+/** Mapping from runtime graph nodes → original flowchart draft nodes. */
+export interface FlowchartMap {
+  /** runtime_node_id → list of original draft node IDs it absorbed. */
+  map: Record<string, string[]> | null;
+  /** Original draft graph preserved before decision-node dissolution. */
+  original_draft: DraftGraph | null;
 }
 
 export interface NodeCriteria {

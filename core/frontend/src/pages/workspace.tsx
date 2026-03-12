@@ -260,6 +260,10 @@ interface AgentBackendState {
   queenPhase: "planning" | "building" | "staging" | "running";
   /** Draft graph from planning phase (before code generation) */
   draftGraph: DraftGraphData | null;
+  /** Original draft (pre-dissolution) for flowchart display during runtime */
+  originalDraft: DraftGraphData | null;
+  /** Runtime node ID → list of original draft node IDs it absorbed */
+  flowchartMap: Record<string, string[]> | null;
   workerRunState: "idle" | "deploying" | "running";
   currentExecutionId: string | null;
   nodeLogs: Record<string, string[]>;
@@ -296,6 +300,8 @@ function defaultAgentState(): AgentBackendState {
     queenBuilding: false,
     queenPhase: "planning",
     draftGraph: null,
+    originalDraft: null,
+    flowchartMap: null,
     workerRunState: "idle",
     currentExecutionId: null,
     nodeLogs: {},
@@ -1824,7 +1830,16 @@ export default function Workspace() {
           });
           if (newPhase !== "planning") {
             const sid = agentStates[agentType]?.sessionId;
-            if (sid) fetchedDraftSessionsRef.current.delete(sid);
+            if (sid) {
+              fetchedDraftSessionsRef.current.delete(sid);
+              // Fetch the flowchart map (original draft + dissolution mapping)
+              graphsApi.flowchartMap(sid).then(({ map, original_draft }) => {
+                updateAgentState(agentType, {
+                  flowchartMap: map,
+                  originalDraft: original_draft,
+                });
+              }).catch(() => {});
+            }
           }
           break;
         }
@@ -2407,10 +2422,16 @@ export default function Workspace() {
       <div className="flex flex-1 min-h-0">
 
         {/* ── Pipeline graph + chat ──────────────────────────────────── */}
-        <div className={`${activeAgentState?.queenPhase === "planning" && activeAgentState?.draftGraph ? "w-[500px] min-w-[400px]" : "w-[300px] min-w-[240px]"} bg-card/30 flex flex-col border-r border-border/30 transition-[width] duration-200`}>
+        <div className={`${(activeAgentState?.queenPhase === "planning" && activeAgentState?.draftGraph) || activeAgentState?.originalDraft ? "w-[500px] min-w-[400px]" : "w-[300px] min-w-[240px]"} bg-card/30 flex flex-col border-r border-border/30 transition-[width] duration-200`}>
           <div className="flex-1 min-h-0">
             {activeAgentState?.queenPhase === "planning" && activeAgentState.draftGraph ? (
               <DraftGraph draft={activeAgentState.draftGraph} />
+            ) : activeAgentState?.originalDraft ? (
+              <DraftGraph
+                draft={activeAgentState.originalDraft}
+                flowchartMap={activeAgentState.flowchartMap ?? undefined}
+                runtimeNodes={currentGraph.nodes}
+              />
             ) : (
               <AgentGraph
                 nodes={currentGraph.nodes}
