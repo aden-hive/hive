@@ -486,43 +486,60 @@ class BrowserSession:
             )
 
             # Launch system Chrome and connect via CDP
-            self._chrome_process = await launch_chrome(
-                cdp_port=self.cdp_port,
-                user_data_dir=self.user_data_dir,
-                headless=headless,
-                extra_args=[f"--user-agent={BROWSER_USER_AGENT}"],
-            )
-            self.browser = await self._playwright.chromium.connect_over_cdp(
-                self._chrome_process.cdp_url
-            )
+            try:
+                self._chrome_process = await launch_chrome(
+                    cdp_port=self.cdp_port,
+                    user_data_dir=self.user_data_dir,
+                    headless=headless,
+                    extra_args=[f"--user-agent={BROWSER_USER_AGENT}"],
+                )
+                self.browser = await self._playwright.chromium.connect_over_cdp(
+                    self._chrome_process.cdp_url
+                )
+            except Exception as exc:
+                logger.error(f"Browser launch failed: {exc}")
+                await self._cleanup_after_failed_start()
+                raise
+
             self.context = self.browser.contexts[0]
+            logger.info(
+                f"CDP connected: contexts={len(self.browser.contexts)}, "
+                f"pages={len(self.context.pages)}"
+            )
 
             # Inject stealth script to hide automation detection
             await self.context.add_init_script(STEALTH_SCRIPT)
 
-            # Set viewport on existing pages (CDP default context doesn't
-            # inherit viewport settings like launch_persistent_context did)
+            # Close ALL pages/contexts Chrome opened on startup (session
+            # restore, about:blank, new-tab page, etc.) and create a single
+            # clean page we fully control.  This avoids the macOS issue where
+            # Chrome's own visible tab is not the one Playwright sees.
             viewport = _get_viewport()
-            for page in self.context.pages:
-                await page.set_viewport_size(viewport)
 
-            if persistent:
-                # Register existing pages from restored session
-                for page in self.context.pages:
-                    target_id = f"tab_{id(page)}"
-                    self.pages[target_id] = page
-                    self.console_messages[target_id] = []
-                    page.on("console", lambda msg, tid=target_id: self._capture_console(tid, msg))
-                    if self.active_page_id is None:
-                        self.active_page_id = target_id
+            for ctx in self.browser.contexts[1:]:
+                try:
+                    await ctx.close()
+                except Exception:
+                    pass
 
-                # Set branded Hive start page on the first blank page
-                if self.context.pages:
-                    first_page = self.context.pages[0]
-                    url = first_page.url
-                    # Only set branded content if it's a blank/new tab page
-                    if url in ("", "about:blank", "chrome://newtab/"):
-                        await first_page.set_content(HIVE_START_PAGE)
+            # Close every initial page so we start with a blank slate
+            for page in list(self.context.pages):
+                try:
+                    await page.close()
+                except Exception:
+                    pass
+
+            first_page = await self.context.new_page()
+            logger.info("Created clean page for session")
+            await first_page.set_viewport_size(viewport)
+
+            # Register the clean page
+            target_id = f"tab_{id(first_page)}"
+            self._register_page(first_page, target_id)
+
+            # Set branded Hive start page on the initial tab
+            logger.info("Setting Hive start page content")
+            await first_page.set_content(HIVE_START_PAGE)
 
             # Health check: confirm the browser is actually responsive
             try:
@@ -678,12 +695,7 @@ class BrowserSession:
 
         page = await self.context.new_page()
         target_id = f"tab_{id(page)}"
-        self.pages[target_id] = page
-        self.active_page_id = target_id
-        self.console_messages[target_id] = []
-
-        # Set up console message capture
-        page.on("console", lambda msg: self._capture_console(target_id, msg))
+        self._register_page(page, target_id)
 
         await page.goto(url, wait_until=wait_until, timeout=DEFAULT_NAVIGATION_TIMEOUT_MS)
 
@@ -709,10 +721,7 @@ class BrowserSession:
             # Nothing to steal focus from — just open normally
             page = await self.context.new_page()
             target_id = f"tab_{id(page)}"
-            self.pages[target_id] = page
-            self.active_page_id = target_id
-            self.console_messages[target_id] = []
-            page.on("console", lambda msg: self._capture_console(target_id, msg))
+            self._register_page(page, target_id)
             await page.goto(url, wait_until=wait_until, timeout=DEFAULT_NAVIGATION_TIMEOUT_MS)
             return {
                 "ok": True,
@@ -746,10 +755,8 @@ class BrowserSession:
             await cdp.detach()
 
         target_id = f"tab_{id(page)}"
-        self.pages[target_id] = page
         # Don't update active_page_id — the whole point is to stay on the current tab
-        self.console_messages[target_id] = []
-        page.on("console", lambda msg: self._capture_console(target_id, msg))
+        self._register_page(page, target_id, set_active=False)
 
         return {
             "ok": True,
@@ -758,6 +765,27 @@ class BrowserSession:
             "title": await page.title(),
             "background": True,
         }
+
+    def _handle_page_close(self, target_id: str) -> None:
+        """Clean up session state when a page is closed (by user or programmatically)."""
+        self.pages.pop(target_id, None)
+        self.console_messages.pop(target_id, None)
+
+        if self.active_page_id == target_id:
+            self.active_page_id = next(iter(self.pages), None)
+            if self.active_page_id:
+                logger.info("Active tab %s closed, switched to %s", target_id, self.active_page_id)
+            else:
+                logger.warning("Active tab %s closed, no remaining tabs", target_id)
+
+    def _register_page(self, page: Page, target_id: str, *, set_active: bool = True) -> None:
+        """Register a page in the session with all necessary event listeners."""
+        self.pages[target_id] = page
+        self.console_messages[target_id] = []
+        page.on("console", lambda msg, tid=target_id: self._capture_console(tid, msg))
+        page.on("close", lambda tid=target_id: self._handle_page_close(tid))
+        if set_active:
+            self.active_page_id = target_id
 
     def _capture_console(self, target_id: str, msg: Any) -> None:
         """Capture console messages for a tab."""
@@ -840,3 +868,22 @@ def get_session(profile: str = "default") -> BrowserSession:
 def get_all_sessions() -> dict[str, BrowserSession]:
     """Get all registered sessions."""
     return _sessions
+
+
+async def shutdown_all_browsers() -> None:
+    """Stop all browser sessions and the shared browser.
+
+    Called at server shutdown to kill orphaned Chrome processes.
+    """
+    for name, session in list(_sessions.items()):
+        try:
+            await session.stop()
+            logger.info("Stopped browser session: %s", name)
+        except Exception as exc:
+            logger.warning("Error stopping session %s: %s", name, exc)
+    _sessions.clear()
+
+    try:
+        await close_shared_browser()
+    except Exception as exc:
+        logger.warning("Error closing shared browser: %s", exc)
