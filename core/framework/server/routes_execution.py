@@ -8,7 +8,7 @@ from typing import Any
 from aiohttp import web
 
 from framework.credentials.validation import validate_agent_credentials
-from framework.server.app import resolve_session, safe_path_segment, sessions_dir
+from framework.server.app import manager_key, resolve_session, safe_path_segment, sessions_dir
 from framework.server.routes_sessions import _credential_error_response
 
 logger = logging.getLogger(__name__)
@@ -133,7 +133,7 @@ async def handle_chat(request: web.Request) -> web.Response:
             )
 
     # Queen is dead — try to revive her
-    manager: Any = request.app["manager"]
+    manager: Any = request.app[manager_key]
     try:
         await manager.revive_queen(session, initial_prompt=message)
         return web.json_response(
@@ -174,7 +174,7 @@ async def handle_queen_context(request: web.Request) -> web.Response:
             return web.json_response({"status": "queued", "delivered": True})
 
     # Queen is dead — try to revive her
-    manager: Any = request.app["manager"]
+    manager: Any = request.app[manager_key]
     try:
         await manager.revive_queen(session)
         # After revival, deliver the message
