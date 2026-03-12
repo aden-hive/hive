@@ -1169,7 +1169,8 @@ case $choice in
         # Local (Ollama) — no API key; pick model from ollama list
         SELECTED_PROVIDER_ID="ollama"
         SELECTED_ENV_VAR=""
-        SELECTED_MAX_TOKENS=8192
+        SELECTED_MAX_TOKENS=32768
+        #SELECTED_MAX_TOKENS=8192
         OLLAMA_MODELS=()
         while IFS= read -r line; do
             [ -n "$line" ] && OLLAMA_MODELS+=("$line")
@@ -1193,6 +1194,9 @@ case $choice in
             done
             echo ""
             echo -e "${GREEN}⬢${NC} Using Ollama with model ${DIM}$SELECTED_MODEL${NC}"
+            echo -e "${YELLOW}  ⚠ Note: The framework uses a ~9,500 token system prompt and requires strong tool use.${NC}"
+            echo -e "${YELLOW}    For best results, use models like qwen2.5:72b+ or mistral-large.${NC}"
+            echo ""
         else
             SELECTED_MODEL="llama3"
             echo ""
@@ -1365,7 +1369,9 @@ if [ -n "$SELECTED_PROVIDER_ID" ]; then
     elif [ "$SUBSCRIPTION_MODE" = "kimi_code" ]; then
         save_configuration "$SELECTED_PROVIDER_ID" "$SELECTED_ENV_VAR" "$SELECTED_MODEL" "$SELECTED_MAX_TOKENS" "$SELECTED_MAX_CONTEXT_TOKENS" "" "$SELECTED_API_BASE" > /dev/null
     elif [ "$SELECTED_PROVIDER_ID" = "ollama" ]; then
-        save_configuration "ollama" "" "$SELECTED_MODEL" "$SELECTED_MAX_TOKENS" "$SELECTED_MAX_CONTEXT_TOKENS" > /dev/null
+        # Pass api_base explicitly — LiteLLM requires this to route ollama/* models
+        # to the local Ollama server instead of trying to reach a remote endpoint.
+        save_configuration "ollama" "" "$SELECTED_MODEL" "$SELECTED_MAX_TOKENS" "$SELECTED_MAX_CONTEXT_TOKENS" "" "http://localhost:11434" > /dev/null
     else
         save_configuration "$SELECTED_PROVIDER_ID" "$SELECTED_ENV_VAR" "$SELECTED_MODEL" "$SELECTED_MAX_TOKENS" "$SELECTED_MAX_CONTEXT_TOKENS" > /dev/null
     fi

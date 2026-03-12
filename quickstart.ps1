@@ -1213,7 +1213,7 @@ switch ($num) {
         # Local (Ollama) — no API key; pick model from ollama list
         $SelectedProviderId = "ollama"
         $SelectedEnvVar     = ""
-        $SelectedMaxTokens = 8192
+        $SelectedMaxTokens = 32768
         $ollamaListOutput = try { & ollama list 2>$null } catch { $null }
         $OllamaModels = @()
         if ($ollamaListOutput) {
@@ -1247,6 +1247,9 @@ switch ($num) {
             }
             Write-Host ""
             Write-Ok "Using Ollama with model $SelectedModel"
+            Write-Warn "Note: The framework uses a ~9,500 token system prompt and requires strong tool use."
+            Write-Color -Text "    For best results, use models like qwen2.5:72b+ or mistral-large." -Color Yellow
+            Write-Host ""
         } else {
             $SelectedModel = "llama3"
             Write-Host ""
@@ -1442,6 +1445,7 @@ if ($SelectedProviderId) {
         $config.llm["api_key_env_var"] = $SelectedEnvVar
     } elseif ($SelectedProviderId -eq "ollama") {
         # No api_key_env_var for local Ollama
+        $config.llm["api_base"] = "http://localhost:11434"
     } else {
         $config.llm["api_key_env_var"] = $SelectedEnvVar
     }
