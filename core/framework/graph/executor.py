@@ -138,6 +138,7 @@ class GraphExecutor:
         tool_provider_map: dict[str, str] | None = None,
         dynamic_tools_provider: Callable | None = None,
         dynamic_prompt_provider: Callable | None = None,
+        iteration_metadata_provider: Callable | None = None,
     ):
         """
         Initialize the executor.
@@ -183,6 +184,7 @@ class GraphExecutor:
         self.tool_provider_map = tool_provider_map
         self.dynamic_tools_provider = dynamic_tools_provider
         self.dynamic_prompt_provider = dynamic_prompt_provider
+        self.iteration_metadata_provider = iteration_metadata_provider
 
         # Parallel execution settings
         self.enable_parallel_execution = enable_parallel_execution
@@ -1799,6 +1801,7 @@ class GraphExecutor:
             shared_node_registry=self.node_registry,  # For subagent escalation routing
             dynamic_tools_provider=self.dynamic_tools_provider,
             dynamic_prompt_provider=self.dynamic_prompt_provider,
+            iteration_metadata_provider=self.iteration_metadata_provider,
         )
 
     VALID_NODE_TYPES = {

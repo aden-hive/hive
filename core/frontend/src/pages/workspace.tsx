@@ -14,7 +14,7 @@ import { graphsApi } from "@/api/graphs";
 import { sessionsApi } from "@/api/sessions";
 import { useMultiSSE } from "@/hooks/use-sse";
 import type { LiveSession, AgentEvent, DiscoverEntry, Message, NodeSpec } from "@/api/types";
-import { backendMessageToChatMessage, sseEventToChatMessage, formatAgentDisplayName } from "@/lib/chat-helpers";
+import { backendMessageToChatMessage, sseEventToChatMessage, formatAgentDisplayName, extractLastPhase } from "@/lib/chat-helpers";
 import { topologyToGraphNodes } from "@/lib/graph-converter";
 import { ApiError } from "@/api/client";
 
@@ -239,6 +239,38 @@ function fmtLogTs(ts: string): string {
 
 function truncate(s: string, max: number): string {
   return s.length > max ? s.slice(0, max) + "..." : s;
+}
+
+type SessionRestoreResult = {
+  messages: ChatMessage[];
+  restoredPhase: "planning" | "building" | "staging" | "running" | null;
+};
+
+/**
+ * Restore session messages from the persisted event log.
+ * Returns an empty result if no event log exists.
+ */
+async function restoreSessionMessages(
+  sessionId: string,
+  thread: string,
+  agentDisplayName: string,
+): Promise<SessionRestoreResult> {
+  try {
+    const { events } = await sessionsApi.eventsHistory(sessionId);
+    if (events.length > 0) {
+      const messages: ChatMessage[] = [];
+      for (const evt of events) {
+        const msg = sseEventToChatMessage(evt, thread, agentDisplayName);
+        if (!msg) continue;
+        if (evt.stream_id === "queen") msg.role = "queen";
+        messages.push(msg);
+      }
+      return { messages, restoredPhase: extractLastPhase(events) };
+    }
+  } catch {
+    // Event log not available — session will start fresh.
+  }
+  return { messages: [], restoredPhase: null };
 }
 
 // --- Per-agent backend state (consolidated) ---
@@ -682,6 +714,7 @@ export default function Workspace() {
           }
         }
 
+        let restoredPhase: "planning" | "building" | "staging" | "running" | null = null;
         if (!liveSession) {
           // Fetch conversation history from disk BEFORE creating the new session.
           // SKIP if messages were already pre-populated by handleHistoryOpen.
@@ -690,30 +723,9 @@ export default function Workspace() {
           const alreadyHasMessages = (activeSess?.messages?.length ?? 0) > 0;
           if (restoreFrom && !alreadyHasMessages) {
             try {
-              // Prefer persisted event log for full UI reconstruction
-              let usedEventLog = false;
-              try {
-                const { events } = await sessionsApi.eventsHistory(restoreFrom);
-                if (events.length > 0) {
-                  for (const evt of events) {
-                    const msg = sseEventToChatMessage(evt, agentType, "Queen Bee");
-                    if (msg) {
-                      if (evt.stream_id === "queen") msg.role = "queen";
-                      preRestoredMsgs.push(msg);
-                    }
-                  }
-                  usedEventLog = true;
-                }
-              } catch { /* event log not available */ }
-
-              if (!usedEventLog) {
-                const { messages: queenMsgs } = await sessionsApi.queenMessages(restoreFrom);
-                for (const m of queenMsgs as Message[]) {
-                  const msg = backendMessageToChatMessage(m, agentType, "Queen Bee");
-                  msg.role = "queen";
-                  preRestoredMsgs.push(msg);
-                }
-              }
+              const restored = await restoreSessionMessages(restoreFrom, agentType, "Queen Bee");
+              preRestoredMsgs.push(...restored.messages);
+              restoredPhase = restored.restoredPhase;
             } catch {
               // Not available — will start fresh
             }
@@ -783,12 +795,15 @@ export default function Workspace() {
         // If no messages were actually restored, lift the intro suppression
         if (restoredMessageCount === 0) suppressIntroRef.current.delete(agentType);
 
+        const qPhase = restoredPhase || liveSession.queen_phase || "planning";
         updateAgentState(agentType, {
           sessionId: liveSession.session_id,
           displayName: "Queen Bee",
           ready: true,
           loading: false,
           queenReady: true,
+          queenPhase: qPhase,
+          queenBuilding: qPhase === "building",
         });
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : String(err);
@@ -863,6 +878,9 @@ export default function Workspace() {
         }
       }
 
+      // Track the last queen phase seen in the event log for cold restore
+      let restoredPhase: "planning" | "building" | "staging" | "running" | null = null;
+
       if (!liveSession) {
         // Reconnect failed — clear stale cached messages from localStorage restore.
         // NEVER wipe when: (a) doing a cold restore (we'll restore from disk) or
@@ -885,50 +903,10 @@ export default function Workspace() {
         // double-fetch and greeting leakage).
         let preQueenMsgs: ChatMessage[] = [];
         if (coldRestoreId && !alreadyHasMessages) {
-          try {
-            // Prefer the persisted event log for full UI reconstruction (includes
-            // tool calls, execution state, etc.). Fall back to parts-based
-            // queen messages when no event log exists (pre-upgrade sessions).
-            let usedEventLog = false;
-            try {
-              const { events } = await sessionsApi.eventsHistory(coldRestoreId);
-              if (events.length > 0) {
-                const displayNameTemp = formatAgentDisplayName(agentPath);
-                for (const evt of events) {
-                  const msg = sseEventToChatMessage(evt, agentType, displayNameTemp);
-                  if (msg) {
-                    // Tag queen-stream messages appropriately
-                    if (evt.stream_id === "queen") msg.role = "queen";
-                    preQueenMsgs.push(msg);
-                  }
-                }
-                usedEventLog = true;
-              }
-            } catch { /* event log not available — fall back to parts */ }
-
-            if (!usedEventLog) {
-              const { messages: queenMsgs } = await sessionsApi.queenMessages(coldRestoreId);
-              const displayNameTemp = formatAgentDisplayName(agentPath);
-              for (const m of queenMsgs as Message[]) {
-                const msg = backendMessageToChatMessage(m, agentType, "Queen Bee");
-                msg.role = "queen";
-                preQueenMsgs.push(msg);
-              }
-              // Also try to grab worker messages while we're here
-              try {
-                const { sessions: workerSessions } = await sessionsApi.workerSessions(coldRestoreId);
-                const resumable = workerSessions.find(s => s.status === "active" || s.status === "paused");
-                if (resumable) {
-                  const { messages: wMsgs } = await sessionsApi.messages(coldRestoreId, resumable.session_id);
-                  for (const m of wMsgs as Message[]) {
-                    preQueenMsgs.push(backendMessageToChatMessage(m, agentType, displayNameTemp));
-                  }
-                }
-              } catch { /* not critical */ }
-            }
-          } catch {
-            // Not available — will start fresh
-          }
+          const displayNameTemp = formatAgentDisplayName(agentPath);
+          const restored = await restoreSessionMessages(coldRestoreId, agentType, displayNameTemp);
+          preQueenMsgs = restored.messages;
+          restoredPhase = restored.restoredPhase;
         }
 
         // Suppress intro whenever we are about to restore a previous conversation.
@@ -1002,7 +980,7 @@ export default function Workspace() {
       // failed, the throw inside the catch exits the outer try block.
       const session = liveSession!;
       const displayName = formatAgentDisplayName(session.worker_name || agentType);
-      const initialPhase = session.queen_phase || (session.has_worker ? "staging" : "planning");
+      const initialPhase = restoredPhase || session.queen_phase || (session.has_worker ? "staging" : "planning");
       updateAgentState(agentType, {
         sessionId: session.session_id,
         displayName,
@@ -1043,21 +1021,9 @@ export default function Workspace() {
       // For cold restore they were already pre-fetched above (before create) so we skip to avoid
       // double-restoring and to avoid capturing the new greeting.
       if (historyId && !coldRestoreId) {
-        // Try event log first for full UI reconstruction
-        let usedEventLog = false;
-        try {
-          const { events } = await sessionsApi.eventsHistory(historyId);
-          if (events.length > 0) {
-            for (const evt of events) {
-              const msg = sseEventToChatMessage(evt, agentType, displayName);
-              if (msg) {
-                if (evt.stream_id === "queen") msg.role = "queen";
-                restoredMsgs.push(msg);
-              }
-            }
-            usedEventLog = true;
-          }
-        } catch { /* event log not available */ }
+        const restored = await restoreSessionMessages(historyId, agentType, displayName);
+        restoredMsgs.push(...restored.messages);
+        const usedEventLog = restored.usedEventLog;
 
         // Check worker status regardless (needed for isWorkerRunning flag)
         try {
@@ -1076,19 +1042,6 @@ export default function Workspace() {
           }
         } catch {
           // Worker session listing failed — not critical
-        }
-
-        if (!usedEventLog) {
-          try {
-            const { messages: queenMsgs } = await sessionsApi.queenMessages(historyId);
-            for (const m of queenMsgs as Message[]) {
-              const msg = backendMessageToChatMessage(m, agentType, "Queen Bee");
-              msg.role = "queen";
-              restoredMsgs.push(msg);
-            }
-          } catch {
-            // Queen messages not available — not critical
-          }
         }
       }
 
@@ -1397,7 +1350,7 @@ export default function Workspace() {
 
   // --- SSE event handler ---
   const upsertChatMessage = useCallback(
-    (agentType: string, chatMsg: ChatMessage) => {
+    (agentType: string, chatMsg: ChatMessage, options?: { reconcileOptimisticUser?: boolean }) => {
       setSessionsByAgent((prev) => {
         const sessions = prev[agentType] || [];
         const activeId = activeSessionRef.current[agentType] || sessions[0]?.id;
@@ -1413,6 +1366,25 @@ export default function Workspace() {
                 i === idx ? { ...chatMsg, createdAt: m.createdAt ?? chatMsg.createdAt } : m,
               );
             } else {
+              const shouldReconcileOptimisticUser =
+                !!options?.reconcileOptimisticUser && chatMsg.type === "user" && s.messages.length > 0;
+              if (shouldReconcileOptimisticUser) {
+                const lastIdx = s.messages.length - 1;
+                const lastMsg = s.messages[lastIdx];
+                const incomingTs = chatMsg.createdAt ?? Date.now();
+                const lastTs = lastMsg.createdAt ?? incomingTs;
+                const sameMessage =
+                  lastMsg.type === "user"
+                  && lastMsg.content === chatMsg.content
+                  && Math.abs(incomingTs - lastTs) <= 15000;
+                if (sameMessage) {
+                  newMessages = s.messages.map((m, i) =>
+                    i === lastIdx ? { ...m, id: chatMsg.id } : m,
+                  );
+                  return { ...s, messages: newMessages };
+                }
+              }
+
               // Append — SSE events arrive in server-timestamp order via the
               // shared EventBus, so arrival order already interleaves queen
               // and worker correctly.  Local user messages are always created
@@ -1540,13 +1512,16 @@ export default function Workspace() {
         case "execution_paused":
         case "execution_failed":
         case "client_output_delta":
+        case "client_input_received":
         case "client_input_requested":
         case "llm_text_delta": {
           const chatMsg = sseEventToChatMessage(event, agentType, displayName, currentTurn);
           if (isQueen) console.log('[QUEEN] chatMsg:', chatMsg?.id, chatMsg?.content?.slice(0, 50), 'turn:', currentTurn);
           if (chatMsg && !suppressQueenMessages) {
             if (isQueen) chatMsg.role = role;
-            upsertChatMessage(agentType, chatMsg);
+            upsertChatMessage(agentType, chatMsg, {
+              reconcileOptimisticUser: event.type === "client_input_received",
+            });
           }
 
           // Mark streaming when LLM text is actively arriving
@@ -2576,32 +2551,10 @@ export default function Workspace() {
     // Prefer the persisted event log for full UI reconstruction; fall back to parts.
     let prefetchedMessages: ChatMessage[] = [];
     try {
-      let usedEventLog = false;
-      try {
-        const { events } = await sessionsApi.eventsHistory(sessionId);
-        if (events.length > 0) {
-          const resolvedType = agentPath || "new-agent";
-          const displayNameTemp = agentName || formatAgentDisplayName(resolvedType);
-          for (const evt of events) {
-            const msg = sseEventToChatMessage(evt, resolvedType, displayNameTemp);
-            if (msg) {
-              if (evt.stream_id === "queen") msg.role = "queen";
-              prefetchedMessages.push(msg);
-            }
-          }
-          usedEventLog = true;
-        }
-      } catch { /* event log not available */ }
-
-      if (!usedEventLog) {
-        const { messages: queenMsgs } = await sessionsApi.queenMessages(sessionId);
-        for (const m of queenMsgs as Message[]) {
-          const resolvedType = agentPath || "new-agent";
-          const msg = backendMessageToChatMessage(m, resolvedType, "Queen Bee");
-          msg.role = "queen";
-          prefetchedMessages.push(msg);
-        }
-      }
+      const resolvedType = agentPath || "new-agent";
+      const displayNameTemp = agentName || formatAgentDisplayName(resolvedType);
+      const restored = await restoreSessionMessages(sessionId, resolvedType, displayNameTemp);
+      prefetchedMessages = restored.messages;
       if (prefetchedMessages.length > 0) {
         prefetchedMessages.sort((a, b) => (a.createdAt ?? 0) - (b.createdAt ?? 0));
       }

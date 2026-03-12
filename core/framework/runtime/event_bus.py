@@ -675,15 +675,19 @@ class EventBus:
         node_id: str,
         iteration: int,
         execution_id: str | None = None,
+        extra_data: dict[str, Any] | None = None,
     ) -> None:
         """Emit node loop iteration event."""
+        data: dict[str, Any] = {"iteration": iteration}
+        if extra_data:
+            data.update(extra_data)
         await self.publish(
             AgentEvent(
                 type=EventType.NODE_LOOP_ITERATION,
                 stream_id=stream_id,
                 node_id=node_id,
                 execution_id=execution_id,
-                data={"iteration": iteration},
+                data=data,
             )
         )
 

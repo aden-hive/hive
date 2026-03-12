@@ -188,3 +188,25 @@ export function sseEventToChatMessage(
       return null;
   }
 }
+
+type QueenPhase = "planning" | "building" | "staging" | "running";
+const VALID_PHASES = new Set<string>(["planning", "building", "staging", "running"]);
+
+/**
+ * Scan an array of persisted events and return the last queen phase seen,
+ * or null if no phase event exists.  Reads both `queen_phase_changed` events
+ * and the per-iteration `phase` metadata on `node_loop_iteration` events.
+ */
+export function extractLastPhase(events: AgentEvent[]): QueenPhase | null {
+  let last: QueenPhase | null = null;
+  for (const evt of events) {
+    const phase =
+      evt.type === "queen_phase_changed" ? (evt.data?.phase as string) :
+      evt.type === "node_loop_iteration" ? (evt.data?.phase as string | undefined) :
+      undefined;
+    if (phase && VALID_PHASES.has(phase)) {
+      last = phase as QueenPhase;
+    }
+  }
+  return last;
+}

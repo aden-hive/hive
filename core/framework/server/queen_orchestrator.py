@@ -252,6 +252,7 @@ async def create_queen(
                 execution_id=session.id,
                 dynamic_tools_provider=phase_state.get_current_tools,
                 dynamic_prompt_provider=phase_state.get_current_prompt,
+                iteration_metadata_provider=lambda: {"phase": phase_state.phase},
             )
             session.queen_executor = executor
 
