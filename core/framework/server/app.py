@@ -258,6 +258,9 @@ def _setup_static_serving(app: web.Application) -> None:
     async def handle_spa(request: web.Request) -> web.FileResponse:
         """Serve static files with SPA fallback to index.html."""
         rel_path = request.match_info.get("path", "")
+        if rel_path == "api" or rel_path.startswith("api/"):
+            return web.json_response({"error": "API route not found"}, status=404)
+
         file_path = (dist_dir / rel_path).resolve()
 
         if file_path.is_file() and file_path.is_relative_to(dist_dir):
