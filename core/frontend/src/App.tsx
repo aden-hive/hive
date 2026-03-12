@@ -1,5 +1,5 @@
 import { Routes, Route } from "react-router-dom";
-import { ThemeProvider } from "./components/ThemeProvider";
+import { ThemeProvider } from "./context/ThemeContext";
 import Home from "./pages/home";
 import MyAgents from "./pages/my-agents";
 import Workspace from "./pages/workspace";

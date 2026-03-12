@@ -18,11 +18,17 @@ export interface TopBarTab {
 }
 
 interface TopBarProps {
+    /** Live tabs from workspace state. When omitted, reads from localStorage. */
   tabs?: TopBarTab[];
+    /** Called when a tab is clicked (workspace overrides to setActiveWorker). */
   onTabClick?: (agentType: string) => void;
+  /** Called when a tab's X is clicked (workspace overrides for SSE teardown). */
   onCloseTab?: (agentType: string) => void;
+  /** Whether close buttons are shown. Defaults to true when >1 tab. */
   canCloseTabs?: boolean;
+  /** Content rendered right after the tab strip (e.g. + button). */
   afterTabs?: React.ReactNode;
+   /** Right-side slot for page-specific controls (e.g. credentials). */
   children?: React.ReactNode;
 }
 
@@ -110,11 +116,11 @@ export default function TopBar({
   );
 
   return (
-    <div className="relative h-12 flex items-center justify-between px-5 border-b border-border/60 bg-card/50 backdrop-blur-sm">
+    <div className="relative h-12 flex items-center justify-between px-5 border-b border-border/60 bg-card/50 backdrop-blur-sm flex-shrink-0">
       <div className="flex items-center gap-3 min-w-0">
         <button
           onClick={() => navigate("/")}
-          className="flex items-center gap-2 hover:opacity-80 transition-opacity"
+          className="flex items-center gap-2 hover:opacity-80 transition-opacity flex-shrink-0"
         >
           <Crown className="w-4 h-4 text-primary" />
           <span className="text-sm font-semibold text-primary">Open Hive</span>
@@ -122,20 +128,20 @@ export default function TopBar({
 
         {tabs.length > 0 && (
           <>
-            <span className="text-border text-xs">|</span>
+            <span className="text-border text-xs  flex-shrink-0">|</span>
             <div className="flex items-center gap-0.5 min-w-0 overflow-x-auto scrollbar-hide">
               {tabs.map((tab) => (
                 <button
                   key={tab.agentType}
                   onClick={() => handleTabClick(tab.agentType)}
-                  className={`group flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-colors whitespace-nowrap ${
+                  className={`group flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-colors whitespace-nowrap  flex-shrink-0 ${
                     tab.isActive
                       ? "bg-primary/15 text-primary"
                       : "text-muted-foreground hover:text-foreground hover:bg-muted/50"
                   }`}
                 >
                   {tab.hasRunning && (
-                    <span className="relative flex h-1.5 w-1.5 ">
+                    <span className="relative flex h-1.5 w-1.5 flex-shrink-0">
                       <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary opacity-60" />
                       <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-primary" />
                     </span>
@@ -145,7 +151,7 @@ export default function TopBar({
 
                   {showClose && (
                     <X
-                      className="w-3 h-3 opacity-0 group-hover:opacity-60 transition-opacity"
+                      className="w-3 h-3 opacity-0 group-hover:opacity-60 hover:!opacity-100 transition-opacity"
                       onClick={(e) => handleCloseTab(tab.agentType, e)}
                     />
                   )}
@@ -158,7 +164,7 @@ export default function TopBar({
         )}
       </div>
 
-      <div className="flex items-center gap-2">
+      <div className="flex items-center gap-2 flex-shrink-0">
         {/* THEME BUTTON */}
         <ThemeToggle />
 
