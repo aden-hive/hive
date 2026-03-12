@@ -39,6 +39,10 @@ def register_tab_tools(mcp: FastMCP) -> None:
         """
         Open a new browser tab and navigate to the given URL.
 
+        This tool already waits for the page to reach the ``wait_until``
+        condition (default: ``load``) before returning.
+        You do NOT need to call ``browser_wait`` afterward.
+
         Args:
             url: URL to navigate to
             background: Open in background without stealing focus

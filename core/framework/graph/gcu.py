@@ -37,24 +37,42 @@ Follow these rules for reliable, efficient browser interaction.
 ## Reading Pages
 - ALWAYS prefer `browser_snapshot` over `browser_get_text("body")`
   — it returns a compact ~1-5 KB accessibility tree vs 100+ KB of raw HTML.
-- Use `browser_snapshot_aria` when you need full ARIA properties
-  for detailed element inspection.
+- Interaction tools (`browser_click`, `browser_type`, `browser_fill`,
+  `browser_scroll`, etc.) return a page snapshot automatically in their
+  result. Use it to decide your next action — do NOT call
+  `browser_snapshot` separately after every action.
+  Only call `browser_snapshot` when you need a fresh view without
+  performing an action, or after setting `auto_snapshot=false`.
 - Do NOT use `browser_screenshot` for reading text content
   — it produces huge base64 images with no searchable text.
 - Only fall back to `browser_get_text` for extracting specific
   small elements by CSS selector.
 
 ## Navigation & Waiting
-- Always call `browser_wait` after navigation actions
-  (`browser_open`, `browser_navigate`, `browser_click` on links)
-  to let the page load.
+- `browser_navigate` and `browser_open` already wait for the page to
+  load (`domcontentloaded`). Do NOT call `browser_wait` with no
+  arguments after navigation — it wastes time.
+  Only use `browser_wait` when you need a *specific element* or *text*
+  to appear (pass `selector` or `text`).
 - NEVER re-navigate to the same URL after scrolling
   — this resets your scroll position and loses loaded content.
 
 ## Scrolling
 - Use large scroll amounts ~2000 when loading more content
   — sites like twitter and linkedin have lazy loading for paging.
-- After scrolling, take a new `browser_snapshot` to see updated content.
+- The scroll result includes a snapshot automatically — no need to call
+  `browser_snapshot` separately.
+
+## Batching Actions
+- You can call multiple tools in a single turn — they execute in parallel.
+  ALWAYS batch independent actions together. Examples:
+  - Fill multiple form fields in one turn.
+  - Navigate + snapshot in one turn.
+  - Click + scroll if targeting different elements.
+- When batching, set `auto_snapshot=false` on all but the last action
+  to avoid redundant snapshots.
+- Aim for 3-5 tool calls per turn minimum. One tool call per turn is
+  wasteful.
 
 ## Error Recovery
 - If a tool fails, retry once with the same approach.
