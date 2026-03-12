@@ -142,7 +142,9 @@ class SessionManager:
         to that existing session's directory instead of creating a new one.
         This preserves full conversation history across server restarts.
         """
-        session = await self._create_session_core(session_id=session_id, model=model)
+        # Reuse the original session ID when cold-restoring
+        resolved_session_id = queen_resume_from or session_id
+        session = await self._create_session_core(session_id=resolved_session_id, model=model)
         session.queen_resume_from = queen_resume_from
 
         # Start queen immediately (queen-only, no worker tools yet)
@@ -165,16 +167,20 @@ class SessionManager:
     ) -> Session:
         """Create a session and load a worker in one step.
 
-        When ``queen_resume_from`` is set the queen writes conversation messages
-        to that existing session's directory instead of creating a new one.
+        When ``queen_resume_from`` is set the session reuses the original session
+        ID so the frontend sees a single continuous session.  The queen writes
+        conversation messages to that existing directory, preserving full history.
         """
         from framework.tools.queen_lifecycle_tools import build_worker_profile
 
         agent_path = Path(agent_path)
         resolved_worker_id = agent_id or agent_path.name
 
-        # Auto-generate session ID (not the agent name)
-        session = await self._create_session_core(model=model)
+        # Reuse the original session ID when cold-restoring so the frontend
+        # sees one continuous session instead of a new one each time.
+        session = await self._create_session_core(
+            session_id=queen_resume_from, model=model,
+        )
         session.queen_resume_from = queen_resume_from
         try:
             # Load worker FIRST (before queen) so queen gets full tools
@@ -871,13 +877,19 @@ class SessionManager:
         # Check whether any message part files are actually present
         has_messages = False
         try:
-            for node_dir in convs_dir.iterdir():
-                if not node_dir.is_dir():
-                    continue
-                parts_dir = node_dir / "parts"
-                if parts_dir.exists() and any(f.suffix == ".json" for f in parts_dir.iterdir()):
-                    has_messages = True
-                    break
+            # Flat layout: conversations/parts/*.json
+            flat_parts = convs_dir / "parts"
+            if flat_parts.exists() and any(f.suffix == ".json" for f in flat_parts.iterdir()):
+                has_messages = True
+            else:
+                # Node-based layout: conversations/<node_id>/parts/*.json
+                for node_dir in convs_dir.iterdir():
+                    if not node_dir.is_dir() or node_dir.name == "parts":
+                        continue
+                    parts_dir = node_dir / "parts"
+                    if parts_dir.exists() and any(f.suffix == ".json" for f in parts_dir.iterdir()):
+                        has_messages = True
+                        break
         except OSError:
             pass
 
@@ -954,12 +966,10 @@ class SessionManager:
             if convs_dir.exists():
                 try:
                     all_parts: list[dict] = []
-                    for node_dir in convs_dir.iterdir():
-                        if not node_dir.is_dir():
-                            continue
-                        parts_dir = node_dir / "parts"
+
+                    def _collect_parts(parts_dir: Path) -> None:
                         if not parts_dir.exists():
-                            continue
+                            return
                         for part_file in sorted(parts_dir.iterdir()):
                             if part_file.suffix != ".json":
                                 continue
@@ -969,6 +979,14 @@ class SessionManager:
                                 all_parts.append(part)
                             except (json.JSONDecodeError, OSError):
                                 continue
+
+                    # Flat layout: conversations/parts/*.json
+                    _collect_parts(convs_dir / "parts")
+                    # Node-based layout: conversations/<node_id>/parts/*.json
+                    for node_dir in convs_dir.iterdir():
+                        if not node_dir.is_dir() or node_dir.name == "parts":
+                            continue
+                        _collect_parts(node_dir / "parts")
                     # Filter to client-facing messages only
                     client_msgs = [
                         p

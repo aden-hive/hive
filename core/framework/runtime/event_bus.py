@@ -166,10 +166,11 @@ class AgentEvent:
     timestamp: datetime = field(default_factory=datetime.now)
     correlation_id: str | None = None  # For tracking related events
     graph_id: str | None = None  # Which graph emitted this event (multi-graph sessions)
+    run_id: str | None = None  # Unique ID per trigger() invocation — used for run dividers
 
     def to_dict(self) -> dict:
         """Convert to dictionary for serialization."""
-        return {
+        d = {
             "type": self.type.value,
             "stream_id": self.stream_id,
             "node_id": self.node_id,
@@ -179,6 +180,9 @@ class AgentEvent:
             "correlation_id": self.correlation_id,
             "graph_id": self.graph_id,
         }
+        if self.run_id is not None:
+            d["run_id"] = self.run_id
+        return d
 
 
 # Type for event handlers
@@ -392,6 +396,7 @@ class EventBus:
         execution_id: str,
         input_data: dict[str, Any] | None = None,
         correlation_id: str | None = None,
+        run_id: str | None = None,
     ) -> None:
         """Emit execution started event."""
         await self.publish(
@@ -401,6 +406,7 @@ class EventBus:
                 execution_id=execution_id,
                 data={"input": input_data or {}},
                 correlation_id=correlation_id,
+                run_id=run_id,
             )
         )
 
@@ -410,6 +416,7 @@ class EventBus:
         execution_id: str,
         output: dict[str, Any] | None = None,
         correlation_id: str | None = None,
+        run_id: str | None = None,
     ) -> None:
         """Emit execution completed event."""
         await self.publish(
@@ -419,6 +426,7 @@ class EventBus:
                 execution_id=execution_id,
                 data={"output": output or {}},
                 correlation_id=correlation_id,
+                run_id=run_id,
             )
         )
 
@@ -428,6 +436,7 @@ class EventBus:
         execution_id: str,
         error: str,
         correlation_id: str | None = None,
+        run_id: str | None = None,
     ) -> None:
         """Emit execution failed event."""
         await self.publish(
@@ -437,6 +446,7 @@ class EventBus:
                 execution_id=execution_id,
                 data={"error": error},
                 correlation_id=correlation_id,
+                run_id=run_id,
             )
         )
 

@@ -8,6 +8,7 @@ while preserving the goal-driven approach.
 import asyncio
 import logging
 import time
+import uuid
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -822,7 +823,8 @@ class AgentRuntime:
         if stream is None:
             raise ValueError(f"Entry point '{entry_point_id}' not found")
 
-        return await stream.execute(input_data, correlation_id, session_state)
+        run_id = uuid.uuid4().hex[:12]
+        return await stream.execute(input_data, correlation_id, session_state, run_id=run_id)
 
     async def trigger_and_wait(
         self,

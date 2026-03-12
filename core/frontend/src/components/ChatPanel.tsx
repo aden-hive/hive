@@ -9,7 +9,7 @@ export interface ChatMessage {
   agentColor: string;
   content: string;
   timestamp: string;
-  type?: "system" | "agent" | "user" | "tool_status" | "worker_input_request";
+  type?: "system" | "agent" | "user" | "tool_status" | "worker_input_request" | "run_divider";
   role?: "queen" | "worker";
   /** Which worker thread this message belongs to (worker agent name) */
   thread?: string;
@@ -148,6 +148,18 @@ const MessageBubble = memo(function MessageBubble({ msg, queenPhase }: { msg: Ch
   const isUser = msg.type === "user";
   const isQueen = msg.role === "queen";
   const color = getColor(msg.agent, msg.role);
+
+  if (msg.type === "run_divider") {
+    return (
+      <div className="flex items-center gap-3 py-2 my-1">
+        <div className="flex-1 h-px bg-border/60" />
+        <span className="text-[10px] text-muted-foreground font-medium uppercase tracking-wider">
+          {msg.content}
+        </span>
+        <div className="flex-1 h-px bg-border/60" />
+      </div>
+    );
+  }
 
   if (msg.type === "system") {
     return (

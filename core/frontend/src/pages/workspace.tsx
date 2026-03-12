@@ -259,6 +259,7 @@ interface AgentBackendState {
   queenPhase: "planning" | "building" | "staging" | "running";
   workerRunState: "idle" | "deploying" | "running";
   currentExecutionId: string | null;
+  currentRunId: string | null;
   nodeLogs: Record<string, string[]>;
   nodeActionPlans: Record<string, string>;
   subagentReports: { subagent_id: string; message: string; data?: Record<string, unknown>; timestamp: string }[];
@@ -294,6 +295,7 @@ function defaultAgentState(): AgentBackendState {
     queenPhase: "planning",
     workerRunState: "idle",
     currentExecutionId: null,
+    currentRunId: null,
     nodeLogs: {},
     nodeActionPlans: {},
     subagentReports: [],
@@ -818,7 +820,7 @@ export default function Workspace() {
       if (!liveSession && !coldRestoreId) {
         try {
           const { sessions: allLive } = await sessionsApi.list();
-          const existingLive = allLive.find(s => s.agent_path === agentPath);
+          const existingLive = allLive.find(s => s.agent_path.endsWith(agentPath));
           if (existingLive) {
             const alreadyOwned = Object.values(sessionsRef.current).flat()
               .some(s => s.backendSessionId === existingLive.session_id);
@@ -834,7 +836,7 @@ export default function Workspace() {
           try {
             const { sessions: allHistory } = await sessionsApi.history();
             const coldMatch = allHistory.find(
-              s => s.agent_path === agentPath && s.has_messages
+              s => s.agent_path?.endsWith(agentPath) && s.has_messages
             );
             if (coldMatch) {
               coldRestoreId = coldMatch.session_id;
@@ -1404,6 +1406,23 @@ export default function Workspace() {
             if (Object.keys(priorSnapshots).length > 0) {
               console.debug(`[hive] execution_started: dropping ${Object.keys(priorSnapshots).length} unflushed LLM snapshot(s)`);
             }
+            // Insert a run divider when a new run_id is detected
+            const incomingRunId = event.run_id || null;
+            const prevRunId = agentStates[agentType]?.currentRunId;
+            if (incomingRunId && incomingRunId !== prevRunId) {
+              const dividerMsg: ChatMessage = {
+                id: `run-divider-${incomingRunId}`,
+                agent: "",
+                agentColor: "",
+                content: prevRunId ? "New Run" : "Run Started",
+                timestamp: ts,
+                type: "run_divider",
+                role: "worker",
+                thread: agentType,
+                createdAt: eventCreatedAt,
+              };
+              upsertChatMessage(agentType, dividerMsg);
+            }
             turnCounterRef.current[turnKey] = currentTurn + 1;
             updateAgentState(agentType, {
               isTyping: true,
@@ -1412,6 +1431,7 @@ export default function Workspace() {
               awaitingInput: false,
               workerRunState: "running",
               currentExecutionId: event.execution_id || agentStates[agentType]?.currentExecutionId || null,
+              currentRunId: incomingRunId,
               nodeLogs: {},
               subagentReports: [],
               llmSnapshots: {},

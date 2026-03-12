@@ -294,4 +294,5 @@ export interface AgentEvent {
   timestamp: string;
   correlation_id: string | null;
   graph_id: string | null;
+  run_id?: string | null;
 }

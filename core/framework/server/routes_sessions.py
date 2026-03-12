@@ -32,6 +32,7 @@ from pathlib import Path
 from aiohttp import web
 
 from framework.server.app import (
+    cold_sessions_dir,
     resolve_session,
     safe_path_segment,
     sessions_dir,
@@ -475,12 +476,15 @@ async def handle_list_worker_sessions(request: web.Request) -> web.Response:
     """List worker sessions on disk."""
     session, err = resolve_session(request)
     if err:
-        return err
-
-    if not session.worker_path:
-        return web.json_response({"sessions": []})
-
-    sess_dir = sessions_dir(session)
+        # Fall back to cold session lookup from disk
+        sid = request.match_info["session_id"]
+        sess_dir = cold_sessions_dir(sid)
+        if sess_dir is None:
+            return err
+    else:
+        if not session.worker_path:
+            return web.json_response({"sessions": []})
+        sess_dir = sessions_dir(session)
     if not sess_dir.exists():
         return web.json_response({"sessions": []})
 
@@ -642,48 +646,83 @@ async def handle_messages(request: web.Request) -> web.Response:
     """Get messages for a worker session."""
     session, err = resolve_session(request)
     if err:
-        return err
-
-    if not session.worker_path:
-        return web.json_response({"error": "No worker loaded"}, status=503)
+        # Fall back to cold session lookup from disk
+        sid = request.match_info["session_id"]
+        sess_dir = cold_sessions_dir(sid)
+        if sess_dir is None:
+            return err
+    else:
+        if not session.worker_path:
+            return web.json_response({"error": "No worker loaded"}, status=503)
+        sess_dir = sessions_dir(session)
 
     ws_id = request.match_info.get("ws_id") or request.match_info.get("session_id", "")
     ws_id = safe_path_segment(ws_id)
 
-    convs_dir = sessions_dir(session) / ws_id / "conversations"
+    convs_dir = sess_dir / ws_id / "conversations"
     if not convs_dir.exists():
         return web.json_response({"messages": []})
 
     filter_node = request.query.get("node_id")
     all_messages = []
 
-    for node_dir in convs_dir.iterdir():
-        if not node_dir.is_dir():
-            continue
-        if filter_node and node_dir.name != filter_node:
-            continue
-
-        parts_dir = node_dir / "parts"
+    def _collect_msg_parts(parts_dir: Path, node_id: str) -> None:
         if not parts_dir.exists():
-            continue
-
+            return
         for part_file in sorted(parts_dir.iterdir()):
             if part_file.suffix != ".json":
                 continue
             try:
                 part = json.loads(part_file.read_text(encoding="utf-8"))
-                part["_node_id"] = node_dir.name
+                part["_node_id"] = node_id
                 part.setdefault("created_at", part_file.stat().st_mtime)
                 all_messages.append(part)
             except (json.JSONDecodeError, OSError):
                 continue
+
+    # Flat layout: conversations/parts/*.json
+    if not filter_node:
+        _collect_msg_parts(convs_dir / "parts", "worker")
+
+    # Node-based layout: conversations/<node_id>/parts/*.json
+    for node_dir in convs_dir.iterdir():
+        if not node_dir.is_dir() or node_dir.name == "parts":
+            continue
+        if filter_node and node_dir.name != filter_node:
+            continue
+        _collect_msg_parts(node_dir / "parts", node_dir.name)
+
+    # Merge run lifecycle markers from runs.jsonl (for historical dividers)
+    runs_file = sess_dir / ws_id / "runs.jsonl"
+    if runs_file.exists():
+        try:
+            for line in runs_file.read_text(encoding="utf-8").splitlines():
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    record = json.loads(line)
+                    all_messages.append({
+                        "seq": -1,
+                        "role": "system",
+                        "content": "",
+                        "_node_id": "_run_marker",
+                        "is_run_marker": True,
+                        "run_id": record.get("run_id"),
+                        "run_event": record.get("event"),
+                        "created_at": record.get("created_at", 0),
+                    })
+                except json.JSONDecodeError:
+                    continue
+        except OSError:
+            pass
 
     all_messages.sort(key=lambda m: m.get("created_at", m.get("seq", 0)))
 
     client_only = request.query.get("client_only", "").lower() in ("true", "1")
     if client_only:
         client_facing_nodes: set[str] = set()
-        if session.runner and hasattr(session.runner, "graph"):
+        if session and session.runner and hasattr(session.runner, "graph"):
             for node in session.runner.graph.nodes:
                 if node.client_facing:
                     client_facing_nodes.add(node.id)
@@ -692,12 +731,15 @@ async def handle_messages(request: web.Request) -> web.Response:
             all_messages = [
                 m
                 for m in all_messages
-                if not m.get("is_transition_marker")
-                and m["role"] != "tool"
-                and not (m["role"] == "assistant" and m.get("tool_calls"))
-                and (
-                    (m["role"] == "user" and m.get("is_client_input"))
-                    or (m["role"] == "assistant" and m.get("_node_id") in client_facing_nodes)
+                if m.get("is_run_marker")
+                or (
+                    not m.get("is_transition_marker")
+                    and m["role"] != "tool"
+                    and not (m["role"] == "assistant" and m.get("tool_calls"))
+                    and (
+                        (m["role"] == "user" and m.get("is_client_input"))
+                        or (m["role"] == "assistant" and m.get("_node_id") in client_facing_nodes)
+                    )
                 )
             ]
 
@@ -718,24 +760,31 @@ async def handle_queen_messages(request: web.Request) -> web.Response:
         return web.json_response({"messages": [], "session_id": session_id})
 
     all_messages: list[dict] = []
-    for node_dir in convs_dir.iterdir():
-        if not node_dir.is_dir():
-            continue
-        parts_dir = node_dir / "parts"
+
+    def _read_parts(parts_dir: Path, node_id: str) -> None:
         if not parts_dir.exists():
-            continue
+            return
         for part_file in sorted(parts_dir.iterdir()):
             if part_file.suffix != ".json":
                 continue
             try:
                 part = json.loads(part_file.read_text(encoding="utf-8"))
-                part["_node_id"] = node_dir.name
+                part["_node_id"] = node_id
                 # Use file mtime as created_at so frontend can order
                 # queen and worker messages chronologically.
                 part.setdefault("created_at", part_file.stat().st_mtime)
                 all_messages.append(part)
             except (json.JSONDecodeError, OSError):
                 continue
+
+    # Flat layout: conversations/parts/*.json
+    _read_parts(convs_dir / "parts", "queen")
+
+    # Node-based layout: conversations/<node_id>/parts/*.json
+    for node_dir in convs_dir.iterdir():
+        if not node_dir.is_dir() or node_dir.name == "parts":
+            continue
+        _read_parts(node_dir / "parts", node_dir.name)
 
     all_messages.sort(key=lambda m: m.get("created_at", m.get("seq", 0)))
 
