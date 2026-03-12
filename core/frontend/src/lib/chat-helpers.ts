@@ -1,10 +1,10 @@
 /**
- * Pure functions for converting backend messages and SSE events into ChatMessage objects.
+ * Pure functions for converting SSE events into ChatMessage objects.
  * No React dependencies — just JSON in, object out.
  */
 
 import type { ChatMessage } from "@/components/ChatPanel";
-import type { AgentEvent, Message } from "@/api/types";
+import type { AgentEvent } from "@/api/types";
 
 /**
  * Derive a human-readable display name from a raw agent identifier.
@@ -25,57 +25,6 @@ export function formatAgentDisplayName(raw: string): string {
     .replace(/[_-]/g, " ")
     .replace(/\b\w/g, (c) => c.toUpperCase())
     .trim();
-}
-
-/**
- * Convert a backend Message (from sessionsApi.messages()) into a ChatMessage.
- * When agentDisplayName is provided, it is used as the sender for all agent
- * messages instead of the raw node_id.
- */
-export function backendMessageToChatMessage(
-  msg: Message,
-  thread: string,
-  agentDisplayName?: string,
-): ChatMessage {
-  // Use file-mtime created_at (epoch seconds → ms) for cross-conversation
-  // ordering; fall back to seq for backwards compatibility.
-  const createdAt = msg.created_at ? msg.created_at * 1000 : msg.seq;
-
-  // Run lifecycle markers (from runs.jsonl)
-  if (msg.is_run_marker) {
-    const runEvent = msg.run_event as string;
-    const runId = msg.run_id as string;
-    const label =
-      runEvent === "run_started" ? "Run Started"
-      : runEvent === "run_completed" ? "Run Completed"
-      : runEvent === "run_failed" ? "Run Failed"
-      : runEvent === "run_paused" ? "Run Paused"
-      : runEvent === "run_cancelled" ? "Run Cancelled"
-      : "Run";
-    return {
-      id: `run-marker-${runId}-${runEvent}`,
-      agent: "",
-      agentColor: "",
-      content: label,
-      timestamp: "",
-      type: "run_divider",
-      role: "worker",
-      thread,
-      createdAt,
-    };
-  }
-
-  return {
-    id: `backend-${msg._node_id}-${msg.seq}`,
-    agent: msg.role === "user" ? "You" : agentDisplayName || msg._node_id || "Agent",
-    agentColor: "",
-    content: msg.content,
-    timestamp: "",
-    type: msg.role === "user" ? "user" : undefined,
-    role: msg.role === "user" ? undefined : "worker",
-    thread,
-    createdAt,
-  };
 }
 
 /**

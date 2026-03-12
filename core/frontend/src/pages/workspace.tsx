@@ -13,8 +13,8 @@ import { executionApi } from "@/api/execution";
 import { graphsApi } from "@/api/graphs";
 import { sessionsApi } from "@/api/sessions";
 import { useMultiSSE } from "@/hooks/use-sse";
-import type { LiveSession, AgentEvent, DiscoverEntry, Message, NodeSpec } from "@/api/types";
-import { backendMessageToChatMessage, sseEventToChatMessage, formatAgentDisplayName, extractLastPhase } from "@/lib/chat-helpers";
+import type { LiveSession, AgentEvent, DiscoverEntry, NodeSpec } from "@/api/types";
+import { sseEventToChatMessage, formatAgentDisplayName, extractLastPhase } from "@/lib/chat-helpers";
 import { topologyToGraphNodes } from "@/lib/graph-converter";
 import { ApiError } from "@/api/client";
 
@@ -841,8 +841,6 @@ export default function Workspace() {
         } catch {
           // 404: session was explicitly stopped (via closeAgentTab) but conversation
           // files likely still exist on disk. Treat it as cold so we can restore.
-          // Verify files exist before assuming cold — if queenMessages succeeds with
-          // content, files are there.
           coldRestoreId = historySourceId || storedSessionId;
         }
       }
@@ -1017,29 +1015,20 @@ export default function Workspace() {
       // For cold-restore, use the old session ID. For live resume, use current session.
       const historyId = coldRestoreId ?? (isResumedSession ? session.session_id : undefined);
 
-      // For LIVE resume (not cold restore), fetch worker + queen messages now.
+      // For LIVE resume (not cold restore), fetch event log + worker status now.
       // For cold restore they were already pre-fetched above (before create) so we skip to avoid
       // double-restoring and to avoid capturing the new greeting.
       if (historyId && !coldRestoreId) {
         const restored = await restoreSessionMessages(historyId, agentType, displayName);
         restoredMsgs.push(...restored.messages);
-        const usedEventLog = restored.usedEventLog;
 
-        // Check worker status regardless (needed for isWorkerRunning flag)
+        // Check worker status (needed for isWorkerRunning flag)
         try {
           const { sessions: workerSessions } = await sessionsApi.workerSessions(historyId);
           const resumable = workerSessions.find(
             (s) => s.status === "active" || s.status === "paused",
           );
           isWorkerRunning = resumable?.status === "active";
-
-          // Fall back to parts-based messages if no event log
-          if (!usedEventLog && resumable) {
-            const { messages } = await sessionsApi.messages(historyId, resumable.session_id);
-            for (const m of messages as Message[]) {
-              restoredMsgs.push(backendMessageToChatMessage(m, agentType, displayName));
-            }
-          }
         } catch {
           // Worker session listing failed — not critical
         }
