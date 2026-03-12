@@ -91,3 +91,135 @@ def test_discover_from_module_handles_empty_content(tmp_path):
     result = registered.executor({})
     assert isinstance(result, dict)
     assert result == {}
+
+
+def test_register_mcp_server_required_raises_on_failure():
+    """register_mcp_server should raise MCPServerConnectionError for required servers."""
+    import pytest
+
+    from framework.credentials.models import MCPServerConnectionError
+
+    registry = ToolRegistry()
+
+    with pytest.raises(MCPServerConnectionError) as exc_info:
+        registry.register_mcp_server(
+            {
+                "name": "required-server",
+                "transport": "stdio",
+                "command": "nonexistent_command_that_will_fail",
+                "args": [],
+            },
+            optional=False,
+        )
+
+    assert "required-server" in str(exc_info.value)
+    assert exc_info.value.server_name == "required-server"
+
+
+def test_register_mcp_server_optional_logs_warning_on_failure(caplog):
+    """register_mcp_server should log warning for optional servers, not raise."""
+    import logging
+
+    registry = ToolRegistry()
+
+    with caplog.at_level(logging.WARNING):
+        result = registry.register_mcp_server(
+            {
+                "name": "optional-server",
+                "transport": "stdio",
+                "command": "nonexistent_command_that_will_fail",
+                "args": [],
+            },
+            optional=True,
+        )
+
+    assert result == 0
+    assert any("optional-server" in record.message for record in caplog.records)
+
+
+def test_load_mcp_config_required_server_failure(tmp_path):
+    """load_mcp_config should raise MCPServerConnectionError for required servers."""
+    import json
+
+    import pytest
+
+    from framework.credentials.models import MCPServerConnectionError
+
+    config = {
+        "required-server": {
+            "transport": "stdio",
+            "command": "nonexistent_command_that_will_fail",
+            "args": [],
+        }
+    }
+    config_path = tmp_path / "mcp_servers.json"
+    config_path.write_text(json.dumps(config))
+
+    registry = ToolRegistry()
+
+    with pytest.raises(MCPServerConnectionError) as exc_info:
+        registry.load_mcp_config(config_path)
+
+    assert exc_info.value.server_name == "required-server"
+
+
+def test_load_mcp_config_optional_server_failure(tmp_path, caplog):
+    """load_mcp_config should not raise for optional servers."""
+    import json
+    import logging
+
+    config = {
+        "optional-server": {
+            "transport": "stdio",
+            "command": "nonexistent_command_that_will_fail",
+            "args": [],
+            "optional": True,
+        }
+    }
+    config_path = tmp_path / "mcp_servers.json"
+    config_path.write_text(json.dumps(config))
+
+    registry = ToolRegistry()
+
+    with caplog.at_level(logging.WARNING):
+        registry.load_mcp_config(config_path)
+
+    assert any("optional-server" in record.message for record in caplog.records)
+
+
+def test_load_mcp_config_mixed_required_and_optional(tmp_path):
+    """load_mcp_config should fail fast on first required server failure."""
+    import json
+
+    import pytest
+
+    from framework.credentials.models import MCPServerConnectionError
+
+    config = {
+        "first-optional": {
+            "transport": "stdio",
+            "command": "nonexistent_command",
+            "args": [],
+            "optional": True,
+        },
+        "required-fails": {
+            "transport": "stdio",
+            "command": "nonexistent_command",
+            "args": [],
+        },
+        "second-optional": {
+            "transport": "stdio",
+            "command": "nonexistent_command",
+            "args": [],
+            "optional": True,
+        },
+    }
+    config_path = tmp_path / "mcp_servers.json"
+    config_path.write_text(json.dumps(config))
+
+    registry = ToolRegistry()
+
+    with pytest.raises(MCPServerConnectionError) as exc_info:
+        registry.load_mcp_config(config_path)
+
+    assert exc_info.value.server_name == "required-fails"

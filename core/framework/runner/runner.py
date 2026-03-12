@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from framework.config import get_hive_config, get_preferred_model
+from framework.credentials.models import MCPServerConnectionError
 from framework.credentials.validation import (
     ensure_credential_key_env as _ensure_credential_key_env,
 )
@@ -1055,6 +1056,7 @@ class AgentRunner:
         self,
         name: str,
         transport: str,
+        optional: bool = False,
         **config_kwargs,
     ) -> int:
         """
@@ -1063,10 +1065,16 @@ class AgentRunner:
         Args:
             name: Server name
             transport: "stdio" or "http"
+            optional: If True, connection failures are logged as warnings
+                instead of raising an exception. Defaults to False.
             **config_kwargs: Additional configuration (command, args, url, etc.)
 
         Returns:
             Number of tools registered from this server
+
+        Raises:
+            MCPServerConnectionError: If the server is not optional and
+                fails to connect or register its tools.
 
         Example:
             # Register STDIO MCP server
@@ -1090,11 +1098,32 @@ class AgentRunner:
             "transport": transport,
             **config_kwargs,
         }
-        return self._tool_registry.register_mcp_server(server_config)
+        return self._tool_registry.register_mcp_server(server_config, optional=optional)
 
     def _load_mcp_servers_from_config(self, config_path: Path) -> None:
-        """Load and register MCP servers from a configuration file."""
-        self._tool_registry.load_mcp_config(config_path)
+        """Load and register MCP servers from a configuration file.
+
+        Raises:
+            MCPServerConnectionError: If a required MCP server fails to connect.
+                The error includes the server name and original error for debugging.
+        """
+        try:
+            self._tool_registry.load_mcp_config(config_path)
+        except MCPServerConnectionError as e:
+            server_name = e.server_name
+            original_error = e.original_error
+            error_detail = str(original_error) if original_error else "unknown error"
+
+            raise MCPServerConnectionError(
+                server_name,
+                RuntimeError(
+                    f"MCP server '{server_name}' is unreachable.\n"
+                    f"Error: {error_detail}\n\n"
+                    f"To allow the agent to start without this server, add "
+                    f'"optional": true to the server config in mcp_servers.json.\n'
+                    f"Config file: {config_path}"
+                ),
+            ) from e
 
     def set_approval_callback(self, callback: Callable) -> None:
         """

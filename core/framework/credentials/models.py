@@ -343,3 +343,24 @@ class CredentialDecryptionError(CredentialError):
     """Raised when credential decryption fails."""
 
     pass
+
+
+class MCPServerConnectionError(Exception):
+    """Raised when a required MCP server fails to connect or register.
+
+    This error is raised during agent startup when an MCP server defined
+    in mcp_servers.json cannot be reached or its tools cannot be registered,
+    AND the server is not marked as optional.
+
+    Attributes:
+        server_name: Name of the MCP server that failed
+        original_error: The underlying exception that caused the failure
+    """
+
+    def __init__(self, server_name: str, original_error: Exception | None = None):
+        self.server_name = server_name
+        self.original_error = original_error
+        message = f"MCP server '{server_name}' failed to connect"
+        if original_error:
+            message += f": {original_error}"
+        super().__init__(message)

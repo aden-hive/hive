@@ -7,11 +7,13 @@ import inspect
 import json
 import logging
 import os
+import traceback
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from framework.credentials.models import MCPServerConnectionError
 from framework.llm.provider import Tool, ToolResult, ToolUse
 
 logger = logging.getLogger(__name__)
@@ -430,10 +432,17 @@ class ToolRegistry:
         Resolves relative ``cwd`` paths against the config file's parent
         directory so callers never need to handle path resolution themselves.
 
+        Implements a fail-fast policy: if an MCP server is not explicitly
+        marked as ``optional: true`` and fails to connect, raises
+        ``MCPServerConnectionError`` to abort startup with a clear error.
+
         Args:
             config_path: Path to an ``mcp_servers.json`` file.
+
+        Raises:
+            MCPServerConnectionError: If a required (non-optional) MCP server
+                fails to connect or register its tools.
         """
-        # Remember config path for potential resync later
         self._mcp_config_path = Path(config_path)
 
         try:
@@ -445,32 +454,48 @@ class ToolRegistry:
 
         base_dir = config_path.parent
 
-        # Support both formats:
-        #   {"servers": [{"name": "x", ...}]}        (list format)
-        #   {"server-name": {"transport": ...}, ...}  (dict format)
         server_list = config.get("servers", [])
         if not server_list and "servers" not in config:
-            # Treat top-level keys as server names
             server_list = [{"name": name, **cfg} for name, cfg in config.items()]
 
         for server_config in server_list:
             server_config = self._resolve_mcp_server_config(server_config, base_dir)
-            try:
-                self.register_mcp_server(server_config)
-            except Exception as e:
-                name = server_config.get("name", "unknown")
-                logger.warning(f"Failed to register MCP server '{name}': {e}")
+            server_name = server_config.get("name", "unknown")
+            is_optional = server_config.get("optional", False)
 
-        # Snapshot credential files and ADEN_API_KEY so we can detect mid-session changes
+            try:
+                self.register_mcp_server(server_config, optional=is_optional)
+            except MCPServerConnectionError:
+                raise
+            except Exception as e:
+                if is_optional:
+                    logger.warning(
+                        "Optional MCP server '%s' failed to register: %s",
+                        server_name,
+                        e,
+                    )
+                else:
+                    logger.error(
+                        "Failed to register MCP server '%s': %s\n%s",
+                        server_name,
+                        e,
+                        traceback.format_exc(),
+                    )
+                    raise MCPServerConnectionError(server_name, e) from e
+
         self._mcp_cred_snapshot = self._snapshot_credentials()
         self._mcp_aden_key_snapshot = os.environ.get("ADEN_API_KEY")
 
     def register_mcp_server(
         self,
         server_config: dict[str, Any],
+        optional: bool = False,
     ) -> int:
         """
         Register an MCP server and discover its tools.
+
+        Implements a fail-fast policy: if the server is not optional and
+        fails to connect or register, raises ``MCPServerConnectionError``.
 
         Args:
             server_config: MCP server configuration dict with keys:
@@ -483,14 +508,21 @@ class ToolRegistry:
                 - url: Server URL (for http)
                 - headers: HTTP headers (for http)
                 - description: Server description (optional)
+            optional: If True, connection failures are logged as warnings
+                instead of raising an exception. Defaults to False.
 
         Returns:
             Number of tools registered from this server
+
+        Raises:
+            MCPServerConnectionError: If the server is not optional and
+                fails to connect or register its tools.
         """
+        server_name = server_config.get("name", "unknown")
+
         try:
             from framework.runner.mcp_client import MCPClient, MCPServerConfig
 
-            # Build config object
             config = MCPServerConfig(
                 name=server_config["name"],
                 transport=server_config["transport"],
@@ -503,23 +535,17 @@ class ToolRegistry:
                 description=server_config.get("description", ""),
             )
 
-            # Create and connect client
             client = MCPClient(config)
             client.connect()
 
-            # Store client for cleanup
             self._mcp_clients.append(client)
 
-            # Register each tool
-            server_name = server_config["name"]
             if server_name not in self._mcp_server_tools:
                 self._mcp_server_tools[server_name] = set()
             count = 0
             for mcp_tool in client.list_tools():
-                # Convert MCP tool to framework Tool (strips context params from LLM schema)
                 tool = self._convert_mcp_tool_to_framework_tool(mcp_tool)
 
-                # Create executor that calls the MCP server
                 def make_mcp_executor(
                     client_ref: MCPClient,
                     tool_name: str,
@@ -528,19 +554,14 @@ class ToolRegistry:
                 ):
                     def executor(inputs: dict) -> Any:
                         try:
-                            # Build base context: session < execution (execution wins)
                             base_context = dict(registry_ref._session_context)
                             exec_ctx = _execution_context.get()
                             if exec_ctx:
                                 base_context.update(exec_ctx)
 
-                            # Only inject context params the tool accepts
                             filtered_context = {
                                 k: v for k, v in base_context.items() if k in tool_params
                             }
-                            # Strip context params from LLM inputs — the framework
-                            # values are authoritative (prevents the LLM from passing
-                            # e.g. data_dir="/data" and overriding the real path).
                             clean_inputs = {
                                 k: v
                                 for k, v in inputs.items()
@@ -548,7 +569,6 @@ class ToolRegistry:
                             }
                             merged_inputs = {**clean_inputs, **filtered_context}
                             result = client_ref.call_tool(tool_name, merged_inputs)
-                            # MCP tools return content array, extract the result
                             if isinstance(result, list) and len(result) > 0:
                                 if isinstance(result[0], dict) and "text" in result[0]:
                                     return result[0]["text"]
@@ -573,14 +593,27 @@ class ToolRegistry:
             logger.info(f"Registered {count} tools from MCP server '{config.name}'")
             return count
 
+        except MCPServerConnectionError:
+            raise
         except Exception as e:
-            logger.error(f"Failed to register MCP server: {e}")
+            error_msg = f"Failed to register MCP server '{server_name}': {e}"
             if "Connection closed" in str(e) and os.name == "nt":
-                logger.debug(
-                    "On Windows, check that the MCP subprocess starts (e.g. uv in PATH, "
-                    "script path correct). Worker config uses base_dir = mcp_servers.json parent."
+                error_msg += (
+                    "\nOn Windows, check that the MCP subprocess starts "
+                    "(e.g. uv in PATH, script path correct). "
+                    "Worker config uses base_dir = mcp_servers.json parent."
                 )
-            return 0
+
+            if optional:
+                logger.warning("%s", error_msg)
+                return 0
+            else:
+                logger.error(
+                    "MCP server '%s' failed to connect:\n%s",
+                    server_name,
+                    traceback.format_exc(),
+                )
+                raise MCPServerConnectionError(server_name, e) from e
 
     def _convert_mcp_tool_to_framework_tool(self, mcp_tool: Any) -> Tool:
         """
