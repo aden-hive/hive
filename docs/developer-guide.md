@@ -539,6 +539,19 @@ chore(deps): update React to 18.2.0
 
 ## Common Tasks
 
+### Testing the `hive doctor` command
+
+The `hive doctor` command runs environment diagnostics (Python/Node versions, dependencies, env vars, config files, optional network). To test it locally:
+
+```bash
+# From repo root (after running quickstart.sh or uv sync in core/)
+hive doctor              # Terminal report with ✓/✗ and suggestions
+hive doctor --json       # JSON output for scripting
+hive doctor --no-network # Skip network connectivity check (e.g. offline)
+```
+
+Ensure `make check` and `make test` pass before submitting changes that touch the doctor logic. See [Pull Request Process](#pull-request-process) and [CONTRIBUTING.md](../CONTRIBUTING.md) for how to submit a PR.
+
 ### Adding Python Dependencies
 
 ```bash

@@ -115,6 +115,26 @@ This sets up:
 
 > **Tip:** To reopen the dashboard later, run `hive open` from the project directory.
 
+### Diagnose your environment (`hive doctor`)
+
+Before running agents, you can verify your setup with the built-in environment checker:
+
+```bash
+hive doctor
+```
+
+This runs checks for:
+
+- **Python & Node** — Ensures Python 3.11+ (and optionally Node 20+ for the frontend)
+- **Dependencies** — Confirms `uv` is installed and that `core/.venv` and `tools/.venv` exist
+- **Environment variables** — Verifies at least one LLM API key is set (e.g. `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`)
+- **Configuration** — Checks for `core/pyproject.toml`, `tools/pyproject.toml`, and optional `~/.hive/configuration.json`
+- **Network** — Optionally tests connectivity to the LLM API (skip with `--no-network`)
+
+Passed checks show ✓ and failures show ✗ with suggestions to fix. For script-friendly output, use `hive doctor --json`. Use `hive doctor --no-network` to skip the connectivity check (e.g. when offline). Fix any reported issues and run `hive doctor` again until all checks pass.
+
+**Testing and contributing:** To test changes to `hive doctor` locally, run `make check` and `make test` from the repo root (see [CONTRIBUTING.md](CONTRIBUTING.md)). To submit a pull request, get assigned to an issue, create a feature branch, and open a PR with a clear description and proof that checks/tests pass.
+
 <img width="2500" height="1214" alt="home-screen" src="https://github.com/user-attachments/assets/134d897f-5e75-4874-b00b-e0505f6b45c4" />
 
 ### Build Your First Agent
