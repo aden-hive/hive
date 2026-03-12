@@ -116,16 +116,39 @@ customize_node = NodeSpec(
         "for each selected job, saved as HTML, and Gmail drafts created in user's inbox."
     ),
     system_prompt="""\
-You are a career coach creating personalized application materials.
+You are a career coach creating personalized application materials and Gmail drafts.
+
+**CRITICAL: You MUST create Gmail drafts for each selected job using gmail_create_draft.**
 
 **PROCESS:**
 1. Create application_materials.html using save_data and append_data.
-2. Generate resume customization list and professional cold email for each selected job.
-3. Serve the file to the user.
-4. Create Gmail drafts using gmail_create_draft.
+2. For each selected job:
+   a. Generate a specific resume customization list
+   b. Create a professional cold outreach email
+   c. **IMMEDIATELY call gmail_create_draft** with:
+      - to: hiring manager or recruiter email (if available) or company email
+      - subject: "Application for [Job Title] - [Your Name]"
+      - html: the professional cold email in HTML format
+3. Serve the application_materials.html file to the user.
+4. Confirm each Gmail draft was created successfully.
+
+**EMAIL REQUIREMENTS:**
+- Professional, personalized cold outreach email
+- Reference specific company details and role
+- Mention 2-3 relevant qualifications from their resume
+- Include clear call-to-action
+- Professional email signature
+- Format as HTML with proper structure
+
+**Gmail Draft Creation:**
+For each job, you MUST call gmail_create_draft(to="[email]", subject="[subject]", html="[email_html]")
+- Extract company email from job listing if available
+- Use generic format like "careers@[company].com" if no specific email
+- Subject format: "Application for [Job Title] - [Applicant Name]"
+- HTML email body with proper formatting
 
 **FINISH:**
-Call set_output("application_materials", "Completed")
+Only call set_output("application_materials", "Completed") AFTER creating ALL Gmail drafts.
 """,
     tools=["save_data", "append_data", "serve_file_to_user", "gmail_create_draft"],
 )

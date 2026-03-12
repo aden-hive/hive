@@ -37,6 +37,7 @@ class MockNodeSpec:
     client_facing: bool = False
     success_criteria: str | None = None
     system_prompt: str | None = None
+    sub_agents: list = field(default_factory=list)
 
 
 @dataclass
@@ -67,6 +68,7 @@ class MockEntryPoint:
     name: str = "Default"
     entry_node: str = "start"
     trigger_type: str = "manual"
+    trigger_config: dict = field(default_factory=dict)
 
 
 @dataclass
@@ -129,6 +131,9 @@ class MockRuntime:
 
     def get_stats(self):
         return {"running": True, "executions": 1}
+
+    def get_timer_next_fire_in(self, ep_id):
+        return None
 
 
 class MockAgentInfo:
@@ -1556,3 +1561,106 @@ class TestErrorMiddleware:
         async with TestClient(TestServer(app)) as client:
             resp = await client.get("/api/nonexistent")
             assert resp.status == 404
+
+
+class TestCleanupStaleActiveSessions:
+    """Tests for _cleanup_stale_active_sessions with two-layer protection."""
+
+    def _make_manager(self):
+        from framework.server.session_manager import SessionManager
+
+        return SessionManager()
+
+    def _write_state(self, session_dir: Path, status: str, pid: int | None = None) -> None:
+        session_dir.mkdir(parents=True, exist_ok=True)
+        state: dict = {"status": status, "session_id": session_dir.name}
+        if pid is not None:
+            state["pid"] = pid
+        (session_dir / "state.json").write_text(json.dumps(state))
+
+    def _read_state(self, session_dir: Path) -> dict:
+        return json.loads((session_dir / "state.json").read_text())
+
+    def test_stale_session_is_cancelled(self, tmp_path, monkeypatch):
+        """Truly stale active sessions (no live tracking, no PID) get cancelled."""
+        monkeypatch.setattr(Path, "home", lambda: tmp_path)
+        agent_path = Path("my_agent")
+        sessions_dir = tmp_path / ".hive" / "agents" / "my_agent" / "sessions"
+        session_dir = sessions_dir / "session_stale_001"
+
+        self._write_state(session_dir, "active")
+
+        mgr = self._make_manager()
+        mgr._cleanup_stale_active_sessions(agent_path)
+
+        state = self._read_state(session_dir)
+        assert state["status"] == "cancelled"
+        assert "Stale session" in state["result"]["error"]
+
+    def test_live_in_memory_session_is_skipped(self, tmp_path, monkeypatch):
+        """Sessions tracked in self._sessions must NOT be cancelled (Layer 1)."""
+        monkeypatch.setattr(Path, "home", lambda: tmp_path)
+        agent_path = Path("my_agent")
+        sessions_dir = tmp_path / ".hive" / "agents" / "my_agent" / "sessions"
+        session_dir = sessions_dir / "session_live_002"
+
+        self._write_state(session_dir, "active")
+
+        mgr = self._make_manager()
+        # Simulate a live session in the manager's in-memory map
+        mgr._sessions["session_live_002"] = MagicMock()
+
+        mgr._cleanup_stale_active_sessions(agent_path)
+
+        state = self._read_state(session_dir)
+        assert state["status"] == "active", "Live in-memory session should NOT be cancelled"
+
+    def test_session_with_live_pid_is_skipped(self, tmp_path, monkeypatch):
+        """Sessions whose owning PID is still alive must NOT be cancelled (Layer 2)."""
+        import os
+
+        monkeypatch.setattr(Path, "home", lambda: tmp_path)
+        agent_path = Path("my_agent")
+        sessions_dir = tmp_path / ".hive" / "agents" / "my_agent" / "sessions"
+        session_dir = sessions_dir / "session_pid_003"
+
+        # Use the current process PID — guaranteed to be alive
+        self._write_state(session_dir, "active", pid=os.getpid())
+
+        mgr = self._make_manager()
+        mgr._cleanup_stale_active_sessions(agent_path)
+
+        state = self._read_state(session_dir)
+        assert state["status"] == "active", "Session with live PID should NOT be cancelled"
+
+    def test_session_with_dead_pid_is_cancelled(self, tmp_path, monkeypatch):
+        """Sessions whose owning PID is dead should be cancelled."""
+        monkeypatch.setattr(Path, "home", lambda: tmp_path)
+        agent_path = Path("my_agent")
+        sessions_dir = tmp_path / ".hive" / "agents" / "my_agent" / "sessions"
+        session_dir = sessions_dir / "session_dead_004"
+
+        # Use a PID that is almost certainly not running
+        self._write_state(session_dir, "active", pid=999999999)
+
+        mgr = self._make_manager()
+        mgr._cleanup_stale_active_sessions(agent_path)
+
+        state = self._read_state(session_dir)
+        assert state["status"] == "cancelled"
+        assert "Stale session" in state["result"]["error"]
+
+    def test_paused_session_is_never_touched(self, tmp_path, monkeypatch):
+        """Paused sessions should remain intact regardless of PID or tracking."""
+        monkeypatch.setattr(Path, "home", lambda: tmp_path)
+        agent_path = Path("my_agent")
+        sessions_dir = tmp_path / ".hive" / "agents" / "my_agent" / "sessions"
+        session_dir = sessions_dir / "session_paused_005"
+
+        self._write_state(session_dir, "paused")
+
+        mgr = self._make_manager()
+        mgr._cleanup_stale_active_sessions(agent_path)
+
+        state = self._read_state(session_dir)
+        assert state["status"] == "paused", "Paused sessions must remain untouched"

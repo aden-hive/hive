@@ -137,6 +137,10 @@ RATE_LIMIT_MAX_RETRIES = 10
 RATE_LIMIT_BACKOFF_BASE = 2  # seconds
 RATE_LIMIT_MAX_DELAY = 120  # seconds - cap to prevent absurd waits
 MINIMAX_API_BASE = "https://api.minimax.io/v1"
+# Kimi For Coding uses an Anthropic-compatible endpoint (no /v1 suffix).
+# Claude Code integration uses this format; the /v1 OpenAI-compatible endpoint
+# enforces a coding-agent whitelist that blocks unknown User-Agents.
+KIMI_API_BASE = "https://api.kimi.com/coding"
 
 # Empty-stream retries use a short fixed delay, not the rate-limit backoff.
 # Conversation-structure issues are deterministic — long waits don't help.
@@ -343,17 +347,22 @@ class LiteLLMProvider(LLMProvider):
             **kwargs: Additional arguments passed to litellm.completion()
         """
         # Normalise ollama/ → ollama_chat/ so LiteLLM uses native function
-        # calling instead of JSON-mode fallback.  ollama_chat/ is the correct
-        # prefix for chat + tool-call capable Ollama endpoints.
+        # calling instead of JSON-mode fallback.
         self.model = _ensure_ollama_chat_prefix(model) if litellm is not None else model
-        # Register Ollama models as supporting function calling so LiteLLM
-        # doesn't silently fall back to JSON-mode tool calls.
         if litellm is not None and _is_ollama_model(self.model):
             litellm.register_model(model_cost={
                 self.model: {"supports_function_calling": True}
             })
+
+        # Kimi For Coding exposes an Anthropic-compatible endpoint
+        _original_model = model
+        if model.lower().startswith("kimi/"):
+            model = "anthropic/" + model[len("kimi/") :]
+            if api_base and api_base.rstrip("/").endswith("/v1"):
+                api_base = api_base.rstrip("/")[:-3]
+            self.model = model
         self.api_key = api_key
-        self.api_base = api_base or self._default_api_base_for_model(model)
+        self.api_base = api_base or self._default_api_base_for_model(_original_model)
         self.extra_kwargs = kwargs
         # The Codex ChatGPT backend (chatgpt.com/backend-api/codex) rejects
         # several standard OpenAI params: max_output_tokens, stream_options.
@@ -378,6 +387,8 @@ class LiteLLMProvider(LLMProvider):
         model_lower = model.lower()
         if model_lower.startswith("minimax/") or model_lower.startswith("minimax-"):
             return MINIMAX_API_BASE
+        if model_lower.startswith("kimi/"):
+            return KIMI_API_BASE
         return None
 
     def _completion_with_rate_limit_retry(
