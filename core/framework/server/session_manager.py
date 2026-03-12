@@ -491,6 +491,8 @@ class SessionManager:
 
     async def _handle_worker_handoff(self, session: Session, executor: Any, event: Any) -> None:
         """Route worker escalation events into the queen conversation."""
+        from framework.graph.context_handoff import compact_handoff_text
+
         if event.stream_id in ("queen", "judge"):
             return
 
@@ -498,6 +500,7 @@ class SessionManager:
         context = str(event.data.get("context", "")).strip()
         node_label = event.node_id or "unknown_node"
         stream_label = event.stream_id or "unknown_stream"
+        compacted = compact_handoff_text(context)
 
         handoff = (
             "[WORKER_ESCALATION_REQUEST]\n"
@@ -505,8 +508,15 @@ class SessionManager:
             f"node_id: {node_label}\n"
             f"reason: {reason or 'unspecified'}\n"
         )
-        if context:
-            handoff += f"context:\n{context}\n"
+        if compacted.was_compacted:
+            handoff += (
+                "context_compacted: yes "
+                f"({compacted.original_chars} -> {compacted.compacted_chars} chars, "
+                f"~{compacted.original_tokens_estimate} -> "
+                f"~{compacted.compacted_tokens_estimate} tokens)\n"
+            )
+        if compacted.text:
+            handoff += f"context:\n{compacted.text}\n"
 
         node = executor.node_registry.get("queen")
         if node is not None and hasattr(node, "inject_event"):

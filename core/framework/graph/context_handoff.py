@@ -1,8 +1,9 @@
-"""Context handoff: summarize a completed NodeConversation for the next graph node."""
+"""Context handoff helpers for node-to-node and worker-to-queen transfers."""
 
 from __future__ import annotations
 
 import logging
+import re
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
@@ -15,6 +16,32 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 _TRUNCATE_CHARS = 500
+_HANDOFF_CONTEXT_MAX_CHARS = 1200
+_HANDOFF_CONTEXT_MAX_LINES = 18
+_HANDOFF_CONTEXT_HEAD_LINES = 4
+_HANDOFF_CONTEXT_TAIL_LINES = 4
+_HANDOFF_CONTEXT_MIDDLE_LINES = 6
+_HANDOFF_CONTEXT_LINE_LIMIT = 220
+_HANDOFF_CONTEXT_KEYWORDS = (
+    "error",
+    "exception",
+    "traceback",
+    "failed",
+    "failure",
+    "blocked",
+    "retry",
+    "warning",
+    "timeout",
+    "auth",
+    "login",
+    "credential",
+    "token",
+    "captcha",
+    "status",
+    "result",
+    "output",
+    "http",
+)
 
 
 # ---------------------------------------------------------------------------
@@ -31,6 +58,194 @@ class HandoffContext:
     key_outputs: dict[str, Any]
     turn_count: int
     total_tokens_used: int
+
+
+@dataclass(frozen=True)
+class CompactedHandoffText:
+    """Deterministically compacted free-form text for cross-agent handoffs."""
+
+    text: str
+    original_chars: int
+    compacted_chars: int
+
+    @property
+    def was_compacted(self) -> bool:
+        return self.compacted_chars < self.original_chars
+
+    @property
+    def original_tokens_estimate(self) -> int:
+        return self.original_chars // 4
+
+    @property
+    def compacted_tokens_estimate(self) -> int:
+        return self.compacted_chars // 4
+
+
+def compact_handoff_text(
+    text: str,
+    *,
+    max_chars: int = _HANDOFF_CONTEXT_MAX_CHARS,
+    max_lines: int = _HANDOFF_CONTEXT_MAX_LINES,
+) -> CompactedHandoffText:
+    """Compact large handoff text before injecting it into another agent.
+
+    This is intentionally deterministic and lightweight: it avoids an extra LLM
+    call while still preserving the first/last context plus the most
+    signal-dense middle lines.
+    """
+    normalized = _normalize_handoff_text(text)
+    original_chars = len(normalized)
+    if not normalized:
+        return CompactedHandoffText(text="", original_chars=0, compacted_chars=0)
+
+    lines = _normalize_handoff_lines(normalized)
+    if original_chars <= max_chars and len(lines) <= max_lines:
+        return CompactedHandoffText(
+            text=normalized,
+            original_chars=original_chars,
+            compacted_chars=original_chars,
+        )
+
+    if len(lines) <= 1:
+        compacted = _compact_single_line(normalized, max_chars=max_chars)
+    else:
+        compacted = _compact_multiline(
+            lines,
+            max_chars=max_chars,
+            max_lines=max_lines,
+        )
+
+    if len(compacted) > max_chars:
+        compacted = _compact_single_line(compacted, max_chars=max_chars)
+
+    return CompactedHandoffText(
+        text=compacted,
+        original_chars=original_chars,
+        compacted_chars=len(compacted),
+    )
+
+
+def _normalize_handoff_text(text: str) -> str:
+    """Normalize whitespace without destroying the evidence structure."""
+    normalized = text.replace("\r\n", "\n").replace("\r", "\n").strip()
+    return normalized
+
+
+def _normalize_handoff_lines(text: str) -> list[str]:
+    """Strip noisy spacing and collapse repeated blank lines."""
+    cleaned: list[str] = []
+    previous_blank = False
+    for raw_line in text.split("\n"):
+        line = re.sub(r"[ \t]+", " ", raw_line).strip()
+        if not line:
+            if not previous_blank:
+                cleaned.append("")
+            previous_blank = True
+            continue
+        cleaned.append(line)
+        previous_blank = False
+
+    while cleaned and not cleaned[0]:
+        cleaned.pop(0)
+    while cleaned and not cleaned[-1]:
+        cleaned.pop()
+    return cleaned
+
+
+def _compact_single_line(text: str, *, max_chars: int) -> str:
+    """Compact a long single-line context with head/tail preservation."""
+    if len(text) <= max_chars:
+        return text
+
+    available = max(80, max_chars - 7)
+    head = max(30, available // 2)
+    tail = max(20, available - head)
+    return f"{text[:head].rstrip()} [...] {text[-tail:].lstrip()}"
+
+
+def _compact_multiline(
+    lines: list[str],
+    *,
+    max_chars: int,
+    max_lines: int,
+) -> str:
+    """Keep the edges and most relevant middle lines from a multiline handoff."""
+    total = len(lines)
+    head_count = min(_HANDOFF_CONTEXT_HEAD_LINES, total, max_lines)
+    tail_count = min(_HANDOFF_CONTEXT_TAIL_LINES, total - head_count, max_lines - head_count)
+
+    selected: set[int] = set(range(head_count))
+    if tail_count:
+        selected.update(range(total - tail_count, total))
+
+    candidates: list[tuple[int, int]] = []
+    for idx, line in enumerate(lines):
+        if idx in selected or not line:
+            continue
+        candidates.append((_score_handoff_line(line), idx))
+
+    candidates.sort(key=lambda item: (-item[0], item[1]))
+    for score, idx in candidates:
+        if len(selected) >= max_lines:
+            break
+        if score <= 0 and len(selected) >= head_count + tail_count + _HANDOFF_CONTEXT_MIDDLE_LINES:
+            break
+        selected.add(idx)
+
+    compacted_lines: list[str] = []
+    last_idx: int | None = None
+    for idx in sorted(selected):
+        if last_idx is not None and idx - last_idx > 1:
+            compacted_lines.append("[...]")
+        compacted_lines.append(_trim_handoff_line(lines[idx]))
+        last_idx = idx
+
+    compacted = "\n".join(compacted_lines)
+    if len(compacted) <= max_chars:
+        return compacted
+
+    overflow = len(compacted) - max_chars
+    trimmed_lines = list(compacted_lines)
+    for i, line in enumerate(trimmed_lines):
+        if overflow <= 0:
+            break
+        if line == "[...]":
+            continue
+        new_limit = max(80, min(_HANDOFF_CONTEXT_LINE_LIMIT, len(line) - overflow))
+        shortened = _trim_handoff_line(line, max_len=new_limit)
+        overflow -= len(line) - len(shortened)
+        trimmed_lines[i] = shortened
+
+    compacted = "\n".join(trimmed_lines)
+    return compacted if len(compacted) <= max_chars else _compact_single_line(compacted, max_chars=max_chars)
+
+
+def _score_handoff_line(line: str) -> int:
+    """Prefer lines that carry actionable evidence over generic narration."""
+    lower = line.lower()
+    score = 0
+    if any(keyword in lower for keyword in _HANDOFF_CONTEXT_KEYWORDS):
+        score += 4
+    if line.startswith(("Traceback", "File ", "{", "[")):
+        score += 2
+    if line.lstrip().startswith(("-", "*", "•")) or ":" in line or "=" in line:
+        score += 1
+    if "http" in lower or "/" in line or "\\" in line:
+        score += 1
+    if any(ch.isdigit() for ch in line):
+        score += 1
+    return score
+
+
+def _trim_handoff_line(line: str, max_len: int = _HANDOFF_CONTEXT_LINE_LIMIT) -> str:
+    """Trim a line while preserving both the prefix and suffix."""
+    if len(line) <= max_len:
+        return line
+
+    available = max(20, max_len - 5)
+    head = max(12, available // 2)
+    tail = max(8, available - head)
+    return f"{line[:head].rstrip()} [...] {line[-tail:].lstrip()}"
 
 
 # ---------------------------------------------------------------------------

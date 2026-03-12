@@ -6,7 +6,11 @@ from typing import Any
 
 import pytest
 
-from framework.graph.context_handoff import ContextHandoff, HandoffContext
+from framework.graph.context_handoff import (
+    ContextHandoff,
+    HandoffContext,
+    compact_handoff_text,
+)
 from framework.graph.conversation import NodeConversation
 from framework.llm.mock import MockLLMProvider
 from framework.llm.provider import LLMProvider, LLMResponse
@@ -314,3 +318,33 @@ class TestFormatAsInput:
         assert msg.role == "user"
         assert "CONTEXT FROM: prev_node" in msg.content
         assert conv.turn_count == 1
+
+
+class TestCompactHandoffText:
+    def test_short_text_passes_through(self) -> None:
+        result = compact_handoff_text("HTTP 401 while calling external API")
+
+        assert result.text == "HTTP 401 while calling external API"
+        assert result.was_compacted is False
+        assert result.original_chars == result.compacted_chars
+
+    def test_long_multiline_text_keeps_edges_and_compacts_middle(self) -> None:
+        noisy_middle = [
+            f"debug noise line {i}: {'x' * 140}"
+            for i in range(24)
+        ]
+        text = "\n".join(
+            [
+                "HTTP 401 while calling external API",
+                *noisy_middle,
+                "Recommended next step: refresh OAuth token and retry.",
+            ]
+        )
+
+        result = compact_handoff_text(text, max_chars=600, max_lines=10)
+
+        assert result.was_compacted is True
+        assert result.compacted_chars < result.original_chars
+        assert "HTTP 401 while calling external API" in result.text
+        assert "Recommended next step: refresh OAuth token and retry." in result.text
+        assert "debug noise line 12" not in result.text

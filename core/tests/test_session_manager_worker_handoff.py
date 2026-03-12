@@ -50,6 +50,40 @@ async def test_worker_handoff_injects_formatted_request_into_queen() -> None:
 
 
 @pytest.mark.asyncio
+async def test_worker_handoff_compacts_large_context_before_injecting() -> None:
+    bus = EventBus()
+    manager = SessionManager()
+    session = _make_session(bus)
+
+    queen_node = SimpleNamespace(inject_event=AsyncMock())
+    manager._subscribe_worker_handoffs(session, _make_executor(queen_node))
+
+    long_context = "\n".join(
+        [
+            "HTTP 401 while calling external API",
+            *[f"debug noise line {i}: {'x' * 140}" for i in range(30)],
+            "Recommended next step: refresh OAuth token and retry.",
+        ]
+    )
+
+    await bus.emit_escalation_requested(
+        stream_id="worker_a",
+        node_id="research_node",
+        reason="Credential wall",
+        context=long_context,
+        execution_id="exec_123",
+    )
+
+    injected = queen_node.inject_event.await_args.args[0]
+
+    assert "context_compacted: yes" in injected
+    assert "HTTP 401 while calling external API" in injected
+    assert "Recommended next step: refresh OAuth token and retry." in injected
+    assert "debug noise line 15" not in injected
+    assert len(injected) < len(long_context)
+
+
+@pytest.mark.asyncio
 async def test_worker_handoff_ignores_queen_and_judge_streams() -> None:
     bus = EventBus()
     manager = SessionManager()
