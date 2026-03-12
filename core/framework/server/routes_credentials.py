@@ -8,13 +8,13 @@ from pydantic import SecretStr
 
 from framework.credentials.models import CredentialKey, CredentialObject
 from framework.credentials.store import CredentialStore
-from framework.server.app import validate_agent_path
+from framework.server.app import credential_store_key, validate_agent_path
 
 logger = logging.getLogger(__name__)
 
 
 def _get_store(request: web.Request) -> CredentialStore:
-    return request.app["credential_store"]
+    return request.app[credential_store_key]
 
 
 def _credential_to_dict(cred: CredentialObject) -> dict:
