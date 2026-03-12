@@ -1,8 +1,9 @@
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
-import { Crown, X, Sun, Moon } from "lucide-react";
+import { Crown, X } from "lucide-react";
 import { loadPersistedTabs, savePersistedTabs, TAB_STORAGE_KEY, type PersistedTabState } from "@/lib/tab-persistence";
 import { sessionsApi } from "@/api/sessions";
+import { ThemeToggle } from "./ThemeToggle";
 
 export interface TopBarTab {
   agentType: string;
@@ -24,38 +25,6 @@ interface TopBarProps {
   afterTabs?: React.ReactNode;
   /** Right-side slot for page-specific controls (e.g. credentials). */
   children?: React.ReactNode;
-}
-
-function ThemeToggle() {
-  const [isDark, setIsDark] = useState(() => {
-    if (typeof window !== "undefined") {
-      return (
-        localStorage.theme === "dark" ||
-        (!("theme" in localStorage) && window.matchMedia("(prefers-color-scheme: dark)").matches)
-      );
-    }
-    return false;
-  });
-
-  useEffect(() => {
-    if (isDark) {
-      document.documentElement.classList.add("dark");
-      localStorage.setItem("theme", "dark");
-    } else {
-      document.documentElement.classList.remove("dark");
-      localStorage.setItem("theme", "light");
-    }
-  }, [isDark]);
-
-  return (
-    <button
-      onClick={() => setIsDark(!isDark)}
-      className="p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors flex-shrink-0"
-      aria-label="Toggle dark mode"
-    >
-      {isDark ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
-    </button>
-  );
 }
 
 export default function TopBar({ tabs: tabsProp, onTabClick, onCloseTab, canCloseTabs, afterTabs, children }: TopBarProps) {
