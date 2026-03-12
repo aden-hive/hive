@@ -118,6 +118,15 @@ RATE_LIMIT_MAX_RETRIES = 10
 RATE_LIMIT_BACKOFF_BASE = 2  # seconds
 RATE_LIMIT_MAX_DELAY = 120  # seconds - cap to prevent absurd waits
 MINIMAX_API_BASE = "https://api.minimax.io/v1"
+
+# Providers that accept cache_control on message content blocks.
+# Anthropic: native ephemeral caching. MiniMax & Z-AI/GLM: pass-through to their APIs.
+# (OpenAI caches automatically server-side; Groq/Gemini/etc. strip the header.)
+_CACHE_CONTROL_PREFIXES = ("anthropic/", "claude-", "minimax/", "minimax-", "MiniMax-", "zai-glm", "glm-")
+
+
+def _model_supports_cache_control(model: str) -> bool:
+    return any(model.startswith(p) for p in _CACHE_CONTROL_PREFIXES)
 # Kimi For Coding uses an Anthropic-compatible endpoint (no /v1 suffix).
 # Claude Code integration uses this format; the /v1 OpenAI-compatible endpoint
 # enforces a coding-agent whitelist that blocks unknown User-Agents.
@@ -707,7 +716,10 @@ class LiteLLMProvider(LLMProvider):
 
         full_messages: list[dict[str, Any]] = []
         if system:
-            full_messages.append({"role": "system", "content": system})
+            sys_msg: dict[str, Any] = {"role": "system", "content": system}
+            if _model_supports_cache_control(self.model):
+                sys_msg["cache_control"] = {"type": "ephemeral"}
+            full_messages.append(sys_msg)
         full_messages.extend(messages)
 
         if json_mode:
@@ -878,7 +890,10 @@ class LiteLLMProvider(LLMProvider):
 
         full_messages: list[dict[str, Any]] = []
         if system:
-            full_messages.append({"role": "system", "content": system})
+            sys_msg: dict[str, Any] = {"role": "system", "content": system}
+            if _model_supports_cache_control(self.model):
+                sys_msg["cache_control"] = {"type": "ephemeral"}
+            full_messages.append(sys_msg)
         full_messages.extend(messages)
 
         # Codex Responses API requires an `instructions` field (system prompt).
