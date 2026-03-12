@@ -91,6 +91,7 @@ _QUEEN_BUILDING_TOOLS = _SHARED_TOOLS + [
     "load_built_agent",
     "list_credentials",
     "replan_agent",
+    "save_agent_draft",  # Re-draft during building → auto-dissolves + updates flowchart
     "write_to_diary",  # Episodic memory — available in all phases
 ]
 

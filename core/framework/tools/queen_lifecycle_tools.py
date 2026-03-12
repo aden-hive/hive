@@ -596,14 +596,47 @@ def register_queen_lifecycle_tools(
                 return json.dumps(
                     {"error": f"Cannot replan: currently in {phase_state.phase} phase."}
                 )
+
+            # Carry forward the current draft: restore original (pre-dissolution)
+            # draft so the queen can edit it in planning, rather than starting
+            # from scratch.
+            if phase_state.original_draft_graph is not None:
+                phase_state.draft_graph = phase_state.original_draft_graph
+                phase_state.original_draft_graph = None
+                phase_state.flowchart_map = None
+            phase_state.build_confirmed = False
+
             await phase_state.switch_to_planning(source="tool")
+
+            # Re-emit draft so frontend shows the flowchart in planning mode
+            bus = phase_state.event_bus
+            if bus is not None and phase_state.draft_graph is not None:
+                try:
+                    await bus.publish(
+                        AgentEvent(
+                            type=EventType.DRAFT_GRAPH_UPDATED,
+                            stream_id="queen",
+                            data=phase_state.draft_graph,
+                        )
+                    )
+                except Exception:
+                    pass
+
+        has_draft = phase_state is not None and phase_state.draft_graph is not None
         return json.dumps(
             {
                 "status": "replanning",
                 "phase": "planning",
+                "has_previous_draft": has_draft,
                 "message": (
                     "Switched to PLANNING phase. Coding tools removed. "
-                    "Discuss the new design with the user."
+                    + (
+                        "The previous draft flowchart has been restored (with "
+                        "decision and sub-agent nodes intact). Call save_agent_draft() "
+                        "to update the design, then confirm_and_build() when ready."
+                        if has_draft
+                        else "Discuss the new design with the user."
+                    )
                 ),
             }
         )
@@ -1004,97 +1037,6 @@ def register_queen_lifecycle_tools(
 
         return converted, flowchart_map
 
-    def _reconcile_flowchart(
-        original_draft: dict,
-        flowchart_map: dict[str, list[str]],
-        runtime_nodes: list,
-        runtime_edges: list,
-    ) -> tuple[dict, dict[str, list[str]]]:
-        """Reconcile the original draft flowchart with the actual runtime graph.
-
-        After building, the queen may have added, removed, or renamed nodes.
-        This updates the original_draft and flowchart_map so the flowchart
-        stays in sync with the runtime graph.
-
-        Returns (updated_draft, updated_map).
-        """
-        import copy as _copy
-
-        draft = _copy.deepcopy(original_draft)
-        draft_nodes: list[dict] = draft.get("nodes", [])
-        draft_edges: list[dict] = draft.get("edges", [])
-        draft_node_ids = {n["id"] for n in draft_nodes}
-
-        # Runtime node IDs
-        runtime_node_ids = {n.id for n in runtime_nodes}
-
-        # All draft node IDs that appear in the current map
-        mapped_draft_ids: set[str] = set()
-        for draft_ids in flowchart_map.values():
-            mapped_draft_ids.update(draft_ids)
-
-        new_map = dict(flowchart_map)
-
-        # 1. New runtime nodes not in the map → add to draft and map
-        for rn in runtime_nodes:
-            if rn.id not in new_map:
-                # Auto-classify and add to draft
-                new_node: dict = {
-                    "id": rn.id,
-                    "name": rn.name,
-                    "description": rn.description or "",
-                    "tools": list(rn.tools) if rn.tools else [],
-                    "input_keys": list(rn.input_keys) if rn.input_keys else [],
-                    "output_keys": list(rn.output_keys) if rn.output_keys else [],
-                    "success_criteria": getattr(rn, "success_criteria", "") or "",
-                }
-                # Classify the new node
-                terminal_ids = runtime_node_ids - {e.source for e in runtime_edges}
-                fc_type = _classify_flowchart_node(
-                    new_node,
-                    len(draft_nodes),  # index
-                    len(draft_nodes) + 1,  # total
-                    draft_edges,
-                    terminal_ids,
-                )
-                fc_meta = _FLOWCHART_TYPES[fc_type]
-                new_node["flowchart_type"] = fc_type
-                new_node["flowchart_shape"] = fc_meta["shape"]
-                new_node["flowchart_color"] = fc_meta["color"]
-
-                draft_nodes.append(new_node)
-                draft_node_ids.add(rn.id)
-                new_map[rn.id] = [rn.id]
-
-                # Add edges connecting this new node
-                for re in runtime_edges:
-                    if re.source == rn.id and re.target in draft_node_ids:
-                        draft_edges.append({
-                            "source": re.source,
-                            "target": re.target,
-                            "condition": str(re.condition.value) if hasattr(re.condition, "value") else str(re.condition),
-                            "description": re.description or "",
-                            "label": "",
-                        })
-                    elif re.target == rn.id and re.source in draft_node_ids:
-                        draft_edges.append({
-                            "source": re.source,
-                            "target": re.target,
-                            "condition": str(re.condition.value) if hasattr(re.condition, "value") else str(re.condition),
-                            "description": re.description or "",
-                            "label": "",
-                        })
-
-        # 2. Runtime nodes removed → remove from map (keep draft nodes for visual continuity)
-        removed_runtime_ids = set(new_map.keys()) - runtime_node_ids
-        for rid in removed_runtime_ids:
-            del new_map[rid]
-
-        draft["nodes"] = draft_nodes
-        draft["edges"] = draft_edges
-
-        return draft, new_map
-
     async def save_agent_draft(
         *,
         agent_name: str,
@@ -1195,20 +1137,78 @@ def register_queen_lifecycle_tools(
             },
         }
 
-        # Store the draft in phase state
-        if phase_state is not None:
-            phase_state.draft_graph = draft
-            phase_state.build_confirmed = False  # reset confirmation
-
-        # Emit event so the frontend can render the draft graph
         bus = getattr(session, "event_bus", None)
+        is_building = phase_state is not None and phase_state.phase == "building"
+
+        if phase_state is not None:
+            if is_building:
+                # During building: re-draft updates the flowchart in place.
+                # Dissolve planning-only nodes immediately (no confirm gate).
+                import copy as _copy
+
+                phase_state.original_draft_graph = _copy.deepcopy(draft)
+                converted, fmap = _dissolve_planning_nodes(draft)
+                phase_state.draft_graph = converted
+                phase_state.flowchart_map = fmap
+                # Do NOT reset build_confirmed — we're already building.
+            else:
+                # During planning: store raw draft, await user confirmation.
+                phase_state.draft_graph = draft
+                phase_state.build_confirmed = False
+
+        # Emit events so the frontend can render
         if bus is not None:
-            await bus.publish(
-                AgentEvent(
-                    type=EventType.DRAFT_GRAPH_UPDATED,
-                    stream_id="queen",
-                    data=draft,
+            if is_building:
+                # Send dissolved draft for runtime display
+                await bus.publish(
+                    AgentEvent(
+                        type=EventType.DRAFT_GRAPH_UPDATED,
+                        stream_id="queen",
+                        data=phase_state.draft_graph if phase_state else draft,
+                    )
                 )
+                # Send original draft + map for flowchart overlay
+                await bus.publish(
+                    AgentEvent(
+                        type=EventType.FLOWCHART_MAP_UPDATED,
+                        stream_id="queen",
+                        data={
+                            "map": phase_state.flowchart_map if phase_state else None,
+                            "original_draft": phase_state.original_draft_graph if phase_state else draft,
+                        },
+                    )
+                )
+            else:
+                await bus.publish(
+                    AgentEvent(
+                        type=EventType.DRAFT_GRAPH_UPDATED,
+                        stream_id="queen",
+                        data=draft,
+                    )
+                )
+
+        dissolution_info = {}
+        if is_building and phase_state is not None:
+            orig_count = len(phase_state.original_draft_graph.get("nodes", []))
+            conv_count = len(phase_state.draft_graph.get("nodes", []))
+            dissolution_info = {
+                "planning_nodes_dissolved": orig_count - conv_count,
+                "flowchart_map": phase_state.flowchart_map,
+            }
+
+        if is_building:
+            msg = (
+                "Draft flowchart updated during building. "
+                "Planning-only nodes dissolved automatically. "
+                "The user can see the updated flowchart. "
+                "Continue building — no re-confirmation needed."
+            )
+        else:
+            msg = (
+                "Draft graph saved and sent to the visualizer. "
+                "The user can now see the color-coded flowchart. "
+                "Present this design to the user and get their approval. "
+                "When the user confirms, call confirm_and_build() to proceed."
             )
 
         return json.dumps({
@@ -1217,23 +1217,21 @@ def register_queen_lifecycle_tools(
             "node_count": len(validated_nodes),
             "edge_count": len(validated_edges),
             "node_types": {n["id"]: n["flowchart_type"] for n in validated_nodes},
-            "message": (
-                "Draft graph saved and sent to the visualizer. "
-                "The user can now see the color-coded flowchart. "
-                "Present this design to the user and get their approval. "
-                "When the user confirms, call confirm_and_build() to proceed."
-            ),
+            **dissolution_info,
+            "message": msg,
         })
 
     _draft_tool = Tool(
         name="save_agent_draft",
         description=(
-            "Save a declarative draft of the agent graph during planning. "
-            "Creates a color-coded flowchart with nodes, edges, and business metadata. "
+            "Save a declarative draft of the agent graph as a color-coded flowchart. "
+            "Usable in PLANNING (creates draft for user review) and BUILDING "
+            "(updates the flowchart in place — planning-only nodes are dissolved "
+            "automatically without re-confirmation). "
             "Each node is auto-classified into a classical flowchart type "
             "(start, terminal, process, decision, io, subprocess, subagent, browser, manual) "
             "with unique colors. No code is generated. "
-            "Planning-only types (decision, subagent) are dissolved at build time: "
+            "Planning-only types (decision, subagent) are dissolved at confirm/build time: "
             "decision nodes merge into predecessor's success_criteria with yes/no edges; "
             "subagent nodes merge into predecessor's sub_agents list as leaf delegates."
         ),
@@ -2681,37 +2679,28 @@ def register_queen_lifecycle_tools(
                             }
                         )
 
-                # Reconcile flowchart with runtime graph if draft exists
+                # Emit flowchart map to frontend if draft exists (so overlay
+                # renders immediately after load without waiting for a poll).
                 if (
                     phase_state is not None
                     and phase_state.original_draft_graph is not None
                     and phase_state.flowchart_map is not None
-                    and loaded_runtime is not None
                 ):
-                    try:
-                        updated_draft, updated_map = _reconcile_flowchart(
-                            phase_state.original_draft_graph,
-                            phase_state.flowchart_map,
-                            list(loaded_runtime.graph.nodes),
-                            list(loaded_runtime.graph.edges),
-                        )
-                        phase_state.original_draft_graph = updated_draft
-                        phase_state.flowchart_map = updated_map
-                        # Notify frontend so flowchart refreshes
-                        bus = phase_state.event_bus
-                        if bus is not None:
+                    bus = phase_state.event_bus
+                    if bus is not None:
+                        try:
                             await bus.publish(
                                 AgentEvent(
                                     type=EventType.FLOWCHART_MAP_UPDATED,
                                     stream_id="queen",
                                     data={
-                                        "map": updated_map,
-                                        "original_draft": updated_draft,
+                                        "map": phase_state.flowchart_map,
+                                        "original_draft": phase_state.original_draft_graph,
                                     },
                                 )
                             )
-                    except Exception:
-                        logger.warning("Flowchart reconciliation failed", exc_info=True)
+                        except Exception:
+                            logger.warning("Failed to emit flowchart map", exc_info=True)
 
                 # Switch to staging phase after successful load + validation
                 if phase_state is not None:
