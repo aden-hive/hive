@@ -21,9 +21,13 @@ Environment Variables:
 from __future__ import annotations
 
 import argparse
+import atexit
+import asyncio
 import logging
 import os
 import sys
+from contextlib import asynccontextmanager
+from typing import AsyncIterator
 
 logger = logging.getLogger(__name__)
 
@@ -57,7 +61,37 @@ from fastmcp import FastMCP  # noqa: E402
 
 from gcu import register_gcu_tools  # noqa: E402
 
-mcp = FastMCP("gcu-tools")
+
+# ---------------------------------------------------------------------------
+# Shutdown hooks — kill Chrome processes when the server exits
+# ---------------------------------------------------------------------------
+
+@asynccontextmanager
+async def _lifespan(server: FastMCP) -> AsyncIterator[dict]:
+    """FastMCP lifespan hook: clean up all browsers on shutdown."""
+    yield {}
+    from gcu.browser.session import shutdown_all_browsers
+
+    logger.info("Server shutting down, cleaning up browser sessions...")
+    await shutdown_all_browsers()
+
+
+def _sync_shutdown() -> None:
+    """atexit fallback: run async browser cleanup from sync context.
+
+    Covers SIGTERM and other exits where the lifespan teardown may not run.
+    """
+    from gcu.browser.session import shutdown_all_browsers
+
+    try:
+        asyncio.run(shutdown_all_browsers())
+    except Exception:
+        pass
+
+
+atexit.register(_sync_shutdown)
+
+mcp = FastMCP("gcu-tools", lifespan=_lifespan)
 
 
 def main() -> None:
