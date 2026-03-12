@@ -94,3 +94,29 @@ def register_tab_tools(mcp: FastMCP) -> None:
         """
         session = get_session(profile)
         return await session.focus_tab(target_id)
+
+    @mcp.tool()
+    async def browser_close_all(keep_active: bool = True, profile: str = "default") -> dict:
+        """
+        Close all browser tabs, optionally keeping the active tab.
+
+        Args:
+            keep_active: If True (default), keep the active tab open.
+                If False, close ALL tabs (browser remains running).
+            profile: Browser profile name (default: "default")
+
+        Returns:
+            Dict with number of closed tabs and remaining count
+        """
+        session = get_session(profile)
+        to_close = [
+            tid
+            for tid in list(session.pages.keys())
+            if not (keep_active and tid == session.active_page_id)
+        ]
+        closed = 0
+        for tid in to_close:
+            result = await session.close_tab(tid)
+            if result.get("ok"):
+                closed += 1
+        return {"ok": True, "closed_count": closed, "remaining": len(session.pages)}
