@@ -179,7 +179,8 @@ class SessionManager:
         # Reuse the original session ID when cold-restoring so the frontend
         # sees one continuous session instead of a new one each time.
         session = await self._create_session_core(
-            session_id=queen_resume_from, model=model,
+            session_id=queen_resume_from,
+            model=model,
         )
         session.queen_resume_from = queen_resume_from
         try:
@@ -717,7 +718,8 @@ class SessionManager:
                     iteration_offset = max_iter + 1
                     logger.info(
                         "Session '%s' resuming with iteration_offset=%d (from events.jsonl max)",
-                        session.id, iteration_offset,
+                        session.id,
+                        iteration_offset,
                     )
         except OSError:
             pass
@@ -1002,7 +1004,7 @@ class SessionManager:
                 try:
                     all_parts: list[dict] = []
 
-                    def _collect_parts(parts_dir: Path) -> None:
+                    def _collect_parts(parts_dir: Path, _dest: list[dict] = all_parts) -> None:
                         if not parts_dir.exists():
                             return
                         for part_file in sorted(parts_dir.iterdir()):
@@ -1011,7 +1013,7 @@ class SessionManager:
                             try:
                                 part = json.loads(part_file.read_text(encoding="utf-8"))
                                 part.setdefault("created_at", part_file.stat().st_mtime)
-                                all_parts.append(part)
+                                _dest.append(part)
                             except (json.JSONDecodeError, OSError):
                                 continue
 

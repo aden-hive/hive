@@ -293,11 +293,13 @@ class EventBus:
 
     # Event types that are high-frequency streaming deltas — accumulated rather
     # than written individually to the session log.
-    _STREAMING_DELTA_TYPES = frozenset({
-        EventType.CLIENT_OUTPUT_DELTA,
-        EventType.LLM_TEXT_DELTA,
-        EventType.LLM_REASONING_DELTA,
-    })
+    _STREAMING_DELTA_TYPES = frozenset(
+        {
+            EventType.CLIENT_OUTPUT_DELTA,
+            EventType.LLM_TEXT_DELTA,
+            EventType.LLM_REASONING_DELTA,
+        }
+    )
 
     def _write_session_log_event(self, event: AgentEvent) -> None:
         """Write an event to the per-session log with streaming coalescing.
@@ -351,7 +353,7 @@ class EventBus:
             return
 
         to_flush: list[tuple] = []
-        for key, evt in self._pending_output_snapshots.items():
+        for key, _evt in self._pending_output_snapshots.items():
             if stream_id is not None:
                 k_stream, k_node, k_exec, _ = key
                 if k_stream != stream_id or k_node != node_id or k_exec != execution_id:
@@ -441,8 +443,13 @@ class EventBus:
         # iteration values.  Without this, live SSE would use raw iterations
         # while events.jsonl would use offset iterations, causing ID collisions
         # on the frontend when replaying after cold resume.
-        if self._session_log_iteration_offset and isinstance(event.data, dict) and "iteration" in event.data:
-            event.data = {**event.data, "iteration": event.data["iteration"] + self._session_log_iteration_offset}
+        if (
+            self._session_log_iteration_offset
+            and isinstance(event.data, dict)
+            and "iteration" in event.data
+        ):
+            offset = self._session_log_iteration_offset
+            event.data = {**event.data, "iteration": event.data["iteration"] + offset}
 
         # Add to history
         async with self._lock:

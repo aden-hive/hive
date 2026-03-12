@@ -678,7 +678,13 @@ class EventLoopNode(NodeProtocol):
                     _iter_meta = ctx.iteration_metadata_provider()
                 except Exception:
                     pass
-            await self._publish_iteration(stream_id, node_id, iteration, execution_id, extra_data=_iter_meta)
+            await self._publish_iteration(
+                stream_id,
+                node_id,
+                iteration,
+                execution_id,
+                extra_data=_iter_meta,
+            )
 
             # 6d. Pre-turn compaction check (tiered)
             _compacted_this_iter = False
@@ -4074,7 +4080,11 @@ class EventLoopNode(NodeProtocol):
                 await conversation.add_user_message(result.inject)
 
     async def _publish_iteration(
-        self, stream_id: str, node_id: str, iteration: int, execution_id: str = "",
+        self,
+        stream_id: str,
+        node_id: str,
+        iteration: int,
+        execution_id: str = "",
         extra_data: dict | None = None,
     ) -> None:
         if self._event_bus:

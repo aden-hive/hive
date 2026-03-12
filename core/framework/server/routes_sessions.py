@@ -703,16 +703,18 @@ async def handle_messages(request: web.Request) -> web.Response:
                     continue
                 try:
                     record = json.loads(line)
-                    all_messages.append({
-                        "seq": -1,
-                        "role": "system",
-                        "content": "",
-                        "_node_id": "_run_marker",
-                        "is_run_marker": True,
-                        "run_id": record.get("run_id"),
-                        "run_event": record.get("event"),
-                        "created_at": record.get("created_at", 0),
-                    })
+                    all_messages.append(
+                        {
+                            "seq": -1,
+                            "role": "system",
+                            "content": "",
+                            "_node_id": "_run_marker",
+                            "is_run_marker": True,
+                            "run_id": record.get("run_id"),
+                            "run_event": record.get("event"),
+                            "created_at": record.get("created_at", 0),
+                        }
+                    )
                 except json.JSONDecodeError:
                     continue
         except OSError:
@@ -949,9 +951,7 @@ def register_routes(app: web.Application) -> None:
     )
     app.router.add_get("/api/sessions/{session_id}/graphs", handle_session_graphs)
     app.router.add_get("/api/sessions/{session_id}/queen-messages", handle_queen_messages)
-    app.router.add_get(
-        "/api/sessions/{session_id}/events/history", handle_session_events_history
-    )
+    app.router.add_get("/api/sessions/{session_id}/events/history", handle_session_events_history)
 
     # Worker session browsing (session-primary)
     app.router.add_get("/api/sessions/{session_id}/worker-sessions", handle_list_worker_sessions)

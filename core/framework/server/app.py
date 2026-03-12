@@ -102,6 +102,7 @@ def cold_sessions_dir(session_id: str) -> Path | None:
     Returns None if meta.json is missing or has no agent_path.
     """
     import json
+
     meta_path = Path.home() / ".hive" / "queen" / "session" / session_id / "meta.json"
     if not meta_path.exists():
         return None

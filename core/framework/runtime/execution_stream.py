@@ -797,7 +797,12 @@ class ExecutionStream:
                 elif result.paused_at:
                     self._write_run_event(execution_id, ctx.run_id, "run_paused")
                 else:
-                    self._write_run_event(execution_id, ctx.run_id, "run_failed", {"error": result.error or "Unknown error"})
+                    self._write_run_event(
+                        execution_id,
+                        ctx.run_id,
+                        "run_failed",
+                        {"error": result.error or "Unknown error"},
+                    )
 
                 logger.debug(f"Execution {execution_id} completed: success={result.success}")
 
