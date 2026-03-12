@@ -237,7 +237,7 @@ export interface DraftGraph {
 export interface FlowchartMap {
   /** runtime_node_id → list of original draft node IDs it absorbed. */
   map: Record<string, string[]> | null;
-  /** Original draft graph preserved before decision-node dissolution. */
+  /** Original draft graph preserved before planning-node dissolution (decision + subagent). */
   original_draft: DraftGraph | null;
 }
 

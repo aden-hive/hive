@@ -687,6 +687,8 @@ def register_queen_lifecycle_tools(
         "comment":          {"shape": "flag",          "color": "#BDBDBD"},  # light grey
         # Alternate process — rounded rectangle
         "alternate_process": {"shape": "rounded_rect", "color": "#42A5F5"}, # light blue
+        # Sub-agent — planning-only; dissolved into parent's sub_agents at build time
+        "subagent":         {"shape": "subroutine",    "color": "#00695C"},  # dark teal
     }
 
     def _classify_flowchart_node(
@@ -787,16 +789,23 @@ def register_queen_lifecycle_tools(
         # Default: process (rectangle)
         return "process"
 
-    def _dissolve_decision_nodes(
+    def _dissolve_planning_nodes(
         draft: dict,
     ) -> tuple[dict, dict[str, list[str]]]:
-        """Convert planning-only decision nodes into runtime-compatible structures.
+        """Convert planning-only nodes into runtime-compatible structures.
 
-        Decision nodes (flowchart diamonds) are dissolved by:
+        Two kinds of planning-only nodes are dissolved:
+
+        **Decision nodes** (flowchart diamonds):
         1. Merging the decision clause into the predecessor node's success_criteria.
         2. Rewiring the decision's yes/no outgoing edges as on_success/on_failure
            edges from the predecessor.
         3. Removing the decision node from the graph.
+
+        **Sub-agent nodes** (flowchart_type == "subagent"):
+        1. Adding the sub-agent node's ID to the predecessor's sub_agents list.
+        2. Removing the sub-agent node and its connecting edge.
+        3. Sub-agent nodes must not have outgoing edges (they are leaf delegates).
 
         Returns (converted_draft, flowchart_map) where flowchart_map maps
         runtime node IDs → list of original draft node IDs they absorbed.
@@ -927,6 +936,52 @@ def register_queen_lifecycle_tools(
             edges[:] = [e for e in edges if e["source"] != d_id and e["target"] != d_id]
             nodes[:] = [n for n in nodes if n["id"] != d_id]
             del node_by_id[d_id]
+
+        # ── Dissolve sub-agent nodes ──────────────────────────────
+        # Sub-agent nodes are leaf delegates: parent → subagent (no outgoing).
+        # Dissolution adds the subagent's ID to parent's sub_agents list.
+        subagent_ids = [
+            n["id"] for n in nodes if n.get("flowchart_type") == "subagent"
+        ]
+
+        for sa_id in subagent_ids:
+            sa_node = node_by_id.get(sa_id)
+            if sa_node is None:
+                continue
+
+            in_edges = _incoming(sa_id)
+            out_edges = _outgoing(sa_id)
+
+            # Validate: sub-agent nodes must be leaves (no outgoing edges)
+            if out_edges:
+                logger.warning(
+                    "Sub-agent node '%s' has outgoing edges — they will be dropped "
+                    "during dissolution. Sub-agent nodes should be leaf nodes.",
+                    sa_id,
+                )
+
+            # Attach to each predecessor's sub_agents list
+            for ie in in_edges:
+                pred_id = ie["source"]
+                pred = node_by_id.get(pred_id)
+                if pred is None:
+                    continue
+
+                existing_subs = pred.get("sub_agents") or []
+                if sa_id not in existing_subs:
+                    existing_subs.append(sa_id)
+                pred["sub_agents"] = existing_subs
+
+                # Record absorption
+                prev_absorbed = absorbed.get(pred_id, [pred_id])
+                if sa_id not in prev_absorbed:
+                    prev_absorbed.append(sa_id)
+                absorbed[pred_id] = prev_absorbed
+
+            # Remove sub-agent node and all its edges
+            edges[:] = [e for e in edges if e["source"] != sa_id and e["target"] != sa_id]
+            nodes[:] = [n for n in nodes if n["id"] != sa_id]
+            del node_by_id[sa_id]
 
         # Build complete flowchart_map (identity for non-absorbed nodes)
         flowchart_map: dict[str, list[str]] = {}
@@ -1176,8 +1231,11 @@ def register_queen_lifecycle_tools(
             "Save a declarative draft of the agent graph during planning. "
             "Creates a color-coded flowchart with nodes, edges, and business metadata. "
             "Each node is auto-classified into a classical flowchart type "
-            "(start, terminal, process, decision, io, subprocess, browser, manual) "
-            "with unique colors. No code is generated."
+            "(start, terminal, process, decision, io, subprocess, subagent, browser, manual) "
+            "with unique colors. No code is generated. "
+            "Planning-only types (decision, subagent) are dissolved at build time: "
+            "decision nodes merge into predecessor's success_criteria with yes/no edges; "
+            "subagent nodes merge into predecessor's sub_agents list as leaf delegates."
         ),
         parameters={
             "type": "object",
@@ -1223,6 +1281,7 @@ def register_queen_lifecycle_tools(
                                     "merge", "extract", "sort", "collate",
                                     "summing_junction", "or",
                                     "browser", "comment", "alternate_process",
+                                    "subagent",
                                 ],
                                 "description": (
                                     "ISO 5807 flowchart symbol type. Auto-detected if omitted. "
@@ -1232,7 +1291,10 @@ def register_queen_lifecycle_tools(
                                     "subprocess (teal subroutine), preparation (brown hexagon), "
                                     "manual_operation (pink trapezoid), delay (orange D-shape), "
                                     "display (cyan), database (green cylinder), "
-                                    "merge (indigo triangle), browser (dark indigo hexagon)"
+                                    "merge (indigo triangle), browser (dark indigo hexagon), "
+                                    "subagent (dark teal subroutine — planning-only, dissolved "
+                                    "into parent node's sub_agents at build time; must be a "
+                                    "leaf node connected only to its managing parent)"
                                 ),
                             },
                             "tools": {
@@ -1356,27 +1418,44 @@ def register_queen_lifecycle_tools(
         phase_state.build_confirmed = True
 
         # Preserve original draft for flowchart display during runtime,
-        # then dissolve decision nodes into runtime-compatible structures.
+        # then dissolve planning-only nodes (decision + subagent) into
+        # runtime-compatible structures.
         import copy as _copy
 
+        original_nodes = phase_state.draft_graph.get("nodes", [])
         phase_state.original_draft_graph = _copy.deepcopy(phase_state.draft_graph)
-        converted, fmap = _dissolve_decision_nodes(phase_state.draft_graph)
+        converted, fmap = _dissolve_planning_nodes(phase_state.draft_graph)
         phase_state.draft_graph = converted
         phase_state.flowchart_map = fmap
 
-        dissolved_count = (
-            len(phase_state.original_draft_graph.get("nodes", []))
-            - len(converted.get("nodes", []))
+        dissolved_count = len(original_nodes) - len(converted.get("nodes", []))
+        decision_count = sum(
+            1 for n in original_nodes if n.get("flowchart_type") == "decision"
         )
+        subagent_count = sum(
+            1 for n in original_nodes if n.get("flowchart_type") == "subagent"
+        )
+
+        dissolution_parts = []
+        if decision_count:
+            dissolution_parts.append(
+                f"{decision_count} decision node(s) dissolved into predecessor criteria"
+            )
+        if subagent_count:
+            dissolution_parts.append(
+                f"{subagent_count} sub-agent node(s) dissolved into predecessor sub_agents"
+            )
 
         return json.dumps({
             "status": "confirmed",
             "agent_name": phase_state.draft_graph.get("agent_name", ""),
-            "decision_nodes_dissolved": dissolved_count,
+            "planning_nodes_dissolved": dissolved_count,
+            "decision_nodes_dissolved": decision_count,
+            "subagent_nodes_dissolved": subagent_count,
             "flowchart_map": fmap,
             "message": (
                 "User has confirmed the design. "
-                + (f"{dissolved_count} decision node(s) dissolved into predecessor criteria. " if dissolved_count else "")
+                + ("; ".join(dissolution_parts) + ". " if dissolution_parts else "")
                 + "Now call initialize_and_build_agent(agent_name, nodes) to scaffold the "
                 "agent package and start building. The draft metadata will be "
                 "used to pre-populate the generated files."
