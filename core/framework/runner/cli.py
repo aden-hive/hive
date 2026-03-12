@@ -380,13 +380,15 @@ def cmd_run(args: argparse.Namespace) -> int:
     from framework.credentials.models import CredentialError
     from framework.runner import AgentRunner
 
+    from framework.observability import configure_logging
+
     # Set logging level (quiet by default for cleaner output)
     if args.quiet:
-        logging.basicConfig(level=logging.ERROR, format="%(message)s")
+        configure_logging(level="ERROR")
     elif getattr(args, "verbose", False):
-        logging.basicConfig(level=logging.INFO, format="%(message)s")
+        configure_logging(level="INFO")
     else:
-        logging.basicConfig(level=logging.WARNING, format="%(message)s")
+        configure_logging(level="WARNING")
 
     # Load input context
     context = {}
@@ -923,11 +925,9 @@ def cmd_shell(args: argparse.Namespace) -> int:
     from framework.credentials.models import CredentialError
     from framework.runner import AgentRunner
 
-    # Configure logging to show runtime visibility
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(message)s",  # Simple format for clean output
-    )
+    from framework.observability import configure_logging
+
+    configure_logging(level="INFO")
 
     agents_dir = Path(args.agents_dir)
 
@@ -1633,10 +1633,9 @@ def cmd_serve(args: argparse.Namespace) -> int:
 
     from framework.server.app import create_app
 
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-    )
+    from framework.observability import configure_logging
+
+    configure_logging(level="INFO")
 
     model = getattr(args, "model", None)
     app = create_app(model=model)
