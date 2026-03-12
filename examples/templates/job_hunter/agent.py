@@ -11,7 +11,7 @@ from framework.runner.tool_registry import ToolRegistry
 from framework.runtime.agent_runtime import AgentRuntime, create_agent_runtime
 from framework.runtime.execution_stream import EntryPointSpec
 
-from .config import default_config, metadata
+from .config import default_config
 from .nodes import (
     intake_node,
     job_search_node,
@@ -139,14 +139,6 @@ terminal_nodes = ["customize"]
 class JobHunterAgent:
     """
     Job Hunter Agent — 4-node pipeline for job search and application materials.
-
-    Flow: intake -> job-search -> job-review -> customize
-
-    Uses AgentRuntime for proper session management:
-    - Session-scoped storage (sessions/{session_id}/)
-    - Checkpointing for resume capability
-    - Runtime logging
-    - Data folder for save_data/load_data
     """
 
     def __init__(self, config=None):
@@ -168,7 +160,7 @@ class JobHunterAgent:
         return GraphSpec(
             id="job-hunter-graph",
             goal_id=self.goal.id,
-            version="1.0.0",
+            version="1.1.0",
             entry_node=self.entry_node,
             entry_points=self.entry_points,
             terminal_nodes=self.terminal_nodes,
@@ -186,9 +178,7 @@ class JobHunterAgent:
             identity_prompt=(
                 "You are a job hunting assistant. You analyze resumes to identify "
                 "the strongest role fits, search for matching job opportunities, "
-                "and help create personalized application materials. You only "
-                "suggest roles the user is realistically qualified for, and you "
-                "never fabricate experience — only enhance presentation truthfully."
+                "and help create personalized application materials."
             ),
         )
 
@@ -288,55 +278,18 @@ class JobHunterAgent:
         finally:
             await self.stop()
 
-    def info(self):
-        """Get agent information."""
-        return {
-            "name": metadata.name,
-            "version": metadata.version,
-            "description": metadata.description,
-            "goal": {
-                "name": self.goal.name,
-                "description": self.goal.description,
-            },
-            "nodes": [n.id for n in self.nodes],
-            "edges": [e.id for e in self.edges],
-            "entry_node": self.entry_node,
-            "entry_points": self.entry_points,
-            "pause_nodes": self.pause_nodes,
-            "terminal_nodes": self.terminal_nodes,
-            "client_facing_nodes": [n.id for n in self.nodes if n.client_facing],
-        }
-
     def validate(self):
         """Validate agent structure."""
         errors = []
-        warnings = []
-
         node_ids = {node.id for node in self.nodes}
         for edge in self.edges:
             if edge.source not in node_ids:
                 errors.append(f"Edge {edge.id}: source '{edge.source}' not found")
             if edge.target not in node_ids:
                 errors.append(f"Edge {edge.id}: target '{edge.target}' not found")
-
         if self.entry_node not in node_ids:
             errors.append(f"Entry node '{self.entry_node}' not found")
-
-        for terminal in self.terminal_nodes:
-            if terminal not in node_ids:
-                errors.append(f"Terminal node '{terminal}' not found")
-
-        for ep_id, node_id in self.entry_points.items():
-            if node_id not in node_ids:
-                errors.append(
-                    f"Entry point '{ep_id}' references unknown node '{node_id}'"
-                )
-
-        return {
-            "valid": len(errors) == 0,
-            "errors": errors,
-            "warnings": warnings,
-        }
+        return {"valid": len(errors) == 0, "errors": errors}
 
 
 # Create default instance

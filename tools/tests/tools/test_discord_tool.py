@@ -411,4 +411,7 @@ class TestCredentialSpec:
         assert "discord_list_channels" in spec.tools
         assert "discord_send_message" in spec.tools
         assert "discord_get_messages" in spec.tools
-        assert len(spec.tools) == 4
+        assert "discord_get_channel" in spec.tools
+        assert "discord_create_reaction" in spec.tools
+        assert "discord_delete_message" in spec.tools
+        assert len(spec.tools) == 7

@@ -12,8 +12,8 @@ export interface LiveSession {
   loaded_at: number;
   uptime_seconds: number;
   intro_message?: string;
-  /** Queen operating mode — "building", "staging", or "running" */
-  queen_mode?: "building" | "staging" | "running";
+  /** Queen operating phase — "planning", "building", "staging", or "running" */
+  queen_phase?: "planning" | "building" | "staging" | "running";
   /** Present in 409 conflict responses when worker is still loading */
   loading?: boolean;
 }
@@ -21,6 +21,8 @@ export interface LiveSession {
 export interface LiveSessionDetail extends LiveSession {
   entry_points?: EntryPoint[];
   graphs?: string[];
+  /** True when the session exists on disk but is not live (server restarted). */
+  cold?: boolean;
 }
 
 export interface EntryPoint {
@@ -273,7 +275,7 @@ export type EventTypeName =
   | "escalation_requested"
   | "worker_loaded"
   | "credentials_required"
-  | "queen_mode_changed"
+  | "queen_phase_changed"
   | "subagent_report";
 
 export interface AgentEvent {

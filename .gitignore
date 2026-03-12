@@ -67,8 +67,6 @@ temp/
 
 exports/*
 
-.agent-builder-sessions/*
-
 .claude/settings.local.json
 .claude/skills/ship-it/
 

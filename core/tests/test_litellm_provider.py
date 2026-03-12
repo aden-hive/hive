@@ -14,7 +14,7 @@ import os
 import threading
 import time
 from datetime import UTC, datetime, timedelta
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -57,6 +57,20 @@ class TestLiteLLMProviderInit:
             model="gpt-4o-mini", api_key="my-key", api_base="https://my-proxy.com/v1"
         )
         assert provider.api_base == "https://my-proxy.com/v1"
+
+    def test_init_minimax_defaults_api_base(self):
+        """MiniMax should default to the official OpenAI-compatible endpoint."""
+        provider = LiteLLMProvider(model="minimax/MiniMax-M2.1", api_key="my-key")
+        assert provider.api_base == "https://api.minimax.io/v1"
+
+    def test_init_minimax_keeps_custom_api_base(self):
+        """Explicit api_base should win over MiniMax defaults."""
+        provider = LiteLLMProvider(
+            model="minimax/MiniMax-M2.1",
+            api_key="my-key",
+            api_base="https://proxy.example/v1",
+        )
+        assert provider.api_base == "https://proxy.example/v1"
 
     def test_init_ollama_no_key_needed(self):
         """Test that Ollama models don't require API key."""
@@ -629,6 +643,43 @@ class TestAsyncComplete:
         assert call_thread_ids[0] != main_thread_id, (
             "Base acomplete() should offload sync complete() to a thread pool"
         )
+
+
+class TestMiniMaxStreamFallback:
+    """MiniMax models should use non-stream fallback due to parser incompatibility."""
+
+    @pytest.mark.asyncio
+    async def test_stream_uses_nonstream_fallback_for_minimax(self):
+        """stream() should call acomplete() and synthesize stream events for MiniMax."""
+        from framework.llm.stream_events import FinishEvent, TextDeltaEvent
+
+        provider = LiteLLMProvider(model="minimax-text-01", api_key="test-key")
+
+        mock_response = LLMResponse(
+            content="hello from minimax",
+            model="minimax-text-01",
+            input_tokens=7,
+            output_tokens=4,
+            stop_reason="stop",
+            raw_response=None,
+        )
+        provider.acomplete = AsyncMock(return_value=mock_response)
+
+        events = []
+        async for event in provider.stream(messages=[{"role": "user", "content": "hi"}]):
+            events.append(event)
+
+        assert provider.acomplete.await_count == 1
+        assert any(isinstance(e, TextDeltaEvent) for e in events)
+        finish = [e for e in events if isinstance(e, FinishEvent)]
+        assert len(finish) == 1
+        assert finish[0].model == "minimax-text-01"
+
+    def test_is_minimax_model_variants(self):
+        """Recognize both prefixed and plain MiniMax model names."""
+        assert LiteLLMProvider(model="minimax-text-01", api_key="x")._is_minimax_model()
+        assert LiteLLMProvider(model="minimax/minimax-text-01", api_key="x")._is_minimax_model()
+        assert not LiteLLMProvider(model="gpt-4o-mini", api_key="x")._is_minimax_model()
 
 
 # ---------------------------------------------------------------------------

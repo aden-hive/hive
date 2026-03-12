@@ -520,3 +520,191 @@ def register_tools(
             return {"error": f"Network error: {e}"}
         except Exception as e:
             return {"error": f"News sentiment failed: {e}"}
+
+    @mcp.tool()
+    def news_latest(
+        language: str = "en",
+        country: str | None = None,
+        category: str | None = None,
+        limit: int | None = 10,
+    ) -> dict:
+        """
+        Get the latest breaking news without a search query.
+
+        Args:
+            language: Language code (default 'en')
+            country: Country code filter (e.g. 'us', 'gb')
+            category: Category filter (e.g. 'business', 'technology')
+            limit: Max number of results
+
+        Returns:
+            Dict with list of latest articles and provider metadata.
+        """
+        creds = _get_credentials()
+        newsdata_key = creds["newsdata_api_key"]
+        finlight_key = creds["finlight_api_key"]
+        if not newsdata_key and not finlight_key:
+            return {
+                "error": "No news credentials configured",
+                "help": "Set NEWSDATA_API_KEY or FINLIGHT_API_KEY environment variable",
+            }
+
+        limit_value = _normalize_limit(limit)
+
+        if newsdata_key:
+            # NewsData latest endpoint
+            params = _clean_params(
+                {
+                    "apikey": newsdata_key,
+                    "language": language,
+                    "category": category,
+                    "country": country,
+                    "size": limit_value,
+                }
+            )
+
+            def _fetch_latest():
+                r = httpx.get(NEWSDATA_URL, params=params, timeout=30.0)
+                if r.status_code != 200:
+                    return _newsdata_error(r)
+                articles = _parse_newsdata_results(r.json())
+                return {
+                    "results": articles,
+                    "total": len(articles),
+                    "provider": "newsdata",
+                }
+
+            result = _try_provider(_fetch_latest)
+            if "error" not in result:
+                return result
+
+        # Fallback to search with broad query
+        result = _search_with_fallback(
+            newsdata_key=newsdata_key,
+            finlight_key=finlight_key,
+            search_kwargs={
+                "query": category or "breaking news",
+                "from_date": None,
+                "to_date": None,
+                "language": language,
+                "limit": limit_value,
+                "sources": None,
+                "category": category,
+                "country": country,
+            },
+        )
+        return result
+
+    @mcp.tool()
+    def news_by_source(
+        sources: str,
+        query: str | None = None,
+        days_back: int = 7,
+        language: str = "en",
+        limit: int | None = 10,
+    ) -> dict:
+        """
+        Get news from specific sources.
+
+        Args:
+            sources: Comma-separated source IDs (e.g. 'bbc,reuters,cnn')
+            query: Optional search query to filter articles
+            days_back: Days to look back (default 7)
+            language: Language code (default 'en')
+            limit: Max number of results
+
+        Returns:
+            Dict with list of articles from specified sources.
+        """
+        if not sources:
+            return {"error": "sources is required (comma-separated source IDs)"}
+
+        from_date, to_date = _build_date_range(days_back)
+
+        creds = _get_credentials()
+        newsdata_key = creds["newsdata_api_key"]
+        finlight_key = creds["finlight_api_key"]
+        if not newsdata_key and not finlight_key:
+            return {
+                "error": "No news credentials configured",
+                "help": "Set NEWSDATA_API_KEY or FINLIGHT_API_KEY environment variable",
+            }
+
+        limit_value = _normalize_limit(limit)
+
+        result = _search_with_fallback(
+            newsdata_key=newsdata_key,
+            finlight_key=finlight_key,
+            search_kwargs={
+                "query": query,
+                "from_date": from_date,
+                "to_date": to_date,
+                "language": language,
+                "limit": limit_value,
+                "sources": sources,
+                "category": None,
+                "country": None,
+            },
+        )
+        result["sources"] = sources
+        if query:
+            result["query"] = query
+        return result
+
+    @mcp.tool()
+    def news_by_topic(
+        topic: str,
+        days_back: int = 3,
+        language: str = "en",
+        country: str | None = None,
+        limit: int | None = 10,
+    ) -> dict:
+        """
+        Get news articles about a broad topic or industry.
+
+        Similar to news_search but optimized for topic-based discovery
+        with automatic date range.
+
+        Args:
+            topic: Broad topic (e.g. 'artificial intelligence', 'climate change')
+            days_back: Days to look back (default 3)
+            language: Language code (default 'en')
+            country: Country code filter
+            limit: Max number of results
+
+        Returns:
+            Dict with list of topic-relevant articles.
+        """
+        if not topic:
+            return {"error": "topic is required"}
+
+        from_date, to_date = _build_date_range(days_back)
+
+        creds = _get_credentials()
+        newsdata_key = creds["newsdata_api_key"]
+        finlight_key = creds["finlight_api_key"]
+        if not newsdata_key and not finlight_key:
+            return {
+                "error": "No news credentials configured",
+                "help": "Set NEWSDATA_API_KEY or FINLIGHT_API_KEY environment variable",
+            }
+
+        limit_value = _normalize_limit(limit)
+
+        result = _search_with_fallback(
+            newsdata_key=newsdata_key,
+            finlight_key=finlight_key,
+            search_kwargs={
+                "query": topic,
+                "from_date": from_date,
+                "to_date": to_date,
+                "language": language,
+                "limit": limit_value,
+                "sources": None,
+                "category": None,
+                "country": country,
+            },
+        )
+        result["topic"] = topic
+        result["days_back"] = days_back
+        return result

@@ -4,6 +4,7 @@ import asyncio
 import logging
 
 from aiohttp import web
+from aiohttp.client_exceptions import ClientConnectionResetError as _AiohttpConnReset
 
 from framework.runtime.event_bus import EventType
 from framework.server.app import resolve_session
@@ -38,7 +39,7 @@ DEFAULT_EVENT_TYPES = [
     EventType.WORKER_LOADED,
     EventType.CREDENTIALS_REQUIRED,
     EventType.SUBAGENT_REPORT,
-    EventType.QUEEN_MODE_CHANGED,
+    EventType.QUEEN_PHASE_CHANGED,
 ]
 
 # Keepalive interval in seconds
@@ -92,7 +93,7 @@ async def handle_events(request: web.Request) -> web.StreamResponse:
         "node_loop_started",
         "credentials_required",
         "worker_loaded",
-        "queen_mode_changed",
+        "queen_phase_changed",
     }
 
     client_disconnected = asyncio.Event()
@@ -168,9 +169,22 @@ async def handle_events(request: web.Request) -> web.StreamResponse:
                         "SSE first event: session='%s', type='%s'", session.id, data.get("type")
                     )
             except TimeoutError:
-                await sse.send_keepalive()
-            except (ConnectionResetError, ConnectionError):
+                try:
+                    await sse.send_keepalive()
+                except (ConnectionResetError, ConnectionError, _AiohttpConnReset):
+                    close_reason = "client_disconnected"
+                    break
+                except Exception as exc:
+                    close_reason = f"keepalive_error: {exc}"
+                    break
+            except (ConnectionResetError, ConnectionError, _AiohttpConnReset):
                 close_reason = "client_disconnected"
+                break
+            except RuntimeError as exc:
+                if "closing transport" in str(exc).lower():
+                    close_reason = "client_disconnected"
+                else:
+                    close_reason = f"error: {exc}"
                 break
             except Exception as exc:
                 close_reason = f"error: {exc}"

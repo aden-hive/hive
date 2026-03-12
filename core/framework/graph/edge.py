@@ -431,8 +431,7 @@ class GraphSpec(BaseModel):
     max_tokens: int = Field(default=None)  # resolved by _resolve_max_tokens validator
 
     # Cleanup LLM for JSON extraction fallback (fast/cheap model preferred)
-    # If not set, uses CEREBRAS_API_KEY -> cerebras/llama-3.3-70b or
-    # ANTHROPIC_API_KEY -> claude-haiku-4-5 as fallback
+    # If not set, uses CEREBRAS_API_KEY -> cerebras/llama-3.3-70b
     cleanup_llm_model: str | None = None
 
     # Execution limits
@@ -575,9 +574,14 @@ class GraphSpec(BaseModel):
         # Default to main entry
         return self.entry_node
 
-    def validate(self) -> list[str]:
-        """Validate the graph structure."""
+    def validate(self) -> dict[str, list[str]]:
+        """Validate the graph structure.
+
+        Returns:
+            Dict with 'errors' (blocking issues) and 'warnings' (non-blocking).
+        """
         errors = []
+        warnings = []
 
         # Check entry node exists
         if not self.get_node(self.entry_node):
@@ -618,6 +622,13 @@ class GraphSpec(BaseModel):
         for term in self.terminal_nodes:
             if not self.get_node(term):
                 errors.append(f"Terminal node '{term}' not found")
+
+        # Suggest at least one terminal node (graphs should have termination points)
+        if not self.terminal_nodes:
+            warnings.append(
+                "Graph has no terminal nodes defined in 'terminal_nodes'. "
+                "Consider adding a termination point where execution ends."
+            )
 
         # Check edge references
         for edge in self.edges:
@@ -750,4 +761,4 @@ class GraphSpec(BaseModel):
                     "GCU nodes must be declared as subagents of a parent node."
                 )
 
-        return errors
+        return {"errors": errors, "warnings": warnings}

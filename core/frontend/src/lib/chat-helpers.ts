@@ -121,7 +121,8 @@ export function sseEventToChatMessage(
         id: `paused-${event.execution_id}`,
         agent: "System",
         agentColor: "",
-        content: "Execution paused by user",
+        content:
+          (event.data?.reason as string) || "Execution paused",
         timestamp: "",
         type: "system",
         thread,

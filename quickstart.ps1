@@ -130,8 +130,8 @@ function Test-DefenderExclusions {
     
     # Normalize and filter null/empty values
     $safePrefixes = $safePrefixes | Where-Object { $_ } | ForEach-Object {
-        [System.IO.Path]::GetFullPath($_)
-    }
+        try { [System.IO.Path]::GetFullPath($_) } catch { $null }
+    } | Where-Object { $_ }
     
     try {
         # Check if Defender cmdlets are available (may not exist on older Windows)
@@ -157,15 +157,20 @@ function Test-DefenderExclusions {
         $existing = $prefs.ExclusionPath
         if (-not $existing) { $existing = @() }
         
-        # Normalize existing paths for comparison
+        # Normalize existing paths for comparison (some may contain wildcards
+        # or env vars that GetFullPath rejects — skip those gracefully)
         $existing = $existing | Where-Object { $_ } | ForEach-Object {
-            [System.IO.Path]::GetFullPath($_)
+            try { [System.IO.Path]::GetFullPath($_) } catch { $_ }
         }
         
         # Normalize paths and find missing exclusions
         $missing = @()
         foreach ($path in $Paths) {
-            $normalized = [System.IO.Path]::GetFullPath($path)
+            try {
+                $normalized = [System.IO.Path]::GetFullPath($path)
+            } catch {
+                continue  # Skip paths with unsupported format
+            }
             
             # Security: Ensure path is within safe boundaries
             $isSafe = $false
@@ -250,7 +255,11 @@ function Add-DefenderExclusions {
     
     foreach ($path in $Paths) {
         try {
-            $normalized = [System.IO.Path]::GetFullPath($path)
+            try {
+                $normalized = [System.IO.Path]::GetFullPath($path)
+            } catch {
+                $normalized = $path  # Use raw path if normalization fails
+            }
             Add-MpPreference -ExclusionPath $normalized -ErrorAction Stop
             $added += $normalized
         } catch {
@@ -408,6 +417,58 @@ Write-Ok "uv detected: $uvVersion"
 Write-Host ""
 
 # Check for Node.js (needed for frontend dashboard)
+function Install-NodeViaFnm {
+    <#
+    .SYNOPSIS
+        Install Node.js 20 via fnm (Fast Node Manager) - mirrors nvm approach in quickstart.sh
+    #>
+    $fnmCmd = Get-Command fnm -ErrorAction SilentlyContinue
+    if (-not $fnmCmd) {
+        $fnmDir = Join-Path $env:LOCALAPPDATA "fnm"
+        $fnmExe = Join-Path $fnmDir "fnm.exe"
+        if (-not (Test-Path $fnmExe)) {
+            try {
+                Write-Host "    Downloading fnm (Fast Node Manager)..." -ForegroundColor DarkGray
+                $zipUrl = "https://github.com/Schniz/fnm/releases/latest/download/fnm-windows.zip"
+                $zipPath = Join-Path $env:TEMP "fnm-install.zip"
+                Invoke-WebRequest -Uri $zipUrl -OutFile $zipPath -UseBasicParsing -ErrorAction Stop
+                if (-not (Test-Path $fnmDir)) { New-Item -ItemType Directory -Path $fnmDir -Force | Out-Null }
+                Expand-Archive -Path $zipPath -DestinationPath $fnmDir -Force
+                Remove-Item $zipPath -Force -ErrorAction SilentlyContinue
+            } catch {
+                Write-Fail "fnm download failed"
+                Write-Host "    Install Node.js 20+ manually from https://nodejs.org" -ForegroundColor DarkGray
+                return $false
+            }
+        }
+        if (Test-Path (Join-Path $fnmDir "fnm.exe")) {
+            $env:PATH = "$fnmDir;$env:PATH"
+        } else {
+            Write-Fail "fnm binary not found after download"
+            Write-Host "    Install Node.js 20+ manually from https://nodejs.org" -ForegroundColor DarkGray
+            return $false
+        }
+    }
+
+    try {
+        $null = & fnm install 20 2>&1
+        if ($LASTEXITCODE -ne 0) { throw "fnm install 20 exited with code $LASTEXITCODE" }
+        & fnm env --use-on-cd --shell powershell | Out-String | Invoke-Expression
+        $null = & fnm use 20 2>&1
+        $testNode = Get-Command node -ErrorAction SilentlyContinue
+        if ($testNode) {
+            $ver = & node --version 2>$null
+            Write-Ok "Node.js $ver installed via fnm"
+            return $true
+        }
+        throw "node not found after fnm install"
+    } catch {
+        Write-Fail "Node.js installation failed"
+        Write-Host "    Install manually from https://nodejs.org" -ForegroundColor DarkGray
+        return $false
+    }
+}
+
 $NodeAvailable = $false
 $nodeCmd = Get-Command node -ErrorAction SilentlyContinue
 if ($nodeCmd) {
@@ -419,12 +480,13 @@ if ($nodeCmd) {
             $NodeAvailable = $true
         } else {
             Write-Warn "Node.js $nodeVersion found (20+ required for frontend dashboard)"
-            Write-Host "    Install from https://nodejs.org" -ForegroundColor DarkGray
+            Write-Host "    Installing Node.js 20 via fnm..." -ForegroundColor Yellow
+            $NodeAvailable = Install-NodeViaFnm
         }
     }
 } else {
-    Write-Warn "Node.js not found (optional, needed for web dashboard)"
-    Write-Host "    Install from https://nodejs.org" -ForegroundColor DarkGray
+    Write-Warn "Node.js not found. Installing via fnm..."
+    $NodeAvailable = Install-NodeViaFnm
 }
 Write-Host ""
 
@@ -659,12 +721,11 @@ $importErrors = 0
 $imports = @(
     @{ Module = "framework";                        Label = "framework";    Required = $true },
     @{ Module = "aden_tools";                       Label = "aden_tools";   Required = $true },
-    @{ Module = "litellm";                          Label = "litellm";      Required = $false },
-    @{ Module = "framework.mcp.agent_builder_server"; Label = "MCP server module"; Required = $true }
+    @{ Module = "litellm";                          Label = "litellm";      Required = $false }
 )
 
 # Batch check all imports in single process (reduces subprocess spawning overhead)
-$modulesToCheck = @("framework", "aden_tools", "litellm", "framework.mcp.agent_builder_server")
+$modulesToCheck = @("framework", "aden_tools", "litellm")
 
 try {
     $checkOutput = & uv run python scripts/check_requirements.py @modulesToCheck 2>&1 | Out-String
@@ -736,8 +797,8 @@ $ProviderMap = [ordered]@{
 }
 
 $DefaultModels = @{
-    anthropic   = "claude-opus-4-6"
-    openai      = "gpt-5.2"
+    anthropic   = "claude-haiku-4-5-20251001"
+    openai      = "gpt-5-mini"
     gemini      = "gemini-3-flash-preview"
     groq        = "moonshotai/kimi-k2-instruct-0905"
     cerebras    = "zai-glm-4.7"
@@ -749,14 +810,14 @@ $DefaultModels = @{
 # Model choices: array of hashtables per provider
 $ModelChoices = @{
     anthropic = @(
-        @{ Id = "claude-opus-4-6";            Label = "Opus 4.6 - Most capable (recommended)"; MaxTokens = 32768 },
-        @{ Id = "claude-sonnet-4-5-20250929"; Label = "Sonnet 4.5 - Best balance";             MaxTokens = 16384 },
-        @{ Id = "claude-sonnet-4-20250514";   Label = "Sonnet 4 - Fast + capable";             MaxTokens = 8192 },
-        @{ Id = "claude-haiku-4-5-20251001";  Label = "Haiku 4.5 - Fast + cheap";              MaxTokens = 8192 }
+        @{ Id = "claude-haiku-4-5-20251001";  Label = "Haiku 4.5 - Fast + cheap (recommended)"; MaxTokens = 8192 },
+        @{ Id = "claude-sonnet-4-20250514";   Label = "Sonnet 4 - Fast + capable";              MaxTokens = 8192 },
+        @{ Id = "claude-sonnet-4-5-20250929"; Label = "Sonnet 4.5 - Best balance";              MaxTokens = 16384 },
+        @{ Id = "claude-opus-4-6";            Label = "Opus 4.6 - Most capable";                MaxTokens = 32768 }
     )
     openai = @(
-        @{ Id = "gpt-5.2";   Label = "GPT-5.2 - Most capable (recommended)"; MaxTokens = 16384 },
-        @{ Id = "gpt-5-mini"; Label = "GPT-5 Mini - Fast + cheap";            MaxTokens = 16384 }
+        @{ Id = "gpt-5-mini"; Label = "GPT-5 Mini - Fast + cheap (recommended)"; MaxTokens = 16384 },
+        @{ Id = "gpt-5.2";   Label = "GPT-5.2 - Most capable";                   MaxTokens = 16384 }
     )
     gemini = @(
         @{ Id = "gemini-3-flash-preview"; Label = "Gemini 3 Flash - Fast (recommended)"; MaxTokens = 8192 },
@@ -783,6 +844,17 @@ function Get-ModelSelection {
         return @{ Model = $choices[0].Id; MaxTokens = $choices[0].MaxTokens }
     }
 
+    # Find default index from previous model (if same provider)
+    $defaultIdx = "1"
+    if ($PrevModel -and $PrevProvider -eq $ProviderId) {
+        for ($j = 0; $j -lt $choices.Count; $j++) {
+            if ($choices[$j].Id -eq $PrevModel) {
+                $defaultIdx = [string]($j + 1)
+                break
+            }
+        }
+    }
+
     Write-Host ""
     Write-Color -Text "Select a model:" -Color White
     Write-Host ""
@@ -794,8 +866,8 @@ function Get-ModelSelection {
     Write-Host ""
 
     while ($true) {
-        $raw = Read-Host "Enter choice [1]"
-        if ([string]::IsNullOrWhiteSpace($raw)) { $raw = "1" }
+        $raw = Read-Host "Enter choice [$defaultIdx]"
+        if ([string]::IsNullOrWhiteSpace($raw)) { $raw = $defaultIdx }
         if ($raw -match '^\d+$') {
             $num = [int]$raw
             if ($num -ge 1 -and $num -le $choices.Count) {
@@ -839,6 +911,13 @@ $zaiKey = [System.Environment]::GetEnvironmentVariable("ZAI_API_KEY", "User")
 if (-not $zaiKey) { $zaiKey = $env:ZAI_API_KEY }
 if ($zaiKey) { $ZaiCredDetected = $true }
 
+$KimiCredDetected = $false
+$kimiConfigPath = Join-Path $env:USERPROFILE ".kimi\config.toml"
+if (Test-Path $kimiConfigPath) { $KimiCredDetected = $true }
+$kimiKey = [System.Environment]::GetEnvironmentVariable("KIMI_API_KEY", "User")
+if (-not $kimiKey) { $kimiKey = $env:KIMI_API_KEY }
+if ($kimiKey) { $KimiCredDetected = $true }
+
 # Detect API key providers
 $ProviderMenuEnvVars  = @("ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GEMINI_API_KEY", "GROQ_API_KEY", "CEREBRAS_API_KEY")
 $ProviderMenuNames    = @("Anthropic (Claude) - Recommended", "OpenAI (GPT)", "Google Gemini - Free tier available", "Groq - Fast, free tier", "Cerebras - Fast, free tier")
@@ -850,6 +929,65 @@ $ProviderMenuUrls     = @(
     "https://console.groq.com/keys",
     "https://cloud.cerebras.ai/"
 )
+
+# ── Read previous configuration (if any) ──────────────────────
+$PrevProvider = ""
+$PrevModel = ""
+$PrevEnvVar = ""
+$PrevSubMode = ""
+if (Test-Path $HiveConfigFile) {
+    try {
+        $prevConfig = Get-Content -Path $HiveConfigFile -Raw | ConvertFrom-Json
+        $prevLlm = $prevConfig.llm
+        if ($prevLlm) {
+            $PrevProvider = if ($prevLlm.provider) { $prevLlm.provider } else { "" }
+            $PrevModel = if ($prevLlm.model) { $prevLlm.model } else { "" }
+            $PrevEnvVar = if ($prevLlm.api_key_env_var) { $prevLlm.api_key_env_var } else { "" }
+            if ($prevLlm.use_claude_code_subscription) { $PrevSubMode = "claude_code" }
+            elseif ($prevLlm.use_codex_subscription) { $PrevSubMode = "codex" }
+            elseif ($prevLlm.use_kimi_code_subscription) { $PrevSubMode = "kimi_code" }
+            elseif ($prevLlm.api_base -and $prevLlm.api_base -like "*api.z.ai*") { $PrevSubMode = "zai_code" }
+            elseif ($prevLlm.api_base -and $prevLlm.api_base -like "*api.kimi.com*") { $PrevSubMode = "kimi_code" }
+        }
+    } catch { }
+}
+
+# Compute default menu number (only if credential is still valid)
+$DefaultChoice = ""
+if ($PrevSubMode -or $PrevProvider) {
+    $prevCredValid = $false
+    switch ($PrevSubMode) {
+        "claude_code" { if ($ClaudeCredDetected) { $prevCredValid = $true } }
+        "zai_code"    { if ($ZaiCredDetected)    { $prevCredValid = $true } }
+        "codex"       { if ($CodexCredDetected)  { $prevCredValid = $true } }
+        "kimi_code"   { if ($KimiCredDetected)   { $prevCredValid = $true } }
+        default {
+            if ($PrevEnvVar) {
+                $envVal = [System.Environment]::GetEnvironmentVariable($PrevEnvVar, "Process")
+                if (-not $envVal) { $envVal = [System.Environment]::GetEnvironmentVariable($PrevEnvVar, "User") }
+                if ($envVal) { $prevCredValid = $true }
+            }
+        }
+    }
+    if ($prevCredValid) {
+        switch ($PrevSubMode) {
+            "claude_code" { $DefaultChoice = "1" }
+            "zai_code"    { $DefaultChoice = "2" }
+            "codex"       { $DefaultChoice = "3" }
+            "kimi_code"   { $DefaultChoice = "4" }
+        }
+        if (-not $DefaultChoice) {
+            switch ($PrevProvider) {
+                "anthropic" { $DefaultChoice = "5" }
+                "openai"    { $DefaultChoice = "6" }
+                "gemini"    { $DefaultChoice = "7" }
+                "groq"      { $DefaultChoice = "8" }
+                "cerebras"  { $DefaultChoice = "9" }
+                "kimi"      { $DefaultChoice = "4" }
+            }
+        }
+    }
+}
 
 # ── Show unified provider selection menu ─────────────────────
 Write-Color -Text "Select your default LLM provider:" -Color White
@@ -877,12 +1015,19 @@ Write-Host ") OpenAI Codex Subscription  " -NoNewline
 Write-Color -Text "(use your Codex/ChatGPT Plus plan)" -Color DarkGray -NoNewline
 if ($CodexCredDetected) { Write-Color -Text "  (credential detected)" -Color Green } else { Write-Host "" }
 
+# 4) Kimi Code
+Write-Host "  " -NoNewline
+Write-Color -Text "4" -Color Cyan -NoNewline
+Write-Host ") Kimi Code Subscription     " -NoNewline
+Write-Color -Text "(use your Kimi Code plan)" -Color DarkGray -NoNewline
+if ($KimiCredDetected) { Write-Color -Text "  (credential detected)" -Color Green } else { Write-Host "" }
+
 Write-Host ""
 Write-Color -Text "  API key providers:" -Color Cyan
 
-# 4-8) API key providers
+# 5-9) API key providers
 for ($idx = 0; $idx -lt $ProviderMenuEnvVars.Count; $idx++) {
-    $num = $idx + 4
+    $num = $idx + 5
     $envVal = [System.Environment]::GetEnvironmentVariable($ProviderMenuEnvVars[$idx], "Process")
     if (-not $envVal) { $envVal = [System.Environment]::GetEnvironmentVariable($ProviderMenuEnvVars[$idx], "User") }
     Write-Host "  " -NoNewline
@@ -892,17 +1037,27 @@ for ($idx = 0; $idx -lt $ProviderMenuEnvVars.Count; $idx++) {
 }
 
 Write-Host "  " -NoNewline
-Write-Color -Text "9" -Color Cyan -NoNewline
+Write-Color -Text "10" -Color Cyan -NoNewline
 Write-Host ") Skip for now"
 Write-Host ""
 
+if ($DefaultChoice) {
+    Write-Color -Text "  Previously configured: $PrevProvider/$PrevModel. Press Enter to keep." -Color DarkGray
+    Write-Host ""
+}
+
 while ($true) {
-    $raw = Read-Host "Enter choice (1-9)"
+    if ($DefaultChoice) {
+        $raw = Read-Host "Enter choice (1-10) [$DefaultChoice]"
+        if ([string]::IsNullOrWhiteSpace($raw)) { $raw = $DefaultChoice }
+    } else {
+        $raw = Read-Host "Enter choice (1-10)"
+    }
     if ($raw -match '^\d+$') {
         $num = [int]$raw
-        if ($num -ge 1 -and $num -le 9) { break }
+        if ($num -ge 1 -and $num -le 10) { break }
     }
-    Write-Color -Text "Invalid choice. Please enter 1-9" -Color Red
+    Write-Color -Text "Invalid choice. Please enter 1-10" -Color Red
 }
 
 switch ($num) {
@@ -966,40 +1121,91 @@ switch ($num) {
             Write-Ok "Using OpenAI Codex subscription"
         }
     }
-    { $_ -ge 4 -and $_ -le 8 } {
+    4 {
+        # Kimi Code Subscription
+        $SubscriptionMode   = "kimi_code"
+        $SelectedProviderId = "kimi"
+        $SelectedEnvVar     = "KIMI_API_KEY"
+        $SelectedModel      = "kimi-k2.5"
+        $SelectedMaxTokens  = 32768
+        Write-Host ""
+        Write-Ok "Using Kimi Code subscription"
+        Write-Color -Text "  Model: kimi-k2.5 | API: api.kimi.com/coding" -Color DarkGray
+    }
+    { $_ -ge 5 -and $_ -le 9 } {
         # API key providers
-        $provIdx = $num - 4
+        $provIdx = $num - 5
         $SelectedEnvVar     = $ProviderMenuEnvVars[$provIdx]
         $SelectedProviderId = $ProviderMenuIds[$provIdx]
         $providerName       = $ProviderMenuNames[$provIdx] -replace ' - .*', ''  # strip description
         $signupUrl          = $ProviderMenuUrls[$provIdx]
 
-        # Check if key is already set
-        $existingKey = [System.Environment]::GetEnvironmentVariable($SelectedEnvVar, "User")
-        if (-not $existingKey) { $existingKey = [System.Environment]::GetEnvironmentVariable($SelectedEnvVar, "Process") }
-        if (-not $existingKey) {
-            Write-Host ""
-            Write-Host "Get your API key from: " -NoNewline
-            Write-Color -Text $signupUrl -Color Cyan
-            Write-Host ""
-            $apiKey = Read-Host "Paste your $providerName API key (or press Enter to skip)"
+        # Prompt for key (allow replacement if already set) with verification + retry
+        while ($true) {
+            $existingKey = [System.Environment]::GetEnvironmentVariable($SelectedEnvVar, "User")
+            if (-not $existingKey) { $existingKey = [System.Environment]::GetEnvironmentVariable($SelectedEnvVar, "Process") }
+
+            if ($existingKey) {
+                $masked = $existingKey.Substring(0, [Math]::Min(4, $existingKey.Length)) + "..." + $existingKey.Substring([Math]::Max(0, $existingKey.Length - 4))
+                Write-Host ""
+                Write-Color -Text "  $([char]0x2B22) Current key: $masked" -Color Green
+                $apiKey = Read-Host "  Press Enter to keep, or paste a new key to replace"
+            } else {
+                Write-Host ""
+                Write-Host "Get your API key from: " -NoNewline
+                Write-Color -Text $signupUrl -Color Cyan
+                Write-Host ""
+                $apiKey = Read-Host "Paste your $providerName API key (or press Enter to skip)"
+            }
 
             if ($apiKey) {
                 [System.Environment]::SetEnvironmentVariable($SelectedEnvVar, $apiKey, "User")
                 Set-Item -Path "Env:\$SelectedEnvVar" -Value $apiKey
                 Write-Host ""
                 Write-Ok "API key saved as User environment variable: $SelectedEnvVar"
-                Write-Color -Text "  (Persisted for all future sessions)" -Color DarkGray
-            } else {
+
+                # Health check the new key
+                Write-Host "  Verifying API key... " -NoNewline
+                try {
+                    $hcResult = & uv run python (Join-Path $ScriptDir "scripts/check_llm_key.py") $SelectedProviderId $apiKey 2>$null
+                    $hcJson = $hcResult | ConvertFrom-Json
+                    if ($hcJson.valid -eq $true) {
+                        Write-Color -Text "ok" -Color Green
+                        break
+                    } elseif ($hcJson.valid -eq $false) {
+                        Write-Color -Text "failed" -Color Red
+                        Write-Warn $hcJson.message
+                        # Undo the save so user can retry cleanly
+                        [System.Environment]::SetEnvironmentVariable($SelectedEnvVar, $null, "User")
+                        Remove-Item -Path "Env:\$SelectedEnvVar" -ErrorAction SilentlyContinue
+                        Write-Host ""
+                        Read-Host "  Press Enter to try again"
+                        # loop back to key prompt
+                    } else {
+                        Write-Color -Text "--" -Color Yellow
+                        Write-Color -Text "  Could not verify key (network issue). The key has been saved." -Color DarkGray
+                        break
+                    }
+                } catch {
+                    Write-Color -Text "--" -Color Yellow
+                    Write-Color -Text "  Could not verify key (network issue). The key has been saved." -Color DarkGray
+                    break
+                }
+            } elseif (-not $existingKey) {
+                # No existing key and user skipped
                 Write-Host ""
                 Write-Warn "Skipped. Set the environment variable manually when ready:"
                 Write-Host "  [System.Environment]::SetEnvironmentVariable('$SelectedEnvVar', 'your-key', 'User')"
                 $SelectedEnvVar     = ""
                 $SelectedProviderId = ""
+                break
+            } else {
+                # User pressed Enter with existing key — keep it
+                break
             }
         }
     }
-    9 {
+    10 {
         Write-Host ""
         Write-Warn "Skipped. An LLM API key is required to test and use worker agents."
         Write-Host "  Add your API key later by running:"
@@ -1011,26 +1217,131 @@ switch ($num) {
     }
 }
 
-# For ZAI subscription: prompt for API key if not already set
+# For ZAI subscription: prompt for API key (allow replacement if already set) with verification + retry
 if ($SubscriptionMode -eq "zai_code") {
-    $existingZai = [System.Environment]::GetEnvironmentVariable("ZAI_API_KEY", "User")
-    if (-not $existingZai) { $existingZai = $env:ZAI_API_KEY }
-    if (-not $existingZai) {
-        Write-Host ""
-        $apiKey = Read-Host "Paste your ZAI API key (or press Enter to skip)"
+    while ($true) {
+        $existingZai = [System.Environment]::GetEnvironmentVariable("ZAI_API_KEY", "User")
+        if (-not $existingZai) { $existingZai = $env:ZAI_API_KEY }
+
+        if ($existingZai) {
+            $masked = $existingZai.Substring(0, [Math]::Min(4, $existingZai.Length)) + "..." + $existingZai.Substring([Math]::Max(0, $existingZai.Length - 4))
+            Write-Host ""
+            Write-Color -Text "  $([char]0x2B22) Current ZAI key: $masked" -Color Green
+            $apiKey = Read-Host "  Press Enter to keep, or paste a new key to replace"
+        } else {
+            Write-Host ""
+            $apiKey = Read-Host "Paste your ZAI API key (or press Enter to skip)"
+        }
 
         if ($apiKey) {
             [System.Environment]::SetEnvironmentVariable("ZAI_API_KEY", $apiKey, "User")
             $env:ZAI_API_KEY = $apiKey
             Write-Host ""
             Write-Ok "ZAI API key saved as User environment variable"
-        } else {
+
+            # Health check the new key
+            Write-Host "  Verifying ZAI API key... " -NoNewline
+            try {
+                $hcResult = & uv run python (Join-Path $ScriptDir "scripts/check_llm_key.py") "zai" $apiKey "https://api.z.ai/api/coding/paas/v4" 2>$null
+                $hcJson = $hcResult | ConvertFrom-Json
+                if ($hcJson.valid -eq $true) {
+                    Write-Color -Text "ok" -Color Green
+                    break
+                } elseif ($hcJson.valid -eq $false) {
+                    Write-Color -Text "failed" -Color Red
+                    Write-Warn $hcJson.message
+                    # Undo the save so user can retry cleanly
+                    [System.Environment]::SetEnvironmentVariable("ZAI_API_KEY", $null, "User")
+                    Remove-Item -Path "Env:\ZAI_API_KEY" -ErrorAction SilentlyContinue
+                    Write-Host ""
+                    Read-Host "  Press Enter to try again"
+                    # loop back to key prompt
+                } else {
+                    Write-Color -Text "--" -Color Yellow
+                    Write-Color -Text "  Could not verify key (network issue). The key has been saved." -Color DarkGray
+                    break
+                }
+            } catch {
+                Write-Color -Text "--" -Color Yellow
+                Write-Color -Text "  Could not verify key (network issue). The key has been saved." -Color DarkGray
+                break
+            }
+        } elseif (-not $existingZai) {
+            # No existing key and user skipped
             Write-Host ""
             Write-Warn "Skipped. Add your ZAI API key later:"
             Write-Color -Text "  [System.Environment]::SetEnvironmentVariable('ZAI_API_KEY', 'your-key', 'User')" -Color Cyan
             $SelectedEnvVar     = ""
             $SelectedProviderId = ""
             $SubscriptionMode   = ""
+            break
+        } else {
+            # User pressed Enter with existing key — keep it
+            break
+        }
+    }
+}
+
+# For Kimi Code subscription: prompt for API key with verification + retry
+if ($SubscriptionMode -eq "kimi_code") {
+    while ($true) {
+        $existingKimi = [System.Environment]::GetEnvironmentVariable("KIMI_API_KEY", "User")
+        if (-not $existingKimi) { $existingKimi = $env:KIMI_API_KEY }
+
+        if ($existingKimi) {
+            $masked = $existingKimi.Substring(0, [Math]::Min(4, $existingKimi.Length)) + "..." + $existingKimi.Substring([Math]::Max(0, $existingKimi.Length - 4))
+            Write-Host ""
+            Write-Color -Text "  $([char]0x2B22) Current Kimi key: $masked" -Color Green
+            $apiKey = Read-Host "  Press Enter to keep, or paste a new key to replace"
+        } else {
+            Write-Host ""
+            Write-Host "Get your API key from: " -NoNewline
+            Write-Color -Text "https://www.kimi.com/code" -Color Cyan
+            Write-Host ""
+            $apiKey = Read-Host "Paste your Kimi API key (or press Enter to skip)"
+        }
+
+        if ($apiKey) {
+            [System.Environment]::SetEnvironmentVariable("KIMI_API_KEY", $apiKey, "User")
+            $env:KIMI_API_KEY = $apiKey
+            Write-Host ""
+            Write-Ok "Kimi API key saved as User environment variable"
+
+            # Health check the new key
+            Write-Host "  Verifying Kimi API key... " -NoNewline
+            try {
+                $hcResult = & uv run python (Join-Path $ScriptDir "scripts/check_llm_key.py") "kimi" $apiKey "https://api.kimi.com/coding" 2>$null
+                $hcJson = $hcResult | ConvertFrom-Json
+                if ($hcJson.valid -eq $true) {
+                    Write-Color -Text "ok" -Color Green
+                    break
+                } elseif ($hcJson.valid -eq $false) {
+                    Write-Color -Text "failed" -Color Red
+                    Write-Warn $hcJson.message
+                    [System.Environment]::SetEnvironmentVariable("KIMI_API_KEY", $null, "User")
+                    Remove-Item -Path "Env:\KIMI_API_KEY" -ErrorAction SilentlyContinue
+                    Write-Host ""
+                    Read-Host "  Press Enter to try again"
+                } else {
+                    Write-Color -Text "--" -Color Yellow
+                    Write-Color -Text "  Could not verify key (network issue). The key has been saved." -Color DarkGray
+                    break
+                }
+            } catch {
+                Write-Color -Text "--" -Color Yellow
+                Write-Color -Text "  Could not verify key (network issue). The key has been saved." -Color DarkGray
+                break
+            }
+        } elseif (-not $existingKimi) {
+            Write-Host ""
+            Write-Warn "Skipped. Add your Kimi API key later:"
+            Write-Color -Text "  [System.Environment]::SetEnvironmentVariable('KIMI_API_KEY', 'your-key', 'User')" -Color Cyan
+            $SelectedEnvVar     = ""
+            $SelectedProviderId = ""
+            $SubscriptionMode   = ""
+            break
+        } else {
+            break
         }
     }
 }
@@ -1070,6 +1381,9 @@ if ($SelectedProviderId) {
     } elseif ($SubscriptionMode -eq "zai_code") {
         $config.llm["api_base"] = "https://api.z.ai/api/coding/paas/v4"
         $config.llm["api_key_env_var"] = $SelectedEnvVar
+    } elseif ($SubscriptionMode -eq "kimi_code") {
+        $config.llm["api_base"] = "https://api.kimi.com/coding"
+        $config.llm["api_key_env_var"] = $SelectedEnvVar
     } else {
         $config.llm["api_key_env_var"] = $SelectedEnvVar
     }
@@ -1081,37 +1395,18 @@ if ($SelectedProviderId) {
 Write-Host ""
 
 # ============================================================
-# Step 5b: Browser Automation (GCU)
+# Step 5b: Browser Automation (GCU) — always enabled
 # ============================================================
 
 Write-Host ""
-Write-Color -Text "Enable browser automation?" -Color White
-Write-Color -Text "This lets your agents control a real browser - navigate websites, fill forms," -Color DarkGray
-Write-Color -Text "scrape dynamic pages, and interact with web UIs." -Color DarkGray
-Write-Host ""
-Write-Host "  " -NoNewline; Write-Color -Text "1)" -Color Cyan -NoNewline; Write-Host " Yes"
-Write-Host "  " -NoNewline; Write-Color -Text "2)" -Color Cyan -NoNewline; Write-Host " No"
-Write-Host ""
-
-do {
-    $gcuChoice = Read-Host "Enter choice (1-2)"
-} while ($gcuChoice -ne "1" -and $gcuChoice -ne "2")
-
-$GcuEnabled = $false
-if ($gcuChoice -eq "1") {
-    $GcuEnabled = $true
-    Write-Ok "Browser automation enabled"
-} else {
-    Write-Color -Text "  Browser automation skipped" -Color DarkGray
-}
+Write-Ok "Browser automation enabled"
 
 # Patch gcu_enabled into configuration.json
 if (Test-Path $HiveConfigFile) {
     $existingConfig = Get-Content -Path $HiveConfigFile -Raw | ConvertFrom-Json
-    $existingConfig | Add-Member -NotePropertyName "gcu_enabled" -NotePropertyValue $GcuEnabled -Force
+    $existingConfig | Add-Member -NotePropertyName "gcu_enabled" -NotePropertyValue $true -Force
     $existingConfig | ConvertTo-Json -Depth 4 | Set-Content -Path $HiveConfigFile -Encoding UTF8
-} elseif ($GcuEnabled) {
-    # No config file yet (user skipped LLM provider) - create minimal one
+} else {
     if (-not (Test-Path $HiveConfigDir)) {
         New-Item -ItemType Directory -Path $HiveConfigDir -Force | Out-Null
     }
@@ -1425,7 +1720,7 @@ if ($FrontendBuilt) {
     Write-Color -Text "  Starting server on http://localhost:8787" -Color DarkGray
     Write-Color -Text "  Press Ctrl+C to stop" -Color DarkGray
     Write-Host ""
-    & (Join-Path $ScriptDir "hive.ps1") serve --open
+    & (Join-Path $ScriptDir "hive.ps1") open
 } else {
     Write-Color -Text "═══════════════════════════════════════════════════════" -Color Yellow
     Write-Host ""

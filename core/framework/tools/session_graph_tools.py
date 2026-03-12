@@ -1,6 +1,6 @@
 """Graph lifecycle tools for multi-graph sessions.
 
-These tools allow an agent (e.g. hive_coder) to load, unload, start,
+These tools allow an agent (e.g. queen) to load, unload, start,
 restart, and query other agent graphs within the same runtime session.
 
 Usage::

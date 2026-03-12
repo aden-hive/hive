@@ -123,7 +123,7 @@ class EventType(StrEnum):
     # Custom events
     CUSTOM = "custom"
 
-    # Escalation (agent requests handoff to hive_coder)
+    # Escalation (agent requests handoff to queen)
     ESCALATION_REQUESTED = "escalation_requested"
 
     # Worker health monitoring (judge → queen → operator)
@@ -137,8 +137,11 @@ class EventType(StrEnum):
     WORKER_LOADED = "worker_loaded"
     CREDENTIALS_REQUIRED = "credentials_required"
 
-    # Queen mode changes (building ↔ running)
-    QUEEN_MODE_CHANGED = "queen_mode_changed"
+    # Queen phase changes (building <-> staging <-> running)
+    QUEEN_PHASE_CHANGED = "queen_phase_changed"
+
+    # Queen thinking hook — persona selected for the current building session
+    QUEEN_PERSONA_SELECTED = "queen_persona_selected"
 
     # Subagent reports (one-way progress updates from sub-agents)
     SUBAGENT_REPORT = "subagent_report"
@@ -973,7 +976,7 @@ class EventBus:
         context: str = "",
         execution_id: str | None = None,
     ) -> None:
-        """Emit escalation requested event (agent wants hive_coder)."""
+        """Emit escalation requested event (agent wants queen)."""
         await self.publish(
             AgentEvent(
                 type=EventType.ESCALATION_REQUESTED,
