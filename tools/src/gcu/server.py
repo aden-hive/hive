@@ -21,13 +21,13 @@ Environment Variables:
 from __future__ import annotations
 
 import argparse
-import atexit
 import asyncio
+import atexit
 import logging
 import os
 import sys
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from typing import AsyncIterator
 
 logger = logging.getLogger(__name__)
 
@@ -61,10 +61,10 @@ from fastmcp import FastMCP  # noqa: E402
 
 from gcu import register_gcu_tools  # noqa: E402
 
-
 # ---------------------------------------------------------------------------
 # Shutdown hooks — kill Chrome processes when the server exits
 # ---------------------------------------------------------------------------
+
 
 @asynccontextmanager
 async def _lifespan(server: FastMCP) -> AsyncIterator[dict]:
