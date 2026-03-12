@@ -328,15 +328,14 @@ class TestGoogleDocsClientComments:
 
 class TestGoogleDocsCredentials:
     def test_no_credentials_returns_error(self, mcp, monkeypatch):
-        monkeypatch.delenv("GOOGLE_DOCS_ACCESS_TOKEN", raising=False)
-        monkeypatch.delenv("GOOGLE_SERVICE_ACCOUNT_JSON", raising=False)
+        monkeypatch.delenv("GOOGLE_ACCESS_TOKEN", raising=False)
         fn = _tool_fn(mcp, "google_docs_get_document")
         result = fn(document_id="doc-1")
         assert "error" in result
         assert "not configured" in result["error"]
 
     def test_env_var_credential(self, mcp, monkeypatch):
-        monkeypatch.setenv("GOOGLE_DOCS_ACCESS_TOKEN", "env-tok")
+        monkeypatch.setenv("GOOGLE_ACCESS_TOKEN", "env-tok")
         fn = _tool_fn(mcp, "google_docs_get_document")
         with patch("httpx.get") as mock_get:
             mock_get.return_value = _mock_response(200, {"documentId": "doc-1"})
@@ -351,7 +350,7 @@ class TestGoogleDocsCredentials:
         with patch("httpx.get") as mock_get:
             mock_get.return_value = _mock_response(200, {"documentId": "doc-1"})
             fn(document_id="doc-1")
-            creds.get.assert_called_once_with("google_docs")
+            creds.get.assert_called_once_with("google")
 
     def test_credential_store_non_string_raises(self, mcp):
         creds = MagicMock()
@@ -367,7 +366,7 @@ class TestGoogleDocsCredentials:
         with patch("httpx.get") as mock_get:
             mock_get.return_value = _mock_response(200, {"documentId": "doc-1"})
             fn(document_id="doc-1", account="my-account")
-            creds.get_by_alias.assert_called_once_with("google_docs", "my-account")
+            creds.get_by_alias.assert_called_once_with("google", "my-account")
 
 
 # ---------------------------------------------------------------------------
@@ -377,7 +376,7 @@ class TestGoogleDocsCredentials:
 
 class TestGoogleDocsCreateDocument:
     def test_success_returns_url(self, mcp, monkeypatch):
-        monkeypatch.setenv("GOOGLE_DOCS_ACCESS_TOKEN", "tok")
+        monkeypatch.setenv("GOOGLE_ACCESS_TOKEN", "tok")
         fn = _tool_fn(mcp, "google_docs_create_document")
         with patch("httpx.post") as mock_post:
             mock_post.return_value = _mock_response(
@@ -389,7 +388,7 @@ class TestGoogleDocsCreateDocument:
             assert "new-doc" in result["document_url"]
 
     def test_timeout(self, mcp, monkeypatch):
-        monkeypatch.setenv("GOOGLE_DOCS_ACCESS_TOKEN", "tok")
+        monkeypatch.setenv("GOOGLE_ACCESS_TOKEN", "tok")
         fn = _tool_fn(mcp, "google_docs_create_document")
         with patch("httpx.post", side_effect=httpx.TimeoutException("t")):
             result = fn(title="Doc")
@@ -398,7 +397,7 @@ class TestGoogleDocsCreateDocument:
 
 class TestGoogleDocsGetDocument:
     def test_success(self, mcp, monkeypatch):
-        monkeypatch.setenv("GOOGLE_DOCS_ACCESS_TOKEN", "tok")
+        monkeypatch.setenv("GOOGLE_ACCESS_TOKEN", "tok")
         fn = _tool_fn(mcp, "google_docs_get_document")
         with patch("httpx.get") as mock_get:
             mock_get.return_value = _mock_response(200, {"documentId": "doc-1", "title": "Test"})
@@ -408,7 +407,7 @@ class TestGoogleDocsGetDocument:
 
 class TestGoogleDocsInsertText:
     def test_success(self, mcp, monkeypatch):
-        monkeypatch.setenv("GOOGLE_DOCS_ACCESS_TOKEN", "tok")
+        monkeypatch.setenv("GOOGLE_ACCESS_TOKEN", "tok")
         fn = _tool_fn(mcp, "google_docs_insert_text")
         with patch("httpx.post") as mock_post:
             mock_post.return_value = _mock_response(200, {"replies": []})
@@ -418,7 +417,7 @@ class TestGoogleDocsInsertText:
 
 class TestGoogleDocsReplaceAllText:
     def test_success_with_count(self, mcp, monkeypatch):
-        monkeypatch.setenv("GOOGLE_DOCS_ACCESS_TOKEN", "tok")
+        monkeypatch.setenv("GOOGLE_ACCESS_TOKEN", "tok")
         fn = _tool_fn(mcp, "google_docs_replace_all_text")
         with patch("httpx.post") as mock_post:
             mock_post.return_value = _mock_response(
@@ -435,7 +434,7 @@ class TestGoogleDocsReplaceAllText:
 
 class TestGoogleDocsInsertImage:
     def test_success(self, mcp, monkeypatch):
-        monkeypatch.setenv("GOOGLE_DOCS_ACCESS_TOKEN", "tok")
+        monkeypatch.setenv("GOOGLE_ACCESS_TOKEN", "tok")
         fn = _tool_fn(mcp, "google_docs_insert_image")
         with patch("httpx.post") as mock_post:
             mock_post.return_value = _mock_response(200, {"replies": []})
@@ -447,7 +446,7 @@ class TestGoogleDocsInsertImage:
             assert "error" not in result
 
     def test_invalid_uri(self, mcp, monkeypatch):
-        monkeypatch.setenv("GOOGLE_DOCS_ACCESS_TOKEN", "tok")
+        monkeypatch.setenv("GOOGLE_ACCESS_TOKEN", "tok")
         fn = _tool_fn(mcp, "google_docs_insert_image")
         # This gets caught by the client-level validation
         with patch("httpx.post") as mock_post:
@@ -462,7 +461,7 @@ class TestGoogleDocsInsertImage:
 
 class TestGoogleDocsFormatText:
     def test_success(self, mcp, monkeypatch):
-        monkeypatch.setenv("GOOGLE_DOCS_ACCESS_TOKEN", "tok")
+        monkeypatch.setenv("GOOGLE_ACCESS_TOKEN", "tok")
         fn = _tool_fn(mcp, "google_docs_format_text")
         with patch("httpx.post") as mock_post:
             mock_post.return_value = _mock_response(200, {"replies": []})
@@ -477,7 +476,7 @@ class TestGoogleDocsFormatText:
 
 class TestGoogleDocsBatchUpdate:
     def test_success(self, mcp, monkeypatch):
-        monkeypatch.setenv("GOOGLE_DOCS_ACCESS_TOKEN", "tok")
+        monkeypatch.setenv("GOOGLE_ACCESS_TOKEN", "tok")
         fn = _tool_fn(mcp, "google_docs_batch_update")
         with patch("httpx.post") as mock_post:
             mock_post.return_value = _mock_response(200, {"replies": []})
@@ -489,14 +488,14 @@ class TestGoogleDocsBatchUpdate:
             assert "error" not in result
 
     def test_invalid_json(self, mcp, monkeypatch):
-        monkeypatch.setenv("GOOGLE_DOCS_ACCESS_TOKEN", "tok")
+        monkeypatch.setenv("GOOGLE_ACCESS_TOKEN", "tok")
         fn = _tool_fn(mcp, "google_docs_batch_update")
         result = fn(document_id="doc-1", requests_json="not json")
         assert "error" in result
         assert "Invalid JSON" in result["error"]
 
     def test_non_array_json(self, mcp, monkeypatch):
-        monkeypatch.setenv("GOOGLE_DOCS_ACCESS_TOKEN", "tok")
+        monkeypatch.setenv("GOOGLE_ACCESS_TOKEN", "tok")
         fn = _tool_fn(mcp, "google_docs_batch_update")
         result = fn(document_id="doc-1", requests_json='{"key": "value"}')
         assert "error" in result
@@ -505,7 +504,7 @@ class TestGoogleDocsBatchUpdate:
 
 class TestGoogleDocsCreateList:
     def test_bullet_list(self, mcp, monkeypatch):
-        monkeypatch.setenv("GOOGLE_DOCS_ACCESS_TOKEN", "tok")
+        monkeypatch.setenv("GOOGLE_ACCESS_TOKEN", "tok")
         fn = _tool_fn(mcp, "google_docs_create_list")
         with patch("httpx.post") as mock_post:
             mock_post.return_value = _mock_response(200, {"replies": []})
@@ -518,7 +517,7 @@ class TestGoogleDocsCreateList:
             assert "error" not in result
 
     def test_numbered_list(self, mcp, monkeypatch):
-        monkeypatch.setenv("GOOGLE_DOCS_ACCESS_TOKEN", "tok")
+        monkeypatch.setenv("GOOGLE_ACCESS_TOKEN", "tok")
         fn = _tool_fn(mcp, "google_docs_create_list")
         with patch("httpx.post") as mock_post:
             mock_post.return_value = _mock_response(200, {"replies": []})
@@ -533,7 +532,7 @@ class TestGoogleDocsCreateList:
 
 class TestGoogleDocsAddComment:
     def test_success(self, mcp, monkeypatch):
-        monkeypatch.setenv("GOOGLE_DOCS_ACCESS_TOKEN", "tok")
+        monkeypatch.setenv("GOOGLE_ACCESS_TOKEN", "tok")
         fn = _tool_fn(mcp, "google_docs_add_comment")
         with patch("httpx.post") as mock_post:
             mock_post.return_value = _mock_response(200, {"id": "comment-1", "content": "Fix this"})
@@ -543,7 +542,7 @@ class TestGoogleDocsAddComment:
 
 class TestGoogleDocsListComments:
     def test_success_returns_structured(self, mcp, monkeypatch):
-        monkeypatch.setenv("GOOGLE_DOCS_ACCESS_TOKEN", "tok")
+        monkeypatch.setenv("GOOGLE_ACCESS_TOKEN", "tok")
         fn = _tool_fn(mcp, "google_docs_list_comments")
         with patch("httpx.get") as mock_get:
             mock_get.return_value = _mock_response(
@@ -558,7 +557,7 @@ class TestGoogleDocsListComments:
 
 class TestGoogleDocsExportContent:
     def test_export_pdf(self, mcp, monkeypatch):
-        monkeypatch.setenv("GOOGLE_DOCS_ACCESS_TOKEN", "tok")
+        monkeypatch.setenv("GOOGLE_ACCESS_TOKEN", "tok")
         fn = _tool_fn(mcp, "google_docs_export_content")
         with patch("httpx.get") as mock_get:
             mock_get.return_value = _mock_response(200, content=b"PDF data here")

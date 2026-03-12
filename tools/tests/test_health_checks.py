@@ -73,7 +73,6 @@ class TestHealthCheckerRegistry:
             "github",
             "gitlab_token",
             "google",
-            "google_docs",
             "google_maps",
             "google_search",
             "google_search_console",

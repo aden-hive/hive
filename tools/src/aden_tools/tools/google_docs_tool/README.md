@@ -26,14 +26,12 @@ Create and manage Google Docs documents via the Google Docs API v1.
 6. Set the environment variable:
 
 ```bash
-export GOOGLE_DOCS_ACCESS_TOKEN="your-access-token"
+export GOOGLE_ACCESS_TOKEN="your-access-token"
 ```
 
 ### Required OAuth Scopes
 
-- `https://www.googleapis.com/auth/documents` - Full access to Google Docs
 - `https://www.googleapis.com/auth/drive.file` - Access to files created/opened by the app
-- `https://www.googleapis.com/auth/drive` - Required for document export and comment functionality
 
 ## Available Tools
 
@@ -144,4 +142,4 @@ All tools return a dict. On error, the dict contains an `"error"` key with a des
 
 | Variable | Required | Description |
 |----------|----------|-------------|
-| `GOOGLE_DOCS_ACCESS_TOKEN` | Yes | OAuth2 access token |
+| `GOOGLE_ACCESS_TOKEN` | Yes | OAuth2 access token (shared with Gmail, Calendar, Sheets) |
