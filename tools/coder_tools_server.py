@@ -334,8 +334,10 @@ def undo_changes(path: str = "") -> str:
 @mcp.tool()
 def list_agent_tools(
     server_config_path: str = "",
-    output_schema: str = "simple",
+    output_schema: str = "summary",
     group: str = "all",
+    credentials: str = "all",
+    service: str = "",
 ) -> str:
     """Discover tools available for agent building, grouped by provider.
 
@@ -343,22 +345,52 @@ def list_agent_tools(
     BEFORE designing an agent to know exactly which tools exist. Only use
     tools from this list in node definitions — never guess or fabricate.
 
+    Progressive disclosure workflow (start narrow, drill in):
+        list_agent_tools()                                           # provider summary: counts + credential status
+        list_agent_tools(group="google", output_schema="summary")   # service breakdown within google
+        list_agent_tools(group="google", service="gmail")           # tool names for just gmail
+        list_agent_tools(group="google", service="gmail", output_schema="full")  # full detail
+
     Args:
         server_config_path: Path to mcp_servers.json. Default: tools/mcp_servers.json
             (the standard hive-tools server). Can also point to an agent's config
             to see what tools that specific agent has access to.
-        output_schema: "simple" (default) returns name and description per tool.
-            "full" also includes server and input_schema.
+        output_schema: Controls verbosity of the response.
+            "summary" (default) — provider list with tool counts + credential status. Very compact.
+                When group is specified, shows service-level breakdown within that provider.
+            "names" — tool names only (no descriptions), grouped by provider.
+            "simple" — names + truncated descriptions.
+            "full" — names + descriptions + server + input_schema.
         group: "all" (default) returns all providers. A provider like "google"
             returns only that provider's tools. Legacy prefix filters (e.g. "gmail")
             are still supported.
+        credentials: Filter by credential availability.
+            "all" (default) — show every tool regardless of credential status.
+            "available" — only tools whose credentials are already configured.
+            "unavailable" — only tools that still need credential setup.
+        service: Filter to a specific service within a provider (e.g. service="gmail"
+            when group="google"). Matches tools whose name starts with "<service>_".
 
     Returns:
         JSON with tools grouped by provider.
     """
-    if output_schema not in ("simple", "full"):
+    if output_schema not in ("summary", "names", "simple", "full"):
         return json.dumps(
-            {"error": f"Invalid output_schema: {output_schema!r}. Use 'simple' or 'full'."}
+            {
+                "error": (
+                    f"Invalid output_schema: {output_schema!r}. "
+                    "Use 'summary', 'names', 'simple', or 'full'."
+                )
+            }
+        )
+    if credentials not in ("all", "available", "unavailable"):
+        return json.dumps(
+            {
+                "error": (
+                    f"Invalid credentials: {credentials!r}. "
+                    "Use 'all', 'available', or 'unavailable'."
+                )
+            }
         )
 
     # Resolve config path
@@ -472,6 +504,33 @@ def list_agent_tools(
 
     tool_provider_auth, tool_providers = _build_provider_metadata()
 
+    def _get_available_credential_names() -> set[str]:
+        """Return set of credential spec keys whose env_var is set in the environment."""
+        try:
+            from framework.credentials.validation import ensure_credential_key_env
+
+            ensure_credential_key_env()
+        except Exception:
+            pass
+        try:
+            from aden_tools.credentials import CREDENTIAL_SPECS
+        except ImportError:
+            return set()
+        return {
+            cred_name
+            for cred_name, spec in CREDENTIAL_SPECS.items()
+            if spec.env_var and os.environ.get(spec.env_var)
+        }
+
+    def _tool_credentials_available(tool_name: str, available_creds: set[str]) -> bool:
+        """True if all credentials required by tool_name are available (or tool needs none)."""
+        required = set()
+        for provider_creds in tool_provider_auth.get(tool_name, {}).values():
+            required.update(provider_creds.keys())
+        if not required:
+            return True  # no credentials needed
+        return required.issubset(available_creds)
+
     def _group_by_provider(tools: list[dict]) -> dict[str, dict]:
         """Group tools by provider, including auth metadata and providerless tools."""
         groups: dict[str, dict] = {}
@@ -481,16 +540,20 @@ def list_agent_tools(
             if not providers:
                 providers = ["no_provider"]
 
-            desc = t["description"]
-            if output_schema == "simple" and desc and len(desc) > 200:
-                desc = desc[:200].rsplit(" ", 1)[0] + "..."
-            tool_payload = {
-                "name": t["name"],
-                "description": desc,
-            }
-            if output_schema == "full":
-                tool_payload["server"] = t["server"]
-                tool_payload["input_schema"] = t["input_schema"]
+            if output_schema == "names":
+                # Store just the name string — will be collapsed to flat list below
+                tool_payload: dict | str = t["name"]
+            else:
+                desc = t["description"]
+                if output_schema == "simple" and desc and len(desc) > 200:
+                    desc = desc[:200].rsplit(" ", 1)[0] + "..."
+                tool_payload = {
+                    "name": t["name"],
+                    "description": desc,
+                }
+                if output_schema == "full":
+                    tool_payload["server"] = t["server"]
+                    tool_payload["input_schema"] = t["input_schema"]
 
             for provider in providers:
                 bucket = groups.setdefault(
@@ -502,17 +565,48 @@ def list_agent_tools(
                 )
                 bucket["tools"].append(tool_payload)
 
-                provider_auth = tool_provider_auth.get(t["name"], {}).get(provider, {})
-                for cred_name, auth in provider_auth.items():
-                    bucket["authorization"][cred_name] = auth
+                # Only accumulate full auth metadata for simple/full schemas.
+                # summary/names use compact representations.
+                if output_schema not in ("summary", "names"):
+                    provider_auth = tool_provider_auth.get(t["name"], {}).get(provider, {})
+                    for cred_name, auth in provider_auth.items():
+                        bucket["authorization"][cred_name] = auth
 
-        for _provider, bucket in groups.items():
-            bucket["tools"] = sorted(bucket["tools"], key=lambda x: x["name"])
-            bucket["authorization"] = dict(sorted(bucket["authorization"].items()))
+        for provider, bucket in groups.items():
+            if output_schema == "names":
+                # Collapse to compact structure: flat sorted name list + credential keys only
+                tool_names = sorted(set(bucket["tools"]))
+                cred_keys: set[str] = set()
+                for tn in tool_names:
+                    for prov_creds in tool_provider_auth.get(tn, {}).values():
+                        cred_keys.update(prov_creds.keys())
+                groups[provider] = {
+                    "tool_count": len(tool_names),
+                    "credentials_required": sorted(cred_keys),
+                    "tool_names": tool_names,
+                }
+            else:
+                bucket["tools"] = sorted(bucket["tools"], key=lambda x: x["name"])
+                bucket["authorization"] = dict(sorted(bucket["authorization"].items()))
 
         return dict(sorted(groups.items()))
 
-    provider_groups = _group_by_provider(all_tools)
+    # Compute credential availability once (used for filtering and summary)
+    available_creds: set[str] = (
+        _get_available_credential_names() if credentials != "all" or output_schema == "summary"
+        else set()
+    )
+
+    # Apply credentials filter before grouping (filter tool list)
+    filtered_tools = all_tools
+    if credentials != "all":
+        filtered_tools = [
+            t
+            for t in all_tools
+            if (credentials == "available") == _tool_credentials_available(t["name"], available_creds)
+        ]
+
+    provider_groups = _group_by_provider(filtered_tools)
 
     # Filter to a specific provider (preferred) or legacy prefix (fallback)
     if group != "all":
@@ -520,20 +614,104 @@ def list_agent_tools(
             provider_groups = {group: provider_groups[group]}
         else:
             prefixed_tools = []
-            for t in all_tools:
+            for t in filtered_tools:
                 parts = t["name"].split("_", 1)
                 prefix = parts[0] if len(parts) > 1 else "general"
                 if prefix == group:
                     prefixed_tools.append(t)
             provider_groups = _group_by_provider(prefixed_tools)
 
-    all_names = sorted({t["name"] for p in provider_groups.values() for t in p["tools"]})
-    result: dict = {
-        "total": len(all_names),
-        "tools_by_provider": provider_groups,
-        "tools_by_category": provider_groups,  # backward-compat alias
-        "all_tool_names": all_names,
-    }
+    # Apply service filter (tool name prefix within a provider, e.g. service="gmail")
+    if service:
+        service_prefix = service.rstrip("_") + "_"
+        service_filtered: list[dict] = []
+        for t in filtered_tools:
+            # Only include tools from the already-filtered provider set
+            tool_name = t["name"]
+            in_provider = any(tool_name in p.get("tool_names", [tool_entry.get("name") for tool_entry in p.get("tools", [])]) for p in provider_groups.values())
+            if in_provider and tool_name.startswith(service_prefix):
+                service_filtered.append(t)
+        provider_groups = _group_by_provider(service_filtered)
+
+    def _infer_service(tool_name: str) -> str:
+        """Infer service name from tool name prefix (e.g. 'gmail' from 'gmail_send_message')."""
+        return tool_name.split("_", 1)[0]
+
+    # Summary mode: compact overview with counts + credential status
+    if output_schema == "summary":
+        if group == "all":
+            # Provider-level summary (default first call)
+            full_groups = _group_by_provider(all_tools) if credentials != "all" else provider_groups
+            summary_providers: dict = {}
+            for prov, bucket in full_groups.items():
+                cred_names = bucket.get("credentials_required", sorted(bucket.get("authorization", {}).keys()))
+                creds_ok = all(c in available_creds for c in cred_names) if cred_names else True
+                summary_providers[prov] = {
+                    "tool_count": len(bucket.get("tool_names", bucket.get("tools", []))),
+                    "credentials_required": cred_names,
+                    "credentials_available": creds_ok,
+                }
+            result: dict = {
+                "total_tools": sum(v["tool_count"] for v in summary_providers.values()),
+                "providers": summary_providers,
+                "hint": (
+                    "Use list_agent_tools(group='<provider>', output_schema='summary') for service breakdown, "
+                    "list_agent_tools(group='<provider>', service='<service>') for tool names. "
+                    "Filter by credentials='available' to see only ready-to-use tools."
+                ),
+            }
+        else:
+            # Service-level breakdown within a specific provider
+            # Re-build from all filtered tools for this provider (ignore service filter for summary)
+            provider_tool_names: list[str] = []
+            for bucket in provider_groups.values():
+                provider_tool_names.extend(
+                    bucket.get("tool_names", [e.get("name") for e in bucket.get("tools", [])])
+                )
+
+            services: dict = {}
+            for tn in sorted(set(provider_tool_names)):
+                svc = _infer_service(tn)
+                if svc not in services:
+                    svc_creds: set[str] = set()
+                    for prov_creds in tool_provider_auth.get(tn, {}).values():
+                        svc_creds.update(prov_creds.keys())
+                    services[svc] = {"tool_count": 0, "credentials_required": sorted(svc_creds)}
+                services[svc]["tool_count"] += 1
+                # Accumulate credentials for other tools in this service
+                for prov_creds in tool_provider_auth.get(tn, {}).values():
+                    existing = set(services[svc]["credentials_required"])
+                    existing.update(prov_creds.keys())
+                    services[svc]["credentials_required"] = sorted(existing)
+
+            result = {
+                "provider": group,
+                "total_tools": len(provider_tool_names),
+                "services": services,
+                "hint": (
+                    f"Use list_agent_tools(group='{group}', service='<service>') "
+                    "for tool names within a service."
+                ),
+            }
+        if errors:
+            result["errors"] = errors
+        return json.dumps(result, indent=2, default=str)
+
+    if output_schema == "names":
+        # Compact result: no duplication, no all_tool_names list
+        total = sum(p["tool_count"] for p in provider_groups.values())
+        result = {
+            "total": total,
+            "tools_by_provider": provider_groups,
+        }
+    else:
+        all_names = sorted({t["name"] for p in provider_groups.values() for t in p["tools"]})
+        result = {
+            "total": len(all_names),
+            "tools_by_provider": provider_groups,
+            "tools_by_category": provider_groups,  # backward-compat alias
+            "all_tool_names": all_names,
+        }
     if errors:
         result["errors"] = errors
 

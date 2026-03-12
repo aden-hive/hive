@@ -185,18 +185,21 @@ docs. Always run list_agent_tools() to see what actually exists.
 
 # Tool Discovery (MANDATORY before designing)
 
-Before designing any agent, run list_agent_tools() with NO arguments \
-to see ALL available tools (names + descriptions, grouped by category). \
-ONLY use tools from this list in your node definitions. \
+Before designing any agent, discover tools progressively — start compact, drill into \
+what you need. ONLY use tools from this list in your node definitions. \
 NEVER guess or fabricate tool names from memory.
 
-  list_agent_tools()  # ALWAYS call this first (simple mode)
-  list_agent_tools(group="google", output_schema="full")  # drill into a provider
+  list_agent_tools()                                                      # Step 1: provider summary (counts + credential status)
+  list_agent_tools(group="google", output_schema="summary")               # Step 2: service breakdown within a provider
+  list_agent_tools(group="google", service="gmail")                       # Step 3: tool names for one service
+  list_agent_tools(group="google", service="gmail", output_schema="full") # Step 4: full detail for specific tools
 
-NEVER skip the first call. Always start with the full list \
-so you know what providers and tools exist before drilling in. \
-Simple mode truncates long descriptions — use group + "full" to \
-get the complete description and input_schema for the tools you need.
+Step 1 is MANDATORY. Returns provider names, tool counts, credential availability — very compact. \
+Step 2 breaks a provider into services (e.g. google → gmail/calendar/sheets/drive). Only do this \
+for providers that are relevant to the task. \
+Step 3 gets tool names for a specific service — no descriptions, minimal tokens. \
+Step 4 only for services you plan to actually use. \
+Use credentials="available" at any step to filter to tools whose credentials are already configured.
 
 # Discovery & Design Workflow
 
@@ -410,11 +413,10 @@ hashline=True for anchors in results
 - undo_changes(path?) — restore from git snapshot
 
 ## Meta-Agent
-- list_agent_tools(server_config_path?, output_schema?, group?) — discover \
-available tools grouped by category. output_schema: "simple" (default, \
-descriptions truncated to ~200 chars) or "full" (complete descriptions + \
-input_schema). group: "all" (default) or a provider like "google". \
-Call FIRST before designing.
+- list_agent_tools(group?, service?, output_schema?, credentials?) — discover tools \
+progressively: no args=provider summary; group+output_schema="summary"=service breakdown; \
+group+service=tool names; group+service+output_schema="full"=full details. \
+credentials="available" filters to configured tools. Call FIRST before designing.
 - validate_agent_package(agent_name) — run ALL validation checks in one call \
 (class validation, runner load, tool validation, tests). Call after building.
 - list_agents() — list all agent packages in exports/ with session counts
@@ -551,8 +553,8 @@ but no write/edit tools.
 - run_command(command, cwd?, timeout?) — Read-only commands only (grep, ls, git log). \
 Never use this to write files, run scripts, or modify the filesystem — transition \
 to BUILDING phase for that.
-- list_agent_tools(server_config_path?, output_schema?, group?) \
-— Discover available tools for design
+- list_agent_tools(server_config_path?, output_schema?, group?, credentials?) \
+— Discover available tools for design (summary → names → full)
 - list_agents() — See existing agent packages for reference
 - list_agent_sessions(agent_name, status?, limit?) — Inspect past runs of an agent
 - list_agent_checkpoints(agent_name, session_id) — View execution history
