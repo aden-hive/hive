@@ -949,6 +949,97 @@ def register_queen_lifecycle_tools(
 
         return converted, flowchart_map
 
+    def _reconcile_flowchart(
+        original_draft: dict,
+        flowchart_map: dict[str, list[str]],
+        runtime_nodes: list,
+        runtime_edges: list,
+    ) -> tuple[dict, dict[str, list[str]]]:
+        """Reconcile the original draft flowchart with the actual runtime graph.
+
+        After building, the queen may have added, removed, or renamed nodes.
+        This updates the original_draft and flowchart_map so the flowchart
+        stays in sync with the runtime graph.
+
+        Returns (updated_draft, updated_map).
+        """
+        import copy as _copy
+
+        draft = _copy.deepcopy(original_draft)
+        draft_nodes: list[dict] = draft.get("nodes", [])
+        draft_edges: list[dict] = draft.get("edges", [])
+        draft_node_ids = {n["id"] for n in draft_nodes}
+
+        # Runtime node IDs
+        runtime_node_ids = {n.id for n in runtime_nodes}
+
+        # All draft node IDs that appear in the current map
+        mapped_draft_ids: set[str] = set()
+        for draft_ids in flowchart_map.values():
+            mapped_draft_ids.update(draft_ids)
+
+        new_map = dict(flowchart_map)
+
+        # 1. New runtime nodes not in the map → add to draft and map
+        for rn in runtime_nodes:
+            if rn.id not in new_map:
+                # Auto-classify and add to draft
+                new_node: dict = {
+                    "id": rn.id,
+                    "name": rn.name,
+                    "description": rn.description or "",
+                    "tools": list(rn.tools) if rn.tools else [],
+                    "input_keys": list(rn.input_keys) if rn.input_keys else [],
+                    "output_keys": list(rn.output_keys) if rn.output_keys else [],
+                    "success_criteria": getattr(rn, "success_criteria", "") or "",
+                }
+                # Classify the new node
+                terminal_ids = runtime_node_ids - {e.source for e in runtime_edges}
+                fc_type = _classify_flowchart_node(
+                    new_node,
+                    len(draft_nodes),  # index
+                    len(draft_nodes) + 1,  # total
+                    draft_edges,
+                    terminal_ids,
+                )
+                fc_meta = _FLOWCHART_TYPES[fc_type]
+                new_node["flowchart_type"] = fc_type
+                new_node["flowchart_shape"] = fc_meta["shape"]
+                new_node["flowchart_color"] = fc_meta["color"]
+
+                draft_nodes.append(new_node)
+                draft_node_ids.add(rn.id)
+                new_map[rn.id] = [rn.id]
+
+                # Add edges connecting this new node
+                for re in runtime_edges:
+                    if re.source == rn.id and re.target in draft_node_ids:
+                        draft_edges.append({
+                            "source": re.source,
+                            "target": re.target,
+                            "condition": str(re.condition.value) if hasattr(re.condition, "value") else str(re.condition),
+                            "description": re.description or "",
+                            "label": "",
+                        })
+                    elif re.target == rn.id and re.source in draft_node_ids:
+                        draft_edges.append({
+                            "source": re.source,
+                            "target": re.target,
+                            "condition": str(re.condition.value) if hasattr(re.condition, "value") else str(re.condition),
+                            "description": re.description or "",
+                            "label": "",
+                        })
+
+        # 2. Runtime nodes removed → remove from map (keep draft nodes for visual continuity)
+        removed_runtime_ids = set(new_map.keys()) - runtime_node_ids
+        for rid in removed_runtime_ids:
+            del new_map[rid]
+
+        draft["nodes"] = draft_nodes
+        draft["edges"] = draft_edges
+
+        return draft, new_map
+
     async def save_agent_draft(
         *,
         agent_name: str,
@@ -2510,6 +2601,38 @@ def register_queen_lifecycle_tools(
                                 )
                             }
                         )
+
+                # Reconcile flowchart with runtime graph if draft exists
+                if (
+                    phase_state is not None
+                    and phase_state.original_draft_graph is not None
+                    and phase_state.flowchart_map is not None
+                    and loaded_runtime is not None
+                ):
+                    try:
+                        updated_draft, updated_map = _reconcile_flowchart(
+                            phase_state.original_draft_graph,
+                            phase_state.flowchart_map,
+                            list(loaded_runtime.graph.nodes),
+                            list(loaded_runtime.graph.edges),
+                        )
+                        phase_state.original_draft_graph = updated_draft
+                        phase_state.flowchart_map = updated_map
+                        # Notify frontend so flowchart refreshes
+                        bus = phase_state.event_bus
+                        if bus is not None:
+                            await bus.publish(
+                                AgentEvent(
+                                    type=EventType.FLOWCHART_MAP_UPDATED,
+                                    stream_id="queen",
+                                    data={
+                                        "map": updated_map,
+                                        "original_draft": updated_draft,
+                                    },
+                                )
+                            )
+                    except Exception:
+                        logger.warning("Flowchart reconciliation failed", exc_info=True)
 
                 # Switch to staging phase after successful load + validation
                 if phase_state is not None:

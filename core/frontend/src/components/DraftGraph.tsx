@@ -366,16 +366,22 @@ export default function DraftGraph({ draft, onNodeClick, flowchartMap, runtimeNo
     return back;
   }, [edges, idxMap]);
 
-  // Layer-based layout — compute viewBox dimensions in SVG units
+  // Layer-based layout with parent-aware column placement
   const layout = useMemo(() => {
     if (nodes.length === 0) {
-      return { layers: [] as number[], cols: [] as number[], maxCols: 1, nodeW: 200, firstColX: MARGIN_X };
+      return { layers: [] as number[], nodeW: 200, firstColX: MARGIN_X, nodeXPositions: [] as number[] };
     }
 
+    // Build parent and children maps
     const parents = new Map<number, number[]>();
-    nodes.forEach((_, i) => parents.set(i, []));
-    forwardEdges.forEach((e) => parents.get(e.toIdx)!.push(e.fromIdx));
+    const children = new Map<number, number[]>();
+    nodes.forEach((_, i) => { parents.set(i, []); children.set(i, []); });
+    forwardEdges.forEach((e) => {
+      parents.get(e.toIdx)!.push(e.fromIdx);
+      children.get(e.fromIdx)!.push(e.toIdx);
+    });
 
+    // Assign layers (longest path from root)
     const layers = new Array(nodes.length).fill(0);
     for (let i = 0; i < nodes.length; i++) {
       const pars = parents.get(i) || [];
@@ -396,35 +402,99 @@ export default function DraftGraph({ draft, onNodeClick, flowchartMap, runtimeNo
       maxCols = Math.max(maxCols, group.length);
     });
 
-    // Compute node width to fill available space (max 360px to stay readable)
+    // Compute node width
     const backEdgeMargin = backEdges.length > 0 ? 30 + backEdges.length * 14 : 8;
     const totalMargin = MARGIN_X * 2 + backEdgeMargin;
     const availW = containerW - totalMargin;
     const nodeW = Math.min(360, Math.floor((availW - (maxCols - 1) * GAP_X) / maxCols));
+
+    // Parent-aware column placement using fractional positions.
+    // Instead of snapping to a fixed grid, nodes inherit positions from parents
+    // and fan-out children spread around the parent's position.
+    const colPos = new Array(nodes.length).fill(0); // fractional column positions
+    const maxLayer = Math.max(...layers);
+
+    // Process layers top-down
+    for (let layer = 0; layer <= maxLayer; layer++) {
+      const group = layerGroups.get(layer) || [];
+      if (layer === 0) {
+        // Root layer: spread evenly across available columns
+        if (group.length === 1) {
+          colPos[group[0]] = (maxCols - 1) / 2;
+        } else {
+          const offset = (maxCols - group.length) / 2;
+          group.forEach((nodeIdx, i) => { colPos[nodeIdx] = offset + i; });
+        }
+        continue;
+      }
+
+      // For each node, compute ideal position from parents
+      const ideals: { idx: number; pos: number }[] = [];
+      for (const nodeIdx of group) {
+        const pars = parents.get(nodeIdx) || [];
+        if (pars.length === 0) {
+          ideals.push({ idx: nodeIdx, pos: (maxCols - 1) / 2 });
+          continue;
+        }
+        // Average parent column — weighted center
+        const avgCol = pars.reduce((s, p) => s + colPos[p], 0) / pars.length;
+
+        // If this node is one of multiple children of a parent, offset from center
+        // Find the parent with the most children to determine fan-out
+        let bestOffset = 0;
+        for (const p of pars) {
+          const siblings = (children.get(p) || []).filter(c => layers[c] === layer);
+          if (siblings.length > 1) {
+            const sibIdx = siblings.indexOf(nodeIdx);
+            if (sibIdx >= 0) {
+              bestOffset = sibIdx - (siblings.length - 1) / 2;
+              // Scale so siblings don't exceed available columns
+              bestOffset *= Math.min(1, (maxCols - 1) / Math.max(siblings.length - 1, 1));
+            }
+          }
+        }
+        ideals.push({ idx: nodeIdx, pos: avgCol + bestOffset });
+      }
+
+      // Sort by ideal position, then assign while preventing overlaps
+      ideals.sort((a, b) => a.pos - b.pos);
+
+      // Ensure minimum spacing of 1 column between nodes in the same layer
+      const assigned: number[] = [];
+      for (const item of ideals) {
+        let pos = item.pos;
+        // Clamp to valid range
+        pos = Math.max(0, Math.min(maxCols - 1, pos));
+        // Push right if overlapping previous
+        if (assigned.length > 0) {
+          const prev = assigned[assigned.length - 1];
+          if (pos < prev + 1) pos = prev + 1;
+        }
+        assigned.push(pos);
+        colPos[item.idx] = pos;
+      }
+
+      // If we pushed nodes too far right, shift the whole group left
+      const maxPos = assigned[assigned.length - 1];
+      if (maxPos > maxCols - 1) {
+        const shift = maxPos - (maxCols - 1);
+        for (const item of ideals) {
+          colPos[item.idx] = Math.max(0, colPos[item.idx] - shift);
+        }
+      }
+    }
+
+    // Convert fractional column positions to pixel X positions
     const colSpacing = nodeW + GAP_X;
-    const totalNodesW = maxCols * nodeW + (maxCols - 1) * GAP_X;
+    const usedMin = Math.min(...colPos);
+    const usedMax = Math.max(...colPos);
+    const usedSpan = usedMax - usedMin || 1;
+    const totalNodesW = usedSpan * colSpacing;
     const firstColX = MARGIN_X + (availW - totalNodesW) / 2;
 
-    const cols = new Array(nodes.length).fill(0);
-    layerGroups.forEach((group) => {
-      if (group.length === 1) {
-        cols[group[0]] = (maxCols - 1) / 2;
-      } else {
-        const sorted = [...group].sort((a, b) => {
-          const aP = parents.get(a) || [];
-          const bP = parents.get(b) || [];
-          const aAvg = aP.length > 0 ? aP.reduce((s, p) => s + cols[p], 0) / aP.length : 0;
-          const bAvg = bP.length > 0 ? bP.reduce((s, p) => s + cols[p], 0) / bP.length : 0;
-          return aAvg - bAvg;
-        });
-        const offset = (maxCols - group.length) / 2;
-        sorted.forEach((nodeIdx, i) => {
-          cols[nodeIdx] = offset + i;
-        });
-      }
-    });
+    const nodeXPositions = colPos.map((c: number) => firstColX + (c - usedMin) * colSpacing);
 
-    return { layers, cols, maxCols, nodeW, colSpacing, firstColX };
+    return { layers, nodeW, firstColX, nodeXPositions };
   }, [nodes, forwardEdges, backEdges.length, containerW]);
 
   if (nodes.length === 0) {
@@ -446,10 +516,10 @@ export default function DraftGraph({ draft, onNodeClick, flowchartMap, runtimeNo
     );
   }
 
-  const { layers, cols, nodeW, colSpacing, firstColX } = layout;
+  const { layers, nodeW, nodeXPositions } = layout;
 
   const nodePos = (i: number) => ({
-    x: firstColX + cols[i] * (colSpacing ?? nodeW + GAP_X),
+    x: nodeXPositions[i],
     y: TOP_Y + layers[i] * (NODE_H + GAP_Y),
   });
 

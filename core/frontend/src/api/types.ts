@@ -327,7 +327,8 @@ export type EventTypeName =
   | "credentials_required"
   | "queen_phase_changed"
   | "subagent_report"
-  | "draft_graph_updated";
+  | "draft_graph_updated"
+  | "flowchart_map_updated";
 
 export interface AgentEvent {
   type: EventTypeName;

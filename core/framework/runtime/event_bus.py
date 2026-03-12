@@ -140,6 +140,9 @@ class EventType(StrEnum):
     # Draft graph (planning phase — lightweight graph preview)
     DRAFT_GRAPH_UPDATED = "draft_graph_updated"
 
+    # Flowchart map updated (after reconciliation with runtime graph)
+    FLOWCHART_MAP_UPDATED = "flowchart_map_updated"
+
     # Queen phase changes (building <-> staging <-> running)
     QUEEN_PHASE_CHANGED = "queen_phase_changed"
 

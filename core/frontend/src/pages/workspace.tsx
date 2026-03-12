@@ -1853,6 +1853,17 @@ export default function Workspace() {
           break;
         }
 
+        case "flowchart_map_updated": {
+          const mapData = event.data as { map?: Record<string, string[]>; original_draft?: DraftGraphData } | undefined;
+          if (mapData) {
+            updateAgentState(agentType, {
+              flowchartMap: mapData.map ?? null,
+              originalDraft: mapData.original_draft ?? null,
+            });
+          }
+          break;
+        }
+
         case "worker_loaded": {
           const workerName = event.data?.worker_name as string | undefined;
           const agentPathFromEvent = event.data?.agent_path as string | undefined;
