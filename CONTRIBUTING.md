@@ -59,6 +59,25 @@ You may submit PRs without prior assignment for:
 ./quickstart.sh
 ```
 
+### Prerequisites: Configuring an LLM Provider
+
+Before running `./quickstart.sh`, you must have at least one LLM provider configured. Hive supports 100+ providers through LiteLLM:
+
+**Popular Options:**
+- **OpenAI** (recommended for Claude): `export OPENAI_API_KEY="sk-..."`
+- **Anthropic**: `export ANTHROPIC_API_KEY="sk-ant-..."`
+- **Google Gemini**: `export GOOGLE_API_KEY="AIza..."`
+- **Other providers**: See [Configuration Guide](https://docs.adenhq.com/getting-started/configuration) for setup
+
+**Set your API key before running quickstart:**
+```bash
+export OPENAI_API_KEY="your-key-here"
+# Then run:
+./quickstart.sh
+```
+
+The quickstart script will verify your LLM provider is correctly configured. If you skip this step, agent initialization will fail with unclear error messages.
+
 > **Windows Users:**  
 > If you are on native Windows, it is recommended to use **WSL (Windows Subsystem for Linux)**.  
 > Alternatively, make sure to run PowerShell or Git Bash with Python 3.11+ installed, and disable "App Execution Aliases" in Windows settings.
