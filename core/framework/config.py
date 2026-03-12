@@ -113,6 +113,14 @@ def get_gcu_enabled() -> bool:
     return get_hive_config().get("gcu_enabled", True)
 
 
+def get_gcu_viewport_scale() -> float:
+    """Return GCU viewport scale factor (0.1-1.0), default 0.8."""
+    scale = get_hive_config().get("gcu_viewport_scale", 0.8)
+    if isinstance(scale, (int, float)) and 0.1 <= scale <= 1.0:
+        return float(scale)
+    return 0.8
+
+
 def get_api_base() -> str | None:
     """Return the api_base URL for OpenAI-compatible endpoints, if configured."""
     llm = get_hive_config().get("llm", {})

@@ -16,6 +16,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -174,7 +175,95 @@ _shared_playwright: Any = None
 _shared_chrome_process: Any = None  # ChromeProcess | None (avoid circular import)
 _shared_cdp_port: int | None = None
 
-_DEFAULT_VIEWPORT = {"width": 1920, "height": 1080}
+# ---------------------------------------------------------------------------
+# Dynamic viewport sizing
+# ---------------------------------------------------------------------------
+
+DEFAULT_VIEWPORT_SCALE = 0.8
+_FALLBACK_WIDTH = 1920
+_FALLBACK_HEIGHT = 1080
+
+
+def _detect_screen_resolution() -> tuple[int, int] | None:
+    """Detect primary monitor resolution using platform-native tools.
+
+    Returns (width, height) or None if detection fails (headless, no display).
+    """
+    if sys.platform == "darwin":
+        try:
+            import subprocess
+
+            out = subprocess.check_output(
+                ["system_profiler", "SPDisplaysDataType"],
+                text=True,
+                timeout=5,
+            )
+            import re
+
+            match = re.search(r"Resolution:\s+(\d+)\s*x\s*(\d+)", out)
+            if match:
+                return int(match.group(1)), int(match.group(2))
+        except Exception:
+            pass
+    elif sys.platform == "win32":
+        try:
+            import ctypes
+
+            user32 = ctypes.windll.user32
+            return user32.GetSystemMetrics(0), user32.GetSystemMetrics(1)
+        except Exception:
+            pass
+    else:
+        # Linux — try xrandr
+        try:
+            import subprocess
+
+            out = subprocess.check_output(
+                ["xrandr", "--current"],
+                text=True,
+                timeout=5,
+            )
+            import re
+
+            match = re.search(r"(\d+)x(\d+)\s+\d+\.\d+\*", out)
+            if match:
+                return int(match.group(1)), int(match.group(2))
+        except Exception:
+            pass
+    return None
+
+
+def _get_viewport(scale: float | None = None) -> dict[str, int]:
+    """Compute viewport as a percentage of the primary monitor resolution.
+
+    Falls back to 1920x1080 if screen detection fails (e.g. headless server).
+    Scale priority: explicit arg > env var > config file > default (0.8).
+    """
+    if scale is None:
+        env_scale = os.environ.get("HIVE_BROWSER_VIEWPORT_SCALE")
+        if env_scale:
+            try:
+                scale = float(env_scale)
+            except ValueError:
+                logger.warning("Invalid HIVE_BROWSER_VIEWPORT_SCALE=%r, using default", env_scale)
+    if scale is None:
+        try:
+            from framework.config import get_gcu_viewport_scale
+
+            scale = get_gcu_viewport_scale()
+        except ImportError:
+            scale = DEFAULT_VIEWPORT_SCALE
+    scale = max(0.1, min(1.0, scale))
+
+    resolution = _detect_screen_resolution()
+    if resolution:
+        w, h = resolution
+        logger.debug("Detected screen resolution: %dx%d", w, h)
+    else:
+        w, h = _FALLBACK_WIDTH, _FALLBACK_HEIGHT
+        logger.debug("Could not detect screen resolution, using default %dx%d", w, h)
+
+    return {"width": int(w * scale), "height": int(h * scale)}
 
 
 async def get_shared_browser(headless: bool = True) -> Browser:
@@ -413,7 +502,7 @@ class BrowserSession:
 
             # Set viewport on existing pages (CDP default context doesn't
             # inherit viewport settings like launch_persistent_context did)
-            viewport = _DEFAULT_VIEWPORT
+            viewport = _get_viewport()
             for page in self.context.pages:
                 await page.set_viewport_size(viewport)
 
@@ -529,7 +618,7 @@ class BrowserSession:
         # Create an isolated context stamped with the snapshot
         context = await browser.new_context(
             storage_state=storage_state,
-            viewport=_DEFAULT_VIEWPORT,
+            viewport=_get_viewport(),
             user_agent=BROWSER_USER_AGENT,
             locale="en-US",
         )

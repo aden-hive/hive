@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import subprocess
+import sys
 import tempfile
 import time
 from dataclasses import dataclass, field
@@ -20,15 +21,17 @@ from .chrome_finder import require_chrome
 
 logger = logging.getLogger(__name__)
 
-# Chrome flags shared with session.py — keep in sync with _CHROME_ARGS there
+# Chrome flags for all browser launches
 _CHROME_ARGS = [
-    "--no-sandbox",
-    "--disable-setuid-sandbox",
     "--disable-dev-shm-usage",
-    "--disable-blink-features=AutomationControlled",
     "--no-first-run",
     "--no-default-browser-check",
 ]
+
+# Sandbox flags are only needed on Linux (Docker, CI). On macOS they
+# trigger a yellow warning bar and serve no purpose.
+if sys.platform == "linux":
+    _CHROME_ARGS = ["--no-sandbox", "--disable-setuid-sandbox", *_CHROME_ARGS]
 
 # CDP readiness polling
 _CDP_POLL_INTERVAL_S = 0.1
@@ -100,11 +103,14 @@ async def launch_chrome(
         temp_dir = tempfile.TemporaryDirectory(prefix="hive-browser-")
         user_data_dir = Path(temp_dir.name)
 
+    from .session import _get_viewport
+
+    vp = _get_viewport()
     args = [
         chrome_path,
         f"--remote-debugging-port={cdp_port}",
         f"--user-data-dir={user_data_dir}",
-        "--window-size=1920,1080",
+        f"--window-size={vp['width']},{vp['height']}",
         "--lang=en-US",
         *_CHROME_ARGS,
         *(extra_args or []),
