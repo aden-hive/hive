@@ -128,6 +128,10 @@ KIMI_API_BASE = "https://api.kimi.com/coding"
 EMPTY_STREAM_MAX_RETRIES = 3
 EMPTY_STREAM_RETRY_DELAY = 1.0  # seconds
 
+# Transient stream errors (network blips, timeouts) use a separate cap
+# from rate-limit retries — 3 retries is sufficient for connection failures.
+STREAM_TRANSIENT_MAX_RETRIES = 3
+
 # Directory for dumping failed requests
 FAILED_REQUESTS_DIR = Path.home() / ".hive" / "failed_requests"
 
@@ -1114,13 +1118,13 @@ class LiteLLMProvider(LLMProvider):
                 return
 
             except Exception as e:
-                if _is_stream_transient_error(e) and attempt < RATE_LIMIT_MAX_RETRIES:
+                if _is_stream_transient_error(e) and attempt < STREAM_TRANSIENT_MAX_RETRIES:
                     wait = _compute_retry_delay(attempt, exception=e)
                     logger.warning(
                         f"[stream-retry] {self.model} transient error "
                         f"({type(e).__name__}): {e!s}. "
                         f"Retrying in {wait:.1f}s "
-                        f"(attempt {attempt + 1}/{RATE_LIMIT_MAX_RETRIES})"
+                        f"(attempt {attempt + 1}/{STREAM_TRANSIENT_MAX_RETRIES})"
                     )
                     await asyncio.sleep(wait)
                     continue
