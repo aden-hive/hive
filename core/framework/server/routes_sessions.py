@@ -906,6 +906,7 @@ async def handle_discover(request: web.Request) -> web.Response:
                 "description": entry.description,
                 "category": entry.category,
                 "session_count": entry.session_count,
+                "run_count": entry.run_count,
                 "node_count": entry.node_count,
                 "tool_count": entry.tool_count,
                 "tags": entry.tags,
