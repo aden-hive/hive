@@ -11,6 +11,8 @@ interface DraftGraphProps {
   flowchartMap?: Record<string, string[]>;
   /** Current runtime graph nodes with live status (for overlay during execution). */
   runtimeNodes?: GraphNode[];
+  /** Called when a draft node is clicked in overlay mode — receives the runtime node ID. */
+  onRuntimeNodeClick?: (runtimeNodeId: string) => void;
 }
 
 // Layout constants — tuned for a ~500px panel (484px after px-2 padding)
@@ -272,7 +274,7 @@ function Tooltip({ node, style }: { node: DraftNode; style: React.CSSProperties 
   );
 }
 
-export default function DraftGraph({ draft, onNodeClick, flowchartMap, runtimeNodes }: DraftGraphProps) {
+export default function DraftGraph({ draft, onNodeClick, flowchartMap, runtimeNodes, onRuntimeNodeClick }: DraftGraphProps) {
   const [hoveredNode, setHoveredNode] = useState<string | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const [containerW, setContainerW] = useState(484);
@@ -291,16 +293,21 @@ export default function DraftGraph({ draft, onNodeClick, flowchartMap, runtimeNo
     return () => ro.disconnect();
   }, []);
 
-  // Compute draft node statuses from runtime overlay
-  const nodeStatuses = useMemo<Record<string, DraftNodeStatus>>(() => {
-    if (!flowchartMap || !runtimeNodes?.length) return {};
-    // Invert map: draftNodeId → runtimeNodeId
-    const draftToRuntime: Record<string, string> = {};
+  // Invert flowchartMap: draftNodeId → runtimeNodeId
+  const draftToRuntime = useMemo<Record<string, string>>(() => {
+    if (!flowchartMap) return {};
+    const map: Record<string, string> = {};
     for (const [runtimeId, draftIds] of Object.entries(flowchartMap)) {
       for (const did of draftIds) {
-        draftToRuntime[did] = runtimeId;
+        map[did] = runtimeId;
       }
     }
+    return map;
+  }, [flowchartMap]);
+
+  // Compute draft node statuses from runtime overlay
+  const nodeStatuses = useMemo<Record<string, DraftNodeStatus>>(() => {
+    if (!runtimeNodes?.length || !Object.keys(draftToRuntime).length) return {};
     // Build runtime status lookup
     const runtimeStatus: Record<string, DraftNodeStatus> = {};
     for (const rn of runtimeNodes) {
@@ -317,7 +324,7 @@ export default function DraftGraph({ draft, onNodeClick, flowchartMap, runtimeNo
       result[draftId] = runtimeStatus[runtimeId] ?? "pending";
     }
     return result;
-  }, [flowchartMap, runtimeNodes]);
+  }, [draftToRuntime, runtimeNodes]);
 
   const hasStatusOverlay = Object.keys(nodeStatuses).length > 0;
 
@@ -449,6 +456,18 @@ export default function DraftGraph({ draft, onNodeClick, flowchartMap, runtimeNo
   const maxLayer = Math.max(...layers);
   const svgHeight = TOP_Y + (maxLayer + 1) * NODE_H + maxLayer * GAP_Y + 16;
 
+  // Compute group areas for multi-node runtime groups
+  const groupAreas = useMemo(() => {
+    if (!flowchartMap || !runtimeNodes?.length) return [];
+    const groups: { runtimeId: string; label: string; draftIds: string[] }[] = [];
+    for (const [runtimeId, draftIds] of Object.entries(flowchartMap)) {
+      if (draftIds.length < 2) continue;
+      const rn = runtimeNodes.find(n => n.id === runtimeId);
+      groups.push({ runtimeId, label: rn?.label ?? runtimeId, draftIds });
+    }
+    return groups;
+  }, [flowchartMap, runtimeNodes]);
+
   // Legend
   const usedTypes = (() => {
     const seen = new Map<string, { shape: string; color: string }>();
@@ -558,7 +577,14 @@ export default function DraftGraph({ draft, onNodeClick, flowchartMap, runtimeNo
     return (
       <g
         key={node.id}
-        onClick={() => onNodeClick?.(node)}
+        onClick={() => {
+          if (hasStatusOverlay && onRuntimeNodeClick) {
+            const runtimeId = draftToRuntime[node.id];
+            if (runtimeId) onRuntimeNodeClick(runtimeId);
+          } else {
+            onNodeClick?.(node);
+          }
+        }}
         onMouseEnter={() => setHoveredNode(node.id)}
         onMouseLeave={() => setHoveredNode(null)}
         style={{ cursor: "pointer" }}
@@ -667,6 +693,45 @@ export default function DraftGraph({ draft, onNodeClick, flowchartMap, runtimeNo
           className="select-none"
           style={{ fontFamily: "'Inter', system-ui, sans-serif" }}
         >
+          {/* Group areas — dashed boxes behind multi-node runtime groups */}
+          {groupAreas.map((group) => {
+            const memberIndices = group.draftIds
+              .map(id => idxMap[id])
+              .filter((idx): idx is number => idx !== undefined);
+            if (memberIndices.length < 2) return null;
+            const positions = memberIndices.map(i => nodePos(i));
+            const pad = 10;
+            const minX = Math.min(...positions.map(p => p.x)) - pad;
+            const minY = Math.min(...positions.map(p => p.y)) - pad - 14; // extra space for label
+            const maxX = Math.max(...positions.map(p => p.x + nodeW)) + pad;
+            const maxY = Math.max(...positions.map(p => p.y + NODE_H)) + pad;
+            return (
+              <g key={`group-${group.runtimeId}`}>
+                <rect
+                  x={minX}
+                  y={minY}
+                  width={maxX - minX}
+                  height={maxY - minY}
+                  rx={8}
+                  fill="hsl(220,15%,18%)"
+                  fillOpacity={0.35}
+                  stroke="hsl(220,10%,40%)"
+                  strokeWidth={1}
+                  strokeDasharray="5 3"
+                />
+                <text
+                  x={minX + 8}
+                  y={minY + 11}
+                  fill="hsl(220,10%,50%)"
+                  fontSize={9}
+                  fontWeight={500}
+                >
+                  {truncateLabel(group.label, maxX - minX - 16, 9)}
+                </text>
+              </g>
+            );
+          })}
+
           {forwardEdges.map((e, i) => renderEdge(e, i))}
           {backEdges.map((e, i) => renderBackEdge(e, i))}
           {nodes.map((n, i) => renderNode(n, i))}

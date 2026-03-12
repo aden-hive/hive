@@ -381,6 +381,42 @@ edges → decision, GCU nodes → browser, nodes mentioning "database" → \
 database, nodes mentioning "report/document" → document, etc. Set \
 flowchart_type explicitly only when auto-detection would be wrong.
 
+## Decision Nodes — Planning-Only Conditional Branching
+
+Decision nodes (amber diamonds) are **planning-only** visual elements. They \
+let you show explicit conditional logic in the flowchart so the user can see \
+and approve branching behavior. At `confirm_and_build()`, decision nodes are \
+automatically **dissolved** into the runtime graph:
+
+- The decision clause is merged into the predecessor node's `success_criteria`
+- The yes/no edges are rewired as the predecessor's `on_success`/`on_failure` edges
+- The original flowchart (with decision diamonds) is preserved for display
+
+**When to use decision nodes:**
+- When a workflow has a meaningful condition that determines the next step \
+(e.g., "Did we find enough results?", "Is the data valid?", "Amount > $100?")
+- When the branching logic is important for the user to understand and approve
+- When different outcomes lead to genuinely different processing paths
+
+**How to create a decision node:**
+- Set `flowchart_type: "decision"` on the node
+- Set `decision_clause` to the condition text (e.g., "Data passes validation?")
+- Add two outgoing edges with `label: "Yes"` and `label: "No"` pointing \
+to the respective target nodes
+
+**Good flowcharts display conditions explicitly.** During planning, the user \
+sees the full flowchart with decision diamonds. This is different from the \
+building/running phase where conditions are embedded inside node criteria. \
+The flowchart is the user-facing contract — make branching logic visible.
+
+Example with a decision node:
+```
+gather → [Valid data?] →Yes→ transform → deliver
+                       →No→  notify_user
+```
+In the draft: the `[Valid data?]` node has `flowchart_type: "decision"`, \
+`decision_clause: "Data passes validation checks?"`, with labeled yes/no edges.
+
 After calling save_agent_draft(), also present an ASCII graph in your message \
 alongside a brief summary of each node's purpose. The user sees both the \
 interactive visualizer AND your textual explanation.
@@ -620,9 +656,13 @@ to BUILDING phase for that.
 Create an ISO 5807 color-coded flowchart draft. No code is generated. Each \
 node is auto-classified into a standard flowchart symbol (process, decision, \
 document, database, subprocess, etc.) with unique shapes and colors. Set \
-flowchart_type on a node to override. Nodes need only an id.
-- confirm_and_build() — Record user confirmation of the draft. Call this ONLY \
-after the user explicitly approves the design via ask_user.
+flowchart_type on a node to override. Nodes need only an id. \
+Use decision nodes (flowchart_type: "decision", with decision_clause and \
+labeled yes/no edges) to make conditional branching explicit in the flowchart.
+- confirm_and_build() — Record user confirmation of the draft. Dissolves \
+decision nodes into runtime-compatible structures (merging clauses into \
+predecessor criteria and rewiring edges). Call this ONLY after the user \
+explicitly approves the design via ask_user.
 - initialize_and_build_agent(agent_name?, nodes?) — Scaffold the agent package \
 and transition to BUILDING phase. For new agents, this REQUIRES \
 save_agent_draft() + confirm_and_build() first. The draft metadata is used to \

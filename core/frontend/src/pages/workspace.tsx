@@ -2431,6 +2431,10 @@ export default function Workspace() {
                 draft={activeAgentState.originalDraft}
                 flowchartMap={activeAgentState.flowchartMap ?? undefined}
                 runtimeNodes={currentGraph.nodes}
+                onRuntimeNodeClick={(runtimeNodeId) => {
+                  const node = currentGraph.nodes.find(n => n.id === runtimeNodeId);
+                  if (node) setSelectedNode(prev => prev?.id === node.id ? null : node);
+                }}
               />
             ) : (
               <AgentGraph
