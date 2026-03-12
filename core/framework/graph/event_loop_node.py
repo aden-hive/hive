@@ -4457,19 +4457,24 @@ class EventLoopNode(NodeProtocol):
             result = await subagent_node.execute(subagent_ctx)
             latency_ms = int((time.time() - start_time) * 1000)
 
+            separator = "-" * 60
             logger.info(
-                "\n" + "-" * 60 + "\n"
+                "\n%s\n"
                 "✅ SUBAGENT '%s' COMPLETED\n"
-                "-" * 60 + "\n"
+                "%s\n"
                 "Success: %s\n"
                 "Latency: %dms\n"
                 "Tokens used: %s\n"
-                "Output keys: %s\n" + "-" * 60,
+                "Output keys: %s\n"
+                "%s",
+                separator,
                 agent_id,
+                separator,
                 result.success,
                 latency_ms,
                 result.tokens_used,
                 list(result.output.keys()) if result.output else [],
+                separator,
             )
 
             result_json = {
