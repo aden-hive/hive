@@ -42,7 +42,6 @@ export default function TopBar({
 }: TopBarProps) {
   const navigate = useNavigate();
 
-  /* ---------------- EXISTING CODE ---------------- */
 
   const [persisted, setPersisted] = useState<PersistedTabState | null>(() =>
     tabsProp ? null : loadPersistedTabs(),
