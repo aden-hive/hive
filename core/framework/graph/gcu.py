@@ -87,7 +87,11 @@ Follow these rules for reliable, efficient browser interaction.
 - Pass `target_id` to tools when operating on a specific tab.
 - Open background tabs with `browser_open(url=..., background=true)`
   to avoid losing your current context.
+- Popup tabs (target="_blank" links, window.open()) are auto-tracked.
+  Check `browser_tabs` if unexpected tabs appear.
 - Close tabs you no longer need with `browser_close` to free resources.
+- Use `browser_close_all` to close all tabs except the active one
+  when cleaning up after multi-tab workflows.
 
 ## Login & Auth Walls
 - If you see a "Log in" or "Sign up" prompt instead of expected
