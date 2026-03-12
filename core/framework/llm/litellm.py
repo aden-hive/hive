@@ -943,9 +943,26 @@ class LiteLLMProvider(LLMProvider):
                 response = await litellm.acompletion(**kwargs)  # type: ignore[union-attr]
 
                 async for chunk in response:
-                    choice = chunk.choices[0] if chunk.choices else None
-                    if not choice:
+                    # Capture usage from the trailing usage-only chunk that
+                    # stream_options={"include_usage": True} sends with empty choices.
+                    if not chunk.choices:
+                        usage = getattr(chunk, "usage", None)
+                        if usage:
+                            input_tokens = getattr(usage, "prompt_tokens", 0) or 0
+                            output_tokens = getattr(usage, "completion_tokens", 0) or 0
+                            logger.debug(
+                                "[tokens] trailing usage chunk: input=%d output=%d model=%s",
+                                input_tokens,
+                                output_tokens,
+                                self.model,
+                            )
+                        else:
+                            logger.debug(
+                                "[tokens] empty-choices chunk with no usage (model=%s)",
+                                self.model,
+                            )
                         continue
+                    choice = chunk.choices[0]
 
                     delta = choice.delta
 
@@ -1021,7 +1038,20 @@ class LiteLLMProvider(LLMProvider):
                         if usage:
                             input_tokens = getattr(usage, "prompt_tokens", 0) or 0
                             output_tokens = getattr(usage, "completion_tokens", 0) or 0
+                            logger.debug(
+                                "[tokens] finish-chunk usage: input=%d output=%d model=%s",
+                                input_tokens,
+                                output_tokens,
+                                self.model,
+                            )
 
+                        logger.debug(
+                            "[tokens] finish event: input=%d output=%d stop=%s model=%s",
+                            input_tokens,
+                            output_tokens,
+                            choice.finish_reason,
+                            self.model,
+                        )
                         tail_events.append(
                             FinishEvent(
                                 stop_reason=choice.finish_reason,

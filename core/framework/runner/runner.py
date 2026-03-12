@@ -926,6 +926,10 @@ class AgentRunner:
 
             if agent_config and hasattr(agent_config, "max_tokens"):
                 max_tokens = agent_config.max_tokens
+                logger.info(
+                    "Agent default_config overrides max_tokens: %d (configuration.json value ignored)",
+                    max_tokens,
+                )
             else:
                 hive_config = get_hive_config()
                 max_tokens = hive_config.get("llm", {}).get("max_tokens", DEFAULT_MAX_TOKENS)
