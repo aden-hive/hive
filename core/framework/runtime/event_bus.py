@@ -97,6 +97,7 @@ class EventType(StrEnum):
     # Client I/O (client_facing=True nodes only)
     CLIENT_OUTPUT_DELTA = "client_output_delta"
     CLIENT_INPUT_REQUESTED = "client_input_requested"
+    CLIENT_INPUT_RECEIVED = "client_input_received"
 
     # Internal node observability (client_facing=False nodes)
     NODE_INTERNAL_OUTPUT = "node_internal_output"
@@ -251,6 +252,125 @@ class EventBus:
         self._semaphore = asyncio.Semaphore(max_concurrent_handlers)
         self._subscription_counter = 0
         self._lock = asyncio.Lock()
+        # Per-session persistent event log (always-on, survives restarts)
+        self._session_log: IO[str] | None = None
+        self._session_log_iteration_offset: int = 0
+        # Accumulator for client_output_delta snapshots — flushed on llm_turn_complete.
+        # Key: (stream_id, node_id, execution_id, iteration) → latest AgentEvent
+        self._pending_output_snapshots: dict[tuple, AgentEvent] = {}
+
+    def set_session_log(self, path: Path, *, iteration_offset: int = 0) -> None:
+        """Enable per-session event persistence to a JSONL file.
+
+        Called once when the queen starts so that all events survive server
+        restarts and can be replayed to reconstruct the frontend state.
+
+        ``iteration_offset`` is added to the ``iteration`` field in logged
+        events so that cold-resumed sessions produce monotonically increasing
+        iteration values — preventing frontend message ID collisions between
+        the original run and resumed runs.
+        """
+        if self._session_log is not None:
+            try:
+                self._session_log.close()
+            except Exception:
+                pass
+        path.parent.mkdir(parents=True, exist_ok=True)
+        self._session_log = open(path, "a", encoding="utf-8")  # noqa: SIM115
+        self._session_log_iteration_offset = iteration_offset
+        logger.info("Session event log → %s (iteration_offset=%d)", path, iteration_offset)
+
+    def close_session_log(self) -> None:
+        """Close the per-session event log file."""
+        # Flush any pending output snapshots before closing
+        self._flush_pending_snapshots()
+        if self._session_log is not None:
+            try:
+                self._session_log.close()
+            except Exception:
+                pass
+            self._session_log = None
+
+    # Event types that are high-frequency streaming deltas — accumulated rather
+    # than written individually to the session log.
+    _STREAMING_DELTA_TYPES = frozenset({
+        EventType.CLIENT_OUTPUT_DELTA,
+        EventType.LLM_TEXT_DELTA,
+        EventType.LLM_REASONING_DELTA,
+    })
+
+    def _write_session_log_event(self, event: AgentEvent) -> None:
+        """Write an event to the per-session log with streaming coalescing.
+
+        Streaming deltas (client_output_delta, llm_text_delta) are accumulated
+        in memory.  When llm_turn_complete fires, any pending snapshots for that
+        (stream_id, node_id, execution_id) are flushed as single consolidated
+        events before the turn-complete event itself is written.
+
+        Note: iteration offset is already applied in publish() before this is
+        called, so events here already have correct iteration values.
+        """
+        if self._session_log is None:
+            return
+
+        if event.type in self._STREAMING_DELTA_TYPES:
+            # Accumulate — keep only the latest event (which carries the full snapshot)
+            key = (
+                event.stream_id,
+                event.node_id,
+                event.execution_id,
+                event.data.get("iteration"),
+            )
+            self._pending_output_snapshots[key] = event
+            return
+
+        # On turn-complete, flush accumulated snapshots for this stream first
+        if event.type == EventType.LLM_TURN_COMPLETE:
+            self._flush_pending_snapshots(
+                stream_id=event.stream_id,
+                node_id=event.node_id,
+                execution_id=event.execution_id,
+            )
+
+        line = json.dumps(event.to_dict(), default=str)
+        self._session_log.write(line + "\n")
+        self._session_log.flush()
+
+    def _flush_pending_snapshots(
+        self,
+        stream_id: str | None = None,
+        node_id: str | None = None,
+        execution_id: str | None = None,
+    ) -> None:
+        """Flush accumulated streaming snapshots to the session log.
+
+        When called with filters, only matching entries are flushed.
+        When called without filters (e.g. on close), everything is flushed.
+        """
+        if self._session_log is None or not self._pending_output_snapshots:
+            return
+
+        to_flush: list[tuple] = []
+        for key, evt in self._pending_output_snapshots.items():
+            if stream_id is not None:
+                k_stream, k_node, k_exec, _ = key
+                if k_stream != stream_id or k_node != node_id or k_exec != execution_id:
+                    continue
+            to_flush.append(key)
+
+        for key in to_flush:
+            evt = self._pending_output_snapshots.pop(key)
+            try:
+                line = json.dumps(evt.to_dict(), default=str)
+                self._session_log.write(line + "\n")
+            except Exception:
+                pass
+
+        if to_flush:
+            try:
+                self._session_log.flush()
+            except Exception:
+                pass
 
     def subscribe(
         self,
@@ -316,6 +436,14 @@ class EventBus:
         Args:
             event: Event to publish
         """
+        # Apply iteration offset at the source so ALL consumers (SSE subscribers,
+        # event history, session log) see the same monotonically increasing
+        # iteration values.  Without this, live SSE would use raw iterations
+        # while events.jsonl would use offset iterations, causing ID collisions
+        # on the frontend when replaying after cold resume.
+        if self._session_log_iteration_offset and isinstance(event.data, dict) and "iteration" in event.data:
+            event.data = {**event.data, "iteration": event.data["iteration"] + self._session_log_iteration_offset}
+
         # Add to history
         async with self._lock:
             self._event_history.append(event)
@@ -335,6 +463,15 @@ class EventBus:
                     _event_log_file.flush()
                 except Exception:
                     pass  # never break event delivery
+
+        # Per-session persistent log (always-on when set_session_log was called).
+        # Streaming deltas are coalesced: client_output_delta and llm_text_delta
+        # are accumulated and flushed as a single snapshot event on llm_turn_complete.
+        if self._session_log is not None:
+            try:
+                self._write_session_log_event(event)
+            except Exception:
+                pass  # never break event delivery
 
         # Find matching subscriptions
         matching_handlers: list[EventHandler] = []

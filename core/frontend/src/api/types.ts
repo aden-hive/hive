@@ -263,6 +263,7 @@ export type EventTypeName =
   | "tool_call_completed"
   | "client_output_delta"
   | "client_input_requested"
+  | "client_input_received"
   | "node_internal_output"
   | "node_input_blocked"
   | "node_stalled"

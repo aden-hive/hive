@@ -12,6 +12,7 @@ Session-primary routes:
 - PATCH  /api/sessions/{session_id}/triggers/{id}   — update trigger task
 - GET    /api/sessions/{session_id}/graphs           — list graph IDs
 - GET    /api/sessions/{session_id}/queen-messages   — queen conversation history
+- GET    /api/sessions/{session_id}/events/history  — persisted eventbus log (for replay)
 
 Worker session browsing (persisted execution runs on disk):
 - GET    /api/sessions/{session_id}/worker-sessions                             — list
@@ -800,6 +801,38 @@ async def handle_queen_messages(request: web.Request) -> web.Response:
     return web.json_response({"messages": all_messages, "session_id": session_id})
 
 
+async def handle_session_events_history(request: web.Request) -> web.Response:
+    """GET /api/sessions/{session_id}/events/history — persisted eventbus log.
+
+    Reads ``events.jsonl`` from the session directory on disk so it works for
+    both live sessions and cold (post-server-restart) sessions.  The frontend
+    replays these events through ``sseEventToChatMessage`` to fully reconstruct
+    the UI state on resume.
+    """
+    session_id = request.match_info["session_id"]
+
+    queen_dir = Path.home() / ".hive" / "queen" / "session" / session_id
+    events_path = queen_dir / "events.jsonl"
+    if not events_path.exists():
+        return web.json_response({"events": [], "session_id": session_id})
+
+    events: list[dict] = []
+    try:
+        with open(events_path, encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    events.append(json.loads(line))
+                except json.JSONDecodeError:
+                    continue
+    except OSError:
+        return web.json_response({"events": [], "session_id": session_id})
+
+    return web.json_response({"events": events, "session_id": session_id})
+
+
 async def handle_session_history(request: web.Request) -> web.Response:
     """GET /api/sessions/history — all queen sessions on disk (live + cold).
 
@@ -915,6 +948,9 @@ def register_routes(app: web.Application) -> None:
     )
     app.router.add_get("/api/sessions/{session_id}/graphs", handle_session_graphs)
     app.router.add_get("/api/sessions/{session_id}/queen-messages", handle_queen_messages)
+    app.router.add_get(
+        "/api/sessions/{session_id}/events/history", handle_session_events_history
+    )
 
     # Worker session browsing (session-primary)
     app.router.add_get("/api/sessions/{session_id}/worker-sessions", handle_list_worker_sessions)

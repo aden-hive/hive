@@ -590,6 +590,9 @@ class SessionManager:
                 name=f"queen-memory-consolidation-{session_id}",
             )
 
+        # Close per-session event log
+        session.event_bus.close_session_log()
+
         logger.info("Session '%s' stopped", session_id)
         return True
 
@@ -687,6 +690,38 @@ class SessionManager:
             )
         except OSError:
             pass
+
+        # Enable per-session event persistence so that all eventbus events
+        # survive server restarts and can be replayed on cold-session resume.
+        # Scan the existing event log to find the max iteration ever written,
+        # then use max+1 as offset so resumed sessions produce monotonically
+        # increasing iteration values — preventing frontend message ID collisions.
+        iteration_offset = 0
+        events_path = queen_dir / "events.jsonl"
+        try:
+            if events_path.exists():
+                max_iter = -1
+                with open(events_path, encoding="utf-8") as f:
+                    for line in f:
+                        line = line.strip()
+                        if not line:
+                            continue
+                        try:
+                            evt = json.loads(line)
+                            it = evt.get("data", {}).get("iteration")
+                            if isinstance(it, int) and it > max_iter:
+                                max_iter = it
+                        except (json.JSONDecodeError, TypeError):
+                            continue
+                if max_iter >= 0:
+                    iteration_offset = max_iter + 1
+                    logger.info(
+                        "Session '%s' resuming with iteration_offset=%d (from events.jsonl max)",
+                        session.id, iteration_offset,
+                    )
+        except OSError:
+            pass
+        session.event_bus.set_session_log(events_path, iteration_offset=iteration_offset)
 
         session.queen_task = await create_queen(
             session=session,

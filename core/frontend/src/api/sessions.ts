@@ -1,5 +1,6 @@
 import { api } from "./client";
 import type {
+  AgentEvent,
   LiveSession,
   LiveSessionDetail,
   SessionSummary,
@@ -76,6 +77,10 @@ export const sessionsApi = {
   /** Get queen conversation history for a session (works for cold/post-restart sessions too). */
   queenMessages: (sessionId: string) =>
     api.get<{ messages: Message[]; session_id: string }>(`/sessions/${sessionId}/queen-messages`),
+
+  /** Get persisted eventbus log for a session (works for cold sessions — used for full UI replay). */
+  eventsHistory: (sessionId: string) =>
+    api.get<{ events: AgentEvent[]; session_id: string }>(`/sessions/${sessionId}/events/history`),
 
   /** List all queen sessions on disk — live + cold (post-restart). */
   history: () =>

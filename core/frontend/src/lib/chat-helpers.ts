@@ -126,6 +126,21 @@ export function sseEventToChatMessage(
       // create a worker_input_request message and set awaitingInput state.
       return null;
 
+    case "client_input_received": {
+      const userContent = (event.data?.content as string) || "";
+      if (!userContent) return null;
+      return {
+        id: `user-input-${event.timestamp}`,
+        agent: "You",
+        agentColor: "",
+        content: userContent,
+        timestamp: "",
+        type: "user",
+        thread,
+        createdAt,
+      };
+    }
+
     case "llm_text_delta": {
       const snapshot = (event.data?.snapshot as string) || (event.data?.content as string) || "";
       if (!snapshot) return null;

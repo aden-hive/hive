@@ -690,11 +690,29 @@ export default function Workspace() {
           const alreadyHasMessages = (activeSess?.messages?.length ?? 0) > 0;
           if (restoreFrom && !alreadyHasMessages) {
             try {
-              const { messages: queenMsgs } = await sessionsApi.queenMessages(restoreFrom);
-              for (const m of queenMsgs as Message[]) {
-                const msg = backendMessageToChatMessage(m, agentType, "Queen Bee");
-                msg.role = "queen";
-                preRestoredMsgs.push(msg);
+              // Prefer persisted event log for full UI reconstruction
+              let usedEventLog = false;
+              try {
+                const { events } = await sessionsApi.eventsHistory(restoreFrom);
+                if (events.length > 0) {
+                  for (const evt of events) {
+                    const msg = sseEventToChatMessage(evt, agentType, "Queen Bee");
+                    if (msg) {
+                      if (evt.stream_id === "queen") msg.role = "queen";
+                      preRestoredMsgs.push(msg);
+                    }
+                  }
+                  usedEventLog = true;
+                }
+              } catch { /* event log not available */ }
+
+              if (!usedEventLog) {
+                const { messages: queenMsgs } = await sessionsApi.queenMessages(restoreFrom);
+                for (const m of queenMsgs as Message[]) {
+                  const msg = backendMessageToChatMessage(m, agentType, "Queen Bee");
+                  msg.role = "queen";
+                  preRestoredMsgs.push(msg);
+                }
               }
             } catch {
               // Not available — will start fresh
@@ -868,25 +886,46 @@ export default function Workspace() {
         let preQueenMsgs: ChatMessage[] = [];
         if (coldRestoreId && !alreadyHasMessages) {
           try {
-            const { messages: queenMsgs } = await sessionsApi.queenMessages(coldRestoreId);
-            // Also pre-fetch worker messages from the old session if a resumable worker exists
-            const displayNameTemp = formatAgentDisplayName(agentPath);
-            for (const m of queenMsgs as Message[]) {
-              const msg = backendMessageToChatMessage(m, agentType, "Queen Bee");
-              msg.role = "queen";
-              preQueenMsgs.push(msg);
-            }
-            // Also try to grab worker messages while we're here
+            // Prefer the persisted event log for full UI reconstruction (includes
+            // tool calls, execution state, etc.). Fall back to parts-based
+            // queen messages when no event log exists (pre-upgrade sessions).
+            let usedEventLog = false;
             try {
-              const { sessions: workerSessions } = await sessionsApi.workerSessions(coldRestoreId);
-              const resumable = workerSessions.find(s => s.status === "active" || s.status === "paused");
-              if (resumable) {
-                const { messages: wMsgs } = await sessionsApi.messages(coldRestoreId, resumable.session_id);
-                for (const m of wMsgs as Message[]) {
-                  preQueenMsgs.push(backendMessageToChatMessage(m, agentType, displayNameTemp));
+              const { events } = await sessionsApi.eventsHistory(coldRestoreId);
+              if (events.length > 0) {
+                const displayNameTemp = formatAgentDisplayName(agentPath);
+                for (const evt of events) {
+                  const msg = sseEventToChatMessage(evt, agentType, displayNameTemp);
+                  if (msg) {
+                    // Tag queen-stream messages appropriately
+                    if (evt.stream_id === "queen") msg.role = "queen";
+                    preQueenMsgs.push(msg);
+                  }
                 }
+                usedEventLog = true;
               }
-            } catch { /* not critical */ }
+            } catch { /* event log not available — fall back to parts */ }
+
+            if (!usedEventLog) {
+              const { messages: queenMsgs } = await sessionsApi.queenMessages(coldRestoreId);
+              const displayNameTemp = formatAgentDisplayName(agentPath);
+              for (const m of queenMsgs as Message[]) {
+                const msg = backendMessageToChatMessage(m, agentType, "Queen Bee");
+                msg.role = "queen";
+                preQueenMsgs.push(msg);
+              }
+              // Also try to grab worker messages while we're here
+              try {
+                const { sessions: workerSessions } = await sessionsApi.workerSessions(coldRestoreId);
+                const resumable = workerSessions.find(s => s.status === "active" || s.status === "paused");
+                if (resumable) {
+                  const { messages: wMsgs } = await sessionsApi.messages(coldRestoreId, resumable.session_id);
+                  for (const m of wMsgs as Message[]) {
+                    preQueenMsgs.push(backendMessageToChatMessage(m, agentType, displayNameTemp));
+                  }
+                }
+              } catch { /* not critical */ }
+            }
           } catch {
             // Not available — will start fresh
           }
@@ -1004,6 +1043,23 @@ export default function Workspace() {
       // For cold restore they were already pre-fetched above (before create) so we skip to avoid
       // double-restoring and to avoid capturing the new greeting.
       if (historyId && !coldRestoreId) {
+        // Try event log first for full UI reconstruction
+        let usedEventLog = false;
+        try {
+          const { events } = await sessionsApi.eventsHistory(historyId);
+          if (events.length > 0) {
+            for (const evt of events) {
+              const msg = sseEventToChatMessage(evt, agentType, displayName);
+              if (msg) {
+                if (evt.stream_id === "queen") msg.role = "queen";
+                restoredMsgs.push(msg);
+              }
+            }
+            usedEventLog = true;
+          }
+        } catch { /* event log not available */ }
+
+        // Check worker status regardless (needed for isWorkerRunning flag)
         try {
           const { sessions: workerSessions } = await sessionsApi.workerSessions(historyId);
           const resumable = workerSessions.find(
@@ -1011,7 +1067,8 @@ export default function Workspace() {
           );
           isWorkerRunning = resumable?.status === "active";
 
-          if (resumable) {
+          // Fall back to parts-based messages if no event log
+          if (!usedEventLog && resumable) {
             const { messages } = await sessionsApi.messages(historyId, resumable.session_id);
             for (const m of messages as Message[]) {
               restoredMsgs.push(backendMessageToChatMessage(m, agentType, displayName));
@@ -1021,15 +1078,17 @@ export default function Workspace() {
           // Worker session listing failed — not critical
         }
 
-        try {
-          const { messages: queenMsgs } = await sessionsApi.queenMessages(historyId);
-          for (const m of queenMsgs as Message[]) {
-            const msg = backendMessageToChatMessage(m, agentType, "Queen Bee");
-            msg.role = "queen";
-            restoredMsgs.push(msg);
+        if (!usedEventLog) {
+          try {
+            const { messages: queenMsgs } = await sessionsApi.queenMessages(historyId);
+            for (const m of queenMsgs as Message[]) {
+              const msg = backendMessageToChatMessage(m, agentType, "Queen Bee");
+              msg.role = "queen";
+              restoredMsgs.push(msg);
+            }
+          } catch {
+            // Queen messages not available — not critical
           }
-        } catch {
-          // Queen messages not available — not critical
         }
       }
 
@@ -2514,15 +2573,34 @@ export default function Workspace() {
     }
 
     // Pre-fetch messages from disk so the tab opens with conversation already shown.
-    // This happens BEFORE creating the tab so no "new session" empty state is visible.
+    // Prefer the persisted event log for full UI reconstruction; fall back to parts.
     let prefetchedMessages: ChatMessage[] = [];
     try {
-      const { messages: queenMsgs } = await sessionsApi.queenMessages(sessionId);
-      for (const m of queenMsgs as Message[]) {
-        const resolvedType = agentPath || "new-agent";
-        const msg = backendMessageToChatMessage(m, resolvedType, "Queen Bee");
-        msg.role = "queen";
-        prefetchedMessages.push(msg);
+      let usedEventLog = false;
+      try {
+        const { events } = await sessionsApi.eventsHistory(sessionId);
+        if (events.length > 0) {
+          const resolvedType = agentPath || "new-agent";
+          const displayNameTemp = agentName || formatAgentDisplayName(resolvedType);
+          for (const evt of events) {
+            const msg = sseEventToChatMessage(evt, resolvedType, displayNameTemp);
+            if (msg) {
+              if (evt.stream_id === "queen") msg.role = "queen";
+              prefetchedMessages.push(msg);
+            }
+          }
+          usedEventLog = true;
+        }
+      } catch { /* event log not available */ }
+
+      if (!usedEventLog) {
+        const { messages: queenMsgs } = await sessionsApi.queenMessages(sessionId);
+        for (const m of queenMsgs as Message[]) {
+          const resolvedType = agentPath || "new-agent";
+          const msg = backendMessageToChatMessage(m, resolvedType, "Queen Bee");
+          msg.role = "queen";
+          prefetchedMessages.push(msg);
+        }
       }
       if (prefetchedMessages.length > 0) {
         prefetchedMessages.sort((a, b) => (a.createdAt ?? 0) - (b.createdAt ?? 0));
