@@ -622,6 +622,7 @@ class EventBus:
         model: str,
         input_tokens: int,
         output_tokens: int,
+        cached_tokens: int = 0,
         execution_id: str | None = None,
         iteration: int | None = None,
     ) -> None:
@@ -631,6 +632,7 @@ class EventBus:
             "model": model,
             "input_tokens": input_tokens,
             "output_tokens": output_tokens,
+            "cached_tokens": cached_tokens,
         }
         if iteration is not None:
             data["iteration"] = iteration

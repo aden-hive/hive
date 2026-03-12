@@ -170,7 +170,7 @@ class LoopConfig:
     judge_every_n_turns: int = 1
     stall_detection_threshold: int = 3
     stall_similarity_threshold: float = 0.85
-    max_history_tokens: int = 32_000
+    max_context_tokens: int = 32_000
     store_prefix: str = ""
 
     # Overflow margin for max_tool_calls_per_turn.  Tool calls are only
@@ -512,7 +512,7 @@ class EventLoopNode(NodeProtocol):
 
                 conversation = NodeConversation(
                     system_prompt=system_prompt,
-                    max_history_tokens=self._config.max_history_tokens,
+                    max_context_tokens=self._config.max_context_tokens,
                     output_keys=ctx.node_spec.output_keys or None,
                     store=self._conversation_store,
                 )
@@ -712,6 +712,7 @@ class EventLoopNode(NodeProtocol):
                         model=turn_tokens.get("model", ""),
                         input_tokens=turn_tokens.get("input", 0),
                         output_tokens=turn_tokens.get("output", 0),
+                        cached_tokens=turn_tokens.get("cached", 0),
                         execution_id=execution_id,
                         iteration=iteration,
                     )
@@ -1833,7 +1834,7 @@ class EventLoopNode(NodeProtocol):
         stream_id = ctx.stream_id or ctx.node_id
         node_id = ctx.node_id
         execution_id = ctx.execution_id or ""
-        token_counts: dict[str, int] = {"input": 0, "output": 0}
+        token_counts: dict[str, int] = {"input": 0, "output": 0, "cached": 0}
         tool_call_count = 0
         final_text = ""
         final_system_prompt = conversation.system_prompt
@@ -1914,6 +1915,7 @@ class EventLoopNode(NodeProtocol):
                     elif isinstance(event, FinishEvent):
                         token_counts["input"] += event.input_tokens
                         token_counts["output"] += event.output_tokens
+                        token_counts["cached"] += event.cached_tokens
                         token_counts["stop_reason"] = event.stop_reason
                         token_counts["model"] = event.model
 
@@ -2457,7 +2459,7 @@ class EventLoopNode(NodeProtocol):
                 # next turn.  The char-based token estimator underestimates
                 # actual API tokens, so the standard compaction check in the
                 # outer loop may not trigger in time.
-                protect = max(2000, self._config.max_history_tokens // 12)
+                protect = max(2000, self._config.max_context_tokens // 12)
                 pruned = await conversation.prune_old_tool_results(
                     protect_tokens=protect,
                     min_prune_tokens=max(1000, protect // 3),
@@ -2466,7 +2468,7 @@ class EventLoopNode(NodeProtocol):
                     logger.info(
                         "Post-limit pruning: cleared %d old tool results (budget: %d)",
                         pruned,
-                        self._config.max_history_tokens,
+                        self._config.max_context_tokens,
                     )
                 # Limit hit — return from this turn so the judge can
                 # evaluate instead of looping back for another stream.
@@ -2487,7 +2489,7 @@ class EventLoopNode(NodeProtocol):
 
             # --- Mid-turn pruning: prevent context blowup within a single turn ---
             if conversation.usage_ratio() >= 0.6:
-                protect = max(2000, self._config.max_history_tokens // 12)
+                protect = max(2000, self._config.max_context_tokens // 12)
                 pruned = await conversation.prune_old_tool_results(
                     protect_tokens=protect,
                     min_prune_tokens=max(1000, protect // 3),
@@ -2914,7 +2916,7 @@ class EventLoopNode(NodeProtocol):
                 phase_description=ctx.node_spec.description,
                 success_criteria=ctx.node_spec.success_criteria,
                 accumulator_state=accumulator.to_dict(),
-                max_history_tokens=self._config.max_history_tokens,
+                max_context_tokens=self._config.max_context_tokens,
             )
             if verdict.action != "ACCEPT":
                 return JudgeVerdict(
@@ -3354,7 +3356,7 @@ class EventLoopNode(NodeProtocol):
         phase_grad = getattr(ctx, "continuous_mode", False)
 
         # --- Step 1: Prune old tool results (free, no LLM) ---
-        protect = max(2000, self._config.max_history_tokens // 12)
+        protect = max(2000, self._config.max_context_tokens // 12)
         pruned = await conversation.prune_old_tool_results(
             protect_tokens=protect,
             min_prune_tokens=max(1000, protect // 3),
@@ -3460,7 +3462,7 @@ class EventLoopNode(NodeProtocol):
                 accumulator,
                 formatted,
             )
-            summary_budget = max(1024, self._config.max_history_tokens // 2)
+            summary_budget = max(1024, self._config.max_context_tokens // 2)
             try:
                 response = await ctx.llm.acomplete(
                     messages=[{"role": "user", "content": prompt}],
@@ -3563,7 +3565,7 @@ class EventLoopNode(NodeProtocol):
         elif spec.output_keys:
             ctx_lines.append(f"OUTPUTS STILL NEEDED: {', '.join(spec.output_keys)}")
 
-        target_tokens = self._config.max_history_tokens // 2
+        target_tokens = self._config.max_context_tokens // 2
         target_chars = target_tokens * 4
         node_ctx = "\n".join(ctx_lines)
 
@@ -4031,6 +4033,7 @@ class EventLoopNode(NodeProtocol):
         model: str,
         input_tokens: int,
         output_tokens: int,
+        cached_tokens: int = 0,
         execution_id: str = "",
         iteration: int | None = None,
     ) -> None:
@@ -4042,6 +4045,7 @@ class EventLoopNode(NodeProtocol):
                 model=model,
                 input_tokens=input_tokens,
                 output_tokens=output_tokens,
+                cached_tokens=cached_tokens,
                 execution_id=execution_id,
                 iteration=iteration,
             )
@@ -4442,7 +4446,7 @@ class EventLoopNode(NodeProtocol):
                 max_iterations=max_iter,  # Tighter budget
                 max_tool_calls_per_turn=self._config.max_tool_calls_per_turn,
                 tool_call_overflow_margin=self._config.tool_call_overflow_margin,
-                max_history_tokens=self._config.max_history_tokens,
+                max_context_tokens=self._config.max_context_tokens,
                 stall_detection_threshold=self._config.stall_detection_threshold,
                 max_tool_result_chars=self._config.max_tool_result_chars,
                 spillover_dir=subagent_spillover,

@@ -253,6 +253,6 @@ judge_graph = GraphSpec(
     loop_config={
         "max_iterations": 10,  # One check shouldn't take many turns
         "max_tool_calls_per_turn": 3,  # get_summary + optionally emit_ticket
-        "max_history_tokens": 16000,  # Compact — judge only needs recent context
+        "max_context_tokens": 16000,  # Compact — judge only needs recent context
     },
 )

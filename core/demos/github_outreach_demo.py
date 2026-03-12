@@ -1769,7 +1769,7 @@ async def _run_pipeline(websocket, initial_message: str):
             config=LoopConfig(
                 max_iterations=30,
                 max_tool_calls_per_turn=30,
-                max_history_tokens=64000,
+                max_context_tokens=64000,
                 max_tool_result_chars=8_000,
                 spillover_dir=str(_DATA_DIR),
             ),
