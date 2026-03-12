@@ -2551,13 +2551,11 @@ export default function Workspace() {
         onClose={() => {
           setCredentialsOpen(false);
           setCredentialAgentPath(null);
-          setDismissedBanner(null);
-          // Clear stale credential error — modal re-validates on every open,
-          // so closing it is an intentional "I'm done here". If credentials
-          // are still missing, the next agent run will re-trigger the 424.
-          if (agentStates[activeWorker]?.error === "credentials_required") {
-            updateAgentState(activeWorker, { error: null });
-          }
+          // Keep credentials_required error set — clearing it here triggers
+          // the auto-load effect which retries session creation immediately,
+          // causing an infinite modal loop when credentials are still missing.
+          // The error is only cleared in onCredentialChange (below) when the
+          // user actually saves valid credentials.
         }}
         credentials={activeSession?.credentials || []}
         onCredentialChange={() => {
