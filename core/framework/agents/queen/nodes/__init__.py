@@ -190,10 +190,12 @@ Before designing any agent, discover tools progressively — start compact, dril
 what you need. ONLY use tools from this list in your node definitions. \
 NEVER guess or fabricate tool names from memory.
 
-  list_agent_tools()                                                      # Step 1: provider summary (counts + credential status)
-  list_agent_tools(group="google", output_schema="summary")               # Step 2: service breakdown within a provider
-  list_agent_tools(group="google", service="gmail")                       # Step 3: tool names for one service
-  list_agent_tools(group="google", service="gmail", output_schema="full") # Step 4: full detail for specific tools
+  list_agent_tools()                                        # Step 1: provider summary
+  list_agent_tools(group="google", output_schema="summary") # Step 2: service breakdown
+  list_agent_tools(group="google", service="gmail")         # Step 3: tool names
+  list_agent_tools(                                         # Step 4: full detail
+      group="google", service="gmail", output_schema="full"
+  )
 
 Step 1 is MANDATORY. Returns provider names, tool counts, credential availability — very compact. \
 Step 2 breaks a provider into services (e.g. google → gmail/calendar/sheets/drive). Only do this \

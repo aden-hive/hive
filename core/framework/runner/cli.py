@@ -243,12 +243,8 @@ def register_commands(subparsers: argparse._SubParsersAction) -> None:
         action="store_true",
         help="Open dashboard in browser after server starts",
     )
-    serve_parser.add_argument(
-        "--verbose", "-v", action="store_true", help="Enable INFO log level"
-    )
-    serve_parser.add_argument(
-        "--debug", action="store_true", help="Enable DEBUG log level"
-    )
+    serve_parser.add_argument("--verbose", "-v", action="store_true", help="Enable INFO log level")
+    serve_parser.add_argument("--debug", action="store_true", help="Enable DEBUG log level")
     serve_parser.set_defaults(func=cmd_serve)
 
     # open command (serve + auto-open browser)
@@ -286,12 +282,8 @@ def register_commands(subparsers: argparse._SubParsersAction) -> None:
         default=None,
         help="LLM model for preloaded agents",
     )
-    open_parser.add_argument(
-        "--verbose", "-v", action="store_true", help="Enable INFO log level"
-    )
-    open_parser.add_argument(
-        "--debug", action="store_true", help="Enable DEBUG log level"
-    )
+    open_parser.add_argument("--verbose", "-v", action="store_true", help="Enable INFO log level")
+    open_parser.add_argument("--debug", action="store_true", help="Enable DEBUG log level")
     open_parser.set_defaults(func=cmd_open)
 
 
@@ -387,12 +379,10 @@ def _prompt_before_start(agent_path: str, runner, model: str | None = None):
 
 def cmd_run(args: argparse.Namespace) -> int:
     """Run an exported agent."""
-    import logging
 
     from framework.credentials.models import CredentialError
-    from framework.runner import AgentRunner
-
     from framework.observability import configure_logging
+    from framework.runner import AgentRunner
 
     # Set logging level (quiet by default for cleaner output)
     if args.quiet:
@@ -932,12 +922,10 @@ def _format_natural_language_to_json(
 
 def cmd_shell(args: argparse.Namespace) -> int:
     """Start an interactive agent session."""
-    import logging
 
     from framework.credentials.models import CredentialError
-    from framework.runner import AgentRunner
-
     from framework.observability import configure_logging
+    from framework.runner import AgentRunner
 
     configure_logging(level="INFO")
 
@@ -1637,15 +1625,13 @@ def _build_frontend() -> bool:
 
 def cmd_serve(args: argparse.Namespace) -> int:
     """Start the HTTP API server."""
-    import logging
 
     from aiohttp import web
 
     _build_frontend()
 
-    from framework.server.app import create_app
-
     from framework.observability import configure_logging
+    from framework.server.app import create_app
 
     if getattr(args, "debug", False):
         configure_logging(level="DEBUG")

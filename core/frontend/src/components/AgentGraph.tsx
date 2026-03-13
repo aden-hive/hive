@@ -1,4 +1,4 @@
-import { memo, useMemo, useState, useRef } from "react";
+import { memo, useMemo, useState, useRef, useEffect, useCallback } from "react";
 import { Play, Pause, Loader2, CheckCircle2 } from "lucide-react";
 
 export type NodeStatus = "running" | "complete" | "pending" | "error" | "looping";
@@ -89,47 +89,87 @@ const MARGIN_RIGHT = 50; // space for back-edge arcs
 const SVG_BASE_W = 320;
 const GAP_X = 12;
 
-// Unified amber/gold palette
-const statusColors: Record<NodeStatus, { dot: string; bg: string; border: string; glow: string }> = {
-  running: {
-    dot: "hsl(45,95%,58%)",
-    bg: "hsl(45,95%,58%,0.08)",
-    border: "hsl(45,95%,58%,0.5)",
-    glow: "hsl(45,95%,58%,0.15)",
-  },
-  looping: {
-    dot: "hsl(38,90%,55%)",
-    bg: "hsl(38,90%,55%,0.08)",
-    border: "hsl(38,90%,55%,0.5)",
-    glow: "hsl(38,90%,55%,0.15)",
-  },
-  complete: {
-    dot: "hsl(43,70%,45%)",
-    bg: "hsl(43,70%,45%,0.05)",
-    border: "hsl(43,70%,45%,0.25)",
-    glow: "none",
-  },
-  pending: {
-    dot: "hsl(35,15%,28%)",
-    bg: "hsl(35,10%,12%)",
-    border: "hsl(35,10%,20%)",
-    glow: "none",
-  },
-  error: {
-    dot: "hsl(0,65%,55%)",
-    bg: "hsl(0,65%,55%,0.06)",
-    border: "hsl(0,65%,55%,0.3)",
-    glow: "hsl(0,65%,55%,0.1)",
-  },
-};
+// Read a CSS custom property value (space-separated HSL components)
+function cssVar(name: string): string {
+  return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+}
 
-// Trigger node palette — cool blue-gray, visually distinct from amber execution nodes
-const triggerColors = {
-  bg: "hsl(210,25%,14%)",
-  border: "hsl(210,30%,30%)",
-  text: "hsl(210,30%,65%)",
-  icon: "hsl(210,40%,55%)",
-};
+type StatusColorSet = Record<NodeStatus, { dot: string; bg: string; border: string; glow: string }>;
+type TriggerColorSet = { bg: string; border: string; text: string; icon: string };
+
+function buildStatusColors(): StatusColorSet {
+  const running = cssVar("--node-running") || "45 95% 58%";
+  const looping = cssVar("--node-looping") || "38 90% 55%";
+  const complete = cssVar("--node-complete") || "43 70% 45%";
+  const pending = cssVar("--node-pending") || "35 15% 28%";
+  const pendingBg = cssVar("--node-pending-bg") || "35 10% 12%";
+  const pendingBorder = cssVar("--node-pending-border") || "35 10% 20%";
+  const error = cssVar("--node-error") || "0 65% 55%";
+
+  return {
+    running: {
+      dot: `hsl(${running})`,
+      bg: `hsl(${running} / 0.08)`,
+      border: `hsl(${running} / 0.5)`,
+      glow: `hsl(${running} / 0.15)`,
+    },
+    looping: {
+      dot: `hsl(${looping})`,
+      bg: `hsl(${looping} / 0.08)`,
+      border: `hsl(${looping} / 0.5)`,
+      glow: `hsl(${looping} / 0.15)`,
+    },
+    complete: {
+      dot: `hsl(${complete})`,
+      bg: `hsl(${complete} / 0.05)`,
+      border: `hsl(${complete} / 0.25)`,
+      glow: "none",
+    },
+    pending: {
+      dot: `hsl(${pending})`,
+      bg: `hsl(${pendingBg})`,
+      border: `hsl(${pendingBorder})`,
+      glow: "none",
+    },
+    error: {
+      dot: `hsl(${error})`,
+      bg: `hsl(${error} / 0.06)`,
+      border: `hsl(${error} / 0.3)`,
+      glow: `hsl(${error} / 0.1)`,
+    },
+  };
+}
+
+function buildTriggerColors(): TriggerColorSet {
+  const bg = cssVar("--trigger-bg") || "210 25% 14%";
+  const border = cssVar("--trigger-border") || "210 30% 30%";
+  const text = cssVar("--trigger-text") || "210 30% 65%";
+  const icon = cssVar("--trigger-icon") || "210 40% 55%";
+  return {
+    bg: `hsl(${bg})`,
+    border: `hsl(${border})`,
+    text: `hsl(${text})`,
+    icon: `hsl(${icon})`,
+  };
+}
+
+/** Hook that reads node/trigger colors from CSS vars and updates on theme changes. */
+function useThemeColors() {
+  const [statusColors, setStatusColors] = useState<StatusColorSet>(buildStatusColors);
+  const [triggerColors, setTriggerColors] = useState<TriggerColorSet>(buildTriggerColors);
+
+  useEffect(() => {
+    const rebuild = () => {
+      setStatusColors(buildStatusColors());
+      setTriggerColors(buildTriggerColors());
+    };
+    const obs = new MutationObserver(rebuild);
+    obs.observe(document.documentElement, { attributes: true, attributeFilter: ["class", "style"] });
+    return () => obs.disconnect();
+  }, []);
+
+  return { statusColors, triggerColors };
+}
 
 const triggerIcons: Record<string, string> = {
   webhook: "\u26A1",  // lightning bolt
@@ -146,10 +186,96 @@ function truncateLabel(label: string, availablePx: number, fontSize: number): st
   return label.slice(0, Math.max(maxChars - 1, 1)) + "\u2026";
 }
 
+// ─── Pan & Zoom wrapper ───
+function PanZoomSvg({ svgW, svgH, className, children }: { svgW: number; svgH: number; className?: string; children: React.ReactNode }) {
+  const [zoom, setZoom] = useState(1);
+  const [pan, setPan] = useState({ x: 0, y: 0 });
+  const [dragging, setDragging] = useState(false);
+  const dragStart = useRef({ x: 0, y: 0, panX: 0, panY: 0 });
+
+  const MIN_ZOOM = 0.4;
+  const MAX_ZOOM = 3;
+
+  const handleWheel = useCallback((e: React.WheelEvent) => {
+    e.preventDefault();
+    const delta = e.deltaY > 0 ? 0.9 : 1.1;
+    setZoom(z => Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, z * delta)));
+  }, []);
+
+  const handleMouseDown = useCallback((e: React.MouseEvent) => {
+    if (e.button !== 0) return;
+    setDragging(true);
+    dragStart.current = { x: e.clientX, y: e.clientY, panX: pan.x, panY: pan.y };
+  }, [pan]);
+
+  const handleMouseMove = useCallback((e: React.MouseEvent) => {
+    if (!dragging) return;
+    setPan({
+      x: dragStart.current.panX + (e.clientX - dragStart.current.x),
+      y: dragStart.current.panY + (e.clientY - dragStart.current.y),
+    });
+  }, [dragging]);
+
+  const handleMouseUp = useCallback(() => setDragging(false), []);
+
+  const resetView = useCallback(() => {
+    setZoom(1);
+    setPan({ x: 0, y: 0 });
+  }, []);
+
+  return (
+    <div className="flex-1 relative overflow-hidden px-1 pb-5">
+      <div
+        onWheel={handleWheel}
+        onMouseDown={handleMouseDown}
+        onMouseMove={handleMouseMove}
+        onMouseUp={handleMouseUp}
+        onMouseLeave={handleMouseUp}
+        className="w-full h-full"
+        style={{ cursor: dragging ? "grabbing" : "grab" }}
+      >
+        <svg
+          width="100%"
+          viewBox={`0 0 ${svgW} ${svgH}`}
+          preserveAspectRatio="xMidYMin meet"
+          className={`select-none ${className || ""}`}
+          style={{
+            fontFamily: "'Inter', system-ui, sans-serif",
+            transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})`,
+            transformOrigin: "center top",
+          }}
+        >
+          {children}
+        </svg>
+      </div>
+
+      {/* Zoom controls */}
+      <div className="absolute bottom-7 right-3 flex items-center gap-1 bg-card/80 backdrop-blur-sm border border-border/40 rounded-lg p-0.5 shadow-sm">
+        <button
+          onClick={() => setZoom(z => Math.min(MAX_ZOOM, z * 1.2))}
+          className="w-6 h-6 flex items-center justify-center rounded text-muted-foreground hover:text-foreground hover:bg-muted/60 transition-colors text-xs font-bold"
+          aria-label="Zoom in"
+        >+</button>
+        <button
+          onClick={resetView}
+          className="px-1.5 h-6 flex items-center justify-center rounded text-[10px] font-mono text-muted-foreground hover:text-foreground hover:bg-muted/60 transition-colors"
+          aria-label="Reset zoom"
+        >{Math.round(zoom * 100)}%</button>
+        <button
+          onClick={() => setZoom(z => Math.max(MIN_ZOOM, z * 0.8))}
+          className="w-6 h-6 flex items-center justify-center rounded text-muted-foreground hover:text-foreground hover:bg-muted/60 transition-colors text-xs font-bold"
+          aria-label="Zoom out"
+        >{"\u2212"}</button>
+      </div>
+    </div>
+  );
+}
+
 export default function AgentGraph({ nodes, title: _title, onNodeClick, onRun, onPause, version, runState: externalRunState, building, queenPhase }: AgentGraphProps) {
   const [localRunState, setLocalRunState] = useState<RunState>("idle");
   const runState = externalRunState ?? localRunState;
   const runBtnRef = useRef<HTMLButtonElement>(null);
+  const { statusColors, triggerColors } = useThemeColors();
 
   const handleRun = () => {
     if (runState !== "idle") return;
@@ -344,18 +470,21 @@ export default function AgentGraph({ nodes, title: _title, onNodeClick, onRun, o
 
     let d: string;
     if (skipsLayers && hasCollision(fromLayer, toLayer, from.x, to.x)) {
-      // Route around intermediate nodes: curve to the left
+      // Route around intermediate nodes: orthogonal detour to the left
       const detourX = Math.min(from.x, to.x) - nodeW * 0.4;
-      d = `M ${startX} ${y1} C ${startX} ${y1 + 20}, ${detourX} ${y1 + 20}, ${detourX} ${midY} S ${toCenterX} ${y2 - 20} ${toCenterX} ${y2}`;
+      d = `M ${startX} ${y1} L ${startX} ${midY} L ${detourX} ${midY} L ${detourX} ${y2 - 10} L ${toCenterX} ${y2 - 10} L ${toCenterX} ${y2}`;
+    } else if (Math.abs(startX - toCenterX) < 2) {
+      // Straight vertical line when aligned
+      d = `M ${startX} ${y1} L ${toCenterX} ${y2}`;
     } else {
-      // Standard bezier: from source bottom to target top
-      d = `M ${startX} ${y1} C ${startX} ${midY}, ${toCenterX} ${midY}, ${toCenterX} ${y2}`;
+      // Orthogonal: down, across, down
+      d = `M ${startX} ${y1} L ${startX} ${midY} L ${toCenterX} ${midY} L ${toCenterX} ${y2}`;
     }
 
     const fromNode = nodes[edge.fromIdx];
     const isActive = fromNode.status === "complete" || fromNode.status === "running" || fromNode.status === "looping";
-    const strokeColor = isActive ? "hsl(43,70%,45%,0.35)" : "hsl(35,10%,20%)";
-    const arrowColor = isActive ? "hsl(43,70%,45%,0.5)" : "hsl(35,10%,22%)";
+    const strokeColor = isActive ? statusColors.complete.border : statusColors.pending.border;
+    const arrowColor = isActive ? statusColors.complete.dot : statusColors.pending.border;
 
     return (
       <g key={`fwd-${i}`}>
@@ -368,7 +497,7 @@ export default function AgentGraph({ nodes, title: _title, onNodeClick, onRun, o
           <text
             x={(startX + toCenterX) / 2 + 8}
             y={midY - 2}
-            fill="hsl(35,15%,40%)"
+            fill={statusColors.pending.dot}
             fontSize={9}
             fontStyle="italic"
           >
@@ -394,9 +523,9 @@ export default function AgentGraph({ nodes, title: _title, onNodeClick, onRun, o
 
     const fromNode = nodes[edge.fromIdx];
     const isActive = fromNode.status === "complete" || fromNode.status === "running" || fromNode.status === "looping";
-    const color = isActive ? "hsl(38,80%,50%,0.3)" : "hsl(35,10%,20%)";
+    const color = isActive ? statusColors.looping.border : statusColors.pending.border;
 
-    // Bezier curve with rounded corners
+    // Bezier curve with rounded corners (kept as curves for back edges)
     const path = `M ${startX} ${startY} C ${startX + r} ${startY}, ${curveX} ${startY}, ${curveX} ${startY - r} L ${curveX} ${endY + r} C ${curveX} ${endY}, ${endX + r} ${endY}, ${endX + 6} ${endY}`;
 
     return (
@@ -404,7 +533,7 @@ export default function AgentGraph({ nodes, title: _title, onNodeClick, onRun, o
         <path d={path} fill="none" stroke={color} strokeWidth={1.5} strokeDasharray="4 3" />
         <polygon
           points={`${endX + 6},${endY - 3} ${endX + 6},${endY + 3} ${endX},${endY}`}
-          fill={isActive ? "hsl(38,80%,50%,0.45)" : "hsl(35,10%,22%)"}
+          fill={isActive ? statusColors.looping.dot : statusColors.pending.border}
         />
       </g>
     );
@@ -468,7 +597,7 @@ export default function AgentGraph({ nodes, title: _title, onNodeClick, onRun, o
         {countdownLabel && (
           <text
             x={pos.x + nodeW / 2} y={pos.y + NODE_H + 13}
-            fill="hsl(210,30%,50%)" fontSize={9.5}
+            fill={triggerColors.text} fontSize={9.5}
             textAnchor="middle" fontStyle="italic" opacity={0.7}
           >
             {countdownLabel}
@@ -543,7 +672,7 @@ export default function AgentGraph({ nodes, title: _title, onNodeClick, onRun, o
         {/* Label -- truncated with ellipsis for narrow nodes */}
         <text
           x={pos.x + 32} y={pos.y + NODE_H / 2}
-          fill={isActive ? "hsl(45,90%,85%)" : isDone ? "hsl(40,20%,75%)" : "hsl(35,10%,45%)"}
+          fill={isActive ? statusColors.running.dot : isDone ? statusColors.complete.dot : statusColors.pending.dot}
           fontSize={fontSize}
           fontWeight={isActive ? 600 : isDone ? 500 : 400}
           dominantBaseline="middle"
@@ -556,7 +685,7 @@ export default function AgentGraph({ nodes, title: _title, onNodeClick, onRun, o
         {node.statusLabel && isActive && (
           <text
             x={pos.x + nodeW + 10} y={pos.y + NODE_H / 2}
-            fill="hsl(45,80%,60%)" fontSize={10.5} fontStyle="italic"
+            fill={statusColors.running.dot} fontSize={10.5} fontStyle="italic"
             dominantBaseline="middle" opacity={0.8}
           >
             {node.statusLabel}
@@ -600,27 +729,19 @@ export default function AgentGraph({ nodes, title: _title, onNodeClick, onRun, o
       </div>
 
       {/* Graph */}
-      <div className="flex-1 overflow-y-auto overflow-x-hidden px-3 pb-5 relative">
-        <svg
-          width={svgWidth}
-          height={svgHeight}
-          viewBox={`0 0 ${svgWidth} ${svgHeight}`}
-          className={`select-none${building ? " opacity-30" : ""}`}
-          style={{ fontFamily: "'Inter', system-ui, sans-serif" }}
-        >
-          {forwardEdges.map((e, i) => renderForwardEdge(e, i))}
-          {backEdges.map((e, i) => renderBackEdge(e, i))}
-          {nodes.map((n, i) => renderNode(n, i))}
-        </svg>
-        {building && (
-          <div className="absolute inset-0 flex items-center justify-center">
-            <div className="flex flex-col items-center gap-3">
-              <Loader2 className="w-6 h-6 animate-spin text-primary/60" />
-              <p className="text-xs text-muted-foreground/80">Rebuilding agent...</p>
-            </div>
+      <PanZoomSvg svgW={svgWidth} svgH={svgHeight} className={building ? "opacity-30" : ""}>
+        {forwardEdges.map((e, i) => renderForwardEdge(e, i))}
+        {backEdges.map((e, i) => renderBackEdge(e, i))}
+        {nodes.map((n, i) => renderNode(n, i))}
+      </PanZoomSvg>
+      {building && (
+        <div className="absolute inset-0 flex items-center justify-center">
+          <div className="flex flex-col items-center gap-3">
+            <Loader2 className="w-6 h-6 animate-spin text-primary/60" />
+            <p className="text-xs text-muted-foreground/80">Rebuilding agent...</p>
           </div>
-        )}
-      </div>
+        </div>
+      )}
     </div>
   );
 }
