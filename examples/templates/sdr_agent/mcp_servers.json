@@ -1,0 +1,12 @@
+{
+    "hive-tools": {
+        "transport": "stdio",
+        "command": "python",
+        "args": [
+            "tools/mcp_server.py",
+            "--stdio"
+        ],
+        "cwd": "../../..",
+        "description": "Hive tools MCP server"
+    }
+}
