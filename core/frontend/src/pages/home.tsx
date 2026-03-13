@@ -1,10 +1,11 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { Crown, Mail, Briefcase, Shield, Search, Newspaper, ArrowRight, Hexagon, Send, Bot, Radar, Reply, DollarSign, MapPin, Calendar, UserPlus, Twitter } from "lucide-react";
-import TopBar from "@/components/TopBar";
 import type { LucideIcon } from "lucide-react";
 import { agentsApi } from "@/api/agents";
 import type { DiscoverEntry } from "@/api/types";
+import SlashCommandMenu, { SLASH_COMMANDS, type SlashCommand } from "@/components/SlashCommandMenu";
+import ResumeSessionPicker from "@/components/ResumeSessionPicker";
 
 // --- Icon and color maps (backend can't serve icons) ---
 
@@ -60,6 +61,26 @@ export default function Home() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // Slash command state
+  const [slashOpen, setSlashOpen] = useState(false);
+  const [slashQuery, setSlashQuery] = useState("");
+  const [slashActiveIndex, setSlashActiveIndex] = useState(0);
+  const [resumePickerOpen, setResumePickerOpen] = useState(false);
+
+  const handleSlashSelect = useCallback((cmd: SlashCommand) => {
+    setSlashOpen(false);
+    setSlashActiveIndex(0);
+    setInputValue("");
+    if (cmd.id === "resume") {
+      setResumePickerOpen(true);
+    }
+  }, []);
+
+  // Active filtered command count — needed for clamping the active index on ArrowDown
+  const slashFiltered = SLASH_COMMANDS.filter((c) =>
+    c.id.startsWith(slashQuery.toLowerCase())
+  );
+
   // Fetch agents on mount so data is ready when user toggles
   useEffect(() => {
     setLoading(true);
@@ -93,9 +114,7 @@ export default function Home() {
   };
 
   return (
-    <div className="min-h-screen bg-background flex flex-col">
-      <TopBar />
-
+    <div className="h-full flex flex-col">
       {/* Main content */}
       <div className="flex-1 flex flex-col items-center justify-center p-6">
         <div className="w-full max-w-2xl">
@@ -125,12 +144,47 @@ export default function Home() {
                 rows={1}
                 value={inputValue}
                 onChange={(e) => {
-                  setInputValue(e.target.value);
+                  const v = e.target.value;
+                  setInputValue(v);
                   const ta = e.target;
                   ta.style.height = "auto";
                   ta.style.height = `${Math.min(ta.scrollHeight, 160)}px`;
+                  // Open slash menu when input is exactly "/" or "/word"
+                  const slashMatch = v.match(/^\/([\w]*)$/);
+                  if (slashMatch) {
+                    setSlashOpen(true);
+                    setSlashQuery(slashMatch[1]);
+                    setSlashActiveIndex(0);
+                  } else {
+                    setSlashOpen(false);
+                  }
                 }}
                 onKeyDown={(e) => {
+                  if (slashOpen) {
+                    if (e.key === "ArrowUp") {
+                      e.preventDefault();
+                      setSlashActiveIndex((i) => Math.max(0, i - 1));
+                      return;
+                    }
+                    if (e.key === "ArrowDown") {
+                      e.preventDefault();
+                      setSlashActiveIndex((i) =>
+                        Math.min(slashFiltered.length - 1, i + 1)
+                      );
+                      return;
+                    }
+                    if (e.key === "Enter") {
+                      e.preventDefault();
+                      const cmd = slashFiltered[slashActiveIndex];
+                      if (cmd) handleSlashSelect(cmd);
+                      return;
+                    }
+                    if (e.key === "Escape") {
+                      e.preventDefault();
+                      setSlashOpen(false);
+                      return;
+                    }
+                  }
                   if (e.key === "Enter" && !e.shiftKey) {
                     e.preventDefault();
                     handleSubmit(e);
@@ -182,6 +236,22 @@ export default function Home() {
               </button>
             ))}
           </div>
+
+      {/* Slash command menu — portal-rendered above textarea */}
+      {slashOpen && (
+        <SlashCommandMenu
+          query={slashQuery}
+          anchorEl={textareaRef.current}
+          activeIndex={slashActiveIndex}
+          onSelect={handleSlashSelect}
+          onClose={() => setSlashOpen(false)}
+        />
+      )}
+
+      {/* Resume session picker modal */}
+      {resumePickerOpen && (
+        <ResumeSessionPicker onClose={() => setResumePickerOpen(false)} />
+      )}
 
           {/* Agent cards — revealed on toggle */}
           {showAgents && (

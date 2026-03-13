@@ -38,18 +38,38 @@ export function backendMessageToChatMessage(
   agentDisplayName?: string,
 ): ChatMessage {
   // Use file-mtime created_at (epoch seconds → ms) for cross-conversation
-  // ordering; fall back to seq for backwards compatibility.
-  const createdAt = msg.created_at ? msg.created_at * 1000 : msg.seq;
+  // ordering; fall back to seq as a relative tiebreaker (not an absolute
+  // timestamp) when created_at is missing.
+  const createdAt = msg.created_at ? msg.created_at * 1000 : undefined;
+  const seq = msg.seq;
+  // For worker messages, use the node_id (phase_id) to show which node responded
+  const sender = msg.role === "user" ? "You" :
+    (msg._source === "worker" && msg._node_id ? formatAgentDisplayName(msg._node_id) :
+      agentDisplayName || msg._node_id || "Agent");
+
+  // Strip the [Worker asked: "..." | Options: ...] prefix that is prepended when
+  // a user answers "Other" on a worker question widget and the answer is routed
+  // through the queen.  Only the user's actual answer should be visible in the
+  // chat transcript — the bracketed context is internal scaffolding.
+  let content = msg.content as string;
+  if (typeof content === "string") {
+    const workerAskedMatch = content.match(/^\[Worker asked:.*?\]\nUser answered: "([\s\S]*)"$/);
+    if (workerAskedMatch) {
+      content = workerAskedMatch[1];
+    }
+  }
+
   return {
-    id: `backend-${msg._node_id}-${msg.seq}`,
-    agent: msg.role === "user" ? "You" : agentDisplayName || msg._node_id || "Agent",
+    id: `backend-${msg._node_id || "queen"}-${msg.seq}`,
+    agent: sender,
     agentColor: "",
-    content: msg.content,
+    content,
     timestamp: "",
     type: msg.role === "user" ? "user" : undefined,
     role: msg.role === "user" ? undefined : "worker",
     thread,
     createdAt,
+    seq,
   };
 }
 

@@ -26,6 +26,7 @@ import json
 import logging
 import shutil
 import time
+from datetime import datetime
 from pathlib import Path
 
 from aiohttp import web
@@ -39,6 +40,53 @@ from framework.server.app import (
 from framework.server.session_manager import SessionManager
 
 logger = logging.getLogger(__name__)
+
+
+def _parse_started_at(value: str | None) -> float:
+    """Best-effort parse of worker session timestamps for cold-session matching."""
+    if not value:
+        return 0.0
+    try:
+        return datetime.fromisoformat(value.replace("Z", "+00:00")).timestamp()
+    except ValueError:
+        return 0.0
+
+
+def _resolve_worker_session_context(request: web.Request):
+    """Resolve worker-session storage for live or cold queen sessions."""
+    sid = request.match_info["session_id"]
+    manager = _get_manager(request)
+    live_session = manager.get_session(sid)
+    if live_session is not None:
+        if not live_session.worker_path:
+            return None, None, live_session, None
+        return sessions_dir(live_session), None, live_session, None
+
+    cold_info = SessionManager.get_cold_session_info(sid)
+    if cold_info is None:
+        return (
+            None,
+            None,
+            None,
+            web.json_response({"error": f"Session '{sid}' not found"}, status=404),
+        )
+
+    cold_agent_path = cold_info.get("agent_path")
+    if not cold_agent_path:
+        return None, cold_info, None, None
+
+    try:
+        validated_agent_path = validate_agent_path(cold_agent_path)
+    except ValueError:
+        return (
+            None,
+            cold_info,
+            None,
+            web.json_response({"error": "Invalid agent path in session metadata"}, status=400),
+        )
+
+    cold_sessions_dir = Path.home() / ".hive" / "agents" / validated_agent_path.name / "sessions"
+    return cold_sessions_dir, cold_info, None, None
 
 
 def _get_manager(request: web.Request) -> SessionManager:
@@ -396,14 +444,13 @@ async def handle_session_graphs(request: web.Request) -> web.Response:
 
 async def handle_list_worker_sessions(request: web.Request) -> web.Response:
     """List worker sessions on disk."""
-    session, err = resolve_session(request)
+    sess_dir, cold_info, session, err = _resolve_worker_session_context(request)
     if err:
         return err
 
-    if not session.worker_path:
+    if sess_dir is None:
         return web.json_response({"sessions": []})
 
-    sess_dir = sessions_dir(session)
     if not sess_dir.exists():
         return web.json_response({"sessions": []})
 
@@ -435,23 +482,32 @@ async def handle_list_worker_sessions(request: web.Request) -> web.Response:
 
         sessions.append(entry)
 
+    if cold_info is not None:
+        target_ts = float(cold_info.get("created_at") or 0.0)
+        sessions.sort(
+            key=lambda s: (
+                abs(_parse_started_at(s.get("started_at")) - target_ts),
+                -_parse_started_at(s.get("started_at")),
+            )
+        )
+
     return web.json_response({"sessions": sessions})
 
 
 async def handle_get_worker_session(request: web.Request) -> web.Response:
     """Get worker session detail from disk."""
-    session, err = resolve_session(request)
+    sess_dir, _cold_info, session, err = _resolve_worker_session_context(request)
     if err:
         return err
 
-    if not session.worker_path:
+    if sess_dir is None:
         return web.json_response({"error": "No worker loaded"}, status=503)
 
     # Support both URL param names: ws_id (new) or session_id (legacy)
     ws_id = request.match_info.get("ws_id") or request.match_info.get("session_id", "")
     ws_id = safe_path_segment(ws_id)
 
-    state_path = sessions_dir(session) / ws_id / "state.json"
+    state_path = sess_dir / ws_id / "state.json"
     if not state_path.exists():
         return web.json_response({"error": "Session not found"}, status=404)
 
@@ -563,17 +619,17 @@ async def handle_restore_checkpoint(request: web.Request) -> web.Response:
 
 async def handle_messages(request: web.Request) -> web.Response:
     """Get messages for a worker session."""
-    session, err = resolve_session(request)
+    sess_dir, _cold_info, session, err = _resolve_worker_session_context(request)
     if err:
         return err
 
-    if not session.worker_path:
+    if sess_dir is None:
         return web.json_response({"error": "No worker loaded"}, status=503)
 
     ws_id = request.match_info.get("ws_id") or request.match_info.get("session_id", "")
     ws_id = safe_path_segment(ws_id)
 
-    convs_dir = sessions_dir(session) / ws_id / "conversations"
+    convs_dir = sess_dir / ws_id / "conversations"
     if not convs_dir.exists():
         return web.json_response({"messages": []})
 
@@ -606,22 +662,25 @@ async def handle_messages(request: web.Request) -> web.Response:
     client_only = request.query.get("client_only", "").lower() in ("true", "1")
     if client_only:
         client_facing_nodes: set[str] = set()
-        if session.runner and hasattr(session.runner, "graph"):
+        if session and session.runner and hasattr(session.runner, "graph"):
             for node in session.runner.graph.nodes:
                 if node.client_facing:
                     client_facing_nodes.add(node.id)
 
+        visible_messages = [m for m in all_messages if SessionManager.is_client_visible_message(m)]
         if client_facing_nodes:
             all_messages = [
                 m
-                for m in all_messages
-                if not m.get("is_transition_marker")
-                and m["role"] != "tool"
-                and not (m["role"] == "assistant" and m.get("tool_calls"))
-                and (
-                    (m["role"] == "user" and m.get("is_client_input"))
-                    or (m["role"] == "assistant" and m.get("_node_id") in client_facing_nodes)
-                )
+                for m in visible_messages
+                if (m["role"] == "user" and m.get("is_client_input"))
+                or (m["role"] == "assistant" and m.get("_node_id") in client_facing_nodes)
+            ]
+        else:
+            # Cold history reopen may not have a live graph to tell us which nodes are
+            # client-facing. In that case, keep only visible user input and assistant
+            # replies, and drop internal control chatter via is_client_visible_message().
+            all_messages = [
+                m for m in visible_messages if m["role"] == "user" or m["role"] == "assistant"
             ]
 
     return web.json_response({"messages": all_messages})
@@ -641,37 +700,75 @@ async def handle_queen_messages(request: web.Request) -> web.Response:
         return web.json_response({"messages": [], "session_id": session_id})
 
     all_messages: list[dict] = []
-    for node_dir in convs_dir.iterdir():
-        if not node_dir.is_dir():
+    for node_id, part_file in SessionManager._iter_conversation_part_files(convs_dir):
+        try:
+            part = json.loads(part_file.read_text(encoding="utf-8"))
+            if node_id is not None:
+                part["_node_id"] = node_id
+            else:
+                part.setdefault("_node_id", part.get("phase_id") or "queen")
+            # Use file mtime as created_at so frontend can order
+            # queen and worker messages chronologically.
+            part.setdefault("created_at", part_file.stat().st_mtime)
+            all_messages.append(part)
+        except (json.JSONDecodeError, OSError):
             continue
-        parts_dir = node_dir / "parts"
-        if not parts_dir.exists():
-            continue
-        for part_file in sorted(parts_dir.iterdir()):
-            if part_file.suffix != ".json":
-                continue
-            try:
-                part = json.loads(part_file.read_text(encoding="utf-8"))
-                part["_node_id"] = node_dir.name
-                # Use file mtime as created_at so frontend can order
-                # queen and worker messages chronologically.
-                part.setdefault("created_at", part_file.stat().st_mtime)
-                all_messages.append(part)
-            except (json.JSONDecodeError, OSError):
-                continue
 
     all_messages.sort(key=lambda m: m.get("created_at", m.get("seq", 0)))
 
     # Filter to client-facing messages only
-    all_messages = [
-        m
-        for m in all_messages
-        if not m.get("is_transition_marker")
-        and m["role"] != "tool"
-        and not (m["role"] == "assistant" and m.get("tool_calls"))
-    ]
+    all_messages = [m for m in all_messages if SessionManager.is_client_visible_message(m)]
 
     return web.json_response({"messages": all_messages, "session_id": session_id})
+
+
+async def handle_transcript(request: web.Request) -> web.Response:
+    """GET /api/sessions/{session_id}/transcript — unified conversation history.
+
+    Returns a single chronologically-sorted, client-filtered transcript that
+    merges queen and worker messages from disk.  Works for both live and cold
+    sessions — no live runtime required.
+
+    This is the canonical endpoint for restoring chat history in the UI (both
+    cold-restore on server restart and reopening closed sessions from History).
+    """
+    session_id = request.match_info["session_id"]
+    manager = _get_manager(request)
+    live_session = manager.get_session(session_id)
+
+    # Resolve worker sessions directory
+    worker_sessions_dir = None
+    client_facing_nodes: set[str] | None = None
+
+    if live_session is not None:
+        # Live session — get worker dir and client-facing nodes from runtime
+        if live_session.worker_path:
+            worker_sessions_dir = sessions_dir(live_session)
+        if live_session.runner and hasattr(live_session.runner, "graph"):
+            client_facing_nodes = {
+                node.id for node in live_session.runner.graph.nodes if node.client_facing
+            }
+    else:
+        # Cold session — resolve from disk metadata.
+        # Derive the agent name directly from the stored path rather than
+        # calling validate_agent_path (which requires the path to still be
+        # inside an allowed root — not guaranteed for paths stored on disk
+        # from earlier installs or different machine layouts).
+        cold_info = SessionManager.get_cold_session_info(session_id)
+        if cold_info is not None:
+            cold_agent_path = cold_info.get("agent_path")
+            if cold_agent_path:
+                agent_name = Path(cold_agent_path).name
+                if agent_name:
+                    worker_sessions_dir = Path.home() / ".hive" / "agents" / agent_name / "sessions"
+
+    transcript = SessionManager.build_transcript(
+        session_id,
+        worker_sessions_dir=worker_sessions_dir,
+        client_facing_nodes=client_facing_nodes,
+    )
+
+    return web.json_response({"messages": transcript, "session_id": session_id})
 
 
 async def handle_session_history(request: web.Request) -> web.Response:
@@ -786,6 +883,7 @@ def register_routes(app: web.Application) -> None:
     app.router.add_get("/api/sessions/{session_id}/entry-points", handle_session_entry_points)
     app.router.add_get("/api/sessions/{session_id}/graphs", handle_session_graphs)
     app.router.add_get("/api/sessions/{session_id}/queen-messages", handle_queen_messages)
+    app.router.add_get("/api/sessions/{session_id}/transcript", handle_transcript)
 
     # Worker session browsing (session-primary)
     app.router.add_get("/api/sessions/{session_id}/worker-sessions", handle_list_worker_sessions)

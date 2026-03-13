@@ -257,8 +257,11 @@ interface AgentBackendState {
   queenBuilding: boolean;
   /** Queen operating phase — "planning" (design), "building" (coding), "staging" (loaded), or "running" (executing) */
   queenPhase: "planning" | "building" | "staging" | "running";
-  workerRunState: "idle" | "deploying" | "running";
+  /** Worker operating state — "idle" (not running), "deploying" (loading), "running" (executing), or "paused" (suspended) */
+  workerRunState: "idle" | "deploying" | "running" | "paused";
   currentExecutionId: string | null;
+  /** Worker session ID saved when paused — used for resume */
+  pausedWorkerSessionId: string | null;
   nodeLogs: Record<string, string[]>;
   nodeActionPlans: Record<string, string>;
   subagentReports: { subagent_id: string; message: string; data?: Record<string, unknown>; timestamp: string }[];
@@ -294,6 +297,7 @@ function defaultAgentState(): AgentBackendState {
     queenPhase: "planning",
     workerRunState: "idle",
     currentExecutionId: null,
+    pausedWorkerSessionId: null,
     nodeLogs: {},
     nodeActionPlans: {},
     subagentReports: [],
@@ -342,7 +346,6 @@ export default function Workspace() {
         if (initialPrompt && hasExplicitAgent && (tab.agentType === "new-agent" || tab.agentType.startsWith("new-agent-"))) {
           continue;
         }
-        if (!initial[tabKey]) initial[tabKey] = [];
         const session = createSession(tab.agentType, tab.label);
         session.id = tab.id;
         session.backendSessionId = tab.backendSessionId;
@@ -356,7 +359,12 @@ export default function Workspace() {
           session.messages = cached.messages || [];
           session.graphNodes = cached.graphNodes || [];
         }
-        initial[tabKey].push(session);
+        // Only keep the latest persisted session per tabKey. Multiple sessions
+        // accumulate when history sessions are opened after the previous one was
+        // closed (both get the bare agentType as their tabKey). Keeping only the
+        // last entry prevents the older session's transcript from bleeding into
+        // the top of the newer conversation on reload.
+        initial[tabKey] = [session];
       }
     }
 
@@ -369,7 +377,12 @@ export default function Workspace() {
     // If there are already persisted tabs for this agent type, don't create
     // a new one — the post-mount effect will call handleHistoryOpen if needed
     // (for ?session= params coming from the home page sidebar).
-    if (initial[initialAgent]?.length) {
+    // Check exact key first, then scan for any tabKey whose base matches
+    // (handles TopBar navigation with bare agentType when tab uses ::suffix).
+    const existingKey = initial[initialAgent]?.length
+      ? initialAgent
+      : Object.keys(initial).find(k => baseAgentType(k) === initialAgent && (initial[k] || []).length > 0);
+    if (existingKey) {
       return initial;
     }
 
@@ -399,6 +412,15 @@ export default function Workspace() {
     }
 
     return initial;
+  });
+
+  // User-defined tab order (array of tabKey/agentType strings). Initialized from
+  // persisted data; kept in sync via the effect below; updated on drag-to-reorder.
+  const [tabOrder, setTabOrder] = useState<string[]>(() => {
+    const p = loadPersistedTabs();
+    if (p?.tabOrder?.length) return p.tabOrder;
+    if (p?.tabs?.length) return p.tabs.map(t => t.tabKey || t.agentType);
+    return [];
   });
 
   const [activeSessionByAgent, setActiveSessionByAgent] = useState<Record<string, string>>(() => {
@@ -453,7 +475,12 @@ export default function Workspace() {
       const persisted = loadPersistedTabs();
       if (persisted?.activeWorker) return persisted.activeWorker;
     }
-    return initialAgent;
+    // initialAgent may be a bare agent path (from TopBar on home page) while
+    // sessionsByAgent is keyed by tabKey (with ::suffix). Find the matching key.
+    const matchingKey = Object.keys(sessionsByAgent).find(
+      k => k === initialAgent || baseAgentType(k) === initialAgent,
+    );
+    return matchingKey || initialAgent;
   });
 
   // Clear URL params after mount — they're consumed during initialization
@@ -520,6 +547,17 @@ export default function Workspace() {
   const currentError = activeAgentState?.error;
   useEffect(() => { if (!currentError) setDismissedBanner(null); }, [currentError]);
 
+  // Keep tabOrder in sync: add newly opened tabs at the end, remove closed ones.
+  useEffect(() => {
+    const activeKeys = Object.keys(sessionsByAgent).filter(k => (sessionsByAgent[k] || []).length > 0);
+    setTabOrder(prev => {
+      const kept = prev.filter(k => activeKeys.includes(k));
+      const added = activeKeys.filter(k => !prev.includes(k));
+      if (kept.length === prev.length && added.length === 0) return prev;
+      return [...kept, ...added];
+    });
+  }, [sessionsByAgent]);
+
   // Persist tab metadata + session data to localStorage on every relevant change
   useEffect(() => {
     const tabs: PersistedTabState["tabs"] = [];
@@ -540,11 +578,11 @@ export default function Workspace() {
       }
     }
     if (tabs.length > 0) {
-      savePersistedTabs({ tabs, activeSessionByAgent, activeWorker, sessions });
+      savePersistedTabs({ tabs, activeSessionByAgent, activeWorker, sessions, tabOrder });
     } else {
       localStorage.removeItem(TAB_STORAGE_KEY);
     }
-  }, [sessionsByAgent, activeSessionByAgent, activeWorker, agentStates]);
+  }, [sessionsByAgent, activeSessionByAgent, activeWorker, agentStates, tabOrder]);
 
   const handleRun = useCallback(async () => {
     const state = agentStates[activeWorker];
@@ -553,8 +591,18 @@ export default function Workspace() {
     setDismissedBanner(null);
     try {
       updateAgentState(activeWorker, { workerRunState: "deploying" });
-      const result = await executionApi.trigger(state.sessionId, "default", {});
-      updateAgentState(activeWorker, { currentExecutionId: result.execution_id });
+
+      // Resume from paused state if we have a saved worker session ID
+      if (state.workerRunState === "paused" && state.pausedWorkerSessionId) {
+        const result = await executionApi.resume(state.sessionId, state.pausedWorkerSessionId);
+        updateAgentState(activeWorker, {
+          currentExecutionId: result.execution_id,
+          pausedWorkerSessionId: null,
+        });
+      } else {
+        const result = await executionApi.trigger(state.sessionId, "default", {});
+        updateAgentState(activeWorker, { currentExecutionId: result.execution_id });
+      }
     } catch (err) {
       // 424 = credentials required — open the credentials modal
       if (err instanceof ApiError && err.status === 424) {
@@ -597,8 +645,30 @@ export default function Workspace() {
     }).catch(() => { });
   }, []);
 
+  /**
+   * Fetch the full unified transcript for a session from the backend.
+   * Single API call — the backend handles queen+worker merging, filtering,
+   * and chronological sorting.  Used by both cold restore and history-open.
+   */
+  const fetchRestoredConversation = useCallback(async (
+    sessionId: string,
+    thread: string,
+    workerDisplayName?: string,
+  ): Promise<ChatMessage[]> => {
+    const { messages: transcript } = await sessionsApi.transcript(sessionId);
+    return (transcript as (Message & { _source?: string })[]).map(m => {
+      const isQueen = m._source === "queen";
+      const sender = isQueen ? "Queen Bee" : (workerDisplayName || "Agent");
+      const msg = backendMessageToChatMessage(m, thread, sender);
+      if (isQueen) msg.role = "queen";
+      return msg;
+    });
+  }, []);
+
   // --- Agent loading: loadAgentForType ---
   const loadingRef = useRef(new Set<string>());
+  // Stable ref so loadAgentForType doesn't get a new identity when URL is cleared
+  const initialPromptRef = useRef(initialPrompt);
   const loadAgentForType = useCallback(async (agentType: string) => {
     // agentType may be a unique composite key ("exports/foo::sessionId") for additional
     // tabs — extract the real agent path for selector checks and API calls.
@@ -611,7 +681,7 @@ export default function Workspace() {
       // Create a queen-only session (no worker) for agent building
       updateAgentState(agentType, { loading: true, error: null, ready: false, sessionId: null });
       try {
-        const prompt = initialPrompt || undefined;
+        const prompt = initialPromptRef.current || undefined;
         let liveSession: LiveSession | undefined;
 
         // Find the active session for this agent type
@@ -735,6 +805,8 @@ export default function Workspace() {
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : String(err);
         updateAgentState(agentType, { error: msg, loading: false });
+      } finally {
+        loadingRef.current.delete(agentType);
       }
       return;
     }
@@ -788,34 +860,20 @@ export default function Workspace() {
           }));
         }
 
-        // CRITICAL: Pre-fetch queen messages from the old session directory BEFORE
+        // CRITICAL: Pre-fetch the full transcript from the old session directory BEFORE
         // creating the new session. When queen_resume_from is set the new session writes
         // to the SAME directory, so if we fetch after creation we risk capturing the
         // new queen's greeting in the restored history.
-        // SKIP if messages were already pre-populated by handleHistoryOpen (avoids
-        // double-fetch and greeting leakage).
+        // SKIP when localStorage already restored messages — avoids duplicate merge
+        // (backendMessageToChatMessage generates new IDs each call, so dedup-by-id fails).
         let preQueenMsgs: ChatMessage[] = [];
         if (coldRestoreId && !alreadyHasMessages) {
           try {
-            const { messages: queenMsgs } = await sessionsApi.queenMessages(coldRestoreId);
-            // Also pre-fetch worker messages from the old session if a resumable worker exists
-            const displayNameTemp = formatAgentDisplayName(agentPath);
-            for (const m of queenMsgs as Message[]) {
-              const msg = backendMessageToChatMessage(m, agentType, "Queen Bee");
-              msg.role = "queen";
-              preQueenMsgs.push(msg);
-            }
-            // Also try to grab worker messages while we're here
-            try {
-              const { sessions: workerSessions } = await sessionsApi.workerSessions(coldRestoreId);
-              const resumable = workerSessions.find(s => s.status === "active" || s.status === "paused");
-              if (resumable) {
-                const { messages: wMsgs } = await sessionsApi.messages(coldRestoreId, resumable.session_id);
-                for (const m of wMsgs as Message[]) {
-                  preQueenMsgs.push(backendMessageToChatMessage(m, agentType, displayNameTemp));
-                }
-              }
-            } catch { /* not critical */ }
+            preQueenMsgs = await fetchRestoredConversation(
+              coldRestoreId,
+              agentType,
+              formatAgentDisplayName(agentPath),
+            );
           } catch {
             // Not available — will start fresh
           }
@@ -877,13 +935,20 @@ export default function Workspace() {
 
         // If we pre-fetched messages for a cold restore, populate the UI immediately.
         // This happens before the SSE connection opens so no greeting can slip through.
+        // Merge with dedup: prepend any older messages not already present (localStorage
+        // is capped at 50, so preQueenMsgs may contain the full earlier history).
         if (preQueenMsgs.length > 0) {
-          preQueenMsgs.sort((a, b) => (a.createdAt ?? 0) - (b.createdAt ?? 0));
           setSessionsByAgent(prev => ({
             ...prev,
-            [agentType]: (prev[agentType] || []).map((s, i) =>
-              i === 0 ? { ...s, messages: preQueenMsgs, graphNodes: [] } : s,
-            ),
+            [agentType]: (prev[agentType] || []).map((s, i) => {
+              if (i !== 0) return s;
+              const existingIds = new Set(s.messages.map((m) => m.id));
+              const newOnly = preQueenMsgs.filter((m) => !existingIds.has(m.id));
+              // Merge and globally sort by createdAt for correct chronological order
+              const merged = [...newOnly, ...s.messages];
+              merged.sort((a, b) => (a.createdAt ?? 0) - (b.createdAt ?? 0) || (a.seq ?? 0) - (b.seq ?? 0));
+              return { ...s, messages: merged, graphNodes: [] };
+            }),
           }));
         }
       }
@@ -925,52 +990,69 @@ export default function Workspace() {
 
       // Restore messages when rejoining an existing session OR cold-restoring from disk.
       let isWorkerRunning = false;
-      const restoredMsgs: ChatMessage[] = [];
+      let pausedWorkerSessionId: string | null = null;
+      let restoredMsgs: ChatMessage[] = [];
       // For cold-restore, use the old session ID. For live resume, use current session.
-      const historyId = coldRestoreId ?? (isResumedSession ? session.session_id : undefined);
+      // Only fetch old transcript when this tab previously had its own backend session.
+      // Fresh tabs (from addAgentSession) have storedSessionId=undefined — even if 409
+      // fires, they should start blank and only show new messages from SSE.
+      const historyId = coldRestoreId ?? (isResumedSession && storedSessionId ? session.session_id : undefined);
 
-      // For LIVE resume (not cold restore), fetch worker + queen messages now.
+      // For LIVE resume (not cold restore), fetch the full transcript now.
       // For cold restore they were already pre-fetched above (before create) so we skip to avoid
       // double-restoring and to avoid capturing the new greeting.
       if (historyId && !coldRestoreId) {
         try {
-          const { sessions: workerSessions } = await sessionsApi.workerSessions(historyId);
-          const resumable = workerSessions.find(
-            (s) => s.status === "active" || s.status === "paused",
+          restoredMsgs = await fetchRestoredConversation(
+            historyId,
+            agentType,
+            displayName,
           );
-          isWorkerRunning = resumable?.status === "active";
-
-          if (resumable) {
-            const { messages } = await sessionsApi.messages(historyId, resumable.session_id);
-            for (const m of messages as Message[]) {
-              restoredMsgs.push(backendMessageToChatMessage(m, agentType, displayName));
-            }
-          }
         } catch {
-          // Worker session listing failed — not critical
+          // Transcript fetch failed — not critical
         }
+      }
 
+      // Check worker execution state for both live resume AND cold restore.
+      // historyId covers both cases: coldRestoreId for cold restore, session_id for live.
+      if (historyId) {
         try {
-          const { messages: queenMsgs } = await sessionsApi.queenMessages(historyId);
-          for (const m of queenMsgs as Message[]) {
-            const msg = backendMessageToChatMessage(m, agentType, "Queen Bee");
-            msg.role = "queen";
-            restoredMsgs.push(msg);
+          const { sessions: workerSessions } = await sessionsApi.workerSessions(historyId);
+          const active = workerSessions.find((s) => s.status === "active");
+          isWorkerRunning = !!active;
+          if (!isWorkerRunning) {
+            // Find the most recently paused session so Resume restores the right one
+            const paused = workerSessions
+              .filter((s) => s.status === "paused")
+              .sort((a, b) => {
+                const ta = a.started_at ? new Date(a.started_at).getTime() : 0;
+                const tb = b.started_at ? new Date(b.started_at).getTime() : 0;
+                return tb - ta;
+              })[0];
+            if (paused) pausedWorkerSessionId = paused.session_id;
           }
         } catch {
-          // Queen messages not available — not critical
+          // Not critical
         }
       }
 
       // Merge messages in chronological order (only for live resume; cold restore
       // was already applied above before create).
       if (restoredMsgs.length > 0) {
-        restoredMsgs.sort((a, b) => (a.createdAt ?? 0) - (b.createdAt ?? 0));
         setSessionsByAgent((prev) => ({
           ...prev,
-          [agentType]: (prev[agentType] || []).map((s, i) =>
-            i === 0 ? { ...s, messages: [...restoredMsgs, ...s.messages] } : s,
-          ),
+          [agentType]: (prev[agentType] || []).map((s, i) => {
+            if (i !== 0) return s;
+            // Deduplicate: handleHistoryOpen may have already pre-populated these
+            // messages. Filter to only those not already present so we never show
+            // the same message twice (or show another session's messages at the top).
+            const existingIds = new Set(s.messages.map((m) => m.id));
+            const newOnly = restoredMsgs.filter((m) => !existingIds.has(m.id));
+            // Merge and globally sort for correct chronological order
+            const merged = [...newOnly, ...s.messages];
+            merged.sort((a, b) => (a.createdAt ?? 0) - (b.createdAt ?? 0) || (a.seq ?? 0) - (b.seq ?? 0));
+            return { ...s, messages: merged };
+          }),
         }));
       }
 
@@ -990,7 +1072,11 @@ export default function Workspace() {
         ready: true,
         loading: false,
         queenReady: !!(isResumedSession || hasRestoredContent),
-        ...(isWorkerRunning ? { workerRunState: "running" } : {}),
+        ...(isWorkerRunning
+          ? { workerRunState: "running" }
+          : pausedWorkerSessionId
+            ? { workerRunState: "paused", pausedWorkerSessionId }
+            : {}),
       });
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -998,7 +1084,7 @@ export default function Workspace() {
     } finally {
       loadingRef.current.delete(agentType);
     }
-  }, [updateAgentState, initialPrompt]);
+  }, [updateAgentState, fetchRestoredConversation]);
 
   // Auto-load agents when new tabs appear in sessionsByAgent.
   // Only eagerly load the active tab — background tabs are deferred until the
@@ -1167,7 +1253,12 @@ export default function Workspace() {
         markAllNodesAs(activeWorker, ["running", "looping"], "pending");
         return;
       }
-      updateAgentState(activeWorker, { workerRunState: "idle", currentExecutionId: null });
+      // Successfully paused — save worker session ID for resume
+      updateAgentState(activeWorker, {
+        workerRunState: "paused",
+        pausedWorkerSessionId: state.currentExecutionId,
+        currentExecutionId: null,
+      });
       markAllNodesAs(activeWorker, ["running", "looping"], "pending");
     } catch (err) {
       // Network errors or non-2xx responses — still reset the UI since
@@ -1304,6 +1395,7 @@ export default function Workspace() {
               awaitingInput: false,
               workerRunState: "running",
               currentExecutionId: event.execution_id || agentStates[agentType]?.currentExecutionId || null,
+              pausedWorkerSessionId: null,
               nodeLogs: {},
               subagentReports: [],
               llmSnapshots: {},
@@ -1336,6 +1428,7 @@ export default function Workspace() {
               workerInputMessageId: null,
               workerRunState: "idle",
               currentExecutionId: null,
+              pausedWorkerSessionId: null,
               llmSnapshots: {},
               pendingQuestion: null,
               pendingOptions: null,
@@ -1460,16 +1553,47 @@ export default function Workspace() {
             }
           }
           if (event.type === "execution_paused") {
-            updateAgentState(agentType, { isTyping: false, isStreaming: false, queenIsTyping: false, workerIsTyping: false, awaitingInput: false, workerInputMessageId: null, pendingQuestion: null, pendingOptions: null, pendingQuestionSource: null });
-            if (!isQueen) {
-              updateAgentState(agentType, { workerRunState: "idle", currentExecutionId: null });
+            if (isQueen) {
+              // Queen paused — preserve any active worker question
+              setAgentStates(prev => {
+                const cur = prev[agentType] || defaultAgentState();
+                const keepWorkerQ = cur.pendingQuestionSource === "worker";
+                return {
+                  ...prev, [agentType]: {
+                    ...cur,
+                    isTyping: false, isStreaming: false, queenIsTyping: false, workerIsTyping: false,
+                    ...(keepWorkerQ ? {} : { awaitingInput: false, workerInputMessageId: null, pendingQuestion: null, pendingOptions: null, pendingQuestionSource: null }),
+                  }
+                };
+              });
+            } else {
+              updateAgentState(agentType, { isTyping: false, isStreaming: false, queenIsTyping: false, workerIsTyping: false, awaitingInput: false, workerInputMessageId: null, pendingQuestion: null, pendingOptions: null, pendingQuestionSource: null });
+              // Transition to "paused" so the Resume button appears
+              updateAgentState(agentType, {
+                workerRunState: "paused",
+                currentExecutionId: null,
+                pausedWorkerSessionId: event.execution_id || agentStates[agentType]?.currentExecutionId || null,
+              });
               markAllNodesAs(agentType, ["running", "looping"], "pending");
             }
           }
           if (event.type === "execution_failed") {
-            updateAgentState(agentType, { isTyping: false, isStreaming: false, queenIsTyping: false, workerIsTyping: false, awaitingInput: false, workerInputMessageId: null, pendingQuestion: null, pendingOptions: null, pendingQuestionSource: null });
-            if (!isQueen) {
-              updateAgentState(agentType, { workerRunState: "idle", currentExecutionId: null });
+            if (isQueen) {
+              // Queen failed — preserve any active worker question
+              setAgentStates(prev => {
+                const cur = prev[agentType] || defaultAgentState();
+                const keepWorkerQ = cur.pendingQuestionSource === "worker";
+                return {
+                  ...prev, [agentType]: {
+                    ...cur,
+                    isTyping: false, isStreaming: false, queenIsTyping: false, workerIsTyping: false,
+                    ...(keepWorkerQ ? {} : { awaitingInput: false, workerInputMessageId: null, pendingQuestion: null, pendingOptions: null, pendingQuestionSource: null }),
+                  }
+                };
+              });
+            } else {
+              updateAgentState(agentType, { isTyping: false, isStreaming: false, queenIsTyping: false, workerIsTyping: false, awaitingInput: false, workerInputMessageId: null, pendingQuestion: null, pendingOptions: null, pendingQuestionSource: null });
+              updateAgentState(agentType, { workerRunState: "idle", currentExecutionId: null, pausedWorkerSessionId: null });
               if (event.node_id) {
                 updateGraphNodeStatus(agentType, event.node_id, "error");
                 const errMsg = (event.data?.error as string) || "unknown error";
@@ -1500,7 +1624,20 @@ export default function Workspace() {
         case "node_loop_iteration":
           turnCounterRef.current[turnKey] = currentTurn + 1;
           if (isQueen) {
-            updateAgentState(agentType, { isStreaming: false, activeToolCalls: {}, awaitingInput: false, pendingQuestion: null, pendingOptions: null, pendingQuestionSource: null });
+            // Preserve active worker question — queen loop iterations must
+            // not clobber a pending worker ask_user prompt.
+            setAgentStates(prev => {
+              const cur = prev[agentType] || defaultAgentState();
+              const keepWorkerQ = cur.pendingQuestionSource === "worker";
+              return {
+                ...prev, [agentType]: {
+                  ...cur,
+                  isStreaming: false,
+                  activeToolCalls: {},
+                  ...(keepWorkerQ ? {} : { awaitingInput: false, pendingQuestion: null, pendingOptions: null, pendingQuestionSource: null }),
+                }
+              };
+            });
           } else {
             updateAgentState(agentType, { isStreaming: false, workerIsTyping: true, activeToolCalls: {}, awaitingInput: false, pendingQuestion: null, pendingOptions: null, pendingQuestionSource: null });
           }
@@ -1793,11 +1930,23 @@ export default function Workspace() {
             : rawPhase === "staging" ? "staging"
             : rawPhase === "planning" ? "planning"
             : "building";
-          updateAgentState(agentType, {
-            queenPhase: newPhase,
-            queenBuilding: newPhase === "building",
-            // Sync workerRunState so the RunButton reflects the phase
-            workerRunState: newPhase === "running" ? "running" : "idle",
+          // Use updater form to avoid overwriting "paused" when queen
+          // transitions to staging after a pause (switch_to_staging fires
+          // queen_phase_changed which would otherwise clobber the paused state).
+          setAgentStates(prev => {
+            const cur = prev[agentType] || defaultAgentState();
+            const workerRunState =
+              cur.workerRunState === "paused" ? "paused"
+                : newPhase === "running" ? "running"
+                  : "idle";
+            return {
+              ...prev, [agentType]: {
+                ...cur,
+                queenPhase: newPhase,
+                queenBuilding: newPhase === "building",
+                workerRunState,
+              }
+            };
           });
           break;
         }
@@ -1818,6 +1967,7 @@ export default function Workspace() {
             displayName,
             queenBuilding: false,
             workerRunState: "idle",
+            pausedWorkerSessionId: null,
             graphId: null,
             nodeSpecs: [],
           });
@@ -1889,6 +2039,16 @@ export default function Workspace() {
         hasRunning: session.graphNodes.some(n => n.status === "running" || n.status === "looping"),
       };
     });
+
+  // Sort by user-defined tabOrder; unknown tabs append at the end.
+  const orderedAgentTabs = [...agentTabs].sort((a, b) => {
+    const ai = tabOrder.indexOf(a.agentType);
+    const bi = tabOrder.indexOf(b.agentType);
+    if (ai === -1 && bi === -1) return 0;
+    if (ai === -1) return 1;
+    if (bi === -1) return -1;
+    return ai - bi;
+  });
 
   // --- handleSend ---
   const handleSend = useCallback((text: string, thread: string) => {
@@ -2190,6 +2350,7 @@ export default function Workspace() {
       return next;
     });
 
+
     if (remaining.length === 0) {
       navigate("/");
     } else if (activeWorker === agentType) {
@@ -2214,10 +2375,8 @@ export default function Workspace() {
     // First tab keeps agentType as its key (backward-compatible with all existing
     // logic).  Additional tabs get a unique key so each has its own isolated
     // agentStates slot, its own backend session, and its own tab-bar entry.
-    const tabKey = existingTabCount === 0 ? agentType : `${agentType}::${newSession.id}`;
-    if (tabKey !== agentType) {
-      newSession.tabKey = tabKey;
-    }
+    const tabKey = `${agentType}::${newSession.id}`;
+    newSession.tabKey = tabKey;
 
     setSessionsByAgent(prev => ({
       ...prev,
@@ -2245,24 +2404,6 @@ export default function Workspace() {
       }
     }
 
-    // Pre-fetch messages from disk so the tab opens with conversation already shown.
-    // This happens BEFORE creating the tab so no "new session" empty state is visible.
-    let prefetchedMessages: ChatMessage[] = [];
-    try {
-      const { messages: queenMsgs } = await sessionsApi.queenMessages(sessionId);
-      for (const m of queenMsgs as Message[]) {
-        const resolvedType = agentPath || "new-agent";
-        const msg = backendMessageToChatMessage(m, resolvedType, "Queen Bee");
-        msg.role = "queen";
-        prefetchedMessages.push(msg);
-      }
-      if (prefetchedMessages.length > 0) {
-        prefetchedMessages.sort((a, b) => (a.createdAt ?? 0) - (b.createdAt ?? 0));
-      }
-    } catch {
-      // Not available — session will open empty and loadAgentForType will try again
-    }
-
     const resolvedAgentType = agentPath || "new-agent";
     const existingTabCount = Object.keys(sessionsByAgent).filter(
       k => baseAgentType(k) === resolvedAgentType && (sessionsByAgent[k] || []).length > 0
@@ -2272,14 +2413,28 @@ export default function Workspace() {
       "New Agent";
     const label = existingTabCount === 0 ? rawLabel : `${rawLabel} #${existingTabCount + 1}`;
     const newSession = createSession(resolvedAgentType, label);
+    const tabKey = existingTabCount === 0 ? resolvedAgentType : `${resolvedAgentType}::${newSession.id}`;
+    if (tabKey !== resolvedAgentType) newSession.tabKey = tabKey;
     newSession.backendSessionId = sessionId;
     newSession.historySourceId = sessionId;
+
+    // Pre-fetch messages from disk so the tab opens with conversation already shown.
+    // Use tabKey as the thread because ChatPanel filters by activeThread.
+    let prefetchedMessages: ChatMessage[] = [];
+    try {
+      prefetchedMessages = await fetchRestoredConversation(
+        sessionId,
+        tabKey,
+        agentPath ? formatAgentDisplayName(agentPath) : undefined,
+      );
+    } catch {
+      // Not available — session will open empty and loadAgentForType will try again
+    }
+
     // Pre-populate messages so the chat panel immediately shows the conversation
     if (prefetchedMessages.length > 0) {
       newSession.messages = prefetchedMessages;
     }
-    const tabKey = existingTabCount === 0 ? resolvedAgentType : `${resolvedAgentType}::${newSession.id}`;
-    if (tabKey !== resolvedAgentType) newSession.tabKey = tabKey;
 
     // Suppress queen intro BEFORE the tab is created so loadAgentForType
     // never sees an unsuppressed window — the user never expects a greeting on reopen.
@@ -2290,7 +2445,7 @@ export default function Workspace() {
     setSessionsByAgent(prev => ({ ...prev, [tabKey]: [newSession] }));
     setActiveSessionByAgent(prev => ({ ...prev, [tabKey]: newSession.id }));
     setActiveWorker(tabKey);
-  }, [sessionsByAgent]);
+  }, [sessionsByAgent, fetchRestoredConversation]);
 
   // Post-mount: open the session from the URL ?session= param via handleHistoryOpen.
   // This runs AFTER persisted tabs are hydrated, so dedup works correctly.
@@ -2306,7 +2461,7 @@ export default function Workspace() {
       const match = r.sessions.find((s: { session_id: string }) => s.session_id === sid);
       handleHistoryOpen(
         sid,
-        match?.agent_path ?? initialAgentRef.current !== "new-agent" ? initialAgentRef.current : null,
+        match?.agent_path ?? (initialAgentRef.current !== "new-agent" ? initialAgentRef.current : null),
         match?.agent_name ?? null,
       );
     }).catch(() => {
@@ -2326,9 +2481,9 @@ export default function Workspace() {
   return (
     <div className="flex flex-col h-screen bg-background overflow-hidden">
       <TopBar
-        tabs={agentTabs}
+        tabs={orderedAgentTabs}
         onTabClick={(agentType) => {
-          const tab = agentTabs.find(t => t.agentType === agentType);
+          const tab = orderedAgentTabs.find(t => t.agentType === agentType);
           if (tab) {
             setActiveWorker(agentType);
             setActiveSessionByAgent(prev => ({ ...prev, [agentType]: tab.sessionId }));
@@ -2336,6 +2491,7 @@ export default function Workspace() {
           }
         }}
         onCloseTab={closeAgentTab}
+        onReorderTabs={setTabOrder}
         afterTabs={
           <>
             <button
@@ -2454,6 +2610,7 @@ export default function Workspace() {
                 queenPhase={activeAgentState?.queenPhase ?? "building"}
                 pendingQuestion={activeAgentState?.awaitingInput ? activeAgentState.pendingQuestion : null}
                 pendingOptions={activeAgentState?.awaitingInput ? activeAgentState.pendingOptions : null}
+                pendingQuestionSource={activeAgentState?.awaitingInput ? activeAgentState.pendingQuestionSource : null}
                 onQuestionSubmit={
                   activeAgentState?.pendingQuestionSource === "queen"
                     ? handleQueenQuestionAnswer
@@ -2532,7 +2689,7 @@ export default function Workspace() {
                   subagentReports={activeAgentState?.subagentReports}
                   sessionId={activeAgentState?.sessionId || undefined}
                   graphId={activeAgentState?.graphId || undefined}
-                  workerSessionId={null}
+                  workerSessionId={activeAgentState?.currentExecutionId || activeAgentState?.pausedWorkerSessionId || null}
                   nodeLogs={activeAgentState?.nodeLogs[selectedNode.id] || []}
                   actionPlan={activeAgentState?.nodeActionPlans[selectedNode.id]}
                   onClose={() => setSelectedNode(null)}

@@ -10,9 +10,15 @@ export interface QuestionWidgetProps {
   onSubmit: (answer: string, isOther: boolean) => void;
   /** Called when user dismisses the question without answering */
   onDismiss?: () => void;
+  /** Where this question originated — affects accent color */
+  source?: "queen" | "worker" | null;
+  /** When true, skip outer padding (used when rendered inline in the chat area) */
+  inline?: boolean;
 }
 
-export default function QuestionWidget({ question, options, onSubmit, onDismiss }: QuestionWidgetProps) {
+const WORKER_ACCENT = "hsl(220,60%,55%)";
+
+export default function QuestionWidget({ question, options, onSubmit, onDismiss, source, inline }: QuestionWidgetProps) {
   const [selected, setSelected] = useState<number | null>(null);
   const [customText, setCustomText] = useState("");
   const [submitted, setSubmitted] = useState(false);
@@ -70,13 +76,33 @@ export default function QuestionWidget({ question, options, onSubmit, onDismiss 
 
   if (submitted) return null;
 
+  const isWorker = source === "worker";
+  // Worker questions use a blue accent; queen questions use the default primary color
+  const accentBg = isWorker ? `${WORKER_ACCENT}15` : undefined;
+  const accentSelectedBg = isWorker ? `${WORKER_ACCENT}18` : undefined;
+  const accentSelectedBorder = isWorker ? WORKER_ACCENT : undefined;
+
   return (
-    <div ref={containerRef} className="p-4">
-      <div className="bg-card border border-border rounded-xl shadow-sm overflow-hidden">
+    <div ref={containerRef} className={inline ? "py-1" : "p-4"}>
+      <div
+        className="bg-card rounded-xl shadow-sm overflow-hidden"
+        style={{
+          border: isWorker ? `1px solid ${WORKER_ACCENT}30` : "1px solid hsl(var(--border))",
+          backgroundColor: accentBg,
+        }}
+      >
         {/* Header / Question */}
         <div className="px-5 pt-4 pb-3 flex items-start gap-3">
-          <div className="w-7 h-7 rounded-lg bg-primary/10 border border-primary/20 flex items-center justify-center flex-shrink-0 mt-0.5">
-            <MessageCircleQuestion className="w-3.5 h-3.5 text-primary" />
+          <div
+            className={`w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0 mt-0.5 ${
+              isWorker ? "" : "bg-primary/10 border border-primary/20"
+            }`}
+            style={isWorker ? { backgroundColor: `${WORKER_ACCENT}15`, border: `1px solid ${WORKER_ACCENT}30` } : undefined}
+          >
+            <MessageCircleQuestion
+              className={`w-3.5 h-3.5 ${isWorker ? "" : "text-primary"}`}
+              style={isWorker ? { color: WORKER_ACCENT } : undefined}
+            />
           </div>
           <p className="text-sm font-medium text-foreground leading-relaxed flex-1">{question}</p>
           {onDismiss && (
@@ -97,9 +123,20 @@ export default function QuestionWidget({ question, options, onSubmit, onDismiss 
               onClick={() => setSelected(idx)}
               className={`w-full text-left px-4 py-2.5 rounded-lg border text-sm transition-colors ${
                 selected === idx
-                  ? "border-primary bg-primary/10 text-foreground"
-                  : "border-border/60 bg-muted/20 text-foreground hover:border-primary/40 hover:bg-muted/40"
+                  ? isWorker
+                    ? "text-foreground"
+                    : "border-primary bg-primary/10 text-foreground"
+                  : isWorker
+                    ? "text-foreground hover:bg-muted/40"
+                    : "border-border/60 bg-muted/20 text-foreground hover:border-primary/40 hover:bg-muted/40"
               }`}
+              style={
+                selected === idx && isWorker
+                  ? { borderColor: accentSelectedBorder, backgroundColor: accentSelectedBg }
+                  : isWorker
+                    ? { borderColor: `${WORKER_ACCENT}25`, backgroundColor: `${WORKER_ACCENT}08` }
+                    : undefined
+              }
             >
               <span className="text-xs text-muted-foreground mr-2">{idx + 1}.</span>
               {option}
@@ -119,9 +156,20 @@ export default function QuestionWidget({ question, options, onSubmit, onDismiss 
             placeholder="Type a custom response..."
             className={`w-full px-4 py-2.5 rounded-lg border border-dashed text-sm transition-colors bg-transparent placeholder:text-muted-foreground focus:outline-none ${
               isOtherSelected
-                ? "border-primary bg-primary/10 text-foreground"
-                : "border-border text-muted-foreground hover:border-primary/40"
+                ? isWorker
+                  ? "text-foreground"
+                  : "border-primary bg-primary/10 text-foreground"
+                : isWorker
+                  ? "text-muted-foreground"
+                  : "border-border text-muted-foreground hover:border-primary/40"
             }`}
+            style={
+              isOtherSelected && isWorker
+                ? { borderColor: accentSelectedBorder, backgroundColor: accentSelectedBg }
+                : isWorker
+                  ? { borderColor: `${WORKER_ACCENT}30` }
+                  : undefined
+            }
           />
         </div>
 
@@ -130,7 +178,12 @@ export default function QuestionWidget({ question, options, onSubmit, onDismiss 
           <button
             onClick={handleSubmit}
             disabled={!canSubmit}
-            className="w-full flex items-center justify-center gap-2 py-2.5 rounded-lg text-sm font-medium bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+            className={`w-full flex items-center justify-center gap-2 py-2.5 rounded-lg text-sm font-medium disabled:opacity-30 disabled:cursor-not-allowed transition-colors ${
+              isWorker
+                ? "text-white hover:opacity-90"
+                : "bg-primary text-primary-foreground hover:bg-primary/90"
+            }`}
+            style={isWorker ? { backgroundColor: WORKER_ACCENT } : undefined}
           >
             <Send className="w-3.5 h-3.5" />
             Submit

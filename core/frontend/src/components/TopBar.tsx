@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { Crown, X } from "lucide-react";
 import { loadPersistedTabs, savePersistedTabs, TAB_STORAGE_KEY, type PersistedTabState } from "@/lib/tab-persistence";
@@ -24,9 +24,11 @@ interface TopBarProps {
   afterTabs?: React.ReactNode;
   /** Right-side slot for page-specific controls (e.g. credentials). */
   children?: React.ReactNode;
+  /** Called with the new ordered array of agentType strings after a drag-reorder. */
+  onReorderTabs?: (agentTypes: string[]) => void;
 }
 
-export default function TopBar({ tabs: tabsProp, onTabClick, onCloseTab, canCloseTabs, afterTabs, children }: TopBarProps) {
+export default function TopBar({ tabs: tabsProp, onTabClick, onCloseTab, canCloseTabs, afterTabs, children, onReorderTabs }: TopBarProps) {
   const navigate = useNavigate();
 
   // Fallback: read persisted tabs when no live tabs provided
@@ -36,6 +38,11 @@ export default function TopBar({ tabs: tabsProp, onTabClick, onCloseTab, canClos
 
   const tabs: TopBarTab[] = tabsProp ?? deriveTabs(persisted);
   const showClose = canCloseTabs ?? true;
+
+  // Drag-to-reorder state — position-aware (left/right half of target tab)
+  const [dragIndex, setDragIndex] = useState<number | null>(null);
+  const [dropTarget, setDropTarget] = useState<{ index: number; side: "left" | "right" } | null>(null);
+  const tabStripRef = useRef<HTMLDivElement>(null);
 
   const handleTabClick = useCallback((agentType: string) => {
     if (onTabClick) {
@@ -52,28 +59,31 @@ export default function TopBar({ tabs: tabsProp, onTabClick, onCloseTab, canClos
       return;
     }
     // Kill the backend session (queen/judge/worker) even outside workspace
+    // agentType may contain a "::" instance suffix — extract bare path for API lookups
+    const bareAgent = agentType.split("::")[0];
     sessionsApi.list()
       .then(({ sessions }) => {
-        const match = sessions.find(s => s.agent_path === agentType);
+        const match = sessions.find(s => s.agent_path === bareAgent);
         if (match) return sessionsApi.stop(match.session_id);
       })
-      .catch(() => {});  // fire-and-forget
+      .catch(() => { });  // fire-and-forget
 
     // Fallback: update localStorage directly (non-workspace pages)
     setPersisted(prev => {
       if (!prev) return null;
-      const nextTabs = prev.tabs.filter(t => t.agentType !== agentType);
+      // Match by tabKey (with :: suffix) — this is how workspace keys its tabs
+      const nextTabs = prev.tabs.filter(t => (t.tabKey || t.agentType) !== agentType);
       if (nextTabs.length === 0) {
         localStorage.removeItem(TAB_STORAGE_KEY);
         return null;
       }
-      const removedIds = new Set(prev.tabs.filter(t => t.agentType === agentType).map(t => t.id));
+      const removedIds = new Set(prev.tabs.filter(t => (t.tabKey || t.agentType) === agentType).map(t => t.id));
       const nextSessions = { ...prev.sessions };
       for (const id of removedIds) delete nextSessions[id];
       const nextActiveSession = { ...prev.activeSessionByAgent };
       delete nextActiveSession[agentType];
       const nextActiveWorker = prev.activeWorker === agentType
-        ? nextTabs[0].agentType
+        ? (nextTabs[0].tabKey || nextTabs[0].agentType)
         : prev.activeWorker;
       const nextState: PersistedTabState = {
         tabs: nextTabs,
@@ -97,32 +107,93 @@ export default function TopBar({ tabs: tabsProp, onTabClick, onCloseTab, canClos
         {tabs.length > 0 && (
           <>
             <span className="text-border text-xs flex-shrink-0">|</span>
-            <div className="flex items-center gap-0.5 min-w-0 overflow-x-auto scrollbar-hide">
-              {tabs.map((tab) => (
-                <button
-                  key={tab.agentType}
-                  onClick={() => handleTabClick(tab.agentType)}
-                  className={`group flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-colors whitespace-nowrap flex-shrink-0 ${
-                    tab.isActive
-                      ? "bg-primary/15 text-primary"
-                      : "text-muted-foreground hover:text-foreground hover:bg-muted/50"
-                  }`}
-                >
-                  {tab.hasRunning && (
-                    <span className="relative flex h-1.5 w-1.5 flex-shrink-0">
-                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary opacity-60" />
-                      <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-primary" />
-                    </span>
-                  )}
-                  <span>{tab.label}</span>
-                  {showClose && (
-                    <X
-                      className="w-3 h-3 opacity-0 group-hover:opacity-60 hover:!opacity-100 transition-opacity"
-                      onClick={(e) => handleCloseTab(tab.agentType, e)}
-                    />
-                  )}
-                </button>
-              ))}
+            <div
+              ref={tabStripRef}
+              className="flex items-center gap-0.5 min-w-0 overflow-x-auto scrollbar-hide"
+              onDragOver={onReorderTabs ? (e) => {
+                e.preventDefault();
+                // When hovering the container gaps (not directly over a tab), find
+                // the nearest tab by checking all child button rects.
+                const strip = tabStripRef.current;
+                if (!strip) return;
+                const buttons = strip.querySelectorAll<HTMLButtonElement>("[data-tab-idx]");
+                let closest: { idx: number; side: "left" | "right" } | null = null;
+                let minDist = Infinity;
+                buttons.forEach((btn) => {
+                  const rect = btn.getBoundingClientRect();
+                  const midX = rect.left + rect.width / 2;
+                  const idx = Number(btn.dataset.tabIdx);
+                  // Distance to left edge vs right edge
+                  const distLeft = Math.abs(e.clientX - rect.left);
+                  const distRight = Math.abs(e.clientX - rect.right);
+                  const dist = Math.min(distLeft, distRight);
+                  if (dist < minDist) {
+                    minDist = dist;
+                    closest = { idx, side: e.clientX < midX ? "left" : "right" };
+                  }
+                });
+                if (closest) setDropTarget(closest);
+              } : undefined}
+              onDragLeave={onReorderTabs ? () => setDropTarget(null) : undefined}
+              onDrop={onReorderTabs ? (e) => {
+                e.preventDefault();
+                if (dragIndex !== null && dropTarget !== null) {
+                  const newOrder = tabs.map(t => t.agentType);
+                  const [removed] = newOrder.splice(dragIndex, 1);
+                  // Calculate insert position: if dropping to the right of a tab,
+                  // insert after it; if to the left, insert before it.
+                  let insertAt = dropTarget.side === "right" ? dropTarget.index + 1 : dropTarget.index;
+                  // Adjust for the removal shifting indices
+                  if (dragIndex < insertAt) insertAt--;
+                  newOrder.splice(insertAt, 0, removed);
+                  onReorderTabs(newOrder);
+                }
+                setDragIndex(null);
+                setDropTarget(null);
+              } : undefined}
+            >
+              {tabs.map((tab, i) => {
+                const isDragging = dragIndex !== null;
+                const showLeftIndicator = isDragging && dropTarget?.index === i && dropTarget?.side === "left" && dragIndex !== i && dragIndex !== i - 1;
+                const showRightIndicator = isDragging && dropTarget?.index === i && dropTarget?.side === "right" && dragIndex !== i && dragIndex !== i + 1;
+                return (
+                  <button
+                    key={tab.agentType}
+                    data-tab-idx={i}
+                    onClick={() => handleTabClick(tab.agentType)}
+                    draggable={!!onReorderTabs}
+                    onDragStart={onReorderTabs ? () => setDragIndex(i) : undefined}
+                    onDragEnd={onReorderTabs ? () => { setDragIndex(null); setDropTarget(null); } : undefined}
+                    onDragOver={onReorderTabs ? (e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      const rect = e.currentTarget.getBoundingClientRect();
+                      const midX = rect.left + rect.width / 2;
+                      setDropTarget({ index: i, side: e.clientX < midX ? "left" : "right" });
+                    } : undefined}
+                    className={`group flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-colors whitespace-nowrap flex-shrink-0 ${tab.isActive
+                        ? "bg-primary/15 text-primary"
+                        : "text-muted-foreground hover:text-foreground hover:bg-muted/50"
+                      } ${onReorderTabs ? "active:cursor-grabbing" : ""} ${showLeftIndicator ? "border-l-2 border-primary" : ""
+                      } ${showRightIndicator ? "border-r-2 border-primary" : ""
+                      } ${dragIndex === i ? "opacity-40" : ""}`}
+                  >
+                    {tab.hasRunning && (
+                      <span className="relative flex h-1.5 w-1.5 flex-shrink-0">
+                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary opacity-60" />
+                        <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-primary" />
+                      </span>
+                    )}
+                    <span>{tab.label}</span>
+                    {showClose && (
+                      <X
+                        className="w-3 h-3 opacity-0 group-hover:opacity-60 hover:!opacity-100 transition-opacity"
+                        onClick={(e) => handleCloseTab(tab.agentType, e)}
+                      />
+                    )}
+                  </button>
+                );
+              })}
             </div>
             {afterTabs}
           </>
@@ -144,14 +215,16 @@ function deriveTabs(persisted: PersistedTabState | null): TopBarTab[] {
   const seen = new Set<string>();
   const tabs: TopBarTab[] = [];
   for (const tab of persisted.tabs) {
-    if (seen.has(tab.agentType)) continue;
-    seen.add(tab.agentType);
+    // Use tabKey (with :: instance suffix) as identity — matches workspace keying
+    const key = tab.tabKey || tab.agentType;
+    if (seen.has(key)) continue;
+    seen.add(key);
     const sessionData = persisted.sessions?.[tab.id];
     const hasRunning = sessionData?.graphNodes?.some(
       (n) => n.status === "running" || n.status === "looping"
     ) ?? false;
     tabs.push({
-      agentType: tab.agentType,
+      agentType: key,
       label: tab.label,
       isActive: false, // no active tab outside workspace
       hasRunning,

@@ -728,8 +728,10 @@ class ExecutionStream:
                 if result.paused_at:
                     ctx.status = "paused"
 
-                # Write final session state (skip for shared-session executions)
-                if not _is_shared_session:
+                # Write final session state (skip for shared-session executions).
+                # Exception: always write on pause so handle_resume can find and
+                # restore the correct node even for shared sessions.
+                if not _is_shared_session or result.paused_at:
                     await self._write_session_state(execution_id, ctx, result=result)
 
                 # Emit completion/failure/pause event
@@ -791,14 +793,14 @@ class ExecutionStream:
                 # Store result with retention
                 self._record_execution_result(execution_id, result)
 
-                # Write session state (skip for shared-session executions)
-                if not _is_shared_session:
-                    if has_result and result.paused_at:
-                        await self._write_session_state(execution_id, ctx, result=result)
-                    else:
-                        await self._write_session_state(
-                            execution_id, ctx, error="Execution cancelled"
-                        )
+                # Write session state.  For shared-session executions we
+                # normally skip this — _write_progress() owns state.json.
+                # But when paused we must persist paused_at so handle_resume
+                # can restart from the correct node.
+                if has_result and result.paused_at:
+                    await self._write_session_state(execution_id, ctx, result=result)
+                elif not _is_shared_session:
+                    await self._write_session_state(execution_id, ctx, error="Execution cancelled")
 
                 # Emit SSE event so the frontend knows the execution stopped.
                 # The executor does NOT emit on CancelledError, so there is no

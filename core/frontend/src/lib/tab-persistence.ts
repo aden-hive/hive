@@ -13,6 +13,8 @@ export interface PersistedTabState {
   activeSessionByAgent: Record<string, string>;
   activeWorker: string;
   sessions?: Record<string, { messages: ChatMessage[]; graphNodes: GraphNode[] }>;
+  /** User-defined tab display order (array of tabKey/agentType strings). */
+  tabOrder?: string[];
 }
 
 export function loadPersistedTabs(): PersistedTabState | null {
