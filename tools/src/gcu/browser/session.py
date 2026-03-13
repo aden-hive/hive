@@ -14,9 +14,11 @@ Supports three session types:
 from __future__ import annotations
 
 import asyncio
+import contextvars
 import logging
 import os
 import sys
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -316,6 +318,20 @@ async def close_shared_browser() -> None:
 
 
 @dataclass
+class TabMeta:
+    """Metadata for a tracked browser tab."""
+
+    created_at: float
+    """Unix timestamp when the tab was registered."""
+
+    origin: str
+    """Who opened this tab: "agent", "popup", "user", or "startup"."""
+
+    opener_url: str | None = None
+    """URL of the page that triggered the popup (popup origin only)."""
+
+
+@dataclass
 class BrowserSession:
     """
     Manages a browser session with multiple tabs.
@@ -336,6 +352,7 @@ class BrowserSession:
     pages: dict[str, Page] = field(default_factory=dict)
     active_page_id: str | None = None
     console_messages: dict[str, list[dict]] = field(default_factory=dict)
+    page_meta: dict[str, TabMeta] = field(default_factory=dict)
     _playwright: Any = None
     _lock: asyncio.Lock = field(default_factory=asyncio.Lock)
 
@@ -429,6 +446,7 @@ class BrowserSession:
         self.pages.clear()
         self.active_page_id = None
         self.console_messages.clear()
+        self.page_meta.clear()
 
     async def start(self, headless: bool = True, persistent: bool = True) -> dict:
         """
@@ -537,7 +555,7 @@ class BrowserSession:
 
             # Register the clean page
             target_id = f"tab_{id(first_page)}"
-            self._register_page(first_page, target_id)
+            self._register_page(first_page, target_id, origin="startup")
 
             # Set branded Hive start page on the initial tab
             logger.info("start(): setting Hive start page content...")
@@ -604,6 +622,7 @@ class BrowserSession:
             self.pages.clear()
             self.active_page_id = None
             self.console_messages.clear()
+            self.page_meta.clear()
             self.user_data_dir = None
             self.persistent = False
 
@@ -706,7 +725,7 @@ class BrowserSession:
 
         page = await self.context.new_page()
         target_id = f"tab_{id(page)}"
-        self._register_page(page, target_id)
+        self._register_page(page, target_id, origin="agent")
 
         await page.goto(url, wait_until=wait_until, timeout=DEFAULT_NAVIGATION_TIMEOUT_MS)
 
@@ -732,7 +751,7 @@ class BrowserSession:
             # Nothing to steal focus from — just open normally
             page = await self.context.new_page()
             target_id = f"tab_{id(page)}"
-            self._register_page(page, target_id)
+            self._register_page(page, target_id, origin="agent")
             await page.goto(url, wait_until=wait_until, timeout=DEFAULT_NAVIGATION_TIMEOUT_MS)
             return {
                 "ok": True,
@@ -767,7 +786,7 @@ class BrowserSession:
 
         target_id = f"tab_{id(page)}"
         # Don't update active_page_id — the whole point is to stay on the current tab
-        self._register_page(page, target_id, set_active=False)
+        self._register_page(page, target_id, set_active=False, origin="agent")
 
         return {
             "ok": True,
@@ -781,6 +800,7 @@ class BrowserSession:
         """Clean up session state when a page is closed (by user or programmatically)."""
         self.pages.pop(target_id, None)
         self.console_messages.pop(target_id, None)
+        self.page_meta.pop(target_id, None)
 
         if self.active_page_id == target_id:
             self.active_page_id = next(iter(self.pages), None)
@@ -801,11 +821,29 @@ class BrowserSession:
         for existing in self.pages.values():
             if existing is page:
                 return
+        # Capture the opener's URL as context for the popup origin
+        opener_url: str | None = None
+        active_page = self.get_active_page()
+        if active_page:
+            try:
+                opener_url = active_page.url
+            except Exception:
+                pass
         target_id = f"tab_{id(page)}"
-        self._register_page(page, target_id, set_active=False)
+        self._register_page(
+            page, target_id, set_active=False, origin="popup", opener_url=opener_url
+        )
         logger.info("Auto-registered popup page: %s (url=%s)", target_id, page.url)
 
-    def _register_page(self, page: Page, target_id: str, *, set_active: bool = True) -> None:
+    def _register_page(
+        self,
+        page: Page,
+        target_id: str,
+        *,
+        set_active: bool = True,
+        origin: str = "user",
+        opener_url: str | None = None,
+    ) -> None:
         """Register a page in the session with all necessary event listeners."""
         if target_id in self.pages:
             if set_active:
@@ -813,6 +851,11 @@ class BrowserSession:
             return
         self.pages[target_id] = page
         self.console_messages[target_id] = []
+        self.page_meta[target_id] = TabMeta(
+            created_at=time.time(),
+            origin=origin,
+            opener_url=opener_url,
+        )
         page.on("console", lambda msg, tid=target_id: self._capture_console(tid, msg))
         page.on("close", lambda tid=target_id: self._handle_page_close(tid))
         if set_active:
@@ -837,6 +880,7 @@ class BrowserSession:
         page = self.pages.pop(tid)
         await page.close()
         self.console_messages.pop(tid, None)
+        self.page_meta.pop(tid, None)
 
         if self.active_page_id == tid:
             self.active_page_id = next(iter(self.pages), None)
@@ -854,15 +898,19 @@ class BrowserSession:
 
     async def list_tabs(self) -> list[dict]:
         """List all open tabs with their metadata."""
+        now = time.time()
         tabs = []
         for tid, page in self.pages.items():
             try:
+                meta = self.page_meta.get(tid)
                 tabs.append(
                     {
                         "targetId": tid,
                         "url": page.url,
                         "title": await page.title(),
                         "active": tid == self.active_page_id,
+                        "origin": meta.origin if meta else "unknown",
+                        "age_seconds": int(now - meta.created_at) if meta else None,
                     }
                 )
             except Exception:
@@ -888,12 +936,36 @@ class BrowserSession:
 
 _sessions: dict[str, BrowserSession] = {}
 
+# ContextVar that lets the framework inject a per-subagent profile without
+# changing any tool signatures.  Each asyncio Task (including those spawned
+# by asyncio.gather) inherits a *copy* of the current context, so concurrent
+# GCU subagents each see their own value here.
+_active_profile: contextvars.ContextVar[str] = contextvars.ContextVar(
+    "hive_gcu_profile", default="default"
+)
 
-def get_session(profile: str = "default") -> BrowserSession:
-    """Get or create a browser session for a profile."""
-    if profile not in _sessions:
-        _sessions[profile] = BrowserSession(profile=profile)
-    return _sessions[profile]
+
+def set_active_profile(profile: str) -> contextvars.Token:
+    """Set the active browser profile for the current async context.
+
+    Returns a token that can be passed to ``_active_profile.reset()`` to
+    restore the previous value when the subagent finishes.
+    """
+    return _active_profile.set(profile)
+
+
+def get_session(profile: str | None = None) -> BrowserSession:
+    """Get or create a browser session for a profile.
+
+    If *profile* is not given, the value set by :func:`set_active_profile`
+    for the current async context is used (default: ``"default"``).  This
+    allows the framework to automatically route concurrent GCU subagents to
+    separate browser contexts without any changes to tool call sites.
+    """
+    resolved = profile if profile is not None else _active_profile.get()
+    if resolved not in _sessions:
+        _sessions[resolved] = BrowserSession(profile=resolved)
+    return _sessions[resolved]
 
 
 def get_all_sessions() -> dict[str, BrowserSession]:
