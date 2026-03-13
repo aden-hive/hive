@@ -348,8 +348,6 @@ _FLOWCHART_TYPES = {
     "comment": {"shape": "flag", "color": "#BDBDBD"},  # light grey
     # Alternate process — rounded rectangle
     "alternate_process": {"shape": "rounded_rect", "color": "#42A5F5"},  # light blue
-    # Sub-agent — planning-only; dissolved into parent's sub_agents at build time
-    "subagent": {"shape": "subroutine", "color": "#00695C"},  # dark teal
 }
 
 
@@ -507,7 +505,7 @@ def _dissolve_planning_nodes(
     subagent_ids = [
         n["id"]
         for n in nodes
-        if n.get("flowchart_type") in ("subagent", "browser") or n.get("node_type") == "gcu"
+        if n.get("flowchart_type") == "browser" or n.get("node_type") == "gcu"
     ]
 
     for sa_id in subagent_ids:
@@ -1265,7 +1263,7 @@ def register_queen_lifecycle_tools(
            edges from the predecessor.
         3. Removing the decision node from the graph.
 
-        **Sub-agent nodes** (flowchart_type == "subagent"):
+        **Sub-agent / browser nodes** (node_type == "gcu" or flowchart_type == "browser"):
         1. Adding the sub-agent node's ID to the predecessor's sub_agents list.
         2. Removing the sub-agent node and its connecting edge.
         3. Sub-agent nodes must not have outgoing edges (they are leaf delegates).
@@ -1407,7 +1405,7 @@ def register_queen_lifecycle_tools(
         subagent_ids = [
             n["id"]
             for n in nodes
-            if n.get("flowchart_type") in ("subagent", "browser") or n.get("node_type") == "gcu"
+            if n.get("flowchart_type") == "browser" or n.get("node_type") == "gcu"
         ]
 
         for sa_id in subagent_ids:
@@ -1623,7 +1621,7 @@ def register_queen_lifecycle_tools(
         }
         gcu_node_ids = {
             n["id"] for n in validated_nodes
-            if n.get("node_type") == "gcu" or n.get("flowchart_type") == "subagent"
+            if n.get("node_type") == "gcu" or n.get("flowchart_type") == "browser"
         }
         topology_corrections: list[str] = []
         if decision_node_ids and gcu_node_ids:
@@ -1681,7 +1679,7 @@ def register_queen_lifecycle_tools(
         # auto-assign the node as a sub-agent of its predecessor.
         leaf_node_ids: set[str] = set()
         for n in validated_nodes:
-            if n.get("node_type") == "gcu" or n.get("flowchart_type") == "subagent":
+            if n.get("node_type") == "gcu" or n.get("flowchart_type") == "browser":
                 leaf_node_ids.add(n["id"])
         if leaf_node_ids:
             for leaf_id in leaf_node_ids:
@@ -2030,11 +2028,11 @@ def register_queen_lifecycle_tools(
             "(updates the flowchart in place — planning-only nodes are dissolved "
             "automatically without re-confirmation). "
             "Each node is auto-classified into a classical flowchart type "
-            "(start, terminal, process, decision, io, subprocess, subagent, browser, manual) "
+            "(start, terminal, process, decision, io, subprocess, browser, manual) "
             "with unique colors. No code is generated. "
-            "Planning-only types (decision, subagent) are dissolved at confirm/build time: "
+            "Planning-only types (decision, browser/GCU) are dissolved at confirm/build time: "
             "decision nodes merge into predecessor's success_criteria with yes/no edges; "
-            "subagent nodes merge into predecessor's sub_agents list as leaf delegates."
+            "browser/GCU nodes merge into predecessor's sub_agents list as leaf delegates."
         ),
         parameters={
             "type": "object",
@@ -2097,7 +2095,6 @@ def register_queen_lifecycle_tools(
                                     "browser",
                                     "comment",
                                     "alternate_process",
-                                    "subagent",
                                 ],
                                 "description": (
                                     "ISO 5807 flowchart symbol type. Auto-detected if omitted. "
@@ -2107,10 +2104,9 @@ def register_queen_lifecycle_tools(
                                     "subprocess (teal subroutine), preparation (brown hexagon), "
                                     "manual_operation (pink trapezoid), delay (orange D-shape), "
                                     "display (cyan), database (green cylinder), "
-                                    "merge (indigo triangle), browser (dark indigo hexagon), "
-                                    "subagent (dark teal subroutine — planning-only, dissolved "
-                                    "into parent node's sub_agents at build time; must be a "
-                                    "leaf node connected only to its managing parent)"
+                                    "merge (indigo triangle), browser (dark indigo hexagon — "
+                                    "for GCU/browser sub-agents; must be a leaf node connected "
+                                    "only to its managing parent)"
                                 ),
                             },
                             "tools": {
@@ -2236,7 +2232,7 @@ def register_queen_lifecycle_tools(
         phase_state.build_confirmed = True
 
         # Preserve original draft for flowchart display during runtime,
-        # then dissolve planning-only nodes (decision + subagent) into
+        # then dissolve planning-only nodes (decision + browser/GCU) into
         # runtime-compatible structures.
         import copy as _copy
 
@@ -2254,7 +2250,10 @@ def register_queen_lifecycle_tools(
 
         dissolved_count = len(original_nodes) - len(converted.get("nodes", []))
         decision_count = sum(1 for n in original_nodes if n.get("flowchart_type") == "decision")
-        subagent_count = sum(1 for n in original_nodes if n.get("flowchart_type") == "subagent")
+        subagent_count = sum(
+            1 for n in original_nodes
+            if n.get("flowchart_type") == "browser" or n.get("node_type") == "gcu"
+        )
 
         dissolution_parts = []
         if decision_count:
