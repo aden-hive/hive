@@ -161,6 +161,7 @@ class SessionManager:
         self,
         agent_path: str | Path,
         agent_id: str | None = None,
+        session_id: str | None = None,
         model: str | None = None,
         initial_prompt: str | None = None,
         queen_resume_from: str | None = None,
