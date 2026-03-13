@@ -89,10 +89,50 @@ def main():
 
     register_testing_commands(subparsers)
 
+    # doctor command
+    doctor_parser = subparsers.add_parser(
+        "doctor",
+        help="Run system health check",
+        description="Diagnose environment and configuration issues.",
+    )
+    doctor_parser.set_defaults(func=cmd_doctor)
+
+    # export command
+    export_parser = subparsers.add_parser(
+        "export-analytics",
+        help="Export agent session data to CSV",
+        description="Generate a CSV report of agent execution history.",
+    )
+    export_parser.add_argument(
+        "agent_name",
+        type=str,
+        help="Name of the agent (folder name in exports/)",
+    )
+    export_parser.add_argument(
+        "--output",
+        "-o",
+        type=str,
+        default="sessions.csv",
+        help="Output CSV file path (default: sessions.csv)",
+    )
+    export_parser.set_defaults(func=cmd_export)
+
     args = parser.parse_args()
 
     if hasattr(args, "func"):
         sys.exit(args.func(args))
+
+
+def cmd_doctor(args: argparse.Namespace) -> int:
+    from framework.doctor import run_doctor
+    return run_doctor()
+
+
+def cmd_export(args: argparse.Namespace) -> int:
+    from framework.analytics import export_sessions_to_csv
+    export_sessions_to_csv(args.agent_name, args.output)
+    return 0
+
 
 
 if __name__ == "__main__":

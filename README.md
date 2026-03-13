@@ -84,7 +84,7 @@ Use Hive when you need:
 - An LLM provider that powers the agents
 - **ripgrep (optional, recommended on Windows):** The `search_files` tool uses ripgrep for faster file search. If not installed, a Python fallback is used. On Windows: `winget install BurntSushi.ripgrep` or `scoop install ripgrep`
 
-> **Note for Windows Users:** It is strongly recommended to use **WSL (Windows Subsystem for Linux)** or **Git Bash** to run this framework. Some core automation scripts may not execute correctly in standard Command Prompt or PowerShell.
+> **Note for Windows Users:** You can run Hive natively on **PowerShell** using the included `quickstart.ps1` and `hive.ps1` scripts. Alternatively, **WSL (Windows Subsystem for Linux)** or **Git Bash** are also supported.
 
 ### Installation
 
