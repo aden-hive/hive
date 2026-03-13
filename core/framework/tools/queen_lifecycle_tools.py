@@ -286,6 +286,70 @@ def build_worker_profile(runtime: AgentRuntime, agent_path: Path | str | None = 
     return "\n".join(lines)
 
 
+_FLOWCHART_TYPES = {
+    # ── Core symbols (ISO 5807 §4) ──────────────────────────
+    # Terminator — rounded rectangle (stadium shape)
+    "start": {"shape": "stadium", "color": "#4CAF50"},  # green
+    "terminal": {"shape": "stadium", "color": "#F44336"},  # red
+    # Process — rectangle
+    "process": {"shape": "rectangle", "color": "#2196F3"},  # blue
+    # Decision — diamond
+    "decision": {"shape": "diamond", "color": "#FF9800"},  # amber
+    # Data (Input/Output) — parallelogram
+    "io": {"shape": "parallelogram", "color": "#9C27B0"},  # purple
+    # Document — rectangle with wavy bottom
+    "document": {"shape": "document", "color": "#607D8B"},  # blue-grey
+    # Multi-document — stacked documents
+    "multi_document": {"shape": "multi_document", "color": "#78909C"},  # blue-grey light
+    # Predefined process / subroutine — rectangle with double vertical bars
+    "subprocess": {"shape": "subroutine", "color": "#009688"},  # teal
+    # Preparation — hexagon
+    "preparation": {"shape": "hexagon", "color": "#795548"},  # brown
+    # Manual input — trapezoid with slanted top
+    "manual_input": {"shape": "manual_input", "color": "#E91E63"},  # pink
+    # Manual operation — inverted trapezoid
+    "manual_operation": {"shape": "trapezoid", "color": "#AD1457"},  # dark pink
+    # Delay — half-rounded rectangle (D-shape)
+    "delay": {"shape": "delay", "color": "#FF5722"},  # deep orange
+    # Display — rounded rectangle with pointed left
+    "display": {"shape": "display", "color": "#00BCD4"},  # cyan
+    # ── Data storage symbols ────────────────────────────────
+    # Database / direct access storage — cylinder
+    "database": {"shape": "cylinder", "color": "#8BC34A"},  # light green
+    # Stored data — generic data store
+    "stored_data": {"shape": "stored_data", "color": "#CDDC39"},  # lime
+    # Internal storage — rectangle with cross-hatch
+    "internal_storage": {"shape": "internal_storage", "color": "#FFC107"},  # amber light
+    # ── Connectors ──────────────────────────────────────────
+    # On-page connector — small circle
+    "connector": {"shape": "circle", "color": "#9E9E9E"},  # grey
+    # Off-page connector — pentagon / home-plate
+    "offpage_connector": {"shape": "pentagon", "color": "#757575"},  # dark grey
+    # ── Flow operations ─────────────────────────────────────
+    # Merge — inverted triangle
+    "merge": {"shape": "triangle_inv", "color": "#3F51B5"},  # indigo
+    # Extract — upward triangle
+    "extract": {"shape": "triangle", "color": "#5C6BC0"},  # indigo light
+    # Sort — hourglass / double triangle
+    "sort": {"shape": "hourglass", "color": "#7986CB"},  # indigo lighter
+    # Collate — merged hourglass
+    "collate": {"shape": "hourglass_inv", "color": "#9FA8DA"},  # indigo lightest
+    # Summing junction — circle with cross
+    "summing_junction": {"shape": "circle_cross", "color": "#F06292"},  # pink light
+    # Or — circle with horizontal bar
+    "or": {"shape": "circle_bar", "color": "#CE93D8"},  # purple light
+    # ── Domain-specific (Hive agent context) ────────────────
+    # Browser automation (GCU) — mapped to preparation/hexagon
+    "browser": {"shape": "hexagon", "color": "#1A237E"},  # dark indigo
+    # Comment / annotation — flag shape
+    "comment": {"shape": "flag", "color": "#BDBDBD"},  # light grey
+    # Alternate process — rounded rectangle
+    "alternate_process": {"shape": "rounded_rect", "color": "#42A5F5"},  # light blue
+    # Sub-agent — planning-only; dissolved into parent's sub_agents at build time
+    "subagent": {"shape": "subroutine", "color": "#00695C"},  # dark teal
+}
+
+
 def _read_agent_triggers_json(agent_path: Path) -> list[dict]:
     """Read triggers.json from the agent's export directory."""
     triggers_path = agent_path / "triggers.json"
