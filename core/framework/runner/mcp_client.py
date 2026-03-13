@@ -237,6 +237,11 @@ class MCPClient:
 
             # Wait for connection to be ready
             connection_ready.wait(timeout=10)
+            if not connection_ready.is_set():
+                raise RuntimeError(
+                    "Timed out waiting for MCP stdio connection to initialize "
+                    f"(command={self.config.command}, args={self.config.args})"
+                )
             if connection_error:
                 raise connection_error[0]
 
