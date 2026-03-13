@@ -220,12 +220,12 @@ const MessageBubble = memo(function MessageBubble({ msg, queenPhase }: { msg: Ch
           >
             {isQueen
               ? ((msg.phase ?? queenPhase) === "running"
-                ? "running phase"
+                ? "running"
                 : (msg.phase ?? queenPhase) === "staging"
-                  ? "staging phase"
+                  ? "staging"
                   : (msg.phase ?? queenPhase) === "planning"
-                    ? "planning phase"
-                    : "building phase")
+                    ? "planning"
+                    : "building")
               : "Worker"}
           </span>
         </div>
