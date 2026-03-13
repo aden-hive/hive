@@ -651,7 +651,8 @@ def register_queen_lifecycle_tools(
         name="replan_agent",
         description=(
             "Switch from building back to planning phase. "
-            "Only use when the user explicitly asks to re-plan or redesign the agent."
+            "Use when the user wants to change integrations, swap tools, "
+            "rethink the flow, or discuss design changes before building them."
         ),
         parameters={"type": "object", "properties": {}},
     )

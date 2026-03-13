@@ -637,7 +637,8 @@ updated flowchart immediately. Use this when you make structural changes \
 (add/remove nodes, change edges) so the flowchart stays in sync.
 - replan_agent() — Switch back to PLANNING phase. The previous draft is \
 restored (with decision/subagent nodes intact) so you can edit it. Use \
-when the user requests a major redesign that needs their approval.
+when the user wants to change integrations, swap tools, rethink the \
+flow, or discuss any design changes before you build them.
 
 When you finish building an agent, call load_built_agent(path) to stage it.
 """
@@ -862,10 +863,15 @@ flowchart immediately.
 
 - **Minor changes** (add a node, rename, adjust edges): call \
 save_agent_draft() with the updated graph and keep building.
-- **Major redesign** (user requests fundamental restructuring): call \
-replan_agent() to go back to planning. The previous draft is restored \
-so you can edit it with the user rather than starting from scratch. \
-After they approve, confirm_and_build() → continue building.
+- **User wants to discuss, redesign, or change integrations/tools**: call \
+replan_agent(). The previous draft is restored so you can edit it with \
+the user. After they approve, confirm_and_build() → continue building.
+
+**When to call replan_agent():** Changing which tools or integrations a \
+node uses, swapping data sources, rethinking the flow, or any time the \
+user says "replan", "go back", "let's redesign", "change the approach", \
+"use a different tool/API", etc. Do NOT stay in building to handle these \
+— switch to planning so the user can review and approve the new design.
 """
 
 # -- STAGING phase behavior --
