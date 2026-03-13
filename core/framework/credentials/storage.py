@@ -154,9 +154,13 @@ class EncryptedFileStorage(CredentialStorage):
             else:
                 # Generate new key
                 self._key = Fernet.generate_key()
+                # Security: NEVER log the key value — it would be exposed
+                # in log files, CI output, error aggregators, etc.
                 logger.warning(
-                    f"Generated new encryption key. To persist credentials across restarts, "
-                    f"set {key_env_var}={self._key.decode()}"
+                    "Generated new encryption key. To persist credentials across "
+                    "restarts, set the %s environment variable. "
+                    "Retrieve the key from your secure key management system.",
+                    key_env_var,
                 )
 
         self._fernet = Fernet(self._key)
