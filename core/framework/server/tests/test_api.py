@@ -16,6 +16,9 @@ from aiohttp.test_utils import TestClient, TestServer
 from framework.server.app import create_app
 from framework.server.session_manager import Session
 
+REPO_ROOT = Path(__file__).resolve().parents[4]
+EXAMPLE_AGENT_PATH = REPO_ROOT / "examples" / "templates" / "deep_research_agent"
+
 # ---------------------------------------------------------------------------
 # Mock helpers
 # ---------------------------------------------------------------------------
@@ -347,6 +350,35 @@ class TestHealth:
 
 
 class TestSessionCRUD:
+    @pytest.mark.asyncio
+    async def test_create_session_with_worker_forwards_session_id(self):
+        app = create_app()
+        manager = app["manager"]
+        manager.create_session_with_worker = AsyncMock(
+            return_value=_make_session(agent_id="my-custom-session")
+        )
+
+        async with TestClient(TestServer(app)) as client:
+            resp = await client.post(
+                "/api/sessions",
+                json={
+                    "session_id": "my-custom-session",
+                    "agent_path": str(EXAMPLE_AGENT_PATH),
+                },
+            )
+            data = await resp.json()
+
+        assert resp.status == 201
+        assert data["session_id"] == "my-custom-session"
+        manager.create_session_with_worker.assert_awaited_once_with(
+            str(EXAMPLE_AGENT_PATH.resolve()),
+            agent_id=None,
+            session_id="my-custom-session",
+            model=None,
+            initial_prompt=None,
+            queen_resume_from=None,
+        )
+
     @pytest.mark.asyncio
     async def test_list_sessions_empty(self):
         app = create_app()
