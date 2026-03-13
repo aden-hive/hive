@@ -281,6 +281,295 @@ def build_worker_profile(runtime: AgentRuntime, agent_path: Path | str | None = 
     return "\n".join(lines)
 
 
+# Classical flowchart symbols per ISO 5807 / ANSI standards.
+# Each type maps to a standard shape and a unique color for the
+# frontend renderer.  Shapes use Mermaid-compatible names where
+# possible so the frontend can render them directly.
+_FLOWCHART_TYPES = {
+    # ── Core symbols (ISO 5807 §4) ──────────────────────────
+    # Terminator — rounded rectangle (stadium shape)
+    "start": {"shape": "stadium", "color": "#4CAF50"},  # green
+    "terminal": {"shape": "stadium", "color": "#F44336"},  # red
+    # Process — rectangle
+    "process": {"shape": "rectangle", "color": "#2196F3"},  # blue
+    # Decision — diamond
+    "decision": {"shape": "diamond", "color": "#FF9800"},  # amber
+    # Data (Input/Output) — parallelogram
+    "io": {"shape": "parallelogram", "color": "#9C27B0"},  # purple
+    # Document — rectangle with wavy bottom
+    "document": {"shape": "document", "color": "#607D8B"},  # blue-grey
+    # Multi-document — stacked documents
+    "multi_document": {"shape": "multi_document", "color": "#78909C"},  # blue-grey light
+    # Predefined process / subroutine — rectangle with double vertical bars
+    "subprocess": {"shape": "subroutine", "color": "#009688"},  # teal
+    # Preparation — hexagon
+    "preparation": {"shape": "hexagon", "color": "#795548"},  # brown
+    # Manual input — trapezoid with slanted top
+    "manual_input": {"shape": "manual_input", "color": "#E91E63"},  # pink
+    # Manual operation — inverted trapezoid
+    "manual_operation": {"shape": "trapezoid", "color": "#AD1457"},  # dark pink
+    # Delay — half-rounded rectangle (D-shape)
+    "delay": {"shape": "delay", "color": "#FF5722"},  # deep orange
+    # Display — rounded rectangle with pointed left
+    "display": {"shape": "display", "color": "#00BCD4"},  # cyan
+    # ── Data storage symbols ────────────────────────────────
+    # Database / direct access storage — cylinder
+    "database": {"shape": "cylinder", "color": "#8BC34A"},  # light green
+    # Stored data — generic data store
+    "stored_data": {"shape": "stored_data", "color": "#CDDC39"},  # lime
+    # Internal storage — rectangle with cross-hatch
+    "internal_storage": {"shape": "internal_storage", "color": "#FFC107"},  # amber light
+    # ── Connectors ──────────────────────────────────────────
+    # On-page connector — small circle
+    "connector": {"shape": "circle", "color": "#9E9E9E"},  # grey
+    # Off-page connector — pentagon / home-plate
+    "offpage_connector": {"shape": "pentagon", "color": "#757575"},  # dark grey
+    # ── Flow operations ─────────────────────────────────────
+    # Merge — inverted triangle
+    "merge": {"shape": "triangle_inv", "color": "#3F51B5"},  # indigo
+    # Extract — upward triangle
+    "extract": {"shape": "triangle", "color": "#5C6BC0"},  # indigo light
+    # Sort — hourglass / double triangle
+    "sort": {"shape": "hourglass", "color": "#7986CB"},  # indigo lighter
+    # Collate — merged hourglass
+    "collate": {"shape": "hourglass_inv", "color": "#9FA8DA"},  # indigo lightest
+    # Summing junction — circle with cross
+    "summing_junction": {"shape": "circle_cross", "color": "#F06292"},  # pink light
+    # Or — circle with horizontal bar
+    "or": {"shape": "circle_bar", "color": "#CE93D8"},  # purple light
+    # ── Domain-specific (Hive agent context) ────────────────
+    # Browser automation (GCU) — mapped to preparation/hexagon
+    "browser": {"shape": "hexagon", "color": "#1A237E"},  # dark indigo
+    # Comment / annotation — flag shape
+    "comment": {"shape": "flag", "color": "#BDBDBD"},  # light grey
+    # Alternate process — rounded rectangle
+    "alternate_process": {"shape": "rounded_rect", "color": "#42A5F5"},  # light blue
+    # Sub-agent — planning-only; dissolved into parent's sub_agents at build time
+    "subagent": {"shape": "subroutine", "color": "#00695C"},  # dark teal
+}
+
+
+def _dissolve_planning_nodes(
+    draft: dict,
+) -> tuple[dict, dict[str, list[str]]]:
+    """Convert planning-only nodes into runtime-compatible structures.
+
+    Two kinds of planning-only nodes are dissolved:
+
+    **Decision nodes** (flowchart diamonds):
+    1. Merging the decision clause into the predecessor node's success_criteria.
+    2. Rewiring the decision's yes/no outgoing edges as on_success/on_failure
+       edges from the predecessor.
+    3. Removing the decision node from the graph.
+
+    If a decision node has no predecessor (i.e. it's the first node), it is
+    converted to a regular process node instead of being dissolved.
+
+    **Sub-agent nodes** (flowchart subroutines):
+    1. Adding the sub-agent's ID to the predecessor's sub_agents list.
+    2. Removing the sub-agent node and its edges.
+
+    Returns (converted_draft, flowchart_map) where flowchart_map maps each
+    surviving runtime node ID to the list of original draft node IDs it absorbed.
+    """
+    import copy as _copy
+
+    nodes: list[dict] = _copy.deepcopy(draft.get("nodes", []))
+    edges: list[dict] = _copy.deepcopy(draft.get("edges", []))
+
+    # Index helpers
+    node_by_id: dict[str, dict] = {n["id"]: n for n in nodes}
+
+    def _incoming(nid: str) -> list[dict]:
+        return [e for e in edges if e["target"] == nid]
+
+    def _outgoing(nid: str) -> list[dict]:
+        return [e for e in edges if e["source"] == nid]
+
+    # Identify decision nodes
+    decision_ids = [n["id"] for n in nodes if n.get("flowchart_type") == "decision"]
+
+    # Track which draft nodes each runtime node absorbed
+    absorbed: dict[str, list[str]] = {}  # runtime_id -> [draft_ids...]
+
+    # Process decisions in node-list order (topological for linear graphs)
+    for d_id in decision_ids:
+        d_node = node_by_id.get(d_id)
+        if d_node is None:
+            continue  # already removed by a prior dissolution
+
+        in_edges = _incoming(d_id)
+        out_edges = _outgoing(d_id)
+
+        # Classify outgoing edges into yes/no branches
+        yes_edge: dict | None = None
+        no_edge: dict | None = None
+
+        for oe in out_edges:
+            lbl = (oe.get("label") or "").lower().strip()
+            cond = (oe.get("condition") or "").lower().strip()
+
+            if lbl in ("yes", "true", "pass") or cond == "on_success":
+                yes_edge = oe
+            elif lbl in ("no", "false", "fail") or cond == "on_failure":
+                no_edge = oe
+
+        # Fallback: if exactly 2 outgoing and couldn't classify, assign by order
+        if len(out_edges) == 2 and (yes_edge is None or no_edge is None):
+            if yes_edge is None and no_edge is None:
+                yes_edge, no_edge = out_edges[0], out_edges[1]
+            elif yes_edge is None:
+                yes_edge = [e for e in out_edges if e is not no_edge][0]
+            else:
+                no_edge = [e for e in out_edges if e is not yes_edge][0]
+
+        # Decision clause: prefer decision_clause, fall back to description/name
+        clause = (
+            d_node.get("decision_clause")
+            or d_node.get("description")
+            or d_node.get("name")
+            or d_id
+        ).strip()
+
+        predecessors = [node_by_id[e["source"]] for e in in_edges if e["source"] in node_by_id]
+
+        if not predecessors:
+            # Decision at start: convert to regular process node
+            d_node["flowchart_type"] = "process"
+            fc_meta = _FLOWCHART_TYPES["process"]
+            d_node["flowchart_shape"] = fc_meta["shape"]
+            d_node["flowchart_color"] = fc_meta["color"]
+            if not d_node.get("success_criteria"):
+                d_node["success_criteria"] = clause
+            # Rewire outgoing edges to on_success/on_failure
+            if yes_edge:
+                yes_edge["condition"] = "on_success"
+            if no_edge:
+                no_edge["condition"] = "on_failure"
+            absorbed[d_id] = absorbed.get(d_id, [d_id])
+            continue
+
+        # Dissolve: merge into each predecessor
+        for pred in predecessors:
+            pid = pred["id"]
+
+            # Merge decision clause into predecessor's success_criteria
+            existing = (pred.get("success_criteria") or "").strip()
+            if existing:
+                pred["success_criteria"] = f"{existing}; then evaluate: {clause}"
+            else:
+                pred["success_criteria"] = clause
+
+            # Remove the edge from predecessor -> decision
+            edges[:] = [e for e in edges if not (e["source"] == pid and e["target"] == d_id)]
+
+            # Wire predecessor -> yes/no targets
+            edge_counter = len(edges)
+            if yes_edge:
+                edges.append(
+                    {
+                        "id": f"edge-dissolved-{edge_counter}",
+                        "source": pid,
+                        "target": yes_edge["target"],
+                        "condition": "on_success",
+                        "description": yes_edge.get("description", ""),
+                        "label": yes_edge.get("label", "Yes"),
+                    }
+                )
+                edge_counter += 1
+            if no_edge:
+                edges.append(
+                    {
+                        "id": f"edge-dissolved-{edge_counter}",
+                        "source": pid,
+                        "target": no_edge["target"],
+                        "condition": "on_failure",
+                        "description": no_edge.get("description", ""),
+                        "label": no_edge.get("label", "No"),
+                    }
+                )
+
+            # Record absorption
+            prev_absorbed = absorbed.get(pid, [pid])
+            if d_id not in prev_absorbed:
+                prev_absorbed.append(d_id)
+            absorbed[pid] = prev_absorbed
+
+        # Remove decision node and all its edges
+        edges[:] = [e for e in edges if e["source"] != d_id and e["target"] != d_id]
+        nodes[:] = [n for n in nodes if n["id"] != d_id]
+        del node_by_id[d_id]
+
+    # ── Dissolve sub-agent nodes ──────────────────────────────
+    # Sub-agent nodes are leaf delegates: parent -> subagent (no outgoing).
+    # Dissolution adds the subagent's ID to parent's sub_agents list.
+    subagent_ids = [
+        n["id"]
+        for n in nodes
+        if n.get("flowchart_type") in ("subagent", "browser") or n.get("node_type") == "gcu"
+    ]
+
+    for sa_id in subagent_ids:
+        sa_node = node_by_id.get(sa_id)
+        if sa_node is None:
+            continue
+
+        in_edges = _incoming(sa_id)
+        out_edges = _outgoing(sa_id)
+
+        # Validate: sub-agent nodes must be leaves (no outgoing edges)
+        if out_edges:
+            logger.warning(
+                "Sub-agent node '%s' has outgoing edges — they will be dropped "
+                "during dissolution. Sub-agent nodes should be leaf nodes.",
+                sa_id,
+            )
+
+        # Attach to each predecessor's sub_agents list
+        for ie in in_edges:
+            pred_id = ie["source"]
+            pred = node_by_id.get(pred_id)
+            if pred is None:
+                continue
+
+            existing_subs = pred.get("sub_agents") or []
+            if sa_id not in existing_subs:
+                existing_subs.append(sa_id)
+            pred["sub_agents"] = existing_subs
+
+            # Record absorption
+            prev_absorbed = absorbed.get(pred_id, [pred_id])
+            if sa_id not in prev_absorbed:
+                prev_absorbed.append(sa_id)
+            absorbed[pred_id] = prev_absorbed
+
+        # Remove sub-agent node and all its edges
+        edges[:] = [e for e in edges if e["source"] != sa_id and e["target"] != sa_id]
+        nodes[:] = [n for n in nodes if n["id"] != sa_id]
+        del node_by_id[sa_id]
+
+    # Build complete flowchart_map (identity for non-absorbed nodes)
+    flowchart_map: dict[str, list[str]] = {}
+    for n in nodes:
+        nid = n["id"]
+        flowchart_map[nid] = absorbed.get(nid, [nid])
+
+    # Rebuild terminal_nodes (decision targets may have changed)
+    sources = {e["source"] for e in edges}
+    all_ids = {n["id"] for n in nodes}
+    terminal_ids = all_ids - sources
+    if not terminal_ids and nodes:
+        terminal_ids = {nodes[-1]["id"]}
+
+    converted = dict(draft)
+    converted["nodes"] = nodes
+    converted["edges"] = edges
+    converted["terminal_nodes"] = sorted(terminal_ids)
+    converted["entry_node"] = nodes[0]["id"] if nodes else ""
+
+    return converted, flowchart_map
+
+
 def register_queen_lifecycle_tools(
     registry: ToolRegistry,
     session: Any = None,
@@ -626,7 +915,7 @@ def register_queen_lifecycle_tools(
                         )
                     )
                 except Exception:
-                    pass
+                    logger.warning("Failed to re-emit draft during replan", exc_info=True)
 
         has_draft = phase_state is not None and phase_state.draft_graph is not None
         return json.dumps(
@@ -723,14 +1012,18 @@ def register_queen_lifecycle_tools(
 
         # Build edge dicts first (needed for classification)
         for i, re in enumerate(runtime_edges):
-            edges.append({
-                "id": f"edge-{i}",
-                "source": re.source,
-                "target": re.target,
-                "condition": str(re.condition.value) if hasattr(re.condition, "value") else str(re.condition),
-                "description": getattr(re, "description", "") or "",
-                "label": "",
-            })
+            edges.append(
+                {
+                    "id": f"edge-{i}",
+                    "source": re.source,
+                    "target": re.target,
+                    "condition": str(re.condition.value)
+                    if hasattr(re.condition, "value")
+                    else str(re.condition),
+                    "description": getattr(re, "description", "") or "",
+                    "label": "",
+                }
+            )
 
         # Terminal detection — exclude sub-agent nodes (they are leaf helpers, not endpoints)
         sub_agent_ids: set[str] = set()
@@ -771,14 +1064,16 @@ def register_queen_lifecycle_tools(
         for node in nodes:
             for sa_id in node.get("sub_agents") or []:
                 if sa_id in node_ids:
-                    edges.append({
-                        "id": f"edge-subagent-{edge_counter}",
-                        "source": node["id"],
-                        "target": sa_id,
-                        "condition": "always",
-                        "description": "sub-agent delegation",
-                        "label": "delegate",
-                    })
+                    edges.append(
+                        {
+                            "id": f"edge-subagent-{edge_counter}",
+                            "source": node["id"],
+                            "target": sa_id,
+                            "condition": "always",
+                            "description": "sub-agent delegation",
+                            "label": "delegate",
+                        }
+                    )
                     edge_counter += 1
                     edges.append({
                         "id": f"edge-subagent-{edge_counter}",
@@ -790,8 +1085,24 @@ def register_queen_lifecycle_tools(
                     })
                     edge_counter += 1
 
-        # 1:1 flowchart map (no dissolution happened)
-        fmap = {n["id"]: [n["id"]] for n in nodes}
+        # Group sub-agent nodes under their parent in the flowchart map
+        # (mirrors what _dissolve_planning_nodes does for planned drafts)
+        sub_agent_ids: set[str] = set()
+        for node in nodes:
+            for sa_id in node.get("sub_agents") or []:
+                if sa_id in node_ids:
+                    sub_agent_ids.add(sa_id)
+
+        fmap: dict[str, list[str]] = {}
+        for node in nodes:
+            nid = node["id"]
+            if nid in sub_agent_ids:
+                continue  # skip — will be included via parent
+            absorbed = [nid]
+            for sa_id in node.get("sub_agents") or []:
+                if sa_id in node_ids:
+                    absorbed.append(sa_id)
+            fmap[nid] = absorbed
 
         draft = {
             "agent_name": agent_name,
@@ -815,73 +1126,6 @@ def register_queen_lifecycle_tools(
     # Creates a lightweight draft graph with nodes, edges, and business metadata.
     # Loose validation: only requires names and descriptions. Emits an event
     # so the frontend can render the graph during planning (before any code).
-
-    # Classical flowchart symbols per ISO 5807 / ANSI standards.
-    # Each type maps to a standard shape and a unique color for the
-    # frontend renderer.  Shapes use Mermaid-compatible names where
-    # possible so the frontend can render them directly.
-    _FLOWCHART_TYPES = {
-        # ── Core symbols (ISO 5807 §4) ──────────────────────────
-        # Terminator — rounded rectangle (stadium shape)
-        "start":            {"shape": "stadium",       "color": "#4CAF50"},  # green
-        "terminal":         {"shape": "stadium",       "color": "#F44336"},  # red
-        # Process — rectangle
-        "process":          {"shape": "rectangle",     "color": "#2196F3"},  # blue
-        # Decision — diamond
-        "decision":         {"shape": "diamond",       "color": "#FF9800"},  # amber
-        # Data (Input/Output) — parallelogram
-        "io":               {"shape": "parallelogram", "color": "#9C27B0"},  # purple
-        # Document — rectangle with wavy bottom
-        "document":         {"shape": "document",      "color": "#607D8B"},  # blue-grey
-        # Multi-document — stacked documents
-        "multi_document":   {"shape": "multi_document", "color": "#78909C"}, # blue-grey light
-        # Predefined process / subroutine — rectangle with double vertical bars
-        "subprocess":       {"shape": "subroutine",    "color": "#009688"},  # teal
-        # Preparation — hexagon
-        "preparation":      {"shape": "hexagon",       "color": "#795548"},  # brown
-        # Manual input — trapezoid with slanted top
-        "manual_input":     {"shape": "manual_input",  "color": "#E91E63"},  # pink
-        # Manual operation — inverted trapezoid
-        "manual_operation": {"shape": "trapezoid",     "color": "#AD1457"},  # dark pink
-        # Delay — half-rounded rectangle (D-shape)
-        "delay":            {"shape": "delay",         "color": "#FF5722"},  # deep orange
-        # Display — rounded rectangle with pointed left
-        "display":          {"shape": "display",       "color": "#00BCD4"},  # cyan
-        # ── Data storage symbols ────────────────────────────────
-        # Database / direct access storage — cylinder
-        "database":         {"shape": "cylinder",      "color": "#8BC34A"},  # light green
-        # Stored data — generic data store
-        "stored_data":      {"shape": "stored_data",   "color": "#CDDC39"},  # lime
-        # Internal storage — rectangle with cross-hatch
-        "internal_storage": {"shape": "internal_storage", "color": "#FFC107"}, # amber light
-        # ── Connectors ──────────────────────────────────────────
-        # On-page connector — small circle
-        "connector":        {"shape": "circle",        "color": "#9E9E9E"},  # grey
-        # Off-page connector — pentagon / home-plate
-        "offpage_connector": {"shape": "pentagon",     "color": "#757575"},  # dark grey
-        # ── Flow operations ─────────────────────────────────────
-        # Merge — inverted triangle
-        "merge":            {"shape": "triangle_inv",  "color": "#3F51B5"},  # indigo
-        # Extract — upward triangle
-        "extract":          {"shape": "triangle",      "color": "#5C6BC0"},  # indigo light
-        # Sort — hourglass / double triangle
-        "sort":             {"shape": "hourglass",     "color": "#7986CB"},  # indigo lighter
-        # Collate — merged hourglass
-        "collate":          {"shape": "hourglass_inv", "color": "#9FA8DA"},  # indigo lightest
-        # Summing junction — circle with cross
-        "summing_junction": {"shape": "circle_cross",  "color": "#F06292"},  # pink light
-        # Or — circle with horizontal bar
-        "or":               {"shape": "circle_bar",    "color": "#CE93D8"},  # purple light
-        # ── Domain-specific (Hive agent context) ────────────────
-        # Browser automation (GCU) — mapped to preparation/hexagon
-        "browser":          {"shape": "hexagon",       "color": "#1A237E"},  # dark indigo
-        # Comment / annotation — flag shape
-        "comment":          {"shape": "flag",          "color": "#BDBDBD"},  # light grey
-        # Alternate process — rounded rectangle
-        "alternate_process": {"shape": "rounded_rect", "color": "#42A5F5"}, # light blue
-        # Sub-agent — planning-only; dissolved into parent's sub_agents at build time
-        "subagent":         {"shape": "subroutine",    "color": "#00695C"},  # dark teal
-    }
 
     def _classify_flowchart_node(
         node: dict,
@@ -930,30 +1174,54 @@ def register_queen_lifecycle_tools(
             return "subprocess"
 
         # Database / data store nodes → cylinder
-        db_tool_hints = {"query_database", "sql_query", "read_table", "write_table",
-                         "save_data", "load_data"}
+        db_tool_hints = {
+            "query_database",
+            "sql_query",
+            "read_table",
+            "write_table",
+            "save_data",
+            "load_data",
+        }
         db_desc_hints = {"database", "data store", "storage", "persist", "cache"}
         if node_tools & db_tool_hints or any(h in desc for h in db_desc_hints):
             return "database"
 
         # Document generation nodes → document shape
-        doc_tool_hints = {"generate_report", "create_document", "write_report",
-                          "render_template", "export_pdf"}
+        doc_tool_hints = {
+            "generate_report",
+            "create_document",
+            "write_report",
+            "render_template",
+            "export_pdf",
+        }
         doc_desc_hints = {"report", "document", "summary", "write up", "writeup"}
         if node_tools & doc_tool_hints or any(h in desc for h in doc_desc_hints):
             return "document"
 
         # I/O nodes: external data ingestion or delivery → parallelogram
-        io_tool_hints = {"serve_file_to_user", "send_email", "post_message",
-                         "upload_file", "download_file", "fetch_url",
-                         "post_to_slack", "send_notification"}
+        io_tool_hints = {
+            "serve_file_to_user",
+            "send_email",
+            "post_message",
+            "upload_file",
+            "download_file",
+            "fetch_url",
+            "post_to_slack",
+            "send_notification",
+        }
         io_desc_hints = {"deliver", "send", "output", "notify", "publish"}
         if node_tools & io_tool_hints or any(h in desc for h in io_desc_hints):
             return "io"
 
         # Manual / human-in-the-loop nodes → trapezoid
-        manual_desc_hints = {"human review", "manual", "approval", "human-in-the-loop",
-                             "user review", "manual check"}
+        manual_desc_hints = {
+            "human review",
+            "manual",
+            "approval",
+            "human-in-the-loop",
+            "user review",
+            "manual check",
+        }
         if any(h in desc for h in manual_desc_hints) or any(h in name for h in manual_desc_hints):
             return "manual_operation"
 
@@ -1017,9 +1285,7 @@ def register_queen_lifecycle_tools(
             return [e for e in edges if e["source"] == nid]
 
         # Identify decision nodes
-        decision_ids = [
-            n["id"] for n in nodes if n.get("flowchart_type") == "decision"
-        ]
+        decision_ids = [n["id"] for n in nodes if n.get("flowchart_type") == "decision"]
 
         # Track which draft nodes each runtime node absorbed
         absorbed: dict[str, list[str]] = {}  # runtime_id → [draft_ids...]
@@ -1040,7 +1306,6 @@ def register_queen_lifecycle_tools(
             for oe in out_edges:
                 lbl = (oe.get("label") or "").lower().strip()
                 cond = (oe.get("condition") or "").lower().strip()
-                desc = (oe.get("description") or "").lower().strip()
 
                 if lbl in ("yes", "true", "pass") or cond == "on_success":
                     yes_edge = oe
@@ -1099,24 +1364,28 @@ def register_queen_lifecycle_tools(
                 # Wire predecessor → yes/no targets
                 edge_counter = len(edges)
                 if yes_edge:
-                    edges.append({
-                        "id": f"edge-dissolved-{edge_counter}",
-                        "source": pid,
-                        "target": yes_edge["target"],
-                        "condition": "on_success",
-                        "description": yes_edge.get("description", ""),
-                        "label": yes_edge.get("label", "Yes"),
-                    })
+                    edges.append(
+                        {
+                            "id": f"edge-dissolved-{edge_counter}",
+                            "source": pid,
+                            "target": yes_edge["target"],
+                            "condition": "on_success",
+                            "description": yes_edge.get("description", ""),
+                            "label": yes_edge.get("label", "Yes"),
+                        }
+                    )
                     edge_counter += 1
                 if no_edge:
-                    edges.append({
-                        "id": f"edge-dissolved-{edge_counter}",
-                        "source": pid,
-                        "target": no_edge["target"],
-                        "condition": "on_failure",
-                        "description": no_edge.get("description", ""),
-                        "label": no_edge.get("label", "No"),
-                    })
+                    edges.append(
+                        {
+                            "id": f"edge-dissolved-{edge_counter}",
+                            "source": pid,
+                            "target": no_edge["target"],
+                            "condition": "on_failure",
+                            "description": no_edge.get("description", ""),
+                            "label": no_edge.get("label", "No"),
+                        }
+                    )
 
                 # Record absorption
                 prev_absorbed = absorbed.get(pid, [pid])
@@ -1133,7 +1402,9 @@ def register_queen_lifecycle_tools(
         # Sub-agent nodes are leaf delegates: parent → subagent (no outgoing).
         # Dissolution adds the subagent's ID to parent's sub_agents list.
         subagent_ids = [
-            n["id"] for n in nodes if n.get("flowchart_type") == "subagent"
+            n["id"]
+            for n in nodes
+            if n.get("flowchart_type") in ("subagent", "browser") or n.get("node_type") == "gcu"
         ]
 
         for sa_id in subagent_ids:
@@ -1259,36 +1530,54 @@ def register_queen_lifecycle_tools(
             node_id = n.get("id", "").strip()
             if not node_id:
                 return json.dumps({"error": f"Node {i} is missing 'id'"})
-            validated_nodes.append({
-                "id": node_id,
-                "name": n.get("name", node_id.replace("-", " ").replace("_", " ").title()),
-                "description": n.get("description", ""),
-                "node_type": n.get("node_type", "event_loop"),
-                # Optional business-logic hints (not validated yet)
-                "tools": n.get("tools", []),
-                "input_keys": n.get("input_keys", []),
-                "output_keys": n.get("output_keys", []),
-                "success_criteria": n.get("success_criteria", ""),
-                "sub_agents": n.get("sub_agents", []),
-                # Decision nodes: the yes/no question to evaluate
-                "decision_clause": n.get("decision_clause", ""),
-                # Explicit flowchart override (preserved for classification)
-                "flowchart_type": n.get("flowchart_type", ""),
-            })
+            validated_nodes.append(
+                {
+                    "id": node_id,
+                    "name": n.get("name", node_id.replace("-", " ").replace("_", " ").title()),
+                    "description": n.get("description", ""),
+                    "node_type": n.get("node_type", "event_loop"),
+                    # Optional business-logic hints (not validated yet)
+                    "tools": n.get("tools", []),
+                    "input_keys": n.get("input_keys", []),
+                    "output_keys": n.get("output_keys", []),
+                    "success_criteria": n.get("success_criteria", ""),
+                    "sub_agents": n.get("sub_agents", []),
+                    # Decision nodes: the yes/no question to evaluate
+                    "decision_clause": n.get("decision_clause", ""),
+                    # Explicit flowchart override (preserved for classification)
+                    "flowchart_type": n.get("flowchart_type", ""),
+                }
+            )
+
+        # Check for duplicate node IDs
+        seen_ids: set[str] = set()
+        for n in validated_nodes:
+            if n["id"] in seen_ids:
+                return json.dumps({"error": f"Duplicate node id '{n['id']}'"})
+            seen_ids.add(n["id"])
 
         validated_edges = []
         if edges:
+            node_ids = {n["id"] for n in validated_nodes}
             for i, e in enumerate(edges):
                 if not isinstance(e, dict):
                     return json.dumps({"error": f"Edge {i} must be a dict"})
-                validated_edges.append({
-                    "id": e.get("id", f"edge-{i}"),
-                    "source": e.get("source", ""),
-                    "target": e.get("target", ""),
-                    "condition": e.get("condition", "on_success"),
-                    "description": e.get("description", ""),
-                    "label": e.get("label", ""),
-                })
+                src = e.get("source", "")
+                tgt = e.get("target", "")
+                if src and src not in node_ids:
+                    return json.dumps({"error": f"Edge {i} source '{src}' references unknown node"})
+                if tgt and tgt not in node_ids:
+                    return json.dumps({"error": f"Edge {i} target '{tgt}' references unknown node"})
+                validated_edges.append(
+                    {
+                        "id": e.get("id", f"edge-{i}"),
+                        "source": src,
+                        "target": tgt,
+                        "condition": e.get("condition", "on_success"),
+                        "description": e.get("description", ""),
+                        "label": e.get("label", ""),
+                    }
+                )
 
         # ── Enforce GCU / subagent leaf constraint ────────────────
         # GCU nodes and nodes with flowchart_type "subagent" are leaf
@@ -1454,7 +1743,11 @@ def register_queen_lifecycle_tools(
         total = len(validated_nodes)
         for i, node in enumerate(validated_nodes):
             fc_type = _classify_flowchart_node(
-                node, i, total, validated_edges, terminal_ids,
+                node,
+                i,
+                total,
+                validated_edges,
+                terminal_ids,
             )
             fc_meta = _FLOWCHART_TYPES[fc_type]
             node["flowchart_type"] = fc_type
@@ -1529,7 +1822,9 @@ def register_queen_lifecycle_tools(
                         stream_id="queen",
                         data={
                             "map": phase_state.flowchart_map if phase_state else None,
-                            "original_draft": phase_state.original_draft_graph if phase_state else draft,
+                            "original_draft": phase_state.original_draft_graph
+                            if phase_state
+                            else draft,
                         },
                     )
                 )
@@ -1543,7 +1838,7 @@ def register_queen_lifecycle_tools(
                 )
 
         dissolution_info = {}
-        if is_building and phase_state is not None:
+        if is_building and phase_state is not None and phase_state.original_draft_graph:
             orig_count = len(phase_state.original_draft_graph.get("nodes", []))
             conv_count = len(phase_state.draft_graph.get("nodes", []))
             dissolution_info = {
@@ -1638,16 +1933,33 @@ def register_queen_lifecycle_tools(
                             "flowchart_type": {
                                 "type": "string",
                                 "enum": [
-                                    "start", "terminal", "process", "decision",
-                                    "io", "document", "multi_document",
-                                    "subprocess", "preparation",
-                                    "manual_input", "manual_operation",
-                                    "delay", "display",
-                                    "database", "stored_data", "internal_storage",
-                                    "connector", "offpage_connector",
-                                    "merge", "extract", "sort", "collate",
-                                    "summing_junction", "or",
-                                    "browser", "comment", "alternate_process",
+                                    "start",
+                                    "terminal",
+                                    "process",
+                                    "decision",
+                                    "io",
+                                    "document",
+                                    "multi_document",
+                                    "subprocess",
+                                    "preparation",
+                                    "manual_input",
+                                    "manual_operation",
+                                    "delay",
+                                    "display",
+                                    "database",
+                                    "stored_data",
+                                    "internal_storage",
+                                    "connector",
+                                    "offpage_connector",
+                                    "merge",
+                                    "extract",
+                                    "sort",
+                                    "collate",
+                                    "summing_junction",
+                                    "or",
+                                    "browser",
+                                    "comment",
+                                    "alternate_process",
                                     "subagent",
                                 ],
                                 "description": (
@@ -1775,12 +2087,14 @@ def register_queen_lifecycle_tools(
             )
 
         if phase_state.draft_graph is None:
-            return json.dumps({
-                "error": (
-                    "No draft graph saved. Call save_agent_draft() first to create "
-                    "a draft, present it to the user, and get their approval."
-                )
-            })
+            return json.dumps(
+                {
+                    "error": (
+                        "No draft graph saved. Call save_agent_draft() first to create "
+                        "a draft, present it to the user, and get their approval."
+                    )
+                }
+            )
 
         phase_state.build_confirmed = True
 
@@ -1790,8 +2104,11 @@ def register_queen_lifecycle_tools(
         import copy as _copy
 
         original_nodes = phase_state.draft_graph.get("nodes", [])
-        phase_state.original_draft_graph = _copy.deepcopy(phase_state.draft_graph)
+        # Compute dissolution first, then assign all three atomically so that
+        # a failure in _dissolve_planning_nodes doesn't leave partial state.
+        original_copy = _copy.deepcopy(phase_state.draft_graph)
         converted, fmap = _dissolve_planning_nodes(phase_state.draft_graph)
+        phase_state.original_draft_graph = original_copy
         phase_state.draft_graph = converted
         phase_state.flowchart_map = fmap
 
@@ -1799,12 +2116,8 @@ def register_queen_lifecycle_tools(
         # (after the agent folder is scaffolded) or in load_built_agent.
 
         dissolved_count = len(original_nodes) - len(converted.get("nodes", []))
-        decision_count = sum(
-            1 for n in original_nodes if n.get("flowchart_type") == "decision"
-        )
-        subagent_count = sum(
-            1 for n in original_nodes if n.get("flowchart_type") == "subagent"
-        )
+        decision_count = sum(1 for n in original_nodes if n.get("flowchart_type") == "decision")
+        subagent_count = sum(1 for n in original_nodes if n.get("flowchart_type") == "subagent")
 
         dissolution_parts = []
         if decision_count:
@@ -1816,21 +2129,23 @@ def register_queen_lifecycle_tools(
                 f"{subagent_count} sub-agent node(s) dissolved into predecessor sub_agents"
             )
 
-        return json.dumps({
-            "status": "confirmed",
-            "agent_name": phase_state.draft_graph.get("agent_name", ""),
-            "planning_nodes_dissolved": dissolved_count,
-            "decision_nodes_dissolved": decision_count,
-            "subagent_nodes_dissolved": subagent_count,
-            "flowchart_map": fmap,
-            "message": (
-                "User has confirmed the design. "
-                + ("; ".join(dissolution_parts) + ". " if dissolution_parts else "")
-                + "Now call initialize_and_build_agent(agent_name, nodes) to scaffold the "
-                "agent package and start building. The draft metadata will be "
-                "used to pre-populate the generated files."
-            ),
-        })
+        return json.dumps(
+            {
+                "status": "confirmed",
+                "agent_name": phase_state.draft_graph.get("agent_name", ""),
+                "planning_nodes_dissolved": dissolved_count,
+                "decision_nodes_dissolved": decision_count,
+                "subagent_nodes_dissolved": subagent_count,
+                "flowchart_map": fmap,
+                "message": (
+                    "User has confirmed the design. "
+                    + ("; ".join(dissolution_parts) + ". " if dissolution_parts else "")
+                    + "Now call initialize_and_build_agent(agent_name, nodes) to scaffold the "
+                    "agent package and start building. The draft metadata will be "
+                    "used to pre-populate the generated files."
+                ),
+            }
+        )
 
     _confirm_tool = Tool(
         name="confirm_and_build",
@@ -1869,22 +2184,26 @@ def register_queen_lifecycle_tools(
                 and not phase_state.build_confirmed
             ):
                 if phase_state.draft_graph is None:
-                    return json.dumps({
-                        "error": (
-                            "Cannot transition to building without a draft. "
-                            "Call save_agent_draft() first to create a visual draft of the "
-                            "graph, present it to the user for review, then call "
-                            "confirm_and_build() after the user approves."
-                        )
-                    })
-                return json.dumps({
-                    "error": (
-                        "The user has not confirmed the draft design yet. "
-                        "Present the draft to the user and call ask_user() to get "
-                        "their approval. Then call confirm_and_build() before "
-                        "calling initialize_and_build_agent()."
+                    return json.dumps(
+                        {
+                            "error": (
+                                "Cannot transition to building without a draft. "
+                                "Call save_agent_draft() first to create a visual draft of the "
+                                "graph, present it to the user for review, then call "
+                                "confirm_and_build() after the user approves."
+                            )
+                        }
                     )
-                })
+                return json.dumps(
+                    {
+                        "error": (
+                            "The user has not confirmed the draft design yet. "
+                            "Present the draft to the user and call ask_user() to get "
+                            "their approval. Then call confirm_and_build() before "
+                            "calling initialize_and_build_agent()."
+                        )
+                    }
+                )
 
             # No agent_name → try to fall back to the session's current agent,
             # or fail with actionable guidance.
@@ -1987,8 +2306,7 @@ def register_queen_lifecycle_tools(
                         if phase_state.inject_notification:
                             await phase_state.inject_notification(
                                 "[PHASE CHANGE] Agent scaffolded and switched to BUILDING phase. "
-                                "Start implementing the agent nodes now."
-                                + draft_hint
+                                "Start implementing the agent nodes now." + draft_hint
                             )
             except (json.JSONDecodeError, KeyError, TypeError):
                 pass
