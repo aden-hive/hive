@@ -45,3 +45,10 @@ uv run python -m exports.my_research_agent --input '{"topic": "..."}'
 | [deep_research_agent](deep_research_agent/) | Interactive research agent that searches diverse sources, evaluates findings with user checkpoints, and produces a cited HTML report |
 | [local_business_extractor](local_business_extractor/) | Finds local businesses on Google Maps, scrapes contact details, and syncs to Google Sheets |
 | [tech_news_reporter](tech_news_reporter/) | Researches the latest technology and AI news from the web and produces a well-organized report |
+| [competitive_intel_agent](competitive_intel_agent/) | Monitors competitor websites, news sources, and GitHub repos to deliver structured digests with key insights and trend analysis |
+| [email_inbox_management](email_inbox_management/) | Automatically manages Gmail inbox using user-defined free-text rules — trash junk, mark spam, archive, star, and report actions taken |
+| [email_reply_agent](email_reply_agent/) | Reads and drafts context-aware replies to emails using customizable tone and response guidelines |
+| [job_hunter](job_hunter/) | Searches job boards for matching roles, filters by criteria, and compiles a ranked list of opportunities with application links |
+| [meeting_scheduler](meeting_scheduler/) | Coordinates meeting availability across participants and proposes optimal time slots based on calendar constraints |
+| [twitter_news_agent](twitter_news_agent/) | Monitors Twitter/X for trending topics and news in a target domain and generates a curated daily digest |
+| [vulnerability_assessment](vulnerability_assessment/) | Scans a target codebase or URL for common security vulnerabilities and produces a structured risk report |
