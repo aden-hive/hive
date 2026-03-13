@@ -14,8 +14,8 @@ import { executionApi } from "@/api/execution";
 import { graphsApi } from "@/api/graphs";
 import { sessionsApi } from "@/api/sessions";
 import { useMultiSSE } from "@/hooks/use-sse";
-import type { LiveSession, AgentEvent, DiscoverEntry, Message, NodeSpec, DraftGraph as DraftGraphData } from "@/api/types";
-import { backendMessageToChatMessage, sseEventToChatMessage, formatAgentDisplayName } from "@/lib/chat-helpers";
+import type { LiveSession, AgentEvent, DiscoverEntry, NodeSpec, DraftGraph as DraftGraphData } from "@/api/types";
+import { sseEventToChatMessage, formatAgentDisplayName } from "@/lib/chat-helpers";
 import { topologyToGraphNodes } from "@/lib/graph-converter";
 import { ApiError } from "@/api/client";
 
@@ -2908,15 +2908,9 @@ export default function Workspace() {
               />
             )}
           </div>
-<<<<<<< HEAD
           {resolvedSelectedNode && (
             <div className="w-[480px] min-w-[400px] flex-shrink-0">
               {resolvedSelectedNode.nodeType === "trigger" ? (
-=======
-          {selectedNode && (
-            <div className="w-[408px] min-w-[340px] flex-shrink-0">
-              {selectedNode.nodeType === "trigger" ? (
->>>>>>> origin/feature/flowchart-linked-experimental
                 <div className="flex flex-col h-full border-l border-border/40 bg-card/20 animate-in slide-in-from-right">
                   <div className="px-4 pt-4 pb-3 border-b border-border/30 flex items-start justify-between gap-2">
                     <div className="flex items-start gap-3 min-w-0">
