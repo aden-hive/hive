@@ -2027,9 +2027,13 @@ export default function Workspace() {
             queenBuilding: newPhase === "building",
             // Sync workerRunState so the RunButton reflects the phase
             workerRunState: newPhase === "running" ? "running" : "idle",
-            // Clear draft graph once we leave planning; also clear dedup refs
-            // so re-entering planning or re-fetching flowchart map works
-            ...(newPhase !== "planning" ? { draftGraph: null } : { originalDraft: null, flowchartMap: null }),
+            // Clear draft graph once we leave planning/building; keep it during
+            // building so the DraftGraph can show a loading overlay.
+            ...(newPhase !== "planning" && newPhase !== "building"
+              ? { draftGraph: null }
+              : newPhase === "planning"
+                ? { originalDraft: null, flowchartMap: null }
+                : {}),
             // Store agent path for credential queries
             ...(eventAgentPath ? { agentPath: eventAgentPath } : {}),
           });
@@ -2795,13 +2799,14 @@ export default function Workspace() {
       <div className="flex flex-1 min-h-0">
 
         {/* ── Pipeline graph + chat ──────────────────────────────────── */}
-        <div className={`${(activeAgentState?.queenPhase === "planning" && activeAgentState?.draftGraph) || activeAgentState?.originalDraft ? "w-[500px] min-w-[400px]" : "w-[300px] min-w-[240px]"} bg-card/30 flex flex-col border-r border-border/30 transition-[width] duration-200`}>
+        <div className={`${((activeAgentState?.queenPhase === "planning" || activeAgentState?.queenPhase === "building") && activeAgentState?.draftGraph) || activeAgentState?.originalDraft ? "w-[500px] min-w-[400px]" : "w-[300px] min-w-[240px]"} bg-card/30 flex flex-col border-r border-border/30 transition-[width] duration-200`}>
           <div className="flex-1 min-h-0">
-            {activeAgentState?.queenPhase === "planning" && activeAgentState.draftGraph ? (
-              <DraftGraph draft={activeAgentState.draftGraph} />
+            {(activeAgentState?.queenPhase === "planning" || activeAgentState?.queenPhase === "building") && activeAgentState?.draftGraph ? (
+              <DraftGraph draft={activeAgentState.draftGraph} building={activeAgentState?.queenBuilding} />
             ) : activeAgentState?.originalDraft ? (
               <DraftGraph
                 draft={activeAgentState.originalDraft}
+                building={activeAgentState?.queenBuilding}
                 flowchartMap={activeAgentState.flowchartMap ?? undefined}
                 runtimeNodes={currentGraph.nodes}
                 onRuntimeNodeClick={(runtimeNodeId) => {
@@ -2903,9 +2908,15 @@ export default function Workspace() {
               />
             )}
           </div>
+<<<<<<< HEAD
           {resolvedSelectedNode && (
             <div className="w-[480px] min-w-[400px] flex-shrink-0">
               {resolvedSelectedNode.nodeType === "trigger" ? (
+=======
+          {selectedNode && (
+            <div className="w-[408px] min-w-[340px] flex-shrink-0">
+              {selectedNode.nodeType === "trigger" ? (
+>>>>>>> origin/feature/flowchart-linked-experimental
                 <div className="flex flex-col h-full border-l border-border/40 bg-card/20 animate-in slide-in-from-right">
                   <div className="px-4 pt-4 pb-3 border-b border-border/30 flex items-start justify-between gap-2">
                     <div className="flex items-start gap-3 min-w-0">

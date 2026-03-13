@@ -346,8 +346,8 @@ def list_agent_tools(
     tools from this list in node definitions — never guess or fabricate.
 
     Progressive disclosure workflow (start narrow, drill in):
-        list_agent_tools()                                           # provider summary: counts + credential status
-        list_agent_tools(group="google", output_schema="summary")   # service breakdown within google
+        list_agent_tools()                                        # provider summary
+        list_agent_tools(group="google", output_schema="summary") # service breakdown
         list_agent_tools(group="google", service="gmail")           # tool names for just gmail
         list_agent_tools(group="google", service="gmail", output_schema="full")  # full detail
 
@@ -593,7 +593,8 @@ def list_agent_tools(
 
     # Compute credential availability once (used for filtering and summary)
     available_creds: set[str] = (
-        _get_available_credential_names() if credentials != "all" or output_schema == "summary"
+        _get_available_credential_names()
+        if credentials != "all" or output_schema == "summary"
         else set()
     )
 
@@ -603,7 +604,8 @@ def list_agent_tools(
         filtered_tools = [
             t
             for t in all_tools
-            if (credentials == "available") == _tool_credentials_available(t["name"], available_creds)
+            if (credentials == "available")
+            == _tool_credentials_available(t["name"], available_creds)
         ]
 
     provider_groups = _group_by_provider(filtered_tools)
@@ -628,7 +630,13 @@ def list_agent_tools(
         for t in filtered_tools:
             # Only include tools from the already-filtered provider set
             tool_name = t["name"]
-            in_provider = any(tool_name in p.get("tool_names", [tool_entry.get("name") for tool_entry in p.get("tools", [])]) for p in provider_groups.values())
+            in_provider = any(
+                tool_name
+                in p.get(
+                    "tool_names", [tool_entry.get("name") for tool_entry in p.get("tools", [])]
+                )
+                for p in provider_groups.values()
+            )
             if in_provider and tool_name.startswith(service_prefix):
                 service_filtered.append(t)
         provider_groups = _group_by_provider(service_filtered)
@@ -644,7 +652,9 @@ def list_agent_tools(
             full_groups = _group_by_provider(all_tools) if credentials != "all" else provider_groups
             summary_providers: dict = {}
             for prov, bucket in full_groups.items():
-                cred_names = bucket.get("credentials_required", sorted(bucket.get("authorization", {}).keys()))
+                cred_names = bucket.get(
+                    "credentials_required", sorted(bucket.get("authorization", {}).keys())
+                )
                 creds_ok = all(c in available_creds for c in cred_names) if cred_names else True
                 summary_providers[prov] = {
                     "tool_count": len(bucket.get("tool_names", bucket.get("tools", []))),
@@ -655,7 +665,8 @@ def list_agent_tools(
                 "total_tools": sum(v["tool_count"] for v in summary_providers.values()),
                 "providers": summary_providers,
                 "hint": (
-                    "Use list_agent_tools(group='<provider>', output_schema='summary') for service breakdown, "
+                    "Use list_agent_tools(group='<provider>', "
+                    "output_schema='summary') for service breakdown, "
                     "list_agent_tools(group='<provider>', service='<service>') for tool names. "
                     "Filter by credentials='available' to see only ready-to-use tools."
                 ),
@@ -1776,7 +1787,7 @@ default_config = RuntimeConfig()
 class AgentMetadata:
     name: str = "{human_name}"
     version: str = "1.0.0"
-    description: str = "{_draft_desc or 'TODO: Add agent description.'}"
+    description: str = "{_draft_desc or "TODO: Add agent description."}"
     intro_message: str = "TODO: Add intro message."
 
 
@@ -1868,53 +1879,57 @@ __all__ = {node_var_names!r}
     edges_str = "\n".join(edge_defs) if edge_defs else "    # TODO: Add edges"
 
     # Pre-populate goal from draft metadata
-    _draft_goal = (_draft.get("goal") or "TODO: Describe the agent's goal.") if _draft else "TODO: Describe the agent's goal."
+    _draft_goal = (
+        (_draft.get("goal") or "TODO: Describe the agent's goal.")
+        if _draft
+        else "TODO: Describe the agent's goal."
+    )
     _draft_sc = (_draft.get("success_criteria") or []) if _draft else []
     _draft_constraints = (_draft.get("constraints") or []) if _draft else []
 
     # Build success criteria entries
     if _draft_sc:
         sc_entries = "\n".join(
-            f'''\
+            f"""\
         SuccessCriterion(
-            id="sc-{i+1}",
+            id="sc-{i + 1}",
             description="{sc}",
             metric="TODO",
             target="TODO",
             weight=1.0,
-        ),'''
+        ),"""
             for i, sc in enumerate(_draft_sc)
         )
     else:
-        sc_entries = '''\
+        sc_entries = """\
         SuccessCriterion(
             id="sc-1",
             description="TODO: Define success criterion.",
             metric="TODO",
             target="TODO",
             weight=1.0,
-        ),'''
+        ),"""
 
     # Build constraint entries
     if _draft_constraints:
         constraint_entries = "\n".join(
-            f'''\
+            f"""\
         Constraint(
-            id="c-{i+1}",
+            id="c-{i + 1}",
             description="{c}",
             constraint_type="hard",
             category="functional",
-        ),'''
+        ),"""
             for i, c in enumerate(_draft_constraints)
         )
     else:
-        constraint_entries = '''\
+        constraint_entries = """\
         Constraint(
             id="c-1",
             description="TODO: Define constraint.",
             constraint_type="hard",
             category="functional",
-        ),'''
+        ),"""
 
     _write(
         "agent.py",

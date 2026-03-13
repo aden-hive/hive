@@ -90,6 +90,28 @@ async def create_queen(
     phase_state = QueenPhaseState(phase=initial_phase, event_bus=session.event_bus)
     session.phase_state = phase_state
 
+    # ---- Track ask rounds during planning ----------------------------
+    # Increment planning_ask_rounds each time the queen requests user
+    # input (ask_user or ask_user_multiple) while in the planning phase.
+    async def _track_planning_asks(event: AgentEvent) -> None:
+        if phase_state.phase != "planning":
+            return
+        # Only count explicit ask_user / ask_user_multiple calls, not
+        # auto-block (text-only turns emit CLIENT_INPUT_REQUESTED with
+        # an empty prompt and no options/questions).
+        data = event.data or {}
+        has_prompt = bool(data.get("prompt"))
+        has_questions = bool(data.get("questions"))
+        has_options = bool(data.get("options"))
+        if has_prompt or has_questions or has_options:
+            phase_state.planning_ask_rounds += 1
+
+    session.event_bus.subscribe(
+        [EventType.CLIENT_INPUT_REQUESTED],
+        _track_planning_asks,
+        filter_stream="queen",
+    )
+
     # ---- Lifecycle tools (always registered) --------------------------
     register_queen_lifecycle_tools(
         queen_registry,
@@ -149,7 +171,8 @@ async def create_queen(
         worker_identity = (
             "\n\n# Worker Profile\n"
             "No worker agent loaded. You are operating independently.\n"
-            "Handle all tasks directly using your coding tools."
+            "Design or build the agent to solve the user's problem "
+            "according to your current phase."
         )
 
     _planning_body = (

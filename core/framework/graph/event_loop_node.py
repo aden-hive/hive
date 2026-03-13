@@ -1295,6 +1295,19 @@ class EventLoopNode(NodeProtocol):
                     ctx, prompt=_cf_prompt, options=ask_user_options,
                     questions=multi_qs,
                 )
+                # Emit deferred tool_call_completed for ask_user / ask_user_multiple
+                deferred = getattr(self, "_deferred_tool_complete", None)
+                if deferred:
+                    self._deferred_tool_complete = None
+                    await self._publish_tool_completed(
+                        deferred["stream_id"],
+                        deferred["node_id"],
+                        deferred["tool_use_id"],
+                        deferred["tool_name"],
+                        deferred["content"],
+                        deferred["is_error"],
+                        deferred["execution_id"],
+                    )
                 logger.info("[%s] iter=%d: unblocked, got_input=%s", node_id, iteration, got_input)
                 if not got_input:
                     await self._publish_loop_completed(
@@ -2516,15 +2529,27 @@ class EventLoopNode(NodeProtocol):
                     content=result.content,
                     is_error=result.is_error,
                 )
-                await self._publish_tool_completed(
-                    stream_id,
-                    node_id,
-                    tc.tool_use_id,
-                    tc.tool_name,
-                    result.content,
-                    result.is_error,
-                    execution_id,
-                )
+                if tc.tool_name in ("ask_user", "ask_user_multiple"):
+                    # Defer tool_call_completed until after user responds
+                    self._deferred_tool_complete = {
+                        "stream_id": stream_id,
+                        "node_id": node_id,
+                        "tool_use_id": tc.tool_use_id,
+                        "tool_name": tc.tool_name,
+                        "content": result.content,
+                        "is_error": result.is_error,
+                        "execution_id": execution_id,
+                    }
+                else:
+                    await self._publish_tool_completed(
+                        stream_id,
+                        node_id,
+                        tc.tool_use_id,
+                        tc.tool_name,
+                        result.content,
+                        result.is_error,
+                        execution_id,
+                    )
 
             # If the limit was hit, add error results for every remaining
             # tool call so the conversation stays consistent.  Without this,

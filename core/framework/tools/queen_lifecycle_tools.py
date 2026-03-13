@@ -96,6 +96,10 @@ class QueenPhaseState:
     # Built during decision-node dissolution at confirm_and_build().
     flowchart_map: dict[str, list[str]] | None = None
 
+    # Counter for ask_user / ask_user_multiple rounds during planning phase.
+    # Incremented via event bus subscription in queen_orchestrator.
+    planning_ask_rounds: int = 0
+
     # Agent path — set after scaffolding so the frontend can query credentials
     agent_path: str | None = None
 
@@ -280,301 +284,6 @@ def build_worker_profile(runtime: AgentRuntime, agent_path: Path | str | None = 
 
     lines.append("\nStatus at session start: idle (not started).")
     return "\n".join(lines)
-
-
-async def _start_trigger_timer(session: Any, trigger_id: str, trigger_def: Any) -> None:
-    """Start an asyncio timer task that fires triggers into the queen node.
-
-    The task is stored in ``session.active_timer_tasks[trigger_id]`` and can
-    be cancelled via ``task.cancel()``.
-    """
-    from framework.graph.event_loop_node import TriggerEvent
-
-    tc = trigger_def.trigger_config
-    cron_expr = tc.get("cron")
-    interval_minutes = tc.get("interval_minutes")
-
-    async def _timer_loop():
-        try:
-            if cron_expr:
-                from croniter import croniter
-
-                # Wait for first fire
-                cron = croniter(cron_expr, datetime.now())
-                next_dt = cron.get_next(datetime)
-                sleep_secs = (next_dt - datetime.now()).total_seconds()
-                session.trigger_next_fire[trigger_id] = time.monotonic() + max(0, sleep_secs)
-                await asyncio.sleep(max(0, sleep_secs))
-
-                while True:
-                    # Fire trigger
-                    if getattr(session, "worker_runtime", None) is None:
-                        logger.warning(
-                            "Trigger '%s': worker not loaded, discarding tick", trigger_id
-                        )
-                    else:
-                        queen_node = _get_queen_node(session)
-                        if queen_node is not None:
-                            trigger = TriggerEvent(
-                                trigger_type="timer",
-                                source_id=trigger_id,
-                                payload={
-                                    "schedule": cron_expr,
-                                    "time": datetime.now(UTC).isoformat(),
-                                    "task": trigger_def.task,
-                                },
-                                timestamp=time.time(),
-                            )
-                            await session.event_bus.publish(
-                                AgentEvent(
-                                    type=EventType.TRIGGER_FIRED,
-                                    stream_id="queen",
-                                    data={
-                                        "trigger_id": trigger_id,
-                                        "trigger_type": "timer",
-                                        "payload": trigger.payload,
-                                    },
-                                )
-                            )
-                            await queen_node.inject_trigger(trigger)
-                            logger.info("Trigger '%s' fired (cron: %s)", trigger_id, cron_expr)
-                        else:
-                            logger.warning(
-                                "Trigger '%s': queen node not available, skipping tick", trigger_id
-                            )
-
-                    # Compute next fire
-                    cron = croniter(cron_expr, datetime.now())
-                    next_dt = cron.get_next(datetime)
-                    sleep_secs = (next_dt - datetime.now()).total_seconds()
-                    session.trigger_next_fire[trigger_id] = time.monotonic() + max(0, sleep_secs)
-                    await asyncio.sleep(max(0, sleep_secs))
-
-            elif interval_minutes:
-                sleep_secs = interval_minutes * 60
-                session.trigger_next_fire[trigger_id] = time.monotonic() + sleep_secs
-                await asyncio.sleep(sleep_secs)
-
-                while True:
-                    if getattr(session, "worker_runtime", None) is None:
-                        logger.warning(
-                            "Trigger '%s': worker not loaded, discarding tick", trigger_id
-                        )
-                    else:
-                        queen_node = _get_queen_node(session)
-                        if queen_node is not None:
-                            trigger = TriggerEvent(
-                                trigger_type="timer",
-                                source_id=trigger_id,
-                                payload={
-                                    "interval_minutes": interval_minutes,
-                                    "time": datetime.now(UTC).isoformat(),
-                                    "task": trigger_def.task,
-                                },
-                                timestamp=time.time(),
-                            )
-                            await session.event_bus.publish(
-                                AgentEvent(
-                                    type=EventType.TRIGGER_FIRED,
-                                    stream_id="queen",
-                                    data={
-                                        "trigger_id": trigger_id,
-                                        "trigger_type": "timer",
-                                        "payload": trigger.payload,
-                                    },
-                                )
-                            )
-                            await queen_node.inject_trigger(trigger)
-                            logger.info(
-                                "Trigger '%s' fired (interval: %dm)", trigger_id, interval_minutes
-                            )
-                        else:
-                            logger.warning(
-                                "Trigger '%s': queen node not available, skipping tick", trigger_id
-                            )
-
-                    session.trigger_next_fire[trigger_id] = time.monotonic() + sleep_secs
-                    await asyncio.sleep(sleep_secs)
-        except asyncio.CancelledError:
-            session.trigger_next_fire.pop(trigger_id, None)
-            logger.info("Trigger timer '%s' cancelled", trigger_id)
-        except Exception:
-            logger.error("Trigger timer '%s' failed", trigger_id, exc_info=True)
-
-    task = asyncio.create_task(_timer_loop(), name=f"trigger-timer-{trigger_id}")
-    session.active_timer_tasks[trigger_id] = task
-
-
-async def _start_trigger_webhook(session: Any, trigger_id: str, trigger_def: Any) -> None:
-    """Subscribe to WEBHOOK_RECEIVED EventBus events for a webhook trigger.
-
-    Creates (or reuses) the queen-owned WebhookServer on the session,
-    registers the route, and subscribes via EventBus with filter_stream=trigger_id.
-    The subscription ID is stored in session.active_webhook_subs[trigger_id].
-    """
-    from framework.graph.event_loop_node import TriggerEvent
-    from framework.runtime.webhook_server import WebhookRoute, WebhookServer, WebhookServerConfig
-
-    tc = trigger_def.trigger_config
-    path: str = tc["path"]
-    methods: list[str] = [m.upper() for m in tc.get("methods", ["POST"])]
-    secret: str | None = tc.get("secret")
-    # Queen server defaults to 8090 to avoid colliding with worker's 8080
-    port: int = int(tc.get("port", 8090))
-
-    # Lazy-create the queen webhook server (singleton per session)
-    if getattr(session, "queen_webhook_server", None) is None:
-        server = WebhookServer(session.event_bus, WebhookServerConfig(host="127.0.0.1", port=port))
-        session.queen_webhook_server = server
-
-    # Register route — source_id=trigger_id so filter_stream matches exactly
-    route = WebhookRoute(source_id=trigger_id, path=path, methods=methods, secret=secret)
-    session.queen_webhook_server.add_route(route)
-
-    if not session.queen_webhook_server.is_running:
-        await session.queen_webhook_server.start()
-
-    # Subscribe to WEBHOOK_RECEIVED filtered by trigger_id (== route.source_id)
-    async def _on_webhook(event: Any) -> None:
-        if getattr(session, "worker_runtime", None) is None:
-            logger.warning("Webhook trigger '%s': no worker loaded, discarding", trigger_id)
-            return
-        queen_node = _get_queen_node(session)
-        if queen_node is None:
-            logger.warning("Webhook trigger '%s': queen node not ready, skipping", trigger_id)
-            return
-        trigger = TriggerEvent(
-            trigger_type="webhook",
-            source_id=trigger_id,
-            payload={
-                "source": trigger_id,
-                "method": event.data.get("method", ""),
-                "path": path,
-                "payload": event.data.get("payload", {}),
-                "task": trigger_def.task,
-            },
-            timestamp=time.time(),
-        )
-        await session.event_bus.publish(
-            AgentEvent(
-                type=EventType.TRIGGER_FIRED,
-                stream_id="queen",
-                data={
-                    "trigger_id": trigger_id,
-                    "trigger_type": "webhook",
-                    "payload": trigger.payload,
-                },
-            )
-        )
-        await queen_node.inject_trigger(trigger)
-        logger.info(
-            "Webhook trigger '%s' fired (%s %s)", trigger_id, event.data.get("method", ""), path
-        )
-
-    sub_id = session.event_bus.subscribe(
-        event_types=[EventType.WEBHOOK_RECEIVED],
-        handler=_on_webhook,
-        filter_stream=trigger_id,
-    )
-    if not hasattr(session, "active_webhook_subs"):
-        session.active_webhook_subs = {}
-    session.active_webhook_subs[trigger_id] = sub_id
-
-
-def _get_queen_node(session: Any):
-    """Get the queen EventLoopNode from the session's executor."""
-    executor = getattr(session, "queen_executor", None)
-    if executor is None:
-        return None
-    registry = getattr(executor, "node_registry", None)
-    if registry is None:
-        return None
-    return registry.get("queen")
-
-
-def _read_agent_triggers_json(agent_path: Path) -> list[dict]:
-    """Read triggers.json from the agent's export directory."""
-    triggers_path = agent_path / "triggers.json"
-    if not triggers_path.exists():
-        return []
-    try:
-        data = json.loads(triggers_path.read_text(encoding="utf-8"))
-        return data if isinstance(data, list) else []
-    except (json.JSONDecodeError, OSError):
-        return []
-
-
-def _write_agent_triggers_json(agent_path: Path, triggers: list[dict]) -> None:
-    """Write triggers.json to the agent's export directory."""
-    triggers_path = agent_path / "triggers.json"
-    triggers_path.write_text(
-        json.dumps(triggers, indent=2, ensure_ascii=False) + "\n",
-        encoding="utf-8",
-    )
-
-
-def _save_trigger_to_agent(session: Any, trigger_id: str, tdef: Any) -> None:
-    """Persist a trigger definition to the agent's triggers.json."""
-    agent_path = getattr(session, "worker_path", None)
-    if agent_path is None:
-        return
-    triggers = _read_agent_triggers_json(agent_path)
-    # Replace existing entry with same id or append
-    triggers = [t for t in triggers if t.get("id") != trigger_id]
-    triggers.append(
-        {
-            "id": tdef.id,
-            "name": tdef.description or tdef.id,
-            "trigger_type": tdef.trigger_type,
-            "trigger_config": tdef.trigger_config,
-            "task": tdef.task or "",
-        }
-    )
-    _write_agent_triggers_json(agent_path, triggers)
-    logger.info("Saved trigger '%s' to %s/triggers.json", trigger_id, agent_path)
-
-
-def _remove_trigger_from_agent(session: Any, trigger_id: str) -> None:
-    """Remove a trigger definition from the agent's triggers.json."""
-    agent_path = getattr(session, "worker_path", None)
-    if agent_path is None:
-        return
-    triggers = _read_agent_triggers_json(agent_path)
-    updated = [t for t in triggers if t.get("id") != trigger_id]
-    if len(updated) != len(triggers):
-        _write_agent_triggers_json(agent_path, updated)
-        logger.info("Removed trigger '%s' from %s/triggers.json", trigger_id, agent_path)
-
-
-async def _persist_active_triggers(session: Any, session_id: str | None) -> None:
-    """Persist active trigger IDs to the worker's session state."""
-    runtime = getattr(session, "worker_runtime", None)
-    if runtime is None or session_id is None:
-        return
-    try:
-        store = runtime._session_store
-        state = await store.read_state(session_id)
-        if state is None:
-            from framework.schemas.session_state import SessionState, SessionTimestamps
-
-            now = datetime.now().isoformat()
-            state = SessionState(
-                session_id=session_id,
-                goal_id="",
-                timestamps=SessionTimestamps(started_at=now, updated_at=now),
-            )
-        state.active_triggers = list(session.active_trigger_ids)
-        available = getattr(session, "available_triggers", {})
-        state.trigger_tasks = {
-            tid: available[tid].task
-            for tid in session.active_trigger_ids
-            if tid in available and available[tid].task
-        }
-        if getattr(session, "worker_configured", False):
-            state.worker_configured = True
-        await store.write_state(session_id, state)
-    except Exception as e:
-        logger.warning("Failed to persist active triggers: %s", e)
 
 
 def register_queen_lifecycle_tools(
@@ -922,7 +631,7 @@ def register_queen_lifecycle_tools(
                         )
                     )
                 except Exception:
-                    pass
+                    logger.warning("Failed to re-emit draft during replan", exc_info=True)
 
         has_draft = phase_state is not None and phase_state.draft_graph is not None
         return json.dumps(
@@ -947,7 +656,8 @@ def register_queen_lifecycle_tools(
         name="replan_agent",
         description=(
             "Switch from building back to planning phase. "
-            "Only use when the user explicitly asks to re-plan or redesign the agent."
+            "Use when the user wants to change integrations, swap tools, "
+            "rethink the flow, or discuss design changes before building them."
         ),
         parameters={"type": "object", "properties": {}},
     )
@@ -1018,14 +728,18 @@ def register_queen_lifecycle_tools(
 
         # Build edge dicts first (needed for classification)
         for i, re in enumerate(runtime_edges):
-            edges.append({
-                "id": f"edge-{i}",
-                "source": re.source,
-                "target": re.target,
-                "condition": str(re.condition.value) if hasattr(re.condition, "value") else str(re.condition),
-                "description": getattr(re, "description", "") or "",
-                "label": "",
-            })
+            edges.append(
+                {
+                    "id": f"edge-{i}",
+                    "source": re.source,
+                    "target": re.target,
+                    "condition": str(re.condition.value)
+                    if hasattr(re.condition, "value")
+                    else str(re.condition),
+                    "description": getattr(re, "description", "") or "",
+                    "label": "",
+                }
+            )
 
         # Terminal detection — exclude sub-agent nodes (they are leaf helpers, not endpoints)
         sub_agent_ids: set[str] = set()
@@ -1066,14 +780,16 @@ def register_queen_lifecycle_tools(
         for node in nodes:
             for sa_id in node.get("sub_agents") or []:
                 if sa_id in node_ids:
-                    edges.append({
-                        "id": f"edge-subagent-{edge_counter}",
-                        "source": node["id"],
-                        "target": sa_id,
-                        "condition": "always",
-                        "description": "sub-agent delegation",
-                        "label": "delegate",
-                    })
+                    edges.append(
+                        {
+                            "id": f"edge-subagent-{edge_counter}",
+                            "source": node["id"],
+                            "target": sa_id,
+                            "condition": "always",
+                            "description": "sub-agent delegation",
+                            "label": "delegate",
+                        }
+                    )
                     edge_counter += 1
                     edges.append({
                         "id": f"edge-subagent-{edge_counter}",
@@ -1085,8 +801,24 @@ def register_queen_lifecycle_tools(
                     })
                     edge_counter += 1
 
-        # 1:1 flowchart map (no dissolution happened)
-        fmap = {n["id"]: [n["id"]] for n in nodes}
+        # Group sub-agent nodes under their parent in the flowchart map
+        # (mirrors what _dissolve_planning_nodes does for planned drafts)
+        sub_agent_ids: set[str] = set()
+        for node in nodes:
+            for sa_id in node.get("sub_agents") or []:
+                if sa_id in node_ids:
+                    sub_agent_ids.add(sa_id)
+
+        fmap: dict[str, list[str]] = {}
+        for node in nodes:
+            nid = node["id"]
+            if nid in sub_agent_ids:
+                continue  # skip — will be included via parent
+            absorbed = [nid]
+            for sa_id in node.get("sub_agents") or []:
+                if sa_id in node_ids:
+                    absorbed.append(sa_id)
+            fmap[nid] = absorbed
 
         draft = {
             "agent_name": agent_name,
@@ -1110,73 +842,6 @@ def register_queen_lifecycle_tools(
     # Creates a lightweight draft graph with nodes, edges, and business metadata.
     # Loose validation: only requires names and descriptions. Emits an event
     # so the frontend can render the graph during planning (before any code).
-
-    # Classical flowchart symbols per ISO 5807 / ANSI standards.
-    # Each type maps to a standard shape and a unique color for the
-    # frontend renderer.  Shapes use Mermaid-compatible names where
-    # possible so the frontend can render them directly.
-    _FLOWCHART_TYPES = {
-        # ── Core symbols (ISO 5807 §4) ──────────────────────────
-        # Terminator — rounded rectangle (stadium shape)
-        "start":            {"shape": "stadium",       "color": "#4CAF50"},  # green
-        "terminal":         {"shape": "stadium",       "color": "#F44336"},  # red
-        # Process — rectangle
-        "process":          {"shape": "rectangle",     "color": "#2196F3"},  # blue
-        # Decision — diamond
-        "decision":         {"shape": "diamond",       "color": "#FF9800"},  # amber
-        # Data (Input/Output) — parallelogram
-        "io":               {"shape": "parallelogram", "color": "#9C27B0"},  # purple
-        # Document — rectangle with wavy bottom
-        "document":         {"shape": "document",      "color": "#607D8B"},  # blue-grey
-        # Multi-document — stacked documents
-        "multi_document":   {"shape": "multi_document", "color": "#78909C"}, # blue-grey light
-        # Predefined process / subroutine — rectangle with double vertical bars
-        "subprocess":       {"shape": "subroutine",    "color": "#009688"},  # teal
-        # Preparation — hexagon
-        "preparation":      {"shape": "hexagon",       "color": "#795548"},  # brown
-        # Manual input — trapezoid with slanted top
-        "manual_input":     {"shape": "manual_input",  "color": "#E91E63"},  # pink
-        # Manual operation — inverted trapezoid
-        "manual_operation": {"shape": "trapezoid",     "color": "#AD1457"},  # dark pink
-        # Delay — half-rounded rectangle (D-shape)
-        "delay":            {"shape": "delay",         "color": "#FF5722"},  # deep orange
-        # Display — rounded rectangle with pointed left
-        "display":          {"shape": "display",       "color": "#00BCD4"},  # cyan
-        # ── Data storage symbols ────────────────────────────────
-        # Database / direct access storage — cylinder
-        "database":         {"shape": "cylinder",      "color": "#8BC34A"},  # light green
-        # Stored data — generic data store
-        "stored_data":      {"shape": "stored_data",   "color": "#CDDC39"},  # lime
-        # Internal storage — rectangle with cross-hatch
-        "internal_storage": {"shape": "internal_storage", "color": "#FFC107"}, # amber light
-        # ── Connectors ──────────────────────────────────────────
-        # On-page connector — small circle
-        "connector":        {"shape": "circle",        "color": "#9E9E9E"},  # grey
-        # Off-page connector — pentagon / home-plate
-        "offpage_connector": {"shape": "pentagon",     "color": "#757575"},  # dark grey
-        # ── Flow operations ─────────────────────────────────────
-        # Merge — inverted triangle
-        "merge":            {"shape": "triangle_inv",  "color": "#3F51B5"},  # indigo
-        # Extract — upward triangle
-        "extract":          {"shape": "triangle",      "color": "#5C6BC0"},  # indigo light
-        # Sort — hourglass / double triangle
-        "sort":             {"shape": "hourglass",     "color": "#7986CB"},  # indigo lighter
-        # Collate — merged hourglass
-        "collate":          {"shape": "hourglass_inv", "color": "#9FA8DA"},  # indigo lightest
-        # Summing junction — circle with cross
-        "summing_junction": {"shape": "circle_cross",  "color": "#F06292"},  # pink light
-        # Or — circle with horizontal bar
-        "or":               {"shape": "circle_bar",    "color": "#CE93D8"},  # purple light
-        # ── Domain-specific (Hive agent context) ────────────────
-        # Browser automation (GCU) — mapped to preparation/hexagon
-        "browser":          {"shape": "hexagon",       "color": "#1A237E"},  # dark indigo
-        # Comment / annotation — flag shape
-        "comment":          {"shape": "flag",          "color": "#BDBDBD"},  # light grey
-        # Alternate process — rounded rectangle
-        "alternate_process": {"shape": "rounded_rect", "color": "#42A5F5"}, # light blue
-        # Sub-agent — planning-only; dissolved into parent's sub_agents at build time
-        "subagent":         {"shape": "subroutine",    "color": "#00695C"},  # dark teal
-    }
 
     def _classify_flowchart_node(
         node: dict,
@@ -1225,30 +890,54 @@ def register_queen_lifecycle_tools(
             return "subprocess"
 
         # Database / data store nodes → cylinder
-        db_tool_hints = {"query_database", "sql_query", "read_table", "write_table",
-                         "save_data", "load_data"}
+        db_tool_hints = {
+            "query_database",
+            "sql_query",
+            "read_table",
+            "write_table",
+            "save_data",
+            "load_data",
+        }
         db_desc_hints = {"database", "data store", "storage", "persist", "cache"}
         if node_tools & db_tool_hints or any(h in desc for h in db_desc_hints):
             return "database"
 
         # Document generation nodes → document shape
-        doc_tool_hints = {"generate_report", "create_document", "write_report",
-                          "render_template", "export_pdf"}
+        doc_tool_hints = {
+            "generate_report",
+            "create_document",
+            "write_report",
+            "render_template",
+            "export_pdf",
+        }
         doc_desc_hints = {"report", "document", "summary", "write up", "writeup"}
         if node_tools & doc_tool_hints or any(h in desc for h in doc_desc_hints):
             return "document"
 
         # I/O nodes: external data ingestion or delivery → parallelogram
-        io_tool_hints = {"serve_file_to_user", "send_email", "post_message",
-                         "upload_file", "download_file", "fetch_url",
-                         "post_to_slack", "send_notification"}
+        io_tool_hints = {
+            "serve_file_to_user",
+            "send_email",
+            "post_message",
+            "upload_file",
+            "download_file",
+            "fetch_url",
+            "post_to_slack",
+            "send_notification",
+        }
         io_desc_hints = {"deliver", "send", "output", "notify", "publish"}
         if node_tools & io_tool_hints or any(h in desc for h in io_desc_hints):
             return "io"
 
         # Manual / human-in-the-loop nodes → trapezoid
-        manual_desc_hints = {"human review", "manual", "approval", "human-in-the-loop",
-                             "user review", "manual check"}
+        manual_desc_hints = {
+            "human review",
+            "manual",
+            "approval",
+            "human-in-the-loop",
+            "user review",
+            "manual check",
+        }
         if any(h in desc for h in manual_desc_hints) or any(h in name for h in manual_desc_hints):
             return "manual_operation"
 
@@ -1312,9 +1001,7 @@ def register_queen_lifecycle_tools(
             return [e for e in edges if e["source"] == nid]
 
         # Identify decision nodes
-        decision_ids = [
-            n["id"] for n in nodes if n.get("flowchart_type") == "decision"
-        ]
+        decision_ids = [n["id"] for n in nodes if n.get("flowchart_type") == "decision"]
 
         # Track which draft nodes each runtime node absorbed
         absorbed: dict[str, list[str]] = {}  # runtime_id → [draft_ids...]
@@ -1335,7 +1022,6 @@ def register_queen_lifecycle_tools(
             for oe in out_edges:
                 lbl = (oe.get("label") or "").lower().strip()
                 cond = (oe.get("condition") or "").lower().strip()
-                desc = (oe.get("description") or "").lower().strip()
 
                 if lbl in ("yes", "true", "pass") or cond == "on_success":
                     yes_edge = oe
@@ -1394,24 +1080,28 @@ def register_queen_lifecycle_tools(
                 # Wire predecessor → yes/no targets
                 edge_counter = len(edges)
                 if yes_edge:
-                    edges.append({
-                        "id": f"edge-dissolved-{edge_counter}",
-                        "source": pid,
-                        "target": yes_edge["target"],
-                        "condition": "on_success",
-                        "description": yes_edge.get("description", ""),
-                        "label": yes_edge.get("label", "Yes"),
-                    })
+                    edges.append(
+                        {
+                            "id": f"edge-dissolved-{edge_counter}",
+                            "source": pid,
+                            "target": yes_edge["target"],
+                            "condition": "on_success",
+                            "description": yes_edge.get("description", ""),
+                            "label": yes_edge.get("label", "Yes"),
+                        }
+                    )
                     edge_counter += 1
                 if no_edge:
-                    edges.append({
-                        "id": f"edge-dissolved-{edge_counter}",
-                        "source": pid,
-                        "target": no_edge["target"],
-                        "condition": "on_failure",
-                        "description": no_edge.get("description", ""),
-                        "label": no_edge.get("label", "No"),
-                    })
+                    edges.append(
+                        {
+                            "id": f"edge-dissolved-{edge_counter}",
+                            "source": pid,
+                            "target": no_edge["target"],
+                            "condition": "on_failure",
+                            "description": no_edge.get("description", ""),
+                            "label": no_edge.get("label", "No"),
+                        }
+                    )
 
                 # Record absorption
                 prev_absorbed = absorbed.get(pid, [pid])
@@ -1428,7 +1118,9 @@ def register_queen_lifecycle_tools(
         # Sub-agent nodes are leaf delegates: parent → subagent (no outgoing).
         # Dissolution adds the subagent's ID to parent's sub_agents list.
         subagent_ids = [
-            n["id"] for n in nodes if n.get("flowchart_type") == "subagent"
+            n["id"]
+            for n in nodes
+            if n.get("flowchart_type") in ("subagent", "browser") or n.get("node_type") == "gcu"
         ]
 
         for sa_id in subagent_ids:
@@ -1546,6 +1238,34 @@ def register_queen_lifecycle_tools(
         with a unique color. The queen can override auto-detection by setting
         flowchart_type explicitly on a node.
         """
+        # ── Gate: require at least 2 rounds of user questions ─────────
+        if (
+            phase_state is not None
+            and phase_state.phase == "planning"
+            and phase_state.planning_ask_rounds < 2
+        ):
+            return json.dumps({
+                "error": (
+                    "You haven't asked enough questions yet. You have only "
+                    f"asked {phase_state.planning_ask_rounds} round(s) of "
+                    "questions — at least 2 are required before saving a "
+                    "draft. Think deeper and ask more practical questions "
+                    "to fully understand the user's requirements before "
+                    "designing the agent graph."
+                )
+            })
+
+        # ── Gate: require at least 5 nodes for a meaningful graph ─────
+        if len(nodes) < 5:
+            return json.dumps({
+                "error": (
+                    f"Draft only has {len(nodes)} node(s) — at least 5 are "
+                    "required for a meaningful agent graph. Think deeper and "
+                    "ask more practical questions to fully understand the "
+                    "user's requirements, then design a more thorough graph."
+                )
+            })
+
         # Loose validation: each node needs at minimum an id
         validated_nodes = []
         for i, n in enumerate(nodes):
@@ -1554,36 +1274,54 @@ def register_queen_lifecycle_tools(
             node_id = n.get("id", "").strip()
             if not node_id:
                 return json.dumps({"error": f"Node {i} is missing 'id'"})
-            validated_nodes.append({
-                "id": node_id,
-                "name": n.get("name", node_id.replace("-", " ").replace("_", " ").title()),
-                "description": n.get("description", ""),
-                "node_type": n.get("node_type", "event_loop"),
-                # Optional business-logic hints (not validated yet)
-                "tools": n.get("tools", []),
-                "input_keys": n.get("input_keys", []),
-                "output_keys": n.get("output_keys", []),
-                "success_criteria": n.get("success_criteria", ""),
-                "sub_agents": n.get("sub_agents", []),
-                # Decision nodes: the yes/no question to evaluate
-                "decision_clause": n.get("decision_clause", ""),
-                # Explicit flowchart override (preserved for classification)
-                "flowchart_type": n.get("flowchart_type", ""),
-            })
+            validated_nodes.append(
+                {
+                    "id": node_id,
+                    "name": n.get("name", node_id.replace("-", " ").replace("_", " ").title()),
+                    "description": n.get("description", ""),
+                    "node_type": n.get("node_type", "event_loop"),
+                    # Optional business-logic hints (not validated yet)
+                    "tools": n.get("tools", []),
+                    "input_keys": n.get("input_keys", []),
+                    "output_keys": n.get("output_keys", []),
+                    "success_criteria": n.get("success_criteria", ""),
+                    "sub_agents": n.get("sub_agents", []),
+                    # Decision nodes: the yes/no question to evaluate
+                    "decision_clause": n.get("decision_clause", ""),
+                    # Explicit flowchart override (preserved for classification)
+                    "flowchart_type": n.get("flowchart_type", ""),
+                }
+            )
+
+        # Check for duplicate node IDs
+        seen_ids: set[str] = set()
+        for n in validated_nodes:
+            if n["id"] in seen_ids:
+                return json.dumps({"error": f"Duplicate node id '{n['id']}'"})
+            seen_ids.add(n["id"])
 
         validated_edges = []
         if edges:
+            node_ids = {n["id"] for n in validated_nodes}
             for i, e in enumerate(edges):
                 if not isinstance(e, dict):
                     return json.dumps({"error": f"Edge {i} must be a dict"})
-                validated_edges.append({
-                    "id": e.get("id", f"edge-{i}"),
-                    "source": e.get("source", ""),
-                    "target": e.get("target", ""),
-                    "condition": e.get("condition", "on_success"),
-                    "description": e.get("description", ""),
-                    "label": e.get("label", ""),
-                })
+                src = e.get("source", "")
+                tgt = e.get("target", "")
+                if src and src not in node_ids:
+                    return json.dumps({"error": f"Edge {i} source '{src}' references unknown node"})
+                if tgt and tgt not in node_ids:
+                    return json.dumps({"error": f"Edge {i} target '{tgt}' references unknown node"})
+                validated_edges.append(
+                    {
+                        "id": e.get("id", f"edge-{i}"),
+                        "source": src,
+                        "target": tgt,
+                        "condition": e.get("condition", "on_success"),
+                        "description": e.get("description", ""),
+                        "label": e.get("label", ""),
+                    }
+                )
 
         # ── Enforce GCU / subagent leaf constraint ────────────────
         # GCU nodes and nodes with flowchart_type "subagent" are leaf
@@ -1597,6 +1335,7 @@ def register_queen_lifecycle_tools(
             if n.get("node_type") == "gcu" or n.get("flowchart_type") == "subagent":
                 leaf_node_ids.add(n["id"])
 
+        topology_corrections: list[str] = []
         if leaf_node_ids:
             for leaf_id in leaf_node_ids:
                 # Find edges where this leaf node is the source
@@ -1628,6 +1367,11 @@ def register_queen_lifecycle_tools(
                         "must be leaf sub-agents.",
                         leaf_id, illegal_targets,
                     )
+                    topology_corrections.append(
+                        f"GCU node '{leaf_id}' had illegal edges to "
+                        f"{illegal_targets} — stripped. GCU nodes MUST "
+                        f"be leaf sub-agents, never in the linear flow."
+                    )
                     # Rewire: predecessor → leaf's targets (skip leaf)
                     for parent_id in parent_ids:
                         for tgt_id in illegal_targets:
@@ -1655,6 +1399,42 @@ def register_queen_lifecycle_tools(
                     if leaf_id not in existing:
                         existing.append(leaf_id)
                     parent["sub_agents"] = existing
+
+        # ── Remove orphaned GCU / subagent nodes ──────────────────
+        # After enforcing the leaf constraint, any GCU/subagent node
+        # that has zero edges AND is not in any parent's sub_agents
+        # list is orphaned — remove it and warn the queen.
+        all_edge_node_ids = set()
+        for e in validated_edges:
+            all_edge_node_ids.add(e["source"])
+            all_edge_node_ids.add(e["target"])
+        all_sa_refs: set[str] = set()
+        for n in validated_nodes:
+            for sa_id in n.get("sub_agents") or []:
+                all_sa_refs.add(sa_id)
+
+        orphaned_ids: list[str] = []
+        for lid in leaf_node_ids:
+            if lid not in all_edge_node_ids and lid not in all_sa_refs:
+                orphaned_ids.append(lid)
+
+        if orphaned_ids:
+            for oid in orphaned_ids:
+                logger.warning(
+                    "GCU/subagent node '%s' is orphaned (no edges, "
+                    "not in any parent's sub_agents) — removing it.",
+                    oid,
+                )
+                topology_corrections.append(
+                    f"GCU node '{oid}' was orphaned (no edges, not "
+                    f"assigned as a sub-agent of any parent node) — "
+                    f"removed. Add it to a parent node's sub_agents "
+                    f"list and re-save the draft."
+                )
+            validated_nodes[:] = [
+                n for n in validated_nodes if n["id"] not in set(orphaned_ids)
+            ]
+            node_by_id_v = {n["id"]: n for n in validated_nodes}
 
         # Synthesize visual edges for sub-agents that are referenced in
         # a parent's sub_agents list but have no connecting edge yet.
@@ -1707,7 +1487,11 @@ def register_queen_lifecycle_tools(
         total = len(validated_nodes)
         for i, node in enumerate(validated_nodes):
             fc_type = _classify_flowchart_node(
-                node, i, total, validated_edges, terminal_ids,
+                node,
+                i,
+                total,
+                validated_edges,
+                terminal_ids,
             )
             fc_meta = _FLOWCHART_TYPES[fc_type]
             node["flowchart_type"] = fc_type
@@ -1782,7 +1566,9 @@ def register_queen_lifecycle_tools(
                         stream_id="queen",
                         data={
                             "map": phase_state.flowchart_map if phase_state else None,
-                            "original_draft": phase_state.original_draft_graph if phase_state else draft,
+                            "original_draft": phase_state.original_draft_graph
+                            if phase_state
+                            else draft,
                         },
                     )
                 )
@@ -1796,7 +1582,7 @@ def register_queen_lifecycle_tools(
                 )
 
         dissolution_info = {}
-        if is_building and phase_state is not None:
+        if is_building and phase_state is not None and phase_state.original_draft_graph:
             orig_count = len(phase_state.original_draft_graph.get("nodes", []))
             conv_count = len(phase_state.draft_graph.get("nodes", []))
             dissolution_info = {
@@ -1804,12 +1590,22 @@ def register_queen_lifecycle_tools(
                 "flowchart_map": phase_state.flowchart_map,
             }
 
+        correction_warning = ""
+        if topology_corrections:
+            correction_warning = (
+                " WARNING — your draft had topology errors that were "
+                "auto-corrected: " + "; ".join(topology_corrections)
+                + " Review the corrected flowchart and do NOT repeat "
+                "this pattern. GCU nodes are ALWAYS leaf sub-agents."
+            )
+
         if is_building:
             msg = (
                 "Draft flowchart updated during building. "
                 "Planning-only nodes dissolved automatically. "
                 "The user can see the updated flowchart. "
                 "Continue building — no re-confirmation needed."
+                + correction_warning
             )
         else:
             msg = (
@@ -1817,9 +1613,10 @@ def register_queen_lifecycle_tools(
                 "The user can now see the color-coded flowchart. "
                 "Present this design to the user and get their approval. "
                 "When the user confirms, call confirm_and_build() to proceed."
+                + correction_warning
             )
 
-        return json.dumps({
+        result: dict = {
             "status": "draft_saved",
             "agent_name": draft["agent_name"],
             "node_count": len(validated_nodes),
@@ -1827,7 +1624,10 @@ def register_queen_lifecycle_tools(
             "node_types": {n["id"]: n["flowchart_type"] for n in validated_nodes},
             **dissolution_info,
             "message": msg,
-        })
+        }
+        if topology_corrections:
+            result["topology_corrections"] = topology_corrections
+        return json.dumps(result)
 
     _draft_tool = Tool(
         name="save_agent_draft",
@@ -1877,16 +1677,33 @@ def register_queen_lifecycle_tools(
                             "flowchart_type": {
                                 "type": "string",
                                 "enum": [
-                                    "start", "terminal", "process", "decision",
-                                    "io", "document", "multi_document",
-                                    "subprocess", "preparation",
-                                    "manual_input", "manual_operation",
-                                    "delay", "display",
-                                    "database", "stored_data", "internal_storage",
-                                    "connector", "offpage_connector",
-                                    "merge", "extract", "sort", "collate",
-                                    "summing_junction", "or",
-                                    "browser", "comment", "alternate_process",
+                                    "start",
+                                    "terminal",
+                                    "process",
+                                    "decision",
+                                    "io",
+                                    "document",
+                                    "multi_document",
+                                    "subprocess",
+                                    "preparation",
+                                    "manual_input",
+                                    "manual_operation",
+                                    "delay",
+                                    "display",
+                                    "database",
+                                    "stored_data",
+                                    "internal_storage",
+                                    "connector",
+                                    "offpage_connector",
+                                    "merge",
+                                    "extract",
+                                    "sort",
+                                    "collate",
+                                    "summing_junction",
+                                    "or",
+                                    "browser",
+                                    "comment",
+                                    "alternate_process",
                                     "subagent",
                                 ],
                                 "description": (
@@ -2014,12 +1831,14 @@ def register_queen_lifecycle_tools(
             )
 
         if phase_state.draft_graph is None:
-            return json.dumps({
-                "error": (
-                    "No draft graph saved. Call save_agent_draft() first to create "
-                    "a draft, present it to the user, and get their approval."
-                )
-            })
+            return json.dumps(
+                {
+                    "error": (
+                        "No draft graph saved. Call save_agent_draft() first to create "
+                        "a draft, present it to the user, and get their approval."
+                    )
+                }
+            )
 
         phase_state.build_confirmed = True
 
@@ -2029,8 +1848,11 @@ def register_queen_lifecycle_tools(
         import copy as _copy
 
         original_nodes = phase_state.draft_graph.get("nodes", [])
-        phase_state.original_draft_graph = _copy.deepcopy(phase_state.draft_graph)
+        # Compute dissolution first, then assign all three atomically so that
+        # a failure in _dissolve_planning_nodes doesn't leave partial state.
+        original_copy = _copy.deepcopy(phase_state.draft_graph)
         converted, fmap = _dissolve_planning_nodes(phase_state.draft_graph)
+        phase_state.original_draft_graph = original_copy
         phase_state.draft_graph = converted
         phase_state.flowchart_map = fmap
 
@@ -2038,12 +1860,8 @@ def register_queen_lifecycle_tools(
         # (after the agent folder is scaffolded) or in load_built_agent.
 
         dissolved_count = len(original_nodes) - len(converted.get("nodes", []))
-        decision_count = sum(
-            1 for n in original_nodes if n.get("flowchart_type") == "decision"
-        )
-        subagent_count = sum(
-            1 for n in original_nodes if n.get("flowchart_type") == "subagent"
-        )
+        decision_count = sum(1 for n in original_nodes if n.get("flowchart_type") == "decision")
+        subagent_count = sum(1 for n in original_nodes if n.get("flowchart_type") == "subagent")
 
         dissolution_parts = []
         if decision_count:
@@ -2055,21 +1873,23 @@ def register_queen_lifecycle_tools(
                 f"{subagent_count} sub-agent node(s) dissolved into predecessor sub_agents"
             )
 
-        return json.dumps({
-            "status": "confirmed",
-            "agent_name": phase_state.draft_graph.get("agent_name", ""),
-            "planning_nodes_dissolved": dissolved_count,
-            "decision_nodes_dissolved": decision_count,
-            "subagent_nodes_dissolved": subagent_count,
-            "flowchart_map": fmap,
-            "message": (
-                "User has confirmed the design. "
-                + ("; ".join(dissolution_parts) + ". " if dissolution_parts else "")
-                + "Now call initialize_and_build_agent(agent_name, nodes) to scaffold the "
-                "agent package and start building. The draft metadata will be "
-                "used to pre-populate the generated files."
-            ),
-        })
+        return json.dumps(
+            {
+                "status": "confirmed",
+                "agent_name": phase_state.draft_graph.get("agent_name", ""),
+                "planning_nodes_dissolved": dissolved_count,
+                "decision_nodes_dissolved": decision_count,
+                "subagent_nodes_dissolved": subagent_count,
+                "flowchart_map": fmap,
+                "message": (
+                    "User has confirmed the design. "
+                    + ("; ".join(dissolution_parts) + ". " if dissolution_parts else "")
+                    + "Now call initialize_and_build_agent(agent_name, nodes) to scaffold the "
+                    "agent package and start building. The draft metadata will be "
+                    "used to pre-populate the generated files."
+                ),
+            }
+        )
 
     _confirm_tool = Tool(
         name="confirm_and_build",
@@ -2108,22 +1928,26 @@ def register_queen_lifecycle_tools(
                 and not phase_state.build_confirmed
             ):
                 if phase_state.draft_graph is None:
-                    return json.dumps({
-                        "error": (
-                            "Cannot transition to building without a draft. "
-                            "Call save_agent_draft() first to create a visual draft of the "
-                            "graph, present it to the user for review, then call "
-                            "confirm_and_build() after the user approves."
-                        )
-                    })
-                return json.dumps({
-                    "error": (
-                        "The user has not confirmed the draft design yet. "
-                        "Present the draft to the user and call ask_user() to get "
-                        "their approval. Then call confirm_and_build() before "
-                        "calling initialize_and_build_agent()."
+                    return json.dumps(
+                        {
+                            "error": (
+                                "Cannot transition to building without a draft. "
+                                "Call save_agent_draft() first to create a visual draft of the "
+                                "graph, present it to the user for review, then call "
+                                "confirm_and_build() after the user approves."
+                            )
+                        }
                     )
-                })
+                return json.dumps(
+                    {
+                        "error": (
+                            "The user has not confirmed the draft design yet. "
+                            "Present the draft to the user and call ask_user() to get "
+                            "their approval. Then call confirm_and_build() before "
+                            "calling initialize_and_build_agent()."
+                        )
+                    }
+                )
 
             # No agent_name → try to fall back to the session's current agent,
             # or fail with actionable guidance.
@@ -2226,8 +2050,7 @@ def register_queen_lifecycle_tools(
                         if phase_state.inject_notification:
                             await phase_state.inject_notification(
                                 "[PHASE CHANGE] Agent scaffolded and switched to BUILDING phase. "
-                                "Start implementing the agent nodes now."
-                                + draft_hint
+                                "Start implementing the agent nodes now." + draft_hint
                             )
             except (json.JSONDecodeError, KeyError, TypeError):
                 pass
