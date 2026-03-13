@@ -429,10 +429,7 @@ def _dissolve_planning_nodes(
 
         # Decision clause: prefer decision_clause, fall back to description/name
         clause = (
-            d_node.get("decision_clause")
-            or d_node.get("description")
-            or d_node.get("name")
-            or d_id
+            d_node.get("decision_clause") or d_node.get("description") or d_node.get("name") or d_id
         ).strip()
 
         predecessors = [node_by_id[e["source"]] for e in in_edges if e["source"] in node_by_id]
@@ -1079,14 +1076,16 @@ def register_queen_lifecycle_tools(
                         }
                     )
                     edge_counter += 1
-                    edges.append({
-                        "id": f"edge-subagent-{edge_counter}",
-                        "source": sa_id,
-                        "target": node["id"],
-                        "condition": "always",
-                        "description": "sub-agent report back",
-                        "label": "report",
-                    })
+                    edges.append(
+                        {
+                            "id": f"edge-subagent-{edge_counter}",
+                            "source": sa_id,
+                            "target": node["id"],
+                            "condition": "always",
+                            "description": "sub-agent report back",
+                            "label": "report",
+                        }
+                    )
                     edge_counter += 1
 
         # Group sub-agent nodes under their parent in the flowchart map
@@ -1627,14 +1626,8 @@ def register_queen_lifecycle_tools(
         if leaf_node_ids:
             for leaf_id in leaf_node_ids:
                 # Find edges where this leaf node is the source
-                out_edges = [
-                    e for e in validated_edges
-                    if e["source"] == leaf_id
-                ]
-                in_edges = [
-                    e for e in validated_edges
-                    if e["target"] == leaf_id
-                ]
+                out_edges = [e for e in validated_edges if e["source"] == leaf_id]
+                in_edges = [e for e in validated_edges if e["target"] == leaf_id]
                 if not out_edges:
                     continue  # already a proper leaf
 
@@ -1653,7 +1646,8 @@ def register_queen_lifecycle_tools(
                         "GCU/subagent node '%s' has illegal outgoing "
                         "edges to %s — stripping them. GCU nodes "
                         "must be leaf sub-agents.",
-                        leaf_id, illegal_targets,
+                        leaf_id,
+                        illegal_targets,
                     )
                     topology_corrections.append(
                         f"GCU node '{leaf_id}' had illegal edges to "
@@ -1663,19 +1657,21 @@ def register_queen_lifecycle_tools(
                     # Rewire: predecessor → leaf's targets (skip leaf)
                     for parent_id in parent_ids:
                         for tgt_id in illegal_targets:
-                            validated_edges.append({
-                                "id": f"edge-rewire-{len(validated_edges)}",
-                                "source": parent_id,
-                                "target": tgt_id,
-                                "condition": "on_success",
-                                "description": "",
-                                "label": "",
-                            })
+                            validated_edges.append(
+                                {
+                                    "id": f"edge-rewire-{len(validated_edges)}",
+                                    "source": parent_id,
+                                    "target": tgt_id,
+                                    "condition": "on_success",
+                                    "description": "",
+                                    "label": "",
+                                }
+                            )
                     # Remove the illegal edges
                     validated_edges[:] = [
-                        e for e in validated_edges
-                        if not (e["source"] == leaf_id
-                                and e["target"] in set(illegal_targets))
+                        e
+                        for e in validated_edges
+                        if not (e["source"] == leaf_id and e["target"] in set(illegal_targets))
                     ]
 
                 # Ensure the leaf is in its parent's sub_agents list
@@ -1719,9 +1715,7 @@ def register_queen_lifecycle_tools(
                     f"removed. Add it to a parent node's sub_agents "
                     f"list and re-save the draft."
                 )
-            validated_nodes[:] = [
-                n for n in validated_nodes if n["id"] not in set(orphaned_ids)
-            ]
+            validated_nodes[:] = [n for n in validated_nodes if n["id"] not in set(orphaned_ids)]
             node_by_id_v = {n["id"]: n for n in validated_nodes}
 
         # Synthesize visual edges for sub-agents that are referenced in
@@ -1734,25 +1728,29 @@ def register_queen_lifecycle_tools(
                 if sa_id not in node_id_set:
                     continue
                 if (n["id"], sa_id) not in existing_edge_pairs:
-                    validated_edges.append({
-                        "id": f"edge-subagent-{edge_counter}",
-                        "source": n["id"],
-                        "target": sa_id,
-                        "condition": "always",
-                        "description": "sub-agent delegation",
-                        "label": "delegate",
-                    })
+                    validated_edges.append(
+                        {
+                            "id": f"edge-subagent-{edge_counter}",
+                            "source": n["id"],
+                            "target": sa_id,
+                            "condition": "always",
+                            "description": "sub-agent delegation",
+                            "label": "delegate",
+                        }
+                    )
                     edge_counter += 1
                     existing_edge_pairs.add((n["id"], sa_id))
                 if (sa_id, n["id"]) not in existing_edge_pairs:
-                    validated_edges.append({
-                        "id": f"edge-subagent-{edge_counter}",
-                        "source": sa_id,
-                        "target": n["id"],
-                        "condition": "always",
-                        "description": "sub-agent report back",
-                        "label": "report",
-                    })
+                    validated_edges.append(
+                        {
+                            "id": f"edge-subagent-{edge_counter}",
+                            "source": sa_id,
+                            "target": n["id"],
+                            "condition": "always",
+                            "description": "sub-agent report back",
+                            "label": "report",
+                        }
+                    )
                     edge_counter += 1
                     existing_edge_pairs.add((sa_id, n["id"]))
 
@@ -1930,7 +1928,8 @@ def register_queen_lifecycle_tools(
         if topology_corrections:
             correction_warning = (
                 " WARNING — your draft had topology errors that were "
-                "auto-corrected: " + "; ".join(topology_corrections)
+                "auto-corrected: "
+                + "; ".join(topology_corrections)
                 + " Review the corrected flowchart and do NOT repeat "
                 "this pattern. GCU nodes are ALWAYS leaf sub-agents."
             )
@@ -1940,16 +1939,14 @@ def register_queen_lifecycle_tools(
                 "Draft flowchart updated during building. "
                 "Planning-only nodes dissolved automatically. "
                 "The user can see the updated flowchart. "
-                "Continue building — no re-confirmation needed."
-                + correction_warning
+                "Continue building — no re-confirmation needed." + correction_warning
             )
         else:
             msg = (
                 "Draft graph saved and sent to the visualizer. "
                 "The user can now see the color-coded flowchart. "
                 "Present this design to the user and get their approval. "
-                "When the user confirms, call confirm_and_build() to proceed."
-                + correction_warning
+                "When the user confirms, call confirm_and_build() to proceed." + correction_warning
             )
 
         result: dict = {

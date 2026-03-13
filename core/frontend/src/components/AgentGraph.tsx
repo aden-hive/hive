@@ -20,7 +20,7 @@ export interface GraphNode {
   edgeLabels?: Record<string, string>;
 }
 
-type RunState = "idle" | "deploying" | "running";
+export type RunState = "idle" | "deploying" | "running";
 
 interface AgentGraphProps {
   nodes: GraphNode[];
@@ -35,7 +35,7 @@ interface AgentGraphProps {
 }
 
 // --- Extracted RunButton so hover state survives parent re-renders ---
-interface RunButtonProps {
+export interface RunButtonProps {
   runState: RunState;
   disabled: boolean;
   onRun: () => void;
@@ -43,7 +43,7 @@ interface RunButtonProps {
   btnRef: React.Ref<HTMLButtonElement>;
 }
 
-const RunButton = memo(function RunButton({ runState, disabled, onRun, onPause, btnRef }: RunButtonProps) {
+export const RunButton = memo(function RunButton({ runState, disabled, onRun, onPause, btnRef }: RunButtonProps) {
   const [hovered, setHovered] = useState(false);
   const showPause = runState === "running" && hovered;
 
