@@ -10,7 +10,7 @@ def get_secure_path(path: str, workspace_id: str, agent_id: str, session_id: str
         raise ValueError("workspace_id, agent_id, and session_id are all required")
 
     # Ensure session directory exists
-    session_dir = os.path.abspath(os.path.join(WORKSPACES_DIR, workspace_id, agent_id, session_id))
+    session_dir = os.path.realpath(os.path.join(WORKSPACES_DIR, workspace_id, agent_id, session_id))
     os.makedirs(session_dir, exist_ok=True)
 
     # Normalize whitespace to prevent bypass via leading spaces/tabs
@@ -21,9 +21,9 @@ def get_secure_path(path: str, workspace_id: str, agent_id: str, session_id: str
         # Strip exactly one leading separator to make path relative to session_dir,
         # preserving any subsequent separators (e.g. UNC paths like //server/share)
         rel_path = path[1:] if path and path[0] in ("/", "\\") else path
-        final_path = os.path.abspath(os.path.join(session_dir, rel_path))
+        final_path = os.path.realpath(os.path.join(session_dir, rel_path))
     else:
-        final_path = os.path.abspath(os.path.join(session_dir, path))
+        final_path = os.path.realpath(os.path.join(session_dir, path))
 
     # Verify path is within session_dir
     try:
