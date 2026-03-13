@@ -89,6 +89,7 @@ class SharedStateManager:
         # Change history for debugging/auditing
         self._change_history: list[StateChange] = []
         self._max_history = 1000
+        self._changes_dropped: int = 0
 
         # Version tracking
         self._version = 0
@@ -283,6 +284,14 @@ class SharedStateManager:
 
         # Trim history if too long
         if len(self._change_history) > self._max_history:
+            dropped = len(self._change_history) - self._max_history
+            self._changes_dropped += dropped
+            if self._changes_dropped == dropped:  # first overflow — warn once
+                logger.warning(
+                    "SharedStateManager change history buffer full (%d). "
+                    "Oldest changes will be dropped.",
+                    self._max_history,
+                )
             self._change_history = self._change_history[-self._max_history :]
 
     # === BULK OPERATIONS ===
@@ -335,6 +344,7 @@ class SharedStateManager:
             "stream_count": len(self._stream_state),
             "execution_count": len(self._execution_state),
             "total_changes": len(self._change_history),
+            "changes_dropped": self._changes_dropped,
             "version": self._version,
         }
 
