@@ -73,6 +73,7 @@ class _EscalationReceiver:
     def __init__(self) -> None:
         self._event = asyncio.Event()
         self._response: str | None = None
+        self._awaiting_input = True  # So inject_worker_message() can prefer us
 
     async def inject_event(self, content: str, *, is_client_input: bool = False) -> None:
         """Called by ExecutionStream.inject_input() when the user responds."""
@@ -4323,22 +4324,18 @@ class EventLoopNode(NodeProtocol):
 
             registry[escalation_id] = receiver
             try:
-                # Stream message to user (parent's node_id so TUI shows parent talking)
-                await self._event_bus.emit_client_output_delta(
-                    stream_id=ctx.node_id,
-                    node_id=ctx.node_id,
-                    content=message,
-                    snapshot=message,
-                    execution_id=ctx.execution_id,
-                )
-                # Request input (escalation_id for routing response back)
-                await self._event_bus.emit_client_input_requested(
-                    stream_id=ctx.node_id,
+                # Escalate to the queen instead of asking the user directly.
+                # The queen handles the request and injects the response via
+                # inject_worker_message(), which finds this receiver through
+                # its _awaiting_input flag.
+                await self._event_bus.emit_escalation_requested(
+                    stream_id=ctx.stream_id or ctx.node_id,
                     node_id=escalation_id,
-                    prompt=message,
+                    reason=f"Subagent report (wait_for_response) from {agent_id}",
+                    context=message,
                     execution_id=ctx.execution_id,
                 )
-                # Block until user responds
+                # Block until queen responds
                 return await receiver.wait()
             finally:
                 registry.pop(escalation_id, None)

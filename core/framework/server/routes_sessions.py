@@ -140,6 +140,7 @@ async def handle_create_session(request: web.Request) -> web.Response:
             session = await manager.create_session_with_worker(
                 agent_path,
                 agent_id=agent_id,
+                session_id=session_id,
                 model=model,
                 initial_prompt=initial_prompt,
                 queen_resume_from=queen_resume_from,
@@ -731,7 +732,7 @@ async def handle_delete_history_session(request: web.Request) -> web.Response:
 
 async def handle_discover(request: web.Request) -> web.Response:
     """GET /api/discover — discover agents from filesystem."""
-    from framework.tui.screens.agent_picker import discover_agents
+    from framework.agents.discovery import discover_agents
 
     manager = _get_manager(request)
     loaded_paths = {str(s.worker_path) for s in manager.list_sessions() if s.worker_path}

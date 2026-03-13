@@ -147,6 +147,7 @@ class SessionManager:
         self,
         agent_path: str | Path,
         agent_id: str | None = None,
+        session_id: str | None = None,
         model: str | None = None,
         initial_prompt: str | None = None,
         queen_resume_from: str | None = None,
@@ -161,8 +162,7 @@ class SessionManager:
         agent_path = Path(agent_path)
         resolved_worker_id = agent_id or agent_path.name
 
-        # Auto-generate session ID (not the agent name)
-        session = await self._create_session_core(model=model)
+        session = await self._create_session_core(session_id=session_id, model=model)
         session.queen_resume_from = queen_resume_from
         try:
             # Load worker FIRST (before queen) so queen gets full tools
