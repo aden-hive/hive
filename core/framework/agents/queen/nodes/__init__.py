@@ -872,6 +872,21 @@ node uses, swapping data sources, rethinking the flow, or any time the \
 user says "replan", "go back", "let's redesign", "change the approach", \
 "use a different tool/API", etc. Do NOT stay in building to handle these \
 — switch to planning so the user can review and approve the new design.
+
+## CRITICAL — Graph topology errors require replanning, not code edits
+
+If you discover that the agent graph has structural problems — GCU nodes \
+in the linear flow, missing edges, wrong node connections, incorrect \
+sub-agent assignments — you MUST call replan_agent() and fix the draft. \
+Do NOT attempt to fix topology by editing agent.py directly. The graph \
+structure is defined by the draft → dissolution → code-gen pipeline. \
+Editing code to rewire nodes bypasses the flowchart and creates drift \
+between what the user sees and what the code does.
+
+**WRONG:** "Let me fix agent.py to remove GCU nodes from edges..."
+**RIGHT:** Call replan_agent(), fix the draft with save_agent_draft(), \
+get user approval, then confirm_and_build() → the corrected code is \
+generated automatically.
 """
 
 # -- STAGING phase behavior --

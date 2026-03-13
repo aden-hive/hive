@@ -1302,6 +1302,7 @@ def register_queen_lifecycle_tools(
             if n.get("node_type") == "gcu" or n.get("flowchart_type") == "subagent":
                 leaf_node_ids.add(n["id"])
 
+        topology_corrections: list[str] = []
         if leaf_node_ids:
             for leaf_id in leaf_node_ids:
                 # Find edges where this leaf node is the source
@@ -1332,6 +1333,11 @@ def register_queen_lifecycle_tools(
                         "edges to %s — stripping them. GCU nodes "
                         "must be leaf sub-agents.",
                         leaf_id, illegal_targets,
+                    )
+                    topology_corrections.append(
+                        f"GCU node '{leaf_id}' had illegal edges to "
+                        f"{illegal_targets} — stripped. GCU nodes MUST "
+                        f"be leaf sub-agents, never in the linear flow."
                     )
                     # Rewire: predecessor → leaf's targets (skip leaf)
                     for parent_id in parent_ids:
@@ -1509,12 +1515,22 @@ def register_queen_lifecycle_tools(
                 "flowchart_map": phase_state.flowchart_map,
             }
 
+        correction_warning = ""
+        if topology_corrections:
+            correction_warning = (
+                " WARNING — your draft had topology errors that were "
+                "auto-corrected: " + "; ".join(topology_corrections)
+                + " Review the corrected flowchart and do NOT repeat "
+                "this pattern. GCU nodes are ALWAYS leaf sub-agents."
+            )
+
         if is_building:
             msg = (
                 "Draft flowchart updated during building. "
                 "Planning-only nodes dissolved automatically. "
                 "The user can see the updated flowchart. "
                 "Continue building — no re-confirmation needed."
+                + correction_warning
             )
         else:
             msg = (
@@ -1522,9 +1538,10 @@ def register_queen_lifecycle_tools(
                 "The user can now see the color-coded flowchart. "
                 "Present this design to the user and get their approval. "
                 "When the user confirms, call confirm_and_build() to proceed."
+                + correction_warning
             )
 
-        return json.dumps({
+        result: dict = {
             "status": "draft_saved",
             "agent_name": draft["agent_name"],
             "node_count": len(validated_nodes),
@@ -1532,7 +1549,10 @@ def register_queen_lifecycle_tools(
             "node_types": {n["id"]: n["flowchart_type"] for n in validated_nodes},
             **dissolution_info,
             "message": msg,
-        })
+        }
+        if topology_corrections:
+            result["topology_corrections"] = topology_corrections
+        return json.dumps(result)
 
     _draft_tool = Tool(
         name="save_agent_draft",
