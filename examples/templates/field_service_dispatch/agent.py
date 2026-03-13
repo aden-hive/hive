@@ -106,14 +106,6 @@ edges = [
         condition=EdgeCondition.ON_SUCCESS,
         priority=1,
     ),
-    # dispatch -> notify (dispatch plan ready)
-    EdgeSpec(
-        id="dispatch-to-notify",
-        source="dispatch",
-        target="notify",
-        condition=EdgeCondition.ON_SUCCESS,
-        priority=1,
-    ),
     # dispatch -> triage_and_plan (reassignment needed — no suitable tech found)
     EdgeSpec(
         id="dispatch-to-triage-reassign",
@@ -121,6 +113,15 @@ edges = [
         target="triage_and_plan",
         condition=EdgeCondition.CONDITIONAL,
         condition_expr="'needs_reassignment: true' in str(dispatch_plan).lower()",
+        priority=1,
+    ),
+    # dispatch -> notify (dispatch plan ready, no reassignment needed)
+    EdgeSpec(
+        id="dispatch-to-notify",
+        source="dispatch",
+        target="notify",
+        condition=EdgeCondition.CONDITIONAL,
+        condition_expr="'needs_reassignment: true' not in str(dispatch_plan).lower()",
         priority=2,
     ),
     # notify -> intake (new dispatch cycle after completion)
