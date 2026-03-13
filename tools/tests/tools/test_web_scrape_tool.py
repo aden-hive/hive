@@ -351,6 +351,45 @@ class TestWebScrapeToolLinkConversion:
         assert len([t for t in texts if not t.strip()]) == 0
 
 
+class TestSSRFProtection:
+    """Tests for SSRF protection in web_scrape tool."""
+
+    def test_blocks_localhost(self, web_scrape_fn):
+        """Blocks requests to localhost."""
+        result = web_scrape_fn(url="http://localhost:8080")
+        assert result.get("blocked_by_ssrf_protection") is True
+        assert "loopback" in result.get("error", "").lower()
+
+    def test_blocks_127_0_0_1(self, web_scrape_fn):
+        """Blocks requests to 127.0.0.1."""
+        result = web_scrape_fn(url="http://127.0.0.1:5000")
+        assert result.get("blocked_by_ssrf_protection") is True
+        assert "loopback" in result.get("error", "").lower()
+
+    def test_blocks_private_192_168(self, web_scrape_fn):
+        """Blocks requests to 192.168.x.x private network."""
+        result = web_scrape_fn(url="http://192.168.1.1")
+        assert result.get("blocked_by_ssrf_protection") is True
+        assert "private" in result.get("error", "").lower()
+
+    def test_blocks_private_10_0(self, web_scrape_fn):
+        """Blocks requests to 10.x.x.x private network."""
+        result = web_scrape_fn(url="http://10.0.0.1")
+        assert result.get("blocked_by_ssrf_protection") is True
+        assert "private" in result.get("error", "").lower()
+
+    def test_blocks_aws_metadata(self, web_scrape_fn):
+        """Blocks requests to AWS/GCP metadata endpoint."""
+        result = web_scrape_fn(url="http://169.254.169.254/latest/meta-data/")
+        assert result.get("blocked_by_ssrf_protection") is True
+        # 169.254.x.x is detected as private by Python's ipaddress module
+        assert "blocked" in result.get("error", "").lower()
+
+    def test_allows_public_urls(self, web_scrape_fn):
+        """Allows requests to public URLs."""
+        result = web_scrape_fn(url="https://example.com")
+        # Should not be blocked by SSRF protection
+        assert result.get("blocked_by_ssrf_protection") is not True
 class TestWebScrapeToolErrorHandling:
     """Tests for error handling and early exit before JS wait."""
 
