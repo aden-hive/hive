@@ -2,6 +2,7 @@ import { memo, useState, useRef, useEffect } from "react";
 import { Send, Square, Crown, Cpu, Check, Loader2 } from "lucide-react";
 import MarkdownContent from "@/components/MarkdownContent";
 import QuestionWidget from "@/components/QuestionWidget";
+import MultiQuestionWidget from "@/components/MultiQuestionWidget";
 
 export interface ChatMessage {
   id: string;
@@ -36,8 +37,12 @@ interface ChatPanelProps {
   pendingQuestion?: string | null;
   /** Options for the pending question */
   pendingOptions?: string[] | null;
+  /** Multiple questions from ask_user_multiple */
+  pendingQuestions?: { id: string; prompt: string; options?: string[] }[] | null;
   /** Called when user submits an answer to the pending question */
   onQuestionSubmit?: (answer: string, isOther: boolean) => void;
+  /** Called when user submits answers to multiple questions */
+  onMultiQuestionSubmit?: (answers: Record<string, string>) => void;
   /** Called when user dismisses the pending question without answering */
   onQuestionDismiss?: () => void;
   /** Queen operating phase — shown as a tag on queen messages */
@@ -236,7 +241,7 @@ const MessageBubble = memo(function MessageBubble({ msg, queenPhase }: { msg: Ch
   );
 }, (prev, next) => prev.msg.id === next.msg.id && prev.msg.content === next.msg.content && prev.msg.phase === next.msg.phase && prev.queenPhase === next.queenPhase);
 
-export default function ChatPanel({ messages, onSend, isWaiting, isWorkerWaiting, isBusy, activeThread, disabled, onCancel, pendingQuestion, pendingOptions, onQuestionSubmit, onQuestionDismiss, queenPhase }: ChatPanelProps) {
+export default function ChatPanel({ messages, onSend, isWaiting, isWorkerWaiting, isBusy, activeThread, disabled, onCancel, pendingQuestion, pendingOptions, pendingQuestions, onQuestionSubmit, onMultiQuestionSubmit, onQuestionDismiss, queenPhase }: ChatPanelProps) {
   const [input, setInput] = useState("");
   const [readMap, setReadMap] = useState<Record<string, number>>({});
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -346,7 +351,13 @@ export default function ChatPanel({ messages, onSend, isWaiting, isWorkerWaiting
       </div>
 
       {/* Input area — question widget replaces textarea when a question is pending */}
-      {pendingQuestion && pendingOptions && onQuestionSubmit ? (
+      {pendingQuestions && pendingQuestions.length >= 2 && onMultiQuestionSubmit ? (
+        <MultiQuestionWidget
+          questions={pendingQuestions}
+          onSubmit={onMultiQuestionSubmit}
+          onDismiss={onQuestionDismiss}
+        />
+      ) : pendingQuestion && pendingOptions && onQuestionSubmit ? (
         <QuestionWidget
           question={pendingQuestion}
           options={pendingOptions}

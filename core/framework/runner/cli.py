@@ -243,6 +243,12 @@ def register_commands(subparsers: argparse._SubParsersAction) -> None:
         action="store_true",
         help="Open dashboard in browser after server starts",
     )
+    serve_parser.add_argument(
+        "--verbose", "-v", action="store_true", help="Enable INFO log level"
+    )
+    serve_parser.add_argument(
+        "--debug", action="store_true", help="Enable DEBUG log level"
+    )
     serve_parser.set_defaults(func=cmd_serve)
 
     # open command (serve + auto-open browser)
@@ -279,6 +285,12 @@ def register_commands(subparsers: argparse._SubParsersAction) -> None:
         type=str,
         default=None,
         help="LLM model for preloaded agents",
+    )
+    open_parser.add_argument(
+        "--verbose", "-v", action="store_true", help="Enable INFO log level"
+    )
+    open_parser.add_argument(
+        "--debug", action="store_true", help="Enable DEBUG log level"
     )
     open_parser.set_defaults(func=cmd_open)
 
@@ -380,13 +392,15 @@ def cmd_run(args: argparse.Namespace) -> int:
     from framework.credentials.models import CredentialError
     from framework.runner import AgentRunner
 
+    from framework.observability import configure_logging
+
     # Set logging level (quiet by default for cleaner output)
     if args.quiet:
-        logging.basicConfig(level=logging.ERROR, format="%(message)s")
+        configure_logging(level="ERROR")
     elif getattr(args, "verbose", False):
-        logging.basicConfig(level=logging.INFO, format="%(message)s")
+        configure_logging(level="INFO")
     else:
-        logging.basicConfig(level=logging.WARNING, format="%(message)s")
+        configure_logging(level="WARNING")
 
     # Load input context
     context = {}
@@ -742,6 +756,17 @@ def cmd_dispatch(args: argparse.Namespace) -> int:
     if args.agents:
         # Use specific agents
         for agent_name in args.agents:
+            # Guard against full paths: if the name contains path separators
+            # (e.g. "exports/my_agent"), it will be doubled with agents_dir
+            agent_name_path = Path(agent_name)
+            if len(agent_name_path.parts) > 1:
+                print(
+                    f"Error: --agents expects agent names, not paths. "
+                    f"Use: --agents {agent_name_path.name} "
+                    f"instead of --agents {agent_name}",
+                    file=sys.stderr,
+                )
+                return 1
             agent_path = agents_dir / agent_name
             if not _is_valid_agent_dir(agent_path):
                 print(f"Agent not found: {agent_path}", file=sys.stderr)
@@ -912,11 +937,9 @@ def cmd_shell(args: argparse.Namespace) -> int:
     from framework.credentials.models import CredentialError
     from framework.runner import AgentRunner
 
-    # Configure logging to show runtime visibility
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(message)s",  # Simple format for clean output
-    )
+    from framework.observability import configure_logging
+
+    configure_logging(level="INFO")
 
     agents_dir = Path(args.agents_dir)
 
@@ -1622,10 +1645,12 @@ def cmd_serve(args: argparse.Namespace) -> int:
 
     from framework.server.app import create_app
 
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-    )
+    from framework.observability import configure_logging
+
+    if getattr(args, "debug", False):
+        configure_logging(level="DEBUG")
+    else:
+        configure_logging(level="INFO")
 
     model = getattr(args, "model", None)
     app = create_app(model=model)

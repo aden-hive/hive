@@ -105,7 +105,7 @@ def _extract_agent_stats(agent_path: Path) -> tuple[int, int, list[str]]:
     if agent_json.exists():
         try:
             data = json.loads(agent_json.read_text(encoding="utf-8"))
-            json_nodes = data.get("nodes", [])
+            json_nodes = data.get("graph", {}).get("nodes", []) or data.get("nodes", [])
             if node_count == 0:
                 node_count = len(json_nodes)
             tools: set[str] = set()

@@ -225,7 +225,7 @@ Only three valid keys:
 loop_config = {
     "max_iterations": 100,          # Max LLM turns per node visit
     "max_tool_calls_per_turn": 20,  # Max tool calls per LLM response
-    "max_history_tokens": 32000,    # Triggers conversation compaction
+    "max_context_tokens": 32000,    # Triggers conversation compaction
 }
 ```
 **INVALID keys** (do NOT use): `"strategy"`, `"mode"`, `"timeout"`,

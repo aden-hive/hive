@@ -185,7 +185,7 @@ class LoopConfig:
     judge_every_n_turns: int = 1
     stall_detection_threshold: int = 3
     stall_similarity_threshold: float = 0.85
-    max_history_tokens: int = 32_000
+    max_context_tokens: int = 32_000
     store_prefix: str = ""
 
     # Overflow margin for max_tool_calls_per_turn.  Tool calls are only
@@ -528,7 +528,7 @@ class EventLoopNode(NodeProtocol):
 
                 conversation = NodeConversation(
                     system_prompt=system_prompt,
-                    max_history_tokens=self._config.max_history_tokens,
+                    max_context_tokens=self._config.max_context_tokens,
                     output_keys=ctx.node_spec.output_keys or None,
                     store=self._conversation_store,
                 )
@@ -565,6 +565,8 @@ class EventLoopNode(NodeProtocol):
             tools.append(set_output_tool)
         if ctx.node_spec.client_facing and not ctx.event_triggered:
             tools.append(self._build_ask_user_tool())
+            if stream_id == "queen":
+                tools.append(self._build_ask_user_multiple_tool())
         # Workers/subagents can escalate blockers to the queen.
         if stream_id not in ("queen", "judge"):
             tools.append(self._build_escalate_tool())
@@ -653,6 +655,7 @@ class EventLoopNode(NodeProtocol):
                 _synthetic_names = {
                     "set_output",
                     "ask_user",
+                    "ask_user_multiple",
                     "escalate",
                     "delegate_to_sub_agent",
                     "report_to_parent",
@@ -742,6 +745,7 @@ class EventLoopNode(NodeProtocol):
                         model=turn_tokens.get("model", ""),
                         input_tokens=turn_tokens.get("input", 0),
                         output_tokens=turn_tokens.get("output", 0),
+                        cached_tokens=turn_tokens.get("cached", 0),
                         execution_id=execution_id,
                         iteration=iteration,
                     )
@@ -1088,7 +1092,9 @@ class EventLoopNode(NodeProtocol):
             mcp_tool_calls = [
                 tc
                 for tc in logged_tool_calls
-                if tc.get("tool_name") not in ("set_output", "ask_user", "escalate")
+                if tc.get("tool_name") not in (
+                    "set_output", "ask_user", "ask_user_multiple", "escalate",
+                )
             ]
             if mcp_tool_calls:
                 fps = self._fingerprint_tool_calls(mcp_tool_calls)
@@ -1282,8 +1288,12 @@ class EventLoopNode(NodeProtocol):
                     iteration,
                     _cf_auto,
                 )
+                # Check for multi-question batch from ask_user_multiple
+                multi_qs = getattr(self, "_pending_multi_questions", None)
+                self._pending_multi_questions = None
                 got_input = await self._await_user_input(
-                    ctx, prompt=_cf_prompt, options=ask_user_options
+                    ctx, prompt=_cf_prompt, options=ask_user_options,
+                    questions=multi_qs,
                 )
                 logger.info("[%s] iter=%d: unblocked, got_input=%s", node_id, iteration, got_input)
                 if not got_input:
@@ -1775,6 +1785,7 @@ class EventLoopNode(NodeProtocol):
         prompt: str = "",
         *,
         options: list[str] | None = None,
+        questions: list[dict] | None = None,
         emit_client_request: bool = True,
     ) -> bool:
         """Block until user input arrives or shutdown is signaled.
@@ -1789,6 +1800,8 @@ class EventLoopNode(NodeProtocol):
             options: Optional predefined choices for the user (from ask_user).
                 Passed through to the CLIENT_INPUT_REQUESTED event so the
                 frontend can render a QuestionWidget with buttons.
+            questions: Optional list of question dicts for ask_user_multiple.
+                Each dict has id, prompt, and optional options.
             emit_client_request: When False, wait silently without publishing
                 CLIENT_INPUT_REQUESTED. Used for worker waits where input is
                 expected from the queen via inject_worker_message().
@@ -1813,6 +1826,7 @@ class EventLoopNode(NodeProtocol):
                 prompt=prompt,
                 execution_id=ctx.execution_id or "",
                 options=options,
+                questions=questions,
             )
 
         self._awaiting_input = True
@@ -1872,7 +1886,7 @@ class EventLoopNode(NodeProtocol):
         stream_id = ctx.stream_id or ctx.node_id
         node_id = ctx.node_id
         execution_id = ctx.execution_id or ""
-        token_counts: dict[str, int] = {"input": 0, "output": 0}
+        token_counts: dict[str, int] = {"input": 0, "output": 0, "cached": 0}
         tool_call_count = 0
         final_text = ""
         final_system_prompt = conversation.system_prompt
@@ -1953,6 +1967,7 @@ class EventLoopNode(NodeProtocol):
                     elif isinstance(event, FinishEvent):
                         token_counts["input"] += event.input_tokens
                         token_counts["output"] += event.output_tokens
+                        token_counts["cached"] += event.cached_tokens
                         token_counts["stop_reason"] = event.stop_reason
                         token_counts["model"] = event.model
 
@@ -2173,6 +2188,59 @@ class EventLoopNode(NodeProtocol):
                             execution_id=execution_id,
                             iteration=iteration,
                         )
+
+                    result = ToolResult(
+                        tool_use_id=tc.tool_use_id,
+                        content="Waiting for user input...",
+                        is_error=False,
+                    )
+                    results_by_id[tc.tool_use_id] = result
+
+                elif tc.tool_name == "ask_user_multiple":
+                    # --- Framework-level ask_user_multiple ---
+                    user_input_requested = True
+                    raw_questions = tc.tool_input.get("questions", [])
+                    if not isinstance(raw_questions, list) or len(raw_questions) < 2:
+                        result = ToolResult(
+                            tool_use_id=tc.tool_use_id,
+                            content=(
+                                "ERROR: questions must be an array of at "
+                                "least 2 question objects. Use ask_user "
+                                "for single questions."
+                            ),
+                            is_error=True,
+                        )
+                        results_by_id[tc.tool_use_id] = result
+                        user_input_requested = False
+                        continue
+
+                    # Normalize each question entry
+                    questions: list[dict] = []
+                    for i, q in enumerate(raw_questions):
+                        if not isinstance(q, dict):
+                            continue
+                        qid = str(q.get("id", f"q{i+1}"))
+                        prompt = str(q.get("prompt", ""))
+                        opts = q.get("options", None)
+                        if isinstance(opts, list):
+                            opts = [str(o) for o in opts if o]
+                            if len(opts) < 2:
+                                opts = None
+                        else:
+                            opts = None
+                        questions.append({
+                            "id": qid,
+                            "prompt": prompt,
+                            **({"options": opts} if opts else {}),
+                        })
+
+                    # Store as multi-question prompt/options for
+                    # the event emission path
+                    ask_user_prompt = ""
+                    ask_user_options = None
+                    # Pass the full questions list via a special
+                    # key that the event emitter picks up
+                    self._pending_multi_questions = questions
 
                     result = ToolResult(
                         tool_use_id=tc.tool_use_id,
@@ -2427,6 +2495,7 @@ class EventLoopNode(NodeProtocol):
                 if tc.tool_name not in (
                     "set_output",
                     "ask_user",
+                    "ask_user_multiple",
                     "escalate",
                     "delegate_to_sub_agent",
                     "report_to_parent",
@@ -2496,7 +2565,7 @@ class EventLoopNode(NodeProtocol):
                 # next turn.  The char-based token estimator underestimates
                 # actual API tokens, so the standard compaction check in the
                 # outer loop may not trigger in time.
-                protect = max(2000, self._config.max_history_tokens // 12)
+                protect = max(2000, self._config.max_context_tokens // 12)
                 pruned = await conversation.prune_old_tool_results(
                     protect_tokens=protect,
                     min_prune_tokens=max(1000, protect // 3),
@@ -2505,7 +2574,7 @@ class EventLoopNode(NodeProtocol):
                     logger.info(
                         "Post-limit pruning: cleared %d old tool results (budget: %d)",
                         pruned,
-                        self._config.max_history_tokens,
+                        self._config.max_context_tokens,
                     )
                 # Limit hit — return from this turn so the judge can
                 # evaluate instead of looping back for another stream.
@@ -2526,7 +2595,7 @@ class EventLoopNode(NodeProtocol):
 
             # --- Mid-turn pruning: prevent context blowup within a single turn ---
             if conversation.usage_ratio() >= 0.6:
-                protect = max(2000, self._config.max_history_tokens // 12)
+                protect = max(2000, self._config.max_context_tokens // 12)
                 pruned = await conversation.prune_old_tool_results(
                     protect_tokens=protect,
                     min_prune_tokens=max(1000, protect // 3),
@@ -2616,6 +2685,73 @@ class EventLoopNode(NodeProtocol):
                     },
                 },
                 "required": ["question"],
+            },
+        )
+
+    def _build_ask_user_multiple_tool(self) -> Tool:
+        """Build the synthetic ask_user_multiple tool for batched questions.
+
+        Queen-only tool that presents multiple questions at once so the user
+        can answer them all in a single interaction rather than one at a time.
+        """
+        return Tool(
+            name="ask_user_multiple",
+            description=(
+                "Ask the user multiple questions at once. Use this instead of "
+                "ask_user when you have 2 or more questions to ask in the same "
+                "turn — it lets the user answer everything in one go rather than "
+                "going back and forth. Each question can have its own predefined "
+                "options (2-3 choices) or be free-form. The UI renders all "
+                "questions together with a single Submit button. "
+                "ALWAYS prefer this over ask_user when you have multiple things "
+                "to clarify. "
+                "IMPORTANT: Do NOT repeat the questions in your text response — "
+                "the widget renders them. Keep your text to a brief intro only. "
+                'Example: {"questions": ['
+                '  {"id": "scope", "prompt": "What scope?", "options": ["Full", "Partial"]},'
+                '  {"id": "format", "prompt": "Output format?", "options": ["PDF", "CSV", "JSON"]},'
+                '  {"id": "details", "prompt": "Any special requirements?"}'
+                "]}"
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "questions": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "id": {
+                                    "type": "string",
+                                    "description": (
+                                        "Short identifier for this question "
+                                        "(used in the response)."
+                                    ),
+                                },
+                                "prompt": {
+                                    "type": "string",
+                                    "description": "The question text shown to the user.",
+                                },
+                                "options": {
+                                    "type": "array",
+                                    "items": {"type": "string"},
+                                    "description": (
+                                        "2-3 predefined choices. The UI appends an "
+                                        "'Other' free-text input automatically. "
+                                        "Omit only when the user must type a free-form answer."
+                                    ),
+                                    "minItems": 2,
+                                    "maxItems": 3,
+                                },
+                            },
+                            "required": ["id", "prompt"],
+                        },
+                        "minItems": 2,
+                        "maxItems": 8,
+                        "description": "List of questions to present to the user.",
+                    },
+                },
+                "required": ["questions"],
             },
         )
 
@@ -2953,7 +3089,7 @@ class EventLoopNode(NodeProtocol):
                 phase_description=ctx.node_spec.description,
                 success_criteria=ctx.node_spec.success_criteria,
                 accumulator_state=accumulator.to_dict(),
-                max_history_tokens=self._config.max_history_tokens,
+                max_context_tokens=self._config.max_context_tokens,
             )
             if verdict.action != "ACCEPT":
                 return JudgeVerdict(
@@ -3393,7 +3529,7 @@ class EventLoopNode(NodeProtocol):
         phase_grad = getattr(ctx, "continuous_mode", False)
 
         # --- Step 1: Prune old tool results (free, no LLM) ---
-        protect = max(2000, self._config.max_history_tokens // 12)
+        protect = max(2000, self._config.max_context_tokens // 12)
         pruned = await conversation.prune_old_tool_results(
             protect_tokens=protect,
             min_prune_tokens=max(1000, protect // 3),
@@ -3499,7 +3635,7 @@ class EventLoopNode(NodeProtocol):
                 accumulator,
                 formatted,
             )
-            summary_budget = max(1024, self._config.max_history_tokens // 2)
+            summary_budget = max(1024, self._config.max_context_tokens // 2)
             try:
                 response = await ctx.llm.acomplete(
                     messages=[{"role": "user", "content": prompt}],
@@ -3602,7 +3738,7 @@ class EventLoopNode(NodeProtocol):
         elif spec.output_keys:
             ctx_lines.append(f"OUTPUTS STILL NEEDED: {', '.join(spec.output_keys)}")
 
-        target_tokens = self._config.max_history_tokens // 2
+        target_tokens = self._config.max_context_tokens // 2
         target_chars = target_tokens * 4
         node_ctx = "\n".join(ctx_lines)
 
@@ -4104,6 +4240,7 @@ class EventLoopNode(NodeProtocol):
         model: str,
         input_tokens: int,
         output_tokens: int,
+        cached_tokens: int = 0,
         execution_id: str = "",
         iteration: int | None = None,
     ) -> None:
@@ -4115,6 +4252,7 @@ class EventLoopNode(NodeProtocol):
                 model=model,
                 input_tokens=input_tokens,
                 output_tokens=output_tokens,
+                cached_tokens=cached_tokens,
                 execution_id=execution_id,
                 iteration=iteration,
             )
@@ -4515,7 +4653,7 @@ class EventLoopNode(NodeProtocol):
                 max_iterations=max_iter,  # Tighter budget
                 max_tool_calls_per_turn=self._config.max_tool_calls_per_turn,
                 tool_call_overflow_margin=self._config.tool_call_overflow_margin,
-                max_history_tokens=self._config.max_history_tokens,
+                max_context_tokens=self._config.max_context_tokens,
                 stall_detection_threshold=self._config.stall_detection_threshold,
                 max_tool_result_chars=self._config.max_tool_result_chars,
                 spillover_dir=subagent_spillover,

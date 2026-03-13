@@ -85,6 +85,20 @@ class QueenPhaseState:
     inject_notification: Any = None  # async (str) -> None
     event_bus: Any = None  # EventBus — for emitting QUEEN_PHASE_CHANGED events
 
+    # Draft graph created during planning phase (lightweight, loose-validation).
+    # Stored here so it persists across turns and can be consumed by building.
+    draft_graph: dict | None = None
+    # Whether the user has confirmed the draft and approved moving to building.
+    build_confirmed: bool = False
+    # Original draft preserved for flowchart display during runtime (pre-dissolution).
+    original_draft_graph: dict | None = None
+    # Mapping from runtime node IDs → list of original draft flowchart node IDs.
+    # Built during decision-node dissolution at confirm_and_build().
+    flowchart_map: dict[str, list[str]] | None = None
+
+    # Agent path — set after scaffolding so the frontend can query credentials
+    agent_path: str | None = None
+
     # Phase-specific prompts (set by session_manager after construction)
     prompt_planning: str = ""
     prompt_building: str = ""
@@ -120,11 +134,14 @@ class QueenPhaseState:
     async def _emit_phase_event(self) -> None:
         """Publish a QUEEN_PHASE_CHANGED event so the frontend updates the tag."""
         if self.event_bus is not None:
+            data: dict = {"phase": self.phase}
+            if self.agent_path:
+                data["agent_path"] = self.agent_path
             await self.event_bus.publish(
                 AgentEvent(
                     type=EventType.QUEEN_PHASE_CHANGED,
                     stream_id="queen",
-                    data={"phase": self.phase},
+                    data=data,
                 )
             )
 
@@ -881,14 +898,47 @@ def register_queen_lifecycle_tools(
                 return json.dumps(
                     {"error": f"Cannot replan: currently in {phase_state.phase} phase."}
                 )
+
+            # Carry forward the current draft: restore original (pre-dissolution)
+            # draft so the queen can edit it in planning, rather than starting
+            # from scratch.
+            if phase_state.original_draft_graph is not None:
+                phase_state.draft_graph = phase_state.original_draft_graph
+                phase_state.original_draft_graph = None
+                phase_state.flowchart_map = None
+            phase_state.build_confirmed = False
+
             await phase_state.switch_to_planning(source="tool")
+
+            # Re-emit draft so frontend shows the flowchart in planning mode
+            bus = phase_state.event_bus
+            if bus is not None and phase_state.draft_graph is not None:
+                try:
+                    await bus.publish(
+                        AgentEvent(
+                            type=EventType.DRAFT_GRAPH_UPDATED,
+                            stream_id="queen",
+                            data=phase_state.draft_graph,
+                        )
+                    )
+                except Exception:
+                    pass
+
+        has_draft = phase_state is not None and phase_state.draft_graph is not None
         return json.dumps(
             {
                 "status": "replanning",
                 "phase": "planning",
+                "has_previous_draft": has_draft,
                 "message": (
                     "Switched to PLANNING phase. Coding tools removed. "
-                    "Discuss the new design with the user."
+                    + (
+                        "The previous draft flowchart has been restored (with "
+                        "decision and sub-agent nodes intact). Call save_agent_draft() "
+                        "to update the design, then confirm_and_build() when ready."
+                        if has_draft
+                        else "Discuss the new design with the user."
+                    )
                 ),
             }
         )
@@ -904,6 +954,1139 @@ def register_queen_lifecycle_tools(
     registry.register("replan_agent", _replan_tool, lambda inputs: replan_agent())
     tools_registered += 1
 
+    # --- Flowchart file persistence -------------------------------------------
+    # The flowchart is saved as flowchart.json in the agent's folder so it
+    # survives restarts and is available when loading any agent.
+
+    FLOWCHART_FILENAME = "flowchart.json"
+
+    def _save_flowchart_file(
+        agent_path: Path | str | None,
+        original_draft: dict,
+        flowchart_map: dict[str, list[str]] | None,
+    ) -> None:
+        """Persist the flowchart to the agent's folder."""
+        if agent_path is None:
+            return
+        p = Path(agent_path)
+        if not p.is_dir():
+            return
+        try:
+            target = p / FLOWCHART_FILENAME
+            target.write_text(
+                json.dumps(
+                    {"original_draft": original_draft, "flowchart_map": flowchart_map},
+                    indent=2,
+                ),
+                encoding="utf-8",
+            )
+            logger.debug("Flowchart saved to %s", target)
+        except Exception:
+            logger.warning("Failed to save flowchart to %s", p, exc_info=True)
+
+    def _load_flowchart_file(
+        agent_path: Path | str | None,
+    ) -> tuple[dict | None, dict[str, list[str]] | None]:
+        """Load flowchart from the agent's folder. Returns (original_draft, flowchart_map)."""
+        if agent_path is None:
+            return None, None
+        target = Path(agent_path) / FLOWCHART_FILENAME
+        if not target.is_file():
+            return None, None
+        try:
+            data = json.loads(target.read_text(encoding="utf-8"))
+            return data.get("original_draft"), data.get("flowchart_map")
+        except Exception:
+            logger.warning("Failed to load flowchart from %s", target, exc_info=True)
+            return None, None
+
+    def _synthesize_draft_from_runtime(
+        runtime_nodes: list,
+        runtime_edges: list,
+        agent_name: str = "",
+        goal_name: str = "",
+    ) -> tuple[dict, dict[str, list[str]]]:
+        """Generate a flowchart draft from a loaded runtime graph.
+
+        Used for agents that were never planned through the draft workflow
+        (e.g., hand-coded or loaded from "my agents"). Produces a valid
+        DraftGraph structure with auto-classified flowchart types.
+        """
+        nodes: list[dict] = []
+        edges: list[dict] = []
+        node_ids = {n.id for n in runtime_nodes}
+
+        # Build edge dicts first (needed for classification)
+        for i, re in enumerate(runtime_edges):
+            edges.append({
+                "id": f"edge-{i}",
+                "source": re.source,
+                "target": re.target,
+                "condition": str(re.condition.value) if hasattr(re.condition, "value") else str(re.condition),
+                "description": getattr(re, "description", "") or "",
+                "label": "",
+            })
+
+        # Terminal detection — exclude sub-agent nodes (they are leaf helpers, not endpoints)
+        sub_agent_ids: set[str] = set()
+        for rn in runtime_nodes:
+            for sa_id in getattr(rn, "sub_agents", None) or []:
+                sub_agent_ids.add(sa_id)
+        sources = {e["source"] for e in edges}
+        terminal_ids = node_ids - sources - sub_agent_ids
+        if not terminal_ids and runtime_nodes:
+            terminal_ids = {runtime_nodes[-1].id}
+
+        # Build node dicts with classification
+        total = len(runtime_nodes)
+        for i, rn in enumerate(runtime_nodes):
+            node: dict = {
+                "id": rn.id,
+                "name": rn.name,
+                "description": rn.description or "",
+                "node_type": getattr(rn, "node_type", "event_loop") or "event_loop",
+                "tools": list(rn.tools) if rn.tools else [],
+                "input_keys": list(rn.input_keys) if rn.input_keys else [],
+                "output_keys": list(rn.output_keys) if rn.output_keys else [],
+                "success_criteria": getattr(rn, "success_criteria", "") or "",
+                "sub_agents": list(rn.sub_agents) if getattr(rn, "sub_agents", None) else [],
+            }
+            fc_type = _classify_flowchart_node(node, i, total, edges, terminal_ids)
+            fc_meta = _FLOWCHART_TYPES[fc_type]
+            node["flowchart_type"] = fc_type
+            node["flowchart_shape"] = fc_meta["shape"]
+            node["flowchart_color"] = fc_meta["color"]
+            nodes.append(node)
+
+        # Add visual edges from parent nodes to their sub_agents.
+        # Sub-agents are connected via the sub_agents field, not via EdgeSpec,
+        # so they'd appear as disconnected islands without this.
+        # Two edges per sub-agent: delegate (parent→sub) and report (sub→parent).
+        edge_counter = len(edges)
+        for node in nodes:
+            for sa_id in node.get("sub_agents") or []:
+                if sa_id in node_ids:
+                    edges.append({
+                        "id": f"edge-subagent-{edge_counter}",
+                        "source": node["id"],
+                        "target": sa_id,
+                        "condition": "always",
+                        "description": "sub-agent delegation",
+                        "label": "delegate",
+                    })
+                    edge_counter += 1
+                    edges.append({
+                        "id": f"edge-subagent-{edge_counter}",
+                        "source": sa_id,
+                        "target": node["id"],
+                        "condition": "always",
+                        "description": "sub-agent report back",
+                        "label": "report",
+                    })
+                    edge_counter += 1
+
+        # 1:1 flowchart map (no dissolution happened)
+        fmap = {n["id"]: [n["id"]] for n in nodes}
+
+        draft = {
+            "agent_name": agent_name,
+            "goal": goal_name,
+            "description": "",
+            "success_criteria": [],
+            "constraints": [],
+            "nodes": nodes,
+            "edges": edges,
+            "entry_node": nodes[0]["id"] if nodes else "",
+            "terminal_nodes": sorted(terminal_ids),
+            "flowchart_legend": {
+                fc_type: {"shape": meta["shape"], "color": meta["color"]}
+                for fc_type, meta in _FLOWCHART_TYPES.items()
+            },
+        }
+
+        return draft, fmap
+
+    # --- save_agent_draft (Planning phase — declarative graph preview) ---------
+    # Creates a lightweight draft graph with nodes, edges, and business metadata.
+    # Loose validation: only requires names and descriptions. Emits an event
+    # so the frontend can render the graph during planning (before any code).
+
+    # Classical flowchart symbols per ISO 5807 / ANSI standards.
+    # Each type maps to a standard shape and a unique color for the
+    # frontend renderer.  Shapes use Mermaid-compatible names where
+    # possible so the frontend can render them directly.
+    _FLOWCHART_TYPES = {
+        # ── Core symbols (ISO 5807 §4) ──────────────────────────
+        # Terminator — rounded rectangle (stadium shape)
+        "start":            {"shape": "stadium",       "color": "#4CAF50"},  # green
+        "terminal":         {"shape": "stadium",       "color": "#F44336"},  # red
+        # Process — rectangle
+        "process":          {"shape": "rectangle",     "color": "#2196F3"},  # blue
+        # Decision — diamond
+        "decision":         {"shape": "diamond",       "color": "#FF9800"},  # amber
+        # Data (Input/Output) — parallelogram
+        "io":               {"shape": "parallelogram", "color": "#9C27B0"},  # purple
+        # Document — rectangle with wavy bottom
+        "document":         {"shape": "document",      "color": "#607D8B"},  # blue-grey
+        # Multi-document — stacked documents
+        "multi_document":   {"shape": "multi_document", "color": "#78909C"}, # blue-grey light
+        # Predefined process / subroutine — rectangle with double vertical bars
+        "subprocess":       {"shape": "subroutine",    "color": "#009688"},  # teal
+        # Preparation — hexagon
+        "preparation":      {"shape": "hexagon",       "color": "#795548"},  # brown
+        # Manual input — trapezoid with slanted top
+        "manual_input":     {"shape": "manual_input",  "color": "#E91E63"},  # pink
+        # Manual operation — inverted trapezoid
+        "manual_operation": {"shape": "trapezoid",     "color": "#AD1457"},  # dark pink
+        # Delay — half-rounded rectangle (D-shape)
+        "delay":            {"shape": "delay",         "color": "#FF5722"},  # deep orange
+        # Display — rounded rectangle with pointed left
+        "display":          {"shape": "display",       "color": "#00BCD4"},  # cyan
+        # ── Data storage symbols ────────────────────────────────
+        # Database / direct access storage — cylinder
+        "database":         {"shape": "cylinder",      "color": "#8BC34A"},  # light green
+        # Stored data — generic data store
+        "stored_data":      {"shape": "stored_data",   "color": "#CDDC39"},  # lime
+        # Internal storage — rectangle with cross-hatch
+        "internal_storage": {"shape": "internal_storage", "color": "#FFC107"}, # amber light
+        # ── Connectors ──────────────────────────────────────────
+        # On-page connector — small circle
+        "connector":        {"shape": "circle",        "color": "#9E9E9E"},  # grey
+        # Off-page connector — pentagon / home-plate
+        "offpage_connector": {"shape": "pentagon",     "color": "#757575"},  # dark grey
+        # ── Flow operations ─────────────────────────────────────
+        # Merge — inverted triangle
+        "merge":            {"shape": "triangle_inv",  "color": "#3F51B5"},  # indigo
+        # Extract — upward triangle
+        "extract":          {"shape": "triangle",      "color": "#5C6BC0"},  # indigo light
+        # Sort — hourglass / double triangle
+        "sort":             {"shape": "hourglass",     "color": "#7986CB"},  # indigo lighter
+        # Collate — merged hourglass
+        "collate":          {"shape": "hourglass_inv", "color": "#9FA8DA"},  # indigo lightest
+        # Summing junction — circle with cross
+        "summing_junction": {"shape": "circle_cross",  "color": "#F06292"},  # pink light
+        # Or — circle with horizontal bar
+        "or":               {"shape": "circle_bar",    "color": "#CE93D8"},  # purple light
+        # ── Domain-specific (Hive agent context) ────────────────
+        # Browser automation (GCU) — mapped to preparation/hexagon
+        "browser":          {"shape": "hexagon",       "color": "#1A237E"},  # dark indigo
+        # Comment / annotation — flag shape
+        "comment":          {"shape": "flag",          "color": "#BDBDBD"},  # light grey
+        # Alternate process — rounded rectangle
+        "alternate_process": {"shape": "rounded_rect", "color": "#42A5F5"}, # light blue
+        # Sub-agent — planning-only; dissolved into parent's sub_agents at build time
+        "subagent":         {"shape": "subroutine",    "color": "#00695C"},  # dark teal
+    }
+
+    def _classify_flowchart_node(
+        node: dict,
+        index: int,
+        total: int,
+        edges: list[dict],
+        terminal_ids: set[str],
+    ) -> str:
+        """Auto-detect the ISO 5807 flowchart type for a draft node.
+
+        Priority: explicit override > structural detection > heuristic > default.
+        """
+        # Explicit override from the queen
+        explicit = node.get("flowchart_type", "").strip()
+        if explicit and explicit in _FLOWCHART_TYPES:
+            return explicit
+
+        node_id = node["id"]
+        node_type = node.get("node_type", "event_loop")
+        node_tools = set(node.get("tools") or [])
+        desc = (node.get("description") or "").lower()
+        name = (node.get("name") or "").lower()
+
+        # GCU / browser automation nodes → hexagon
+        if node_type == "gcu":
+            return "browser"
+
+        # Entry node (first node or no incoming edges) → start terminator
+        incoming = {e["target"] for e in edges}
+        if index == 0 or (node_id not in incoming and index == 0):
+            return "start"
+
+        # Terminal node → end terminator
+        if node_id in terminal_ids:
+            return "terminal"
+
+        # Decision node: has outgoing edges with branching conditions → diamond
+        outgoing = [e for e in edges if e["source"] == node_id]
+        if len(outgoing) >= 2:
+            conditions = {e.get("condition", "on_success") for e in outgoing}
+            if len(conditions) > 1 or conditions - {"on_success"}:
+                return "decision"
+
+        # Sub-agent / subprocess nodes → subroutine (double-bordered rect)
+        if node.get("sub_agents"):
+            return "subprocess"
+
+        # Database / data store nodes → cylinder
+        db_tool_hints = {"query_database", "sql_query", "read_table", "write_table",
+                         "save_data", "load_data"}
+        db_desc_hints = {"database", "data store", "storage", "persist", "cache"}
+        if node_tools & db_tool_hints or any(h in desc for h in db_desc_hints):
+            return "database"
+
+        # Document generation nodes → document shape
+        doc_tool_hints = {"generate_report", "create_document", "write_report",
+                          "render_template", "export_pdf"}
+        doc_desc_hints = {"report", "document", "summary", "write up", "writeup"}
+        if node_tools & doc_tool_hints or any(h in desc for h in doc_desc_hints):
+            return "document"
+
+        # I/O nodes: external data ingestion or delivery → parallelogram
+        io_tool_hints = {"serve_file_to_user", "send_email", "post_message",
+                         "upload_file", "download_file", "fetch_url",
+                         "post_to_slack", "send_notification"}
+        io_desc_hints = {"deliver", "send", "output", "notify", "publish"}
+        if node_tools & io_tool_hints or any(h in desc for h in io_desc_hints):
+            return "io"
+
+        # Manual / human-in-the-loop nodes → trapezoid
+        manual_desc_hints = {"human review", "manual", "approval", "human-in-the-loop",
+                             "user review", "manual check"}
+        if any(h in desc for h in manual_desc_hints) or any(h in name for h in manual_desc_hints):
+            return "manual_operation"
+
+        # Preparation / setup nodes → hexagon
+        prep_desc_hints = {"setup", "initialize", "prepare", "configure", "provision"}
+        if any(h in desc for h in prep_desc_hints) or any(h in name for h in prep_desc_hints):
+            return "preparation"
+
+        # Delay / wait nodes → D-shape
+        delay_desc_hints = {"wait", "delay", "pause", "cooldown", "throttle", "sleep"}
+        if any(h in desc for h in delay_desc_hints):
+            return "delay"
+
+        # Merge nodes → inverted triangle
+        merge_desc_hints = {"merge", "combine", "aggregate", "consolidate"}
+        if any(h in desc for h in merge_desc_hints) or any(h in name for h in merge_desc_hints):
+            return "merge"
+
+        # Display nodes → display shape
+        display_desc_hints = {"display", "show", "present", "render", "visualize"}
+        display_tool_hints = {"serve_file_to_user", "display_results"}
+        if node_tools & display_tool_hints or any(h in name for h in display_desc_hints):
+            return "display"
+
+        # Default: process (rectangle)
+        return "process"
+
+    def _dissolve_planning_nodes(
+        draft: dict,
+    ) -> tuple[dict, dict[str, list[str]]]:
+        """Convert planning-only nodes into runtime-compatible structures.
+
+        Two kinds of planning-only nodes are dissolved:
+
+        **Decision nodes** (flowchart diamonds):
+        1. Merging the decision clause into the predecessor node's success_criteria.
+        2. Rewiring the decision's yes/no outgoing edges as on_success/on_failure
+           edges from the predecessor.
+        3. Removing the decision node from the graph.
+
+        **Sub-agent nodes** (flowchart_type == "subagent"):
+        1. Adding the sub-agent node's ID to the predecessor's sub_agents list.
+        2. Removing the sub-agent node and its connecting edge.
+        3. Sub-agent nodes must not have outgoing edges (they are leaf delegates).
+
+        Returns (converted_draft, flowchart_map) where flowchart_map maps
+        runtime node IDs → list of original draft node IDs they absorbed.
+        """
+        import copy as _copy
+
+        nodes: list[dict] = _copy.deepcopy(draft.get("nodes", []))
+        edges: list[dict] = _copy.deepcopy(draft.get("edges", []))
+
+        # Index helpers
+        node_by_id: dict[str, dict] = {n["id"]: n for n in nodes}
+
+        def _incoming(nid: str) -> list[dict]:
+            return [e for e in edges if e["target"] == nid]
+
+        def _outgoing(nid: str) -> list[dict]:
+            return [e for e in edges if e["source"] == nid]
+
+        # Identify decision nodes
+        decision_ids = [
+            n["id"] for n in nodes if n.get("flowchart_type") == "decision"
+        ]
+
+        # Track which draft nodes each runtime node absorbed
+        absorbed: dict[str, list[str]] = {}  # runtime_id → [draft_ids...]
+
+        # Process decisions in node-list order (topological for linear graphs)
+        for d_id in decision_ids:
+            d_node = node_by_id.get(d_id)
+            if d_node is None:
+                continue  # already removed by a prior dissolution
+
+            in_edges = _incoming(d_id)
+            out_edges = _outgoing(d_id)
+
+            # Classify outgoing edges into yes/no branches
+            yes_edge: dict | None = None
+            no_edge: dict | None = None
+
+            for oe in out_edges:
+                lbl = (oe.get("label") or "").lower().strip()
+                cond = (oe.get("condition") or "").lower().strip()
+                desc = (oe.get("description") or "").lower().strip()
+
+                if lbl in ("yes", "true", "pass") or cond == "on_success":
+                    yes_edge = oe
+                elif lbl in ("no", "false", "fail") or cond == "on_failure":
+                    no_edge = oe
+
+            # Fallback: if exactly 2 outgoing and couldn't classify, assign by order
+            if len(out_edges) == 2 and (yes_edge is None or no_edge is None):
+                if yes_edge is None and no_edge is None:
+                    yes_edge, no_edge = out_edges[0], out_edges[1]
+                elif yes_edge is None:
+                    yes_edge = [e for e in out_edges if e is not no_edge][0]
+                else:
+                    no_edge = [e for e in out_edges if e is not yes_edge][0]
+
+            # Decision clause: prefer decision_clause, fall back to description/name
+            clause = (
+                d_node.get("decision_clause")
+                or d_node.get("description")
+                or d_node.get("name")
+                or d_id
+            ).strip()
+
+            predecessors = [node_by_id[e["source"]] for e in in_edges if e["source"] in node_by_id]
+
+            if not predecessors:
+                # Decision at start: convert to regular process node
+                d_node["flowchart_type"] = "process"
+                fc_meta = _FLOWCHART_TYPES["process"]
+                d_node["flowchart_shape"] = fc_meta["shape"]
+                d_node["flowchart_color"] = fc_meta["color"]
+                if not d_node.get("success_criteria"):
+                    d_node["success_criteria"] = clause
+                # Rewire outgoing edges to on_success/on_failure
+                if yes_edge:
+                    yes_edge["condition"] = "on_success"
+                if no_edge:
+                    no_edge["condition"] = "on_failure"
+                absorbed[d_id] = absorbed.get(d_id, [d_id])
+                continue
+
+            # Dissolve: merge into each predecessor
+            for pred in predecessors:
+                pid = pred["id"]
+
+                # Merge decision clause into predecessor's success_criteria
+                existing = (pred.get("success_criteria") or "").strip()
+                if existing:
+                    pred["success_criteria"] = f"{existing}; then evaluate: {clause}"
+                else:
+                    pred["success_criteria"] = clause
+
+                # Remove the edge from predecessor → decision
+                edges[:] = [e for e in edges if not (e["source"] == pid and e["target"] == d_id)]
+
+                # Wire predecessor → yes/no targets
+                edge_counter = len(edges)
+                if yes_edge:
+                    edges.append({
+                        "id": f"edge-dissolved-{edge_counter}",
+                        "source": pid,
+                        "target": yes_edge["target"],
+                        "condition": "on_success",
+                        "description": yes_edge.get("description", ""),
+                        "label": yes_edge.get("label", "Yes"),
+                    })
+                    edge_counter += 1
+                if no_edge:
+                    edges.append({
+                        "id": f"edge-dissolved-{edge_counter}",
+                        "source": pid,
+                        "target": no_edge["target"],
+                        "condition": "on_failure",
+                        "description": no_edge.get("description", ""),
+                        "label": no_edge.get("label", "No"),
+                    })
+
+                # Record absorption
+                prev_absorbed = absorbed.get(pid, [pid])
+                if d_id not in prev_absorbed:
+                    prev_absorbed.append(d_id)
+                absorbed[pid] = prev_absorbed
+
+            # Remove decision node and all its edges
+            edges[:] = [e for e in edges if e["source"] != d_id and e["target"] != d_id]
+            nodes[:] = [n for n in nodes if n["id"] != d_id]
+            del node_by_id[d_id]
+
+        # ── Dissolve sub-agent nodes ──────────────────────────────
+        # Sub-agent nodes are leaf delegates: parent → subagent (no outgoing).
+        # Dissolution adds the subagent's ID to parent's sub_agents list.
+        subagent_ids = [
+            n["id"] for n in nodes if n.get("flowchart_type") == "subagent"
+        ]
+
+        for sa_id in subagent_ids:
+            sa_node = node_by_id.get(sa_id)
+            if sa_node is None:
+                continue
+
+            in_edges = _incoming(sa_id)
+            out_edges = _outgoing(sa_id)
+
+            # Validate: sub-agent nodes must be leaves (no outgoing edges)
+            if out_edges:
+                logger.warning(
+                    "Sub-agent node '%s' has outgoing edges — they will be dropped "
+                    "during dissolution. Sub-agent nodes should be leaf nodes.",
+                    sa_id,
+                )
+
+            # Attach to each predecessor's sub_agents list
+            for ie in in_edges:
+                pred_id = ie["source"]
+                pred = node_by_id.get(pred_id)
+                if pred is None:
+                    continue
+
+                existing_subs = pred.get("sub_agents") or []
+                if sa_id not in existing_subs:
+                    existing_subs.append(sa_id)
+                pred["sub_agents"] = existing_subs
+
+                # Record absorption
+                prev_absorbed = absorbed.get(pred_id, [pred_id])
+                if sa_id not in prev_absorbed:
+                    prev_absorbed.append(sa_id)
+                absorbed[pred_id] = prev_absorbed
+
+            # Remove sub-agent node and all its edges
+            edges[:] = [e for e in edges if e["source"] != sa_id and e["target"] != sa_id]
+            nodes[:] = [n for n in nodes if n["id"] != sa_id]
+            del node_by_id[sa_id]
+
+        # ── Dissolve implicit sub-agents ─────────────────────────
+        # Nodes that appear in another node's sub_agents list but weren't
+        # caught above (e.g. GCU nodes with flowchart_type="browser" where
+        # the queen set sub_agents directly on the parent).
+        implicit_sa_ids: list[str] = []
+        for n in nodes:
+            for sa_id in n.get("sub_agents") or []:
+                if sa_id in node_by_id and sa_id != n["id"]:
+                    implicit_sa_ids.append(sa_id)
+
+        for sa_id in implicit_sa_ids:
+            if sa_id not in node_by_id:
+                continue  # already removed
+
+            # Find which parent(s) reference this sub-agent
+            for n in nodes:
+                if sa_id in (n.get("sub_agents") or []) and n["id"] != sa_id:
+                    prev_absorbed = absorbed.get(n["id"], [n["id"]])
+                    if sa_id not in prev_absorbed:
+                        prev_absorbed.append(sa_id)
+                    absorbed[n["id"]] = prev_absorbed
+
+            # Remove the sub-agent node and its edges
+            edges[:] = [e for e in edges if e["source"] != sa_id and e["target"] != sa_id]
+            nodes[:] = [n for n in nodes if n["id"] != sa_id]
+            del node_by_id[sa_id]
+
+        # Build complete flowchart_map (identity for non-absorbed nodes)
+        flowchart_map: dict[str, list[str]] = {}
+        for n in nodes:
+            nid = n["id"]
+            flowchart_map[nid] = absorbed.get(nid, [nid])
+
+        # Rebuild terminal_nodes (decision targets may have changed).
+        # Sub-agent nodes are leaf helpers, not endpoints — exclude them.
+        post_sa_ids: set[str] = set()
+        for n in nodes:
+            for sa_id in n.get("sub_agents") or []:
+                post_sa_ids.add(sa_id)
+        sources = {e["source"] for e in edges}
+        all_ids = {n["id"] for n in nodes}
+        terminal_ids = all_ids - sources - post_sa_ids
+        if not terminal_ids and nodes:
+            terminal_ids = {nodes[-1]["id"]}
+
+        converted = dict(draft)
+        converted["nodes"] = nodes
+        converted["edges"] = edges
+        converted["terminal_nodes"] = sorted(terminal_ids)
+        converted["entry_node"] = nodes[0]["id"] if nodes else ""
+
+        return converted, flowchart_map
+
+    async def save_agent_draft(
+        *,
+        agent_name: str,
+        goal: str,
+        nodes: list[dict],
+        edges: list[dict] | None = None,
+        description: str = "",
+        success_criteria: list[str] | None = None,
+        constraints: list[str] | None = None,
+        terminal_nodes: list[str] | None = None,
+    ) -> str:
+        """Save a declarative draft of the agent graph during planning.
+
+        This creates a lightweight, visual-only graph for the user to review.
+        No executable code is generated. Nodes need only an id, name, and
+        description. Tools, input/output keys, and system prompts are optional
+        metadata hints — they will be fully specified during the building phase.
+
+        Each node is classified into a classical flowchart component type
+        (start, terminal, process, decision, io, subprocess, browser, manual)
+        with a unique color. The queen can override auto-detection by setting
+        flowchart_type explicitly on a node.
+        """
+        # Loose validation: each node needs at minimum an id
+        validated_nodes = []
+        for i, n in enumerate(nodes):
+            if not isinstance(n, dict):
+                return json.dumps({"error": f"Node {i} must be a dict, got {type(n).__name__}"})
+            node_id = n.get("id", "").strip()
+            if not node_id:
+                return json.dumps({"error": f"Node {i} is missing 'id'"})
+            validated_nodes.append({
+                "id": node_id,
+                "name": n.get("name", node_id.replace("-", " ").replace("_", " ").title()),
+                "description": n.get("description", ""),
+                "node_type": n.get("node_type", "event_loop"),
+                # Optional business-logic hints (not validated yet)
+                "tools": n.get("tools", []),
+                "input_keys": n.get("input_keys", []),
+                "output_keys": n.get("output_keys", []),
+                "success_criteria": n.get("success_criteria", ""),
+                "sub_agents": n.get("sub_agents", []),
+                # Decision nodes: the yes/no question to evaluate
+                "decision_clause": n.get("decision_clause", ""),
+                # Explicit flowchart override (preserved for classification)
+                "flowchart_type": n.get("flowchart_type", ""),
+            })
+
+        validated_edges = []
+        if edges:
+            for i, e in enumerate(edges):
+                if not isinstance(e, dict):
+                    return json.dumps({"error": f"Edge {i} must be a dict"})
+                validated_edges.append({
+                    "id": e.get("id", f"edge-{i}"),
+                    "source": e.get("source", ""),
+                    "target": e.get("target", ""),
+                    "condition": e.get("condition", "on_success"),
+                    "description": e.get("description", ""),
+                    "label": e.get("label", ""),
+                })
+
+        # ── Enforce GCU / subagent leaf constraint ────────────────
+        # GCU nodes and nodes with flowchart_type "subagent" are leaf
+        # delegates: they can only receive a delegate edge IN from
+        # their parent and send a report edge OUT back to that parent.
+        # Any other outgoing edges are design errors — strip them and
+        # auto-assign the node as a sub-agent of its predecessor.
+        node_by_id_v = {n["id"]: n for n in validated_nodes}
+        leaf_node_ids: set[str] = set()
+        for n in validated_nodes:
+            if n.get("node_type") == "gcu" or n.get("flowchart_type") == "subagent":
+                leaf_node_ids.add(n["id"])
+
+        if leaf_node_ids:
+            for leaf_id in leaf_node_ids:
+                # Find edges where this leaf node is the source
+                out_edges = [
+                    e for e in validated_edges
+                    if e["source"] == leaf_id
+                ]
+                in_edges = [
+                    e for e in validated_edges
+                    if e["target"] == leaf_id
+                ]
+                if not out_edges:
+                    continue  # already a proper leaf
+
+                # Identify the parent (predecessor that connects IN)
+                parent_ids = [e["source"] for e in in_edges]
+
+                # Strip all outgoing edges from the leaf node that
+                # don't go back to a parent (report edges are OK)
+                illegal_targets: list[str] = []
+                for oe in out_edges:
+                    if oe["target"] not in parent_ids:
+                        illegal_targets.append(oe["target"])
+
+                if illegal_targets:
+                    logger.warning(
+                        "GCU/subagent node '%s' has illegal outgoing "
+                        "edges to %s — stripping them. GCU nodes "
+                        "must be leaf sub-agents.",
+                        leaf_id, illegal_targets,
+                    )
+                    # Rewire: predecessor → leaf's targets (skip leaf)
+                    for parent_id in parent_ids:
+                        for tgt_id in illegal_targets:
+                            validated_edges.append({
+                                "id": f"edge-rewire-{len(validated_edges)}",
+                                "source": parent_id,
+                                "target": tgt_id,
+                                "condition": "on_success",
+                                "description": "",
+                                "label": "",
+                            })
+                    # Remove the illegal edges
+                    validated_edges[:] = [
+                        e for e in validated_edges
+                        if not (e["source"] == leaf_id
+                                and e["target"] in set(illegal_targets))
+                    ]
+
+                # Ensure the leaf is in its parent's sub_agents list
+                for pid in parent_ids:
+                    parent = node_by_id_v.get(pid)
+                    if parent is None:
+                        continue
+                    existing = parent.get("sub_agents") or []
+                    if leaf_id not in existing:
+                        existing.append(leaf_id)
+                    parent["sub_agents"] = existing
+
+        # Synthesize visual edges for sub-agents that are referenced in
+        # a parent's sub_agents list but have no connecting edge yet.
+        node_id_set = {n["id"] for n in validated_nodes}
+        existing_edge_pairs = {(e["source"], e["target"]) for e in validated_edges}
+        edge_counter = len(validated_edges)
+        for n in validated_nodes:
+            for sa_id in n.get("sub_agents") or []:
+                if sa_id not in node_id_set:
+                    continue
+                if (n["id"], sa_id) not in existing_edge_pairs:
+                    validated_edges.append({
+                        "id": f"edge-subagent-{edge_counter}",
+                        "source": n["id"],
+                        "target": sa_id,
+                        "condition": "always",
+                        "description": "sub-agent delegation",
+                        "label": "delegate",
+                    })
+                    edge_counter += 1
+                    existing_edge_pairs.add((n["id"], sa_id))
+                if (sa_id, n["id"]) not in existing_edge_pairs:
+                    validated_edges.append({
+                        "id": f"edge-subagent-{edge_counter}",
+                        "source": sa_id,
+                        "target": n["id"],
+                        "condition": "always",
+                        "description": "sub-agent report back",
+                        "label": "report",
+                    })
+                    edge_counter += 1
+                    existing_edge_pairs.add((sa_id, n["id"]))
+
+        # Determine terminal nodes: explicit list, or nodes with no outgoing edges.
+        # Sub-agent nodes are leaf helpers, not endpoints — exclude them.
+        sa_ids: set[str] = set()
+        for n in validated_nodes:
+            for sa_id in n.get("sub_agents") or []:
+                sa_ids.add(sa_id)
+        terminal_ids: set[str] = set(terminal_nodes or []) - sa_ids
+        if not terminal_ids:
+            sources = {e["source"] for e in validated_edges}
+            all_ids = {n["id"] for n in validated_nodes}
+            terminal_ids = all_ids - sources - sa_ids
+            # If all nodes have outgoing edges (loop graph), mark the last as terminal
+            if not terminal_ids and validated_nodes:
+                terminal_ids = {validated_nodes[-1]["id"]}
+
+        # Classify each node into a flowchart component type with color
+        total = len(validated_nodes)
+        for i, node in enumerate(validated_nodes):
+            fc_type = _classify_flowchart_node(
+                node, i, total, validated_edges, terminal_ids,
+            )
+            fc_meta = _FLOWCHART_TYPES[fc_type]
+            node["flowchart_type"] = fc_type
+            node["flowchart_shape"] = fc_meta["shape"]
+            node["flowchart_color"] = fc_meta["color"]
+
+        draft = {
+            "agent_name": agent_name.strip(),
+            "goal": goal.strip(),
+            "description": description.strip(),
+            "success_criteria": success_criteria or [],
+            "constraints": constraints or [],
+            "nodes": validated_nodes,
+            "edges": validated_edges,
+            "entry_node": validated_nodes[0]["id"] if validated_nodes else "",
+            "terminal_nodes": sorted(terminal_ids),
+            # Color legend for the frontend
+            "flowchart_legend": {
+                fc_type: {"shape": meta["shape"], "color": meta["color"]}
+                for fc_type, meta in _FLOWCHART_TYPES.items()
+            },
+        }
+
+        bus = getattr(session, "event_bus", None)
+        is_building = phase_state is not None and phase_state.phase == "building"
+
+        if phase_state is not None:
+            if is_building:
+                # During building: re-draft updates the flowchart in place.
+                # Dissolve planning-only nodes immediately (no confirm gate).
+                import copy as _copy
+
+                phase_state.original_draft_graph = _copy.deepcopy(draft)
+                converted, fmap = _dissolve_planning_nodes(draft)
+                phase_state.draft_graph = converted
+                phase_state.flowchart_map = fmap
+                # Do NOT reset build_confirmed — we're already building.
+                # Persist to agent folder
+                save_path = getattr(session, "worker_path", None)
+                if save_path is None:
+                    # Worker not loaded yet — resolve from draft name
+                    draft_name = draft.get("agent_name", "")
+                    if draft_name:
+                        candidate = Path("exports") / draft_name
+                        if candidate.is_dir():
+                            save_path = candidate
+                _save_flowchart_file(
+                    save_path,
+                    phase_state.original_draft_graph,
+                    fmap,
+                )
+            else:
+                # During planning: store raw draft, await user confirmation.
+                phase_state.draft_graph = draft
+                phase_state.build_confirmed = False
+
+        # Emit events so the frontend can render
+        if bus is not None:
+            if is_building:
+                # Send dissolved draft for runtime display
+                await bus.publish(
+                    AgentEvent(
+                        type=EventType.DRAFT_GRAPH_UPDATED,
+                        stream_id="queen",
+                        data=phase_state.draft_graph if phase_state else draft,
+                    )
+                )
+                # Send original draft + map for flowchart overlay
+                await bus.publish(
+                    AgentEvent(
+                        type=EventType.FLOWCHART_MAP_UPDATED,
+                        stream_id="queen",
+                        data={
+                            "map": phase_state.flowchart_map if phase_state else None,
+                            "original_draft": phase_state.original_draft_graph if phase_state else draft,
+                        },
+                    )
+                )
+            else:
+                await bus.publish(
+                    AgentEvent(
+                        type=EventType.DRAFT_GRAPH_UPDATED,
+                        stream_id="queen",
+                        data=draft,
+                    )
+                )
+
+        dissolution_info = {}
+        if is_building and phase_state is not None:
+            orig_count = len(phase_state.original_draft_graph.get("nodes", []))
+            conv_count = len(phase_state.draft_graph.get("nodes", []))
+            dissolution_info = {
+                "planning_nodes_dissolved": orig_count - conv_count,
+                "flowchart_map": phase_state.flowchart_map,
+            }
+
+        if is_building:
+            msg = (
+                "Draft flowchart updated during building. "
+                "Planning-only nodes dissolved automatically. "
+                "The user can see the updated flowchart. "
+                "Continue building — no re-confirmation needed."
+            )
+        else:
+            msg = (
+                "Draft graph saved and sent to the visualizer. "
+                "The user can now see the color-coded flowchart. "
+                "Present this design to the user and get their approval. "
+                "When the user confirms, call confirm_and_build() to proceed."
+            )
+
+        return json.dumps({
+            "status": "draft_saved",
+            "agent_name": draft["agent_name"],
+            "node_count": len(validated_nodes),
+            "edge_count": len(validated_edges),
+            "node_types": {n["id"]: n["flowchart_type"] for n in validated_nodes},
+            **dissolution_info,
+            "message": msg,
+        })
+
+    _draft_tool = Tool(
+        name="save_agent_draft",
+        description=(
+            "Save a declarative draft of the agent graph as a color-coded flowchart. "
+            "Usable in PLANNING (creates draft for user review) and BUILDING "
+            "(updates the flowchart in place — planning-only nodes are dissolved "
+            "automatically without re-confirmation). "
+            "Each node is auto-classified into a classical flowchart type "
+            "(start, terminal, process, decision, io, subprocess, subagent, browser, manual) "
+            "with unique colors. No code is generated. "
+            "Planning-only types (decision, subagent) are dissolved at confirm/build time: "
+            "decision nodes merge into predecessor's success_criteria with yes/no edges; "
+            "subagent nodes merge into predecessor's sub_agents list as leaf delegates."
+        ),
+        parameters={
+            "type": "object",
+            "properties": {
+                "agent_name": {
+                    "type": "string",
+                    "description": "Snake_case name for the agent (e.g. 'research_agent')",
+                },
+                "goal": {
+                    "type": "string",
+                    "description": "High-level goal description for the agent",
+                },
+                "description": {
+                    "type": "string",
+                    "description": "Brief description of what the agent does",
+                },
+                "nodes": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "id": {"type": "string", "description": "Kebab-case node identifier"},
+                            "name": {"type": "string", "description": "Human-readable name"},
+                            "description": {
+                                "type": "string",
+                                "description": "What this node does (business logic)",
+                            },
+                            "node_type": {
+                                "type": "string",
+                                "enum": ["event_loop", "gcu"],
+                                "description": "Node type (default: event_loop)",
+                            },
+                            "flowchart_type": {
+                                "type": "string",
+                                "enum": [
+                                    "start", "terminal", "process", "decision",
+                                    "io", "document", "multi_document",
+                                    "subprocess", "preparation",
+                                    "manual_input", "manual_operation",
+                                    "delay", "display",
+                                    "database", "stored_data", "internal_storage",
+                                    "connector", "offpage_connector",
+                                    "merge", "extract", "sort", "collate",
+                                    "summing_junction", "or",
+                                    "browser", "comment", "alternate_process",
+                                    "subagent",
+                                ],
+                                "description": (
+                                    "ISO 5807 flowchart symbol type. Auto-detected if omitted. "
+                                    "Core: start (green stadium), terminal (red stadium), "
+                                    "process (blue rect), decision (amber diamond), "
+                                    "io (purple parallelogram), document (grey wavy rect), "
+                                    "subprocess (teal subroutine), preparation (brown hexagon), "
+                                    "manual_operation (pink trapezoid), delay (orange D-shape), "
+                                    "display (cyan), database (green cylinder), "
+                                    "merge (indigo triangle), browser (dark indigo hexagon), "
+                                    "subagent (dark teal subroutine — planning-only, dissolved "
+                                    "into parent node's sub_agents at build time; must be a "
+                                    "leaf node connected only to its managing parent)"
+                                ),
+                            },
+                            "tools": {
+                                "type": "array",
+                                "items": {"type": "string"},
+                                "description": "Planned tools (hints, not validated yet)",
+                            },
+                            "input_keys": {
+                                "type": "array",
+                                "items": {"type": "string"},
+                                "description": "Expected input memory keys (hints)",
+                            },
+                            "output_keys": {
+                                "type": "array",
+                                "items": {"type": "string"},
+                                "description": "Expected output memory keys (hints)",
+                            },
+                            "success_criteria": {
+                                "type": "string",
+                                "description": "What success looks like for this node",
+                            },
+                            "decision_clause": {
+                                "type": "string",
+                                "description": (
+                                    "For decision nodes only: the yes/no question to "
+                                    "evaluate (e.g. 'Is amount > $100?'). Used during "
+                                    "dissolution to set the predecessor's success_criteria."
+                                ),
+                            },
+                        },
+                        "required": ["id"],
+                    },
+                    "description": "List of nodes with at minimum an id",
+                },
+                "edges": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "source": {"type": "string"},
+                            "target": {"type": "string"},
+                            "condition": {
+                                "type": "string",
+                                "enum": [
+                                    "always",
+                                    "on_success",
+                                    "on_failure",
+                                    "conditional",
+                                    "llm_decide",
+                                ],
+                            },
+                            "description": {"type": "string"},
+                            "label": {
+                                "type": "string",
+                                "description": (
+                                    "Short edge label shown on the flowchart "
+                                    "(e.g. 'Yes', 'No', 'Retry')"
+                                ),
+                            },
+                        },
+                        "required": ["source", "target"],
+                    },
+                    "description": "Connections between nodes",
+                },
+                "terminal_nodes": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": (
+                        "Node IDs that are terminal (end) nodes. "
+                        "Auto-detected from edges if omitted."
+                    ),
+                },
+                "success_criteria": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Agent-level success criteria",
+                },
+                "constraints": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Agent-level constraints",
+                },
+            },
+            "required": ["agent_name", "goal", "nodes"],
+        },
+    )
+    registry.register(
+        "save_agent_draft",
+        _draft_tool,
+        lambda inputs: save_agent_draft(**inputs),
+    )
+    tools_registered += 1
+
+    # --- confirm_and_build (Planning → Building gate) -------------------------
+    # Explicit user confirmation is required before transitioning from planning
+    # to building. This tool records that confirmation and proceeds.
+
+    async def confirm_and_build() -> str:
+        """Confirm the draft and transition from planning to building phase.
+
+        This tool should ONLY be called after the user has explicitly approved
+        the draft graph design via ask_user. It gates the planning→building
+        transition so the user always has a chance to review before code is written.
+        """
+        if phase_state is None:
+            return json.dumps({"error": "Phase state not available."})
+
+        if phase_state.phase != "planning":
+            return json.dumps(
+                {"error": f"Cannot confirm_and_build: currently in {phase_state.phase} phase."}
+            )
+
+        if phase_state.draft_graph is None:
+            return json.dumps({
+                "error": (
+                    "No draft graph saved. Call save_agent_draft() first to create "
+                    "a draft, present it to the user, and get their approval."
+                )
+            })
+
+        phase_state.build_confirmed = True
+
+        # Preserve original draft for flowchart display during runtime,
+        # then dissolve planning-only nodes (decision + subagent) into
+        # runtime-compatible structures.
+        import copy as _copy
+
+        original_nodes = phase_state.draft_graph.get("nodes", [])
+        phase_state.original_draft_graph = _copy.deepcopy(phase_state.draft_graph)
+        converted, fmap = _dissolve_planning_nodes(phase_state.draft_graph)
+        phase_state.draft_graph = converted
+        phase_state.flowchart_map = fmap
+
+        # Note: flowchart file is persisted later, in initialize_and_build_agent
+        # (after the agent folder is scaffolded) or in load_built_agent.
+
+        dissolved_count = len(original_nodes) - len(converted.get("nodes", []))
+        decision_count = sum(
+            1 for n in original_nodes if n.get("flowchart_type") == "decision"
+        )
+        subagent_count = sum(
+            1 for n in original_nodes if n.get("flowchart_type") == "subagent"
+        )
+
+        dissolution_parts = []
+        if decision_count:
+            dissolution_parts.append(
+                f"{decision_count} decision node(s) dissolved into predecessor criteria"
+            )
+        if subagent_count:
+            dissolution_parts.append(
+                f"{subagent_count} sub-agent node(s) dissolved into predecessor sub_agents"
+            )
+
+        return json.dumps({
+            "status": "confirmed",
+            "agent_name": phase_state.draft_graph.get("agent_name", ""),
+            "planning_nodes_dissolved": dissolved_count,
+            "decision_nodes_dissolved": decision_count,
+            "subagent_nodes_dissolved": subagent_count,
+            "flowchart_map": fmap,
+            "message": (
+                "User has confirmed the design. "
+                + ("; ".join(dissolution_parts) + ". " if dissolution_parts else "")
+                + "Now call initialize_and_build_agent(agent_name, nodes) to scaffold the "
+                "agent package and start building. The draft metadata will be "
+                "used to pre-populate the generated files."
+            ),
+        })
+
+    _confirm_tool = Tool(
+        name="confirm_and_build",
+        description=(
+            "Confirm the draft graph design and approve transition to building phase. "
+            "ONLY call this after the user has explicitly approved the design via ask_user. "
+            "After confirmation, call initialize_and_build_agent() to scaffold and build."
+        ),
+        parameters={"type": "object", "properties": {}},
+    )
+    registry.register(
+        "confirm_and_build",
+        _confirm_tool,
+        lambda inputs: confirm_and_build(),
+    )
+    tools_registered += 1
+
     # --- initialize_and_build_agent wrapper (Planning → Building) -------------
     # With agent_name: scaffold a new agent via MCP tool, then switch to building.
     # Without agent_name: just switch to building (for fixing an existing loaded agent).
@@ -915,6 +2098,32 @@ def register_queen_lifecycle_tools(
         async def initialize_and_build_agent_wrapper(inputs: dict) -> str:
             """Wrapper: scaffold or just switch to building phase."""
             agent_name = (inputs.get("agent_name") or "").strip()
+
+            # Gate: when in planning phase and creating a new agent,
+            # require the user to have confirmed the draft first.
+            if (
+                agent_name
+                and phase_state is not None
+                and phase_state.phase == "planning"
+                and not phase_state.build_confirmed
+            ):
+                if phase_state.draft_graph is None:
+                    return json.dumps({
+                        "error": (
+                            "Cannot transition to building without a draft. "
+                            "Call save_agent_draft() first to create a visual draft of the "
+                            "graph, present it to the user for review, then call "
+                            "confirm_and_build() after the user approves."
+                        )
+                    })
+                return json.dumps({
+                    "error": (
+                        "The user has not confirmed the draft design yet. "
+                        "Present the draft to the user and call ask_user() to get "
+                        "their approval. Then call confirm_and_build() before "
+                        "calling initialize_and_build_agent()."
+                    )
+                })
 
             # No agent_name → try to fall back to the session's current agent,
             # or fail with actionable guidance.
@@ -949,6 +2158,8 @@ def register_queen_lifecycle_tools(
                     agent_name,
                 )
                 if phase_state is not None:
+                    if fallback_path:
+                        phase_state.agent_path = str(fallback_path)
                     await phase_state.switch_to_building(source="tool")
                     if phase_state.inject_notification:
                         await phase_state.inject_notification(
@@ -971,8 +2182,15 @@ def register_queen_lifecycle_tools(
                     }
                 )
 
-            # Has agent_name → scaffold via MCP tool
-            result = _orig_init_executor(inputs)
+            # Has agent_name → scaffold via MCP tool.
+            # If a draft exists, pass its metadata so the scaffolder can
+            # pre-populate descriptions, goals, and node metadata.
+            scaffold_inputs = dict(inputs)
+            draft = phase_state.draft_graph if phase_state else None
+            if draft and draft.get("agent_name") == agent_name:
+                scaffold_inputs["_draft"] = draft
+
+            result = _orig_init_executor(scaffold_inputs)
             # Handle both sync and async executors
             if asyncio.iscoroutine(result) or asyncio.isfuture(result):
                 result = await result
@@ -984,13 +2202,32 @@ def register_queen_lifecycle_tools(
                 parsed = json.loads(result_str)
                 if parsed.get("success", True):
                     if phase_state is not None:
+                        # Set agent_path so the frontend can query credentials
+                        phase_state.agent_path = str(Path("exports") / agent_name)
                         await phase_state.switch_to_building(source="tool")
+                        # Reset draft state after successful scaffolding
+                        phase_state.build_confirmed = False
+                        # Persist flowchart now that the agent folder exists
+                        if phase_state.original_draft_graph and phase_state.flowchart_map:
+                            _save_flowchart_file(
+                                Path("exports") / agent_name,
+                                phase_state.original_draft_graph,
+                                phase_state.flowchart_map,
+                            )
                         # Inject a continuation message so the queen starts
                         # building immediately instead of blocking for user input.
+                        draft_hint = ""
+                        if draft:
+                            draft_hint = (
+                                " The draft metadata has been used to pre-populate "
+                                "node descriptions, goal, and success criteria. "
+                                "Review and refine the generated files."
+                            )
                         if phase_state.inject_notification:
                             await phase_state.inject_notification(
                                 "[PHASE CHANGE] Agent scaffolded and switched to BUILDING phase. "
                                 "Start implementing the agent nodes now."
+                                + draft_hint
                             )
             except (json.JSONDecodeError, KeyError, TypeError):
                 pass
@@ -1816,6 +3053,15 @@ def register_queen_lifecycle_tools(
         Returns credential IDs, aliases, status, and identity metadata.
         Never returns secret values. Optionally filter by credential_id.
         """
+        # Load shell config vars into os.environ — same first step as check-agent.
+        # Ensures keys set in ~/.zshrc/~/.bashrc are visible to is_available() checks.
+        try:
+            from framework.credentials.validation import ensure_credential_key_env
+
+            ensure_credential_key_env()
+        except Exception:
+            pass
+
         try:
             # Primary: CredentialStoreAdapter sees both Aden OAuth and local accounts
             from aden_tools.credentials import CredentialStoreAdapter
@@ -1823,13 +3069,24 @@ def register_queen_lifecycle_tools(
             store = CredentialStoreAdapter.default()
             all_accounts = store.get_all_account_info()
 
-            # Filter by credential_id / provider if requested
+            # Filter by credential_id / provider if requested.
+            # A spec name like "gmail_oauth" maps to provider "google" via
+            # credential_id field — resolve that alias before filtering.
             if credential_id:
+                try:
+                    from aden_tools.credentials import CREDENTIAL_SPECS
+
+                    spec = CREDENTIAL_SPECS.get(credential_id)
+                    resolved_provider = (
+                        (spec.credential_id or credential_id) if spec else credential_id
+                    )
+                except Exception:
+                    resolved_provider = credential_id
                 all_accounts = [
                     a
                     for a in all_accounts
                     if a.get("credential_id", "").startswith(credential_id)
-                    or a.get("provider", "") == credential_id
+                    or a.get("provider", "") in (credential_id, resolved_provider)
                 ]
 
             return json.dumps(
@@ -1846,12 +3103,42 @@ def register_queen_lifecycle_tools(
 
         # Fallback: local encrypted store only
         try:
+            from framework.credentials.local.models import LocalAccountInfo
             from framework.credentials.local.registry import LocalCredentialRegistry
+            from framework.credentials.storage import EncryptedFileStorage
 
             registry = LocalCredentialRegistry.default()
             accounts = registry.list_accounts(
                 credential_id=credential_id or None,
             )
+
+            # Also include flat-file credentials saved by the GUI (no "/" separator).
+            # LocalCredentialRegistry.list_accounts() skips these — read them directly.
+            seen_cred_ids = {info.credential_id for info in accounts}
+            storage = EncryptedFileStorage()
+            for storage_id in storage.list_all():
+                if "/" in storage_id:
+                    continue  # already handled by LocalCredentialRegistry above
+                if credential_id and storage_id != credential_id:
+                    continue
+                if storage_id in seen_cred_ids:
+                    continue
+                try:
+                    cred_obj = storage.load(storage_id)
+                except Exception:
+                    continue
+                if cred_obj is None:
+                    continue
+                accounts.append(
+                    LocalAccountInfo(
+                        credential_id=storage_id,
+                        alias="default",
+                        status="unknown",
+                        identity=cred_obj.identity,
+                        last_validated=cred_obj.last_refreshed,
+                        created_at=cred_obj.created_at,
+                    )
+                )
 
             credentials = []
             for info in accounts:
@@ -2014,8 +3301,56 @@ def register_queen_lifecycle_tools(
                             }
                         )
 
+                # Ensure we have a flowchart for this agent — try in order:
+                # 1. Already in phase_state (from planning workflow)
+                # 2. Load from flowchart.json in the agent folder
+                # 3. Synthesize from the runtime graph
+                if phase_state is not None:
+                    if phase_state.original_draft_graph is None:
+                        # Try loading from file
+                        file_draft, file_map = _load_flowchart_file(resolved_path)
+                        if file_draft is not None:
+                            phase_state.original_draft_graph = file_draft
+                            phase_state.flowchart_map = file_map
+                        elif loaded_runtime is not None:
+                            # Synthesize from runtime graph
+                            goal = loaded_runtime.goal
+                            synth_draft, synth_map = _synthesize_draft_from_runtime(
+                                list(loaded_runtime.graph.nodes),
+                                list(loaded_runtime.graph.edges),
+                                agent_name=resolved_path.name,
+                                goal_name=goal.name if goal else "",
+                            )
+                            phase_state.original_draft_graph = synth_draft
+                            phase_state.flowchart_map = synth_map
+                            # Persist the synthesized flowchart so it's
+                            # available on next load without re-synthesis
+                            _save_flowchart_file(resolved_path, synth_draft, synth_map)
+
+                    # Emit to frontend
+                    if (
+                        phase_state.original_draft_graph is not None
+                        and phase_state.flowchart_map is not None
+                    ):
+                        bus = phase_state.event_bus
+                        if bus is not None:
+                            try:
+                                await bus.publish(
+                                    AgentEvent(
+                                        type=EventType.FLOWCHART_MAP_UPDATED,
+                                        stream_id="queen",
+                                        data={
+                                            "map": phase_state.flowchart_map,
+                                            "original_draft": phase_state.original_draft_graph,
+                                        },
+                                    )
+                                )
+                            except Exception:
+                                logger.warning("Failed to emit flowchart map", exc_info=True)
+
                 # Switch to staging phase after successful load + validation
                 if phase_state is not None:
+                    phase_state.agent_path = str(resolved_path)
                     await phase_state.switch_to_staging()
 
                 worker_name = info.name if info else updated_session.worker_id

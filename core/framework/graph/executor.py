@@ -332,7 +332,7 @@ class GraphExecutor:
                 _depth,
             )
         else:
-            max_tokens = getattr(conversation, "_max_history_tokens", 32000)
+            max_tokens = getattr(conversation, "_max_context_tokens", 32000)
             target_tokens = max_tokens // 2
             target_chars = target_tokens * 4
 
@@ -1875,7 +1875,7 @@ class GraphExecutor:
                     max_tool_calls_per_turn=lc.get("max_tool_calls_per_turn", 30),
                     tool_call_overflow_margin=lc.get("tool_call_overflow_margin", 0.5),
                     stall_detection_threshold=lc.get("stall_detection_threshold", 3),
-                    max_history_tokens=lc.get("max_history_tokens", 32000),
+                    max_context_tokens=lc.get("max_context_tokens", 32000),
                     max_tool_result_chars=lc.get("max_tool_result_chars", 30_000),
                     spillover_dir=spillover,
                     hooks=lc.get("hooks", {}),

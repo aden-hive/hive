@@ -9,7 +9,7 @@ from datetime import UTC
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from framework.config import get_hive_config, get_preferred_model
+from framework.config import get_hive_config, get_max_context_tokens, get_preferred_model
 from framework.credentials.validation import (
     ensure_credential_key_env as _ensure_credential_key_env,
 )
@@ -903,9 +903,30 @@ class AgentRunner:
 
             if agent_config and hasattr(agent_config, "max_tokens"):
                 max_tokens = agent_config.max_tokens
+                logger.info(
+                    "Agent default_config overrides max_tokens: %d (configuration.json value ignored)",
+                    max_tokens,
+                )
             else:
                 hive_config = get_hive_config()
                 max_tokens = hive_config.get("llm", {}).get("max_tokens", DEFAULT_MAX_TOKENS)
+
+            # Resolve max_context_tokens with priority:
+            #   1. agent loop_config["max_context_tokens"] (explicit, wins silently)
+            #   2. agent default_config.max_context_tokens (logged)
+            #   3. configuration.json llm.max_context_tokens
+            #   4. hardcoded default (32_000)
+            agent_loop_config: dict = dict(getattr(agent_module, "loop_config", {}))
+            if "max_context_tokens" not in agent_loop_config:
+                if agent_config and hasattr(agent_config, "max_context_tokens"):
+                    agent_loop_config["max_context_tokens"] = agent_config.max_context_tokens
+                    logger.info(
+                        "Agent default_config overrides max_context_tokens: %d"
+                        " (configuration.json value ignored)",
+                        agent_config.max_context_tokens,
+                    )
+                else:
+                    agent_loop_config["max_context_tokens"] = get_max_context_tokens()
 
             # Read intro_message from agent metadata (shown on TUI load)
             agent_metadata = getattr(agent_module, "metadata", None)
@@ -925,7 +946,7 @@ class AgentRunner:
                 "nodes": nodes,
                 "edges": edges,
                 "max_tokens": max_tokens,
-                "loop_config": getattr(agent_module, "loop_config", {}),
+                "loop_config": agent_loop_config,
             }
             # Only pass optional fields if explicitly defined by the agent module
             conversation_mode = getattr(agent_module, "conversation_mode", None)

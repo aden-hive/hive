@@ -46,6 +46,7 @@ DEFAULT_EVENT_TYPES = [
     EventType.TRIGGER_DEACTIVATED,
     EventType.TRIGGER_FIRED,
     EventType.TRIGGER_REMOVED,
+    EventType.DRAFT_GRAPH_UPDATED,
 ]
 
 # Keepalive interval in seconds

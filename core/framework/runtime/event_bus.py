@@ -138,6 +138,12 @@ class EventType(StrEnum):
     WORKER_LOADED = "worker_loaded"
     CREDENTIALS_REQUIRED = "credentials_required"
 
+    # Draft graph (planning phase — lightweight graph preview)
+    DRAFT_GRAPH_UPDATED = "draft_graph_updated"
+
+    # Flowchart map updated (after reconciliation with runtime graph)
+    FLOWCHART_MAP_UPDATED = "flowchart_map_updated"
+
     # Queen phase changes (building <-> staging <-> running)
     QUEEN_PHASE_CHANGED = "queen_phase_changed"
 
@@ -781,6 +787,7 @@ class EventBus:
         model: str,
         input_tokens: int,
         output_tokens: int,
+        cached_tokens: int = 0,
         execution_id: str | None = None,
         iteration: int | None = None,
     ) -> None:
@@ -790,6 +797,7 @@ class EventBus:
             "model": model,
             "input_tokens": input_tokens,
             "output_tokens": output_tokens,
+            "cached_tokens": cached_tokens,
         }
         if iteration is not None:
             data["iteration"] = iteration
@@ -887,16 +895,23 @@ class EventBus:
         prompt: str = "",
         execution_id: str | None = None,
         options: list[str] | None = None,
+        questions: list[dict] | None = None,
     ) -> None:
         """Emit client input requested event (client_facing=True nodes).
 
         Args:
             options: Optional predefined choices for the user (1-3 items).
-                     The frontend appends an "Other" free-text option automatically.
+                     The frontend appends an "Other" free-text option
+                     automatically.
+            questions: Optional list of question dicts for multi-question
+                       batches (from ask_user_multiple). Each dict has id,
+                       prompt, and optional options.
         """
         data: dict[str, Any] = {"prompt": prompt}
         if options:
             data["options"] = options
+        if questions:
+            data["questions"] = questions
         await self.publish(
             AgentEvent(
                 type=EventType.CLIENT_INPUT_REQUESTED,
