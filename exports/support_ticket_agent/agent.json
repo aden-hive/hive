@@ -1,0 +1,162 @@
+{
+  "agent": {
+    "id": "support_ticket_agent",
+    "name": "Support Ticket Agent",
+    "version": "1.0.0",
+    "description": "Processes customer support tickets by parsing content, categorizing issues, and generating helpful responses"
+  },
+  "graph": {
+    "id": "support_ticket_agent-graph",
+    "goal_id": "process-support-tickets",
+    "version": "1.0.0",
+    "entry_node": "parse-ticket",
+    "entry_points": {
+      "start": "parse-ticket"
+    },
+    "pause_nodes": [],
+    "terminal_nodes": [
+      "generate-response"
+    ],
+    "nodes": [
+      {
+        "id": "parse-ticket",
+        "name": "Parse Ticket",
+        "description": "Extract key information from the customer support ticket",
+        "node_type": "llm_generate",
+        "input_keys": [
+          "ticket_content",
+          "customer_id",
+          "ticket_id"
+        ],
+        "output_keys": [
+          "parsed_data",
+          "category_hint"
+        ],
+        "system_prompt": "You are a ticket parsing assistant. Extract the following information from the support ticket:\n\n1. Subject/Title\n2. Main issue description\n3. Sentiment (positive, neutral, negative)\n4. Urgency indicators (urgent keywords, time-sensitive language)\n5. Technical details mentioned (error codes, system info, etc.)\n\nTicket Content: {ticket_content}\nCustomer ID: {customer_id}\nTicket ID: {ticket_id}\n\nProvide your response as a JSON object with keys: subject, issue_description, sentiment, urgency_level (low/medium/high), technical_details, and category_hint (suggest a category like 'login', 'billing', 'technical', 'feature_request').",
+        "tools": [],
+        "max_retries": 2
+      },
+      {
+        "id": "categorize-issue",
+        "name": "Categorize Issue",
+        "description": "Classify the ticket type and assign priority",
+        "node_type": "llm_generate",
+        "input_keys": [
+          "parsed_data",
+          "category_hint"
+        ],
+        "output_keys": [
+          "category",
+          "priority",
+          "confidence"
+        ],
+        "system_prompt": "You are a ticket classification specialist. Based on the parsed ticket data, classify the ticket into one of these categories:\n\n- login: Authentication and access issues\n- billing: Payment, subscription, invoicing issues\n- technical: Bugs, errors, system problems\n- feature_request: New feature suggestions\n- account: Account settings, profile management\n- other: Anything that doesn't fit above\n\nAssign priority (low/medium/high/critical) based on:\n- Urgency indicators\n- Business impact\n- Customer sentiment\n\nParsed Data: {parsed_data}\nCategory Hint: {category_hint}\n\nProvide your response as a JSON object with keys: category, priority, confidence (0.0-1.0), and reasoning.",
+        "tools": [],
+        "max_retries": 2
+      },
+      {
+        "id": "generate-response",
+        "name": "Generate Response",
+        "description": "Create a helpful response for the customer",
+        "node_type": "llm_generate",
+        "input_keys": [
+          "parsed_data",
+          "category",
+          "priority"
+        ],
+        "output_keys": [
+          "response_text",
+          "suggested_actions"
+        ],
+        "system_prompt": "You are a customer support response specialist. Generate a helpful, professional response to the customer's ticket.\n\nGuidelines:\n1. Acknowledge their issue\n2. Show empathy appropriate to the sentiment\n3. Provide clear next steps or solutions\n4. Be concise but informative\n5. Match the urgency to the priority level\n\nParsed Data: {parsed_data}\nCategory: {category}\nPriority: {priority}\n\nProvide your response as a JSON object with keys:\n- response_text: The full response to send to the customer\n- suggested_actions: Array of specific actions (e.g., ['escalate_to_engineering', 'send_password_reset', 'apply_billing_credit'])\n- estimated_resolution_time: Expected time to resolve (e.g., '2 hours', '1 business day')",
+        "tools": [],
+        "max_retries": 2
+      }
+    ],
+    "edges": [
+      {
+        "id": "parse-to-categorize",
+        "source": "parse-ticket",
+        "target": "categorize-issue",
+        "condition": "on_success",
+        "condition_expr": null,
+        "priority": 1,
+        "input_mapping": {}
+      },
+      {
+        "id": "categorize-to-generate",
+        "source": "categorize-issue",
+        "target": "generate-response",
+        "condition": "on_success",
+        "condition_expr": null,
+        "priority": 1,
+        "input_mapping": {}
+      }
+    ],
+    "max_steps": 100,
+    "max_retries_per_node": 3,
+    "description": "Processes customer support tickets by parsing content, categorizing issues, and generating helpful responses",
+    "created_at": "2026-01-29T00:31:00+05:30"
+  },
+  "goal": {
+    "id": "process-support-tickets",
+    "name": "Process Customer Support Tickets",
+    "description": "Automatically process incoming customer support tickets to extract information, categorize issues, and generate helpful responses",
+    "success_criteria": [
+      {
+        "id": "accurate-parsing",
+        "description": "Correctly extract key information from ticket content",
+        "metric": "extraction_accuracy",
+        "target": "95%",
+        "weight": 0.25
+      },
+      {
+        "id": "accurate-categorization",
+        "description": "Correctly classify ticket type and priority",
+        "metric": "classification_accuracy",
+        "target": "90%",
+        "weight": 0.3
+      },
+      {
+        "id": "response-quality",
+        "description": "Provide helpful, professional responses",
+        "metric": "customer_satisfaction",
+        "target": "85%",
+        "weight": 0.3
+      },
+      {
+        "id": "fast-processing",
+        "description": "Process tickets quickly",
+        "metric": "processing_time",
+        "target": "<30s",
+        "weight": 0.15
+      }
+    ],
+    "constraints": [
+      {
+        "id": "privacy-protection",
+        "description": "Must not expose sensitive customer data in logs or outputs",
+        "constraint_type": "security",
+        "category": "data_privacy"
+      },
+      {
+        "id": "escalation-threshold",
+        "description": "Escalate to human when confidence below 70%",
+        "constraint_type": "quality",
+        "category": "accuracy"
+      },
+      {
+        "id": "response-time",
+        "description": "Complete processing within 60 seconds",
+        "constraint_type": "performance",
+        "category": "latency"
+      }
+    ]
+  },
+  "required_tools": [],
+  "metadata": {
+    "created_at": "2026-01-29T00:31:00+05:30",
+    "node_count": 3,
+    "edge_count": 2
+  }
+}
