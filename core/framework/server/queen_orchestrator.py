@@ -155,7 +155,18 @@ async def create_queen(
     logger.info("Queen: registered tools: %s", sorted(registered_names))
 
     phase_state.planning_tools = [t for t in queen_tools if t.name in planning_names]
-    phase_state.building_tools = [t for t in queen_tools if t.name in building_names]
+    
+    # Partition tools into mode-specific sets.
+    # In building mode, we allow all standard building tools PLUS any dynamic/MCP tools.
+    # Dynamic tools are those NOT specifically whitelisted for other modes.
+    all_hardcoded = building_names | staging_names | running_names
+    phase_state.building_tools = [
+        t
+        for t in queen_tools
+        if t.name in building_names or t.name not in all_hardcoded
+    ]
+
+    # Staging and running sets remain strictly whitelisted for safety.
     phase_state.staging_tools = [t for t in queen_tools if t.name in staging_names]
     phase_state.running_tools = [t for t in queen_tools if t.name in running_names]
 
