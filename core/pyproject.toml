@@ -61,6 +61,10 @@ lint.isort.section-order = [
   "first-party",
   "local-folder",
 ]
+[tool.pytest.ini_options]
+filterwarnings = [
+    "ignore::DeprecationWarning:litellm.*"
+]
 
 [dependency-groups]
 dev = [
