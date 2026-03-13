@@ -13,6 +13,7 @@ API Reference: https://developers.facebook.com/docs/whatsapp/cloud-api/reference
 
 from __future__ import annotations
 
+import json
 import os
 from typing import TYPE_CHECKING, Any
 
@@ -22,7 +23,7 @@ from fastmcp import FastMCP
 if TYPE_CHECKING:
     from aden_tools.credentials import CredentialStoreAdapter
 
-GRAPH_API_BASE = "https://graph.facebook.com/v21.0"
+GRAPH_API_BASE = "https://graph.facebook.com/v25.0"
 
 
 class _WhatsAppClient:
@@ -147,12 +148,13 @@ class _WhatsAppClient:
         return self._handle_response(response)
 
     def send_reaction(
-        self, message_id: str, emoji: str
+        self, to: str, message_id: str, emoji: str
     ) -> dict[str, Any]:
         """React to a message with an emoji."""
         payload = {
             "messaging_product": "whatsapp",
             "recipient_type": "individual",
+            "to": to,
             "type": "reaction",
             "reaction": {
                 "message_id": message_id,
@@ -310,13 +312,11 @@ def register_tools(
         if isinstance(client, dict):
             return client
         try:
-            import json as json_module
-
             parsed_components = None
             if components:
                 try:
-                    parsed_components = json_module.loads(components)
-                except json_module.JSONDecodeError as e:
+                    parsed_components = json.loads(components)
+                except json.JSONDecodeError as e:
                     return {"error": f"Invalid components JSON: {e}"}
 
             result = client.send_template(to, template_name, language, parsed_components)
@@ -417,11 +417,12 @@ def register_tools(
     # --- Reactions ---
 
     @mcp.tool()
-    def whatsapp_send_reaction(message_id: str, emoji: str) -> dict:
+    def whatsapp_send_reaction(to: str, message_id: str, emoji: str) -> dict:
         """
         React to a WhatsApp message with an emoji.
 
         Args:
+            to: Recipient phone number in E.164 format (e.g., '+14155552671')
             message_id: The WhatsApp message ID to react to
                 (e.g., 'wamid.xxx')
             emoji: The emoji character to react with (e.g., '\U0001f44d' for thumbs up)
@@ -429,14 +430,14 @@ def register_tools(
         Returns:
             Dict with success status or error
         """
-        if not message_id or not emoji:
-            return {"error": "message_id and emoji are required"}
+        if not to or not message_id or not emoji:
+            return {"error": "to, message_id and emoji are required"}
 
         client = _get_client()
         if isinstance(client, dict):
             return client
         try:
-            result = client.send_reaction(message_id, emoji)
+            result = client.send_reaction(to, message_id, emoji)
             if "error" in result:
                 return result
             messages = result.get("messages", [])

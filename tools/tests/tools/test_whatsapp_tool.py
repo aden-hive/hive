@@ -36,7 +36,7 @@ class TestWhatsAppClient:
 
     def test_messages_url(self):
         assert "123456789/messages" in self.client._messages_url
-        assert self.client._messages_url.startswith("https://graph.facebook.com/v21.0/")
+        assert self.client._messages_url.startswith("https://graph.facebook.com/v25.0/")
 
     def test_handle_response_success(self):
         response = MagicMock()
@@ -178,10 +178,11 @@ class TestWhatsAppClient:
         mock_response.json.return_value = {"messages": [{"id": "wamid.react1"}]}
         mock_post.return_value = mock_response
 
-        self.client.send_reaction("wamid.abc", "\U0001f44d")
+        self.client.send_reaction("+14155552671", "wamid.abc", "\U0001f44d")
 
         mock_post.assert_called_once()
         call_kwargs = mock_post.call_args.kwargs
+        assert call_kwargs["json"]["to"] == "+14155552671"
         assert call_kwargs["json"]["type"] == "reaction"
         assert call_kwargs["json"]["reaction"]["emoji"] == "\U0001f44d"
         assert call_kwargs["json"]["reaction"]["message_id"] == "wamid.abc"
@@ -343,7 +344,9 @@ class TestRegisterTools:
         register_tools(self.mcp, credentials=None)
         tools = {t.name: t for t in self.mcp._tool_manager._tools.values()}
 
-        result = tools["whatsapp_send_reaction"].fn(message_id="", emoji="")
+        result = tools["whatsapp_send_reaction"].fn(
+            to="", message_id="", emoji=""
+        )
         assert "error" in result
 
     def test_send_image_missing_params(self):
@@ -464,7 +467,9 @@ class TestErrorHandling:
 
         with self._env_patch():
             result = tools["whatsapp_send_reaction"].fn(
-                message_id="wamid.abc", emoji="\U0001f44d"
+                to="+14155552671",
+                message_id="wamid.abc",
+                emoji="\U0001f44d",
             )
 
         assert "error" in result
@@ -514,7 +519,11 @@ class TestErrorHandling:
             "whatsapp_send_template": {"to": "+1234", "template_name": "hello"},
             "whatsapp_list_templates": {"waba_id": "waba123"},
             "whatsapp_mark_as_read": {"message_id": "wamid.abc"},
-            "whatsapp_send_reaction": {"message_id": "wamid.abc", "emoji": "\U0001f44d"},
+            "whatsapp_send_reaction": {
+                "to": "+14155552671",
+                "message_id": "wamid.abc",
+                "emoji": "\U0001f44d",
+            },
             "whatsapp_send_image": {"to": "+1234", "image_url": "https://example.com/img.jpg"},
             "whatsapp_send_document": {"to": "+1234", "document_url": "https://example.com/doc.pdf"},
         }

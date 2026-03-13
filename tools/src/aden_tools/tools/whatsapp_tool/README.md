@@ -121,6 +121,7 @@ whatsapp_send_document(
 
 ```python
 whatsapp_send_reaction(
+    to="+14155552671",
     message_id="wamid.xxx",
     emoji="\U0001f44d",
 )
@@ -185,6 +186,7 @@ whatsapp_mark_as_read(message_id="wamid.xxx")
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
+| to | str | Yes | Recipient phone number in E.164 format |
 | message_id | str | Yes | WhatsApp message ID to react to |
 | emoji | str | Yes | Emoji character to react with |
 
@@ -218,7 +220,7 @@ The tools return error dictionaries on failure:
 {"error": "Rate limit exceeded. Try again later."}
 ```
 
-## API Reference
+## External Links
 
 - [WhatsApp Cloud API Docs](https://developers.facebook.com/docs/whatsapp/cloud-api)
 - [Message Templates](https://developers.facebook.com/docs/whatsapp/cloud-api/guides/send-message-templates)
