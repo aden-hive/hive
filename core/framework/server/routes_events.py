@@ -15,6 +15,7 @@ logger = logging.getLogger(__name__)
 DEFAULT_EVENT_TYPES = [
     EventType.CLIENT_OUTPUT_DELTA,
     EventType.CLIENT_INPUT_REQUESTED,
+    EventType.CLIENT_INPUT_RECEIVED,
     EventType.LLM_TEXT_DELTA,
     EventType.TOOL_CALL_STARTED,
     EventType.TOOL_CALL_COMPLETED,
@@ -40,6 +41,12 @@ DEFAULT_EVENT_TYPES = [
     EventType.CREDENTIALS_REQUIRED,
     EventType.SUBAGENT_REPORT,
     EventType.QUEEN_PHASE_CHANGED,
+    EventType.TRIGGER_AVAILABLE,
+    EventType.TRIGGER_ACTIVATED,
+    EventType.TRIGGER_DEACTIVATED,
+    EventType.TRIGGER_FIRED,
+    EventType.TRIGGER_REMOVED,
+    EventType.DRAFT_GRAPH_UPDATED,
 ]
 
 # Keepalive interval in seconds
@@ -89,6 +96,7 @@ async def handle_events(request: web.Request) -> web.StreamResponse:
         "execution_failed",
         "execution_paused",
         "client_input_requested",
+        "client_input_received",
         "node_loop_iteration",
         "node_loop_started",
         "credentials_required",
@@ -142,6 +150,7 @@ async def handle_events(request: web.Request) -> web.StreamResponse:
         EventType.CLIENT_OUTPUT_DELTA.value,
         EventType.EXECUTION_STARTED.value,
         EventType.CLIENT_INPUT_REQUESTED.value,
+        EventType.CLIENT_INPUT_RECEIVED.value,
     }
     event_type_values = {et.value for et in event_types}
     replay_types = _REPLAY_TYPES & event_type_values

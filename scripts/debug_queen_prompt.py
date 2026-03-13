@@ -13,7 +13,8 @@ from framework.agents.queen.nodes import (
 _DEFAULT_WORKER_IDENTITY = (
     "\n\n# Worker Profile\n"
     "No worker agent loaded. You are operating independently.\n"
-    "Handle all tasks directly using your coding tools."
+    "Design or build the agent to solve the user's problem "
+    "according to your current phase."
 )
 
 

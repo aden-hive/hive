@@ -16,6 +16,7 @@ class AgentEntry:
     description: str
     category: str
     session_count: int = 0
+    run_count: int = 0
     node_count: int = 0
     tool_count: int = 0
     tags: list[str] = field(default_factory=list)
@@ -52,6 +53,31 @@ def _count_sessions(agent_name: str) -> int:
     return sum(1 for d in sessions_dir.iterdir() if d.is_dir() and d.name.startswith("session_"))
 
 
+def _count_runs(agent_name: str) -> int:
+    """Count unique run_ids across all sessions for an agent."""
+    sessions_dir = Path.home() / ".hive" / "agents" / agent_name / "sessions"
+    if not sessions_dir.exists():
+        return 0
+    run_ids: set[str] = set()
+    for session_dir in sessions_dir.iterdir():
+        if not session_dir.is_dir() or not session_dir.name.startswith("session_"):
+            continue
+        # runs.jsonl lives inside workspace subdirectories
+        for runs_file in session_dir.rglob("runs.jsonl"):
+            try:
+                for line in runs_file.read_text(encoding="utf-8").splitlines():
+                    line = line.strip()
+                    if not line:
+                        continue
+                    record = json.loads(line)
+                    rid = record.get("run_id")
+                    if rid:
+                        run_ids.add(rid)
+            except Exception:
+                continue
+    return len(run_ids)
+
+
 def _extract_agent_stats(agent_path: Path) -> tuple[int, int, list[str]]:
     """Extract node count, tool count, and tags from an agent directory.
 
@@ -79,7 +105,7 @@ def _extract_agent_stats(agent_path: Path) -> tuple[int, int, list[str]]:
     if agent_json.exists():
         try:
             data = json.loads(agent_json.read_text(encoding="utf-8"))
-            json_nodes = data.get("nodes", [])
+            json_nodes = data.get("graph", {}).get("nodes", []) or data.get("nodes", [])
             if node_count == 0:
                 node_count = len(json_nodes)
             tools: set[str] = set()
@@ -139,6 +165,7 @@ def discover_agents() -> dict[str, list[AgentEntry]]:
                     description=desc,
                     category=category,
                     session_count=_count_sessions(path.name),
+                    run_count=_count_runs(path.name),
                     node_count=node_count,
                     tool_count=tool_count,
                     tags=tags,

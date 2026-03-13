@@ -466,6 +466,23 @@ if [ "$USE_ASSOC_ARRAYS" = true ]; then
         ["cerebras:1"]=8192
     )
 
+    # Max context tokens (input history budget) per model, based on actual context windows.
+    # Leave ~10% headroom for system prompt and output tokens.
+    declare -A MODEL_CHOICES_MAXCONTEXTTOKENS=(
+        ["anthropic:0"]=180000   # Claude Haiku 4.5 — 200k context window
+        ["anthropic:1"]=180000   # Claude Sonnet 4 — 200k context window
+        ["anthropic:2"]=180000   # Claude Sonnet 4.5 — 200k context window
+        ["anthropic:3"]=180000   # Claude Opus 4.6 — 200k context window
+        ["openai:0"]=120000      # GPT-5 Mini — 128k context window
+        ["openai:1"]=120000      # GPT-5.2 — 128k context window
+        ["gemini:0"]=900000      # Gemini 3 Flash — 1M context window
+        ["gemini:1"]=900000      # Gemini 3.1 Pro — 1M context window
+        ["groq:0"]=120000        # Kimi K2 — 128k context window
+        ["groq:1"]=120000        # GPT-OSS 120B — 128k context window
+        ["cerebras:0"]=120000    # ZAI-GLM 4.7 — 128k context window
+        ["cerebras:1"]=120000    # Qwen3 235B — 128k context window
+    )
+
     declare -A MODEL_CHOICES_COUNT=(
         ["anthropic"]=4
         ["openai"]=2
@@ -501,6 +518,10 @@ if [ "$USE_ASSOC_ARRAYS" = true ]; then
 
     get_model_choice_maxtokens() {
         echo "${MODEL_CHOICES_MAXTOKENS[$1:$2]}"
+    }
+
+    get_model_choice_maxcontexttokens() {
+        echo "${MODEL_CHOICES_MAXCONTEXTTOKENS[$1:$2]}"
     }
 else
     # Bash 3.2 - use parallel indexed arrays
@@ -557,6 +578,9 @@ else
     MC_IDS=("claude-haiku-4-5-20251001" "claude-sonnet-4-20250514" "claude-sonnet-4-5-20250929" "claude-opus-4-6" "gpt-5-mini" "gpt-5.2" "gemini-3-flash-preview" "gemini-3.1-pro-preview" "moonshotai/kimi-k2-instruct-0905" "openai/gpt-oss-120b" "zai-glm-4.7" "qwen3-235b-a22b-instruct-2507")
     MC_LABELS=("Haiku 4.5 - Fast + cheap (recommended)" "Sonnet 4 - Fast + capable" "Sonnet 4.5 - Best balance" "Opus 4.6 - Most capable" "GPT-5 Mini - Fast + cheap (recommended)" "GPT-5.2 - Most capable" "Gemini 3 Flash - Fast (recommended)" "Gemini 3.1 Pro - Best quality" "Kimi K2 - Best quality (recommended)" "GPT-OSS 120B - Fast reasoning" "ZAI-GLM 4.7 - Best quality (recommended)" "Qwen3 235B - Frontier reasoning")
     MC_MAXTOKENS=(8192 8192 16384 32768 16384 16384 8192 8192 8192 8192 8192 8192)
+    # Max context tokens per model (same order as MC_PROVIDERS/MC_IDS above)
+    # Based on actual context windows with ~10% headroom for system prompt + output.
+    MC_MAXCONTEXTTOKENS=(180000 180000 180000 180000 120000 120000 900000 900000 120000 120000 120000 120000)
 
     # Helper: get number of model choices for a provider
     get_model_choice_count() {
@@ -625,6 +649,24 @@ else
             i=$((i + 1))
         done
     }
+
+    # Helper: get model choice max_context_tokens by provider and index
+    get_model_choice_maxcontexttokens() {
+        local provider_id="$1"
+        local idx="$2"
+        local count=0
+        local i=0
+        while [ $i -lt ${#MC_PROVIDERS[@]} ]; do
+            if [ "${MC_PROVIDERS[$i]}" = "$provider_id" ]; then
+                if [ $count -eq "$idx" ]; then
+                    echo "${MC_MAXCONTEXTTOKENS[$i]}"
+                    return
+                fi
+                count=$((count + 1))
+            fi
+            i=$((i + 1))
+        done
+    }
 fi
 
 # Configuration directory
@@ -664,7 +706,7 @@ SHELL_RC_FILE=$(detect_shell_rc)
 SHELL_NAME=$(basename "$SHELL")
 
 # Prompt the user to choose a model for their selected provider.
-# Sets SELECTED_MODEL and SELECTED_MAX_TOKENS.
+# Sets SELECTED_MODEL, SELECTED_MAX_TOKENS, and SELECTED_MAX_CONTEXT_TOKENS.
 prompt_model_selection() {
     local provider_id="$1"
     local count
@@ -674,6 +716,7 @@ prompt_model_selection() {
         # No curated choices for this provider (e.g. Mistral, DeepSeek)
         SELECTED_MODEL="$(get_default_model "$provider_id")"
         SELECTED_MAX_TOKENS=8192
+        SELECTED_MAX_CONTEXT_TOKENS=120000  # 128k context window (Mistral, DeepSeek, etc.)
         return
     fi
 
@@ -681,6 +724,7 @@ prompt_model_selection() {
         # Only one choice — auto-select
         SELECTED_MODEL="$(get_model_choice_id "$provider_id" 0)"
         SELECTED_MAX_TOKENS="$(get_model_choice_maxtokens "$provider_id" 0)"
+        SELECTED_MAX_CONTEXT_TOKENS="$(get_model_choice_maxcontexttokens "$provider_id" 0)"
         return
     fi
 
@@ -726,6 +770,7 @@ prompt_model_selection() {
             local idx=$((choice - 1))
             SELECTED_MODEL="$(get_model_choice_id "$provider_id" "$idx")"
             SELECTED_MAX_TOKENS="$(get_model_choice_maxtokens "$provider_id" "$idx")"
+            SELECTED_MAX_CONTEXT_TOKENS="$(get_model_choice_maxcontexttokens "$provider_id" "$idx")"
             echo ""
             echo -e "${GREEN}⬢${NC} Model: ${DIM}$SELECTED_MODEL${NC}"
             return
@@ -735,15 +780,16 @@ prompt_model_selection() {
 }
 
 # Function to save configuration
-# Args: provider_id env_var model max_tokens [use_claude_code_sub] [api_base] [use_codex_sub]
+# Args: provider_id env_var model max_tokens max_context_tokens [use_claude_code_sub] [api_base] [use_codex_sub]
 save_configuration() {
     local provider_id="$1"
     local env_var="$2"
     local model="$3"
     local max_tokens="$4"
-    local use_claude_code_sub="${5:-}"
-    local api_base="${6:-}"
-    local use_codex_sub="${7:-}"
+    local max_context_tokens="$5"
+    local use_claude_code_sub="${6:-}"
+    local api_base="${7:-}"
+    local use_codex_sub="${8:-}"
 
     # Fallbacks if not provided
     if [ -z "$model" ]; then
@@ -751,6 +797,9 @@ save_configuration() {
     fi
     if [ -z "$max_tokens" ]; then
         max_tokens=8192
+    fi
+    if [ -z "$max_context_tokens" ]; then
+        max_context_tokens=120000
     fi
 
     mkdir -p "$HIVE_CONFIG_DIR"
@@ -762,6 +811,7 @@ config = {
         'provider': '$provider_id',
         'model': '$model',
         'max_tokens': $max_tokens,
+        'max_context_tokens': $max_context_tokens,
         'api_key_env_var': '$env_var'
     },
     'created_at': '$(date -u +"%Y-%m-%dT%H:%M:%S+00:00")'
@@ -796,7 +846,8 @@ FOUND_ENV_VARS=()       # Corresponding env var names
 SELECTED_PROVIDER_ID="" # Will hold the chosen provider ID
 SELECTED_ENV_VAR=""     # Will hold the chosen env var
 SELECTED_MODEL=""       # Will hold the chosen model ID
-SELECTED_MAX_TOKENS=8192 # Will hold the chosen max_tokens
+SELECTED_MAX_TOKENS=8192 # Will hold the chosen max_tokens (output limit)
+SELECTED_MAX_CONTEXT_TOKENS=120000 # Will hold the chosen max_context_tokens (input history budget)
 SUBSCRIPTION_MODE=""    # "claude_code" | "codex" | "zai_code" | ""
 
 # ── Credential detection (silent — just set flags) ───────────
@@ -1006,6 +1057,7 @@ case $choice in
             SELECTED_PROVIDER_ID="anthropic"
             SELECTED_MODEL="claude-opus-4-6"
             SELECTED_MAX_TOKENS=32768
+            SELECTED_MAX_CONTEXT_TOKENS=180000  # Claude — 200k context window
             echo ""
             echo -e "${GREEN}⬢${NC} Using Claude Code subscription"
         fi
@@ -1017,6 +1069,7 @@ case $choice in
         SELECTED_ENV_VAR="ZAI_API_KEY"
         SELECTED_MODEL="glm-5"
         SELECTED_MAX_TOKENS=32768
+        SELECTED_MAX_CONTEXT_TOKENS=120000  # GLM-5 — 128k context window
         PROVIDER_NAME="ZAI"
         echo ""
         echo -e "${GREEN}⬢${NC} Using ZAI Code subscription"
@@ -1047,6 +1100,7 @@ case $choice in
             SELECTED_PROVIDER_ID="openai"
             SELECTED_MODEL="gpt-5.3-codex"
             SELECTED_MAX_TOKENS=16384
+            SELECTED_MAX_CONTEXT_TOKENS=120000  # GPT Codex — 128k context window
             echo ""
             echo -e "${GREEN}⬢${NC} Using OpenAI Codex subscription"
         fi
@@ -1058,6 +1112,7 @@ case $choice in
         SELECTED_PROVIDER_ID="minimax"
         SELECTED_MODEL="MiniMax-M2.5"
         SELECTED_MAX_TOKENS=32768
+        SELECTED_MAX_CONTEXT_TOKENS=900000  # MiniMax M2.5 — 1M context window
         SELECTED_API_BASE="https://api.minimax.io/v1"
         PROVIDER_NAME="MiniMax"
         SIGNUP_URL="https://platform.minimax.io/user-center/basic-information/interface-key"
@@ -1072,6 +1127,7 @@ case $choice in
         SELECTED_ENV_VAR="KIMI_API_KEY"
         SELECTED_MODEL="kimi-k2.5"
         SELECTED_MAX_TOKENS=32768
+        SELECTED_MAX_CONTEXT_TOKENS=120000  # Kimi K2.5 — 128k context window
         SELECTED_API_BASE="https://api.kimi.com/coding"
         PROVIDER_NAME="Kimi"
         SIGNUP_URL="https://www.kimi.com/code"
@@ -1263,17 +1319,17 @@ if [ -n "$SELECTED_PROVIDER_ID" ]; then
     echo ""
     echo -n "  Saving configuration... "
     if [ "$SUBSCRIPTION_MODE" = "claude_code" ]; then
-        save_configuration "$SELECTED_PROVIDER_ID" "" "$SELECTED_MODEL" "$SELECTED_MAX_TOKENS" "true" "" > /dev/null
+        save_configuration "$SELECTED_PROVIDER_ID" "" "$SELECTED_MODEL" "$SELECTED_MAX_TOKENS" "$SELECTED_MAX_CONTEXT_TOKENS" "true" "" > /dev/null
     elif [ "$SUBSCRIPTION_MODE" = "codex" ]; then
-        save_configuration "$SELECTED_PROVIDER_ID" "" "$SELECTED_MODEL" "$SELECTED_MAX_TOKENS" "" "" "true" > /dev/null
+        save_configuration "$SELECTED_PROVIDER_ID" "" "$SELECTED_MODEL" "$SELECTED_MAX_TOKENS" "$SELECTED_MAX_CONTEXT_TOKENS" "" "" "true" > /dev/null
     elif [ "$SUBSCRIPTION_MODE" = "zai_code" ]; then
-        save_configuration "$SELECTED_PROVIDER_ID" "$SELECTED_ENV_VAR" "$SELECTED_MODEL" "$SELECTED_MAX_TOKENS" "" "https://api.z.ai/api/coding/paas/v4" > /dev/null
+        save_configuration "$SELECTED_PROVIDER_ID" "$SELECTED_ENV_VAR" "$SELECTED_MODEL" "$SELECTED_MAX_TOKENS" "$SELECTED_MAX_CONTEXT_TOKENS" "" "https://api.z.ai/api/coding/paas/v4" > /dev/null
     elif [ "$SUBSCRIPTION_MODE" = "minimax_code" ]; then
-        save_configuration "$SELECTED_PROVIDER_ID" "$SELECTED_ENV_VAR" "$SELECTED_MODEL" "$SELECTED_MAX_TOKENS" "" "$SELECTED_API_BASE" > /dev/null
+        save_configuration "$SELECTED_PROVIDER_ID" "$SELECTED_ENV_VAR" "$SELECTED_MODEL" "$SELECTED_MAX_TOKENS" "$SELECTED_MAX_CONTEXT_TOKENS" "" "$SELECTED_API_BASE" > /dev/null
     elif [ "$SUBSCRIPTION_MODE" = "kimi_code" ]; then
-        save_configuration "$SELECTED_PROVIDER_ID" "$SELECTED_ENV_VAR" "$SELECTED_MODEL" "$SELECTED_MAX_TOKENS" "" "$SELECTED_API_BASE" > /dev/null
+        save_configuration "$SELECTED_PROVIDER_ID" "$SELECTED_ENV_VAR" "$SELECTED_MODEL" "$SELECTED_MAX_TOKENS" "$SELECTED_MAX_CONTEXT_TOKENS" "" "$SELECTED_API_BASE" > /dev/null
     else
-        save_configuration "$SELECTED_PROVIDER_ID" "$SELECTED_ENV_VAR" "$SELECTED_MODEL" "$SELECTED_MAX_TOKENS" > /dev/null
+        save_configuration "$SELECTED_PROVIDER_ID" "$SELECTED_ENV_VAR" "$SELECTED_MODEL" "$SELECTED_MAX_TOKENS" "$SELECTED_MAX_CONTEXT_TOKENS" > /dev/null
     fi
     echo -e "${GREEN}⬢${NC}"
     echo -e "  ${DIM}~/.hive/configuration.json${NC}"

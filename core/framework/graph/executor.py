@@ -34,6 +34,16 @@ from framework.schemas.checkpoint import Checkpoint
 from framework.storage.checkpoint_store import CheckpointStore
 
 
+def _default_max_context_tokens() -> int:
+    """Resolve max_context_tokens from global config, falling back to 32000."""
+    try:
+        from framework.config import get_max_context_tokens
+
+        return get_max_context_tokens()
+    except Exception:
+        return 32_000
+
+
 @dataclass
 class ExecutionResult:
     """Result of executing a graph."""
@@ -138,6 +148,7 @@ class GraphExecutor:
         tool_provider_map: dict[str, str] | None = None,
         dynamic_tools_provider: Callable | None = None,
         dynamic_prompt_provider: Callable | None = None,
+        iteration_metadata_provider: Callable | None = None,
     ):
         """
         Initialize the executor.
@@ -183,6 +194,7 @@ class GraphExecutor:
         self.tool_provider_map = tool_provider_map
         self.dynamic_tools_provider = dynamic_tools_provider
         self.dynamic_prompt_provider = dynamic_prompt_provider
+        self.iteration_metadata_provider = iteration_metadata_provider
 
         # Parallel execution settings
         self.enable_parallel_execution = enable_parallel_execution
@@ -330,7 +342,7 @@ class GraphExecutor:
                 _depth,
             )
         else:
-            max_tokens = getattr(conversation, "_max_history_tokens", 32000)
+            max_tokens = getattr(conversation, "_max_context_tokens", 32000)
             target_tokens = max_tokens // 2
             target_chars = target_tokens * 4
 
@@ -1799,6 +1811,7 @@ class GraphExecutor:
             shared_node_registry=self.node_registry,  # For subagent escalation routing
             dynamic_tools_provider=self.dynamic_tools_provider,
             dynamic_prompt_provider=self.dynamic_prompt_provider,
+            iteration_metadata_provider=self.iteration_metadata_provider,
         )
 
     VALID_NODE_TYPES = {
@@ -1872,7 +1885,7 @@ class GraphExecutor:
                     max_tool_calls_per_turn=lc.get("max_tool_calls_per_turn", 30),
                     tool_call_overflow_margin=lc.get("tool_call_overflow_margin", 0.5),
                     stall_detection_threshold=lc.get("stall_detection_threshold", 3),
-                    max_history_tokens=lc.get("max_history_tokens", 32000),
+                    max_context_tokens=lc.get("max_context_tokens", _default_max_context_tokens()),
                     max_tool_result_chars=lc.get("max_tool_result_chars", 30_000),
                     spillover_dir=spillover,
                     hooks=lc.get("hooks", {}),
