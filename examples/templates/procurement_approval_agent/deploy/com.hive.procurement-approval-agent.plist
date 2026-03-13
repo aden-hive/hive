@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.hive.procurement-approval-agent</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/usr/bin/env</string>
+    <string>python3</string>
+    <string>-m</string>
+    <string>procurement_approval_agent</string>
+    <string>monitor</string>
+    <string>--watch-dir</string>
+    <string>/watched_requests</string>
+    <string>--poll-interval</string>
+    <string>2.0</string>
+    <string>--mock</string>
+  </array>
+  <key>WorkingDirectory</key>
+  <string>/Users/vasu/Desktop/hive</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PYTHONPATH</key>
+    <string>core:examples/templates</string>
+    <key>HIVE_AGENT_STORAGE_ROOT</key>
+    <string>/tmp/hive_agents</string>
+  </dict>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+  <key>StandardOutPath</key>
+  <string>/tmp/procurement_approval_agent_launchd.log</string>
+  <key>StandardErrorPath</key>
+  <string>/tmp/procurement_approval_agent_launchd.log</string>
+</dict>
+</plist>
