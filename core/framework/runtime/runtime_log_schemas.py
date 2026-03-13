@@ -11,6 +11,8 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
+from framework.runtime.evidence import ExecutionAttempt
+
 # ---------------------------------------------------------------------------
 # Level 3: Tool logs (most granular) — per step within any node
 # ---------------------------------------------------------------------------
@@ -53,11 +55,9 @@ class NodeStepLog(BaseModel):
     error: str = ""  # Error message if step failed
     stacktrace: str = ""  # Full stack trace if exception occurred
     is_partial: bool = False  # True if step didn't complete normally
-    # OTel / trace context (from observability; empty if not set):
-    trace_id: str = ""  # OTel trace id (e.g. from set_trace_context)
-    span_id: str = ""  # OTel span id (16 hex chars per step)
-    parent_span_id: str = ""  # Optional; for nested span hierarchy
-    execution_id: str = ""  # Session/run correlation id
+    # Execution evidence (optional, backward compatible):
+    execution_attempt: ExecutionAttempt | None = None
+    evidence_quality: str = "unknown"  # Denormalized for easy querying
 
 
 # ---------------------------------------------------------------------------
