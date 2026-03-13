@@ -1367,6 +1367,42 @@ def register_queen_lifecycle_tools(
                         existing.append(leaf_id)
                     parent["sub_agents"] = existing
 
+        # ── Remove orphaned GCU / subagent nodes ──────────────────
+        # After enforcing the leaf constraint, any GCU/subagent node
+        # that has zero edges AND is not in any parent's sub_agents
+        # list is orphaned — remove it and warn the queen.
+        all_edge_node_ids = set()
+        for e in validated_edges:
+            all_edge_node_ids.add(e["source"])
+            all_edge_node_ids.add(e["target"])
+        all_sa_refs: set[str] = set()
+        for n in validated_nodes:
+            for sa_id in n.get("sub_agents") or []:
+                all_sa_refs.add(sa_id)
+
+        orphaned_ids: list[str] = []
+        for lid in leaf_node_ids:
+            if lid not in all_edge_node_ids and lid not in all_sa_refs:
+                orphaned_ids.append(lid)
+
+        if orphaned_ids:
+            for oid in orphaned_ids:
+                logger.warning(
+                    "GCU/subagent node '%s' is orphaned (no edges, "
+                    "not in any parent's sub_agents) — removing it.",
+                    oid,
+                )
+                topology_corrections.append(
+                    f"GCU node '{oid}' was orphaned (no edges, not "
+                    f"assigned as a sub-agent of any parent node) — "
+                    f"removed. Add it to a parent node's sub_agents "
+                    f"list and re-save the draft."
+                )
+            validated_nodes[:] = [
+                n for n in validated_nodes if n["id"] not in set(orphaned_ids)
+            ]
+            node_by_id_v = {n["id"]: n for n in validated_nodes}
+
         # Synthesize visual edges for sub-agents that are referenced in
         # a parent's sub_agents list but have no connecting edge yet.
         node_id_set = {n["id"] for n in validated_nodes}
