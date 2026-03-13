@@ -33,7 +33,7 @@ async def example_1_programmatic_registration():
     print(f"Registered {num_tools} tools from tools MCP server")
 
     # List all available tools
-    tools = runner._tool_registry.get_tools()
+    tools = runner.list_tools()
     print(f"\nAvailable tools: {list(tools.keys())}")
 
     # Run the agent with MCP tools available

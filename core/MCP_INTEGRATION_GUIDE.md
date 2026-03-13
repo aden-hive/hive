@@ -304,7 +304,7 @@ If you get connection errors with STDIO transport:
 If a tool is registered but not found:
 
 1. Verify the server registered successfully (check logs)
-2. List available tools: `runner._tool_registry.get_registered_names()`
+2. List available tools: `runner.list_tools()`
 3. Check tool name spelling in your node configuration
 
 ### HTTP Server Not Responding
