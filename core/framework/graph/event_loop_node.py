@@ -779,15 +779,34 @@ class EventLoopNode(NodeProtocol):
                             * (2 ** (_stream_retry_count - 1)),
                             self._config.stream_retry_max_delay,
                         )
-                        logger.warning(
-                            "[%s] iter=%d: transient error (%s), retrying in %.1fs (%d/%d): %s",
+                        if _stream_retry_count == 1:
+                            logger.warning(
+                                "[%s] iter=%d: transient error (%s), "
+                                "retrying in %.1fs (%d/%d): %s",
+                                node_id,
+                                iteration,
+                                type(e).__name__,
+                                delay,
+                                _stream_retry_count,
+                                self._config.max_stream_retries,
+                                str(e)[:200],
+                            )
+                        else:
+                            logger.warning(
+                                "[%s] iter=%d: transient error (%s), "
+                                "retrying in %.1fs (%d/%d)",
+                                node_id,
+                                iteration,
+                                type(e).__name__,
+                                delay,
+                                _stream_retry_count,
+                                self._config.max_stream_retries,
+                            )
+                        logger.debug(
+                            "[%s] iter=%d: full transient error: %s",
                             node_id,
                             iteration,
-                            type(e).__name__,
-                            delay,
-                            _stream_retry_count,
-                            self._config.max_stream_retries,
-                            str(e)[:200],
+                            str(e),
                         )
                         if self._event_bus:
                             await self._event_bus.emit_node_retry(
