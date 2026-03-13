@@ -139,6 +139,7 @@ from .vercel import VERCEL_CREDENTIALS
 from .youtube import YOUTUBE_CREDENTIALS
 from .zendesk import ZENDESK_CREDENTIALS
 from .zoho_crm import ZOHO_CRM_CREDENTIALS
+from .virustotal import VIRUSTOTAL_CREDENTIALS
 from .zoom import ZOOM_CREDENTIALS
 
 # Merged registry of all credentials
@@ -217,6 +218,7 @@ CREDENTIAL_SPECS = {
     **ZENDESK_CREDENTIALS,
     **ZOHO_CRM_CREDENTIALS,
     **ZOOM_CREDENTIALS,
+    **VIRUSTOTAL_CREDENTIALS,
 }
 
 __all__ = [
@@ -309,4 +311,5 @@ __all__ = [
     "ZENDESK_CREDENTIALS",
     "ZOHO_CRM_CREDENTIALS",
     "ZOOM_CREDENTIALS",
+    "VIRUSTOTAL_CREDENTIALS",
 ]

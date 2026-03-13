@@ -140,6 +140,7 @@ from .youtube_tool import register_tools as register_youtube
 from .youtube_transcript_tool import register_tools as register_youtube_transcript
 from .zendesk_tool import register_tools as register_zendesk
 from .zoho_crm_tool import register_tools as register_zoho_crm
+from .virustotal_tool import register_tools as register_virustotal
 from .zoom_tool import register_tools as register_zoom
 
 
@@ -298,6 +299,7 @@ def _register_unverified(
     register_youtube(mcp, credentials=credentials)
     register_zendesk(mcp, credentials=credentials)
     register_zoho_crm(mcp, credentials=credentials)
+    register_virustotal(mcp, credentials=credentials)
     register_zoom(mcp, credentials=credentials)
 
 
