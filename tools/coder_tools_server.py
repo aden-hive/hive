@@ -2271,7 +2271,7 @@ if __name__ == "__main__":
             "args": ["run", "python", "-m", "gcu.server", "--stdio"],
             "cwd": "../../tools",
             "description": "GCU browser automation tools",
-        }
+        },
     }
 
     _write("mcp_servers.json", json.dumps(mcp_config, indent=2))
