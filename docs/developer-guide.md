@@ -124,10 +124,9 @@ To use Codex with Hive:
 2. Start the configured MCP-assisted workflow
 
 Example:
-```
+```text
 Start Codex in the repo root and use the configured MCP tools
 ```
-
 
 ### Opencode Support
 To enable Opencode integration:
@@ -414,12 +413,11 @@ def process_ticket(
         Dictionary with processing results
     """
     # Implementation
-    return {"status": "processed", "id": ticket_id}
-
+    return {"status": "processed", "customer_id": customer_id}
 # Avoid
 def process_ticket(ticket_content, customer_id, priority=None):
     # No types, no docstring
-    return {"status": "processed", "id": ticket_id}
+    return {"status": "processed", "customer_id": customer_id}
 ```
 
 ### Agent Package Structure
