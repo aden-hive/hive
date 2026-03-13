@@ -83,10 +83,16 @@ class SafeEvalVisitor(ast.NodeVisitor):
         return tuple(self.visit(elt) for elt in node.elts)
 
     def visit_Dict(self, node: ast.Dict) -> dict:
+        # Check for dict unpacking (**expr) which appears as None keys in AST
+        # Silent skipping of unpacking is a security/data integrity issue
+        if any(k is None for k in node.keys):
+            raise ValueError(
+                "Dict unpacking (**expr) is not allowed in safe evaluations. "
+                "Flatten the dict manually or use individual key access."
+            )
         return {
             self.visit(k): self.visit(v)
             for k, v in zip(node.keys, node.values, strict=False)
-            if k is not None
         }
 
     # --- Operations ---
