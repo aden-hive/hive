@@ -1,0 +1,204 @@
+{
+	"agent": {
+		"id": "influencer_matchmaker",
+		"name": "Brand-Influencer Matchmaker",
+		"version": "1.0.0",
+		"description": "Analyzes brand websites and influencer presence to calculate a compatibility score and generate a strategic sales briefing doc."
+	},
+	"graph": {
+		"id": "influencer_matchmaker-graph",
+		"goal_id": "influencer-match-report",
+		"version": "1.0.0",
+		"entry_node": "intake",
+		"entry_points": {
+			"start": "intake"
+		},
+		"pause_nodes": [],
+		"terminal_nodes": [
+			"generate-brief"
+		],
+		"nodes": [
+			{
+			"id": "intake",
+			"name": "Intake",
+			"description": "Collect the target Brand URL and the Influencer's name or social handle from the user.",
+			"node_type": "event_loop",
+			"input_keys": [],
+			"output_keys": [
+				"target_data"
+			],
+			"nullable_output_keys": [],
+			"input_schema": {},
+			"output_schema": {},
+			"system_prompt": "You are the intake assistant for the Brand-Influencer Matchmaker.\n\n**STEP 1:** Greet the user and ask for:\n1. The Brand's Website URL\n2. The Influencer's name or social media handle.\n\n**STEP 2:** Once provided, call set_output(\"target_data\", {\"brand_url\": \"...\", \"influencer_query\": \"...\"}) and proceed.",
+			"tools": [],
+			"model": null,
+			"function": null,
+			"routes": {},
+			"max_retries": 3,
+			"retry_on": [],
+			"max_node_visits": 1,
+			"output_model": null,
+			"max_validation_retries": 2,
+			"client_facing": true
+			},
+			{
+			"id": "brand-analysis",
+			"name": "Brand DNA Analysis",
+			"description": "Scrape the brand's website to identify core values, target audience, and brand voice.",
+			"node_type": "event_loop",
+			"input_keys": [
+				"target_data"
+			],
+			"output_keys": [
+				"brand_profile"
+			],
+			"nullable_output_keys": [],
+			"input_schema": {},
+			"output_schema": {},
+			"system_prompt": "You are a Brand Strategist.\n\n**Task:** Use web_scrape on the provided brand_url. Focus on the 'About Us', 'Mission', or 'Product' pages.\n\n**Extract:**\n1. Brand Persona (e.g., Luxury, Eco-friendly, High-performance).\n2. Target Audience (e.g., Gen-Z, Corporate Professionals, Parents).\n3. Core Value Keywords (5-10 keywords).\n\nOutput a summary of the Brand DNA.",
+			"tools": [
+				"web_scrape"
+			],
+			"model": null,
+			"function": null,
+			"routes": {},
+			"max_retries": 3,
+			"retry_on": [],
+			"max_node_visits": 1,
+			"output_model": null,
+			"max_validation_retries": 2,
+			"client_facing": false
+			},
+			{
+			"id": "influencer-analysis",
+			"name": "Influencer Persona Research",
+			"description": "Research the influencer's recent public activity and sentiment.",
+			"node_type": "event_loop",
+			"input_keys": [
+				"target_data"
+			],
+			"output_keys": [
+				"influencer_profile"
+			],
+			"nullable_output_keys": [],
+			"input_schema": {},
+			"output_schema": {},
+			"system_prompt": "You are a Creator Economy Analyst.\n\n**Task:** Use web_search to find the influencer's recent content, news, or social profiles.\n\n**Extract:**\n1. Primary Content Topics (e.g., Fitness, Tech reviews, Humor).\n2. Audience Sentiment (How do people react to them?).\n3. Value Alignment (What do they stand for?).\n4. Red Flags (Any recent controversies or misaligned partnerships?).",
+			"tools": [
+				"web_search",
+				"web_scrape"
+			],
+			"model": null,
+			"function": null,
+			"routes": {},
+			"max_retries": 3,
+			"retry_on": [],
+			"max_node_visits": 1,
+			"output_model": null,
+			"max_validation_retries": 2,
+			"client_facing": false
+			},
+			{
+			"id": "match-scoring",
+			"name": "Affinity Match Scoring",
+			"description": "Compare Brand DNA and Influencer Persona to calculate a match score.",
+			"node_type": "event_loop",
+			"input_keys": [
+				"brand_profile",
+				"influencer_profile"
+			],
+			"output_keys": [
+				"match_data"
+			],
+			"nullable_output_keys": [],
+			"input_schema": {},
+			"output_schema": {},
+			"system_prompt": "You are a Partnership Strategist. Compare the brand_profile and influencer_profile.\n\n**Calculation Logic:**\n1. **Audience Overlap (40%)**: Does the influencer's audience match the brand's target?\n2. **Tone Alignment (30%)**: Is the brand voice consistent with the influencer's vibe?\n3. **Risk Factor (-X%)**: Subtract points for any red flags found.\n\n**Output:** A numerical score (0-100) and 3 clear 'Reasons for this Score'.",
+			"tools": [],
+			"model": null,
+			"function": null,
+			"routes": {},
+			"max_retries": 3,
+			"retry_on": [],
+			"max_node_visits": 1,
+			"output_model": null,
+			"max_validation_retries": 2,
+			"client_facing": false
+			},
+			{
+			"id": "generate-brief",
+			"name": "Generate Sales Brief",
+			"description": "Format the analysis into a polished Sales Briefing.",
+			"node_type": "event_loop",
+			"input_keys": [
+				"match_data"
+			],
+			"output_keys": [
+				"final_brief"
+			],
+			"nullable_output_keys": [],
+			"input_schema": {},
+			"output_schema": {},
+			"system_prompt": "You are the Report Compiler.\n\n**Task:** Create a professional HTML report titled 'Influencer Partnership Brief'.\n\nInclude:\n- Big Match Score (e.g., 85/100).\n- Section 1: Why it works (Pros).\n- Section 2: Potential Risks (Cons).\n- Section 3: Recommended first outreach message.\n\nUse save_data and serve_file_to_user to deliver the brief.",
+			"tools": [
+				"save_data",
+				"serve_file_to_user"
+			],
+			"model": null,
+			"function": null,
+			"routes": {},
+			"max_retries": 3,
+			"retry_on": [],
+			"max_node_visits": 1,
+			"output_model": null,
+			"max_validation_retries": 2,
+			"client_facing": false
+			}
+		],
+		"edges": [
+			{ "id": "e1", "source": "intake", "target": "brand-analysis", "condition": "on_success", "priority": 1 },
+			{ "id": "e2", "source": "brand-analysis", "target": "influencer-analysis", "condition": "on_success", "priority": 1 },
+			{ "id": "e3", "source": "influencer-analysis", "target": "match-scoring", "condition": "on_success", "priority": 1 },
+			{ "id": "e4", "source": "match-scoring", "target": "generate-brief", "condition": "on_success", "priority": 1 }
+		],
+		"max_steps": 50,
+		"max_retries_per_node": 3,
+		"description": "Autonomous Sales-Enablement Agent for Brand-Influencer Matchmaking.",
+		"created_at": "2026-02-06T12:00:00.000000"
+	},
+	"goal": {
+		"id": "influencer-match-report",
+		"name": "Influencer Match Success",
+		"description": "Deliver a data-backed compatibility score between a brand and an influencer to aid sales decisions.",
+		"status": "draft",
+		"success_criteria": [
+			{ "id": "sc1", "description": "Successfully identified Brand DNA", "target": "Yes", "weight": 0.2, "met": false },
+			{ "id": "sc2", "description": "Extracted Influencer sentiment", "target": "Yes", "weight": 0.2, "met": false },
+			{ "id": "sc3", "description": "Match Score is calculated", "target": "0-100", "weight": 0.3, "met": false },
+			{ "id": "sc4", "description": "Brief delivered", "target": "Yes", "weight": 0.3, "met": false }
+		],
+		"constraints": [
+			{ "id": "c1", "description": "Never use fabricated red flags", "constraint_type": "hard", "category": "quality" },
+			{ "id": "c2", "description": "Must cite the Brand URL in the report", "constraint_type": "hard", "category": "compliance" }
+		],
+		"context": {},
+		"required_capabilities": [],
+		"input_schema": {},
+		"output_schema": {},
+		"version": "1.0.0",
+		"created_at": "2026-02-06T12:00:00.000000",
+		"updated_at": "2026-02-06T12:00:00.000000"
+	},
+	"required_tools": [
+		"web_search",
+		"web_scrape",
+		"save_data",
+		"serve_file_to_user"
+	],
+	"metadata": {
+		"created_at": "2026-02-06T12:00:00.000000",
+		"node_count": 5,
+		"edge_count": 4
+	}
+}
