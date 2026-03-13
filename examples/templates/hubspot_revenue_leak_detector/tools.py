@@ -17,7 +17,8 @@ Node flow:
   analyze   → detect_revenue_leaks(cycle, deals_json)  [returns leaks_json]
               → set_output("leaks_json", ...)
 
-  notify    → build_telegram_alert(..., leaks_json)  [builds + sends Telegram message internally]
+  notify    → build_telegram_alert(..., leaks_json)  [builds HTML alert, returns html_message + chat_id]
+              → telegram_send_message (MCP) sends the message
 
   followup  → prepare_followup_emails(cycle, leaks_json)
               → gmail_create_draft (MCP) per GHOSTED contact
@@ -32,7 +33,7 @@ Required credentials (via env vars / MCP credential store):
 import html as _html
 import json
 import os
-import urllib.request
+import re
 from datetime import datetime, timezone
 from typing import Any
 
@@ -41,11 +42,45 @@ from framework.llm.provider import Tool, ToolUse, ToolResult
 MAX_CYCLES = 3  # halt after this many consecutive low-severity cycles
 MAX_TOTAL_CYCLES = 10  # absolute cap — prevents infinite loops
 
+# Module-level deal cache: kept for debugging only.
+# Primary data flow uses deals_json passed via context between nodes.
+_DEALS_CACHE: dict[int, list[dict]] = {}
+
+
+def validate_credentials() -> tuple[bool, list[str]]:
+    """Return (all_required_present, missing_list).
+    
+    Checks HubSpot (required), Telegram bot token (required), and Telegram chat ID (required).
+    Does NOT check Google OAuth as that's MCP-managed.
+    
+    Returns:
+        (True, []) if all required credentials are present
+        (False, [list of missing]) if any are missing
+    """
+    missing = []
+    if not os.getenv("HUBSPOT_ACCESS_TOKEN", "").strip():
+        missing.append("HUBSPOT_ACCESS_TOKEN")
+    if not os.getenv("TELEGRAM_BOT_TOKEN", "").strip():
+        missing.append("TELEGRAM_BOT_TOKEN")
+    if not os.getenv("TELEGRAM_CHAT_ID", "").strip():
+        missing.append("TELEGRAM_CHAT_ID")
+    return (len(missing) == 0, missing)
+
 _SEVERITY_EMOJI: dict[str, str] = {
     "low": "🟢",
     "medium": "🟡",
     "high": "🔴",
     "critical": "🚨",
+}
+
+# Configurable thresholds for leak detection
+_LEAK_THRESHOLDS = {
+    "ghosted_days": 30,
+    "stalled_days": 14,
+    "critical_ghosted_count": 2,
+    "critical_at_risk_usd": 50_000,
+    "high_leak_count": 3,
+    "high_at_risk_usd": 20_000,
 }
 
 # HubSpot API deal stage → human-readable name
@@ -67,47 +102,34 @@ _STAGE_MAP: dict[str, str] = {
 
 def _get_telegram_chat_id() -> str:
     """
-    Return TELEGRAM_CHAT_ID from env.
+    Return TELEGRAM_CHAT_ID from env with validation.
 
     Chat ID discovery is handled outside this agent — set TELEGRAM_CHAT_ID
     in the environment before running. To find your chat ID, send any message
     to your bot and check: https://api.telegram.org/bot<TOKEN>/getUpdates
+    
+    Returns:
+        Valid chat ID string, or empty string if missing/invalid
     """
-    return os.getenv("TELEGRAM_CHAT_ID", "").strip()
-
-
-def _send_telegram(chat_id: str, html_message: str, parse_mode: str = "HTML") -> dict:
-    """
-    Send a Telegram message directly via the Bot API.
-
-    Uses urllib (stdlib only) so the full message reaches Telegram without
-    the LLM ever touching or relaying the text content.
-
-    Returns a dict with "ok": True on success, or "error": str on failure.
-    """
-    token = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
-    if not token:
-        return {"error": "TELEGRAM_BOT_TOKEN env var not set"}
+    chat_id = os.getenv("TELEGRAM_CHAT_ID", "").strip()
+    
+    # Telegram chat IDs are numeric (positive for users, negative for groups)
     if not chat_id:
-        return {"error": "chat_id is empty"}
-
-    url = f"https://api.telegram.org/bot{token}/sendMessage"
-    payload = json.dumps({
-        "chat_id": chat_id,
-        "text": html_message,
-        "parse_mode": parse_mode,
-    }).encode()
-    req = urllib.request.Request(
-        url, data=payload, headers={"Content-Type": "application/json"}
-    )
-    try:
-        with urllib.request.urlopen(req, timeout=30) as resp:
-            data = json.loads(resp.read())
-            if data.get("ok"):
-                return {"ok": True}
-            return {"error": data.get("description", "unknown Telegram error")}
-    except Exception as exc:  # noqa: BLE001
-        return {"error": str(exc)}
+        print(
+            "  ⚠️  TELEGRAM_CHAT_ID not set in environment.\n"
+            "     To find your chat ID, send a message to your bot and check:\n"
+            "     https://api.telegram.org/bot<TOKEN>/getUpdates"
+        )
+        return ""
+    
+    if not re.fullmatch(r"-?\d+", chat_id):
+        print(
+            f"  ✗ TELEGRAM_CHAT_ID '{chat_id}' is invalid. Expected numeric ID.\n"
+            "    Check: https://api.telegram.org/bot<TOKEN>/getUpdates"
+        )
+        return ""
+    
+    return chat_id
 
 
 # ---------------------------------------------------------------------------
@@ -144,10 +166,16 @@ def _scan_pipeline(cycle: int, deals: list | None = None) -> dict:
         cycle_num = 0
     next_cycle = cycle_num + 1
 
+    # NOTE: Credential validation removed from scan_pipeline since MCP tools
+    # (hubspot_search_deals, hubspot_get_deal, hubspot_get_contact) handle
+    # their own authentication. Validation is only needed for Telegram and email
+    # actions in later nodes (notify, followup).
+    # Keeping the agent running allows deals to be processed and analyzed.
+
     if not deals:
         print(
             f"\n[scan_pipeline] Cycle {next_cycle} — no deals provided.\n"
-            "  Ensure HUBSPOT_ACCESS_TOKEN is set and hubspot_search_deals returned results."
+            "  Ensure hubspot_search_deals returned results."
         )
         return {
             "next_cycle": next_cycle,
@@ -159,8 +187,11 @@ def _scan_pipeline(cycle: int, deals: list | None = None) -> dict:
     # Normalise each deal — guard against LLM sending partial objects
     now = datetime.now(timezone.utc)
     normalised: list[dict] = []
+    skipped_count = 0
     for raw in deals:
         if not isinstance(raw, dict):
+            print(f"  ⚠️  Skipped non-dict item: {type(raw)}")
+            skipped_count += 1
             continue
 
         # Resolve days_inactive from real sales activity.
@@ -171,28 +202,48 @@ def _scan_pipeline(cycle: int, deals: list | None = None) -> dict:
             raw.get("notes_last_contacted")
             or raw.get("hs_lastmodifieddate")
         )
+        days_inactive = 0
         if last_activity:
             try:
-                dt = datetime.fromisoformat(str(last_activity).replace("Z", "+00:00"))
+                s = str(last_activity).strip()
+                # Normalise Z suffix and handle offset-aware strings
+                s = s.replace("Z", "+00:00")
+                # Remove sub-second precision beyond 6 digits if present
+                s = re.sub(r"(\.\d{6})\d+", r"\1", s)
+                dt = datetime.fromisoformat(s)
+                if dt.tzinfo is None:
+                    dt = dt.replace(tzinfo=timezone.utc)
                 days_inactive = max(0, (now - dt).days)
-            except (ValueError, OverflowError):
+                # Sanity check: reject dates in the future or >10 years in past
+                if days_inactive < 0 or days_inactive > 3650:
+                    print(f"  ⚠️  Deal {raw.get('id')} has invalid date: {last_activity} → {days_inactive}d")
+                    days_inactive = int(raw.get("days_inactive") or 0)
+            except (ValueError, OverflowError, TypeError) as e:
+                print(f"  ⚠️  Deal {raw.get('id')} failed to parse date '{last_activity}': {e}")
+                # Fall back only if parse fails
                 days_inactive = int(raw.get("days_inactive") or 0)
         else:
+            # No activity date — use provided days_inactive or default to 0
             days_inactive = int(raw.get("days_inactive") or 0)
 
         # Resolve stage — accept raw API key or already-mapped name.
-        # Numeric IDs are custom pipeline stages; label them clearly.
+        # Normalise to lowercase for map lookup so casing variants (closedWon,
+        # CLOSEDWON) are handled correctly.
         raw_stage = str(raw.get("stage") or raw.get("dealstage") or "unknown")
-        if raw_stage in _STAGE_MAP:
-            stage = _STAGE_MAP[raw_stage]
+        raw_stage_lower = raw_stage.lower()
+
+        # Skip closed deals — case-insensitive
+        if raw_stage_lower in ("closedwon", "closedlost"):
+            continue
+
+        if raw_stage_lower in _STAGE_MAP:
+            stage = _STAGE_MAP[raw_stage_lower]
         elif raw_stage.isdigit():
             stage = f"Stage {raw_stage}"  # custom pipeline numeric ID
         else:
-            stage = raw_stage.replace("_", " ").title()
+            # Custom stage name: preserve the original with formatting
+            stage = raw_stage.replace("_", " ").title().replace("-", " ")
 
-        # Skip closed deals
-        if raw_stage in ("closedwon", "closedlost"):
-            continue
 
         try:
             value = int(float(raw.get("value") or raw.get("amount") or 0))
@@ -211,6 +262,18 @@ def _scan_pipeline(cycle: int, deals: list | None = None) -> dict:
                 "value": value,
             }
         )
+
+    # Store in module-level cache so detect_revenue_leaks can always read the
+    # full deal list — immune to LLM truncation of the deals_json argument.
+    # IMPORTANT: Store under the cycle number that WILL be passed to next node.
+    # If scan_pipeline receives cycle=N, it stores at cache key N.
+    # Then detect_revenue_leaks receives cycle=N and should find data at key N.
+    _DEALS_CACHE[cycle_num] = normalised
+    # Cap cache to last 10 keys to prevent unbounded growth across many cycles.
+    if len(_DEALS_CACHE) > 10:
+        for old_key in sorted(_DEALS_CACHE.keys())[:-10]:
+            del _DEALS_CACHE[old_key]
+
 
     print(
         f"\n[scan_pipeline] Cycle {next_cycle} — {len(normalised)} open deal(s) from HubSpot"
@@ -252,20 +315,39 @@ def _detect_revenue_leaks(cycle: int, deals_json: str | None = None) -> dict:
     except (ValueError, TypeError):
         cycle_num = 0
 
-    # Prefer deals_json passed explicitly (survives node async context boundary).
-    # Fall back to contextvar for single-session / test use.
-    if deals_json is not None:
+    # PRIORITY 1: module-level cache from scan_pipeline (immune to LLM truncation).
+    # The framework loads tools.py once per agent run via discover_from_module,
+    # so _DEALS_CACHE is shared across all tool calls in the same run.
+    # Checks exact cycle, adjacent cycles (off-by-one guard), then most recent.
+    # PRIORITY 2: deals_json arg passed by LLM (may be truncated for large pipelines).
+    deals: list[dict] = []
+    for key in [cycle_num, cycle_num - 1, cycle_num + 1]:
+        if _DEALS_CACHE.get(key):
+            deals = _DEALS_CACHE[key]
+            print(f"[detect_revenue_leaks] Loaded {len(deals)} deals from cache (key={key})")
+            break
+    if not deals:
+        # Fall back to most-recent cache entry regardless of cycle number
+        for key in sorted(_DEALS_CACHE.keys(), reverse=True):
+            if _DEALS_CACHE[key]:
+                deals = _DEALS_CACHE[key]
+                print(f"[detect_revenue_leaks] Loaded {len(deals)} deals from most-recent cache (key={key})")
+                break
+    if not deals and deals_json is not None:
         try:
             deals = json.loads(deals_json)
-        except (json.JSONDecodeError, TypeError):
+            if deals:
+                print(f"[detect_revenue_leaks] Loaded {len(deals)} deals from deals_json arg (cache was empty)")
+        except (json.JSONDecodeError, TypeError) as e:
+            print(f"[detect_revenue_leaks] Failed to parse deals_json: {e}")
             deals = []
-    else:
-        deals = []
 
     if not deals:
         _no_data_halt = cycle_num >= MAX_CYCLES
         print(
-            f"[detect_revenue_leaks] Cycle {cycle_num} — no deal data, "
+            f"[detect_revenue_leaks] Cycle {cycle_num} — NO DEAL DATA. "
+            f"cache_keys={list(_DEALS_CACHE.keys())} "
+            f"deals_json={'null' if deals_json is None else repr(deals_json[:80])}... "
             f"halt={_no_data_halt}"
         )
         return {
@@ -273,10 +355,22 @@ def _detect_revenue_leaks(cycle: int, deals_json: str | None = None) -> dict:
             "leak_count": 0,
             "severity": "low",
             "total_at_risk": 0,
-            "halt": _no_data_halt,
+                "halt": "true" if _no_data_halt else "false",  # String, not boolean
             "leaks_json": "[]",
             "warning": "No deal data — ensure deals_json from scan_pipeline is passed",
         }
+
+    # Detect and warn about potential data consistency issues
+    # If we have deals but found 0 leaks, this may indicate a problem
+    ghosted_count = sum(1 for d in deals if d.get("days_inactive", 0) > _LEAK_THRESHOLDS["stalled_days"])
+    if ghosted_count > 0 and len(leaks) == 0:
+        print(
+            f"[detect_revenue_leaks] ⚠️ DATA CONSISTENCY WARNING: "
+            f"{ghosted_count} deal(s) inactive > {_LEAK_THRESHOLDS['stalled_days']}d "
+            f"but 0 leaks detected. Check deal data processing."
+        )
+
+    leaks: list[dict] = []
 
     leaks: list[dict] = []
     for deal in deals:
@@ -287,8 +381,8 @@ def _detect_revenue_leaks(cycle: int, deals_json: str | None = None) -> dict:
         stage = deal.get("stage", "Unknown")
         email = deal.get("email", "")
 
-        if days > 30:
-            # No real sales activity for over 30 days — treat as ghosted.
+        if days > _LEAK_THRESHOLDS["ghosted_days"]:
+            # No real sales activity for over threshold days — treat as ghosted.
             leaks.append(
                 {
                     "type": "GHOSTED",
@@ -304,8 +398,8 @@ def _detect_revenue_leaks(cycle: int, deals_json: str | None = None) -> dict:
                     ),
                 }
             )
-        elif days > 14:
-            # 15-30 days without activity — deal is stalling.
+        elif days > _LEAK_THRESHOLDS["stalled_days"]:
+            # Between stalled and ghosted threshold — deal is stalling.
             leaks.append(
                 {
                     "type": "STALLED",
@@ -325,12 +419,10 @@ def _detect_revenue_leaks(cycle: int, deals_json: str | None = None) -> dict:
     total_at_risk = int(sum(leak.get("value", 0) for leak in leaks))
     ghosted_count = sum(1 for leak in leaks if leak["type"] == "GHOSTED")
 
-
-
-    if ghosted_count >= 2 or total_at_risk >= 50_000:
+    if ghosted_count >= _LEAK_THRESHOLDS["critical_ghosted_count"] or total_at_risk >= _LEAK_THRESHOLDS["critical_at_risk_usd"]:
         severity = "critical"
         halt = True
-    elif len(leaks) >= 3 or total_at_risk >= 20_000:
+    elif len(leaks) >= _LEAK_THRESHOLDS["high_leak_count"] or total_at_risk >= _LEAK_THRESHOLDS["high_at_risk_usd"]:
         severity = "high"
         halt = False
     elif len(leaks) >= 1:
@@ -349,12 +441,13 @@ def _detect_revenue_leaks(cycle: int, deals_json: str | None = None) -> dict:
         f"at_risk=${total_at_risk:,} | halt={halt}"
     )
 
+    # IMPORTANT: halt must be returned as a string for edge condition evaluation
     return {
         "cycle": cycle_num,
         "leak_count": len(leaks),
         "severity": severity,
         "total_at_risk": total_at_risk,
-        "halt": halt,
+            "halt": "true" if halt else "false",  # String, not boolean
         # Serialised leaks for followup node — passes across node boundary
         "leaks_json": json.dumps(leaks),
     }
@@ -380,8 +473,8 @@ def _build_telegram_alert(
         total_at_risk: Total USD value at risk.
 
     Returns:
-        telegram_sent  — True if the message was delivered, False otherwise
-        telegram_error — error string if send failed, empty string on success
+        html_message   — fully formatted HTML message ready to pass to telegram_send_message
+        chat_id        — Telegram chat ID from TELEGRAM_CHAT_ID env var
         cycle / severity / leak_count / total_at_risk — echoed for context
     """
     try:
@@ -480,30 +573,22 @@ def _build_telegram_alert(
         lines.append(action_tg)
 
     html_message = "\n".join(lines)
-    chat_id = _get_telegram_chat_id()
 
-    # ── Send directly — don't ask the LLM to relay the full message ─────────
+    chat_id = _get_telegram_chat_id()
     if not chat_id:
         print(
-            "  ⚠️  Telegram alert cannot be sent — TELEGRAM_CHAT_ID not set.\n"
+            "  ⚠️  TELEGRAM_CHAT_ID not set — call telegram_send_message will fail.\n"
             "     Set TELEGRAM_CHAT_ID env var. To find your chat ID:\n"
             "     https://api.telegram.org/bot<TOKEN>/getUpdates"
         )
-        tg_result = {"error": "TELEGRAM_CHAT_ID not set"}
-    else:
-        tg_result = _send_telegram(chat_id, html_message)
-        if tg_result.get("ok"):
-            print("  ✅  Telegram alert sent successfully.")
-        else:
-            print(f"  ⚠️  Telegram send failed: {tg_result.get('error')}")
 
     return {
         "cycle": cycle_num,
         "severity": sev,
         "leak_count": leak_count_int,
         "total_at_risk": at_risk_int,
-        "telegram_sent": tg_result.get("ok", False),
-        "telegram_error": tg_result.get("error", ""),
+        "html_message": html_message,
+        "chat_id": chat_id,
     }
 
 
@@ -553,17 +638,33 @@ def _prepare_followup_emails(cycle: int, leaks_json: str | None = None) -> dict:
 
     contacts: list[dict] = []
     skipped: list[str] = []
+    seen_emails: set[str] = set()  # Deduplicate by email address
+
+    EMAIL_REGEX = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
 
     for leak in ghosted:
         contact = str(leak.get("contact", "there"))
-        to_email = str(leak.get("email", "")).strip()
+        to_email = str(leak.get("email", "")).strip().lower()  # Normalize to lowercase
         days = int(leak.get("days_inactive", 0))
         value = int(leak.get("value", 0))
         deal_id = str(leak.get("deal_id", ""))
 
+        # Skip if no email
         if not to_email:
             skipped.append(contact)
             continue
+
+        # Validate email format
+        if not re.match(EMAIL_REGEX, to_email):
+            skipped.append(f"{contact} (invalid email: {to_email})")
+            continue
+
+        # Deduplicate by email — only send one draft per unique email
+        if to_email in seen_emails:
+            print(f"  ℹ️  Skipping duplicate email for {contact} <{to_email}>")
+            continue
+
+        seen_emails.add(to_email)
 
         subject = f"Following up on our conversation — {contact}"
         html = f"""<!DOCTYPE html>
@@ -580,7 +681,6 @@ def _prepare_followup_emails(cycle: int, leaks_json: str | None = None) -> dict:
   </style>
 </head>
 <body>
-  <h2>Following up — {_html.escape(contact)}</h2>
   <p>Hi {_html.escape(contact)},</p>
   <p>It has been <strong>{days} days</strong> since we last connected, and I
   wanted to make sure our conversation did not fall through the cracks.</p>
@@ -654,8 +754,8 @@ TOOLS: dict[str, Tool] = {
                             "contact": {"type": "string"},
                             "email": {"type": "string"},
                             "stage": {"type": "string"},
-                            "days_inactive": {"type": "integer"},
-                            "value": {"type": "integer"},
+                            "days_inactive": {"type": ["integer", "string"]},
+                            "value": {"type": ["integer", "string"]},
                         },
                         "required": [
                             "id",
@@ -674,7 +774,7 @@ TOOLS: dict[str, Tool] = {
         name="detect_revenue_leaks",
         description=(
             "Analyse HubSpot deals and classify revenue leak patterns: "
-            "GHOSTED (21+ days silent) and STALLED (10-20 days inactive). "
+            "GHOSTED (30+ days silent) and STALLED (14-30 days inactive). "
             "Pass deals_json from scan_pipeline output. "
             "Returns leak_count, severity, total_at_risk, halt, and leaks_json."
         ),
@@ -699,11 +799,11 @@ TOOLS: dict[str, Tool] = {
     "build_telegram_alert": Tool(
         name="build_telegram_alert",
         description=(
-            "Print a rich console cycle report, build an HTML Telegram alert, "
-            "and send it directly to Telegram (reads TELEGRAM_BOT_TOKEN and "
-            "TELEGRAM_CHAT_ID from env automatically). "
-            "Returns telegram_sent=True/False. "
-            "Call AFTER detect_revenue_leaks. Do NOT call telegram_send_message separately."
+            "Print a rich console cycle report and build an HTML Telegram alert. "
+            "Returns html_message (formatted HTML) and chat_id (from TELEGRAM_CHAT_ID env). "
+            "Pass these to telegram_send_message MCP tool to actually send the alert. "
+            "Call AFTER detect_revenue_leaks. "
+            "Note: html_message may exceed 4096 chars — implement chunking when calling telegram_send_message."
         ),
         parameters={
             "type": "object",
@@ -775,6 +875,8 @@ _TOOL_HANDLERS: dict[str, Any] = {
 
 def tool_executor(tool_use: ToolUse) -> ToolResult:
     """Dispatch a ToolUse to the correct handler and return a JSON ToolResult."""
+    import traceback
+    
     handler = _TOOL_HANDLERS.get(tool_use.name)
     if handler is None:
         return ToolResult(
@@ -788,9 +890,25 @@ def tool_executor(tool_use: ToolUse) -> ToolResult:
             tool_use_id=tool_use.id,
             content=json.dumps(result),
         )
-    except Exception as exc:
+    except (ValueError, KeyError, TypeError) as exc:
+        # Input validation or data structure error
         return ToolResult(
             tool_use_id=tool_use.id,
-            content=json.dumps({"error": str(exc)}),
+            content=json.dumps({
+                "error": f"Invalid input to {tool_use.name}: {exc}",
+                "traceback": traceback.format_exc()
+            }),
+            is_error=True,
+        )
+    except Exception as exc:
+        # Unexpected error — include traceback for debugging
+        print(f"[TOOL ERROR] {tool_use.name}: {exc}")
+        print(traceback.format_exc())
+        return ToolResult(
+            tool_use_id=tool_use.id,
+            content=json.dumps({
+                "error": f"Error in {tool_use.name}: {exc}",
+                "traceback": traceback.format_exc()
+            }),
             is_error=True,
         )

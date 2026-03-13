@@ -132,12 +132,13 @@ edges: tuple = (
         priority=1,
     ),
     # followup → monitor (loop back while not halted)
+    # NOTE: halt must be a string "true" or "false" from detect_revenue_leaks output
     EdgeSpec(
         id="followup-to-monitor",
         source="followup",
         target="monitor",
         condition=EdgeCondition.CONDITIONAL,
-        condition_expr='str(halt).lower() != "true"',
+        condition_expr='halt != "true" and str(halt).lower() != "true"',
         priority=1,
     ),
 )
@@ -194,7 +195,7 @@ class RevenueLeakDetectorAgent:
             default_model=self.config.model,
             max_tokens=self.config.max_tokens,
             loop_config={
-                "max_iterations": 100,
+                "max_iterations": 20,  # Reduced from 100 to prevent infinite loops (4 nodes per cycle = 5 complete cycles max)
                 "max_tool_calls_per_turn": 20,
                 "max_history_tokens": 32000,
             },

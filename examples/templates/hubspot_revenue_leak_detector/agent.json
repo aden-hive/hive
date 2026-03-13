@@ -45,7 +45,7 @@
         "max_node_visits": 0,
         "input_keys": ["cycle", "leak_count", "severity", "total_at_risk", "halt", "leaks_json"],
         "output_keys": ["cycle", "halt"],
-        "tools": ["build_telegram_alert"]
+        "tools": ["build_telegram_alert", "telegram_send_message"]
       },
       {
         "id": "followup",
@@ -156,6 +156,7 @@
     "scan_pipeline",
     "detect_revenue_leaks",
     "build_telegram_alert",
+    "telegram_send_message",
     "prepare_followup_emails"
   ],
   "mcp_servers": {

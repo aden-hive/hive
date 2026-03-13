@@ -28,7 +28,7 @@ monitor_node = NodeSpec(
     client_facing=False,
     max_node_visits=0,
     input_keys=["cycle"],
-    output_keys=["cycle", "deals_scanned", "overdue_invoices", "support_escalations", "deals_json"],
+    output_keys=["cycle", "deals_scanned", "deals_json"],
     tools=[
         "hubspot_search_deals",
         "hubspot_get_deal",
@@ -41,14 +41,21 @@ You are executing ONE HubSpot pipeline scan. Complete every step below in order.
 CRITICAL RULE: You must NEVER invent, fabricate, or guess deal data.
 Do NOT create fictitious contacts, companies, or deals under any circumstances.
 
-STEP 1 — Fetch deals from HubSpot:
-  Call hubspot_search_deals with:
-    query: ""
-    properties: ["dealname", "dealstage", "amount", "notes_last_contacted", "hs_lastmodifieddate"]
-    limit: 50
-  If the response contains an "error" key or has no results, wait 2 seconds and
-  call hubspot_search_deals ONCE MORE with the same parameters.
-  If the second attempt also fails or returns empty, skip to STEP 3 with deals=[].
+STEP 1 — Fetch ALL deals from HubSpot (paginate until done):
+  Set accumulated_results = [] and after_cursor = "".
+  Loop:
+    Call hubspot_search_deals with:
+      query: ""
+      properties: ["dealname", "dealstage", "amount", "notes_last_contacted", "hs_lastmodifieddate"]
+      limit: 100
+      after: after_cursor   (use "" for the first call)
+    If the response contains an "error" key and accumulated_results is empty:
+      Wait 2 seconds and retry ONCE with the same parameters (after="" still).
+      If the retry also fails, skip to STEP 3 with deals=[].
+    Add the results from this response to accumulated_results.
+    If the response contains paging.next.after, set after_cursor = that value and loop again.
+    Otherwise (no paging.next.after), stop the loop.
+    Use accumulated_results as the full list of deals for STEP 2.
 
 STEP 2 — Build the deals array (only from real hubspot_search_deals results):
   For each result from the search:
@@ -70,12 +77,14 @@ STEP 2 — Build the deals array (only from real hubspot_search_deals results):
            properties: ["email", "firstname", "lastname"]
          Use the email property, or "" if the property is empty or missing.
        If there are no associations or the call errors, use email="".
+       CRITICAL: ALWAYS add the deal even if email is empty — missing contact
+       information does NOT invalidate the deal's revenue leak detection.
   d. Add a deal object to the array:
        { "id": "<deal id>", "contact": "<dealname>", "email": "<contact email or empty>",
          "stage": "<dealstage value>", "days_inactive": <int>, "value": <int amount>,
          "notes_last_contacted": "<raw notes_last_contacted value or empty string>",
          "hs_lastmodifieddate": "<raw hs_lastmodifieddate value or empty string>" }
-       Always include the two raw date fields verbatim from HubSpot so the pipeline
+       Always include the two raw date fields verbatim from HubSpot so that the pipeline
        scanner can recompute inactivity if needed.
 
 STEP 3 — Store results:
@@ -85,11 +94,9 @@ STEP 3 — Store results:
 
 STEP 4 — Set outputs:
   Call set_output for each key (all values as strings):
-    "cycle"               → next_cycle returned by scan_pipeline
-    "deals_scanned"       → deals_scanned returned by scan_pipeline
-    "overdue_invoices"    → "0"
-    "support_escalations" → "0"
-    "deals_json"          → deals_json returned by scan_pipeline (pass verbatim)
+    "cycle"         → next_cycle returned by scan_pipeline
+    "deals_scanned" → deals_scanned returned by scan_pipeline
+    "deals_json"    → deals_json returned by scan_pipeline (pass verbatim)
 
 Stop immediately after all set_output calls. Do NOT call scan_pipeline more than once.
 """,
@@ -99,13 +106,13 @@ analyze_node = NodeSpec(
     id="analyze",
     name="Analyze",
     description=(
-        "Detect GHOSTED (21+ days) and STALLED (10-20 days) revenue leak patterns "
-        "from the deals passed via deals_json context key."
+        "Detect GHOSTED (30+ days) and STALLED (14-30 days) revenue leak patterns "
+        "from deals passed via deals_json context key."
     ),
     node_type="event_loop",
     client_facing=False,
     max_node_visits=0,
-    input_keys=["cycle", "deals_scanned", "overdue_invoices", "support_escalations", "deals_json"],
+    input_keys=["cycle", "deals_json"],
     output_keys=["cycle", "leak_count", "severity", "total_at_risk", "halt", "leaks_json"],
     tools=["detect_revenue_leaks"],
     system_prompt="""\
@@ -116,13 +123,7 @@ STEP 1 — Detect leaks:
     cycle:      the 'cycle' value from context
     deals_json: the 'deals_json' value from context (pass it through verbatim)
 
-STEP 2 — Sanity check:
-  If detect_revenue_leaks returns leak_count=0 AND the 'deals_scanned' context
-  value is greater than 0, this indicates a data problem. Do NOT report the
-  pipeline as healthy. Instead, set severity to "low" and include a warning in
-  your reasoning, but continue to STEP 3 with the returned values.
-
-STEP 3 — Set outputs (all values as strings):
+STEP 2 — Set outputs (all values as strings):
   Call set_output for each key:
     "cycle"         → cycle value returned by detect_revenue_leaks
     "leak_count"    → leak_count returned by detect_revenue_leaks
@@ -141,36 +142,56 @@ notify_node = NodeSpec(
     id="notify",
     name="Notify",
     description=(
-        "Build and send a formatted HTML revenue leak alert to Telegram, "
-        "then pass halt state through to the followup node."
+        "Build a formatted HTML revenue leak alert and send it to Telegram via MCP. "
+        "Implements automatic chunking for messages exceeding Telegram's 4096 character limit. "
+        "Then pass halt state through to the followup node."
     ),
     node_type="event_loop",
     client_facing=False,
     max_node_visits=0,
     input_keys=["cycle", "leak_count", "severity", "total_at_risk", "halt", "leaks_json"],
-    output_keys=["cycle", "halt"],
-    tools=["build_telegram_alert"],
+    output_keys=["cycle", "halt", "leaks_json"],
+    tools=["build_telegram_alert", "telegram_send_message"],
     system_prompt="""\
 You are executing ONE revenue alert notification step.
 
-STEP 1 — Build and send the alert:
+STEP 1 — Build the alert:
   Call build_telegram_alert EXACTLY ONCE with:
-    cycle:         'cycle' from context
-    leak_count:    'leak_count' from context
-    severity:      'severity' from context
-    total_at_risk: 'total_at_risk' from context
-    leaks_json:    'leaks_json' from context (pass verbatim)
+    cycle:         the 'cycle' value from context
+    leak_count:    the 'leak_count' from context
+    severity:      the 'severity' from context
+    total_at_risk: the 'total_at_risk' from context
+    leaks_json:    the 'leaks_json' from context (pass verbatim)
 
-  build_telegram_alert sends the Telegram message automatically.
-  You do NOT need to call any other send tool.
+  The result contains 'html_message' and 'chat_id'.
 
-STEP 2 — Set outputs (values as strings):
+STEP 2 — Send the alert via Telegram MCP with chunking:
+  Telegram message limit is 4096 characters. You MUST implement chunking:
+
+  If len(html_message) <= 4096:
+    Call telegram_send_message ONCE with:
+      chat_id:    the EXACT 'chat_id' value returned by build_telegram_alert
+      text:       the EXACT 'html_message' value (do NOT paraphrase or modify)
+      parse_mode: "HTML"
+
+  If len(html_message) > 4096:
+    Split html_message into chunks of up to 4096 characters each.
+    Split at NEWLINES (\\n) to keep content readable — try to keep lines intact.
+    Call telegram_send_message ONCE for each chunk with:
+      chat_id:    the EXACT 'chat_id' value from build_telegram_alert
+      text:       the chunk (do NOT paraphrase or modify)
+      parse_mode: "HTML"
+    Stop sending if any chunk fails (returns an error).
+
+STEP 3 — Set outputs (values as strings):
   Call set_output:
-    "cycle" → 'cycle' from context (pass through unchanged)
-    "halt"  → 'halt' from context (pass through as "true" or "false")
+    "cycle"      → the 'cycle' from context (pass through unchanged)
+    "halt"       → the 'halt' from context (pass through as "true" or "false")
+    "leaks_json" → the 'leaks_json' from context (pass through verbatim)
 
 Stop immediately after all set_output calls.
 Do NOT call build_telegram_alert more than once.
+Do NOT call telegram_send_message more than necessary (once per chunk).
 Do NOT call hubspot tools, scan_pipeline, or detect_revenue_leaks.
 """,
 )
@@ -193,8 +214,8 @@ You are executing ONE follow-up email drafting step.
 
 STEP 1 — Prepare email payloads:
   Call prepare_followup_emails EXACTLY ONCE with:
-    cycle:      'cycle' value from context
-    leaks_json: 'leaks_json' value from context (pass it through verbatim)
+    cycle:      the 'cycle' value from context
+    leaks_json: the 'leaks_json' value from context (pass it through verbatim)
 
   The result contains a 'contacts' array. Each item has:
     contact  — recipient display name
@@ -217,8 +238,8 @@ STEP 2 — Create Gmail drafts:
 
 STEP 3 — Set outputs (values as strings):
   Call set_output:
-    "cycle" → 'cycle' from context (pass through unchanged)
-    "halt"  → 'halt' from context (pass through as "true" or "false")
+    "cycle" → the 'cycle' from context (pass through unchanged)
+    "halt"  → the 'halt' from context (pass through as "true" or "false")
 
 Stop immediately after all set_output calls.
 Do NOT call prepare_followup_emails more than once.
