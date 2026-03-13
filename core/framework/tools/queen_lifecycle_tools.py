@@ -36,7 +36,6 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import time
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -376,13 +375,15 @@ def _save_trigger_to_agent(session: Any, trigger_id: str, tdef: Any) -> None:
         return
     triggers = _read_agent_triggers_json(agent_path)
     triggers = [t for t in triggers if t.get("id") != trigger_id]
-    triggers.append({
-        "id": tdef.id,
-        "name": tdef.description or tdef.id,
-        "trigger_type": tdef.trigger_type,
-        "trigger_config": tdef.trigger_config,
-        "task": tdef.task or "",
-    })
+    triggers.append(
+        {
+            "id": tdef.id,
+            "name": tdef.description or tdef.id,
+            "trigger_type": tdef.trigger_type,
+            "trigger_config": tdef.trigger_config,
+            "task": tdef.task or "",
+        }
+    )
     _write_agent_triggers_json(agent_path, triggers)
     logger.info("Saved trigger '%s' to %s/triggers.json", trigger_id, agent_path)
 
@@ -397,6 +398,157 @@ def _remove_trigger_from_agent(session: Any, trigger_id: str) -> None:
     if len(updated) != len(triggers):
         _write_agent_triggers_json(agent_path, updated)
         logger.info("Removed trigger '%s' from %s/triggers.json", trigger_id, agent_path)
+
+
+async def _persist_active_triggers(session: Any, session_id: str) -> None:
+    """Persist the set of active trigger IDs (and their tasks) to SessionState."""
+    runtime = getattr(session, "worker_runtime", None)
+    if runtime is None:
+        return
+    store = getattr(runtime, "_session_store", None)
+    if store is None:
+        return
+    try:
+        state = await store.read_state(session_id)
+        if state is None:
+            return
+        active_ids = list(getattr(session, "active_trigger_ids", set()))
+        state.active_triggers = active_ids
+        # Persist per-trigger task overrides
+        available = getattr(session, "available_triggers", {})
+        state.trigger_tasks = {
+            tid: available[tid].task
+            for tid in active_ids
+            if tid in available and available[tid].task
+        }
+        await store.write_state(session_id, state)
+    except Exception:
+        logger.warning(
+            "Failed to persist active triggers for session %s", session_id, exc_info=True
+        )
+
+
+async def _start_trigger_timer(session: Any, trigger_id: str, tdef: Any) -> None:
+    """Start an asyncio background task that fires the trigger on a timer."""
+    from framework.graph.event_loop_node import TriggerEvent
+
+    cron_expr = tdef.trigger_config.get("cron")
+    interval_minutes = tdef.trigger_config.get("interval_minutes")
+
+    async def _timer_loop() -> None:
+        if cron_expr:
+            from croniter import croniter
+
+            cron = croniter(cron_expr, datetime.now(tz=UTC))
+
+        while True:
+            try:
+                if cron_expr:
+                    next_fire = cron.get_next(datetime)
+                    delay = (next_fire - datetime.now(tz=UTC)).total_seconds()
+                    if delay > 0:
+                        await asyncio.sleep(delay)
+                else:
+                    await asyncio.sleep(float(interval_minutes) * 60)
+
+                # Record next fire time for introspection
+                fire_times = getattr(session, "trigger_next_fire", None)
+                if fire_times is not None:
+                    fire_times[trigger_id] = datetime.now(tz=UTC).isoformat()
+
+                # Gate on worker being loaded
+                if getattr(session, "worker_runtime", None) is None:
+                    continue
+
+                # Fire into queen node
+                executor = getattr(session, "queen_executor", None)
+                if executor is None:
+                    continue
+                queen_node = getattr(executor, "node_registry", {}).get("queen")
+                if queen_node is None:
+                    continue
+
+                event = TriggerEvent(
+                    trigger_type="timer",
+                    source_id=trigger_id,
+                    payload={
+                        "task": tdef.task or "",
+                        "trigger_config": tdef.trigger_config,
+                    },
+                )
+                await queen_node.inject_trigger(event)
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                logger.warning("Timer trigger '%s' tick failed", trigger_id, exc_info=True)
+
+    task = asyncio.create_task(_timer_loop(), name=f"trigger_timer_{trigger_id}")
+    if not hasattr(session, "active_timer_tasks"):
+        session.active_timer_tasks = {}
+    session.active_timer_tasks[trigger_id] = task
+
+
+async def _start_trigger_webhook(session: Any, trigger_id: str, tdef: Any) -> None:
+    """Subscribe to WEBHOOK_RECEIVED events and route matching ones to the queen."""
+    from framework.graph.event_loop_node import TriggerEvent
+    from framework.runtime.webhook_server import WebhookRoute, WebhookServer, WebhookServerConfig
+
+    bus = session.event_bus
+    path = tdef.trigger_config.get("path", "")
+    methods = [m.upper() for m in tdef.trigger_config.get("methods", ["POST"])]
+
+    async def _on_webhook(event: AgentEvent) -> None:
+        data = event.data or {}
+        if data.get("path") != path:
+            return
+        if data.get("method", "").upper() not in methods:
+            return
+        # Gate on worker being loaded
+        if getattr(session, "worker_runtime", None) is None:
+            return
+        executor = getattr(session, "queen_executor", None)
+        if executor is None:
+            return
+        queen_node = getattr(executor, "node_registry", {}).get("queen")
+        if queen_node is None:
+            return
+
+        trigger_event = TriggerEvent(
+            trigger_type="webhook",
+            source_id=trigger_id,
+            payload={
+                "task": tdef.task or "",
+                "path": data.get("path", ""),
+                "method": data.get("method", ""),
+                "headers": data.get("headers", {}),
+                "payload": data.get("payload", {}),
+                "query_params": data.get("query_params", {}),
+            },
+        )
+        await queen_node.inject_trigger(trigger_event)
+
+    sub_id = bus.subscribe(
+        event_types=[EventType.WEBHOOK_RECEIVED],
+        handler=_on_webhook,
+        filter_stream=trigger_id,
+    )
+    if not hasattr(session, "active_webhook_subs"):
+        session.active_webhook_subs = {}
+    session.active_webhook_subs[trigger_id] = sub_id
+
+    # Ensure the webhook HTTP server is running
+    if getattr(session, "queen_webhook_server", None) is None:
+        port = int(tdef.trigger_config.get("port", 8090))
+        config = WebhookServerConfig(host="127.0.0.1", port=port)
+        server = WebhookServer(bus, config)
+        session.queen_webhook_server = server
+
+    server = session.queen_webhook_server
+    route = WebhookRoute(source_id=trigger_id, path=path, methods=methods)
+    server.add_route(route)
+    if not getattr(server, "is_running", False):
+        await server.start()
+        server.is_running = True
 
 
 def _dissolve_planning_nodes(
@@ -475,10 +627,7 @@ def _dissolve_planning_nodes(
 
         # Decision clause: prefer decision_clause, fall back to description/name
         clause = (
-            d_node.get("decision_clause")
-            or d_node.get("description")
-            or d_node.get("name")
-            or d_id
+            d_node.get("decision_clause") or d_node.get("description") or d_node.get("name") or d_id
         ).strip()
 
         predecessors = [node_by_id[e["source"]] for e in in_edges if e["source"] in node_by_id]
@@ -2568,7 +2717,6 @@ def register_queen_lifecycle_tools(
 
     def _format_time_ago(ts) -> str:
         """Format a datetime as relative time ago."""
-        from datetime import datetime
 
         now = datetime.now(UTC)
         if ts.tzinfo is None:
@@ -2606,7 +2754,6 @@ def register_queen_lifecycle_tools(
         - pending_question (when waiting)
         - _active_execs (internal, stripped before return)
         """
-        from datetime import datetime
 
         graph_id = runtime.graph_id
         reg = runtime.get_graph_registration(graph_id)
