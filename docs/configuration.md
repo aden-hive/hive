@@ -1,3 +1,6 @@
+Ctrl + _
+
+
 # Configuration Guide
 
 Aden Hive is a Python-based agent framework. Configuration is handled through environment variables and agent-level config files. There is no centralized `config.yaml` or Docker Compose setup.
@@ -209,3 +212,43 @@ PYTHONPATH=exports uv run python -m my_agent validate
 ```
 
 See [Environment Setup](./environment-setup.md) for detailed installation instructions.
+
+
+
+---
+
+## MCP Server Troubleshooting
+
+During agent construction, Hive attempts to connect to configured MCP servers to enable live tool discovery (e.g. `web_search`, `web_scrape`, etc.).
+
+If the MCP server fails to connect, Hive may continue execution using example/static agent patterns instead of live tool introspection.
+
+### Symptoms
+
+- Tools appear available but return mock or placeholder data
+- Tool-dependent tests fail (e.g. missing URLs, citation counts)
+- No explicit MCP runtime error is surfaced
+
+### What This Means
+
+When MCP connectivity fails:
+- Live tool auto-discovery is disabled
+- Tool-use nodes may operate in degraded or mock mode
+- Agent structure validates, but real-world execution may fail
+
+### How to Diagnose
+
+1. Ensure your MCP server process is running
+2. Verify your virtual environment is activated
+3. Re-run `quickstart.sh`
+4. Confirm MCP configuration in your project or global config
+5. Restart your IDE if using agent-builder integrations
+
+### Recommendation
+
+Future improvements could include:
+- Explicit fallback-mode warnings in CLI output
+- A `hive doctor` diagnostic command
+- Clear connection health status during startup
+
+
