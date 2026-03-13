@@ -307,13 +307,13 @@ class NodeConversation:
     def __init__(
         self,
         system_prompt: str = "",
-        max_history_tokens: int = 32000,
+        max_context_tokens: int = 32000,
         compaction_threshold: float = 0.8,
         output_keys: list[str] | None = None,
         store: ConversationStore | None = None,
     ) -> None:
         self._system_prompt = system_prompt
-        self._max_history_tokens = max_history_tokens
+        self._max_context_tokens = max_context_tokens
         self._compaction_threshold = compaction_threshold
         self._output_keys = output_keys
         self._store = store
@@ -525,16 +525,16 @@ class NodeConversation:
         self._last_api_input_tokens = actual_input_tokens
 
     def usage_ratio(self) -> float:
-        """Current token usage as a fraction of *max_history_tokens*.
+        """Current token usage as a fraction of *max_context_tokens*.
 
-        Returns 0.0 when ``max_history_tokens`` is zero (unlimited).
+        Returns 0.0 when ``max_context_tokens`` is zero (unlimited).
         """
-        if self._max_history_tokens <= 0:
+        if self._max_context_tokens <= 0:
             return 0.0
-        return self.estimate_tokens() / self._max_history_tokens
+        return self.estimate_tokens() / self._max_context_tokens
 
     def needs_compaction(self) -> bool:
-        return self.estimate_tokens() >= self._max_history_tokens * self._compaction_threshold
+        return self.estimate_tokens() >= self._max_context_tokens * self._compaction_threshold
 
     # --- Output-key extraction ---------------------------------------------
 
@@ -1029,7 +1029,7 @@ class NodeConversation:
         await self._store.write_meta(
             {
                 "system_prompt": self._system_prompt,
-                "max_history_tokens": self._max_history_tokens,
+                "max_context_tokens": self._max_context_tokens,
                 "compaction_threshold": self._compaction_threshold,
                 "output_keys": self._output_keys,
             }
@@ -1062,7 +1062,7 @@ class NodeConversation:
 
         conv = cls(
             system_prompt=meta.get("system_prompt", ""),
-            max_history_tokens=meta.get("max_history_tokens", 32000),
+            max_context_tokens=meta.get("max_context_tokens", 32000),
             compaction_threshold=meta.get("compaction_threshold", 0.8),
             output_keys=meta.get("output_keys"),
             store=store,

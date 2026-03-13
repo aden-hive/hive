@@ -1,0 +1,11 @@
+[
+  {
+    "id": "email-timer",
+    "name": "Scheduled Inbox Check",
+    "trigger_type": "timer",
+    "trigger_config": {
+      "interval_minutes": 5
+    },
+    "task": "Fetch and process inbox emails according to the user's rules"
+  }
+]

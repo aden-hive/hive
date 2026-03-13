@@ -1068,16 +1068,6 @@ class ExaSearchHealthChecker(BaseHttpHealthChecker):
         return {"query": "test", "numResults": 1}
 
 
-class GoogleDocsHealthChecker(OAuthBearerHealthChecker):
-    """Health checker for Google Docs OAuth tokens."""
-
-    def __init__(self):
-        super().__init__(
-            endpoint="https://docs.googleapis.com/v1/documents/1",
-            service_name="Google Docs",
-        )
-
-
 class CalcomHealthChecker(BaseHttpHealthChecker):
     """Health checker for Cal.com API key."""
 
@@ -1334,7 +1324,6 @@ HEALTH_CHECKERS: dict[str, CredentialHealthChecker] = {
     "github": GitHubHealthChecker(),
     "gitlab_token": GitLabHealthChecker(),
     "google": GoogleHealthChecker(),
-    "google_docs": GoogleDocsHealthChecker(),
     "google_maps": GoogleMapsHealthChecker(),
     "google_search": GoogleSearchHealthChecker(),
     "google_search_console": GoogleSearchConsoleHealthChecker(),
