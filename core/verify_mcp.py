@@ -116,14 +116,38 @@ def main():
                     logger.info(f"    Command: {server_config.get('command')}")
                     logger.info(f"    Args: {' '.join(server_config.get('args', []))}")
             else:
-                warning("exists but missing mcpServers config")
-                all_checks_passed = False
-        except json.JSONDecodeError:
-            error("invalid JSON format")
-            all_checks_passed = False
+                warning("exists but missing 'mcpServers' key")
+                logger.info("")
+                logger.info("  The file is valid JSON but does not contain MCP server definitions.")
+                logger.info(
+                    "  This is optional - MCP servers are typically configured at repo root."
+                )
+                logger.info("")
+                logger.info("  Example valid format:")
+                logger.info("    {")
+                logger.info('      "mcpServers": {')
+                logger.info('        "my-server": {')
+                logger.info('          "command": "uv",')
+                logger.info('          "args": ["run", "python", "-m", "my_module"]')
+                logger.info("        }")
+                logger.info("      }")
+                logger.info("    }")
+        except json.JSONDecodeError as e:
+            error(f"could not parse config: {e.msg} at line {e.lineno}, column {e.colno}")
+            logger.info("")
+            logger.info("  The .mcp.json file contains invalid JSON syntax.")
+            logger.info("  This is optional and safe to ignore if you don't need MCP servers.")
+            logger.info("")
+            logger.info("  To fix, check for:")
+            logger.info("    - Missing commas between items")
+            logger.info("    - Unquoted keys or string values")
+            logger.info("    - Trailing commas (not allowed in JSON)")
+            logger.info("    - Mismatched brackets or braces")
+            logger.info("")
+            logger.info(f"  Or delete the file if you don't need MCP servers: rm {mcp_config}")
     else:
         warning("not found (optional)")
-        logger.info(f"  Location would be: {mcp_config}")
+        logger.info("  MCP servers are typically configured at the repo root, not in core/.")
 
     # Check 4: Framework modules
     check("core framework modules")

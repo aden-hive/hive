@@ -100,11 +100,34 @@ def main():
     mcp_config_path = script_dir / ".mcp.json"
 
     if mcp_config_path.exists():
-        log_success("MCP configuration found at .mcp.json")
-        logger.info("Configuration:")
-        with open(mcp_config_path, encoding="utf-8") as f:
-            config = json.load(f)
-            logger.info(json.dumps(config, indent=2))
+        try:
+            with open(mcp_config_path, encoding="utf-8") as f:
+                config = json.load(f)
+            log_success("MCP configuration found at .mcp.json")
+            if "mcpServers" in config:
+                logger.info("MCP servers configured:")
+                for name, server_config in config.get("mcpServers", {}).items():
+                    logger.info(f"  - {name}")
+                    logger.info(f"      Command: {server_config.get('command')}")
+                    logger.info(f"      Args: {' '.join(server_config.get('args', []))}")
+            else:
+                logger.info(
+                    f"{Colors.YELLOW}Note: .mcp.json exists but has no 'mcpServers' key.{Colors.NC}"
+                )
+                logger.info("This is optional - MCP servers are typically configured at repo root.")
+        except json.JSONDecodeError as e:
+            log_error(f"could not parse .mcp.json: {e.msg} at line {e.lineno}, column {e.colno}")
+            logger.info("")
+            logger.info("The .mcp.json file contains invalid JSON syntax.")
+            logger.info("This is optional and safe to ignore if you don't need MCP servers.")
+            logger.info("")
+            logger.info("To fix, check for:")
+            logger.info("  - Missing commas between items")
+            logger.info("  - Unquoted keys or string values")
+            logger.info("  - Trailing commas (not allowed in JSON)")
+            logger.info("  - Mismatched brackets or braces")
+            logger.info("")
+            logger.info(f"Or delete the file if you don't need MCP servers: rm {mcp_config_path}")
     else:
         log_success("No .mcp.json needed (MCP servers configured at repo root)")
     logger.info("")
