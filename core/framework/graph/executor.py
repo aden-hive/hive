@@ -34,6 +34,16 @@ from framework.schemas.checkpoint import Checkpoint
 from framework.storage.checkpoint_store import CheckpointStore
 
 
+def _default_max_context_tokens() -> int:
+    """Resolve max_context_tokens from global config, falling back to 32000."""
+    try:
+        from framework.config import get_max_context_tokens
+
+        return get_max_context_tokens()
+    except Exception:
+        return 32_000
+
+
 @dataclass
 class ExecutionResult:
     """Result of executing a graph."""
@@ -1872,7 +1882,7 @@ class GraphExecutor:
                     max_tool_calls_per_turn=lc.get("max_tool_calls_per_turn", 30),
                     tool_call_overflow_margin=lc.get("tool_call_overflow_margin", 0.5),
                     stall_detection_threshold=lc.get("stall_detection_threshold", 3),
-                    max_context_tokens=lc.get("max_context_tokens", 32000),
+                    max_context_tokens=lc.get("max_context_tokens", _default_max_context_tokens()),
                     max_tool_result_chars=lc.get("max_tool_result_chars", 30_000),
                     spillover_dir=spillover,
                     hooks=lc.get("hooks", {}),
