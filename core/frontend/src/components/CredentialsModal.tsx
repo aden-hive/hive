@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from "react";
-import { KeyRound, Check, AlertCircle, X, Shield, Loader2, Trash2, ExternalLink, Pencil } from "lucide-react";
+import { KeyRound, Check, AlertCircle, X, Shield, Loader2, Trash2, ExternalLink, Pencil, ChevronDown } from "lucide-react";
 import { credentialsApi, type AgentCredentialRequirement } from "@/api/credentials";
 
 export interface Credential {
@@ -41,6 +41,8 @@ interface CredentialRow {
   valid: boolean | null; // true = health check passed, false = failed, null = not checked
   validationMessage: string | null;
   alternativeGroup: string | null; // non-null when multiple providers can satisfy a tool
+  apiKeyInstructions: string;
+  helpUrl: string;
 }
 
 function requirementToRow(r: AgentCredentialRequirement): CredentialRow {
@@ -56,6 +58,8 @@ function requirementToRow(r: AgentCredentialRequirement): CredentialRow {
     valid: r.valid,
     validationMessage: r.validation_message,
     alternativeGroup: r.alternative_group ?? null,
+    apiKeyInstructions: r.api_key_instructions || "",
+    helpUrl: r.help_url || "",
   };
 }
 
@@ -102,6 +106,7 @@ export default function CredentialsModal({
   const [inputValue, setInputValue] = useState("");
   const [saving, setSaving] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [expandedInstructions, setExpandedInstructions] = useState<string | null>(null);
   const pendingAdenAuth = useRef(false);
   const lastFocusFetch = useRef(0);
 
@@ -136,6 +141,8 @@ export default function CredentialsModal({
           valid: null,
           validationMessage: null,
           alternativeGroup: null,
+          apiKeyInstructions: "",
+          helpUrl: "",
         })));
       } else {
         setRows([]);
@@ -467,32 +474,65 @@ export default function CredentialsModal({
 
                   {/* Inline API key input */}
                   {editingId === row.id && (
-                    <div className="mt-1.5 flex gap-2 px-3">
-                      <input
-                        type="password"
-                        value={inputValue}
-                        onChange={(e) => setInputValue(e.target.value)}
-                        onKeyDown={(e) => {
-                          if (e.key === "Enter") handleConnect(row);
-                          if (e.key === "Escape") { setEditingId(null); setInputValue(""); }
-                        }}
-                        placeholder={`${row.connected ? "Enter new" : "Paste your"} ${row.name} API key...`}
-                        autoFocus
-                        className="flex-1 px-3 py-1.5 rounded-md border border-border bg-background text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary/40"
-                      />
-                      <button
-                        onClick={() => handleConnect(row)}
-                        disabled={saving || !inputValue.trim()}
-                        className="px-3 py-1.5 rounded-md text-xs font-medium bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-                      >
-                        {saving ? <Loader2 className="w-3 h-3 animate-spin" /> : "Save"}
-                      </button>
-                      <button
-                        onClick={() => { setEditingId(null); setInputValue(""); }}
-                        className="px-2 py-1.5 rounded-md text-xs text-muted-foreground hover:bg-muted transition-colors"
-                      >
-                        Cancel
-                      </button>
+                    <div className="mt-1.5 space-y-1.5">
+                      <div className="flex gap-2 px-3">
+                        <input
+                          type="password"
+                          value={inputValue}
+                          onChange={(e) => setInputValue(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter") handleConnect(row);
+                            if (e.key === "Escape") { setEditingId(null); setInputValue(""); }
+                          }}
+                          placeholder={`${row.connected ? "Enter new" : "Paste your"} ${row.name} API key...`}
+                          autoFocus
+                          className="flex-1 px-3 py-1.5 rounded-md border border-border bg-background text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary/40"
+                        />
+                        <button
+                          onClick={() => handleConnect(row)}
+                          disabled={saving || !inputValue.trim()}
+                          className="px-3 py-1.5 rounded-md text-xs font-medium bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                        >
+                          {saving ? <Loader2 className="w-3 h-3 animate-spin" /> : "Save"}
+                        </button>
+                        <button
+                          onClick={() => { setEditingId(null); setInputValue(""); }}
+                          className="px-2 py-1.5 rounded-md text-xs text-muted-foreground hover:bg-muted transition-colors"
+                        >
+                          Cancel
+                        </button>
+                      </div>
+
+                      {/* How to get this key */}
+                      {(row.apiKeyInstructions || row.helpUrl) && (
+                        <div className="px-3">
+                          <button
+                            onClick={() => setExpandedInstructions(expandedInstructions === row.id ? null : row.id)}
+                            className="flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground transition-colors"
+                          >
+                            <ChevronDown className={`w-3 h-3 transition-transform ${expandedInstructions === row.id ? "rotate-180" : ""}`} />
+                            How to get this key
+                          </button>
+                          {expandedInstructions === row.id && (
+                            <div className="mt-1.5 px-3 py-2.5 rounded-md bg-muted/40 border border-border/50 text-[11px] text-muted-foreground space-y-1.5">
+                              {row.apiKeyInstructions && (
+                                <p className="whitespace-pre-line leading-relaxed">{row.apiKeyInstructions}</p>
+                              )}
+                              {row.helpUrl && (
+                                <a
+                                  href={row.helpUrl}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="flex items-center gap-1 text-primary hover:underline"
+                                >
+                                  <ExternalLink className="w-3 h-3" />
+                                  Open documentation
+                                </a>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>
@@ -502,18 +542,22 @@ export default function CredentialsModal({
 
           {/* Footer */}
           {!loading && (
-            <div className="px-5 pb-4">
+            <div className="px-5 pb-4 space-y-2">
               <button
                 onClick={onClose}
-                disabled={!allRequiredMet}
                 className={`w-full py-2.5 rounded-lg text-sm font-medium transition-colors ${
                   allRequiredMet
                     ? "bg-primary text-primary-foreground hover:bg-primary/90"
-                    : "bg-muted text-muted-foreground cursor-not-allowed"
+                    : "bg-primary text-primary-foreground hover:bg-primary/90 opacity-60"
                 }`}
               >
-                {allRequiredMet ? "Done" : missingCount > 0 ? "Connect required credentials to continue" : "Fix invalid credentials to continue"}
+                {allRequiredMet ? "Done" : missingCount > 0 ? "Done (missing credentials)" : "Done (invalid credentials)"}
               </button>
+              {!allRequiredMet && (
+                <p className="text-center text-[11px] text-muted-foreground">
+                  You can add credentials later — the agent will prompt you when it needs them.
+                </p>
+              )}
             </div>
           )}
         </div>

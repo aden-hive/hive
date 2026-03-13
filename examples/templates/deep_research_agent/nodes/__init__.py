@@ -63,7 +63,7 @@ You are a research agent. Given a research brief, find and analyze sources.
 If feedback is provided, this is a follow-up round — focus on the gaps identified.
 
 Work in phases:
-1. **Search**: Use web_search with 3-5 diverse queries covering different angles.
+1. **Search**: Use exa_search (preferred) or web_search with 3-5 diverse queries covering different angles.
    Prioritize authoritative sources (.edu, .gov, established publications).
    For automotive research, target: caranddriver.com, motortrend.com, edmunds.com, 
    consumerreports.org, jdpower.com, and enthusiast forums.
@@ -92,6 +92,7 @@ Include themes, contradictions, and confidence levels.")
 - set_output("gaps", "What aspects of the research brief are NOT well-covered yet, if any.")
 """,
     tools=[
+        "exa_search",
         "web_search",
         "web_scrape",
         "load_data",

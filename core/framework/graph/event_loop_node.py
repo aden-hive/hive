@@ -1991,6 +1991,13 @@ class EventLoopNode(NodeProtocol):
                         token_counts["model"] = event.model
 
                     elif isinstance(event, StreamErrorEvent):
+                        if self._event_bus and ctx.stream_id:
+                            await self._event_bus.emit_node_stalled(
+                                stream_id=ctx.stream_id,
+                                node_id=ctx.node_id,
+                                reason=event.error,
+                                execution_id=ctx.execution_id,
+                            )
                         if not event.recoverable:
                             raise RuntimeError(f"Stream error: {event.error}")
                         _stream_error = event
