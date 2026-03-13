@@ -308,16 +308,15 @@ with a unique color. You can override auto-detection by setting \
 - **offpage_connector** (dark grey, pentagon): Cross-page link
 
 **Domain-specific:**
-- **browser** (dark indigo, hexagon): GCU browser automation
-- **subagent** (dark teal, subroutine): Planning-only sub-agent delegation \
-(dissolved into parent's sub_agents at build time)
+- **browser** (dark indigo, hexagon): GCU browser automation / sub-agent \
+delegation. At build time, browser nodes are dissolved into the parent \
+node's sub_agents list. Use for any GCU or sub-agent leaf node.
 
 Auto-detection works well for most cases: first node → start, nodes with \
 no outgoing edges → terminal, nodes with multiple conditional outgoing \
 edges → decision, GCU nodes → browser, nodes mentioning "database" → \
 database, nodes mentioning "report/document" → document, etc. Set \
-flowchart_type explicitly only when auto-detection would be wrong. \
-Note: `subagent` is never auto-detected — you must set it explicitly.
+flowchart_type explicitly only when auto-detection would be wrong.
 
 ## Decision Nodes — Planning-Only Conditional Branching
 
@@ -366,11 +365,11 @@ sub-agent nodes are **dissolved** into their parent node:
 - At runtime, the parent node can invoke the sub-agent via `delegate_to_sub_agent`
 
 **Rules for sub-agent nodes (INCLUDING GCU nodes):**
-- Set `flowchart_type: "subagent"` explicitly (never auto-detected)
+- GCU nodes are auto-detected as `flowchart_type: "browser"` (hexagon)
 - Connect from the managing parent node to the sub-agent node
 - Sub-agent nodes must be **leaf nodes** — NO outgoing edges to other nodes
-- The sub-agent node's ID must match a real node ID in the runtime graph \
-(the node it represents will be invokable as a sub-agent)
+- At build time, browser/GCU nodes are dissolved into the parent's \
+`sub_agents` list, just like decision nodes are dissolved into criteria
 
 **CRITICAL: GCU nodes (`node_type: "gcu"`) are ALWAYS sub-agents.** \
 They MUST NOT appear in the linear flow. NEVER chain GCU nodes \
@@ -389,7 +388,7 @@ workflow step.
 
 **How to show delegation in the flowchart:**
 ```
-research → (deep_searcher)   ← subagent node, leaf
+research → (deep_searcher)   ← browser/GCU node, leaf
 research → [Enough results?] ← decision node
 ```
 After dissolution: `research` node gets `sub_agents: ["deep_searcher"]` \
@@ -608,11 +607,12 @@ document, database, subprocess, etc.) with unique shapes and colors. Set \
 flowchart_type on a node to override. Nodes need only an id. \
 Use decision nodes (flowchart_type: "decision", with decision_clause and \
 labeled yes/no edges) to make conditional branching explicit. \
-Use subagent nodes (flowchart_type: "subagent") as leaf nodes connected \
-to a parent to show sub-agent delegation visually.
+GCU/sub-agent nodes (node_type: "gcu") are auto-detected as browser \
+hexagons — connect them as leaf nodes to their parent.
 - confirm_and_build() — Record user confirmation of the draft. Dissolves \
-planning-only nodes (decision → predecessor criteria; subagent → predecessor \
-sub_agents list). Call this ONLY after the user explicitly approves via ask_user.
+planning-only nodes (decision → predecessor criteria; browser/GCU → \
+predecessor sub_agents list). Call this ONLY after the user explicitly \
+approves via ask_user.
 - initialize_and_build_agent(agent_name?, nodes?) — Scaffold the agent package \
 and transition to BUILDING phase. For new agents, this REQUIRES \
 save_agent_draft() + confirm_and_build() first. The draft metadata is used to \
@@ -646,12 +646,12 @@ list_agent_checkpoints, get_agent_checkpoint
 - load_built_agent(agent_path) — Load the agent and switch to STAGING phase
 - list_credentials(credential_id?) — List authorized credentials
 - save_agent_draft(...) — **Re-draft the flowchart during building.** When \
-called during building, planning-only nodes (decision, subagent) are \
+called during building, planning-only nodes (decision, browser/GCU) are \
 dissolved automatically — no re-confirmation needed. The user sees the \
 updated flowchart immediately. Use this when you make structural changes \
 (add/remove nodes, change edges) so the flowchart stays in sync.
 - replan_agent() — Switch back to PLANNING phase. The previous draft is \
-restored (with decision/subagent nodes intact) so you can edit it. Use \
+restored (with decision/browser nodes intact) so you can edit it. Use \
 when the user wants to change integrations, swap tools, rethink the \
 flow, or discuss any design changes before you build them.
 

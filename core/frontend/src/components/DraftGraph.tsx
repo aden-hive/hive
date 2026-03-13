@@ -338,7 +338,6 @@ function FlowchartShape({
 function Tooltip({ node, style }: { node: DraftNode; style: React.CSSProperties }) {
   const lines: string[] = [];
   if (node.description) lines.push(node.description);
-  if (node.tools.length > 0) lines.push(`Tools: ${node.tools.join(", ")}`);
   if (node.success_criteria) lines.push(`Criteria: ${node.success_criteria}`);
   if (lines.length === 0) return null;
 
@@ -358,10 +357,27 @@ function Tooltip({ node, style }: { node: DraftNode; style: React.CSSProperties 
 
 export default function DraftGraph({ draft, onNodeClick, flowchartMap, runtimeNodes, onRuntimeNodeClick, building, onRun, onPause, runState = "idle" }: DraftGraphProps) {
   const [hoveredNode, setHoveredNode] = useState<string | null>(null);
+  const [mousePos, setMousePos] = useState<{ x: number; y: number } | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const runBtnRef = useRef<HTMLButtonElement>(null);
   const [containerW, setContainerW] = useState(484);
   const chrome = useDraftChromeColors();
+
+  // Shift-to-pin tooltip
+  const shiftHeld = useRef(false);
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => { if (e.key === "Shift") shiftHeld.current = true; };
+    const onKeyUp = (e: KeyboardEvent) => {
+      if (e.key === "Shift") {
+        shiftHeld.current = false;
+        setHoveredNode(null);
+        setMousePos(null);
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    window.addEventListener("keyup", onKeyUp);
+    return () => { window.removeEventListener("keydown", onKeyDown); window.removeEventListener("keyup", onKeyUp); };
+  }, []);
 
   // Pan & Zoom state
   const [zoom, setZoom] = useState(1);
@@ -817,10 +833,7 @@ export default function DraftGraph({ draft, onNodeClick, flowchartMap, runtimeNo
   const legendH = usedTypes.length * 18 + 20;
   const totalH = svgHeight + legendH;
 
-  // Find hovered node for tooltip positioning
   const hoveredNodeData = hoveredNode ? nodes.find(n => n.id === hoveredNode) : null;
-  const hoveredIdx = hoveredNode ? idxMap[hoveredNode] : -1;
-  const hoveredPos = hoveredIdx >= 0 ? nodePos(hoveredIdx) : null;
 
   const renderEdge = (edge: typeof forwardEdges[number], i: number) => {
     const from = nodePos(edge.fromIdx);
@@ -922,11 +935,15 @@ export default function DraftGraph({ draft, onNodeClick, flowchartMap, runtimeNo
             onNodeClick?.(node);
           }
         }}
-        onMouseEnter={() => setHoveredNode(node.id)}
-        onMouseLeave={() => setHoveredNode(null)}
+        onMouseEnter={(e) => {
+          if (shiftHeld.current && hoveredNode) return;
+          setHoveredNode(node.id);
+          const rect = containerRef.current?.getBoundingClientRect();
+          if (rect) setMousePos({ x: e.clientX - rect.left, y: e.clientY - rect.top });
+        }}
+        onMouseLeave={() => { if (!shiftHeld.current) { setHoveredNode(null); setMousePos(null); } }}
         style={{ cursor: "pointer" }}
       >
-        <title>{`${node.name}\n${node.flowchart_type}`}</title>
 
         <FlowchartShape
           shape={node.flowchart_shape}
@@ -1144,17 +1161,26 @@ export default function DraftGraph({ draft, onNodeClick, flowchartMap, runtimeNo
         </div>
 
         {/* HTML tooltip — rendered outside SVG so it's not clipped */}
-        {hoveredNodeData && hoveredPos && (
-          <Tooltip
-            node={hoveredNodeData}
-            style={{
-              left: 8,
-              right: 8,
-              // Position below the hovered node, scaled to container width
-              top: `calc(${((hoveredPos.y + NODE_H + 4) / totalH) * 100}%)`,
-            }}
-          />
-        )}
+        {hoveredNodeData && mousePos && (() => {
+          const TOOLTIP_W = 260;
+          const OFFSET = 12;
+          const rect = containerRef.current?.getBoundingClientRect();
+          const cw = rect?.width ?? 0;
+          const ch = rect?.height ?? 0;
+          const flipX = mousePos.x + OFFSET + TOOLTIP_W > cw;
+          const flipY = mousePos.y + 16 + 60 > ch;
+          return (
+            <Tooltip
+              node={hoveredNodeData}
+              style={{
+                left: flipX ? undefined : mousePos.x + OFFSET,
+                right: flipX ? (cw - mousePos.x + OFFSET) : undefined,
+                top: flipY ? undefined : mousePos.y + 16,
+                bottom: flipY ? (ch - mousePos.y + 16) : undefined,
+              }}
+            />
+          );
+        })()}
       </div>
     </div>
   );

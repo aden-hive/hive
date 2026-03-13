@@ -345,8 +345,6 @@ _FLOWCHART_TYPES = {
     "comment": {"shape": "flag", "color": "#BDBDBD"},  # light grey
     # Alternate process — rounded rectangle
     "alternate_process": {"shape": "rounded_rect", "color": "#42A5F5"},  # light blue
-    # Sub-agent — planning-only; dissolved into parent's sub_agents at build time
-    "subagent": {"shape": "subroutine", "color": "#00695C"},  # dark teal
 }
 
 
@@ -558,7 +556,7 @@ def _dissolve_planning_nodes(
     subagent_ids = [
         n["id"]
         for n in nodes
-        if n.get("flowchart_type") in ("subagent", "browser") or n.get("node_type") == "gcu"
+        if n.get("flowchart_type") == "browser" or n.get("node_type") == "gcu"
     ]
 
     for sa_id in subagent_ids:
@@ -1316,7 +1314,7 @@ def register_queen_lifecycle_tools(
            edges from the predecessor.
         3. Removing the decision node from the graph.
 
-        **Sub-agent nodes** (flowchart_type == "subagent"):
+        **Sub-agent / browser nodes** (node_type == "gcu" or flowchart_type == "browser"):
         1. Adding the sub-agent node's ID to the predecessor's sub_agents list.
         2. Removing the sub-agent node and its connecting edge.
         3. Sub-agent nodes must not have outgoing edges (they are leaf delegates).
@@ -1458,7 +1456,7 @@ def register_queen_lifecycle_tools(
         subagent_ids = [
             n["id"]
             for n in nodes
-            if n.get("flowchart_type") in ("subagent", "browser") or n.get("node_type") == "gcu"
+            if n.get("flowchart_type") == "browser" or n.get("node_type") == "gcu"
         ]
 
         for sa_id in subagent_ids:
@@ -1582,27 +1580,31 @@ def register_queen_lifecycle_tools(
             and phase_state.phase == "planning"
             and phase_state.planning_ask_rounds < 2
         ):
-            return json.dumps({
-                "error": (
-                    "You haven't asked enough questions yet. You have only "
-                    f"asked {phase_state.planning_ask_rounds} round(s) of "
-                    "questions — at least 2 are required before saving a "
-                    "draft. Think deeper and ask more practical questions "
-                    "to fully understand the user's requirements before "
-                    "designing the agent graph."
-                )
-            })
+            return json.dumps(
+                {
+                    "error": (
+                        "You haven't asked enough questions yet. You have only "
+                        f"asked {phase_state.planning_ask_rounds} round(s) of "
+                        "questions — at least 2 are required before saving a "
+                        "draft. Think deeper and ask more practical questions "
+                        "to fully understand the user's requirements before "
+                        "designing the agent graph."
+                    )
+                }
+            )
 
         # ── Gate: require at least 5 nodes for a meaningful graph ─────
         if len(nodes) < 5:
-            return json.dumps({
-                "error": (
-                    f"Draft only has {len(nodes)} node(s) — at least 5 are "
-                    "required for a meaningful agent graph. Think deeper and "
-                    "ask more practical questions to fully understand the "
-                    "user's requirements, then design a more thorough graph."
-                )
-            })
+            return json.dumps(
+                {
+                    "error": (
+                        f"Draft only has {len(nodes)} node(s) — at least 5 are "
+                        "required for a meaningful agent graph. Think deeper and "
+                        "ask more practical questions to fully understand the "
+                        "user's requirements, then design a more thorough graph."
+                    )
+                }
+            )
 
         # Loose validation: each node needs at minimum an id
         validated_nodes = []
@@ -1669,32 +1671,31 @@ def register_queen_lifecycle_tools(
         # sub-agent and remove the decision → GCU edge.
         node_by_id_v = {n["id"]: n for n in validated_nodes}
         decision_node_ids = {
-            n["id"] for n in validated_nodes
-            if n.get("flowchart_type") == "decision"
+            n["id"] for n in validated_nodes if n.get("flowchart_type") == "decision"
         }
         gcu_node_ids = {
-            n["id"] for n in validated_nodes
-            if n.get("node_type") == "gcu" or n.get("flowchart_type") == "subagent"
+            n["id"]
+            for n in validated_nodes
+            if n.get("node_type") == "gcu" or n.get("flowchart_type") == "browser"
         }
         topology_corrections: list[str] = []
         if decision_node_ids and gcu_node_ids:
             for d_id in decision_node_ids:
                 gcu_children = [
-                    e for e in validated_edges
+                    e
+                    for e in validated_edges
                     if e["source"] == d_id and e["target"] in gcu_node_ids
                 ]
                 if not gcu_children:
                     continue
-                d_parents = [
-                    e["source"] for e in validated_edges
-                    if e["target"] == d_id
-                ]
+                d_parents = [e["source"] for e in validated_edges if e["target"] == d_id]
                 for gc_edge in gcu_children:
                     gc_id = gc_edge["target"]
                     logger.warning(
                         "GCU node '%s' is a child of decision node '%s' "
                         "— moving it to the decision's predecessor.",
-                        gc_id, d_id,
+                        gc_id,
+                        d_id,
                     )
                     topology_corrections.append(
                         f"GCU node '{gc_id}' was a child of decision "
@@ -1704,15 +1705,16 @@ def register_queen_lifecycle_tools(
                     )
                     # Remove the decision → GCU edge
                     validated_edges[:] = [
-                        e for e in validated_edges
+                        e
+                        for e in validated_edges
                         if not (e["source"] == d_id and e["target"] == gc_id)
                     ]
                     # Remove any outgoing edges from the GCU node
                     # (keep report edges back to predecessors)
                     validated_edges[:] = [
-                        e for e in validated_edges
-                        if e["source"] != gc_id
-                        or e["target"] in set(d_parents)
+                        e
+                        for e in validated_edges
+                        if e["source"] != gc_id or e["target"] in set(d_parents)
                     ]
                     # Assign GCU as sub-agent of predecessor(s)
                     for pid in d_parents:
@@ -1732,7 +1734,7 @@ def register_queen_lifecycle_tools(
         # auto-assign the node as a sub-agent of its predecessor.
         leaf_node_ids: set[str] = set()
         for n in validated_nodes:
-            if n.get("node_type") == "gcu" or n.get("flowchart_type") == "subagent":
+            if n.get("node_type") == "gcu" or n.get("flowchart_type") == "browser":
                 leaf_node_ids.add(n["id"])
         if leaf_node_ids:
             for leaf_id in leaf_node_ids:
@@ -1895,7 +1897,8 @@ def register_queen_lifecycle_tools(
                     logger.warning(
                         "Node '%s' is unreachable from entry node '%s' "
                         "— removing it from the draft.",
-                        uid, entry_id,
+                        uid,
+                        entry_id,
                     )
                     topology_corrections.append(
                         f"Node '{uid}' is disconnected from the graph "
@@ -1904,14 +1907,11 @@ def register_queen_lifecycle_tools(
                         f"as a sub-agent of an existing node."
                     )
                 validated_edges[:] = [
-                    e for e in validated_edges
-                    if e["source"] not in unreachable
-                    and e["target"] not in unreachable
+                    e
+                    for e in validated_edges
+                    if e["source"] not in unreachable and e["target"] not in unreachable
                 ]
-                validated_nodes[:] = [
-                    n for n in validated_nodes
-                    if n["id"] not in unreachable
-                ]
+                validated_nodes[:] = [n for n in validated_nodes if n["id"] not in unreachable]
 
         # Determine terminal nodes: explicit list, or nodes with no outgoing edges.
         # Sub-agent nodes are leaf helpers, not endpoints — exclude them.
@@ -2081,11 +2081,11 @@ def register_queen_lifecycle_tools(
             "(updates the flowchart in place — planning-only nodes are dissolved "
             "automatically without re-confirmation). "
             "Each node is auto-classified into a classical flowchart type "
-            "(start, terminal, process, decision, io, subprocess, subagent, browser, manual) "
+            "(start, terminal, process, decision, io, subprocess, browser, manual) "
             "with unique colors. No code is generated. "
-            "Planning-only types (decision, subagent) are dissolved at confirm/build time: "
+            "Planning-only types (decision, browser/GCU) are dissolved at confirm/build time: "
             "decision nodes merge into predecessor's success_criteria with yes/no edges; "
-            "subagent nodes merge into predecessor's sub_agents list as leaf delegates."
+            "browser/GCU nodes merge into predecessor's sub_agents list as leaf delegates."
         ),
         parameters={
             "type": "object",
@@ -2148,7 +2148,6 @@ def register_queen_lifecycle_tools(
                                     "browser",
                                     "comment",
                                     "alternate_process",
-                                    "subagent",
                                 ],
                                 "description": (
                                     "ISO 5807 flowchart symbol type. Auto-detected if omitted. "
@@ -2158,10 +2157,9 @@ def register_queen_lifecycle_tools(
                                     "subprocess (teal subroutine), preparation (brown hexagon), "
                                     "manual_operation (pink trapezoid), delay (orange D-shape), "
                                     "display (cyan), database (green cylinder), "
-                                    "merge (indigo triangle), browser (dark indigo hexagon), "
-                                    "subagent (dark teal subroutine — planning-only, dissolved "
-                                    "into parent node's sub_agents at build time; must be a "
-                                    "leaf node connected only to its managing parent)"
+                                    "merge (indigo triangle), browser (dark indigo hexagon — "
+                                    "for GCU/browser sub-agents; must be a leaf node connected "
+                                    "only to its managing parent)"
                                 ),
                             },
                             "tools": {
@@ -2287,7 +2285,7 @@ def register_queen_lifecycle_tools(
         phase_state.build_confirmed = True
 
         # Preserve original draft for flowchart display during runtime,
-        # then dissolve planning-only nodes (decision + subagent) into
+        # then dissolve planning-only nodes (decision + browser/GCU) into
         # runtime-compatible structures.
         import copy as _copy
 
@@ -2305,7 +2303,11 @@ def register_queen_lifecycle_tools(
 
         dissolved_count = len(original_nodes) - len(converted.get("nodes", []))
         decision_count = sum(1 for n in original_nodes if n.get("flowchart_type") == "decision")
-        subagent_count = sum(1 for n in original_nodes if n.get("flowchart_type") == "subagent")
+        subagent_count = sum(
+            1
+            for n in original_nodes
+            if n.get("flowchart_type") == "browser" or n.get("node_type") == "gcu"
+        )
 
         dissolution_parts = []
         if decision_count:
