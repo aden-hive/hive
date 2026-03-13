@@ -4,6 +4,37 @@
 
 The Hive framework is organized around five core subsystems that collaborate to execute goal-driven agents reliably. The following diagram shows how these subsystems connect:
 
+## Quick Architecture Overview
+
+Hive is an agent orchestration framework designed to run reliable goal-driven AI agents.
+
+The system is composed of several core components that work together:
+
+1. **Event Loop Node**
+   - Entry point of the system
+   - Listens for external events like schedulers, webhooks, or SSE streams
+   - Triggers task execution
+
+2. **Worker Bees**
+   - Responsible for executing tasks
+   - Organized as a graph of nodes
+   - Each node performs a specific step in the workflow
+
+3. **Judge**
+   - Monitors the behavior of worker nodes
+   - Evaluates progress and detects problems
+   - Emits escalation events when issues occur
+
+4. **Queen Bee**
+   - Oversees the entire system
+   - Receives events from workers and judge nodes
+   - Coordinates high-level orchestration
+
+5. **Infrastructure Layer**
+   - Provides shared services such as memory, credentials, event bus, and tool registry
+
+These components communicate through an **event-driven architecture**, enabling scalable and modular execution of agents.
+
 ```mermaid
 flowchart TB
     %% Main Entity
@@ -148,7 +179,43 @@ flowchart TB
     %% Credentials Access
     CS -->|"Read Access"| QB_C
 ```
+## Typical Agent Lifecycle
 
+A typical agent execution in Hive follows this lifecycle:
+
+1. **Trigger**
+   - An external event (scheduler, webhook, or SSE) triggers the system.
+
+2. **Event Processing**
+   - The Event Loop Node receives the event and starts processing.
+
+3. **Task Execution**
+   - Worker Bees execute the task through graph nodes.
+
+4. **Monitoring**
+   - The Judge continuously monitors execution and system health.
+
+5. **Escalation (if needed)**
+   - If issues are detected, the Judge emits escalation tickets.
+
+6. **Orchestration**
+   - The Queen Bee receives events and coordinates responses.
+
+7. **Completion**
+   - Results are returned or stored in shared memory.
+
+## How Modules Interact
+
+The Hive framework uses an **event-driven communication model** where different components interact through shared infrastructure.
+
+- **Worker Bees** publish execution events to the **Event Bus**.
+- The **Queen Bee** subscribes to these events to maintain system awareness and coordination.
+- The **Judge** monitors worker logs and emits escalation tickets when abnormal behavior is detected.
+- **Shared Memory** allows different components to read and write execution state.
+- **Sub-agents** can be spawned for parallel task execution while reporting progress back to parent nodes.
+
+This architecture ensures that system components remain **loosely coupled but highly coordinated**, enabling scalable agent orchestration.
+ 
 ### Key Subsystems
 
 | Subsystem               | Role        | Description                                                                                                                                                                                                                                                  |
