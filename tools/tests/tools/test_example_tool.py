@@ -15,6 +15,11 @@ def example_tool_fn(mcp: FastMCP):
 
 class TestExampleTool:
     """Tests for example_tool function."""
+    def test_missing_message_argument_error(self, example_tool_fn):
+        """Calling tool without required message returns error."""
+        result = example_tool_fn()
+
+        assert "Error" in result
 
     def test_valid_message(self, example_tool_fn):
         """Basic message returns unchanged."""
