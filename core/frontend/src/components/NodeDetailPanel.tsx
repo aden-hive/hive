@@ -170,7 +170,7 @@ function SystemPromptTab({ systemPrompt }: { systemPrompt?: string }) {
   const prompt = systemPrompt || "";
   const [copied, setCopied] = useState(false);
 
-  const handleCopy =  () => {
+  const handleCopy = () => {
     navigator.clipboard.writeText(prompt);
     setCopied(true);
     setTimeout(() => setCopied(false), 1500);
