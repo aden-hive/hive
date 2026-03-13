@@ -1258,7 +1258,7 @@ async def _run_org_pipeline(websocket, topic: str):
             config=LoopConfig(
                 max_iterations=30,
                 max_tool_calls_per_turn=30,
-                max_history_tokens=32_000,
+                max_context_tokens=32_000,
             ),
             conversation_store=store,
             tool_executor=executor,

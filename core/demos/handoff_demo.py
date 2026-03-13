@@ -752,7 +752,7 @@ async def _run_pipeline(websocket, topic: str):
         config=LoopConfig(
             max_iterations=20,
             max_tool_calls_per_turn=30,
-            max_history_tokens=32_000,
+            max_context_tokens=32_000,
         ),
         conversation_store=store_a,
         tool_executor=tool_executor,
@@ -850,7 +850,7 @@ async def _run_pipeline(websocket, topic: str):
         config=LoopConfig(
             max_iterations=10,
             max_tool_calls_per_turn=30,
-            max_history_tokens=32_000,
+            max_context_tokens=32_000,
         ),
         conversation_store=store_b,
     )

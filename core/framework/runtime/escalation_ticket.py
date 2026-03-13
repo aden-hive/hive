@@ -1,4 +1,4 @@
-"""EscalationTicket — structured schema for worker health judge escalations."""
+"""EscalationTicket — structured schema for worker health escalations."""
 
 from __future__ import annotations
 
@@ -10,10 +10,10 @@ from pydantic import BaseModel, Field
 
 
 class EscalationTicket(BaseModel):
-    """Structured escalation report emitted by the Worker Health Judge.
+    """Structured escalation report for worker health monitoring.
 
-    The judge must fill every field before calling emit_escalation_ticket.
-    Pydantic validation rejects partial tickets, preventing impulsive escalation.
+    All fields must be filled before calling emit_escalation_ticket.
+    Pydantic validation rejects partial tickets.
     """
 
     ticket_id: str = Field(default_factory=lambda: str(uuid4()))
@@ -25,7 +25,7 @@ class EscalationTicket(BaseModel):
     worker_node_id: str
     worker_graph_id: str
 
-    # Problem characterization (filled by judge via LLM deliberation)
+    # Problem characterization
     severity: Literal["low", "medium", "high", "critical"]
     cause: str  # Human-readable: "Node has produced 18 RETRY verdicts..."
     judge_reasoning: str  # Judge's own deliberation chain

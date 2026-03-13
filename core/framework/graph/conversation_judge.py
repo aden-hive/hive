@@ -37,7 +37,7 @@ async def evaluate_phase_completion(
     phase_description: str,
     success_criteria: str,
     accumulator_state: dict[str, Any],
-    max_history_tokens: int = 8_196,
+    max_context_tokens: int = 8_196,
 ) -> PhaseVerdict:
     """Level 2 judge: read the conversation and evaluate quality.
 
@@ -50,7 +50,7 @@ async def evaluate_phase_completion(
         phase_description: Description of the phase
         success_criteria: Natural-language criteria for phase completion
         accumulator_state: Current output key values
-        max_history_tokens: Main conversation token budget (judge gets 20%)
+        max_context_tokens: Main conversation token budget (judge gets 20%)
 
     Returns:
         PhaseVerdict with action and optional feedback
@@ -89,7 +89,7 @@ FEEDBACK: (reason if RETRY, empty if ACCEPT)"""
         response = await llm.acomplete(
             messages=[{"role": "user", "content": user_prompt}],
             system=system_prompt,
-            max_tokens=max(1024, max_history_tokens // 5),
+            max_tokens=max(1024, max_context_tokens // 5),
             max_retries=1,
         )
         if not response.content or not response.content.strip():
