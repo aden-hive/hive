@@ -3,6 +3,8 @@
 import argparse
 import asyncio
 import json
+import os
+import shutil
 import sys
 from pathlib import Path
 
@@ -118,6 +120,25 @@ def register_commands(subparsers: argparse._SubParsersAction) -> None:
         help="Directory to search (default: exports)",
     )
     list_parser.set_defaults(func=cmd_list)
+
+    # doctor command (environment diagnostics)
+    doctor_parser = subparsers.add_parser(
+        "doctor",
+        help="Diagnose environment before running agents",
+        description="Run checks for Python/Node, dependencies, env vars, config files, "
+        "and optional network connectivity. Use to troubleshoot setup issues.",
+    )
+    doctor_parser.add_argument(
+        "--json",
+        action="store_true",
+        help="Output results as JSON (list of check objects)",
+    )
+    doctor_parser.add_argument(
+        "--no-network",
+        action="store_true",
+        help="Skip network connectivity check (e.g. when offline)",
+    )
+    doctor_parser.set_defaults(func=cmd_doctor)
 
     # dispatch command (multi-agent)
     dispatch_parser = subparsers.add_parser(
@@ -720,6 +741,46 @@ def cmd_list(args: argparse.Namespace) -> int:
             print()
 
     return 0
+
+
+def cmd_doctor(args: argparse.Namespace) -> int:
+    """Run environment diagnostics and print a report with pass/fail and suggestions."""
+    from framework.runner.doctor import run_doctor_checks
+
+    # Resolve project root (same as doctor module: runner -> framework -> core -> root)
+    _runner_dir = Path(__file__).resolve().parent
+    _core_dir = _runner_dir.parent.parent
+    project_root = _core_dir.parent
+
+    results = run_doctor_checks(
+        project_root=project_root,
+        skip_network=getattr(args, "no_network", False),
+    )
+
+    if args.json:
+        output = [r.to_dict() for r in results]
+        print(json.dumps(output, indent=2))
+        return 0 if all(r.passed for r in results) else 1
+
+    # Terminal report: ✓ for passed, ✗ for failed, with suggestions
+    print("Hive Doctor — environment diagnostics")
+    print("=" * 60)
+    failed = 0
+    for r in results:
+        symbol = "✓" if r.passed else "✗"
+        status = "PASS" if r.passed else "FAIL"
+        print(f"  {symbol} [{status}] {r.name}")
+        print(f"      {r.message}")
+        if not r.passed:
+            failed += 1
+            if r.suggestion:
+                print(f"      → {r.suggestion}")
+    print("=" * 60)
+    if failed == 0:
+        print("All checks passed. You should be able to run agents.")
+    else:
+        print(f"{failed} check(s) failed. Address the suggestions above and run `hive doctor` again.")
+    return 0 if failed == 0 else 1
 
 
 def cmd_dispatch(args: argparse.Namespace) -> int:

@@ -6,6 +6,7 @@ Usage:
     hive info exports/my-agent
     hive validate exports/my-agent
     hive list exports/
+    hive doctor              # Diagnose environment (Python, deps, env vars, config, network)
     hive dispatch exports/ --input '{"key": "value"}'
     hive shell exports/my-agent
 
