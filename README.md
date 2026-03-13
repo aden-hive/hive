@@ -43,6 +43,16 @@ Visit [adenhq.com](https://adenhq.com) for complete documentation, examples, and
 
 [![Hive Demo](https://img.youtube.com/vi/XDOG9fOaLjU/maxresdefault.jpg)](https://www.youtube.com/watch?v=XDOG9fOaLjU)
 
+## Project Structure
+
+The Hive repository is organized into several core directories:
+
+- **core/** – Core runtime responsible for orchestrating the multi-agent system.
+- **tools/** – Tool integrations that agents can use to interact with external systems.
+- **docs/** – Documentation and architecture explanations for the Hive framework.
+- **examples/** – Example implementations demonstrating how to build with Hive.
+- **scripts/** – Utility scripts used for development and setup.
+
 ## Who Is Hive For?
 
 Hive is designed for developers and teams who want to build **production-grade AI agents** without manually wiring complex workflows.
@@ -56,6 +66,7 @@ Hive is a good fit if you:
 - Plan to run agents in **production environments**
 
 Hive may not be the best fit if you’re only experimenting with simple agent chains or one-off scripts.
+
 
 ## When Should You Use Hive?
 
