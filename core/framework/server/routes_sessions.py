@@ -410,10 +410,12 @@ async def handle_list_worker_sessions(request: web.Request) -> web.Response:
     for d in sorted(sess_dir.iterdir(), reverse=True):
         if not d.is_dir():
             continue
+        state_path = d / "state.json"
+        if not d.name.startswith("session_") and not state_path.exists():
+            continue
 
         entry: dict = {"session_id": d.name}
 
-        state_path = d / "state.json"
         if state_path.exists():
             try:
                 state = json.loads(state_path.read_text(encoding="utf-8"))
