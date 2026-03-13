@@ -170,19 +170,9 @@ function SystemPromptTab({ systemPrompt }: { systemPrompt?: string }) {
   const prompt = systemPrompt || "";
   const [copied, setCopied] = useState(false);
 
-  const handleCopy = async () => {
-     try {
-    if (!navigator.clipboard) {
-      throw new Error("Clipboard API not supported");
-    }
-
-    await navigator.clipboard.writeText(prompt);
+  const handleCopy =  () => {
+    navigator.clipboard.writeText(prompt);
     setCopied(true);
-    setTimeout(() => setCopied(false), 1500);
-  } catch (err) {
-    console.error("Clipboard copy failed:", err);
-  }
-    
     setTimeout(() => setCopied(false), 1500);
   };
 
