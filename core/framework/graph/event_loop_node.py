@@ -772,8 +772,13 @@ class EventLoopNode(NodeProtocol):
                     # For client-facing nodes, surface the error and wait
                     # for user input instead of killing the loop.  The user
                     # can retry or adjust the request.
+                    turn_tokens = {"input": 0, "output": 0}
                     if ctx.node_spec.client_facing:
-                        error_msg = f"LLM call failed: {e}"
+                        error_str = str(e).lower()
+                        if "429" in error_str or "rate limit" in error_str or "rate_limit" in error_str or "resource_exhausted" in error_str:
+                            error_msg = "Model rate limit reached"
+                        else:
+                            error_msg = f"LLM call failed: {str(e)}"
                         logger.error(
                             "[%s] iter=%d: %s — waiting for user input",
                             node_id,
@@ -789,6 +794,11 @@ class EventLoopNode(NodeProtocol):
                                 error=str(e)[:500],
                                 execution_id=execution_id,
                             )
+                            await self._event_bus.emit_execution_failed(
+                                stream_id=stream_id,
+                                execution_id=execution_id,
+                                error=error_msg,
+                            )
                         # Inject the error as an assistant message so the
                         # user sees it, then block for their next message.
                         await conversation.add_assistant_message(
@@ -796,8 +806,26 @@ class EventLoopNode(NodeProtocol):
                         )
                         await self._await_user_input(ctx, prompt="")
                         break  # exit retry loop, continue outer iteration
-
+                    # Non-client-facing: surface error via event bus
+                    error_str = str(e).lower()
+                    if "429" in error_str or "rate limit" in error_str or "rate_limit" in error_str or "resource_exhausted" in error_str:
+                        if self._event_bus:
+                            await self._event_bus.emit_node_retry(
+                                stream_id=stream_id,
+                                node_id=node_id,
+                                retry_count=_stream_retry_count,
+                                max_retries=self._config.max_stream_retries,
+                                error="Model rate limit reached",
+                                execution_id=execution_id,
+                            )
+                            await self._event_bus.emit_execution_failed(
+                                stream_id=stream_id,
+                                execution_id=execution_id,
+                                error="Model rate limit reached",
+                            )
                     # Non-client-facing: crash as before
+                    raise
+
                     import traceback
 
                     iter_latency_ms = int((time.time() - iter_start) * 1000)
