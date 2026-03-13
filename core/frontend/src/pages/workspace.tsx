@@ -719,7 +719,9 @@ export default function Workspace() {
 
         // Before creating a new session, check if there's already a live backend
         // session for this queen-only agent that no open tab owns.
-        if (!liveSession && !coldRestoreId) {
+        // Skip this search when the tab has a prompt — it's a fresh agent from
+        // home and must always get its own session.
+        if (!liveSession && !coldRestoreId && !prompt) {
           try {
             const { sessions: allLive } = await sessionsApi.list();
             const existing = allLive.find(s => !s.has_worker && !s.agent_path);
