@@ -256,6 +256,27 @@ def _compute_retry_delay(
     return min(delay, max_delay)
 
 
+def _brief_error(exc: BaseException, max_len: int = 200) -> str:
+    """Return a short, single-line summary of an exception for log messages.
+
+    LLM provider errors (especially RateLimitError) often include the full
+    HTTP response body, which can be hundreds of lines.  This extracts the
+    first non-empty line and truncates it so retry logs stay readable.
+    """
+    text = str(exc)
+    first_line = ""
+    for line in text.splitlines():
+        stripped = line.strip()
+        if stripped:
+            first_line = stripped
+            break
+    if not first_line:
+        first_line = type(exc).__name__
+    if len(first_line) > max_len:
+        return first_line[:max_len] + "..."
+    return first_line
+
+
 def _is_stream_transient_error(exc: BaseException) -> bool:
     """Classify whether a streaming exception is transient (recoverable).
 
@@ -472,7 +493,6 @@ class LiteLLMProvider(LLMProvider):
 
                 return response
             except RateLimitError as e:
-                # Dump full request to file for debugging
                 messages = kwargs.get("messages", [])
                 token_count, token_method = _estimate_tokens(model, messages)
                 dump_path = _dump_failed_request(
@@ -484,19 +504,27 @@ class LiteLLMProvider(LLMProvider):
                 if attempt == retries:
                     logger.error(
                         f"[retry] GAVE UP on {model} after {retries + 1} "
-                        f"attempts — rate limit error: {e!s}. "
+                        f"attempts — rate limit error: {_brief_error(e)}. "
                         f"~{token_count} tokens ({token_method}). "
                         f"Full request dumped to: {dump_path}"
                     )
                     raise
                 wait = _compute_retry_delay(attempt, exception=e)
-                logger.warning(
-                    f"[retry] {model} rate limited (429): {e!s}. "
-                    f"~{token_count} tokens ({token_method}). "
-                    f"Full request dumped to: {dump_path}. "
-                    f"Retrying in {wait}s "
-                    f"(attempt {attempt + 1}/{retries})"
-                )
+                if attempt == 0:
+                    logger.warning(
+                        f"[retry] {model} rate limited (429): {_brief_error(e)}. "
+                        f"~{token_count} tokens ({token_method}). "
+                        f"Full request dumped to: {dump_path}. "
+                        f"Retrying in {wait}s "
+                        f"(attempt {attempt + 1}/{retries})"
+                    )
+                else:
+                    logger.warning(
+                        f"[retry] {model} rate limited (429). "
+                        f"Retrying in {wait}s "
+                        f"(attempt {attempt + 1}/{retries})"
+                    )
+                logger.debug(f"[retry] Full rate limit error: {e!s}")
                 time.sleep(wait)
         # unreachable, but satisfies type checker
         raise RuntimeError("Exhausted rate limit retries")
@@ -684,19 +712,27 @@ class LiteLLMProvider(LLMProvider):
                 if attempt == retries:
                     logger.error(
                         f"[async-retry] GAVE UP on {model} after {retries + 1} "
-                        f"attempts — rate limit error: {e!s}. "
+                        f"attempts — rate limit error: {_brief_error(e)}. "
                         f"~{token_count} tokens ({token_method}). "
                         f"Full request dumped to: {dump_path}"
                     )
                     raise
                 wait = _compute_retry_delay(attempt, exception=e)
-                logger.warning(
-                    f"[async-retry] {model} rate limited (429): {e!s}. "
-                    f"~{token_count} tokens ({token_method}). "
-                    f"Full request dumped to: {dump_path}. "
-                    f"Retrying in {wait}s "
-                    f"(attempt {attempt + 1}/{retries})"
-                )
+                if attempt == 0:
+                    logger.warning(
+                        f"[async-retry] {model} rate limited (429): {_brief_error(e)}. "
+                        f"~{token_count} tokens ({token_method}). "
+                        f"Full request dumped to: {dump_path}. "
+                        f"Retrying in {wait}s "
+                        f"(attempt {attempt + 1}/{retries})"
+                    )
+                else:
+                    logger.warning(
+                        f"[async-retry] {model} rate limited (429). "
+                        f"Retrying in {wait}s "
+                        f"(attempt {attempt + 1}/{retries})"
+                    )
+                logger.debug(f"[async-retry] Full rate limit error: {e!s}")
                 await asyncio.sleep(wait)
         raise RuntimeError("Exhausted rate limit retries")
 
@@ -1217,11 +1253,20 @@ class LiteLLMProvider(LLMProvider):
             except RateLimitError as e:
                 if attempt < RATE_LIMIT_MAX_RETRIES:
                     wait = _compute_retry_delay(attempt, exception=e)
-                    logger.warning(
-                        f"[stream-retry] {self.model} rate limited (429): {e!s}. "
-                        f"Retrying in {wait:.1f}s "
-                        f"(attempt {attempt + 1}/{RATE_LIMIT_MAX_RETRIES})"
-                    )
+                    if attempt == 0:
+                        logger.warning(
+                            f"[stream-retry] {self.model} rate limited (429): "
+                            f"{_brief_error(e)}. "
+                            f"Retrying in {wait:.1f}s "
+                            f"(attempt {attempt + 1}/{RATE_LIMIT_MAX_RETRIES})"
+                        )
+                    else:
+                        logger.warning(
+                            f"[stream-retry] {self.model} rate limited (429). "
+                            f"Retrying in {wait:.1f}s "
+                            f"(attempt {attempt + 1}/{RATE_LIMIT_MAX_RETRIES})"
+                        )
+                    logger.debug(f"[stream-retry] Full rate limit error: {e!s}")
                     await asyncio.sleep(wait)
                     continue
                 yield StreamErrorEvent(error=str(e), recoverable=False)
@@ -1230,11 +1275,22 @@ class LiteLLMProvider(LLMProvider):
             except Exception as e:
                 if _is_stream_transient_error(e) and attempt < RATE_LIMIT_MAX_RETRIES:
                     wait = _compute_retry_delay(attempt, exception=e)
-                    logger.warning(
-                        f"[stream-retry] {self.model} transient error "
-                        f"({type(e).__name__}): {e!s}. "
-                        f"Retrying in {wait:.1f}s "
-                        f"(attempt {attempt + 1}/{RATE_LIMIT_MAX_RETRIES})"
+                    if attempt == 0:
+                        logger.warning(
+                            f"[stream-retry] {self.model} transient error "
+                            f"({type(e).__name__}): {_brief_error(e)}. "
+                            f"Retrying in {wait:.1f}s "
+                            f"(attempt {attempt + 1}/{RATE_LIMIT_MAX_RETRIES})"
+                        )
+                    else:
+                        logger.warning(
+                            f"[stream-retry] {self.model} transient error "
+                            f"({type(e).__name__}). "
+                            f"Retrying in {wait:.1f}s "
+                            f"(attempt {attempt + 1}/{RATE_LIMIT_MAX_RETRIES})"
+                        )
+                    logger.debug(
+                        f"[stream-retry] Full transient error: {e!s}"
                     )
                     await asyncio.sleep(wait)
                     continue
