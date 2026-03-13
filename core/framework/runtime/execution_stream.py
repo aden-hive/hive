@@ -127,6 +127,7 @@ class ExecutionContext:
     input_data: dict[str, Any]
     isolation_level: IsolationLevel
     session_state: dict[str, Any] | None = None  # For resuming from pause
+    run_id: str | None = None  # Unique ID per trigger() invocation
     started_at: datetime = field(default_factory=datetime.now)
     completed_at: datetime | None = None
     status: str = "pending"  # pending, running, completed, failed, paused
@@ -425,11 +426,36 @@ class ExecutionStream:
                 return True
         return False
 
+    async def inject_trigger(
+        self,
+        node_id: str,
+        trigger: Any,
+    ) -> bool:
+        """Inject a trigger event into a running queen EventLoopNode.
+
+        Searches active executors for a node matching ``node_id`` and calls
+        its ``inject_trigger()`` method to wake the queen.
+
+        Args:
+            node_id: The queen EventLoopNode ID.
+            trigger: A ``TriggerEvent`` instance (typed as Any to avoid
+                circular imports with graph layer).
+
+        Returns True if the trigger was delivered, False otherwise.
+        """
+        for executor in self._active_executors.values():
+            node = executor.node_registry.get(node_id)
+            if node is not None and hasattr(node, "inject_trigger"):
+                await node.inject_trigger(trigger)
+                return True
+        return False
+
     async def execute(
         self,
         input_data: dict[str, Any],
         correlation_id: str | None = None,
         session_state: dict[str, Any] | None = None,
+        run_id: str | None = None,
     ) -> str:
         """
         Queue an execution and return its ID.
@@ -440,6 +466,7 @@ class ExecutionStream:
             input_data: Input data for this execution
             correlation_id: Optional ID to correlate related executions
             session_state: Optional session state to resume from (with paused_at, memory)
+            run_id: Unique ID for this trigger invocation (for run dividers)
 
         Returns:
             Execution ID for tracking
@@ -500,6 +527,7 @@ class ExecutionStream:
             input_data=input_data,
             isolation_level=self.entry_spec.get_isolation_level(),
             session_state=session_state,
+            run_id=run_id,
         )
 
         async with self._lock:
@@ -575,7 +603,9 @@ class ExecutionStream:
                         execution_id=execution_id,
                         input_data=ctx.input_data,
                         correlation_id=ctx.correlation_id,
+                        run_id=ctx.run_id,
                     )
+                self._write_run_event(execution_id, ctx.run_id, "run_started")
 
                 # Create execution-scoped memory
                 self._state_manager.create_memory(
@@ -740,6 +770,7 @@ class ExecutionStream:
                             execution_id=execution_id,
                             output=result.output,
                             correlation_id=ctx.correlation_id,
+                            run_id=ctx.run_id,
                         )
                     elif result.paused_at:
                         # The executor returns paused_at on CancelledError but
@@ -757,7 +788,21 @@ class ExecutionStream:
                             execution_id=execution_id,
                             error=result.error or "Unknown error",
                             correlation_id=ctx.correlation_id,
+                            run_id=ctx.run_id,
                         )
+
+                # Write run event for historical restoration
+                if result.success:
+                    self._write_run_event(execution_id, ctx.run_id, "run_completed")
+                elif result.paused_at:
+                    self._write_run_event(execution_id, ctx.run_id, "run_paused")
+                else:
+                    self._write_run_event(
+                        execution_id,
+                        ctx.run_id,
+                        "run_failed",
+                        {"error": result.error or "Unknown error"},
+                    )
 
                 logger.debug(f"Execution {execution_id} completed: success={result.success}")
 
@@ -818,8 +863,10 @@ class ExecutionStream:
                             execution_id=execution_id,
                             error=cancel_reason,
                             correlation_id=ctx.correlation_id,
+                            run_id=ctx.run_id,
                         )
 
+                self._write_run_event(execution_id, ctx.run_id, "run_cancelled")
                 # Don't re-raise - we've handled it and saved state
 
             except Exception as e:
@@ -856,7 +903,9 @@ class ExecutionStream:
                         execution_id=execution_id,
                         error=str(e),
                         correlation_id=ctx.correlation_id,
+                        run_id=ctx.run_id,
                     )
+                self._write_run_event(execution_id, ctx.run_id, "run_failed", {"error": str(e)})
 
             finally:
                 # Clean up state
@@ -871,6 +920,36 @@ class ExecutionStream:
                     self._active_executions.pop(execution_id, None)
                     self._completion_events.pop(execution_id, None)
                     self._execution_tasks.pop(execution_id, None)
+
+    def _write_run_event(
+        self,
+        execution_id: str,
+        run_id: str | None,
+        event: str,
+        extra: dict[str, Any] | None = None,
+    ) -> None:
+        """Append a run lifecycle event to runs.jsonl for historical restoration."""
+        if not self._session_store or not run_id:
+            return
+        import json as _json
+
+        session_dir = self._session_store.get_session_path(execution_id)
+        runs_file = session_dir / "runs.jsonl"
+        now = datetime.now()
+        record = {
+            "run_id": run_id,
+            "event": event,
+            "timestamp": now.isoformat(),
+            "created_at": now.timestamp(),
+        }
+        if extra:
+            record.update(extra)
+        try:
+            runs_file.parent.mkdir(parents=True, exist_ok=True)
+            with open(runs_file, "a", encoding="utf-8") as f:
+                f.write(_json.dumps(record) + "\n")
+        except OSError:
+            pass  # Non-critical — don't break execution
 
     async def _write_session_state(
         self,
@@ -978,8 +1057,8 @@ class ExecutionStream:
     def _create_modified_graph(self) -> "GraphSpec":
         """Create a graph with the entry point overridden.
 
-        Preserves the original graph's entry_points and async_entry_points
-        so that validation correctly considers ALL entry nodes reachable.
+        Preserves the original graph's entry_points so that validation
+        correctly considers ALL entry nodes reachable.
         Each stream only executes from its own entry_node, but the full
         graph must validate with all entry points accounted for.
         """
@@ -1004,7 +1083,6 @@ class ExecutionStream:
             version=self.graph.version,
             entry_node=self.entry_spec.entry_node,  # Use our entry point
             entry_points=merged_entry_points,
-            async_entry_points=self.graph.async_entry_points,
             terminal_nodes=self.graph.terminal_nodes,
             pause_nodes=self.graph.pause_nodes,
             nodes=self.graph.nodes,

@@ -56,6 +56,14 @@ def get_max_tokens() -> int:
     return get_hive_config().get("llm", {}).get("max_tokens", DEFAULT_MAX_TOKENS)
 
 
+DEFAULT_MAX_CONTEXT_TOKENS = 32_000
+
+
+def get_max_context_tokens() -> int:
+    """Return the configured max_context_tokens, falling back to DEFAULT_MAX_CONTEXT_TOKENS."""
+    return get_hive_config().get("llm", {}).get("max_context_tokens", DEFAULT_MAX_CONTEXT_TOKENS)
+
+
 def get_api_key() -> str | None:
     """Return the API key, supporting env var, Claude Code subscription, Codex, and ZAI Code.
 
@@ -178,6 +186,7 @@ class RuntimeConfig:
     model: str = field(default_factory=get_preferred_model)
     temperature: float = 0.7
     max_tokens: int = field(default_factory=get_max_tokens)
+    max_context_tokens: int = field(default_factory=get_max_context_tokens)
     api_key: str | None = field(default_factory=get_api_key)
     api_base: str | None = field(default_factory=get_api_base)
     extra_kwargs: dict[str, Any] = field(default_factory=get_llm_extra_kwargs)
