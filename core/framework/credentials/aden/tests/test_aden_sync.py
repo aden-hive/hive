@@ -391,9 +391,10 @@ class TestAdenSyncProvider:
 
     def test_sync_all(self, provider, mock_client, aden_response):
         """Test syncing all credentials."""
+        active_id = aden_response.integration_id
         mock_client.list_integrations.return_value = [
             AdenIntegrationInfo(
-                integration_id="aHVic3BvdDp0ZXN0OjEzNjExOjExNTI1",
+                integration_id=active_id,
                 provider="hubspot",
                 alias="My HubSpot",
                 status="active",
@@ -411,7 +412,7 @@ class TestAdenSyncProvider:
         synced = provider.sync_all(store)
 
         assert synced == 1  # Only active one was synced
-        assert store.get_credential("aHVic3BvdDp0ZXN0OjEzNjExOjExNTI1") is not None
+        assert store.get_credential(active_id) is not None
 
     def test_validate_via_aden(self, provider, mock_client):
         """Test validation via Aden introspection."""
