@@ -350,6 +350,57 @@ _FLOWCHART_TYPES = {
 }
 
 
+def _read_agent_triggers_json(agent_path: Path) -> list[dict]:
+    """Read triggers.json from the agent's export directory."""
+    triggers_path = agent_path / "triggers.json"
+    if not triggers_path.exists():
+        return []
+    try:
+        data = json.loads(triggers_path.read_text(encoding="utf-8"))
+        return data if isinstance(data, list) else []
+    except (json.JSONDecodeError, OSError):
+        return []
+
+
+def _write_agent_triggers_json(agent_path: Path, triggers: list[dict]) -> None:
+    """Write triggers.json to the agent's export directory."""
+    triggers_path = agent_path / "triggers.json"
+    triggers_path.write_text(
+        json.dumps(triggers, indent=2, ensure_ascii=False) + "\n",
+        encoding="utf-8",
+    )
+
+
+def _save_trigger_to_agent(session: Any, trigger_id: str, tdef: Any) -> None:
+    """Persist a trigger definition to the agent's triggers.json."""
+    agent_path = getattr(session, "worker_path", None)
+    if agent_path is None:
+        return
+    triggers = _read_agent_triggers_json(agent_path)
+    triggers = [t for t in triggers if t.get("id") != trigger_id]
+    triggers.append({
+        "id": tdef.id,
+        "name": tdef.description or tdef.id,
+        "trigger_type": tdef.trigger_type,
+        "trigger_config": tdef.trigger_config,
+        "task": tdef.task or "",
+    })
+    _write_agent_triggers_json(agent_path, triggers)
+    logger.info("Saved trigger '%s' to %s/triggers.json", trigger_id, agent_path)
+
+
+def _remove_trigger_from_agent(session: Any, trigger_id: str) -> None:
+    """Remove a trigger definition from the agent's triggers.json."""
+    agent_path = getattr(session, "worker_path", None)
+    if agent_path is None:
+        return
+    triggers = _read_agent_triggers_json(agent_path)
+    updated = [t for t in triggers if t.get("id") != trigger_id]
+    if len(updated) != len(triggers):
+        _write_agent_triggers_json(agent_path, updated)
+        logger.info("Removed trigger '%s' from %s/triggers.json", trigger_id, agent_path)
+
+
 def _dissolve_planning_nodes(
     draft: dict,
 ) -> tuple[dict, dict[str, list[str]]]:
