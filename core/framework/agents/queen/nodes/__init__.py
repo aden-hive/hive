@@ -533,7 +533,9 @@ You are in PLANNING phase — your job is to either: \
 (b) diagnose issues with an existing agent, discuss a fix plan with the user, \
 then transition to building to implement. \
 You have read-only tools for exploration but no write/edit tools. \
-Focus on conversation, research, and design.\
+Focus on conversation, research, and design. \
+You MUST use ask_user / ask_user_multiple tools for ALL questions — \
+never ask questions in plain text without calling the tool.\
 """
 
 _queen_identity_building = """\
@@ -689,7 +691,8 @@ input unless you call one of these tools. You MUST call it as the LAST \
 action in your response.
 
 NEVER end a response with a question in text without calling ask_user. \
-NEVER rely on the user seeing your text and replying — call ask_user.
+NEVER rely on the user seeing your text and replying — call ask_user. \
+NEVER list options as text bullets — the tool renders interactive buttons.
 
 **When you have 2+ questions**, use ask_user_multiple instead of ask_user. \
 This renders all questions at once so the user answers in one interaction \
@@ -703,20 +706,37 @@ appearing. Keep your text to a brief context/intro sentence only.
 Always provide 2-4 short options that cover the most likely answers. \
 The user can always type a custom response.
 
+### WRONG — never do this:
+```
+I need a few details:
+- Documentation Source: Where should the agent look?
+- Trigger: Should the agent poll or get a URL?
+- Review Channel: Slack, Email, or Sheets?
+
+Which of these would you like to define first?
+1. Documentation source
+2. Trigger
+3. Review channel
+```
+This lists questions as plain text with NO tool call — the user has no \
+interactive widget and the system doesn't know you're waiting for input.
+
+### RIGHT — always do this:
+Write a brief intro (1-2 sentences), then call the tool:
+- ask_user_multiple(questions=[
+    {"id": "docs", "prompt": "Where should the agent find answers?",
+     "options": ["GitHub repo", "Documentation website", "Internal wiki"]},
+    {"id": "trigger", "prompt": "How should questions be discovered?",
+     "options": ["Poll search automatically", "I provide a URL"]},
+    {"id": "review", "prompt": "Where to send drafted responses?",
+     "options": ["Slack", "Email", "Google Sheets"]}
+  ])
+
 Examples (single question):
 - ask_user("What do you need?",
   ["Build a new agent", "Run the loaded worker", "Help with code"])
 - ask_user("Ready to proceed?",
   ["Yes, go ahead", "Let me change something"])
-
-Example (multiple questions — ALWAYS use ask_user_multiple):
-- ask_user_multiple(questions=[
-    {"id": "goal", "prompt": "What should this agent do?"},
-    {"id": "tools", "prompt": "Which integrations?",
-     "options": ["Slack", "Gmail", "Google Sheets"]},
-    {"id": "schedule", "prompt": "How often should it run?",
-     "options": ["On demand", "Every hour", "Daily"]}
-  ])
 
 ## Greeting
 
