@@ -350,55 +350,225 @@ _FLOWCHART_TYPES = {
 }
 
 
-def _read_agent_triggers_json(agent_path: Path) -> list[dict]:
-    """Read triggers.json from the agent's export directory."""
-    triggers_path = agent_path / "triggers.json"
-    if not triggers_path.exists():
-        return []
-    try:
-        data = json.loads(triggers_path.read_text(encoding="utf-8"))
-        return data if isinstance(data, list) else []
-    except (json.JSONDecodeError, OSError):
-        return []
+def _dissolve_planning_nodes(
+    draft: dict,
+) -> tuple[dict, dict[str, list[str]]]:
+    """Convert planning-only nodes into runtime-compatible structures.
 
+    Two kinds of planning-only nodes are dissolved:
 
-def _write_agent_triggers_json(agent_path: Path, triggers: list[dict]) -> None:
-    """Write triggers.json to the agent's export directory."""
-    triggers_path = agent_path / "triggers.json"
-    triggers_path.write_text(
-        json.dumps(triggers, indent=2, ensure_ascii=False) + "\n",
-        encoding="utf-8",
-    )
+    **Decision nodes** (flowchart diamonds):
+    1. Merging the decision clause into the predecessor node's success_criteria.
+    2. Rewiring the decision's yes/no outgoing edges as on_success/on_failure
+       edges from the predecessor.
+    3. Removing the decision node from the graph.
 
+    If a decision node has no predecessor (i.e. it's the first node), it is
+    converted to a regular process node instead of being dissolved.
 
-def _save_trigger_to_agent(session: Any, trigger_id: str, tdef: Any) -> None:
-    """Persist a trigger definition to the agent's triggers.json."""
-    agent_path = getattr(session, "worker_path", None)
-    if agent_path is None:
-        return
-    triggers = _read_agent_triggers_json(agent_path)
-    triggers = [t for t in triggers if t.get("id") != trigger_id]
-    triggers.append({
-        "id": tdef.id,
-        "name": tdef.description or tdef.id,
-        "trigger_type": tdef.trigger_type,
-        "trigger_config": tdef.trigger_config,
-        "task": tdef.task or "",
-    })
-    _write_agent_triggers_json(agent_path, triggers)
-    logger.info("Saved trigger '%s' to %s/triggers.json", trigger_id, agent_path)
+    **Sub-agent nodes** (flowchart subroutines):
+    1. Adding the sub-agent's ID to the predecessor's sub_agents list.
+    2. Removing the sub-agent node and its edges.
 
+    Returns (converted_draft, flowchart_map) where flowchart_map maps each
+    surviving runtime node ID to the list of original draft node IDs it absorbed.
+    """
+    import copy as _copy
 
-def _remove_trigger_from_agent(session: Any, trigger_id: str) -> None:
-    """Remove a trigger definition from the agent's triggers.json."""
-    agent_path = getattr(session, "worker_path", None)
-    if agent_path is None:
-        return
-    triggers = _read_agent_triggers_json(agent_path)
-    updated = [t for t in triggers if t.get("id") != trigger_id]
-    if len(updated) != len(triggers):
-        _write_agent_triggers_json(agent_path, updated)
-        logger.info("Removed trigger '%s' from %s/triggers.json", trigger_id, agent_path)
+    nodes: list[dict] = _copy.deepcopy(draft.get("nodes", []))
+    edges: list[dict] = _copy.deepcopy(draft.get("edges", []))
+
+    # Index helpers
+    node_by_id: dict[str, dict] = {n["id"]: n for n in nodes}
+
+    def _incoming(nid: str) -> list[dict]:
+        return [e for e in edges if e["target"] == nid]
+
+    def _outgoing(nid: str) -> list[dict]:
+        return [e for e in edges if e["source"] == nid]
+
+    # Identify decision nodes
+    decision_ids = [n["id"] for n in nodes if n.get("flowchart_type") == "decision"]
+
+    # Track which draft nodes each runtime node absorbed
+    absorbed: dict[str, list[str]] = {}  # runtime_id -> [draft_ids...]
+
+    # Process decisions in node-list order (topological for linear graphs)
+    for d_id in decision_ids:
+        d_node = node_by_id.get(d_id)
+        if d_node is None:
+            continue  # already removed by a prior dissolution
+
+        in_edges = _incoming(d_id)
+        out_edges = _outgoing(d_id)
+
+        # Classify outgoing edges into yes/no branches
+        yes_edge: dict | None = None
+        no_edge: dict | None = None
+
+        for oe in out_edges:
+            lbl = (oe.get("label") or "").lower().strip()
+            cond = (oe.get("condition") or "").lower().strip()
+
+            if lbl in ("yes", "true", "pass") or cond == "on_success":
+                yes_edge = oe
+            elif lbl in ("no", "false", "fail") or cond == "on_failure":
+                no_edge = oe
+
+        # Fallback: if exactly 2 outgoing and couldn't classify, assign by order
+        if len(out_edges) == 2 and (yes_edge is None or no_edge is None):
+            if yes_edge is None and no_edge is None:
+                yes_edge, no_edge = out_edges[0], out_edges[1]
+            elif yes_edge is None:
+                yes_edge = [e for e in out_edges if e is not no_edge][0]
+            else:
+                no_edge = [e for e in out_edges if e is not yes_edge][0]
+
+        # Decision clause: prefer decision_clause, fall back to description/name
+        clause = (
+            d_node.get("decision_clause")
+            or d_node.get("description")
+            or d_node.get("name")
+            or d_id
+        ).strip()
+
+        predecessors = [node_by_id[e["source"]] for e in in_edges if e["source"] in node_by_id]
+
+        if not predecessors:
+            # Decision at start: convert to regular process node
+            d_node["flowchart_type"] = "process"
+            fc_meta = _FLOWCHART_TYPES["process"]
+            d_node["flowchart_shape"] = fc_meta["shape"]
+            d_node["flowchart_color"] = fc_meta["color"]
+            if not d_node.get("success_criteria"):
+                d_node["success_criteria"] = clause
+            # Rewire outgoing edges to on_success/on_failure
+            if yes_edge:
+                yes_edge["condition"] = "on_success"
+            if no_edge:
+                no_edge["condition"] = "on_failure"
+            absorbed[d_id] = absorbed.get(d_id, [d_id])
+            continue
+
+        # Dissolve: merge into each predecessor
+        for pred in predecessors:
+            pid = pred["id"]
+
+            # Merge decision clause into predecessor's success_criteria
+            existing = (pred.get("success_criteria") or "").strip()
+            if existing:
+                pred["success_criteria"] = f"{existing}; then evaluate: {clause}"
+            else:
+                pred["success_criteria"] = clause
+
+            # Remove the edge from predecessor -> decision
+            edges[:] = [e for e in edges if not (e["source"] == pid and e["target"] == d_id)]
+
+            # Wire predecessor -> yes/no targets
+            edge_counter = len(edges)
+            if yes_edge:
+                edges.append(
+                    {
+                        "id": f"edge-dissolved-{edge_counter}",
+                        "source": pid,
+                        "target": yes_edge["target"],
+                        "condition": "on_success",
+                        "description": yes_edge.get("description", ""),
+                        "label": yes_edge.get("label", "Yes"),
+                    }
+                )
+                edge_counter += 1
+            if no_edge:
+                edges.append(
+                    {
+                        "id": f"edge-dissolved-{edge_counter}",
+                        "source": pid,
+                        "target": no_edge["target"],
+                        "condition": "on_failure",
+                        "description": no_edge.get("description", ""),
+                        "label": no_edge.get("label", "No"),
+                    }
+                )
+
+            # Record absorption
+            prev_absorbed = absorbed.get(pid, [pid])
+            if d_id not in prev_absorbed:
+                prev_absorbed.append(d_id)
+            absorbed[pid] = prev_absorbed
+
+        # Remove decision node and all its edges
+        edges[:] = [e for e in edges if e["source"] != d_id and e["target"] != d_id]
+        nodes[:] = [n for n in nodes if n["id"] != d_id]
+        del node_by_id[d_id]
+
+    # ── Dissolve sub-agent nodes ──────────────────────────────
+    # Sub-agent nodes are leaf delegates: parent -> subagent (no outgoing).
+    # Dissolution adds the subagent's ID to parent's sub_agents list.
+    subagent_ids = [
+        n["id"]
+        for n in nodes
+        if n.get("flowchart_type") in ("subagent", "browser") or n.get("node_type") == "gcu"
+    ]
+
+    for sa_id in subagent_ids:
+        sa_node = node_by_id.get(sa_id)
+        if sa_node is None:
+            continue
+
+        in_edges = _incoming(sa_id)
+        out_edges = _outgoing(sa_id)
+
+        # Validate: sub-agent nodes must be leaves (no outgoing edges)
+        if out_edges:
+            logger.warning(
+                "Sub-agent node '%s' has outgoing edges — they will be dropped "
+                "during dissolution. Sub-agent nodes should be leaf nodes.",
+                sa_id,
+            )
+
+        # Attach to each predecessor's sub_agents list
+        for ie in in_edges:
+            pred_id = ie["source"]
+            pred = node_by_id.get(pred_id)
+            if pred is None:
+                continue
+
+            existing_subs = pred.get("sub_agents") or []
+            if sa_id not in existing_subs:
+                existing_subs.append(sa_id)
+            pred["sub_agents"] = existing_subs
+
+            # Record absorption
+            prev_absorbed = absorbed.get(pred_id, [pred_id])
+            if sa_id not in prev_absorbed:
+                prev_absorbed.append(sa_id)
+            absorbed[pred_id] = prev_absorbed
+
+        # Remove sub-agent node and all its edges
+        edges[:] = [e for e in edges if e["source"] != sa_id and e["target"] != sa_id]
+        nodes[:] = [n for n in nodes if n["id"] != sa_id]
+        del node_by_id[sa_id]
+
+    # Build complete flowchart_map (identity for non-absorbed nodes)
+    flowchart_map: dict[str, list[str]] = {}
+    for n in nodes:
+        nid = n["id"]
+        flowchart_map[nid] = absorbed.get(nid, [nid])
+
+    # Rebuild terminal_nodes (decision targets may have changed)
+    sources = {e["source"] for e in edges}
+    all_ids = {n["id"] for n in nodes}
+    terminal_ids = all_ids - sources
+    if not terminal_ids and nodes:
+        terminal_ids = {nodes[-1]["id"]}
+
+    converted = dict(draft)
+    converted["nodes"] = nodes
+    converted["edges"] = edges
+    converted["terminal_nodes"] = sorted(terminal_ids)
+    converted["entry_node"] = nodes[0]["id"] if nodes else ""
+
+    return converted, flowchart_map
 
 
 def register_queen_lifecycle_tools(
@@ -906,14 +1076,16 @@ def register_queen_lifecycle_tools(
                         }
                     )
                     edge_counter += 1
-                    edges.append({
-                        "id": f"edge-subagent-{edge_counter}",
-                        "source": sa_id,
-                        "target": node["id"],
-                        "condition": "always",
-                        "description": "sub-agent report back",
-                        "label": "report",
-                    })
+                    edges.append(
+                        {
+                            "id": f"edge-subagent-{edge_counter}",
+                            "source": sa_id,
+                            "target": node["id"],
+                            "condition": "always",
+                            "description": "sub-agent report back",
+                            "label": "report",
+                        }
+                    )
                     edge_counter += 1
 
         # Group sub-agent nodes under their parent in the flowchart map
@@ -1438,30 +1610,84 @@ def register_queen_lifecycle_tools(
                     }
                 )
 
+        # ── GCU nodes cannot be children of decision nodes ─────────
+        # Decision nodes dissolve into their predecessor. If a GCU node
+        # is a decision child, after dissolution it would become a
+        # conditional workflow step — violating the leaf sub-agent rule.
+        # Rewire: move the GCU to the decision's predecessor as a
+        # sub-agent and remove the decision → GCU edge.
+        node_by_id_v = {n["id"]: n for n in validated_nodes}
+        decision_node_ids = {
+            n["id"] for n in validated_nodes
+            if n.get("flowchart_type") == "decision"
+        }
+        gcu_node_ids = {
+            n["id"] for n in validated_nodes
+            if n.get("node_type") == "gcu" or n.get("flowchart_type") == "subagent"
+        }
+        topology_corrections: list[str] = []
+        if decision_node_ids and gcu_node_ids:
+            for d_id in decision_node_ids:
+                gcu_children = [
+                    e for e in validated_edges
+                    if e["source"] == d_id and e["target"] in gcu_node_ids
+                ]
+                if not gcu_children:
+                    continue
+                d_parents = [
+                    e["source"] for e in validated_edges
+                    if e["target"] == d_id
+                ]
+                for gc_edge in gcu_children:
+                    gc_id = gc_edge["target"]
+                    logger.warning(
+                        "GCU node '%s' is a child of decision node '%s' "
+                        "— moving it to the decision's predecessor.",
+                        gc_id, d_id,
+                    )
+                    topology_corrections.append(
+                        f"GCU node '{gc_id}' was a child of decision "
+                        f"node '{d_id}' — invalid because decision "
+                        f"nodes dissolve at build time. Moved "
+                        f"'{gc_id}' to predecessor as a sub-agent."
+                    )
+                    # Remove the decision → GCU edge
+                    validated_edges[:] = [
+                        e for e in validated_edges
+                        if not (e["source"] == d_id and e["target"] == gc_id)
+                    ]
+                    # Remove any outgoing edges from the GCU node
+                    # (keep report edges back to predecessors)
+                    validated_edges[:] = [
+                        e for e in validated_edges
+                        if e["source"] != gc_id
+                        or e["target"] in set(d_parents)
+                    ]
+                    # Assign GCU as sub-agent of predecessor(s)
+                    for pid in d_parents:
+                        parent = node_by_id_v.get(pid)
+                        if parent is None:
+                            continue
+                        existing = parent.get("sub_agents") or []
+                        if gc_id not in existing:
+                            existing.append(gc_id)
+                        parent["sub_agents"] = existing
+
         # ── Enforce GCU / subagent leaf constraint ────────────────
         # GCU nodes and nodes with flowchart_type "subagent" are leaf
         # delegates: they can only receive a delegate edge IN from
         # their parent and send a report edge OUT back to that parent.
         # Any other outgoing edges are design errors — strip them and
         # auto-assign the node as a sub-agent of its predecessor.
-        node_by_id_v = {n["id"]: n for n in validated_nodes}
         leaf_node_ids: set[str] = set()
         for n in validated_nodes:
             if n.get("node_type") == "gcu" or n.get("flowchart_type") == "subagent":
                 leaf_node_ids.add(n["id"])
-
-        topology_corrections: list[str] = []
         if leaf_node_ids:
             for leaf_id in leaf_node_ids:
                 # Find edges where this leaf node is the source
-                out_edges = [
-                    e for e in validated_edges
-                    if e["source"] == leaf_id
-                ]
-                in_edges = [
-                    e for e in validated_edges
-                    if e["target"] == leaf_id
-                ]
+                out_edges = [e for e in validated_edges if e["source"] == leaf_id]
+                in_edges = [e for e in validated_edges if e["target"] == leaf_id]
                 if not out_edges:
                     continue  # already a proper leaf
 
@@ -1480,7 +1706,8 @@ def register_queen_lifecycle_tools(
                         "GCU/subagent node '%s' has illegal outgoing "
                         "edges to %s — stripping them. GCU nodes "
                         "must be leaf sub-agents.",
-                        leaf_id, illegal_targets,
+                        leaf_id,
+                        illegal_targets,
                     )
                     topology_corrections.append(
                         f"GCU node '{leaf_id}' had illegal edges to "
@@ -1490,19 +1717,21 @@ def register_queen_lifecycle_tools(
                     # Rewire: predecessor → leaf's targets (skip leaf)
                     for parent_id in parent_ids:
                         for tgt_id in illegal_targets:
-                            validated_edges.append({
-                                "id": f"edge-rewire-{len(validated_edges)}",
-                                "source": parent_id,
-                                "target": tgt_id,
-                                "condition": "on_success",
-                                "description": "",
-                                "label": "",
-                            })
+                            validated_edges.append(
+                                {
+                                    "id": f"edge-rewire-{len(validated_edges)}",
+                                    "source": parent_id,
+                                    "target": tgt_id,
+                                    "condition": "on_success",
+                                    "description": "",
+                                    "label": "",
+                                }
+                            )
                     # Remove the illegal edges
                     validated_edges[:] = [
-                        e for e in validated_edges
-                        if not (e["source"] == leaf_id
-                                and e["target"] in set(illegal_targets))
+                        e
+                        for e in validated_edges
+                        if not (e["source"] == leaf_id and e["target"] in set(illegal_targets))
                     ]
 
                 # Ensure the leaf is in its parent's sub_agents list
@@ -1546,9 +1775,7 @@ def register_queen_lifecycle_tools(
                     f"removed. Add it to a parent node's sub_agents "
                     f"list and re-save the draft."
                 )
-            validated_nodes[:] = [
-                n for n in validated_nodes if n["id"] not in set(orphaned_ids)
-            ]
+            validated_nodes[:] = [n for n in validated_nodes if n["id"] not in set(orphaned_ids)]
             node_by_id_v = {n["id"]: n for n in validated_nodes}
 
         # Synthesize visual edges for sub-agents that are referenced in
@@ -1561,27 +1788,79 @@ def register_queen_lifecycle_tools(
                 if sa_id not in node_id_set:
                     continue
                 if (n["id"], sa_id) not in existing_edge_pairs:
-                    validated_edges.append({
-                        "id": f"edge-subagent-{edge_counter}",
-                        "source": n["id"],
-                        "target": sa_id,
-                        "condition": "always",
-                        "description": "sub-agent delegation",
-                        "label": "delegate",
-                    })
+                    validated_edges.append(
+                        {
+                            "id": f"edge-subagent-{edge_counter}",
+                            "source": n["id"],
+                            "target": sa_id,
+                            "condition": "always",
+                            "description": "sub-agent delegation",
+                            "label": "delegate",
+                        }
+                    )
                     edge_counter += 1
                     existing_edge_pairs.add((n["id"], sa_id))
                 if (sa_id, n["id"]) not in existing_edge_pairs:
-                    validated_edges.append({
-                        "id": f"edge-subagent-{edge_counter}",
-                        "source": sa_id,
-                        "target": n["id"],
-                        "condition": "always",
-                        "description": "sub-agent report back",
-                        "label": "report",
-                    })
+                    validated_edges.append(
+                        {
+                            "id": f"edge-subagent-{edge_counter}",
+                            "source": sa_id,
+                            "target": n["id"],
+                            "condition": "always",
+                            "description": "sub-agent report back",
+                            "label": "report",
+                        }
+                    )
                     edge_counter += 1
                     existing_edge_pairs.add((sa_id, n["id"]))
+
+        # ── Validate graph connectivity ─────────────────────────────
+        # Every node must be reachable from the entry node. Disconnected
+        # subgraphs indicate a broken design — remove unreachable nodes
+        # and report them so the queen can fix the draft.
+        if validated_nodes:
+            entry_id = validated_nodes[0]["id"]
+            # Build undirected adjacency from edges
+            _adj: dict[str, set[str]] = {n["id"]: set() for n in validated_nodes}
+            for e in validated_edges:
+                s, t = e["source"], e["target"]
+                if s in _adj and t in _adj:
+                    _adj[s].add(t)
+                    _adj[t].add(s)
+            # BFS from entry
+            visited: set[str] = set()
+            queue = [entry_id]
+            while queue:
+                cur = queue.pop()
+                if cur in visited:
+                    continue
+                visited.add(cur)
+                for nb in _adj.get(cur, ()):
+                    if nb not in visited:
+                        queue.append(nb)
+            unreachable = {n["id"] for n in validated_nodes} - visited
+            if unreachable:
+                for uid in sorted(unreachable):
+                    logger.warning(
+                        "Node '%s' is unreachable from entry node '%s' "
+                        "— removing it from the draft.",
+                        uid, entry_id,
+                    )
+                    topology_corrections.append(
+                        f"Node '{uid}' is disconnected from the graph "
+                        f"(unreachable from entry node '{entry_id}') — "
+                        f"removed. Connect it to the flow or assign it "
+                        f"as a sub-agent of an existing node."
+                    )
+                validated_edges[:] = [
+                    e for e in validated_edges
+                    if e["source"] not in unreachable
+                    and e["target"] not in unreachable
+                ]
+                validated_nodes[:] = [
+                    n for n in validated_nodes
+                    if n["id"] not in unreachable
+                ]
 
         # Determine terminal nodes: explicit list, or nodes with no outgoing edges.
         # Sub-agent nodes are leaf helpers, not endpoints — exclude them.
@@ -1709,7 +1988,8 @@ def register_queen_lifecycle_tools(
         if topology_corrections:
             correction_warning = (
                 " WARNING — your draft had topology errors that were "
-                "auto-corrected: " + "; ".join(topology_corrections)
+                "auto-corrected: "
+                + "; ".join(topology_corrections)
                 + " Review the corrected flowchart and do NOT repeat "
                 "this pattern. GCU nodes are ALWAYS leaf sub-agents."
             )
@@ -1719,16 +1999,14 @@ def register_queen_lifecycle_tools(
                 "Draft flowchart updated during building. "
                 "Planning-only nodes dissolved automatically. "
                 "The user can see the updated flowchart. "
-                "Continue building — no re-confirmation needed."
-                + correction_warning
+                "Continue building — no re-confirmation needed." + correction_warning
             )
         else:
             msg = (
                 "Draft graph saved and sent to the visualizer. "
                 "The user can now see the color-coded flowchart. "
                 "Present this design to the user and get their approval. "
-                "When the user confirms, call confirm_and_build() to proceed."
-                + correction_warning
+                "When the user confirms, call confirm_and_build() to proceed." + correction_warning
             )
 
         result: dict = {

@@ -2816,11 +2816,14 @@ export default function Workspace() {
         <div className={`${((activeAgentState?.queenPhase === "planning" || activeAgentState?.queenPhase === "building") && activeAgentState?.draftGraph) || activeAgentState?.originalDraft ? "w-[500px] min-w-[400px]" : "w-[300px] min-w-[240px]"} bg-card/30 flex flex-col border-r border-border/30 transition-[width] duration-200`}>
           <div className="flex-1 min-h-0">
             {(activeAgentState?.queenPhase === "planning" || activeAgentState?.queenPhase === "building") && activeAgentState?.draftGraph ? (
-              <DraftGraph draft={activeAgentState.draftGraph} building={activeAgentState?.queenBuilding} />
+              <DraftGraph draft={activeAgentState.draftGraph} building={activeAgentState?.queenBuilding} onRun={handleRun} onPause={handlePause} runState={activeAgentState?.workerRunState ?? "idle"} />
             ) : activeAgentState?.originalDraft ? (
               <DraftGraph
                 draft={activeAgentState.originalDraft}
                 building={activeAgentState?.queenBuilding}
+                onRun={handleRun}
+                onPause={handlePause}
+                runState={activeAgentState?.workerRunState ?? "idle"}
                 flowchartMap={activeAgentState.flowchartMap ?? undefined}
                 runtimeNodes={currentGraph.nodes}
                 onRuntimeNodeClick={(runtimeNodeId) => {

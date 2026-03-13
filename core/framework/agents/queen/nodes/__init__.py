@@ -378,10 +378,14 @@ sequentially (A → gcu1 → gcu2 → B is WRONG). Instead, attach them \
 as leaves to the parent that orchestrates them:
 ```
 WRONG:  intake → gcu_find_prospect → gcu_scan_mutuals → check_results
+WRONG:  decision_node → gcu_node (as a yes/no branch)
 RIGHT:  intake (sub_agents: [gcu_find, gcu_scan]) → check_results
 ```
 The parent node delegates to its GCU sub-agents and collects results. \
-The main flow continues from the parent, not from the GCU node.
+The main flow continues from the parent, not from the GCU node. \
+GCU nodes MUST NOT be children of decision nodes — decision nodes \
+dissolve at build time, which would leave the GCU as a dangling \
+workflow step.
 
 **How to show delegation in the flowchart:**
 ```

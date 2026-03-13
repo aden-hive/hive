@@ -1092,8 +1092,12 @@ class EventLoopNode(NodeProtocol):
             mcp_tool_calls = [
                 tc
                 for tc in logged_tool_calls
-                if tc.get("tool_name") not in (
-                    "set_output", "ask_user", "ask_user_multiple", "escalate",
+                if tc.get("tool_name")
+                not in (
+                    "set_output",
+                    "ask_user",
+                    "ask_user_multiple",
+                    "escalate",
                 )
             ]
             if mcp_tool_calls:
@@ -1292,7 +1296,9 @@ class EventLoopNode(NodeProtocol):
                 multi_qs = getattr(self, "_pending_multi_questions", None)
                 self._pending_multi_questions = None
                 got_input = await self._await_user_input(
-                    ctx, prompt=_cf_prompt, options=ask_user_options,
+                    ctx,
+                    prompt=_cf_prompt,
+                    options=ask_user_options,
                     questions=multi_qs,
                 )
                 # Emit deferred tool_call_completed for ask_user / ask_user_multiple
@@ -2232,7 +2238,7 @@ class EventLoopNode(NodeProtocol):
                     for i, q in enumerate(raw_questions):
                         if not isinstance(q, dict):
                             continue
-                        qid = str(q.get("id", f"q{i+1}"))
+                        qid = str(q.get("id", f"q{i + 1}"))
                         prompt = str(q.get("prompt", ""))
                         opts = q.get("options", None)
                         if isinstance(opts, list):
@@ -2241,11 +2247,13 @@ class EventLoopNode(NodeProtocol):
                                 opts = None
                         else:
                             opts = None
-                        questions.append({
-                            "id": qid,
-                            "prompt": prompt,
-                            **({"options": opts} if opts else {}),
-                        })
+                        questions.append(
+                            {
+                                "id": qid,
+                                "prompt": prompt,
+                                **({"options": opts} if opts else {}),
+                            }
+                        )
 
                     # Store as multi-question prompt/options for
                     # the event emission path
@@ -2749,8 +2757,7 @@ class EventLoopNode(NodeProtocol):
                                 "id": {
                                     "type": "string",
                                     "description": (
-                                        "Short identifier for this question "
-                                        "(used in the response)."
+                                        "Short identifier for this question (used in the response)."
                                     ),
                                 },
                                 "prompt": {

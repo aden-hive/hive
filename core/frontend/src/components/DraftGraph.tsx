@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useRef, useState, useCallback } from "react";
 import { Loader2 } from "lucide-react";
 import type { DraftGraph as DraftGraphData, DraftNode } from "@/api/types";
-import type { GraphNode } from "./AgentGraph";
+import { RunButton } from "./AgentGraph";
+import type { GraphNode, RunState } from "./AgentGraph";
 
 // Read a CSS custom property value (space-separated HSL components)
 function cssVar(name: string): string {
@@ -82,6 +83,12 @@ interface DraftGraphProps {
   onRuntimeNodeClick?: (runtimeNodeId: string) => void;
   /** True while the queen is building the agent from the draft. */
   building?: boolean;
+  /** Called when the user clicks Run. */
+  onRun?: () => void;
+  /** Called when the user clicks Pause. */
+  onPause?: () => void;
+  /** Current run state — drives the RunButton appearance. */
+  runState?: RunState;
 }
 
 // Layout constants — tuned for a ~500px panel (484px after px-2 padding)
@@ -349,9 +356,10 @@ function Tooltip({ node, style }: { node: DraftNode; style: React.CSSProperties 
   );
 }
 
-export default function DraftGraph({ draft, onNodeClick, flowchartMap, runtimeNodes, onRuntimeNodeClick, building }: DraftGraphProps) {
+export default function DraftGraph({ draft, onNodeClick, flowchartMap, runtimeNodes, onRuntimeNodeClick, building, onRun, onPause, runState = "idle" }: DraftGraphProps) {
   const [hoveredNode, setHoveredNode] = useState<string | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const runBtnRef = useRef<HTMLButtonElement>(null);
   const [containerW, setContainerW] = useState(484);
   const chrome = useDraftChromeColors();
 
@@ -960,19 +968,24 @@ export default function DraftGraph({ draft, onNodeClick, flowchartMap, runtimeNo
   return (
     <div className="flex flex-col h-full">
       {/* Header */}
-      <div className="px-4 pt-3 pb-1.5 flex items-center gap-2">
-        <p className="text-[11px] text-muted-foreground font-medium uppercase tracking-wider">
-          {hasStatusOverlay ? "Flowchart" : "Draft"}
-        </p>
-        {building ? (
-          <span className="text-[9px] font-mono font-medium rounded px-1 py-0.5 leading-none border text-primary/60 border-primary/20 flex items-center gap-1">
-            <Loader2 className="w-2.5 h-2.5 animate-spin" />
-            building
-          </span>
-        ) : (
-          <span className={`text-[9px] font-mono font-medium rounded px-1 py-0.5 leading-none border ${hasStatusOverlay ? "text-emerald-500/60 border-emerald-500/20" : "text-amber-500/60 border-amber-500/20"}`}>
-            {hasStatusOverlay ? "live" : "planning"}
-          </span>
+      <div className="px-4 pt-3 pb-1.5 flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <p className="text-[11px] text-muted-foreground font-medium uppercase tracking-wider">
+            {hasStatusOverlay ? "Flowchart" : "Draft"}
+          </p>
+          {building ? (
+            <span className="text-[9px] font-mono font-medium rounded px-1 py-0.5 leading-none border text-primary/60 border-primary/20 flex items-center gap-1">
+              <Loader2 className="w-2.5 h-2.5 animate-spin" />
+              building
+            </span>
+          ) : (
+            <span className={`text-[9px] font-mono font-medium rounded px-1 py-0.5 leading-none border ${hasStatusOverlay ? "text-emerald-500/60 border-emerald-500/20" : "text-amber-500/60 border-amber-500/20"}`}>
+              {hasStatusOverlay ? "live" : "planning"}
+            </span>
+          )}
+        </div>
+        {onRun && (
+          <RunButton runState={runState} disabled={draft.nodes.length === 0} onRun={onRun} onPause={onPause ?? (() => {})} btnRef={runBtnRef} />
         )}
       </div>
 
