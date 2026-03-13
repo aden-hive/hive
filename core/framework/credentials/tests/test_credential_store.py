@@ -17,7 +17,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 import pytest
-from core.framework.credentials import (
+from framework.credentials import (
     CompositeStorage,
     CredentialKey,
     CredentialKeyNotFoundError,
@@ -640,7 +640,7 @@ class TestOAuth2Module:
 
     def test_oauth2_token_from_response(self):
         """Test creating OAuth2Token from token response."""
-        from core.framework.credentials.oauth2 import OAuth2Token
+        from framework.credentials.oauth2 import OAuth2Token
 
         response = {
             "access_token": "xxx",
@@ -659,7 +659,7 @@ class TestOAuth2Module:
 
     def test_token_is_expired(self):
         """Test token expiration check."""
-        from core.framework.credentials.oauth2 import OAuth2Token
+        from framework.credentials.oauth2 import OAuth2Token
 
         # Not expired
         future = datetime.now(UTC) + timedelta(hours=1)
@@ -673,7 +673,7 @@ class TestOAuth2Module:
 
     def test_token_can_refresh(self):
         """Test token refresh capability check."""
-        from core.framework.credentials.oauth2 import OAuth2Token
+        from framework.credentials.oauth2 import OAuth2Token
 
         with_refresh = OAuth2Token(access_token="xxx", refresh_token="yyy")
         assert with_refresh.can_refresh
@@ -683,7 +683,7 @@ class TestOAuth2Module:
 
     def test_oauth2_config_validation(self):
         """Test OAuth2Config validation."""
-        from core.framework.credentials.oauth2 import OAuth2Config, TokenPlacement
+        from framework.credentials.oauth2 import OAuth2Config, TokenPlacement
 
         # Valid config
         config = OAuth2Config(
