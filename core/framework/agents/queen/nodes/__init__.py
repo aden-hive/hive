@@ -734,8 +734,6 @@ Write a brief intro (1-2 sentences), then call the tool:
   ])
 
 Examples (single question):
-- ask_user("What do you need?",
-  ["Build a new agent", "Run the loaded worker", "Help with code"])
 - ask_user("Ready to proceed?",
   ["Yes, go ahead", "Let me change something"])
 

@@ -95,6 +95,10 @@ class QueenPhaseState:
     # Built during decision-node dissolution at confirm_and_build().
     flowchart_map: dict[str, list[str]] | None = None
 
+    # Counter for ask_user / ask_user_multiple rounds during planning phase.
+    # Incremented via event bus subscription in queen_orchestrator.
+    planning_ask_rounds: int = 0
+
     # Agent path — set after scaffolding so the frontend can query credentials
     agent_path: str | None = None
 
@@ -1251,6 +1255,34 @@ def register_queen_lifecycle_tools(
         with a unique color. The queen can override auto-detection by setting
         flowchart_type explicitly on a node.
         """
+        # ── Gate: require at least 2 rounds of user questions ─────────
+        if (
+            phase_state is not None
+            and phase_state.phase == "planning"
+            and phase_state.planning_ask_rounds < 2
+        ):
+            return json.dumps({
+                "error": (
+                    "You haven't asked enough questions yet. You have only "
+                    f"asked {phase_state.planning_ask_rounds} round(s) of "
+                    "questions — at least 2 are required before saving a "
+                    "draft. Think deeper and ask more practical questions "
+                    "to fully understand the user's requirements before "
+                    "designing the agent graph."
+                )
+            })
+
+        # ── Gate: require at least 5 nodes for a meaningful graph ─────
+        if len(nodes) < 5:
+            return json.dumps({
+                "error": (
+                    f"Draft only has {len(nodes)} node(s) — at least 5 are "
+                    "required for a meaningful agent graph. Think deeper and "
+                    "ask more practical questions to fully understand the "
+                    "user's requirements, then design a more thorough graph."
+                )
+            })
+
         # Loose validation: each node needs at minimum an id
         validated_nodes = []
         for i, n in enumerate(nodes):

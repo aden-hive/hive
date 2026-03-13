@@ -765,7 +765,8 @@ class SessionManager:
 
         await node.inject_event(
             "[SYSTEM] Worker unloaded. You are now operating independently. "
-            "Handle all tasks directly using your coding tools."
+            "Design or build the agent to solve the user's problem "
+            "according to your current phase."
         )
 
     async def revive_queen(self, session: Session, initial_prompt: str | None = None) -> None:
