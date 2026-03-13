@@ -18,6 +18,7 @@ from fastmcp import FastMCP
 
 from aden_tools.tools.github_tool.github_tool import (
     _GitHubClient,
+    _encode_branch_path_param,
     register_tools,
 )
 
@@ -69,6 +70,13 @@ class TestGitHubClient:
         result = self.client._handle_response(response)
         assert "error" in result
         assert "Validation" in result["error"]
+
+    def test_encode_branch_path_param_encodes_slashes(self):
+        assert _encode_branch_path_param("feature/test-branch") == "feature%2Ftest-branch"
+
+    def test_encode_branch_path_param_rejects_path_traversal(self):
+        with pytest.raises(ValueError, match="cannot contain '\\.\\.'"):
+            _encode_branch_path_param("../main")
 
     @patch("aden_tools.tools.github_tool.github_tool.httpx.get")
     def test_list_repos(self, mock_get):
@@ -622,3 +630,20 @@ class TestGitHubBranches:
             result = get_branch(owner="owner", repo="repo", branch="main")
 
             assert result["success"] is True
+
+    @patch("aden_tools.tools.github_tool.github_tool.httpx.get")
+    def test_get_branch_encodes_slash_in_branch_name(self, mock_get, mcp):
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {"name": "feature/test-branch", "protected": False}
+        mock_get.return_value = mock_response
+
+        with patch("os.getenv", return_value="ghp_test"):
+            register_tools(mcp, credentials=None)
+            get_branch = mcp._tool_manager._tools["github_get_branch"].fn
+
+            result = get_branch(owner="owner", repo="repo", branch="feature/test-branch")
+
+            assert result["success"] is True
+            request_url = mock_get.call_args.args[0]
+            assert request_url.endswith("/branches/feature%2Ftest-branch")
