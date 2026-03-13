@@ -801,7 +801,7 @@ $DefaultModels = @{
     openai      = "gpt-5-mini"
     gemini      = "gemini-3-flash-preview"
     groq        = "moonshotai/kimi-k2-instruct-0905"
-    cerebras    = "zai-glm-4.7"
+    cerebras    = "gpt-oss-120b"
     mistral     = "mistral-large-latest"
     together_ai = "meta-llama/Llama-3.3-70B-Instruct-Turbo"
     deepseek    = "deepseek-chat"
@@ -828,8 +828,13 @@ $ModelChoices = @{
         @{ Id = "openai/gpt-oss-120b";              Label = "GPT-OSS 120B - Fast reasoning";        MaxTokens = 8192; MaxContextTokens = 120000 }
     )
     cerebras = @(
+<<<<<<< HEAD
+        @{ Id = "gpt-oss-120b";                   Label = "GPT-OSS 120B - Best quality (recommended)"; MaxTokens = 8192 },
+        @{ Id = "qwen-3-235b-a22b-instruct-2507"; Label = "Qwen 3 235B A22B - Frontier reasoning";    MaxTokens = 8192 }
+=======
         @{ Id = "zai-glm-4.7";                    Label = "ZAI-GLM 4.7 - Best quality (recommended)"; MaxTokens = 8192; MaxContextTokens = 120000 },
         @{ Id = "qwen3-235b-a22b-instruct-2507";  Label = "Qwen3 235B - Frontier reasoning";          MaxTokens = 8192; MaxContextTokens = 120000 }
+>>>>>>> 1e74f194a1cc7d90b360ec029bbfb74c5adff626
     )
 }
 
@@ -878,6 +883,53 @@ function Get-ModelSelection {
             }
         }
         Write-Color -Text "Invalid choice. Please enter 1-$($choices.Count)" -Color Red
+    }
+}
+
+function Test-SelectedModelAccess {
+    param(
+        [string]$ProviderId,
+        [string]$ModelId,
+        [string]$EnvVar,
+        [string]$ApiBase = ""
+    )
+
+    if (-not $ProviderId -or -not $ModelId -or -not $EnvVar) {
+        return $true
+    }
+
+    $apiKey = [System.Environment]::GetEnvironmentVariable($EnvVar, "Process")
+    if ([string]::IsNullOrWhiteSpace($apiKey)) {
+        return $true
+    }
+
+    Write-Host "  Verifying model access... " -NoNewline
+    try {
+        $checkScript = Join-Path $ScriptDir "scripts/check_llm_key.py"
+        if ([string]::IsNullOrWhiteSpace($ApiBase)) {
+            $hcResult = & uv run python $checkScript $ProviderId $apiKey $ModelId 2>$null
+        } else {
+            $hcResult = & uv run python $checkScript $ProviderId $apiKey $ApiBase $ModelId 2>$null
+        }
+        $hc = $hcResult | ConvertFrom-Json
+        if ($hc.valid -eq $true) {
+            Write-Ok "ok"
+            return $true
+        }
+        if ($hc.valid -eq $false) {
+            Write-Fail "failed"
+            if ($hc.message) {
+                Write-Warn $hc.message
+            }
+            return $false
+        }
+        Write-Warn "--"
+        Write-Color -Text "  Could not verify model access (network/rate limit). Continuing." -Color DarkGray
+        return $true
+    } catch {
+        Write-Warn "--"
+        Write-Color -Text "  Could not verify model access (network/rate limit). Continuing." -Color DarkGray
+        return $true
     }
 }
 
@@ -944,7 +996,8 @@ if (Test-Path $HiveConfigFile) {
             $PrevProvider = if ($prevLlm.provider) { $prevLlm.provider } else { "" }
             $PrevModel = if ($prevLlm.model) { $prevLlm.model } else { "" }
             $PrevEnvVar = if ($prevLlm.api_key_env_var) { $prevLlm.api_key_env_var } else { "" }
-            if ($prevLlm.use_claude_code_subscription) { $PrevSubMode = "claude_code" }
+            if ($prevLlm.auth_mode -eq "claude_code" -or $prevLlm.auth_mode -eq "codex" -or $prevLlm.auth_mode -eq "kimi_code") { $PrevSubMode = $prevLlm.auth_mode }
+            elseif ($prevLlm.use_claude_code_subscription) { $PrevSubMode = "claude_code" }
             elseif ($prevLlm.use_codex_subscription) { $PrevSubMode = "codex" }
             elseif ($prevLlm.use_kimi_code_subscription) { $PrevSubMode = "kimi_code" }
             elseif ($prevLlm.api_base -and $prevLlm.api_base -like "*api.z.ai*") { $PrevSubMode = "zai_code" }
@@ -1353,10 +1406,22 @@ if ($SubscriptionMode -eq "kimi_code") {
 
 # Prompt for model if not already selected (manual provider path)
 if ($SelectedProviderId -and -not $SelectedModel) {
+<<<<<<< HEAD
+    while ($true) {
+        $modelSel = Get-ModelSelection $SelectedProviderId
+        $SelectedModel     = $modelSel.Model
+        $SelectedMaxTokens = $modelSel.MaxTokens
+        if (Test-SelectedModelAccess -ProviderId $SelectedProviderId -ModelId $SelectedModel -EnvVar $SelectedEnvVar) {
+            break
+        }
+        Write-Color -Text "  Please choose another model." -Color Yellow
+    }
+=======
     $modelSel = Get-ModelSelection $SelectedProviderId
     $SelectedModel            = $modelSel.Model
     $SelectedMaxTokens        = $modelSel.MaxTokens
     $SelectedMaxContextTokens = $modelSel.MaxContextTokens
+>>>>>>> 1e74f194a1cc7d90b360ec029bbfb74c5adff626
 }
 
 # Save configuration
@@ -1382,16 +1447,22 @@ if ($SelectedProviderId) {
     }
 
     if ($SubscriptionMode -eq "claude_code") {
+        $config.llm["auth_mode"] = "claude_code"
         $config.llm["use_claude_code_subscription"] = $true
     } elseif ($SubscriptionMode -eq "codex") {
+        $config.llm["auth_mode"] = "codex"
         $config.llm["use_codex_subscription"] = $true
     } elseif ($SubscriptionMode -eq "zai_code") {
+        $config.llm["auth_mode"] = "api_key"
         $config.llm["api_base"] = "https://api.z.ai/api/coding/paas/v4"
         $config.llm["api_key_env_var"] = $SelectedEnvVar
     } elseif ($SubscriptionMode -eq "kimi_code") {
+        $config.llm["auth_mode"] = "kimi_code"
+        $config.llm["use_kimi_code_subscription"] = $true
         $config.llm["api_base"] = "https://api.kimi.com/coding"
         $config.llm["api_key_env_var"] = $SelectedEnvVar
     } else {
+        $config.llm["auth_mode"] = "api_key"
         $config.llm["api_key_env_var"] = $SelectedEnvVar
     }
 
@@ -1720,14 +1791,15 @@ if ($CodexAvailable) {
     Write-Host ""
 }
 
-# Auto-launch dashboard or show manual instructions
+# Show dashboard start instructions (do not auto-launch)
 if ($FrontendBuilt) {
-    Write-Color -Text "Launching dashboard..." -Color White
+    Write-Color -Text "Dashboard ready." -Color White
     Write-Host ""
-    Write-Color -Text "  Starting server on http://localhost:8787" -Color DarkGray
-    Write-Color -Text "  Press Ctrl+C to stop" -Color DarkGray
+    Write-Color -Text "  If you changed API keys in this setup, open a new terminal first." -Color DarkGray
     Write-Host ""
-    & (Join-Path $ScriptDir "hive.ps1") open
+    Write-Color -Text "  Start it when you're ready:" -Color DarkGray
+    Write-Color -Text "     .\hive.ps1 open" -Color Cyan
+    Write-Host ""
 } else {
     Write-Color -Text "═══════════════════════════════════════════════════════" -Color Yellow
     Write-Host ""
@@ -1743,7 +1815,7 @@ if ($FrontendBuilt) {
     Write-Host ""
     Write-Host "  Launch the interactive dashboard to browse and run agents:"
     Write-Host "  You can start an example agent or an agent built by yourself:"
-    Write-Color -Text "     .\hive.ps1 tui" -Color Cyan
+    Write-Color -Text "     .\hive.ps1 open" -Color Cyan
     Write-Host ""
 
     if ($SelectedProviderId -or $credKey) {

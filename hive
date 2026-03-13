@@ -59,4 +59,29 @@ if ! command -v uv &> /dev/null; then
     exit 1
 fi
 
+# Load the latest configured API key from shell rc files so running
+# ./hive immediately after quickstart uses the key quickstart saved.
+HIVE_CONFIG_FILE="$HOME/.hive/configuration.json"
+if [ -f "$HIVE_CONFIG_FILE" ]; then
+    API_KEY_ENV_VAR=$(
+        grep -E '"api_key_env_var"[[:space:]]*:' "$HIVE_CONFIG_FILE" 2>/dev/null \
+            | head -n 1 \
+            | sed -E 's/.*"api_key_env_var"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/' \
+            || true
+    )
+
+    if [[ "$API_KEY_ENV_VAR" =~ ^[A-Z_][A-Z0-9_]*$ ]]; then
+        for rc in "$HOME/.bashrc" "$HOME/.zshrc" "$HOME/.profile"; do
+            [ -f "$rc" ] || continue
+            export_line=$(grep -E "^export ${API_KEY_ENV_VAR}=" "$rc" 2>/dev/null | tail -n 1 || true)
+            if [ -n "$export_line" ]; then
+                # shellcheck disable=SC2086
+                eval "$export_line"
+                export "$API_KEY_ENV_VAR"
+                break
+            fi
+        done
+    fi
+fi
+
 exec uv run hive "$@"

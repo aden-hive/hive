@@ -53,7 +53,7 @@ if (Test-Path $configPath) {
         $envVarName = $config.llm.api_key_env_var
         if ($envVarName) {
             $val = [System.Environment]::GetEnvironmentVariable($envVarName, "User")
-            if ($val -and -not (Test-Path "Env:\$envVarName" -ErrorAction SilentlyContinue)) {
+            if ($val) {
                 Set-Item -Path "Env:\$envVarName" -Value $val
             }
         }

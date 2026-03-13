@@ -159,6 +159,30 @@ async def create_queen(
     phase_state.staging_tools = [t for t in queen_tools if t.name in staging_names]
     phase_state.running_tools = [t for t in queen_tools if t.name in running_names]
 
+    def _runtime_tool_guard(phase: str, expected: set[str], available_tools: list[Any]) -> str:
+        """Append a strict availability guard for providers enforcing request.tools."""
+        available_names = sorted(t.name for t in available_tools)
+        missing_names = sorted(expected - set(available_names))
+        lines = [
+            "",
+            "",
+            f"# Runtime Tool Availability ({phase.upper()} phase)",
+            "Only call tools from this available list. Never call unavailable tools.",
+            (
+                "Available now: " + ", ".join(available_names)
+                if available_names
+                else "Available now: (none)"
+            ),
+        ]
+        if missing_names:
+            lines.append("Unavailable in this session: " + ", ".join(missing_names))
+        if "list_agent_tools" in missing_names:
+            lines.append(
+                "IMPORTANT: list_agent_tools is unavailable right now. "
+                "Do not call it; continue using only the available tools."
+            )
+        return "\n".join(lines)
+
     # ---- Cross-session memory ----------------------------------------
     from framework.agents.queen.queen_memory import seed_if_missing
 
@@ -183,6 +207,7 @@ async def create_queen(
         + _queen_behavior_planning
         + _planning_knowledge
         + worker_identity
+        + _runtime_tool_guard("planning", planning_names, phase_state.planning_tools)
     )
     phase_state.prompt_planning = _queen_identity_planning + _planning_body
 
@@ -196,6 +221,7 @@ async def create_queen(
         + _queen_phase_7
         + _appendices
         + worker_identity
+        + _runtime_tool_guard("building", building_names, phase_state.building_tools)
     )
     phase_state.prompt_building = _queen_identity_building + _building_body
     phase_state.prompt_staging = (
@@ -205,6 +231,7 @@ async def create_queen(
         + _queen_behavior_always
         + _queen_behavior_staging
         + worker_identity
+        + _runtime_tool_guard("staging", staging_names, phase_state.staging_tools)
     )
     phase_state.prompt_running = (
         _queen_identity_running
@@ -213,6 +240,7 @@ async def create_queen(
         + _queen_behavior_always
         + _queen_behavior_running
         + worker_identity
+        + _runtime_tool_guard("running", running_names, phase_state.running_tools)
     )
 
     # ---- Persona hook ------------------------------------------------

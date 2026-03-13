@@ -19,7 +19,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from framework.llm.anthropic import AnthropicProvider
-from framework.llm.litellm import LiteLLMProvider, _compute_retry_delay
+from framework.llm.litellm import LiteLLMProvider, _compute_retry_delay, _is_stream_transient_error
 from framework.llm.provider import LLMProvider, LLMResponse, Tool
 
 
@@ -166,6 +166,49 @@ class TestLiteLLMProviderComplete:
         assert "tools" in call_kwargs
         assert call_kwargs["tools"][0]["type"] == "function"
         assert call_kwargs["tools"][0]["function"]["name"] == "get_weather"
+
+    @patch("litellm.completion")
+    def test_complete_adds_compat_tool_from_history(self, mock_completion):
+        """Historical assistant tool calls should be preserved in request.tools."""
+        mock_response = MagicMock()
+        mock_response.choices = [MagicMock()]
+        mock_response.choices[0].message.content = "Response"
+        mock_response.choices[0].finish_reason = "stop"
+        mock_response.model = "gpt-4o-mini"
+        mock_response.usage.prompt_tokens = 20
+        mock_response.usage.completion_tokens = 10
+        mock_completion.return_value = mock_response
+
+        provider = LiteLLMProvider(model="gpt-4o-mini", api_key="test-key")
+        tools = [
+            Tool(
+                name="ask_user",
+                description="Ask for user input",
+                parameters={"properties": {"question": {"type": "string"}}, "required": ["question"]},
+            )
+        ]
+        messages = [
+            {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [
+                    {
+                        "id": "call_1",
+                        "type": "function",
+                        "function": {"name": "list_agent_tools", "arguments": "{}"},
+                    }
+                ],
+            },
+            {"role": "tool", "tool_call_id": "call_1", "content": "{}"},
+            {"role": "user", "content": "continue"},
+        ]
+
+        provider.complete(messages=messages, tools=tools)
+
+        call_kwargs = mock_completion.call_args[1]
+        names = [t["function"]["name"] for t in call_kwargs["tools"]]
+        assert "ask_user" in names
+        assert "list_agent_tools" in names
 
 
 class TestToolConversion:
@@ -504,6 +547,11 @@ class TestComputeRetryDelay:
         exc = _make_exception_with_headers({"retry-after-ms": "300000"})  # 300s
         assert _compute_retry_delay(0, exception=exc) == 120  # capped
 
+    def test_retry_delay_from_exception_message_seconds(self):
+        """Provider text like 'try again in 23.022s' should be respected."""
+        exc = Exception("Rate limit reached. Please try again in 23.022s.")
+        assert _compute_retry_delay(0, exception=exc) == 23.022
+
 
 def _make_exception_with_headers(headers: dict[str, str]) -> BaseException:
     """Create a mock exception with response headers for testing."""
@@ -512,6 +560,17 @@ def _make_exception_with_headers(headers: dict[str, str]) -> BaseException:
     response.headers = headers
     exc.response = response  # type: ignore[attr-defined]
     return exc
+
+
+class TestStreamTransientClassification:
+    """Classify stream errors as transient vs permanent."""
+
+    def test_tool_not_in_request_is_not_transient(self):
+        err = RuntimeError(
+            "GroqException - tool call validation failed: attempted to call tool "
+            "'list_agent_tools' which was not in request.tools"
+        )
+        assert _is_stream_transient_error(err) is False
 
 
 # ---------------------------------------------------------------------------

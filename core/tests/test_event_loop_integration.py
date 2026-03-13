@@ -1,7 +1,7 @@
 """
 Integration tests for EventLoopNode lifecycle
 
-Default: real LLM (cerebras/zai-glm-4.7).
+Default: real LLM (cerebras/gpt-oss-120b).
 Set HIVE_TEST_LLM_MODE=mock for fast, deterministic, no-API tests.
 Set HIVE_TEST_LLM_MODEL=<model> to override the real model.
 """
@@ -46,7 +46,7 @@ from framework.runtime.event_bus import AgentEvent, EventBus, EventType
 # ---------------------------------------------------------------------------
 
 USE_MOCK_LLM = os.environ.get("HIVE_TEST_LLM_MODE", "mock").lower() == "mock"
-LLM_MODEL = os.environ.get("HIVE_TEST_LLM_MODEL", "cerebras/zai-glm-4.7")
+LLM_MODEL = os.environ.get("HIVE_TEST_LLM_MODEL", "cerebras/gpt-oss-120b")
 
 
 # ---------------------------------------------------------------------------

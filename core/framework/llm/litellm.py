@@ -10,6 +10,7 @@ See: https://docs.litellm.ai/docs/providers
 import asyncio
 import json
 import logging
+import re
 import time
 from collections.abc import AsyncIterator
 from datetime import datetime
@@ -150,6 +151,15 @@ EMPTY_STREAM_RETRY_DELAY = 1.0  # seconds
 # Directory for dumping failed requests
 FAILED_REQUESTS_DIR = Path.home() / ".hive" / "failed_requests"
 
+_RETRY_IN_SECONDS_RE = re.compile(
+    r"(?:try again in|retry (?:in|after))\s*([0-9]+(?:\.[0-9]+)?)\s*s",
+    re.IGNORECASE,
+)
+_TOOL_NOT_IN_REQUEST_RE = re.compile(
+    r"attempted to call tool ['`\"]?([^'`\" ]+)['`\"]?\s+which was not in request\.tools",
+    re.IGNORECASE,
+)
+
 
 def _estimate_tokens(model: str, messages: list[dict]) -> tuple[int, str]:
     """Estimate token count for messages. Returns (token_count, method)."""
@@ -251,6 +261,17 @@ def _compute_retry_delay(
                     except (ValueError, TypeError, OverflowError):
                         pass
 
+        # Some providers include retry guidance in the error body
+        # (e.g., "Please try again in 23.022s") without Retry-After headers.
+        msg = str(exception)
+        m = _RETRY_IN_SECONDS_RE.search(msg)
+        if m:
+            try:
+                delay = float(m.group(1))
+                return min(max(delay, 0), max_delay)
+            except (ValueError, TypeError):
+                pass
+
     # Fallback: exponential backoff
     delay = backoff_base * (2**attempt)
     return min(delay, max_delay)
@@ -267,6 +288,10 @@ def _is_stream_transient_error(exc: BaseException) -> bool:
     same malformed output.  This error is handled at the EventLoopNode level
     where the conversation can be modified before retrying.
     """
+    error_text = str(exc)
+    if _TOOL_NOT_IN_REQUEST_RE.search(error_text):
+        return False
+
     try:
         from litellm.exceptions import (
             APIConnectionError,
@@ -555,9 +580,9 @@ class LiteLLMProvider(LLMProvider):
         if self.api_base:
             kwargs["api_base"] = self.api_base
 
-        # Add tools if provided
-        if tools:
-            kwargs["tools"] = [self._tool_to_openai_format(t) for t in tools]
+        tool_payload = self._build_tool_payload(tools, full_messages)
+        if tool_payload:
+            kwargs["tools"] = tool_payload
 
         # Add response_format for structured output
         # LiteLLM passes this through to the underlying provider
@@ -750,8 +775,9 @@ class LiteLLMProvider(LLMProvider):
             kwargs["api_key"] = self.api_key
         if self.api_base:
             kwargs["api_base"] = self.api_base
-        if tools:
-            kwargs["tools"] = [self._tool_to_openai_format(t) for t in tools]
+        tool_payload = self._build_tool_payload(tools, full_messages)
+        if tool_payload:
+            kwargs["tools"] = tool_payload
         if response_format:
             kwargs["response_format"] = response_format
 
@@ -785,6 +811,73 @@ class LiteLLMProvider(LLMProvider):
                 },
             },
         }
+
+    def _extract_history_tool_names(self, messages: list[dict[str, Any]]) -> set[str]:
+        """Return function names from assistant tool_calls already in history."""
+        names: set[str] = set()
+        for msg in messages:
+            if msg.get("role") != "assistant":
+                continue
+            tool_calls = msg.get("tool_calls")
+            if not isinstance(tool_calls, list):
+                continue
+            for tc in tool_calls:
+                if not isinstance(tc, dict):
+                    continue
+                fn = tc.get("function")
+                if not isinstance(fn, dict):
+                    continue
+                name = fn.get("name")
+                if isinstance(name, str) and name:
+                    names.add(name)
+        return names
+
+    @staticmethod
+    def _compat_tool_schema(name: str) -> dict[str, Any]:
+        """Build a generic schema for historical tools no longer in active set."""
+        return {
+            "type": "function",
+            "function": {
+                "name": name,
+                "description": (
+                    "Compatibility schema for prior conversation history. "
+                    "Prefer currently available tools instead."
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {},
+                    "required": [],
+                },
+            },
+        }
+
+    def _build_tool_payload(
+        self,
+        tools: list[Tool] | None,
+        full_messages: list[dict[str, Any]],
+    ) -> list[dict[str, Any]] | None:
+        """Build tool payload and include compatibility schemas for history."""
+        payload: list[dict[str, Any]] = []
+        if tools:
+            payload.extend(self._tool_to_openai_format(t) for t in tools)
+
+        known = {t["function"]["name"] for t in payload if t.get("function")}
+        history_tool_names = self._extract_history_tool_names(full_messages)
+        compat_added: list[str] = []
+        for name in sorted(history_tool_names):
+            if name not in known:
+                payload.append(self._compat_tool_schema(name))
+                known.add(name)
+                compat_added.append(name)
+
+        if compat_added:
+            logger.debug(
+                "[tools] Added %d compatibility tool schema(s): %s",
+                len(compat_added),
+                compat_added,
+            )
+
+        return payload or None
 
     def _is_minimax_model(self) -> bool:
         """Return True when the configured model targets MiniMax."""
@@ -943,8 +1036,9 @@ class LiteLLMProvider(LLMProvider):
             kwargs["api_key"] = self.api_key
         if self.api_base:
             kwargs["api_base"] = self.api_base
-        if tools:
-            kwargs["tools"] = [self._tool_to_openai_format(t) for t in tools]
+        tool_payload = self._build_tool_payload(tools, full_messages)
+        if tool_payload:
+            kwargs["tools"] = tool_payload
         if response_format:
             kwargs["response_format"] = response_format
         # The Codex ChatGPT backend (Responses API) rejects several params.

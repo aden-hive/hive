@@ -1,6 +1,6 @@
 """Shared Hive configuration utilities.
 
-Centralises reading of ~/.hive/configuration.json so that the runner
+Centralizes reading of ~/.hive/configuration.json so that the runner
 and every agent template share one implementation instead of copy-pasting
 helper functions.
 """
@@ -10,7 +10,7 @@ import logging
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from framework.graph.edge import DEFAULT_MAX_TOKENS
 
@@ -20,6 +20,9 @@ from framework.graph.edge import DEFAULT_MAX_TOKENS
 
 HIVE_CONFIG_FILE = Path.home() / ".hive" / "configuration.json"
 logger = logging.getLogger(__name__)
+
+LLMAuthMode = Literal["api_key", "claude_code", "codex", "kimi_code"]
+_VALID_AUTH_MODES: set[str] = {"api_key", "claude_code", "codex", "kimi_code"}
 
 
 def get_hive_config() -> dict[str, Any]:
@@ -51,6 +54,37 @@ def get_preferred_model() -> str:
     return "anthropic/claude-sonnet-4-20250514"
 
 
+def resolve_llm_auth_mode(llm: dict[str, Any] | None = None) -> LLMAuthMode:
+    """Resolve one effective LLM auth mode from config.
+
+    Preference order:
+    1. Explicit ``auth_mode`` (new schema)
+    2. Legacy subscription booleans
+    3. Legacy Kimi subscription heuristic
+    4. Default to API-key mode
+    """
+    llm = llm if llm is not None else get_hive_config().get("llm", {})
+
+    auth_mode = str(llm.get("auth_mode", "")).strip().lower()
+    if auth_mode in _VALID_AUTH_MODES:
+        return auth_mode  # type: ignore[return-value]
+
+    if llm.get("use_claude_code_subscription"):
+        return "claude_code"
+    if llm.get("use_codex_subscription"):
+        return "codex"
+    if llm.get("use_kimi_code_subscription"):
+        return "kimi_code"
+
+    # Legacy quickstart kimi config used provider/api_base without explicit flag.
+    provider = str(llm.get("provider", "")).strip().lower()
+    api_base = str(llm.get("api_base", "")).strip().lower()
+    if provider == "kimi" and "api.kimi.com/coding" in api_base:
+        return "kimi_code"
+
+    return "api_key"
+
+
 def get_max_tokens() -> int:
     """Return the configured max_tokens, falling back to DEFAULT_MAX_TOKENS."""
     return get_hive_config().get("llm", {}).get("max_tokens", DEFAULT_MAX_TOKENS)
@@ -65,19 +99,17 @@ def get_max_context_tokens() -> int:
 
 
 def get_api_key() -> str | None:
-    """Return the API key, supporting env var, Claude Code subscription, Codex, and ZAI Code.
+    """Return the API key based on resolved auth mode.
 
     Priority:
-    1. Claude Code subscription (``use_claude_code_subscription: true``)
-       reads the OAuth token from ``~/.claude/.credentials.json``.
-    2. Codex subscription (``use_codex_subscription: true``)
-       reads the OAuth token from macOS Keychain or ``~/.codex/auth.json``.
+    1. Explicit ``llm.auth_mode``.
+    2. Legacy subscription flags/heuristics.
     3. Environment variable named in ``api_key_env_var``.
     """
     llm = get_hive_config().get("llm", {})
+    auth_mode = resolve_llm_auth_mode(llm)
 
-    # Claude Code subscription: read OAuth token directly
-    if llm.get("use_claude_code_subscription"):
+    if auth_mode == "claude_code":
         try:
             from framework.runner.runner import get_claude_code_token
 
@@ -87,8 +119,7 @@ def get_api_key() -> str | None:
         except ImportError:
             pass
 
-    # Codex subscription: read OAuth token from Keychain / auth.json
-    if llm.get("use_codex_subscription"):
+    elif auth_mode == "codex":
         try:
             from framework.runner.runner import get_codex_token
 
@@ -98,8 +129,7 @@ def get_api_key() -> str | None:
         except ImportError:
             pass
 
-    # Kimi Code subscription: read API key from ~/.kimi/config.toml
-    if llm.get("use_kimi_code_subscription"):
+    elif auth_mode == "kimi_code":
         try:
             from framework.runner.runner import get_kimi_code_token
 
@@ -109,7 +139,7 @@ def get_api_key() -> str | None:
         except ImportError:
             pass
 
-    # Standard env-var path (covers ZAI Code and all API-key providers)
+    # Standard env-var path (covers ZAI/MiniMax and all API-key providers)
     api_key_env_var = llm.get("api_key_env_var")
     if api_key_env_var:
         return os.environ.get(api_key_env_var)
@@ -124,34 +154,30 @@ def get_gcu_enabled() -> bool:
 def get_api_base() -> str | None:
     """Return the api_base URL for OpenAI-compatible endpoints, if configured."""
     llm = get_hive_config().get("llm", {})
-    if llm.get("use_codex_subscription"):
+    auth_mode = resolve_llm_auth_mode(llm)
+
+    if auth_mode == "codex":
         # Codex subscription routes through the ChatGPT backend, not api.openai.com.
         return "https://chatgpt.com/backend-api/codex"
-    if llm.get("use_kimi_code_subscription"):
+    if auth_mode == "kimi_code":
         # Kimi Code uses an Anthropic-compatible endpoint (no /v1 suffix).
         return "https://api.kimi.com/coding"
     return llm.get("api_base")
 
 
 def get_llm_extra_kwargs() -> dict[str, Any]:
-    """Return extra kwargs for LiteLLMProvider (e.g. OAuth headers).
-
-    When ``use_claude_code_subscription`` is enabled, returns
-    ``extra_headers`` with the OAuth Bearer token so that litellm's
-    built-in Anthropic OAuth handler adds the required beta headers.
-
-    When ``use_codex_subscription`` is enabled, returns
-    ``extra_headers`` with the Bearer token, ``ChatGPT-Account-Id``,
-    and ``store=False`` (required by the ChatGPT backend).
-    """
+    """Return extra kwargs for LiteLLMProvider (e.g. OAuth headers)."""
     llm = get_hive_config().get("llm", {})
-    if llm.get("use_claude_code_subscription"):
+    auth_mode = resolve_llm_auth_mode(llm)
+
+    if auth_mode == "claude_code":
         api_key = get_api_key()
         if api_key:
             return {
                 "extra_headers": {"authorization": f"Bearer {api_key}"},
             }
-    if llm.get("use_codex_subscription"):
+
+    if auth_mode == "codex":
         api_key = get_api_key()
         if api_key:
             headers: dict[str, str] = {
@@ -171,11 +197,12 @@ def get_llm_extra_kwargs() -> dict[str, Any]:
                 "store": False,
                 "allowed_openai_params": ["store"],
             }
+
     return {}
 
 
 # ---------------------------------------------------------------------------
-# RuntimeConfig – shared across agent templates
+# RuntimeConfig - shared across agent templates
 # ---------------------------------------------------------------------------
 
 
