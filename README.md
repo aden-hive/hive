@@ -77,6 +77,33 @@ Use Hive when you need:
 - **[Contributing](CONTRIBUTING.md)** - How to contribute and submit PRs
 
 ## Quick Start
+### Python only quick start
+This section provides a minimal Python-only example to help new contributors
+quickly get started with Hive without additional tooling.
+
+#### Prerequisites
+- Python 3.9+
+- Git
+
+#### Installation
+```bash
+git clone https://github.com/adenhq/hive.git
+cd hive
+pip install -e .
+```
+
+#### Minimal Example
+Create a file named `example_agent.py` locally with the following content:
+# NOTE: This is a minimal illustrative example.
+# Refer to the examples directory for exact imports and advanced usage.
+```
+agent = Agent(
+    name="hello_agent",
+    goal="Print hello world"
+)
+
+agent.run()
+```
 
 ### Prerequisites
 
