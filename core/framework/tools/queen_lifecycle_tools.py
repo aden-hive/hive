@@ -1529,27 +1529,31 @@ def register_queen_lifecycle_tools(
             and phase_state.phase == "planning"
             and phase_state.planning_ask_rounds < 2
         ):
-            return json.dumps({
-                "error": (
-                    "You haven't asked enough questions yet. You have only "
-                    f"asked {phase_state.planning_ask_rounds} round(s) of "
-                    "questions — at least 2 are required before saving a "
-                    "draft. Think deeper and ask more practical questions "
-                    "to fully understand the user's requirements before "
-                    "designing the agent graph."
-                )
-            })
+            return json.dumps(
+                {
+                    "error": (
+                        "You haven't asked enough questions yet. You have only "
+                        f"asked {phase_state.planning_ask_rounds} round(s) of "
+                        "questions — at least 2 are required before saving a "
+                        "draft. Think deeper and ask more practical questions "
+                        "to fully understand the user's requirements before "
+                        "designing the agent graph."
+                    )
+                }
+            )
 
         # ── Gate: require at least 5 nodes for a meaningful graph ─────
         if len(nodes) < 5:
-            return json.dumps({
-                "error": (
-                    f"Draft only has {len(nodes)} node(s) — at least 5 are "
-                    "required for a meaningful agent graph. Think deeper and "
-                    "ask more practical questions to fully understand the "
-                    "user's requirements, then design a more thorough graph."
-                )
-            })
+            return json.dumps(
+                {
+                    "error": (
+                        f"Draft only has {len(nodes)} node(s) — at least 5 are "
+                        "required for a meaningful agent graph. Think deeper and "
+                        "ask more practical questions to fully understand the "
+                        "user's requirements, then design a more thorough graph."
+                    )
+                }
+            )
 
         # Loose validation: each node needs at minimum an id
         validated_nodes = []
@@ -1616,32 +1620,31 @@ def register_queen_lifecycle_tools(
         # sub-agent and remove the decision → GCU edge.
         node_by_id_v = {n["id"]: n for n in validated_nodes}
         decision_node_ids = {
-            n["id"] for n in validated_nodes
-            if n.get("flowchart_type") == "decision"
+            n["id"] for n in validated_nodes if n.get("flowchart_type") == "decision"
         }
         gcu_node_ids = {
-            n["id"] for n in validated_nodes
+            n["id"]
+            for n in validated_nodes
             if n.get("node_type") == "gcu" or n.get("flowchart_type") == "browser"
         }
         topology_corrections: list[str] = []
         if decision_node_ids and gcu_node_ids:
             for d_id in decision_node_ids:
                 gcu_children = [
-                    e for e in validated_edges
+                    e
+                    for e in validated_edges
                     if e["source"] == d_id and e["target"] in gcu_node_ids
                 ]
                 if not gcu_children:
                     continue
-                d_parents = [
-                    e["source"] for e in validated_edges
-                    if e["target"] == d_id
-                ]
+                d_parents = [e["source"] for e in validated_edges if e["target"] == d_id]
                 for gc_edge in gcu_children:
                     gc_id = gc_edge["target"]
                     logger.warning(
                         "GCU node '%s' is a child of decision node '%s' "
                         "— moving it to the decision's predecessor.",
-                        gc_id, d_id,
+                        gc_id,
+                        d_id,
                     )
                     topology_corrections.append(
                         f"GCU node '{gc_id}' was a child of decision "
@@ -1651,15 +1654,16 @@ def register_queen_lifecycle_tools(
                     )
                     # Remove the decision → GCU edge
                     validated_edges[:] = [
-                        e for e in validated_edges
+                        e
+                        for e in validated_edges
                         if not (e["source"] == d_id and e["target"] == gc_id)
                     ]
                     # Remove any outgoing edges from the GCU node
                     # (keep report edges back to predecessors)
                     validated_edges[:] = [
-                        e for e in validated_edges
-                        if e["source"] != gc_id
-                        or e["target"] in set(d_parents)
+                        e
+                        for e in validated_edges
+                        if e["source"] != gc_id or e["target"] in set(d_parents)
                     ]
                     # Assign GCU as sub-agent of predecessor(s)
                     for pid in d_parents:
@@ -1842,7 +1846,8 @@ def register_queen_lifecycle_tools(
                     logger.warning(
                         "Node '%s' is unreachable from entry node '%s' "
                         "— removing it from the draft.",
-                        uid, entry_id,
+                        uid,
+                        entry_id,
                     )
                     topology_corrections.append(
                         f"Node '{uid}' is disconnected from the graph "
@@ -1851,14 +1856,11 @@ def register_queen_lifecycle_tools(
                         f"as a sub-agent of an existing node."
                     )
                 validated_edges[:] = [
-                    e for e in validated_edges
-                    if e["source"] not in unreachable
-                    and e["target"] not in unreachable
+                    e
+                    for e in validated_edges
+                    if e["source"] not in unreachable and e["target"] not in unreachable
                 ]
-                validated_nodes[:] = [
-                    n for n in validated_nodes
-                    if n["id"] not in unreachable
-                ]
+                validated_nodes[:] = [n for n in validated_nodes if n["id"] not in unreachable]
 
         # Determine terminal nodes: explicit list, or nodes with no outgoing edges.
         # Sub-agent nodes are leaf helpers, not endpoints — exclude them.
@@ -2251,7 +2253,8 @@ def register_queen_lifecycle_tools(
         dissolved_count = len(original_nodes) - len(converted.get("nodes", []))
         decision_count = sum(1 for n in original_nodes if n.get("flowchart_type") == "decision")
         subagent_count = sum(
-            1 for n in original_nodes
+            1
+            for n in original_nodes
             if n.get("flowchart_type") == "browser" or n.get("node_type") == "gcu"
         )
 
