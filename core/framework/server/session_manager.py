@@ -588,6 +588,22 @@ class SessionManager:
             initial_prompt=initial_prompt,
         )
 
+        # Auto-load worker on cold restore — the queen's conversation expects
+        # the agent to be loaded, but the new session has no worker.
+        if session.queen_resume_from and not session.worker_runtime:
+            meta_path = queen_dir / "meta.json"
+            if meta_path.exists():
+                try:
+                    _meta = json.loads(meta_path.read_text(encoding="utf-8"))
+                    _agent_path = _meta.get("agent_path")
+                    if _agent_path and Path(_agent_path).exists():
+                        await self.load_worker(session.id, _agent_path)
+                        if session.phase_state:
+                            await session.phase_state.switch_to_staging(source="auto")
+                        logger.info("Cold restore: auto-loaded worker from %s", _agent_path)
+                except Exception:
+                    logger.warning("Cold restore: failed to auto-load worker", exc_info=True)
+
         # Memory consolidation — triggered by context compaction events.
         # Compaction is a natural signal that "enough has happened to be worth remembering".
         _consolidation_llm = session.llm
