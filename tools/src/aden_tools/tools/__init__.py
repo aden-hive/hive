@@ -139,6 +139,7 @@ from .yahoo_finance_tool import register_tools as register_yahoo_finance
 from .youtube_tool import register_tools as register_youtube
 from .youtube_transcript_tool import register_tools as register_youtube_transcript
 from .zendesk_tool import register_tools as register_zendesk
+from .virustotal_tool import register_tools as register_virustotal
 from .zoho_crm_tool import register_tools as register_zoho_crm
 from .zoom_tool import register_tools as register_zoom
 
@@ -294,6 +295,7 @@ def _register_unverified(
     register_trello(mcp, credentials=credentials)
     register_twilio(mcp, credentials=credentials)
     register_twitter(mcp, credentials=credentials)
+    register_virustotal(mcp, credentials=credentials)
     register_vercel(mcp, credentials=credentials)
     register_youtube(mcp, credentials=credentials)
     register_zendesk(mcp, credentials=credentials)
