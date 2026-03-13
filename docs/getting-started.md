@@ -25,6 +25,8 @@ cd hive
 uv run python -c "import framework; import aden_tools; print('✓ Setup complete')"
 ```
 
+> **Enterprise Users**: If you're behind a corporate proxy or need offline installation, see the [Enterprise Installation Guide](./enterprise-installation.md) for proxy configuration and air-gapped setup instructions.
+
 ## Building Your First Agent
 
 Agents are not included by default in a fresh clone.
