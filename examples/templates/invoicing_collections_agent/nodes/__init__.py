@@ -61,7 +61,7 @@ classify_overdue_node = NodeSpec(
     ),
     node_type="event_loop",
     client_facing=False,
-    max_node_visits=0,
+    max_node_visits=3,
     input_keys=["all_invoices", "collection_config"],
     output_keys=[
         "classified_invoices",
