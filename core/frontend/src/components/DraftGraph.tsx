@@ -1,6 +1,73 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, useCallback } from "react";
+import { Loader2 } from "lucide-react";
 import type { DraftGraph as DraftGraphData, DraftNode } from "@/api/types";
 import type { GraphNode } from "./AgentGraph";
+
+// Read a CSS custom property value (space-separated HSL components)
+function cssVar(name: string): string {
+  return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+}
+
+interface DraftChromeColors {
+  edge: string;
+  edgeArrow: string;
+  edgeLabel: string;
+  backEdge: string;
+  groupFill: string;
+  groupStroke: string;
+  chromeText: string;
+  chromeTextDim: string;
+  nodeText: string;
+  nodeTextHover: string;
+  statusRunning: string;
+  statusComplete: string;
+  statusError: string;
+}
+
+function buildDraftChromeColors(): DraftChromeColors {
+  const edge = cssVar("--draft-edge") || "220 10% 30%";
+  const edgeArrow = cssVar("--draft-edge-arrow") || "220 10% 35%";
+  const edgeLabel = cssVar("--draft-edge-label") || "220 10% 45%";
+  const backEdge = cssVar("--draft-back-edge") || "220 10% 25%";
+  const groupFill = cssVar("--draft-group-fill") || "220 15% 18%";
+  const groupStroke = cssVar("--draft-group-stroke") || "220 10% 40%";
+  const chromeText = cssVar("--draft-chrome-text") || "220 10% 50%";
+  const chromeTextDim = cssVar("--draft-chrome-text-dim") || "220 10% 55%";
+  const nodeText = cssVar("--draft-node-text") || "0 0% 78%";
+  const nodeTextHover = cssVar("--draft-node-text-hover") || "0 0% 92%";
+  const running = cssVar("--node-running") || "45 95% 58%";
+  const complete = cssVar("--node-complete") || "43 70% 45%";
+  const error = cssVar("--node-error") || "0 65% 55%";
+
+  return {
+    edge: `hsl(${edge})`,
+    edgeArrow: `hsl(${edgeArrow})`,
+    edgeLabel: `hsl(${edgeLabel})`,
+    backEdge: `hsl(${backEdge})`,
+    groupFill: `hsl(${groupFill})`,
+    groupStroke: `hsl(${groupStroke})`,
+    chromeText: `hsl(${chromeText})`,
+    chromeTextDim: `hsl(${chromeTextDim})`,
+    nodeText: `hsl(${nodeText})`,
+    nodeTextHover: `hsl(${nodeTextHover})`,
+    statusRunning: `hsl(${running})`,
+    statusComplete: `hsl(${complete})`,
+    statusError: `hsl(${error})`,
+  };
+}
+
+function useDraftChromeColors() {
+  const [colors, setColors] = useState<DraftChromeColors>(buildDraftChromeColors);
+
+  useEffect(() => {
+    const rebuild = () => setColors(buildDraftChromeColors());
+    const obs = new MutationObserver(rebuild);
+    obs.observe(document.documentElement, { attributes: true, attributeFilter: ["class", "style"] });
+    return () => obs.disconnect();
+  }, []);
+
+  return colors;
+}
 
 type DraftNodeStatus = "pending" | "running" | "complete" | "error";
 
@@ -13,6 +80,8 @@ interface DraftGraphProps {
   runtimeNodes?: GraphNode[];
   /** Called when a draft node is clicked in overlay mode — receives the runtime node ID. */
   onRuntimeNodeClick?: (runtimeNodeId: string) => void;
+  /** True while the queen is building the agent from the draft. */
+  building?: boolean;
 }
 
 // Layout constants — tuned for a ~500px panel (484px after px-2 padding)
@@ -21,6 +90,11 @@ const GAP_Y = 48;
 const TOP_Y = 28;
 const MARGIN_X = 16;
 const GAP_X = 16;
+const GROUP_GAP_COLS = 1; // extra column spacing between different groups
+
+function formatNodeId(id: string): string {
+  return id.split("-").map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(" ");
+}
 
 function truncateLabel(label: string, availablePx: number, fontSize: number): string {
   const avgCharW = fontSize * 0.58;
@@ -29,6 +103,7 @@ function truncateLabel(label: string, availablePx: number, fontSize: number): st
   return label.slice(0, Math.max(maxChars - 1, 1)) + "\u2026";
 }
 
+/** Return the bounding-rect corner radius for a given flowchart shape. */
 /**
  * Render an ISO 5807 flowchart shape as an SVG element.
  */
@@ -274,10 +349,46 @@ function Tooltip({ node, style }: { node: DraftNode; style: React.CSSProperties 
   );
 }
 
-export default function DraftGraph({ draft, onNodeClick, flowchartMap, runtimeNodes, onRuntimeNodeClick }: DraftGraphProps) {
+export default function DraftGraph({ draft, onNodeClick, flowchartMap, runtimeNodes, onRuntimeNodeClick, building }: DraftGraphProps) {
   const [hoveredNode, setHoveredNode] = useState<string | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const [containerW, setContainerW] = useState(484);
+  const chrome = useDraftChromeColors();
+
+  // Pan & Zoom state
+  const [zoom, setZoom] = useState(1);
+  const [pan, setPan] = useState({ x: 0, y: 0 });
+  const [dragging, setDragging] = useState(false);
+  const dragStart = useRef({ x: 0, y: 0, panX: 0, panY: 0 });
+  const MIN_ZOOM = 0.4;
+  const MAX_ZOOM = 3;
+
+  const handleWheel = useCallback((e: React.WheelEvent) => {
+    e.preventDefault();
+    const delta = e.deltaY > 0 ? 0.9 : 1.1;
+    setZoom(z => Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, z * delta)));
+  }, []);
+
+  const handleMouseDown = useCallback((e: React.MouseEvent) => {
+    if (e.button !== 0) return;
+    setDragging(true);
+    dragStart.current = { x: e.clientX, y: e.clientY, panX: pan.x, panY: pan.y };
+  }, [pan]);
+
+  const handleMouseMove = useCallback((e: React.MouseEvent) => {
+    if (!dragging) return;
+    setPan({
+      x: dragStart.current.panX + (e.clientX - dragStart.current.x),
+      y: dragStart.current.panY + (e.clientY - dragStart.current.y),
+    });
+  }, [dragging]);
+
+  const handleMouseUp = useCallback(() => setDragging(false), []);
+
+  const resetView = useCallback(() => {
+    setZoom(1);
+    setPan({ x: 0, y: 0 });
+  }, []);
 
   // Measure actual container width so layout fills it exactly
   useEffect(() => {
@@ -402,17 +513,29 @@ export default function DraftGraph({ draft, onNodeClick, flowchartMap, runtimeNo
       maxCols = Math.max(maxCols, group.length);
     });
 
-    // Compute node width
-    const backEdgeMargin = backEdges.length > 0 ? 30 + backEdges.length * 14 : 8;
-    const totalMargin = MARGIN_X * 2 + backEdgeMargin;
+    // Compute node width — keep back-edge overflow out of node sizing so nodes
+    // get full width.  The viewBox is expanded later to fit back-edge curves.
+    const totalMargin = MARGIN_X * 2 + 8;
     const availW = containerW - totalMargin;
     const nodeW = Math.min(360, Math.floor((availW - (maxCols - 1) * GAP_X) / maxCols));
+    const backEdgeOverflow = backEdges.length > 0 ? 20 + (backEdges.length - 1) * 14 + 14 : 0;
 
     // Parent-aware column placement using fractional positions.
     // Instead of snapping to a fixed grid, nodes inherit positions from parents
     // and fan-out children spread around the parent's position.
     const colPos = new Array(nodes.length).fill(0); // fractional column positions
     const maxLayer = Math.max(...layers);
+
+    // Map each draft node index to its runtime group ID for group-aware spacing
+    const nodeGroup = new Map<number, string>();
+    if (flowchartMap) {
+      for (const [runtimeId, draftIds] of Object.entries(flowchartMap)) {
+        for (const did of draftIds) {
+          const idx = idxMap[did];
+          if (idx !== undefined) nodeGroup.set(idx, runtimeId);
+        }
+      }
+    }
 
     // Process layers top-down
     for (let layer = 0; layer <= maxLayer; layer++) {
@@ -460,7 +583,9 @@ export default function DraftGraph({ draft, onNodeClick, flowchartMap, runtimeNo
       ideals.sort((a, b) => a.pos - b.pos);
 
       // Ensure minimum spacing of 1 column between nodes in the same layer
+      // (wider gap between nodes from different groups to prevent box overlap)
       const assigned: number[] = [];
+      const assignedIdxs: number[] = [];
       for (const item of ideals) {
         let pos = item.pos;
         // Clamp to valid range
@@ -468,9 +593,17 @@ export default function DraftGraph({ draft, onNodeClick, flowchartMap, runtimeNo
         // Push right if overlapping previous
         if (assigned.length > 0) {
           const prev = assigned[assigned.length - 1];
-          if (pos < prev + 1) pos = prev + 1;
+          const prevIdx = assignedIdxs[assignedIdxs.length - 1];
+          let minGap = 1;
+          const curGroup = nodeGroup.get(item.idx);
+          const prevGroup = nodeGroup.get(prevIdx);
+          if (curGroup !== prevGroup && (curGroup || prevGroup)) {
+            minGap = 1 + GROUP_GAP_COLS;
+          }
+          if (pos < prev + minGap) pos = prev + minGap;
         }
         assigned.push(pos);
+        assignedIdxs.push(item.idx);
         colPos[item.idx] = pos;
       }
 
@@ -494,8 +627,10 @@ export default function DraftGraph({ draft, onNodeClick, flowchartMap, runtimeNo
 
     const nodeXPositions = colPos.map((c: number) => firstColX + (c - usedMin) * colSpacing);
 
-    return { layers, nodeW, firstColX, nodeXPositions };
-  }, [nodes, forwardEdges, backEdges.length, containerW]);
+    const maxContentRight = Math.max(containerW, ...nodeXPositions.map(x => x + nodeW));
+
+    return { layers, nodeW, firstColX, nodeXPositions, backEdgeOverflow, maxContentRight };
+  }, [nodes, forwardEdges, backEdges.length, containerW, flowchartMap, idxMap]);
 
   if (nodes.length === 0) {
     return (
@@ -516,24 +651,147 @@ export default function DraftGraph({ draft, onNodeClick, flowchartMap, runtimeNo
     );
   }
 
-  const { layers, nodeW, nodeXPositions } = layout;
+  const { layers, nodeW, nodeXPositions, backEdgeOverflow, maxContentRight } = layout;
+
+  const maxLayer = nodes.length > 0 ? Math.max(...layers) : 0;
+
+  // Group-box collision resolution: compute per-node Y offsets so that group
+  // bounding boxes (dashed rectangles) never overlap.  Handles both same-layer
+  // groups (sub-row splitting) and adjacent-layer groups (inter-box gap).
+  const { nodeYOffset, totalExtraY, groupBoxMaxX } = useMemo(() => {
+    const offsets = new Array(nodes.length).fill(0);
+    if (!flowchartMap || !Object.keys(flowchartMap).length) {
+      return { nodeYOffset: offsets, totalExtraY: 0, groupBoxMaxX: 0 };
+    }
+
+    const PAD = 7;
+    const LABEL_H = 14;
+    const MIN_GROUP_GAP = 16;
+    const SUB_ROW_GAP = NODE_H + 24; // spacing for same-layer sub-rows
+
+    // Build node index → group ID
+    const nodeToGroup = new Map<number, string>();
+    for (const [runtimeId, draftIds] of Object.entries(flowchartMap)) {
+      for (const did of draftIds) {
+        const idx = idxMap[did];
+        if (idx !== undefined) nodeToGroup.set(idx, runtimeId);
+      }
+    }
+
+    // Step 1: Same-layer sub-row splitting — when multiple groups share a layer,
+    // assign per-node offsets to separate them into sub-rows.
+    const layerGroupMap = new Map<number, Map<string, number[]>>();
+    nodes.forEach((_, i) => {
+      const group = nodeToGroup.get(i);
+      if (!group) return;
+      const layer = layers[i];
+      if (!layerGroupMap.has(layer)) layerGroupMap.set(layer, new Map());
+      const lg = layerGroupMap.get(layer)!;
+      if (!lg.has(group)) lg.set(group, []);
+      lg.get(group)!.push(i);
+    });
+
+    // Per-node sub-row offset and per-layer extra height from sub-rows
+    const layerSubRowExtra = new Array(maxLayer + 1).fill(0);
+    for (let L = 0; L <= maxLayer; L++) {
+      const groups = layerGroupMap.get(L);
+      if (!groups || groups.size <= 1) continue;
+      let subIdx = 0;
+      for (const [, nodeIndices] of groups) {
+        for (const idx of nodeIndices) {
+          offsets[idx] = subIdx * SUB_ROW_GAP;
+        }
+        subIdx++;
+      }
+      layerSubRowExtra[L] = (groups.size - 1) * SUB_ROW_GAP;
+    }
+
+    // Cumulative sub-row shift: layers after a split layer are pushed down
+    const subRowCumShift = new Array(maxLayer + 1).fill(0);
+    let subCum = 0;
+    for (let L = 0; L <= maxLayer; L++) {
+      subRowCumShift[L] = subCum;
+      subCum += layerSubRowExtra[L];
+    }
+
+    // Add cumulative sub-row shift to each node's offset
+    for (let i = 0; i < nodes.length; i++) {
+      offsets[i] += subRowCumShift[layers[i]];
+    }
+
+    // Step 2: Compute group bounding boxes using sub-row-adjusted positions
+    type GroupBox = { runtimeId: string; minLayer: number; maxLayer: number; minY: number; maxY: number; maxX: number };
+    const boxes: GroupBox[] = [];
+    for (const [runtimeId, draftIds] of Object.entries(flowchartMap)) {
+      const indices = draftIds.map(id => idxMap[id]).filter((idx): idx is number => idx !== undefined);
+      if (indices.length === 0) continue;
+      const memberLayers = indices.map(i => layers[i]);
+      const ys = indices.map(i => TOP_Y + layers[i] * (NODE_H + GAP_Y) + offsets[i]);
+      const xs = indices.map(i => nodeXPositions[i]);
+      boxes.push({
+        runtimeId,
+        minLayer: Math.min(...memberLayers),
+        maxLayer: Math.max(...memberLayers),
+        minY: Math.min(...ys) - PAD - LABEL_H,
+        maxY: Math.max(...ys) + NODE_H + PAD,
+        maxX: Math.max(...xs.map(x => x + nodeW)) + PAD,
+      });
+    }
+
+    boxes.sort((a, b) => a.minY - b.minY || a.minLayer - b.minLayer);
+
+    // Step 3: Resolve remaining overlaps between adjacent group boxes
+    // by pushing lower boxes down.  Track shifts per-group so they apply
+    // only to that group's nodes.
+    const groupShift = new Map<string, number>();
+    for (let i = 1; i < boxes.length; i++) {
+      const prev = boxes[i - 1];
+      const curr = boxes[i];
+
+      const prevShift = groupShift.get(prev.runtimeId) ?? 0;
+      const currShift = groupShift.get(curr.runtimeId) ?? 0;
+      const prevBottom = prev.maxY + prevShift;
+      const currTop = curr.minY + currShift;
+
+      const overlap = prevBottom + MIN_GROUP_GAP - currTop;
+      if (overlap > 0) {
+        groupShift.set(curr.runtimeId, currShift + overlap);
+      }
+    }
+
+    // Apply group shifts to node offsets
+    let maxShift = 0;
+    for (let i = 0; i < nodes.length; i++) {
+      const group = nodeToGroup.get(i);
+      if (group) {
+        const shift = groupShift.get(group) ?? 0;
+        offsets[i] += shift;
+        maxShift = Math.max(maxShift, offsets[i]);
+      }
+    }
+
+    // Also shift ungrouped nodes by their layer's cumulative sub-row shift
+    // (they already have it from the subRowCumShift step above)
+
+    const totalExtra = subCum + Math.max(0, ...Array.from(groupShift.values()));
+    const maxGroupX = boxes.length > 0 ? Math.max(...boxes.map(b => b.maxX)) : 0;
+
+    return { nodeYOffset: offsets, totalExtraY: totalExtra, groupBoxMaxX: maxGroupX };
+  }, [nodes, maxLayer, flowchartMap, idxMap, layers, nodeXPositions, nodeW]);
 
   const nodePos = (i: number) => ({
     x: nodeXPositions[i],
-    y: TOP_Y + layers[i] * (NODE_H + GAP_Y),
+    y: TOP_Y + layers[i] * (NODE_H + GAP_Y) + nodeYOffset[i],
   });
 
-  const maxLayer = Math.max(...layers);
-  const svgHeight = TOP_Y + (maxLayer + 1) * NODE_H + maxLayer * GAP_Y + 16;
+  const svgHeight = TOP_Y + (maxLayer + 1) * NODE_H + maxLayer * GAP_Y + totalExtraY + 16;
 
-  // Compute group areas for multi-node runtime groups
+  // Compute group areas for runtime node boundaries on the draft
   const groupAreas = useMemo(() => {
     if (!flowchartMap || !runtimeNodes?.length) return [];
     const groups: { runtimeId: string; label: string; draftIds: string[] }[] = [];
     for (const [runtimeId, draftIds] of Object.entries(flowchartMap)) {
-      if (draftIds.length < 2) continue;
-      const rn = runtimeNodes.find(n => n.id === runtimeId);
-      groups.push({ runtimeId, label: rn?.label ?? runtimeId, draftIds });
+      groups.push({ runtimeId, label: formatNodeId(runtimeId), draftIds });
     }
     return groups;
   }, [flowchartMap, runtimeNodes]);
@@ -572,20 +830,23 @@ export default function DraftGraph({ draft, onNodeClick, flowchartMap, runtimeNo
     }
 
     const midY = (y1 + y2) / 2;
-    const d = `M ${startX} ${y1} C ${startX} ${midY}, ${toCenterX} ${midY}, ${toCenterX} ${y2}`;
+    // Orthogonal routing: straight when aligned, L-shape when offset
+    const d = Math.abs(startX - toCenterX) < 2
+      ? `M ${startX} ${y1} L ${toCenterX} ${y2}`
+      : `M ${startX} ${y1} L ${startX} ${midY} L ${toCenterX} ${midY} L ${toCenterX} ${y2}`;
 
     return (
       <g key={`fwd-${i}`}>
-        <path d={d} fill="none" stroke="hsl(220,10%,30%)" strokeWidth={1.2} />
+        <path d={d} fill="none" stroke={chrome.edge} strokeWidth={1.2} />
         <polygon
           points={`${toCenterX - 3},${y2 - 5} ${toCenterX + 3},${y2 - 5} ${toCenterX},${y2 - 1}`}
-          fill="hsl(220,10%,35%)"
+          fill={chrome.edgeArrow}
         />
         {edge.label && (
           <text
             x={(startX + toCenterX) / 2}
             y={midY - 3}
-            fill="hsl(220,10%,45%)"
+            fill={chrome.edgeLabel}
             fontSize={9}
             fontStyle="italic"
             textAnchor="middle"
@@ -613,27 +874,25 @@ export default function DraftGraph({ draft, onNodeClick, flowchartMap, runtimeNo
 
     return (
       <g key={`back-${i}`}>
-        <path d={path} fill="none" stroke="hsl(220,10%,25%)" strokeWidth={1.2} strokeDasharray="4 3" />
+        <path d={path} fill="none" stroke={chrome.backEdge} strokeWidth={1.2} strokeDasharray="4 3" />
         <polygon
           points={`${endX + 5},${endY - 2.5} ${endX + 5},${endY + 2.5} ${endX},${endY}`}
-          fill="hsl(220,10%,30%)"
+          fill={chrome.edge}
         />
       </g>
     );
   };
 
   const STATUS_COLORS: Record<DraftNodeStatus, string> = {
-    running: "#F59E0B",  // amber
-    complete: "#22C55E", // green
-    error: "#EF4444",    // red
-    pending: "",         // no overlay
+    running: chrome.statusRunning,
+    complete: chrome.statusComplete,
+    error: chrome.statusError,
+    pending: "",
   };
 
   const renderNode = (node: DraftNode, i: number) => {
     const pos = nodePos(i);
     const isHovered = hoveredNode === node.id;
-    const status = nodeStatuses[node.id] as DraftNodeStatus | undefined;
-    const statusColor = status ? STATUS_COLORS[status] : "";
     const fontSize = 13;
     const labelAvailW = nodeW - 28;
     const displayLabel = truncateLabel(node.name, labelAvailW, fontSize);
@@ -661,25 +920,6 @@ export default function DraftGraph({ draft, onNodeClick, flowchartMap, runtimeNo
       >
         <title>{`${node.name}\n${node.flowchart_type}`}</title>
 
-        {/* Status glow ring (runtime overlay) */}
-        {hasStatusOverlay && statusColor && (
-          <rect
-            x={pos.x - 3}
-            y={pos.y - 3}
-            width={nodeW + 6}
-            height={NODE_H + 6}
-            rx={8}
-            fill="none"
-            stroke={statusColor}
-            strokeWidth={2}
-            opacity={status === "running" ? 0.8 : 0.6}
-          >
-            {status === "running" && (
-              <animate attributeName="opacity" values="0.4;0.9;0.4" dur="1.5s" repeatCount="indefinite" />
-            )}
-          </rect>
-        )}
-
         <FlowchartShape
           shape={node.flowchart_shape}
           x={pos.x}
@@ -693,7 +933,7 @@ export default function DraftGraph({ draft, onNodeClick, flowchartMap, runtimeNo
         <text
           x={textX}
           y={textY - 5}
-          fill={isHovered ? "hsl(0,0%,92%)" : "hsl(0,0%,78%)"}
+          fill={isHovered ? chrome.nodeTextHover : chrome.nodeText}
           fontSize={fontSize}
           fontWeight={500}
           textAnchor="middle"
@@ -705,7 +945,7 @@ export default function DraftGraph({ draft, onNodeClick, flowchartMap, runtimeNo
         <text
           x={textX}
           y={textY + 11}
-          fill="hsl(220,10%,50%)"
+          fill={chrome.chromeText}
           fontSize={9.5}
           textAnchor="middle"
           dominantBaseline="middle"
@@ -713,19 +953,6 @@ export default function DraftGraph({ draft, onNodeClick, flowchartMap, runtimeNo
           {descLabel}
         </text>
 
-        {/* Status dot indicator */}
-        {hasStatusOverlay && statusColor && (
-          <circle
-            cx={pos.x + nodeW - 6}
-            cy={pos.y + 6}
-            r={4}
-            fill={statusColor}
-          >
-            {status === "running" && (
-              <animate attributeName="r" values="3;5;3" dur="1s" repeatCount="indefinite" />
-            )}
-          </circle>
-        )}
       </g>
     );
   };
@@ -737,67 +964,111 @@ export default function DraftGraph({ draft, onNodeClick, flowchartMap, runtimeNo
         <p className="text-[11px] text-muted-foreground font-medium uppercase tracking-wider">
           {hasStatusOverlay ? "Flowchart" : "Draft"}
         </p>
-        <span className={`text-[9px] font-mono font-medium rounded px-1 py-0.5 leading-none border ${hasStatusOverlay ? "text-emerald-500/60 border-emerald-500/20" : "text-amber-500/60 border-amber-500/20"}`}>
-          {hasStatusOverlay ? "live" : "planning"}
-        </span>
-      </div>
-
-      {/* Agent name + goal */}
-      <div className="px-4 pb-2.5 border-b border-border/20">
-        <p className="text-[11px] font-medium text-foreground/80 truncate">
-          {draft.agent_name}
-        </p>
-        {draft.goal && (
-          <p className="text-[10px] text-muted-foreground/60 mt-0.5 line-clamp-2 leading-snug">
-            {draft.goal}
-          </p>
+        {building ? (
+          <span className="text-[9px] font-mono font-medium rounded px-1 py-0.5 leading-none border text-primary/60 border-primary/20 flex items-center gap-1">
+            <Loader2 className="w-2.5 h-2.5 animate-spin" />
+            building
+          </span>
+        ) : (
+          <span className={`text-[9px] font-mono font-medium rounded px-1 py-0.5 leading-none border ${hasStatusOverlay ? "text-emerald-500/60 border-emerald-500/20" : "text-amber-500/60 border-amber-500/20"}`}>
+            {hasStatusOverlay ? "live" : "planning"}
+          </span>
         )}
       </div>
 
       {/* Graph */}
-      <div ref={containerRef} className="flex-1 overflow-y-auto overflow-x-hidden px-2 pb-2 relative">
+      <div ref={containerRef} className="flex-1 overflow-hidden px-2 pb-2 relative">
+        <div
+          onWheel={handleWheel}
+          onMouseDown={handleMouseDown}
+          onMouseMove={handleMouseMove}
+          onMouseUp={handleMouseUp}
+          onMouseLeave={handleMouseUp}
+          className={`w-full h-full${building ? " opacity-30" : ""}`}
+          style={{ cursor: dragging ? "grabbing" : "grab" }}
+        >
         <svg
           width="100%"
-          viewBox={`0 0 ${containerW} ${totalH}`}
+          viewBox={`0 0 ${Math.max((maxContentRight ?? 0), groupBoxMaxX) + (backEdgeOverflow ?? 0)} ${totalH}`}
           preserveAspectRatio="xMidYMin meet"
           className="select-none"
-          style={{ fontFamily: "'Inter', system-ui, sans-serif" }}
+          style={{
+            fontFamily: "'Inter', system-ui, sans-serif",
+            transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})`,
+            transformOrigin: "center top",
+          }}
         >
           {/* Group areas — dashed boxes behind multi-node runtime groups */}
           {groupAreas.map((group) => {
             const memberIndices = group.draftIds
               .map(id => idxMap[id])
               .filter((idx): idx is number => idx !== undefined);
-            if (memberIndices.length < 2) return null;
+            if (memberIndices.length === 0) return null;
             const positions = memberIndices.map(i => nodePos(i));
-            const pad = 10;
+            const pad = 7;
             const minX = Math.min(...positions.map(p => p.x)) - pad;
             const minY = Math.min(...positions.map(p => p.y)) - pad - 14; // extra space for label
             const maxX = Math.max(...positions.map(p => p.x + nodeW)) + pad;
             const maxY = Math.max(...positions.map(p => p.y + NODE_H)) + pad;
+
+            // Runtime status for this group
+            const runtimeNode = runtimeNodes?.find(rn => rn.id === group.runtimeId);
+            const groupStatus: DraftNodeStatus | undefined = runtimeNode
+              ? (runtimeNode.status === "running" || runtimeNode.status === "looping" ? "running"
+                : runtimeNode.status === "complete" ? "complete"
+                : runtimeNode.status === "error" ? "error" : "pending")
+              : undefined;
+            const groupStatusColor = groupStatus ? STATUS_COLORS[groupStatus] : "";
+
             return (
               <g key={`group-${group.runtimeId}`}>
+                {/* Status glow around group boundary */}
+                {(groupStatus === "running" || groupStatus === "error") && groupStatusColor && (
+                  <rect
+                    x={minX - 3}
+                    y={minY - 3}
+                    width={maxX - minX + 6}
+                    height={maxY - minY + 6}
+                    rx={10}
+                    fill="none"
+                    stroke={groupStatusColor}
+                    strokeWidth={2}
+                    opacity={groupStatus === "running" ? 0.8 : 0.6}
+                  >
+                    {groupStatus === "running" && (
+                      <animate attributeName="opacity" values="0.4;0.9;0.4" dur="1.5s" repeatCount="indefinite" />
+                    )}
+                  </rect>
+                )}
                 <rect
                   x={minX}
                   y={minY}
                   width={maxX - minX}
                   height={maxY - minY}
                   rx={8}
-                  fill="hsl(220,15%,18%)"
+                  fill={chrome.groupFill}
                   fillOpacity={0.35}
-                  stroke="hsl(220,10%,40%)"
+                  stroke={chrome.groupStroke}
                   strokeWidth={1}
                   strokeDasharray="5 3"
                 />
                 <text
                   x={minX + 8}
                   y={minY + 11}
-                  fill="hsl(220,10%,50%)"
+                  fill={chrome.chromeText}
                   fontSize={9}
                   fontWeight={500}
                 >
                   {truncateLabel(group.label, maxX - minX - 16, 9)}
                 </text>
+                {/* Status dot on group boundary */}
+                {hasStatusOverlay && (groupStatus === "running" || groupStatus === "error") && groupStatusColor && (
+                  <circle cx={maxX - 6} cy={minY + 6} r={4} fill={groupStatusColor}>
+                    {groupStatus === "running" && (
+                      <animate attributeName="r" values="3;5;3" dur="1s" repeatCount="indefinite" />
+                    )}
+                  </circle>
+                )}
               </g>
             );
           })}
@@ -808,7 +1079,7 @@ export default function DraftGraph({ draft, onNodeClick, flowchartMap, runtimeNo
 
           {/* Legend */}
           <g transform={`translate(${MARGIN_X}, ${svgHeight + 4})`}>
-            <text fill="hsl(220,10%,40%)" fontSize={9} fontWeight={600} y={4}>
+            <text fill={chrome.groupStroke} fontSize={9} fontWeight={600} y={4}>
               LEGEND
             </text>
             {usedTypes.map(([type, meta], i) => (
@@ -822,13 +1093,42 @@ export default function DraftGraph({ draft, onNodeClick, flowchartMap, runtimeNo
                   color={meta.color}
                   selected={false}
                 />
-                <text x={22} y={9} fill="hsl(220,10%,55%)" fontSize={9.5}>
+                <text x={22} y={9} fill={chrome.chromeTextDim} fontSize={9.5}>
                   {type.replace(/_/g, " ")}
                 </text>
               </g>
             ))}
           </g>
         </svg>
+        </div>
+
+        {building && (
+          <div className="absolute inset-0 flex items-center justify-center">
+            <div className="flex flex-col items-center gap-3">
+              <Loader2 className="w-6 h-6 animate-spin text-primary/60" />
+              <p className="text-xs text-muted-foreground/80">Building agent...</p>
+            </div>
+          </div>
+        )}
+
+        {/* Zoom controls */}
+        <div className="absolute bottom-3 right-3 flex items-center gap-1 bg-card/80 backdrop-blur-sm border border-border/40 rounded-lg p-0.5 shadow-sm">
+          <button
+            onClick={() => setZoom(z => Math.min(MAX_ZOOM, z * 1.2))}
+            className="w-6 h-6 flex items-center justify-center rounded text-muted-foreground hover:text-foreground hover:bg-muted/60 transition-colors text-xs font-bold"
+            aria-label="Zoom in"
+          >+</button>
+          <button
+            onClick={resetView}
+            className="px-1.5 h-6 flex items-center justify-center rounded text-[10px] font-mono text-muted-foreground hover:text-foreground hover:bg-muted/60 transition-colors"
+            aria-label="Reset zoom"
+          >{Math.round(zoom * 100)}%</button>
+          <button
+            onClick={() => setZoom(z => Math.max(MIN_ZOOM, z * 0.8))}
+            className="w-6 h-6 flex items-center justify-center rounded text-muted-foreground hover:text-foreground hover:bg-muted/60 transition-colors text-xs font-bold"
+            aria-label="Zoom out"
+          >{"\u2212"}</button>
+        </div>
 
         {/* HTML tooltip — rendered outside SVG so it's not clipped */}
         {hoveredNodeData && hoveredPos && (
