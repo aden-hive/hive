@@ -167,15 +167,17 @@ class EdgeSpec(BaseModel):
         if not self.condition_expr:
             return True
 
-        # Build evaluation context
-        # Include memory keys directly for easier access in conditions
+        # Build evaluation context.
+        # Security: do NOT unpack memory directly into the eval context
+        # via **memory — that would allow adversarial memory keys to shadow
+        # built-in names or inject unexpected variables into the evaluator.
+        # Instead, only expose memory under its own namespace.
         context = {
             "output": output,
             "memory": memory,
             "result": output.get("result"),
             "true": True,  # Allow lowercase true/false in conditions
             "false": False,
-            **memory,  # Unpack memory keys directly into context
         }
 
         try:
