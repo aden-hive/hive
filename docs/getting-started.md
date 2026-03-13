@@ -211,6 +211,12 @@ pip uninstall -y framework tools
 ./quickstart.sh
 ```
 
+#### Gemini 503 (High Demand)
+
+If you see repeated `503 UNAVAILABLE` or `429 RESOURCE_EXHAUSTED` errors while using Gemini models, see:
+
+- [Gemini 503 Troubleshooting Guide](./troubleshooting/gemini-503.md)
+
 ## Getting Help
 
 - **Documentation**: Check the `/docs` folder
