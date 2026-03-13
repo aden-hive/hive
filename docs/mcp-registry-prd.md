@@ -2,7 +2,7 @@
 
 **Status**: Draft v2
 **Last updated**: 2026-03-13
-**Authors**: Engineering
+**Authors**: Timothy
 **Reviewers**: Platform, Product, OSS/Community, Security
 
 ---
