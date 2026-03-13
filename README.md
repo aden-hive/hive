@@ -418,7 +418,7 @@ Visit [docs.adenhq.com](https://docs.adenhq.com/) for complete guides, API refer
 
 **Q: How can I contribute to Aden?**
 
-Contributions are welcome! Fork the repository, create your feature branch, implement your changes, and submit a pull request. See [CONTRIBUTING.md](CONTRIBUTING.md) for detailed guidelines.
+Contributions are welcome! Browse existing issues, comment to claim one, and wait for assignment before submitting a PR. Then fork the repository, create your feature branch, implement your changes, and submit a pull request. See [CONTRIBUTING.md](CONTRIBUTING.md) for detailed guidelines.
 
 ---
 
