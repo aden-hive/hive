@@ -117,6 +117,14 @@ This sets up:
 
 <img width="2500" height="1214" alt="home-screen" src="https://github.com/user-attachments/assets/134d897f-5e75-4874-b00b-e0505f6b45c4" />
 
+### Verify Installation
+
+Before building your own agent, run the included manual example to confirm your environment is set up correctly:
+
+```bash
+PYTHONPATH=core python core/examples/manual_agent.py
+```
+
 ### Build Your First Agent
 
 Type the agent you want to build in the home input box
