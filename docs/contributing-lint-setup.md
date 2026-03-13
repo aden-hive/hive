@@ -117,8 +117,8 @@ Codex CLI (OpenAI, v0.101.0+) is supported via `.codex/config.toml` (MCP server 
 Every push and PR to `main` runs the `Lint Python` job in GitHub Actions (`.github/workflows/ci.yml`):
 
 ```
-ruff check   → core/, tools/, exports/
-ruff format  → core/, tools/, exports/ (--check mode, no modifications)
+ruff check   → core/, tools/
+ruff format  → core/, tools/ (--check mode, no modifications)
 ```
 
 Both must pass. If CI fails:
