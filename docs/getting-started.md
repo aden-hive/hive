@@ -14,12 +14,19 @@ This guide will help you set up the Aden Agent Framework and build your first ag
 The fastest way to get started:
 
 ```bash
+# Install uv first (required)
+pip install uv
+
 # 1. Clone the repository
 git clone https://github.com/adenhq/hive.git
 cd hive
 
 # 2. Run automated setup
+# On Linux/macOS:
 ./quickstart.sh
+
+# On Windows (PowerShell):
+# .\quickstart.ps1
 
 # 3. Verify installation (optional, quickstart.sh already verifies)
 uv run python -c "import framework; import aden_tools; print('✓ Setup complete')"
@@ -170,12 +177,14 @@ PYTHONPATH=exports uv run python -m my_agent test --type success
 
 ## Next Steps
 
-1. **Dashboard**: Run `hive open` to launch the web dashboard, or `hive tui` for the terminal UI
+1. **Dashboard**: Run `hive open` to launch the web dashboard (recommended)
 2. **Detailed Setup**: See [environment-setup.md](./environment-setup.md)
 3. **Developer Guide**: See [developer-guide.md](./developer-guide.md)
 4. **Build Agents**: Use the coder-tools `initialize_and_build_agent` tool in Claude Code
 5. **Custom Tools**: Learn to integrate MCP servers
 6. **Join Community**: [Discord](https://discord.com/invite/MXE49hrKDk)
+
+> **Note:** The TUI (`hive tui`) is deprecated. Use `hive open` for the web dashboard instead.
 
 ## Troubleshooting
 
