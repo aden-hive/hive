@@ -204,8 +204,8 @@ class TestNodeConversation:
 
     @pytest.mark.asyncio
     async def test_usage_ratio(self):
-        """usage_ratio returns estimate / max_history_tokens."""
-        conv = NodeConversation(max_history_tokens=1000)
+        """usage_ratio returns estimate / max_context_tokens."""
+        conv = NodeConversation(max_context_tokens=1000)
         await conv.add_user_message("a" * 400)
         assert conv.usage_ratio() == pytest.approx(0.1)  # 100/1000
 
@@ -214,15 +214,15 @@ class TestNodeConversation:
 
     @pytest.mark.asyncio
     async def test_usage_ratio_zero_budget(self):
-        """usage_ratio returns 0 when max_history_tokens is 0 (unlimited)."""
-        conv = NodeConversation(max_history_tokens=0)
+        """usage_ratio returns 0 when max_context_tokens is 0 (unlimited)."""
+        conv = NodeConversation(max_context_tokens=0)
         await conv.add_user_message("a" * 400)
         assert conv.usage_ratio() == 0.0
 
     @pytest.mark.asyncio
     async def test_needs_compaction_with_actual_tokens(self):
         """needs_compaction uses actual API token count when available."""
-        conv = NodeConversation(max_history_tokens=1000, compaction_threshold=0.8)
+        conv = NodeConversation(max_context_tokens=1000, compaction_threshold=0.8)
         await conv.add_user_message("a" * 100)  # chars/4 = 25, well under 800
 
         assert conv.needs_compaction() is False
@@ -233,7 +233,7 @@ class TestNodeConversation:
 
     @pytest.mark.asyncio
     async def test_needs_compaction(self):
-        conv = NodeConversation(max_history_tokens=100, compaction_threshold=0.8)
+        conv = NodeConversation(max_context_tokens=100, compaction_threshold=0.8)
         await conv.add_user_message("x" * 320)
         assert conv.needs_compaction() is True
 
@@ -457,7 +457,7 @@ class TestPersistence:
         store = MockConversationStore()
         assert await NodeConversation.restore(store) is None
 
-        conv = NodeConversation(system_prompt="hello", max_history_tokens=500, store=store)
+        conv = NodeConversation(system_prompt="hello", max_context_tokens=500, store=store)
         await conv.add_user_message("u1")
         await conv.add_assistant_message("a1")
 
@@ -643,7 +643,7 @@ class TestConversationIntegration:
         store = FileConversationStore(base)
         conv = NodeConversation(
             system_prompt="You are a helpful travel agent.",
-            max_history_tokens=16000,
+            max_context_tokens=16000,
             store=store,
         )
 
@@ -1314,7 +1314,7 @@ class TestLlmCompact:
         """Create a minimal EventLoopNode for testing."""
         from framework.graph.event_loop_node import EventLoopNode, LoopConfig
 
-        config = LoopConfig(max_history_tokens=32000)
+        config = LoopConfig(max_context_tokens=32000)
         node = EventLoopNode.__new__(EventLoopNode)
         node._config = config
         node._event_bus = None

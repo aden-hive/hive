@@ -172,7 +172,7 @@ Add to `.vscode/settings.json`:
 ## Security Best Practices
 
 1. **Never commit API keys** - Use environment variables or `.env` files
-2. **`.env` is git-ignored** - Copy `.env.example` to `.env` at the project root and fill in your values
+2. **If you use a local `.env` file, keep it private** - This repository does not include a root `.env.example`; use your own local `.env` file or shell environment variables for secrets
 3. **Use real provider keys in non-production environments** - validate configuration with low-risk inputs before production rollout
 4. **Credential isolation** - Each tool validates its own credentials at runtime
 
