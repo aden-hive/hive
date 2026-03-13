@@ -169,7 +169,9 @@ def register_tools(mcp: FastMCP) -> None:
             secure_path = get_secure_path(path, workspace_id, agent_id, session_id)
 
             if not os.path.exists(secure_path):
-                return {"error": f"File not found: {path}. Use csv_write to create a new file."}
+                return {
+                    "error": f"File not found: {path}. Use csv_write to create a new file."
+                }
 
             if not path.lower().endswith(".csv"):
                 return {"error": "File must have .csv extension"}
@@ -282,31 +284,6 @@ def register_tools(mcp: FastMCP) -> None:
         Query a CSV file using SQL (powered by DuckDB).
 
         The CSV file is loaded as a table named 'data'. Use standard SQL syntax.
-
-        Args:
-            path: Path to the CSV file (relative to session sandbox)
-            workspace_id: Workspace identifier
-            agent_id: Agent identifier
-            session_id: Session identifier
-            query: SQL query to execute. The CSV is available as table 'data'.
-                   Example: "SELECT * FROM data WHERE price > 100 ORDER BY name LIMIT 10"
-
-        Returns:
-            dict with query results, columns, and row count
-
-        Examples:
-            # Filter rows
-            query="SELECT * FROM data WHERE status = 'pending'"
-
-            # Aggregate data
-            query="SELECT category, COUNT(*) as count, "
-                  "AVG(price) as avg_price FROM data GROUP BY category"
-
-            # Sort and limit
-            query="SELECT name, price FROM data ORDER BY price DESC LIMIT 5"
-
-            # Search text (case-insensitive)
-            query="SELECT * FROM data WHERE LOWER(name) LIKE '%phone%'"
         """
         try:
             import duckdb
@@ -330,9 +307,9 @@ def register_tools(mcp: FastMCP) -> None:
             if not query or not query.strip():
                 return {"error": "query cannot be empty"}
 
-            # Security: only allow SELECT statements
-            query_upper = query.strip().upper()
-            if not query_upper.startswith("SELECT"):
+            # Security: allow SELECT/WITH only
+            query_upper = query.lstrip().upper()
+            if not (query_upper.startswith("SELECT") or query_upper.startswith("WITH")):
                 return {"error": "Only SELECT queries are allowed for security reasons"}
 
             # Disallowed keywords for security
@@ -351,18 +328,24 @@ def register_tools(mcp: FastMCP) -> None:
                 if keyword in query_upper:
                     return {"error": f"'{keyword}' is not allowed in queries"}
 
-            # Execute query using in-memory DuckDB
+            # Block obvious multi-statement / injection attempts
+            q_lower = query.lower()
+            for token in [";", "--", "/*", "*/"]:
+                if token in q_lower:
+                    return {"error": "Multiple statements or comments are not allowed"}
+
             con = duckdb.connect(":memory:")
             try:
-                # Load CSV as 'data' table
-                con.execute(f"CREATE TABLE data AS SELECT * FROM read_csv_auto('{secure_path}')")
+                # SAFE: parameter binding (no string interpolation)
+                con.execute(
+                    "CREATE TABLE data AS SELECT * FROM read_csv_auto(?)",
+                    [str(secure_path)],
+                )
 
-                # Execute user query
                 result = con.execute(query)
                 columns = [desc[0] for desc in result.description]
                 rows = result.fetchall()
 
-                # Convert to list of dicts
                 rows_as_dicts = [dict(zip(columns, row, strict=False)) for row in rows]
 
                 return {
@@ -374,12 +357,14 @@ def register_tools(mcp: FastMCP) -> None:
                     "rows": rows_as_dicts,
                     "row_count": len(rows_as_dicts),
                 }
+
             finally:
                 con.close()
 
         except Exception as e:
             error_msg = str(e)
-            # Make DuckDB errors more readable
             if "Catalog Error" in error_msg:
-                return {"error": f"SQL error: {error_msg}. Remember the table is named 'data'."}
+                return {
+                    "error": f"SQL error: {error_msg}. Remember the table is named 'data'."
+                }
             return {"error": f"Query failed: {error_msg}"}
