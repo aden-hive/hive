@@ -731,9 +731,13 @@ def register_queen_lifecycle_tools(
                 "label": "",
             })
 
-        # Terminal detection
+        # Terminal detection — exclude sub-agent nodes (they are leaf helpers, not endpoints)
+        sub_agent_ids: set[str] = set()
+        for rn in runtime_nodes:
+            for sa_id in getattr(rn, "sub_agents", None) or []:
+                sub_agent_ids.add(sa_id)
         sources = {e["source"] for e in edges}
-        terminal_ids = node_ids - sources
+        terminal_ids = node_ids - sources - sub_agent_ids
         if not terminal_ids and runtime_nodes:
             terminal_ids = {runtime_nodes[-1].id}
 
@@ -761,6 +765,7 @@ def register_queen_lifecycle_tools(
         # Add visual edges from parent nodes to their sub_agents.
         # Sub-agents are connected via the sub_agents field, not via EdgeSpec,
         # so they'd appear as disconnected islands without this.
+        # Two edges per sub-agent: delegate (parent→sub) and report (sub→parent).
         edge_counter = len(edges)
         for node in nodes:
             for sa_id in node.get("sub_agents") or []:
@@ -772,6 +777,15 @@ def register_queen_lifecycle_tools(
                         "condition": "always",
                         "description": "sub-agent delegation",
                         "label": "delegate",
+                    })
+                    edge_counter += 1
+                    edges.append({
+                        "id": f"edge-subagent-{edge_counter}",
+                        "source": sa_id,
+                        "target": node["id"],
+                        "condition": "always",
+                        "description": "sub-agent report back",
+                        "label": "report",
                     })
                     edge_counter += 1
 
@@ -1160,16 +1174,48 @@ def register_queen_lifecycle_tools(
             nodes[:] = [n for n in nodes if n["id"] != sa_id]
             del node_by_id[sa_id]
 
+        # ── Dissolve implicit sub-agents ─────────────────────────
+        # Nodes that appear in another node's sub_agents list but weren't
+        # caught above (e.g. GCU nodes with flowchart_type="browser" where
+        # the queen set sub_agents directly on the parent).
+        implicit_sa_ids: list[str] = []
+        for n in nodes:
+            for sa_id in n.get("sub_agents") or []:
+                if sa_id in node_by_id and sa_id != n["id"]:
+                    implicit_sa_ids.append(sa_id)
+
+        for sa_id in implicit_sa_ids:
+            if sa_id not in node_by_id:
+                continue  # already removed
+
+            # Find which parent(s) reference this sub-agent
+            for n in nodes:
+                if sa_id in (n.get("sub_agents") or []) and n["id"] != sa_id:
+                    prev_absorbed = absorbed.get(n["id"], [n["id"]])
+                    if sa_id not in prev_absorbed:
+                        prev_absorbed.append(sa_id)
+                    absorbed[n["id"]] = prev_absorbed
+
+            # Remove the sub-agent node and its edges
+            edges[:] = [e for e in edges if e["source"] != sa_id and e["target"] != sa_id]
+            nodes[:] = [n for n in nodes if n["id"] != sa_id]
+            del node_by_id[sa_id]
+
         # Build complete flowchart_map (identity for non-absorbed nodes)
         flowchart_map: dict[str, list[str]] = {}
         for n in nodes:
             nid = n["id"]
             flowchart_map[nid] = absorbed.get(nid, [nid])
 
-        # Rebuild terminal_nodes (decision targets may have changed)
+        # Rebuild terminal_nodes (decision targets may have changed).
+        # Sub-agent nodes are leaf helpers, not endpoints — exclude them.
+        post_sa_ids: set[str] = set()
+        for n in nodes:
+            for sa_id in n.get("sub_agents") or []:
+                post_sa_ids.add(sa_id)
         sources = {e["source"] for e in edges}
         all_ids = {n["id"] for n in nodes}
-        terminal_ids = all_ids - sources
+        terminal_ids = all_ids - sources - post_sa_ids
         if not terminal_ids and nodes:
             terminal_ids = {nodes[-1]["id"]}
 
@@ -1243,12 +1289,120 @@ def register_queen_lifecycle_tools(
                     "label": e.get("label", ""),
                 })
 
-        # Determine terminal nodes: explicit list, or nodes with no outgoing edges
-        terminal_ids: set[str] = set(terminal_nodes or [])
+        # ── Enforce GCU / subagent leaf constraint ────────────────
+        # GCU nodes and nodes with flowchart_type "subagent" are leaf
+        # delegates: they can only receive a delegate edge IN from
+        # their parent and send a report edge OUT back to that parent.
+        # Any other outgoing edges are design errors — strip them and
+        # auto-assign the node as a sub-agent of its predecessor.
+        node_by_id_v = {n["id"]: n for n in validated_nodes}
+        leaf_node_ids: set[str] = set()
+        for n in validated_nodes:
+            if n.get("node_type") == "gcu" or n.get("flowchart_type") == "subagent":
+                leaf_node_ids.add(n["id"])
+
+        if leaf_node_ids:
+            for leaf_id in leaf_node_ids:
+                # Find edges where this leaf node is the source
+                out_edges = [
+                    e for e in validated_edges
+                    if e["source"] == leaf_id
+                ]
+                in_edges = [
+                    e for e in validated_edges
+                    if e["target"] == leaf_id
+                ]
+                if not out_edges:
+                    continue  # already a proper leaf
+
+                # Identify the parent (predecessor that connects IN)
+                parent_ids = [e["source"] for e in in_edges]
+
+                # Strip all outgoing edges from the leaf node that
+                # don't go back to a parent (report edges are OK)
+                illegal_targets: list[str] = []
+                for oe in out_edges:
+                    if oe["target"] not in parent_ids:
+                        illegal_targets.append(oe["target"])
+
+                if illegal_targets:
+                    logger.warning(
+                        "GCU/subagent node '%s' has illegal outgoing "
+                        "edges to %s — stripping them. GCU nodes "
+                        "must be leaf sub-agents.",
+                        leaf_id, illegal_targets,
+                    )
+                    # Rewire: predecessor → leaf's targets (skip leaf)
+                    for parent_id in parent_ids:
+                        for tgt_id in illegal_targets:
+                            validated_edges.append({
+                                "id": f"edge-rewire-{len(validated_edges)}",
+                                "source": parent_id,
+                                "target": tgt_id,
+                                "condition": "on_success",
+                                "description": "",
+                                "label": "",
+                            })
+                    # Remove the illegal edges
+                    validated_edges[:] = [
+                        e for e in validated_edges
+                        if not (e["source"] == leaf_id
+                                and e["target"] in set(illegal_targets))
+                    ]
+
+                # Ensure the leaf is in its parent's sub_agents list
+                for pid in parent_ids:
+                    parent = node_by_id_v.get(pid)
+                    if parent is None:
+                        continue
+                    existing = parent.get("sub_agents") or []
+                    if leaf_id not in existing:
+                        existing.append(leaf_id)
+                    parent["sub_agents"] = existing
+
+        # Synthesize visual edges for sub-agents that are referenced in
+        # a parent's sub_agents list but have no connecting edge yet.
+        node_id_set = {n["id"] for n in validated_nodes}
+        existing_edge_pairs = {(e["source"], e["target"]) for e in validated_edges}
+        edge_counter = len(validated_edges)
+        for n in validated_nodes:
+            for sa_id in n.get("sub_agents") or []:
+                if sa_id not in node_id_set:
+                    continue
+                if (n["id"], sa_id) not in existing_edge_pairs:
+                    validated_edges.append({
+                        "id": f"edge-subagent-{edge_counter}",
+                        "source": n["id"],
+                        "target": sa_id,
+                        "condition": "always",
+                        "description": "sub-agent delegation",
+                        "label": "delegate",
+                    })
+                    edge_counter += 1
+                    existing_edge_pairs.add((n["id"], sa_id))
+                if (sa_id, n["id"]) not in existing_edge_pairs:
+                    validated_edges.append({
+                        "id": f"edge-subagent-{edge_counter}",
+                        "source": sa_id,
+                        "target": n["id"],
+                        "condition": "always",
+                        "description": "sub-agent report back",
+                        "label": "report",
+                    })
+                    edge_counter += 1
+                    existing_edge_pairs.add((sa_id, n["id"]))
+
+        # Determine terminal nodes: explicit list, or nodes with no outgoing edges.
+        # Sub-agent nodes are leaf helpers, not endpoints — exclude them.
+        sa_ids: set[str] = set()
+        for n in validated_nodes:
+            for sa_id in n.get("sub_agents") or []:
+                sa_ids.add(sa_id)
+        terminal_ids: set[str] = set(terminal_nodes or []) - sa_ids
         if not terminal_ids:
             sources = {e["source"] for e in validated_edges}
             all_ids = {n["id"] for n in validated_nodes}
-            terminal_ids = all_ids - sources
+            terminal_ids = all_ids - sources - sa_ids
             # If all nodes have outgoing edges (loop graph), mark the last as terminal
             if not terminal_ids and validated_nodes:
                 terminal_ids = {validated_nodes[-1]["id"]}

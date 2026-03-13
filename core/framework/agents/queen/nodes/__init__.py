@@ -354,12 +354,23 @@ sub-agent nodes are **dissolved** into their parent node:
 - The sub-agent node and its connecting edge are removed
 - At runtime, the parent node can invoke the sub-agent via `delegate_to_sub_agent`
 
-**Rules for sub-agent nodes:**
+**Rules for sub-agent nodes (INCLUDING GCU nodes):**
 - Set `flowchart_type: "subagent"` explicitly (never auto-detected)
 - Connect from the managing parent node to the sub-agent node
-- Sub-agent nodes must be **leaf nodes** — no outgoing edges
+- Sub-agent nodes must be **leaf nodes** — NO outgoing edges to other nodes
 - The sub-agent node's ID must match a real node ID in the runtime graph \
 (the node it represents will be invokable as a sub-agent)
+
+**CRITICAL: GCU nodes (`node_type: "gcu"`) are ALWAYS sub-agents.** \
+They MUST NOT appear in the linear flow. NEVER chain GCU nodes \
+sequentially (A → gcu1 → gcu2 → B is WRONG). Instead, attach them \
+as leaves to the parent that orchestrates them:
+```
+WRONG:  intake → gcu_find_prospect → gcu_scan_mutuals → check_results
+RIGHT:  intake (sub_agents: [gcu_find, gcu_scan]) → check_results
+```
+The parent node delegates to its GCU sub-agents and collects results. \
+The main flow continues from the parent, not from the GCU node.
 
 **How to show delegation in the flowchart:**
 ```
@@ -669,27 +680,43 @@ To just stop without modifying, call stop_worker().
 _queen_behavior_always = """
 # Behavior
 
-## CRITICAL RULE — ask_user tool
+## CRITICAL RULE — ask_user / ask_user_multiple
 
 Every response that ends with a question, a prompt, or expects user \
-input MUST finish with a call to ask_user(prompt, options). \
+input MUST finish with a call to ask_user or ask_user_multiple. \
 The system CANNOT detect that you are waiting for \
-input unless you call ask_user. You MUST call ask_user as the LAST \
+input unless you call one of these tools. You MUST call it as the LAST \
 action in your response.
 
 NEVER end a response with a question in text without calling ask_user. \
 NEVER rely on the user seeing your text and replying — call ask_user.
 
+**When you have 2+ questions**, use ask_user_multiple instead of ask_user. \
+This renders all questions at once so the user answers in one interaction \
+instead of going back and forth. ALWAYS prefer ask_user_multiple when \
+you need to clarify multiple things. \
+**IMPORTANT: When using ask_user_multiple, do NOT repeat the questions \
+in your text response.** The widget renders the questions with options — \
+duplicating them in text wastes the user's time and delays the widget \
+appearing. Keep your text to a brief context/intro sentence only.
+
 Always provide 2-4 short options that cover the most likely answers. \
 The user can always type a custom response.
 
-Examples:
+Examples (single question):
 - ask_user("What do you need?",
   ["Build a new agent", "Run the loaded worker", "Help with code"])
-- ask_user("Which pattern?",
-  ["Simple 3-node", "Rich with feedback", "Custom"])
 - ask_user("Ready to proceed?",
   ["Yes, go ahead", "Let me change something"])
+
+Example (multiple questions — ALWAYS use ask_user_multiple):
+- ask_user_multiple(questions=[
+    {"id": "goal", "prompt": "What should this agent do?"},
+    {"id": "tools", "prompt": "Which integrations?",
+     "options": ["Slack", "Gmail", "Google Sheets"]},
+    {"id": "schedule", "prompt": "How often should it run?",
+     "options": ["On demand", "Every hour", "Daily"]}
+  ])
 
 ## Greeting
 

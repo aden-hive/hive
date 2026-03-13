@@ -283,6 +283,8 @@ interface AgentBackendState {
   pendingQuestion: string | null;
   /** Predefined choices from ask_user (1-3 items); UI appends "Other" */
   pendingOptions: string[] | null;
+  /** Multiple questions from ask_user_multiple */
+  pendingQuestions: { id: string; prompt: string; options?: string[] }[] | null;
   /** Whether the pending question came from queen or worker */
   pendingQuestionSource: "queen" | "worker" | null;
 }
@@ -318,6 +320,7 @@ function defaultAgentState(): AgentBackendState {
     activeToolCalls: {},
     pendingQuestion: null,
     pendingOptions: null,
+    pendingQuestions: null,
     pendingQuestionSource: null,
   };
 }
@@ -1356,6 +1359,7 @@ export default function Workspace() {
               activeToolCalls: {},
               pendingQuestion: null,
               pendingOptions: null,
+              pendingQuestions: null,
               pendingQuestionSource: null,
             });
             markAllNodesAs(agentType, ["running", "looping", "complete", "error"], "pending");
@@ -1385,6 +1389,7 @@ export default function Workspace() {
               llmSnapshots: {},
               pendingQuestion: null,
               pendingOptions: null,
+              pendingQuestions: null,
               pendingQuestionSource: null,
             });
             markAllNodesAs(agentType, ["running", "looping"], "complete");
@@ -1434,9 +1439,13 @@ export default function Workspace() {
             console.log('[CLIENT_INPUT_REQ] stream_id:', streamId, 'isQueen:', isQueen, 'node_id:', event.node_id, 'prompt:', (event.data?.prompt as string)?.slice(0, 80), 'agentType:', agentType);
             const rawOptions = event.data?.options;
             const options = Array.isArray(rawOptions) ? (rawOptions as string[]) : null;
+            const rawQuestions = event.data?.questions;
+            const questions = Array.isArray(rawQuestions)
+              ? (rawQuestions as { id: string; prompt: string; options?: string[] }[])
+              : null;
             if (isQueen) {
               const prompt = (event.data?.prompt as string) || "";
-              const isAutoBlock = !prompt && !options;
+              const isAutoBlock = !prompt && !options && !questions;
               // Queen auto-block (empty prompt, no options) should not
               // overwrite a pending worker question — the worker's
               // QuestionWidget must stay visible.  Use the updater form
@@ -1467,6 +1476,7 @@ export default function Workspace() {
                     queenBuilding: false,
                     pendingQuestion: prompt || null,
                     pendingOptions: options,
+                    pendingQuestions: questions,
                     pendingQuestionSource: "queen",
                   }
                 };
@@ -1506,14 +1516,14 @@ export default function Workspace() {
             }
           }
           if (event.type === "execution_paused") {
-            updateAgentState(agentType, { isTyping: false, isStreaming: false, queenIsTyping: false, workerIsTyping: false, awaitingInput: false, workerInputMessageId: null, pendingQuestion: null, pendingOptions: null, pendingQuestionSource: null });
+            updateAgentState(agentType, { isTyping: false, isStreaming: false, queenIsTyping: false, workerIsTyping: false, awaitingInput: false, workerInputMessageId: null, pendingQuestion: null, pendingOptions: null, pendingQuestions: null, pendingQuestionSource: null });
             if (!isQueen) {
               updateAgentState(agentType, { workerRunState: "idle", currentExecutionId: null });
               markAllNodesAs(agentType, ["running", "looping"], "pending");
             }
           }
           if (event.type === "execution_failed") {
-            updateAgentState(agentType, { isTyping: false, isStreaming: false, queenIsTyping: false, workerIsTyping: false, awaitingInput: false, workerInputMessageId: null, pendingQuestion: null, pendingOptions: null, pendingQuestionSource: null });
+            updateAgentState(agentType, { isTyping: false, isStreaming: false, queenIsTyping: false, workerIsTyping: false, awaitingInput: false, workerInputMessageId: null, pendingQuestion: null, pendingOptions: null, pendingQuestions: null, pendingQuestionSource: null });
             if (!isQueen) {
               updateAgentState(agentType, { workerRunState: "idle", currentExecutionId: null });
               if (event.node_id) {
@@ -1546,9 +1556,9 @@ export default function Workspace() {
         case "node_loop_iteration":
           turnCounterRef.current[turnKey] = currentTurn + 1;
           if (isQueen) {
-            updateAgentState(agentType, { isStreaming: false, activeToolCalls: {}, awaitingInput: false, pendingQuestion: null, pendingOptions: null, pendingQuestionSource: null });
+            updateAgentState(agentType, { isStreaming: false, activeToolCalls: {}, awaitingInput: false, pendingQuestion: null, pendingOptions: null, pendingQuestions: null, pendingQuestionSource: null });
           } else {
-            updateAgentState(agentType, { isStreaming: false, workerIsTyping: true, activeToolCalls: {}, awaitingInput: false, pendingQuestion: null, pendingOptions: null, pendingQuestionSource: null });
+            updateAgentState(agentType, { isStreaming: false, workerIsTyping: true, activeToolCalls: {}, awaitingInput: false, pendingQuestion: null, pendingOptions: null, pendingQuestions: null, pendingQuestionSource: null });
           }
           if (!isQueen && event.node_id) {
             const pendingText = agentStates[agentType]?.llmSnapshots[event.node_id];
@@ -2020,7 +2030,7 @@ export default function Workspace() {
             s.id === activeSession.id ? { ...s, messages: [...s.messages, userMsg] } : s
           ),
         }));
-        updateAgentState(activeWorker, { awaitingInput: false, workerInputMessageId: null, isTyping: true, pendingQuestion: null, pendingOptions: null, pendingQuestionSource: null });
+        updateAgentState(activeWorker, { awaitingInput: false, workerInputMessageId: null, isTyping: true, pendingQuestion: null, pendingOptions: null, pendingQuestions: null, pendingQuestionSource: null });
         executionApi.workerInput(state.sessionId, text).catch((err: unknown) => {
           const errMsg = err instanceof Error ? err.message : String(err);
           const errorChatMsg: ChatMessage = {
@@ -2042,7 +2052,7 @@ export default function Workspace() {
 
     // If queen has a pending question widget, dismiss it when user types directly
     if (agentStates[activeWorker]?.pendingQuestionSource === "queen") {
-      updateAgentState(activeWorker, { pendingQuestion: null, pendingOptions: null, pendingQuestionSource: null });
+      updateAgentState(activeWorker, { pendingQuestion: null, pendingOptions: null, pendingQuestions: null, pendingQuestionSource: null });
     }
 
     const userMsg: ChatMessage = {
@@ -2109,7 +2119,7 @@ export default function Workspace() {
     }));
 
     // Clear awaiting state optimistically
-    updateAgentState(activeWorker, { awaitingInput: false, workerInputMessageId: null, isTyping: true, pendingQuestion: null, pendingOptions: null, pendingQuestionSource: null });
+    updateAgentState(activeWorker, { awaitingInput: false, workerInputMessageId: null, isTyping: true, pendingQuestion: null, pendingOptions: null, pendingQuestions: null, pendingQuestionSource: null });
 
     executionApi.workerInput(state.sessionId, text).catch((err: unknown) => {
       const errMsg = err instanceof Error ? err.message : String(err);
@@ -2137,7 +2147,7 @@ export default function Workspace() {
 
     if (isOther) {
       // "Other" free-text → route through queen for evaluation
-      updateAgentState(activeWorker, { pendingQuestion: null, pendingOptions: null, pendingQuestionSource: null });
+      updateAgentState(activeWorker, { pendingQuestion: null, pendingOptions: null, pendingQuestions: null, pendingQuestionSource: null });
       if (question && opts && state?.sessionId && state?.ready) {
         const formatted = `[Worker asked: "${question}" | Options: ${opts.join(", ")}]\nUser answered: "${answer}"`;
         const userMsg: ChatMessage = {
@@ -2183,8 +2193,21 @@ export default function Workspace() {
   // --- handleQueenQuestionAnswer: submit queen's own question answer via /chat ---
   // The queen asked the question herself, so she already has context — just send the raw answer.
   const handleQueenQuestionAnswer = useCallback((answer: string, _isOther: boolean) => {
-    updateAgentState(activeWorker, { pendingQuestion: null, pendingOptions: null, pendingQuestionSource: null });
+    updateAgentState(activeWorker, { pendingQuestion: null, pendingOptions: null, pendingQuestions: null, pendingQuestionSource: null });
     handleSend(answer, activeWorker);
+  }, [activeWorker, handleSend, updateAgentState]);
+
+  // --- handleMultiQuestionAnswer: submit answers to ask_user_multiple ---
+  const handleMultiQuestionAnswer = useCallback((answers: Record<string, string>) => {
+    updateAgentState(activeWorker, {
+      pendingQuestion: null, pendingOptions: null,
+      pendingQuestions: null, pendingQuestionSource: null,
+    });
+    // Format as structured text the LLM can parse
+    const lines = Object.entries(answers).map(
+      ([id, answer]) => `[${id}]: ${answer}`,
+    );
+    handleSend(lines.join("\n"), activeWorker);
   }, [activeWorker, handleSend, updateAgentState]);
 
   // --- handleQuestionDismiss: user closed the question widget without answering ---
@@ -2199,6 +2222,7 @@ export default function Workspace() {
     updateAgentState(activeWorker, {
       pendingQuestion: null,
       pendingOptions: null,
+      pendingQuestions: null,
       pendingQuestionSource: null,
       awaitingInput: false,
     });
@@ -2559,11 +2583,13 @@ export default function Workspace() {
                 queenPhase={activeAgentState?.queenPhase ?? "building"}
                 pendingQuestion={activeAgentState?.awaitingInput ? activeAgentState.pendingQuestion : null}
                 pendingOptions={activeAgentState?.awaitingInput ? activeAgentState.pendingOptions : null}
+                pendingQuestions={activeAgentState?.awaitingInput ? activeAgentState.pendingQuestions : null}
                 onQuestionSubmit={
                   activeAgentState?.pendingQuestionSource === "queen"
                     ? handleQueenQuestionAnswer
                     : handleWorkerQuestionAnswer
                 }
+                onMultiQuestionSubmit={handleMultiQuestionAnswer}
                 onQuestionDismiss={handleQuestionDismiss}
               />
             )}

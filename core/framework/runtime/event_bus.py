@@ -730,16 +730,23 @@ class EventBus:
         prompt: str = "",
         execution_id: str | None = None,
         options: list[str] | None = None,
+        questions: list[dict] | None = None,
     ) -> None:
         """Emit client input requested event (client_facing=True nodes).
 
         Args:
             options: Optional predefined choices for the user (1-3 items).
-                     The frontend appends an "Other" free-text option automatically.
+                     The frontend appends an "Other" free-text option
+                     automatically.
+            questions: Optional list of question dicts for multi-question
+                       batches (from ask_user_multiple). Each dict has id,
+                       prompt, and optional options.
         """
         data: dict[str, Any] = {"prompt": prompt}
         if options:
             data["options"] = options
+        if questions:
+            data["questions"] = questions
         await self.publish(
             AgentEvent(
                 type=EventType.CLIENT_INPUT_REQUESTED,
