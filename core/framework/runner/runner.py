@@ -1248,12 +1248,21 @@ class AgentRunner:
                             f"(e.g. 'ollama serve' for Ollama)."
                         )
                     api_key_env = self._get_api_key_env_var(self.model)
-                    hint = (
-                        f"Set it with: export {api_key_env}=your-api-key"
-                        if api_key_env
-                        else "Configure an API key for your LLM provider."
-                    )
-                    raise CredentialError(f"LLM API key not found for model '{self.model}'. {hint}")
+                    api_key_url = self._get_api_key_url(self.model)
+                    if api_key_env:
+                        raise CredentialError(
+                            f"LLM provider not configured for model '{self.model}'.\n\n"
+                            f"Please set the {api_key_env} environment variable:\n"
+                            f"  1. Get your API key from: {api_key_url}\n"
+                            f"  2. Run: export {api_key_env}=your-api-key\n"
+                            f"  3. Try again\n"
+                        )
+                    else:
+                        raise CredentialError(
+                            f"LLM provider not configured for model '{self.model}'.\n\n"
+                            f"Please configure an API key for your LLM provider.\n"
+                            f"See {api_key_url} for more information.\n"
+                        )
 
         # For GCU nodes: auto-register GCU MCP server if needed, then expand tool lists
         has_gcu_nodes = any(node.node_type == "gcu" for node in self.graph.nodes)
@@ -1418,6 +1427,45 @@ class AgentRunner:
             "llamacpp/",
         )
         return model.lower().startswith(LOCAL_PREFIXES)
+
+    @staticmethod
+    def _get_api_key_url(model: str) -> str:
+        """Get URL to obtain an API key for a given model provider.
+
+        Args:
+            model: Model name (e.g., 'claude-sonnet-4-20250514', 'gpt-4o-mini')
+
+        Returns:
+            URL to the provider's API key management page
+        """
+        model_lower = model.lower()
+
+        if model_lower.startswith("anthropic/") or model_lower.startswith("claude"):
+            return "https://console.anthropic.com/"
+        elif model_lower.startswith("openai/") or model_lower.startswith("gpt-"):
+            return "https://platform.openai.com/api-keys"
+        elif model_lower.startswith("gemini/") or model_lower.startswith("google/"):
+            return "https://aistudio.google.com/apikey"
+        elif model_lower.startswith("mistral/"):
+            return "https://console.mistral.ai/api-keys/"
+        elif model_lower.startswith("groq/"):
+            return "https://console.groq.com/keys"
+        elif model_lower.startswith("cerebras/"):
+            return "https://cloud.cerebras.ai/"
+        elif model_lower.startswith("azure/"):
+            return "https://portal.azure.com/"
+        elif model_lower.startswith("cohere/"):
+            return "https://dashboard.cohere.com/api-keys"
+        elif model_lower.startswith("replicate/"):
+            return "https://replicate.com/account/api-tokens"
+        elif model_lower.startswith("together/"):
+            return "https://api.together.xyz/settings/api-keys"
+        elif model_lower.startswith("minimax/") or model_lower.startswith("minimax-"):
+            return "https://www.minimaxi.com/user-center/basic-information/interface-key"
+        elif model_lower.startswith("kimi/"):
+            return "https://platform.moonshot.cn/console/api-keys"
+        else:
+            return "https://docs.litellm.ai/docs/providers"
 
     def _setup_agent_runtime(
         self,
