@@ -1610,19 +1610,79 @@ def register_queen_lifecycle_tools(
                     }
                 )
 
+        # ── GCU nodes cannot be children of decision nodes ─────────
+        # Decision nodes dissolve into their predecessor. If a GCU node
+        # is a decision child, after dissolution it would become a
+        # conditional workflow step — violating the leaf sub-agent rule.
+        # Rewire: move the GCU to the decision's predecessor as a
+        # sub-agent and remove the decision → GCU edge.
+        node_by_id_v = {n["id"]: n for n in validated_nodes}
+        decision_node_ids = {
+            n["id"] for n in validated_nodes
+            if n.get("flowchart_type") == "decision"
+        }
+        gcu_node_ids = {
+            n["id"] for n in validated_nodes
+            if n.get("node_type") == "gcu" or n.get("flowchart_type") == "subagent"
+        }
+        topology_corrections: list[str] = []
+        if decision_node_ids and gcu_node_ids:
+            for d_id in decision_node_ids:
+                gcu_children = [
+                    e for e in validated_edges
+                    if e["source"] == d_id and e["target"] in gcu_node_ids
+                ]
+                if not gcu_children:
+                    continue
+                d_parents = [
+                    e["source"] for e in validated_edges
+                    if e["target"] == d_id
+                ]
+                for gc_edge in gcu_children:
+                    gc_id = gc_edge["target"]
+                    logger.warning(
+                        "GCU node '%s' is a child of decision node '%s' "
+                        "— moving it to the decision's predecessor.",
+                        gc_id, d_id,
+                    )
+                    topology_corrections.append(
+                        f"GCU node '{gc_id}' was a child of decision "
+                        f"node '{d_id}' — invalid because decision "
+                        f"nodes dissolve at build time. Moved "
+                        f"'{gc_id}' to predecessor as a sub-agent."
+                    )
+                    # Remove the decision → GCU edge
+                    validated_edges[:] = [
+                        e for e in validated_edges
+                        if not (e["source"] == d_id and e["target"] == gc_id)
+                    ]
+                    # Remove any outgoing edges from the GCU node
+                    # (keep report edges back to predecessors)
+                    validated_edges[:] = [
+                        e for e in validated_edges
+                        if e["source"] != gc_id
+                        or e["target"] in set(d_parents)
+                    ]
+                    # Assign GCU as sub-agent of predecessor(s)
+                    for pid in d_parents:
+                        parent = node_by_id_v.get(pid)
+                        if parent is None:
+                            continue
+                        existing = parent.get("sub_agents") or []
+                        if gc_id not in existing:
+                            existing.append(gc_id)
+                        parent["sub_agents"] = existing
+
         # ── Enforce GCU / subagent leaf constraint ────────────────
         # GCU nodes and nodes with flowchart_type "subagent" are leaf
         # delegates: they can only receive a delegate edge IN from
         # their parent and send a report edge OUT back to that parent.
         # Any other outgoing edges are design errors — strip them and
         # auto-assign the node as a sub-agent of its predecessor.
-        node_by_id_v = {n["id"]: n for n in validated_nodes}
         leaf_node_ids: set[str] = set()
         for n in validated_nodes:
             if n.get("node_type") == "gcu" or n.get("flowchart_type") == "subagent":
                 leaf_node_ids.add(n["id"])
-
-        topology_corrections: list[str] = []
         if leaf_node_ids:
             for leaf_id in leaf_node_ids:
                 # Find edges where this leaf node is the source
