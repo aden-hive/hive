@@ -20,11 +20,11 @@
 | `core/framework/graph/executor.py` | Remove `FunctionNode` import (~L24). Remove `"function"` from `VALID_NODE_TYPES` (~L1473). Remove `node_type == "function"` branch (~L1529-1533). Remove `register_function()` (~L1975-1977). Add migration error for graphs with `node_type="function"`. |
 | `core/framework/builder/workflow.py` | Remove `node_type == "function"` validation block (~L258-260). |
 
-### 1.2 Agent Builder MCP server
+### 1.2 Builder Package Generator
 
 | File | What to change |
 |---|---|
-| `core/framework/mcp/agent_builder_server.py` | Remove `"function"` from `node_type` description in `add_node` (~L590) and `update_node` (~L841). Remove `node_type == "function"` simulation branch in `test_node` (~L2356-2357). |
+| `core/framework/builder/package_generator.py` | Remove `"function"` from `node_type` description in `add_node` and `update_node`. Remove `node_type == "function"` simulation branch in `test_node`. |
 
 ### 1.3 Examples & demos
 
@@ -38,7 +38,7 @@
 
 | File | Action |
 |---|---|
-| `.claude/skills/hive-create/SKILL.md` | Remove `"function"` from node type table (~L495, L856) |
+| `docs/developer-guide.md` | Remove `"function"` from node type table (~L495, L856) |
 | `docs/developer-guide.md` | Remove `"function"` node type reference (~L613) |
 | `core/MCP_SERVER_GUIDE.md` | Audit for `"function"` references |
 | `docs/why-conditional-edge-priority.md` | Remove or repurpose (entire doc framed around function nodes) |
@@ -56,7 +56,7 @@ Already soft-deprecated with `DeprecationWarning`. No template agent uses them. 
 |---|---|
 | `core/framework/graph/node.py` | Delete `LLMNode` class (~L660-1689, ~1000 lines). Largest single removal. |
 | `core/framework/graph/executor.py` | Remove `LLMNode` import. Remove `"llm_tool_use"`/`"llm_generate"` from `VALID_NODE_TYPES`. Remove `DEPRECATED_NODE_TYPES` dict. Remove their branches in `_get_node_implementation` (~L1507-1523). Update `human_input` branch to use `EventLoopNode` instead of `LLMNode`. Add migration error for deprecated types. |
-| `core/framework/mcp/agent_builder_server.py` | Remove `llm_tool_use`/`llm_generate` validation warnings and branches (~L668-683, L922-937) |
+| `core/framework/builder/package_generator.py` | Remove `llm_tool_use`/`llm_generate` validation warnings and branches |
 
 ---
 
@@ -94,7 +94,7 @@ These tests use `node_type="function"` as convenient scaffolding but actually te
 
 The entire Planner-Worker-Judge pattern has **zero external consumers**. No template agent, example, demo, or runner references it. It is only consumed by:
 - Its own internal files (self-referential imports)
-- The agent-builder MCP server (exposes tools for it)
+- The builder package generator (exposes tools for it)
 - Its own dedicated tests
 
 ### 5.1 Delete these files entirely
@@ -114,9 +114,9 @@ The entire Planner-Worker-Judge pattern has **zero external consumers**. No temp
 
 `core/framework/graph/__init__.py` — Remove all planner-worker exports: `FlexibleGraphExecutor`, `ExecutorConfig`, `WorkerNode`, `StepExecutionResult`, `HybridJudge`, `create_default_judge`, `CodeSandbox`, `safe_eval`, `safe_exec`, `Plan`, `PlanStep`, `ActionType`, `ActionSpec`, and all related symbols.
 
-### 5.3 Remove MCP tools from agent-builder server
+### 5.3 Remove MCP tools from builder package generator
 
-`core/framework/mcp/agent_builder_server.py` — Remove these 7 MCP tools:
+`core/framework/builder/package_generator.py` — Remove these 7 MCP tools:
 
 | MCP tool | Description |
 |---|---|
@@ -144,7 +144,7 @@ Also remove:
 4. **Remove `LLMNode` class + deprecated types** (Part 2)
 5. **Delete Planner-Worker subsystem files** (Part 5.1)
 6. **Clean up `__init__.py` exports** (Part 5.2)
-7. **Remove MCP tools** for plans/evaluation from agent-builder server (Part 5.3)
+7. **Remove MCP tools** for plans/evaluation from builder package generator (Part 5.3)
 8. **Update examples/demos/docs/skills** (Parts 1.3, 1.4)
 9. **Run full test suite** to verify
 
@@ -157,5 +157,5 @@ Also remove:
 3. Load any template agent JSON — no errors
 4. Attempt to load a graph with `node_type="function"` — clear `RuntimeError` with migration guidance
 5. Attempt to load a graph with `node_type="llm_tool_use"` — clear `RuntimeError` with migration guidance
-6. Agent builder MCP: `add_node` with `node_type="function"` — rejected with helpful message
+6. Builder package generator: `add_node` with `node_type="function"` — rejected with helpful message
 7. Plan/evaluation MCP tools no longer appear in tool list

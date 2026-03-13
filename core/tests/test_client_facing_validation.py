@@ -34,7 +34,7 @@ class TestClientFacingFanOut:
             ],
         )
 
-        errors = graph.validate()
+        errors = graph.validate()["errors"]
         cf_errors = [e for e in errors if "multiple client-facing" in e]
         assert len(cf_errors) == 1
         assert "'src'" in cf_errors[0]
@@ -56,7 +56,7 @@ class TestClientFacingFanOut:
             ],
         )
 
-        errors = graph.validate()
+        errors = graph.validate()["errors"]
         cf_errors = [e for e in errors if "multiple client-facing" in e]
         assert len(cf_errors) == 0
 
@@ -77,7 +77,7 @@ class TestClientFacingFanOut:
             ],
         )
 
-        errors = graph.validate()
+        errors = graph.validate()["errors"]
         cf_errors = [e for e in errors if "multiple client-facing" in e]
         assert len(cf_errors) == 0
 
@@ -119,7 +119,7 @@ class TestEventLoopOutputKeyOverlap:
             ],
         )
 
-        errors = graph.validate()
+        errors = graph.validate()["errors"]
         key_errors = [e for e in errors if "output_key" in e]
         assert len(key_errors) == 1
         assert "'shared'" in key_errors[0]
@@ -153,7 +153,7 @@ class TestEventLoopOutputKeyOverlap:
             ],
         )
 
-        errors = graph.validate()
+        errors = graph.validate()["errors"]
         key_errors = [e for e in errors if "output_key" in e]
         assert len(key_errors) == 0
 
@@ -197,7 +197,7 @@ class TestNoFanOutUnaffected:
             ],
         )
 
-        errors = graph.validate()
+        errors = graph.validate()["errors"]
         cf_errors = [e for e in errors if "multiple client-facing" in e]
         key_errors = [e for e in errors if "output_key" in e]
         assert len(cf_errors) == 0

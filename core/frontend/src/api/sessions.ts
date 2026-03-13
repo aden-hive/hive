@@ -1,11 +1,11 @@
 import { api } from "./client";
 import type {
+  AgentEvent,
   LiveSession,
   LiveSessionDetail,
   SessionSummary,
   SessionDetail,
   Checkpoint,
-  Message,
   EntryPoint,
 } from "./types";
 
@@ -64,12 +64,18 @@ export const sessionsApi = {
       `/sessions/${sessionId}/entry-points`,
     ),
 
+  updateTriggerTask: (sessionId: string, triggerId: string, task: string) =>
+    api.patch<{ trigger_id: string; task: string }>(
+      `/sessions/${sessionId}/triggers/${triggerId}`,
+      { task },
+    ),
+
   graphs: (sessionId: string) =>
     api.get<{ graphs: string[] }>(`/sessions/${sessionId}/graphs`),
 
-  /** Get queen conversation history for a session (works for cold/post-restart sessions too). */
-  queenMessages: (sessionId: string) =>
-    api.get<{ messages: Message[]; session_id: string }>(`/sessions/${sessionId}/queen-messages`),
+  /** Get persisted eventbus log for a session (works for cold sessions — used for full UI replay). */
+  eventsHistory: (sessionId: string) =>
+    api.get<{ events: AgentEvent[]; session_id: string }>(`/sessions/${sessionId}/events/history`),
 
   /** List all queen sessions on disk — live + cold (post-restart). */
   history: () =>
@@ -105,12 +111,4 @@ export const sessionsApi = {
     api.post<{ execution_id: string }>(
       `/sessions/${sessionId}/worker-sessions/${wsId}/checkpoints/${checkpointId}/restore`,
     ),
-
-  messages: (sessionId: string, wsId: string, nodeId?: string) => {
-    const params = new URLSearchParams({ client_only: "true" });
-    if (nodeId) params.set("node_id", nodeId);
-    return api.get<{ messages: Message[] }>(
-      `/sessions/${sessionId}/worker-sessions/${wsId}/messages?${params}`,
-    );
-  },
 };

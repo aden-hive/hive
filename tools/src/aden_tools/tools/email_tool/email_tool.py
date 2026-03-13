@@ -249,14 +249,16 @@ def register_tools(
         return _send_email_impl(to, subject, html, provider, from_email, cc, bcc, account)
 
     def _fetch_original_message(access_token: str, message_id: str) -> dict:
-        """Fetch the original message to extract threading info."""
+        """Fetch the original message to extract threading info and body."""
+        import base64
+
         response = httpx.get(
             f"https://gmail.googleapis.com/gmail/v1/users/me/messages/{message_id}",
             headers={
                 "Authorization": f"Bearer {access_token}",
                 "Content-Type": "application/json",
             },
-            params={"format": "metadata", "metadataHeaders": ["Message-ID", "Subject", "From"]},
+            params={"format": "full"},
             timeout=30.0,
         )
 
@@ -273,13 +275,39 @@ def register_tools(
             }
 
         data = response.json()
-        headers = {h["name"]: h["value"] for h in data.get("payload", {}).get("headers", [])}
+        payload = data.get("payload", {})
+        headers = {h["name"]: h["value"] for h in payload.get("headers", [])}
+
+        def _extract_body(part: dict, mime_type: str) -> str | None:
+            """Recursively find and decode a body part by mime type."""
+            if part.get("mimeType") == mime_type:
+                body_data = part.get("body", {}).get("data", "")
+                if body_data:
+                    return base64.urlsafe_b64decode(body_data).decode("utf-8", errors="replace")
+            for sub in part.get("parts", []):
+                result = _extract_body(sub, mime_type)
+                if result:
+                    return result
+            return None
+
+        body_html = _extract_body(payload, "text/html")
+        body_text = _extract_body(payload, "text/plain") if not body_html else None
+
         return {
             "thread_id": data.get("threadId"),
             "message_id_header": headers.get("Message-ID", headers.get("Message-Id", "")),
             "subject": headers.get("Subject", ""),
             "from": headers.get("From", ""),
+            "date": headers.get("Date", ""),
+            "body_html": body_html,
+            "body_text": body_text,
         }
+
+    def _plain_to_html(text: str) -> str:
+        """Wrap plain text in a <pre> tag for safe HTML embedding."""
+        import html as html_module
+
+        return f"<pre>{html_module.escape(text)}</pre>"
 
     @mcp.tool()
     def gmail_reply_email(
@@ -337,11 +365,25 @@ def register_tools(
         original_message_id = original["message_id_header"]
         original_subject = original["subject"]
         reply_to_address = original["from"]
+        original_date = original.get("date", "")
 
         # Build reply subject
         subject = original_subject
         if not subject.lower().startswith("re:"):
             subject = f"Re: {subject}"
+
+        # Append quoted original body so the thread is visible in the reply
+        original_body = original.get("body_html") or _plain_to_html(original.get("body_text") or "")
+        quoted_html = (
+            f"<br><br>"
+            f'<div class="gmail_quote">'
+            f"<div>On {original_date}, {reply_to_address} wrote:</div>"
+            f'<blockquote style="margin:0 0 0 .8ex;border-left:1px #ccc solid;padding-left:1ex">'
+            f"{original_body}"
+            f"</blockquote>"
+            f"</div>"
+        )
+        full_html = html + quoted_html
 
         # Build MIME message with threading headers
         msg = MIMEMultipart("alternative")
@@ -358,7 +400,7 @@ def register_tools(
         if bcc_list:
             msg["Bcc"] = ", ".join(bcc_list)
 
-        msg.attach(MIMEText(html, "html"))
+        msg.attach(MIMEText(full_html, "html"))
 
         raw = base64.urlsafe_b64encode(msg.as_bytes()).decode("ascii")
 

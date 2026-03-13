@@ -1,5 +1,5 @@
 import { api } from "./client";
-import type { GraphTopology, NodeDetail, NodeCriteria, ToolInfo } from "./types";
+import type { GraphTopology, NodeDetail, NodeCriteria, ToolInfo, DraftGraph, FlowchartMap } from "./types";
 
 export const graphsApi = {
   nodes: (sessionId: string, graphId: string, workerSessionId?: string) =>
@@ -25,5 +25,15 @@ export const graphsApi = {
   nodeTools: (sessionId: string, graphId: string, nodeId: string) =>
     api.get<{ tools: ToolInfo[] }>(
       `/sessions/${sessionId}/graphs/${graphId}/nodes/${nodeId}/tools`,
+    ),
+
+  draftGraph: (sessionId: string) =>
+    api.get<{ draft: DraftGraph | null }>(
+      `/sessions/${sessionId}/draft-graph`,
+    ),
+
+  flowchartMap: (sessionId: string) =>
+    api.get<FlowchartMap>(
+      `/sessions/${sessionId}/flowchart-map`,
     ),
 };

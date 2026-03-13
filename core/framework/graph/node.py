@@ -262,6 +262,16 @@ class NodeSpec(BaseModel):
         ),
     )
 
+    # Opt out of judge evaluation entirely (no feedback injected, loop continues normally)
+    skip_judge: bool = Field(
+        default=False,
+        description=(
+            "When True, the implicit judge is bypassed entirely — no feedback is "
+            "injected and the loop continues naturally. Intended for conversational "
+            "nodes (e.g., the queen) that should never receive tool-use pressure."
+        ),
+    )
+
     model_config = {"extra": "allow", "arbitrary_types_allowed": True}
 
 
@@ -548,6 +558,17 @@ class NodeContext:
     # list from this callback at the start of each iteration.  Used by
     # the queen to switch between building-mode and running-mode tools.
     dynamic_tools_provider: Any = None  # Callable[[], list[Tool]] | None
+
+    # Dynamic prompt provider — when set, EventLoopNode checks each
+    # iteration and updates the system prompt if it changed.  Used by
+    # the queen to switch between phase-specific prompts (building /
+    # staging / running) without restarting the conversation.
+    dynamic_prompt_provider: Any = None  # Callable[[], str] | None
+
+    # Per-iteration metadata provider — when set, EventLoopNode merges
+    # the returned dict into node_loop_iteration event data.  Used by
+    # the queen to record the current phase per iteration.
+    iteration_metadata_provider: Any = None  # Callable[[], dict] | None
 
 
 @dataclass

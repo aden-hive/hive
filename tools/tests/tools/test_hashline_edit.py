@@ -1304,3 +1304,96 @@ class TestPermissionsPreservation:
 
         assert result["success"] is True
         assert f.stat().st_mode & 0o777 == mode
+
+    @pytest.mark.skipif(sys.platform != "win32", reason="Windows-only ACL test")
+    def test_acl_preserved_after_edit_windows(
+        self, hashline_edit_fn, mock_workspace, mock_secure_path, tmp_path
+    ):
+        """Atomic replace preserves the target file's DACL on Windows."""
+        import ctypes
+
+        advapi32 = ctypes.windll.advapi32
+        kernel32 = ctypes.windll.kernel32
+        SE_FILE_OBJECT = 1
+        DACL_SECURITY_INFORMATION = 0x00000004
+
+        advapi32.GetNamedSecurityInfoW.argtypes = [
+            ctypes.wintypes.LPCWSTR,  # pObjectName
+            ctypes.c_uint,  # ObjectType (SE_OBJECT_TYPE enum)
+            ctypes.wintypes.DWORD,  # SecurityInfo
+            ctypes.c_void_p,  # ppsidOwner
+            ctypes.c_void_p,  # ppsidGroup
+            ctypes.c_void_p,  # ppDacl
+            ctypes.c_void_p,  # ppSacl
+            ctypes.c_void_p,  # ppSecurityDescriptor
+        ]
+        advapi32.GetNamedSecurityInfoW.restype = ctypes.wintypes.DWORD
+
+        advapi32.ConvertSecurityDescriptorToStringSecurityDescriptorW.argtypes = [
+            ctypes.c_void_p,  # SecurityDescriptor
+            ctypes.wintypes.DWORD,  # RequestedStringSDRevision
+            ctypes.wintypes.DWORD,  # SecurityInformation
+            ctypes.c_void_p,  # StringSecurityDescriptor (out)
+            ctypes.c_void_p,  # StringSecurityDescriptorLen (out, optional)
+        ]
+        advapi32.ConvertSecurityDescriptorToStringSecurityDescriptorW.restype = ctypes.wintypes.BOOL
+
+        kernel32.LocalFree.argtypes = [ctypes.c_void_p]
+        kernel32.LocalFree.restype = ctypes.c_void_p
+
+        f = tmp_path / "test.txt"
+        f.write_text("aaa\nbbb\n")
+
+        def _read_dacl_sddl(path):
+            sd = ctypes.c_void_p()
+            dacl = ctypes.c_void_p()
+            rc = advapi32.GetNamedSecurityInfoW(
+                str(path),
+                SE_FILE_OBJECT,
+                DACL_SECURITY_INFORMATION,
+                None,
+                None,
+                ctypes.byref(dacl),
+                None,
+                ctypes.byref(sd),
+            )
+            assert rc == 0, f"GetNamedSecurityInfoW failed: {rc}"
+            sddl = ctypes.c_wchar_p()
+            assert advapi32.ConvertSecurityDescriptorToStringSecurityDescriptorW(
+                sd,
+                1,
+                DACL_SECURITY_INFORMATION,
+                ctypes.byref(sddl),
+                None,
+            )
+            value = sddl.value
+            kernel32.LocalFree(sddl)
+            kernel32.LocalFree(sd)
+            return value
+
+        acl_before = _read_dacl_sddl(f)
+
+        edits = json.dumps([{"op": "set_line", "anchor": _anchor(1, "aaa"), "content": "AAA"}])
+        result = hashline_edit_fn(path="test.txt", edits=edits, **mock_workspace)
+        assert result["success"] is True
+
+        acl_after = _read_dacl_sddl(f)
+
+        assert acl_before == acl_after, f"ACL changed after edit: {acl_before} -> {acl_after}"
+
+    @pytest.mark.skipif(sys.platform != "win32", reason="Windows-only ACL test")
+    def test_edit_succeeds_when_dacl_unavailable_windows(
+        self, hashline_edit_fn, mock_workspace, mock_secure_path, tmp_path
+    ):
+        """Edit still works on volumes without ACL support (e.g. FAT32)."""
+        from aden_tools import _win32_atomic
+
+        f = tmp_path / "test.txt"
+        f.write_text("aaa\nbbb\n")
+
+        with patch.object(_win32_atomic, "snapshot_dacl", return_value=None):
+            edits = json.dumps([{"op": "set_line", "anchor": _anchor(1, "aaa"), "content": "AAA"}])
+            result = hashline_edit_fn(path="test.txt", edits=edits, **mock_workspace)
+
+        assert result["success"] is True
+        assert f.read_text().splitlines()[0].endswith("AAA")
