@@ -261,10 +261,12 @@ async def handle_flowchart_map(request: web.Request) -> web.Response:
 
     # Fast path: already in memory
     if phase_state is not None and phase_state.original_draft_graph is not None:
-        return web.json_response({
-            "map": phase_state.flowchart_map,
-            "original_draft": phase_state.original_draft_graph,
-        })
+        return web.json_response(
+            {
+                "map": phase_state.flowchart_map,
+                "original_draft": phase_state.original_draft_graph,
+            }
+        )
 
     # Try loading from flowchart.json in the agent folder
     worker_path = getattr(session, "worker_path", None)
@@ -281,10 +283,12 @@ async def handle_flowchart_map(request: web.Request) -> web.Response:
                 if phase_state is not None and original_draft:
                     phase_state.original_draft_graph = original_draft
                     phase_state.flowchart_map = fmap
-                return web.json_response({
-                    "map": fmap,
-                    "original_draft": original_draft,
-                })
+                return web.json_response(
+                    {
+                        "map": fmap,
+                        "original_draft": original_draft,
+                    }
+                )
             except Exception:
                 logger.warning("Failed to read flowchart.json from %s", worker_path)
 

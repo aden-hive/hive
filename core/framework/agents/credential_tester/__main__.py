@@ -1,8 +1,6 @@
 """CLI entry point for Credential Tester agent."""
 
 import asyncio
-import logging
-import sys
 
 import click
 

@@ -122,11 +122,21 @@ MINIMAX_API_BASE = "https://api.minimax.io/v1"
 # Providers that accept cache_control on message content blocks.
 # Anthropic: native ephemeral caching. MiniMax & Z-AI/GLM: pass-through to their APIs.
 # (OpenAI caches automatically server-side; Groq/Gemini/etc. strip the header.)
-_CACHE_CONTROL_PREFIXES = ("anthropic/", "claude-", "minimax/", "minimax-", "MiniMax-", "zai-glm", "glm-")
+_CACHE_CONTROL_PREFIXES = (
+    "anthropic/",
+    "claude-",
+    "minimax/",
+    "minimax-",
+    "MiniMax-",
+    "zai-glm",
+    "glm-",
+)
 
 
 def _model_supports_cache_control(model: str) -> bool:
     return any(model.startswith(p) for p in _CACHE_CONTROL_PREFIXES)
+
+
 # Kimi For Coding uses an Anthropic-compatible endpoint (no /v1 suffix).
 # Claude Code integration uses this format; the /v1 OpenAI-compatible endpoint
 # enforces a coding-agent whitelist that blocks unknown User-Agents.
@@ -1066,7 +1076,8 @@ class LiteLLMProvider(LLMProvider):
                                 else getattr(usage, "cache_read_input_tokens", 0) or 0
                             )
                             logger.debug(
-                                "[tokens] finish-chunk usage: input=%d output=%d cached=%d model=%s",
+                                "[tokens] finish-chunk usage: "
+                                "input=%d output=%d cached=%d model=%s",
                                 input_tokens,
                                 output_tokens,
                                 cached_tokens,
