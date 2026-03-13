@@ -140,6 +140,7 @@ async def handle_create_session(request: web.Request) -> web.Response:
             session = await manager.create_session_with_worker(
                 agent_path,
                 agent_id=agent_id,
+                session_id=session_id,
                 model=model,
                 initial_prompt=initial_prompt,
                 queen_resume_from=queen_resume_from,
