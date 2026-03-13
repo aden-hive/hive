@@ -17,6 +17,7 @@ INTEGRATION_CREDENTIALS = {
             "github_get_issue",
             "github_create_issue",
             "github_update_issue",
+            "github_create_comment",
             "github_list_pull_requests",
             "github_get_pull_request",
             "github_create_pull_request",
