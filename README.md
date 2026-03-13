@@ -117,6 +117,23 @@ This sets up:
 
 <img width="2500" height="1214" alt="home-screen" src="https://github.com/user-attachments/assets/134d897f-5e75-4874-b00b-e0505f6b45c4" />
 
+### Windows (Native) Setup (Using uv)
+
+If you are running Hive on native Windows (without WSL), `pip install -e .` may fail due to packaging limitations (see #3802).
+
+Recommended setup using `uv`:
+
+```bash
+# Create virtual environment
+python -m venv .venv
+.venv\Scripts\activate
+
+# Install uv
+pip install uv
+
+# Install dependencies
+uv sync
+
 ### Build Your First Agent
 
 Type the agent you want to build in the home input box
