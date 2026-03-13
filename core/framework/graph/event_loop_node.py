@@ -59,6 +59,10 @@ _CONTEXT_TOO_LARGE_RE = re.compile(
     r"maximum.{0,20}token|prompt.{0,20}too.{0,10}long",
     re.IGNORECASE,
 )
+_TOOL_NOT_IN_REQUEST_RE = re.compile(
+    r"attempted to call tool ['`\"]?([^'`\" ]+)['`\"]?\s+which was not in request\.tools",
+    re.IGNORECASE,
+)
 
 
 def _is_context_too_large_error(exc: BaseException) -> bool:
@@ -704,6 +708,20 @@ class EventLoopNode(NodeProtocol):
             )
             _stream_retry_count = 0
             _turn_cancelled = False
+            _waiting_after_llm_error = False
+            # Defaults for this iteration; overwritten on successful LLM turn.
+            assistant_text = ""
+            real_tool_results = []
+            outputs_set = []
+            turn_tokens: dict[str, int] = {}
+            logged_tool_calls = []
+            user_input_requested = False
+            ask_user_prompt = ""
+            ask_user_options = None
+            queen_input_requested = False
+            request_system_prompt = ""
+            request_messages = []
+            reported_to_parent = False
             while True:
                 try:
                     (
@@ -768,6 +786,30 @@ class EventLoopNode(NodeProtocol):
                     break
 
                 except Exception as e:
+                    disallowed_tool = self._extract_disallowed_tool_name(e)
+                    if disallowed_tool and _stream_retry_count < self._config.max_stream_retries:
+                        _stream_retry_count += 1
+                        allowed = [t.name for t in tools] if tools else []
+                        shown = ", ".join(allowed[:20]) if allowed else "(none)"
+                        if len(allowed) > 20:
+                            shown += ", ..."
+                        logger.warning(
+                            "[%s] iter=%d: model requested unavailable tool '%s'; "
+                            "injecting corrective hint and retrying (%d/%d)",
+                            node_id,
+                            iteration,
+                            disallowed_tool,
+                            _stream_retry_count,
+                            self._config.max_stream_retries,
+                        )
+                        await conversation.add_user_message(
+                            "[System: Your previous response attempted to call "
+                            f"'{disallowed_tool}', which is unavailable in this turn. "
+                            f"Only call tools from request.tools: {shown}. "
+                            "Do not call unavailable tools.]"
+                        )
+                        continue
+
                     # Retry transient errors with exponential backoff
                     if (
                         self._is_transient_error(e)
@@ -844,6 +886,7 @@ class EventLoopNode(NodeProtocol):
                             f"[Error: {error_msg}. Please try again.]"
                         )
                         await self._await_user_input(ctx, prompt="")
+                        _waiting_after_llm_error = True
                         break  # exit retry loop, continue outer iteration
 
                     # Non-client-facing: crash as before
@@ -893,6 +936,9 @@ class EventLoopNode(NodeProtocol):
                 if ctx.node_spec.client_facing and not ctx.event_triggered:
                     await self._await_user_input(ctx, prompt="")
                 continue  # back to top of for-iteration loop
+
+            if _waiting_after_llm_error:
+                continue  # retry this outer iteration after user input
 
             # 6e'. Feed actual API token count back for accurate estimation
             turn_input = turn_tokens.get("input", 0)
@@ -3261,6 +3307,8 @@ class EventLoopNode(NodeProtocol):
         # RuntimeError from StreamErrorEvent with "Stream error:" prefix
         if isinstance(exc, RuntimeError):
             error_str = str(exc).lower()
+            if "not in request.tools" in error_str:
+                return False
             transient_keywords = [
                 "rate limit",
                 "429",
@@ -3278,6 +3326,12 @@ class EventLoopNode(NodeProtocol):
             return any(kw in error_str for kw in transient_keywords)
 
         return False
+
+    @staticmethod
+    def _extract_disallowed_tool_name(exc: BaseException) -> str | None:
+        """Extract the tool name from strict-provider request.tools validation errors."""
+        m = _TOOL_NOT_IN_REQUEST_RE.search(str(exc))
+        return m.group(1) if m else None
 
     @staticmethod
     def _fingerprint_tool_calls(
