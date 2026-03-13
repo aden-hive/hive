@@ -1,0 +1,8 @@
+{
+  "name": "Issue Triage Agent",
+  "description": "Automatically triages and categorizes issues from various sources for efficient handling.",
+  "category": "support",
+  "tags": ["support", "triage", "automation", "issues"],
+  "author": "Hive Team",
+  "version": "1.0.0"
+}

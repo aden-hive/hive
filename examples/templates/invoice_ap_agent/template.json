@@ -1,0 +1,8 @@
+{
+  "name": "Invoice AP Agent",
+  "description": "Automates accounts payable processes including invoice processing and payment scheduling.",
+  "category": "finance",
+  "tags": ["finance", "invoice", "accounts-payable", "automation"],
+  "author": "Hive Team",
+  "version": "1.0.0"
+}

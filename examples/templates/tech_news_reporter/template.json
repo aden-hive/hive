@@ -1,0 +1,8 @@
+{
+  "name": "Tech News Reporter",
+  "description": "Researches the latest technology and AI news from the web and produces a well-organized report.",
+  "category": "research",
+  "tags": ["news", "technology", "ai", "research", "reporting"],
+  "author": "Hive Team",
+  "version": "1.0.0"
+}

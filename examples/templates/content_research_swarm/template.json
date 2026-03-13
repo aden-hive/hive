@@ -1,0 +1,8 @@
+{
+  "name": "Content Research Swarm",
+  "description": "Multi-agent system that researches and curates content from multiple sources.",
+  "category": "research",
+  "tags": ["content", "research", "multi-agent", "curation"],
+  "author": "Hive Team",
+  "version": "1.0.0"
+}

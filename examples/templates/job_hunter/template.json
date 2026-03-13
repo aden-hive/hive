@@ -1,0 +1,8 @@
+{
+  "name": "Job Hunter",
+  "description": "Analyze a user's resume to identify their strongest role fits, find 10 matching job opportunities, let the user select which to pursue, then generate a resume customization list and cold outreach email for each selected job.",
+  "category": "productivity",
+  "tags": ["career", "job-search", "resume", "email", "automation"],
+  "author": "Hive Team",
+  "version": "1.0.0"
+}

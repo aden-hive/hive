@@ -1,0 +1,8 @@
+{
+  "name": "Hacker News Briefing",
+  "description": "Curates and summarizes top stories from Hacker News for daily briefings.",
+  "category": "research",
+  "tags": ["news", "hacker-news", "research", "briefing"],
+  "author": "Hive Team",
+  "version": "1.0.0"
+}

@@ -1,0 +1,8 @@
+{
+  "name": "Deep Research Agent",
+  "description": "Interactive research agent that searches diverse sources, evaluates findings with user checkpoints, and produces a cited HTML report.",
+  "category": "research",
+  "tags": ["research", "web-search", "analysis", "reporting"],
+  "author": "Hive Team",
+  "version": "1.0.0"
+}

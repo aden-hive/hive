@@ -1,0 +1,8 @@
+{
+  "name": "Marketing Ops Traffic Controller",
+  "description": "Manages and routes marketing operations tasks, coordinating campaigns and content distribution.",
+  "category": "marketing",
+  "tags": ["marketing", "campaigns", "automation", "operations"],
+  "author": "Hive Team",
+  "version": "1.0.0"
+}

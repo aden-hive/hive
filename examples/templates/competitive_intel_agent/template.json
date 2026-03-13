@@ -1,0 +1,8 @@
+{
+  "name": "Competitive Intel Agent",
+  "description": "Gathers and analyzes competitive intelligence from various sources.",
+  "category": "research",
+  "tags": ["competitive-intelligence", "research", "analysis", "market"],
+  "author": "Hive Team",
+  "version": "1.0.0"
+}

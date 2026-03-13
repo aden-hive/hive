@@ -1,0 +1,8 @@
+{
+  "name": "Financial Ledger Agent",
+  "description": "Automates financial ledger management and transaction reconciliation.",
+  "category": "finance",
+  "tags": ["finance", "ledger", "accounting", "reconciliation"],
+  "author": "Hive Team",
+  "version": "1.0.0"
+}

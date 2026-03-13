@@ -1,0 +1,8 @@
+{
+  "name": "Email Inbox Management",
+  "description": "Automates email inbox organization, filtering, and response prioritization.",
+  "category": "productivity",
+  "tags": ["email", "inbox", "automation", "productivity"],
+  "author": "Hive Team",
+  "version": "1.0.0"
+}

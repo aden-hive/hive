@@ -1,0 +1,8 @@
+{
+  "name": "Twitter News Agent",
+  "description": "Monitors Twitter for news and trends, curating relevant content for users.",
+  "category": "research",
+  "tags": ["twitter", "social-media", "news", "monitoring"],
+  "author": "Hive Team",
+  "version": "1.0.0"
+}

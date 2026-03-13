@@ -1,0 +1,8 @@
+{
+  "name": "MCP Toolsmith",
+  "description": "Helps create and manage MCP (Model Context Protocol) tools for extending agent capabilities.",
+  "category": "development",
+  "tags": ["mcp", "tools", "development", "automation"],
+  "author": "Hive Team",
+  "version": "1.0.0"
+}

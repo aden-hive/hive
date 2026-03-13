@@ -1,0 +1,8 @@
+{
+  "name": "HR Onboarding Orchestrator",
+  "description": "Orchestrates the employee onboarding process by coordinating tasks, documentation, and communications.",
+  "category": "hr",
+  "tags": ["hr", "onboarding", "employee", "automation"],
+  "author": "Hive Team",
+  "version": "1.0.0"
+}

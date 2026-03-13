@@ -1,0 +1,8 @@
+{
+  "name": "Support Debugger",
+  "description": "Helps debug and resolve customer support issues by analyzing logs and suggesting solutions.",
+  "category": "support",
+  "tags": ["support", "debugging", "customer-service", "troubleshooting"],
+  "author": "Hive Team",
+  "version": "1.0.0"
+}

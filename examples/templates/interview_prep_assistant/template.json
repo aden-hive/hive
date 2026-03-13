@@ -1,0 +1,8 @@
+{
+  "name": "Interview Prep Assistant",
+  "description": "Helps prepare for job interviews by researching companies and generating practice questions.",
+  "category": "productivity",
+  "tags": ["interview", "career", "preparation", "research"],
+  "author": "Hive Team",
+  "version": "1.0.0"
+}

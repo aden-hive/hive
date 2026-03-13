@@ -14,6 +14,13 @@ Testing commands:
     hive test-debug <agent_path> <test_name>
     hive test-list <agent_path>
     hive test-stats <agent_path>
+
+Template commands:
+    hive template list [--category <cat>] [--tag <tag>] [--search <query>]
+    hive template show <template_id>
+    hive template copy <template_id> [destination] [--name <name>]
+    hive template categories
+    hive template tags
 """
 
 import argparse
@@ -44,7 +51,7 @@ def _configure_paths():
         if exports_str not in sys.path:
             sys.path.insert(0, exports_str)
 
-    # Add examples/templates/ to sys.path so template agents are importable
+    # Add examples/templates/ to sys.path so template agents are importable as top-level packages
     templates_dir = project_root / "examples" / "templates"
     if templates_dir.is_dir():
         templates_str = str(templates_dir)
@@ -83,6 +90,11 @@ def main():
     from framework.runner.cli import register_commands
 
     register_commands(subparsers)
+
+    # Register template commands (template list, show, copy, categories, tags)
+    from framework.templates.cli import register_commands as register_template_commands
+
+    register_template_commands(subparsers)
 
     # Register testing commands (test-run, test-debug, test-list, test-stats)
     from framework.testing.cli import register_testing_commands

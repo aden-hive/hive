@@ -1,0 +1,8 @@
+{
+  "name": "Meeting Scheduler",
+  "description": "Automates meeting scheduling by coordinating calendars and sending invitations.",
+  "category": "productivity",
+  "tags": ["calendar", "scheduling", "meetings", "automation"],
+  "author": "Hive Team",
+  "version": "1.0.0"
+}

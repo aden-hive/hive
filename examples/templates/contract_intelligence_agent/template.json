@@ -1,0 +1,8 @@
+{
+  "name": "Contract Intelligence Agent",
+  "description": "Analyzes contracts to extract key terms, risks, and compliance requirements.",
+  "category": "finance",
+  "tags": ["contracts", "legal", "analysis", "compliance"],
+  "author": "Hive Team",
+  "version": "1.0.0"
+}

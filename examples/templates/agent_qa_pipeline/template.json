@@ -1,0 +1,8 @@
+{
+  "name": "Agent QA Pipeline",
+  "description": "Automated quality assurance pipeline for testing and validating agents.",
+  "category": "development",
+  "tags": ["testing", "qa", "automation", "agents"],
+  "author": "Hive Team",
+  "version": "1.0.0"
+}

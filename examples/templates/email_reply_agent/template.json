@@ -1,0 +1,8 @@
+{
+  "name": "Email Reply Agent",
+  "description": "Automatically drafts replies to emails based on context and user preferences.",
+  "category": "productivity",
+  "tags": ["email", "communication", "automation", "gmail"],
+  "author": "Hive Team",
+  "version": "1.0.0"
+}

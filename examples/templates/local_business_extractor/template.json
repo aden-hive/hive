@@ -1,0 +1,8 @@
+{
+  "name": "Local Business Extractor",
+  "description": "Finds local businesses on Google Maps, scrapes contact details, and syncs to Google Sheets.",
+  "category": "sales",
+  "tags": ["lead-generation", "sales", "google-maps", "web-scraping"],
+  "author": "Hive Team",
+  "version": "1.0.0"
+}
