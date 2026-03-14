@@ -1,0 +1,22 @@
+name: Secret Scan (Gitleaks)
+
+on:
+  pull_request:
+
+jobs:
+  gitleaks:
+    name: Gitleaks Secret Scan
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # required for accurate scanning of PR changes
+
+      - name: Run Gitleaks (warning mode)
+        uses: gitleaks/gitleaks-action@v2
+        continue-on-error: true
