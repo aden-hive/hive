@@ -10,7 +10,6 @@ This module provides abstract and concrete storage implementations:
 
 from __future__ import annotations
 
-import fcntl
 import json
 import logging
 import os
@@ -225,6 +224,8 @@ class EncryptedFileStorage(CredentialStorage):
 
     def list_all(self) -> list[str]:
         """List all credential IDs with file locking for read consistency."""
+        import fcntl
+
         index_path = self.base_path / "metadata" / "index.json"
         if not index_path.exists():
             return []
@@ -272,6 +273,8 @@ class EncryptedFileStorage(CredentialStorage):
         credential_type: str | None = None,
     ) -> None:
         """Update the metadata index with file locking for concurrency safety."""
+        import fcntl
+
         index_path = self.base_path / "metadata" / "index.json"
         lock_path = self.base_path / "metadata" / ".index.lock"
 
