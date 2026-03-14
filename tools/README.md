@@ -101,7 +101,7 @@ python mcp_server.py
 
 | Tool | Description |
 | ---- | ----------- |
-| `web_search` | Search the web (Google or Brave, auto-detected) |
+| `web_search` | Search the web (Google or Brave, auto-detected). Supports freshness filter (day/week/month/year) and returns published_date. |
 | `web_scrape` | Scrape and extract content from webpages |
 | `search_wikipedia` | Search Wikipedia for pages and summaries |
 | `scholar_search`, `scholar_get_citations`, `scholar_get_author` | Search academic papers, get citations and author profiles via SerpAPI |

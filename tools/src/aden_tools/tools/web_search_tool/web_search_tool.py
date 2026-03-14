@@ -20,6 +20,21 @@ from fastmcp import FastMCP
 if TYPE_CHECKING:
     from aden_tools.credentials import CredentialStoreAdapter
 
+FreshnessFilter = Literal["day", "week", "month", "year"]
+
+
+def _freshness_to_google_date_restrict(freshness: FreshnessFilter | None) -> str | None:
+    """Convert freshness filter to Google dateRestrict format."""
+    if freshness is None:
+        return None
+    mapping = {
+        "day": "d1",
+        "week": "w1",
+        "month": "m1",
+        "year": "y1",
+    }
+    return mapping.get(freshness)
+
 
 def register_tools(
     mcp: FastMCP,
@@ -34,20 +49,26 @@ def register_tools(
         language: str,
         api_key: str,
         cse_id: str,
+        freshness: FreshnessFilter | None = None,
     ) -> dict:
         """Execute search using Google Custom Search API."""
         max_retries = 3
+        params = {
+            "key": api_key,
+            "cx": cse_id,
+            "q": query,
+            "num": min(num_results, 10),
+            "lr": f"lang_{language}",
+            "gl": country,
+        }
+        date_restrict = _freshness_to_google_date_restrict(freshness)
+        if date_restrict:
+            params["dateRestrict"] = date_restrict
+
         for attempt in range(max_retries + 1):
             response = httpx.get(
                 "https://www.googleapis.com/customsearch/v1",
-                params={
-                    "key": api_key,
-                    "cx": cse_id,
-                    "q": query,
-                    "num": min(num_results, 10),
-                    "lr": f"lang_{language}",
-                    "gl": country,
-                },
+                params=params,
                 timeout=30.0,
             )
 
@@ -74,6 +95,9 @@ def register_tools(
                     "title": item.get("title", ""),
                     "url": item.get("link", ""),
                     "snippet": item.get("snippet", ""),
+                    "published_date": item.get("pagemap", {})
+                    .get("metatags", [{}])[0]
+                    .get("article:published_time"),
                 }
             )
 
@@ -89,17 +113,22 @@ def register_tools(
         num_results: int,
         country: str,
         api_key: str,
+        freshness: FreshnessFilter | None = None,
     ) -> dict:
         """Execute search using Brave Search API."""
         max_retries = 3
+        params = {
+            "q": query,
+            "count": min(num_results, 20),
+            "country": country,
+        }
+        if freshness:
+            params["freshness"] = freshness
+
         for attempt in range(max_retries + 1):
             response = httpx.get(
                 "https://api.search.brave.com/res/v1/web/search",
-                params={
-                    "q": query,
-                    "count": min(num_results, 20),
-                    "country": country,
-                },
+                params=params,
                 headers={
                     "X-Subscription-Token": api_key,
                     "Accept": "application/json",
@@ -128,6 +157,7 @@ def register_tools(
                     "title": item.get("title", ""),
                     "url": item.get("url", ""),
                     "snippet": item.get("description", ""),
+                    "published_date": item.get("age"),
                 }
             )
 
@@ -159,6 +189,7 @@ def register_tools(
         country: str = "us",
         language: str = "en",
         provider: Literal["auto", "google", "brave"] = "auto",
+        freshness: FreshnessFilter | None = None,
     ) -> dict:
         """
         Search the web for information.
@@ -174,6 +205,7 @@ def register_tools(
             country: Country code for localized results (us, id, uk, de, etc.)
             language: Language code for results (en, id, etc.) - Google only
             provider: Search provider to use ("auto", "google", "brave")
+            freshness: Filter by recency ("day", "week", "month", "year") - optional
 
         Returns:
             Dict with search results, total count, and provider used
@@ -199,6 +231,7 @@ def register_tools(
                     language,
                     creds["google_api_key"],
                     creds["google_cse_id"],
+                    freshness,
                 )
 
             elif provider == "brave":
@@ -207,11 +240,13 @@ def register_tools(
                         "error": "Brave credentials not configured",
                         "help": "Set BRAVE_SEARCH_API_KEY environment variable",
                     }
-                return _search_brave(query, num_results, country, creds["brave_api_key"])
+                return _search_brave(query, num_results, country, creds["brave_api_key"], freshness)
 
             else:  # auto - try Brave first for backward compatibility
                 if brave_available:
-                    return _search_brave(query, num_results, country, creds["brave_api_key"])
+                    return _search_brave(
+                        query, num_results, country, creds["brave_api_key"], freshness
+                    )
                 elif google_available:
                     return _search_google(
                         query,
@@ -220,6 +255,7 @@ def register_tools(
                         language,
                         creds["google_api_key"],
                         creds["google_cse_id"],
+                        freshness,
                     )
                 else:
                     return {

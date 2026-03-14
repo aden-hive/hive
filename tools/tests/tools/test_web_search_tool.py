@@ -145,3 +145,18 @@ class TestParameters:
 
         result = web_search_fn(query="test", num_results=5)
         assert isinstance(result, dict)
+
+    def test_freshness_parameter(self, web_search_fn, monkeypatch):
+        """freshness parameter is accepted."""
+        monkeypatch.setenv("BRAVE_SEARCH_API_KEY", "test-key")
+
+        result = web_search_fn(query="test", freshness="week")
+        assert isinstance(result, dict)
+
+    def test_freshness_with_google_provider(self, web_search_fn, monkeypatch):
+        """freshness parameter works with Google provider."""
+        monkeypatch.setenv("GOOGLE_API_KEY", "test-key")
+        monkeypatch.setenv("GOOGLE_CSE_ID", "test-cse-id")
+
+        result = web_search_fn(query="test", provider="google", freshness="month")
+        assert isinstance(result, dict)
