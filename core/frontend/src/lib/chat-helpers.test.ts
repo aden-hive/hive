@@ -1,60 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { backendMessageToChatMessage, sseEventToChatMessage, formatAgentDisplayName } from "./chat-helpers";
-import type { AgentEvent, Message } from "@/api/types";
-
-// ---------------------------------------------------------------------------
-// backendMessageToChatMessage
-// ---------------------------------------------------------------------------
-
-describe("backendMessageToChatMessage", () => {
-  it("converts a user message", () => {
-    const msg: Message = { seq: 1, role: "user", content: "hello", _node_id: "chat" };
-    const result = backendMessageToChatMessage(msg, "inbox-management");
-    expect(result.type).toBe("user");
-    expect(result.agent).toBe("You");
-    expect(result.role).toBeUndefined();
-    expect(result.content).toBe("hello");
-    expect(result.thread).toBe("inbox-management");
-  });
-
-  it("converts an assistant message with node_id as agent", () => {
-    const msg: Message = { seq: 2, role: "assistant", content: "hi", _node_id: "intake" };
-    const result = backendMessageToChatMessage(msg, "inbox-management");
-    expect(result.agent).toBe("intake");
-    expect(result.role).toBe("worker");
-    expect(result.type).toBeUndefined();
-  });
-
-  it("defaults agent to 'Agent' when _node_id is empty", () => {
-    const msg: Message = { seq: 3, role: "assistant", content: "ok", _node_id: "" };
-    const result = backendMessageToChatMessage(msg, "inbox-management");
-    expect(result.agent).toBe("Agent");
-  });
-
-  it("produces deterministic ID from seq", () => {
-    const msg: Message = { seq: 42, role: "user", content: "test", _node_id: "x" };
-    const result = backendMessageToChatMessage(msg, "thread");
-    expect(result.id).toBe("backend-42");
-  });
-
-  it("passes through the thread parameter", () => {
-    const msg: Message = { seq: 1, role: "user", content: "hi", _node_id: "x" };
-    const result = backendMessageToChatMessage(msg, "my-thread");
-    expect(result.thread).toBe("my-thread");
-  });
-
-  it("uses agentDisplayName instead of node_id when provided", () => {
-    const msg: Message = { seq: 2, role: "assistant", content: "hi", _node_id: "intake" };
-    const result = backendMessageToChatMessage(msg, "thread", "Competitive Intel Agent");
-    expect(result.agent).toBe("Competitive Intel Agent");
-  });
-
-  it("still shows 'You' for user messages even when agentDisplayName is provided", () => {
-    const msg: Message = { seq: 1, role: "user", content: "hello", _node_id: "chat" };
-    const result = backendMessageToChatMessage(msg, "thread", "My Agent");
-    expect(result.agent).toBe("You");
-  });
-});
+import { sseEventToChatMessage, formatAgentDisplayName } from "./chat-helpers";
+import type { AgentEvent } from "@/api/types";
 
 // ---------------------------------------------------------------------------
 // sseEventToChatMessage
@@ -250,6 +196,102 @@ describe("sseEventToChatMessage", () => {
     );
   });
 
+  it("different inner_turn values produce different message IDs", () => {
+    const e1 = makeEvent({
+      type: "client_output_delta",
+      node_id: "queen",
+      execution_id: "exec-1",
+      data: { snapshot: "first response", iteration: 0, inner_turn: 0 },
+    });
+    const e2 = makeEvent({
+      type: "client_output_delta",
+      node_id: "queen",
+      execution_id: "exec-1",
+      data: { snapshot: "after tool call", iteration: 0, inner_turn: 1 },
+    });
+    const r1 = sseEventToChatMessage(e1, "t");
+    const r2 = sseEventToChatMessage(e2, "t");
+    expect(r1!.id).not.toBe(r2!.id);
+  });
+
+  it("same inner_turn produces same ID (streaming upsert within one LLM call)", () => {
+    const e1 = makeEvent({
+      type: "client_output_delta",
+      node_id: "queen",
+      execution_id: "exec-1",
+      data: { snapshot: "partial", iteration: 0, inner_turn: 1 },
+    });
+    const e2 = makeEvent({
+      type: "client_output_delta",
+      node_id: "queen",
+      execution_id: "exec-1",
+      data: { snapshot: "partial response", iteration: 0, inner_turn: 1 },
+    });
+    expect(sseEventToChatMessage(e1, "t")!.id).toBe(
+      sseEventToChatMessage(e2, "t")!.id,
+    );
+  });
+
+  it("absent inner_turn produces same ID as inner_turn=0 (backward compat)", () => {
+    const withField = makeEvent({
+      type: "client_output_delta",
+      node_id: "queen",
+      execution_id: "exec-1",
+      data: { snapshot: "hello", iteration: 2, inner_turn: 0 },
+    });
+    const withoutField = makeEvent({
+      type: "client_output_delta",
+      node_id: "queen",
+      execution_id: "exec-1",
+      data: { snapshot: "hello", iteration: 2 },
+    });
+    expect(sseEventToChatMessage(withField, "t")!.id).toBe(
+      sseEventToChatMessage(withoutField, "t")!.id,
+    );
+  });
+
+  it("inner_turn=0 produces no suffix (matches old ID format)", () => {
+    const event = makeEvent({
+      type: "client_output_delta",
+      node_id: "queen",
+      execution_id: "exec-1",
+      data: { snapshot: "hello", iteration: 3, inner_turn: 0 },
+    });
+    const result = sseEventToChatMessage(event, "t");
+    expect(result!.id).toBe("stream-exec-1-3-queen");
+  });
+
+  it("inner_turn>0 adds -t suffix to ID", () => {
+    const event = makeEvent({
+      type: "client_output_delta",
+      node_id: "queen",
+      execution_id: "exec-1",
+      data: { snapshot: "hello", iteration: 3, inner_turn: 2 },
+    });
+    const result = sseEventToChatMessage(event, "t");
+    expect(result!.id).toBe("stream-exec-1-3-t2-queen");
+  });
+
+  it("llm_text_delta also uses inner_turn for distinct IDs", () => {
+    const e1 = makeEvent({
+      type: "llm_text_delta",
+      node_id: "research",
+      execution_id: "exec-1",
+      data: { snapshot: "first", inner_turn: 0 },
+    });
+    const e2 = makeEvent({
+      type: "llm_text_delta",
+      node_id: "research",
+      execution_id: "exec-1",
+      data: { snapshot: "second", inner_turn: 1 },
+    });
+    const r1 = sseEventToChatMessage(e1, "t");
+    const r2 = sseEventToChatMessage(e2, "t");
+    expect(r1!.id).not.toBe(r2!.id);
+    expect(r1!.id).toBe("stream-exec-1-research");
+    expect(r2!.id).toBe("stream-exec-1-t1-research");
+  });
+
   it("uses timestamp fallback when both turnId and execution_id are null", () => {
     const event = makeEvent({
       type: "client_output_delta",
@@ -261,25 +303,36 @@ describe("sseEventToChatMessage", () => {
     expect(result!.id).toMatch(/^stream-t-\d+-chat$/);
   });
 
-  it("converts client_input_requested with prompt to message", () => {
+  it("returns null for client_input_requested (handled in workspace.tsx)", () => {
     const event = makeEvent({
       type: "client_input_requested",
       node_id: "chat",
       execution_id: "abc",
       data: { prompt: "What next?" },
     });
-    const result = sseEventToChatMessage(event, "t");
-    expect(result).not.toBeNull();
-    expect(result!.content).toBe("What next?");
-    expect(result!.role).toBe("worker");
+    expect(sseEventToChatMessage(event, "t")).toBeNull();
   });
 
-  it("returns null for client_input_requested without prompt", () => {
+  it("converts client_input_received to user message", () => {
     const event = makeEvent({
-      type: "client_input_requested",
-      node_id: "chat",
+      type: "client_input_received",
+      node_id: "queen",
       execution_id: "abc",
-      data: { prompt: "" },
+      data: { content: "do the thing" },
+    });
+    const result = sseEventToChatMessage(event, "t");
+    expect(result).not.toBeNull();
+    expect(result!.agent).toBe("You");
+    expect(result!.type).toBe("user");
+    expect(result!.content).toBe("do the thing");
+  });
+
+  it("returns null for client_input_received with empty content", () => {
+    const event = makeEvent({
+      type: "client_input_received",
+      node_id: "queen",
+      execution_id: "abc",
+      data: { content: "" },
     });
     expect(sseEventToChatMessage(event, "t")).toBeNull();
   });

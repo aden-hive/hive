@@ -134,12 +134,22 @@ class SessionState(BaseModel):
     # Input data (for debugging/replay)
     input_data: dict[str, Any] = Field(default_factory=dict)
 
+    # Process ID of the owning process (for cross-process stale session detection)
+    pid: int | None = None
+
     # Isolation level (from ExecutionContext)
     isolation_level: str = "shared"
 
     # Checkpointing (for crash recovery and resume-from-failure)
     checkpoint_enabled: bool = False
     latest_checkpoint_id: str | None = None
+
+    # Trigger activation state (IDs of triggers the queen/user turned on)
+    active_triggers: list[str] = Field(default_factory=list)
+    # Per-trigger task strings (user overrides, keyed by trigger ID)
+    trigger_tasks: dict[str, str] = Field(default_factory=dict)
+    # True after first successful worker execution (gates trigger delivery on restart)
+    worker_configured: bool = Field(default=False)
 
     model_config = {"extra": "allow"}
 

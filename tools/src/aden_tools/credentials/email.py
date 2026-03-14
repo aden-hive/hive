@@ -36,8 +36,8 @@ EMAIL_CREDENTIALS = {
     "google": CredentialSpec(
         env_var="GOOGLE_ACCESS_TOKEN",
         tools=[
-            # send_email is excluded: it's a multi-provider tool that checks
-            # credentials at runtime based on the provider parameter.
+            # send_email is a multi-provider tool; also listed under resend
+            "send_email",
             # Gmail tools
             "gmail_reply_email",
             "gmail_list_messages",
@@ -69,12 +69,26 @@ EMAIL_CREDENTIALS = {
             "google_sheets_batch_clear_values",
             "google_sheets_add_sheet",
             "google_sheets_delete_sheet",
+            # Google Docs tools
+            "google_docs_create_document",
+            "google_docs_get_document",
+            "google_docs_insert_text",
+            "google_docs_replace_all_text",
+            "google_docs_insert_image",
+            "google_docs_format_text",
+            "google_docs_batch_update",
+            "google_docs_create_list",
+            "google_docs_add_comment",
+            "google_docs_list_comments",
+            "google_docs_export_content",
         ],
         node_types=[],
         required=True,
         startup_required=False,
         help_url="https://hive.adenhq.com",
-        description="Google OAuth2 access token (via Aden) - used for Gmail, Calendar, and Sheets",
+        description=(
+            "Google OAuth2 access token (via Aden) - used for Gmail, Calendar, Sheets, and Docs"
+        ),
         aden_supported=True,
         aden_provider_name="google",
         direct_api_key_supported=False,

@@ -125,6 +125,18 @@ async def handle_chat(request: web.Request) -> web.Response:
         node = queen_executor.node_registry.get("queen")
         if node is not None and hasattr(node, "inject_event"):
             await node.inject_event(message, is_client_input=True)
+            # Publish to EventBus so the session event log captures user messages
+            from framework.runtime.event_bus import AgentEvent, EventType
+
+            await session.event_bus.publish(
+                AgentEvent(
+                    type=EventType.CLIENT_INPUT_RECEIVED,
+                    stream_id="queen",
+                    node_id="queen",
+                    execution_id=session.id,
+                    data={"content": message},
+                )
+            )
             return web.json_response(
                 {
                     "status": "queen",
@@ -347,7 +359,7 @@ async def handle_pause(request: web.Request) -> web.Response:
 
             for exec_id in list(stream.active_execution_ids):
                 try:
-                    ok = await stream.cancel_execution(exec_id)
+                    ok = await stream.cancel_execution(exec_id, reason="Execution paused by user")
                     if ok:
                         cancelled.append(exec_id)
                 except Exception:
@@ -357,8 +369,8 @@ async def handle_pause(request: web.Request) -> web.Response:
     runtime.pause_timers()
 
     # Switch to staging (agent still loaded, ready to re-run)
-    if session.mode_state is not None:
-        await session.mode_state.switch_to_staging(source="frontend")
+    if session.phase_state is not None:
+        await session.phase_state.switch_to_staging(source="frontend")
 
     return web.json_response(
         {
@@ -400,7 +412,9 @@ async def handle_stop(request: web.Request) -> web.Response:
                     if hasattr(node, "cancel_current_turn"):
                         node.cancel_current_turn()
 
-            cancelled = await stream.cancel_execution(execution_id)
+            cancelled = await stream.cancel_execution(
+                execution_id, reason="Execution stopped by user"
+            )
             if cancelled:
                 # Cancel queen's in-progress LLM turn
                 if session.queen_executor:

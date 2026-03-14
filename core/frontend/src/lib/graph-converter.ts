@@ -51,6 +51,7 @@ export function topologyToGraphNodes(topology: GraphTopology): GraphNode[] {
       triggerConfig: {
         ...ep.trigger_config,
         ...(ep.next_fire_in != null ? { next_fire_in: ep.next_fire_in } : {}),
+        ...(ep.task ? { task: ep.task } : {}),
       },
       next: [ep.entry_node],
     });

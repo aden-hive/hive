@@ -148,8 +148,9 @@ class HumanReadableFormatter(logging.Formatter):
         if record_event is not None:
             event = f" [{record_event}]"
 
-        # Format message: [LEVEL] [trace context] message
-        return f"{color}[{level}]{reset} {context_prefix}{record.getMessage()}{event}"
+        timestamp = self.formatTime(record, "%Y-%m-%d %H:%M:%S")
+        # Format message: TIMESTAMP [LEVEL] [trace context] message
+        return f"{timestamp} {color}[{level}]{reset} {context_prefix}{record.getMessage()}{event}"
 
 
 def configure_logging(

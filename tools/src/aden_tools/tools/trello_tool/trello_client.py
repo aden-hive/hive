@@ -170,3 +170,60 @@ class TrelloClient:
     ) -> dict[str, Any]:
         params = {"url": attachment_url, "name": name}
         return self._request("POST", f"/cards/{card_id}/attachments", params=params)
+
+    def get_card(
+        self,
+        card_id: str,
+        fields: list[str] | None = None,
+    ) -> dict[str, Any]:
+        """Get a single card by ID.
+
+        API ref: GET /1/cards/{id}
+        """
+        params: dict[str, Any] = {
+            "fields": ",".join(fields) if fields else "all",
+            "members": "true",
+            "member_fields": "fullName,username",
+            "checklists": "all",
+            "checklist_fields": "name",
+            "attachments": "true",
+            "attachment_fields": "name,url",
+        }
+        return self._request("GET", f"/cards/{card_id}", params=params)
+
+    def create_list(
+        self,
+        board_id: str,
+        name: str,
+        pos: str | None = None,
+    ) -> dict[str, Any]:
+        """Create a new list on a board.
+
+        API ref: POST /1/lists
+        """
+        params: dict[str, Any] = {
+            "idBoard": board_id,
+            "name": name,
+            "pos": pos,
+        }
+        return self._request("POST", "/lists", params=params)
+
+    def search(
+        self,
+        query: str,
+        model_types: str = "cards",
+        cards_limit: int = 10,
+        board_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Search across Trello.
+
+        API ref: GET /1/search
+        """
+        params: dict[str, Any] = {
+            "query": query,
+            "modelTypes": model_types,
+            "cards_limit": min(cards_limit, 1000),
+        }
+        if board_id:
+            params["idBoards"] = board_id
+        return self._request("GET", "/search", params=params)

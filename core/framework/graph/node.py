@@ -565,6 +565,11 @@ class NodeContext:
     # staging / running) without restarting the conversation.
     dynamic_prompt_provider: Any = None  # Callable[[], str] | None
 
+    # Per-iteration metadata provider — when set, EventLoopNode merges
+    # the returned dict into node_loop_iteration event data.  Used by
+    # the queen to record the current phase per iteration.
+    iteration_metadata_provider: Any = None  # Callable[[], dict] | None
+
 
 @dataclass
 class NodeResult:
