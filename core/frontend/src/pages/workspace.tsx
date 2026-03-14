@@ -325,6 +325,8 @@ interface AgentBackendState {
   queenIsTyping: boolean;
   /** True only when a worker's LLM is actively processing (not queen) */
   workerIsTyping: boolean;
+  /** Rate limit message to show in the queen typing indicator, cleared on next LLM activity */
+  rateLimitMessage: string | null;
   llmSnapshots: Record<string, string>;
   activeToolCalls: Record<string, { name: string; done: boolean; streamId: string }>;
   /** Agent folder path — set after scaffolding, used for credential queries */
@@ -367,6 +369,7 @@ function defaultAgentState(): AgentBackendState {
     isStreaming: false,
     queenIsTyping: false,
     workerIsTyping: false,
+    rateLimitMessage: null,
     llmSnapshots: {},
     activeToolCalls: {},
     pendingQuestion: null,
@@ -1494,7 +1497,7 @@ export default function Workspace() {
         case "execution_started":
           if (isQueen) {
             turnCounterRef.current[turnKey] = currentTurn + 1;
-            updateAgentState(agentType, { isTyping: true, queenIsTyping: true, ...(shouldMarkQueenReady && { queenReady: true }) });
+            updateAgentState(agentType, { isTyping: true, queenIsTyping: true, rateLimitMessage: null, ...(shouldMarkQueenReady && { queenReady: true }) });
           } else {
             // Warn if prior LLM snapshots are being dropped (edge case: execution_completed never arrived)
             const priorSnapshots = agentStates[agentType]?.llmSnapshots || {};
@@ -1964,12 +1967,15 @@ export default function Workspace() {
           break;
         }
 
-        case "node_stalled":
-          if (!isQueen && event.node_id) {
-            const reason = (event.data?.reason as string) || "unknown";
+        case "node_stalled": {
+          const reason = (event.data?.reason as string) || "unknown";
+          if (isQueen) {
+            updateAgentState(agentType, { rateLimitMessage: reason });
+          } else if (event.node_id) {
             appendNodeLog(agentType, event.node_id, `${ts} WARN  Stalled: ${reason}`);
           }
           break;
+        }
 
         case "node_retry":
           if (!isQueen && event.node_id) {
@@ -2913,6 +2919,7 @@ export default function Workspace() {
                 isWaiting={(activeAgentState?.queenIsTyping && !activeAgentState?.isStreaming) ?? false}
                 isWorkerWaiting={(activeAgentState?.workerIsTyping && !activeAgentState?.isStreaming) ?? false}
                 isBusy={activeAgentState?.queenIsTyping ?? false}
+                rateLimitMessage={activeAgentState?.rateLimitMessage ?? null}
                 disabled={
                   (activeAgentState?.loading ?? true) ||
                   !(activeAgentState?.queenReady)
