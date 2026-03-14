@@ -18,9 +18,9 @@ export interface TopBarTab {
 }
 
 interface TopBarProps {
-    /** Live tabs from workspace state. When omitted, reads from localStorage. */
+  /** Live tabs from workspace state. When omitted, reads from localStorage. */
   tabs?: TopBarTab[];
-    /** Called when a tab is clicked (workspace overrides to setActiveWorker). */
+  /** Called when a tab is clicked (workspace overrides to setActiveWorker). */
   onTabClick?: (agentType: string) => void;
   /** Called when a tab's X is clicked (workspace overrides for SSE teardown). */
   onCloseTab?: (agentType: string) => void;
@@ -28,7 +28,7 @@ interface TopBarProps {
   canCloseTabs?: boolean;
   /** Content rendered right after the tab strip (e.g. + button). */
   afterTabs?: React.ReactNode;
-   /** Right-side slot for page-specific controls (e.g. credentials). */
+  /** Right-side slot for page-specific controls (e.g. credentials). */
   children?: React.ReactNode;
 }
 
@@ -42,7 +42,7 @@ export default function TopBar({
 }: TopBarProps) {
   const navigate = useNavigate();
 
-
+  // Fallback: read persisted tabs when no live tabs provided
   const [persisted, setPersisted] = useState<PersistedTabState | null>(() =>
     tabsProp ? null : loadPersistedTabs(),
   );
@@ -68,6 +68,7 @@ export default function TopBar({
         onCloseTab(agentType);
         return;
       }
+      // Kill the backend session (queen/judge/worker) even outside workspace
 
       sessionsApi
         .list()
@@ -75,8 +76,9 @@ export default function TopBar({
           const match = sessions.find((s) => s.agent_path === agentType);
           if (match) return sessionsApi.stop(match.session_id);
         })
-        .catch(() => {});
+        .catch(() => {}); // fire-and-forget
 
+      // Fallback: update localStorage directly (non-workspace pages)
       setPersisted((prev) => {
         if (!prev) return null;
         const nextTabs = prev.tabs.filter((t) => t.agentType !== agentType);
@@ -173,6 +175,7 @@ export default function TopBar({
   );
 }
 
+/** Derive TopBarTab[] from persisted localStorage state (used outside workspace). */
 function deriveTabs(persisted: PersistedTabState | null): TopBarTab[] {
   if (!persisted) return [];
 
@@ -194,7 +197,7 @@ function deriveTabs(persisted: PersistedTabState | null): TopBarTab[] {
     tabs.push({
       agentType: tab.agentType,
       label: tab.label,
-      isActive: false,
+      isActive: false, // no active tab outside workspace
       hasRunning,
     });
   }
