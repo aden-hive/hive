@@ -337,7 +337,6 @@ class TestExecutionQuality:
 
     async def test_execution_result_properties(self, tmp_path):
         """Test ExecutionResult helper properties."""
-        # Clean success
         clean = ExecutionResult(
             success=True,
             execution_quality="clean",
@@ -345,7 +344,6 @@ class TestExecutionQuality:
         assert clean.is_clean_success is True
         assert clean.is_degraded_success is False
 
-        # Degraded success
         degraded = ExecutionResult(
             success=True,
             execution_quality="degraded",
@@ -354,13 +352,88 @@ class TestExecutionQuality:
         assert degraded.is_clean_success is False
         assert degraded.is_degraded_success is True
 
-        # Failed
         failed = ExecutionResult(
             success=False,
             execution_quality="failed",
         )
         assert failed.is_clean_success is False
         assert failed.is_degraded_success is False
+
+    async def test_hitl_pause_returns_success_false(self, tmp_path):
+        """Test that HITL pause returns success=False (not success=True).
+
+        A paused execution is an intermediate state awaiting human input,
+        not a successful completion. Returning success=True misrepresents
+        the execution state.
+
+        See: https://github.com/adenhq/hive/issues/2295
+        """
+        runtime = Runtime(tmp_path)
+        goal = Goal(
+            id="test",
+            name="Test",
+            description="Test HITL pause",
+            success_criteria=[
+                SuccessCriterion(
+                    id="works",
+                    description="Works",
+                    metric="output_equals",
+                    target="success",
+                )
+            ],
+        )
+
+        graph = GraphSpec(
+            id="test-graph",
+            goal_id=goal.id,
+            nodes=[
+                NodeSpec(
+                    id="start",
+                    name="Start Node",
+                    description="Starting node",
+                    node_type="event_loop",
+                    output_keys=["initial_result"],
+                ),
+                NodeSpec(
+                    id="hitl_review",
+                    name="HITL Review",
+                    description="Human review required",
+                    node_type="event_loop",
+                    input_keys=["initial_result"],
+                    output_keys=["reviewed"],
+                ),
+            ],
+            edges=[
+                EdgeSpec(
+                    id="e1",
+                    source="start",
+                    target="hitl_review",
+                    condition=EdgeCondition.ON_SUCCESS,
+                ),
+            ],
+            entry_node="start",
+            terminal_nodes=["hitl_review"],
+            pause_nodes=["hitl_review"],
+        )
+
+        executor = GraphExecutor(
+            runtime=runtime,
+            node_registry={
+                "start": AlwaysSucceedsNode(),
+                "hitl_review": AlwaysSucceedsNode(),
+            },
+        )
+
+        result = await executor.execute(graph, goal)
+
+        assert result.paused_at == "hitl_review", "Execution should pause at HITL node"
+        assert result.success is False, (
+            "Paused HITL execution must return success=False, not success=True. "
+            "A paused state is an intermediate state awaiting human input, "
+            "not a successful completion."
+        )
+        assert result.session_state is not None
+        assert result.session_state.get("paused_at") == "hitl_review"
 
 
 if __name__ == "__main__":
