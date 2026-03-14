@@ -168,7 +168,7 @@ def _scan_pipeline(cycle: int, deals: list | None = None) -> dict:
             "hs_lastmodifieddate"
         )
         days_inactive = 0
-        if last_activity:
+        if last_activity and last_activity.strip():
             try:
                 s = str(last_activity).strip()
                 # Normalise Z suffix and handle offset-aware strings
