@@ -159,6 +159,7 @@ entry_points = {"start": "scan-invoices"}
 pause_nodes = []
 terminal_nodes = []
 
+# Module-level vars read by AgentRunner.load()
 conversation_mode = "continuous"
 identity_prompt = (
     "You are an accounts-receivable automation agent. You process invoices, "
