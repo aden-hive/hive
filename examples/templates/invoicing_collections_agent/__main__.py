@@ -27,7 +27,7 @@ def cli():
     pass
 
 
-@click.command()
+@cli.command()
 @click.option("--file", "-f", "invoice_file", help="Path to invoice CSV file")
 @click.option("--verbose", "-v", is_flag=True)
 def run(invoice_file, verbose):
@@ -44,7 +44,7 @@ def run(invoice_file, verbose):
     sys.exit(0 if result.success else 1)
 
 
-@click.command()
+@cli.command()
 def info():
     """Show agent info."""
     data = default_agent.info()
@@ -55,7 +55,7 @@ def info():
     click.echo(f"Client-facing: {', '.join(data['client_facing_nodes'])}")
 
 
-@click.command()
+@cli.command()
 def validate():
     """Validate agent structure."""
     v = default_agent.validate()
@@ -67,10 +67,6 @@ def validate():
             click.echo(f"  {e}")
     sys.exit(0 if v["valid"] else 1)
 
-
-cli.add_command(run)
-cli.add_command(info)
-cli.add_command(validate)
 
 if __name__ == "__main__":
     cli()
