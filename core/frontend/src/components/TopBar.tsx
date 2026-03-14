@@ -7,8 +7,8 @@ import {
   TAB_STORAGE_KEY,
   type PersistedTabState,
 } from "@/lib/tab-persistence";
-import { sessionsApi } from "@/api/sessions";
 import ThemeToggle from "./ThemeToggle";
+import { sessionsApi } from "@/api/sessions";
 
 export interface TopBarTab {
   agentType: string;
@@ -50,16 +50,13 @@ export default function TopBar({
   const tabs: TopBarTab[] = tabsProp ?? deriveTabs(persisted);
   const showClose = canCloseTabs ?? true;
 
-  const handleTabClick = useCallback(
-    (agentType: string) => {
-      if (onTabClick) {
-        onTabClick(agentType);
-      } else {
-        navigate(`/workspace?agent=${encodeURIComponent(agentType)}`);
-      }
-    },
-    [onTabClick, navigate],
-  );
+  const handleTabClick = useCallback((agentType: string) => {
+    if (onTabClick) {
+      onTabClick(agentType);
+    } else {
+      navigate(`/workspace?agent=${encodeURIComponent(agentType)}`);
+    }
+  }, [onTabClick, navigate]);
 
   const handleCloseTab = useCallback(
     (agentType: string, e: React.MouseEvent) => {

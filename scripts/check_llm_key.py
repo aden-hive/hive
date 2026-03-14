@@ -56,6 +56,53 @@ def check_openai_compatible(api_key: str, endpoint: str, name: str) -> dict:
     return {"valid": False, "message": f"{name} API returned status {r.status_code}"}
 
 
+def check_minimax(
+    api_key: str, api_base: str = "https://api.minimax.io/v1", **_: str
+) -> dict:
+    """Validate via chatcompletion_v2 endpoint with empty messages.
+
+    MiniMax doesn't support GET /models; their native endpoint is
+    /v1/text/chatcompletion_v2.
+    """
+    with httpx.Client(timeout=TIMEOUT) as client:
+        r = client.post(
+            f"{api_base.rstrip('/')}/text/chatcompletion_v2",
+            headers={
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json",
+            },
+            json={"model": "MiniMax-M2.5", "messages": []},
+        )
+    if r.status_code in (200, 400, 422, 429):
+        return {"valid": True, "message": "MiniMax API key valid"}
+    if r.status_code == 401:
+        return {"valid": False, "message": "Invalid MiniMax API key"}
+    if r.status_code == 403:
+        return {"valid": False, "message": "MiniMax API key lacks permissions"}
+    return {"valid": False, "message": f"MiniMax API returned status {r.status_code}"}
+
+
+def check_anthropic_compatible(api_key: str, endpoint: str, name: str) -> dict:
+    """POST empty messages to an Anthropic-compatible endpoint to validate key."""
+    with httpx.Client(timeout=TIMEOUT) as client:
+        r = client.post(
+            endpoint,
+            headers={
+                "x-api-key": api_key,
+                "anthropic-version": "2023-06-01",
+                "Content-Type": "application/json",
+            },
+            json={"model": "kimi-k2.5", "max_tokens": 1, "messages": []},
+        )
+    if r.status_code in (200, 400, 429):
+        return {"valid": True, "message": f"{name} API key valid"}
+    if r.status_code == 401:
+        return {"valid": False, "message": f"Invalid {name} API key"}
+    if r.status_code == 403:
+        return {"valid": False, "message": f"{name} API key lacks permissions"}
+    return {"valid": False, "message": f"{name} API returned status {r.status_code}"}
+
+
 def check_gemini(api_key: str, **_: str) -> dict:
     """List models with query param auth."""
     with httpx.Client(timeout=TIMEOUT) as client:
@@ -82,8 +129,11 @@ PROVIDERS = {
     "cerebras": lambda key, **kw: check_openai_compatible(
         key, "https://api.cerebras.ai/v1/models", "Cerebras"
     ),
-    "minimax": lambda key, **kw: check_openai_compatible(
-        key, "https://api.minimax.io/v1/models", "MiniMax"
+    "minimax": lambda key, **kw: check_minimax(key),
+    # Kimi For Coding uses an Anthropic-compatible endpoint; check via /v1/messages
+    # with empty messages (same as check_anthropic, triggers 400 not 401).
+    "kimi": lambda key, **kw: check_anthropic_compatible(
+        key, "https://api.kimi.com/coding/v1/messages", "Kimi"
     ),
 }
 
@@ -105,12 +155,17 @@ def main() -> None:
     api_base = sys.argv[3] if len(sys.argv) > 3 else ""
 
     try:
-        if api_base:
+        if api_base and provider_id == "minimax":
+            result = check_minimax(api_key, api_base)
+        elif api_base and provider_id == "kimi":
+            # Kimi uses an Anthropic-compatible endpoint; check via /v1/messages
+            result = check_anthropic_compatible(
+                api_key, api_base.rstrip("/") + "/v1/messages", "Kimi"
+            )
+        elif api_base:
             # Custom API base (ZAI or other OpenAI-compatible)
             endpoint = api_base.rstrip("/") + "/models"
-            name = {"zai": "ZAI", "minimax": "MiniMax"}.get(
-                provider_id, "Custom provider"
-            )
+            name = {"zai": "ZAI"}.get(provider_id, "Custom provider")
             result = check_openai_compatible(api_key, endpoint, name)
         elif provider_id in PROVIDERS:
             result = PROVIDERS[provider_id](api_key)

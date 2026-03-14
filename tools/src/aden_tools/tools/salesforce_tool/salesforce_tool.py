@@ -338,3 +338,125 @@ def register_tools(
             return {"error": "Request timed out"}
         except httpx.RequestError as e:
             return {"error": f"Network error: {e}"}
+
+    @mcp.tool()
+    def salesforce_delete_record(
+        object_type: str,
+        record_id: str,
+    ) -> dict:
+        """
+        Delete a Salesforce record by its ID.
+
+        Args:
+            object_type: SObject type (e.g. "Lead", "Contact", "Account").
+            record_id: The 15 or 18-character Salesforce record ID.
+
+        Returns:
+            Dict with success status or error.
+        """
+        creds = _get_creds(credentials)
+        if isinstance(creds, dict):
+            return creds
+        token, instance_url = creds
+
+        if not object_type or not record_id:
+            return {"error": "object_type and record_id are required"}
+
+        try:
+            url = f"{instance_url}/services/data/{API_VERSION}/sobjects/{object_type}/{record_id}"
+            resp = httpx.delete(url, headers=_headers(token), timeout=30.0)
+            return _handle_response(resp)
+        except httpx.TimeoutException:
+            return {"error": "Request timed out"}
+        except httpx.RequestError as e:
+            return {"error": f"Network error: {e}"}
+
+    @mcp.tool()
+    def salesforce_search_records(
+        search_query: str,
+    ) -> dict:
+        """
+        Full-text search across Salesforce records using SOSL.
+
+        More flexible than SOQL for keyword searches across multiple objects.
+
+        Args:
+            search_query: SOSL search string.
+                e.g. "FIND {John Smith} IN ALL FIELDS RETURNING Contact(Id, Name), Lead(Id, Name)"
+
+        Returns:
+            Dict with search results grouped by SObject type.
+        """
+        creds = _get_creds(credentials)
+        if isinstance(creds, dict):
+            return creds
+        token, instance_url = creds
+
+        if not search_query:
+            return {"error": "search_query is required"}
+
+        try:
+            url = f"{instance_url}/services/data/{API_VERSION}/search/"
+            resp = httpx.get(
+                url,
+                headers=_headers(token),
+                params={"q": search_query},
+                timeout=30.0,
+            )
+            result = _handle_response(resp)
+            if "error" in result:
+                return result
+
+            # Result is a list of search results
+            if isinstance(result, list):
+                return {"records": result, "count": len(result)}
+            records = result.get("searchRecords", [])
+            return {"records": records, "count": len(records)}
+        except httpx.TimeoutException:
+            return {"error": "Request timed out"}
+        except httpx.RequestError as e:
+            return {"error": f"Network error: {e}"}
+
+    @mcp.tool()
+    def salesforce_get_record_count(
+        object_type: str,
+    ) -> dict:
+        """
+        Get the total number of records for a Salesforce SObject type.
+
+        Uses SELECT COUNT() for an efficient count without returning records.
+
+        Args:
+            object_type: SObject type (e.g. "Lead", "Contact", "Account", "Opportunity").
+
+        Returns:
+            Dict with total_size count or error.
+        """
+        creds = _get_creds(credentials)
+        if isinstance(creds, dict):
+            return creds
+        token, instance_url = creds
+
+        if not object_type:
+            return {"error": "object_type is required"}
+
+        try:
+            url = f"{instance_url}/services/data/{API_VERSION}/query/"
+            resp = httpx.get(
+                url,
+                headers=_headers(token),
+                params={"q": f"SELECT COUNT() FROM {object_type}"},
+                timeout=30.0,
+            )
+            result = _handle_response(resp)
+            if "error" in result:
+                return result
+
+            return {
+                "object_type": object_type,
+                "total_size": result.get("totalSize", 0),
+            }
+        except httpx.TimeoutException:
+            return {"error": "Request timed out"}
+        except httpx.RequestError as e:
+            return {"error": f"Network error: {e}"}
