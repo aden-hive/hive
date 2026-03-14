@@ -301,17 +301,10 @@ if [ "$NODE_AVAILABLE" = true ]; then
 fi
 
 # ============================================================
-# Step 3: Configure LLM API Key
-# ============================================================
-
-echo -e "${YELLOW}⬢${NC} ${BLUE}${BOLD}Step 3: Configuring LLM provider...${NC}"
-echo ""
-
-# ============================================================
 # Step 3: Verify Python Imports
 # ============================================================
 
-echo -e "${BLUE}Step 3: Verifying Python imports...${NC}"
+echo -e "${YELLOW}⬢${NC} ${BLUE}${BOLD}Step 3: Verifying Python imports...${NC}"
 echo ""
 
 IMPORT_ERRORS=0
