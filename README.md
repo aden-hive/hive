@@ -45,7 +45,14 @@ Visit [adenhq.com](https://adenhq.com) for complete documentation, examples, and
 
 ## Who Is Hive For?
 
-Hive is designed for developers and teams who want to build many **autonomous AI agents** fast without manually wiring complex workflows.
+Hive is designed for developers and teams who want to build **autonomous AI agents** at scale without manually wiring complex workflows.
+
+It is a perfect fit for:
+
+- **AI/ML Engineers:** Who need to deploy models as autonomous agents that can capture failure data and self-evolve their own node graphs.
+- **DevOps & Automation Teams:** Who want to build self-healing infrastructure agents that can process logs and fix environment issues using **Browser-Use** and **MCP tools**.
+- **Full-Stack Developers:** Who want to integrate "Queen Bee" coordination into **React/NextJS** or **FastAPI** apps to handle complex, multi-step business logic.
+- **QA & Testing Engineers:** Who need a framework that supports **Human-in-the-Loop** intervention and real-time observability to ensure agent reliability in production.
 
 Hive is a good fit if you:
 
