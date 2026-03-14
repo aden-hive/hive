@@ -113,7 +113,7 @@ This sets up:
 
 - Finally, it will open the Hive interface in your browser
 
-> **Tip:** To reopen the dashboard later, run `hive open` from the project directory.
+> **Tip:** To reopen the dashboard later, run `hive open` from the repo root directory. If `hive` is not found, run `source $HOME/.local/bin/env` first.
 
 <img width="2500" height="1214" alt="home-screen" src="https://github.com/user-attachments/assets/134d897f-5e75-4874-b00b-e0505f6b45c4" />
 
