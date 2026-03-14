@@ -89,6 +89,11 @@ def main():
 
     register_testing_commands(subparsers)
 
+    # Register skill trust commands (skill trust list/add/remove/status)
+    from framework.cli_skill import register_skill_trust_commands
+
+    register_skill_trust_commands(subparsers)
+
     args = parser.parse_args()
 
     if hasattr(args, "func"):

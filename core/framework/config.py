@@ -183,6 +183,39 @@ def get_llm_extra_kwargs() -> dict[str, Any]:
 
 
 # ---------------------------------------------------------------------------
+# Trust and skill configuration
+# ---------------------------------------------------------------------------
+
+HIVE_DIR = Path.home() / ".hive"
+DEFAULT_TRUSTED_ORGS = ["github.com"]
+
+
+def get_hive_dir() -> Path:
+    """Return the ~/.hive directory path.
+
+    This is the base directory for Hive configuration, credentials,
+    and trusted repository storage.
+    """
+    return HIVE_DIR
+
+
+def get_trusted_orgs() -> list[str]:
+    """Return list of orgs/domains to auto-trust.
+
+    Reads from:
+    - ~/.hive/configuration.json -> trusted_orgs
+
+    Returns:
+        List of org/domain strings to auto-trust
+    """
+    config = get_hive_config()
+    orgs = config.get("trusted_orgs", [])
+    if isinstance(orgs, list):
+        return [str(o) for o in orgs if o]
+    return DEFAULT_TRUSTED_ORGS
+
+
+# ---------------------------------------------------------------------------
 # RuntimeConfig – shared across agent templates
 # ---------------------------------------------------------------------------
 
