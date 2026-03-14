@@ -14,7 +14,7 @@ Complete setup from zero to running. Estimated time: 30 minutes.
 ./scripts/setup-bounty-labels.sh
 ```
 
-This creates 7 labels: 4 bounty types (`bounty:test`, `bounty:docs`, `bounty:code`, `bounty:new-tool`) and 3 difficulty levels (`difficulty:easy`, `difficulty:medium`, `difficulty:hard`).
+This creates 11 labels: 4 integration bounty types (`bounty:test`, `bounty:docs`, `bounty:code`, `bounty:new-tool`), 4 standard bounty sizes (`bounty:small`, `bounty:medium`, `bounty:large`, `bounty:extreme`), and 3 difficulty levels (`difficulty:easy`, `difficulty:medium`, `difficulty:hard`).
 
 ## Step 2: Create Discord Channels (3 min)
 

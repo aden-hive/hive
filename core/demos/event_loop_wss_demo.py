@@ -601,7 +601,7 @@ async def handle_ws(websocket):
         )
         node = EventLoopNode(
             event_bus=bus,
-            config=LoopConfig(max_iterations=10_000, max_history_tokens=32_000),
+            config=LoopConfig(max_iterations=10_000, max_context_tokens=32_000),
             conversation_store=STORE,
             tool_executor=tool_executor,
         )

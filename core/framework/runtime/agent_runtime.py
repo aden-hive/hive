@@ -8,6 +8,7 @@ while preserving the goal-driven approach.
 import asyncio
 import logging
 import time
+import uuid
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -822,7 +823,8 @@ class AgentRuntime:
         if stream is None:
             raise ValueError(f"Entry point '{entry_point_id}' not found")
 
-        return await stream.execute(input_data, correlation_id, session_state)
+        run_id = uuid.uuid4().hex[:12]
+        return await stream.execute(input_data, correlation_id, session_state, run_id=run_id)
 
     async def trigger_and_wait(
         self,
@@ -1359,8 +1361,8 @@ class AgentRuntime:
                 allowed_keys = set(entry_node.input_keys)
 
         # Search primary graph's streams for an active session.
-        # Skip isolated streams (e.g. health judge) — they have their own
-        # session directories and must never be used as a shared session.
+        # Skip isolated streams — they have their own session directories
+        # and must never be used as a shared session.
         all_streams: list[tuple[str, ExecutionStream]] = []
         for _gid, reg in self._graphs.items():
             for ep_id, stream in reg.streams.items():
@@ -1531,6 +1533,11 @@ class AgentRuntime:
                 for executor in stream._active_executors.values():
                     for node_id, node in executor.node_registry.items():
                         if getattr(node, "_awaiting_input", False):
+                            # Skip escalation receivers — those are handled
+                            # by the queen via inject_worker_message(), not
+                            # by the user directly.
+                            if ":escalation:" in node_id:
+                                continue
                             return node_id, graph_id
         return None, None
 

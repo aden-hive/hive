@@ -1,0 +1,78 @@
+name: Standard Bounty
+description: A bounty task for general framework contributions (not integration-specific)
+title: "[Bounty]: "
+labels: []
+body:
+  - type: markdown
+    attributes:
+      value: |
+        ## Standard Bounty
+
+        This issue is part of the [Bounty Program](../../docs/bounty-program/README.md).
+        **Claim this bounty** by commenting below — a maintainer will assign you within 24 hours.
+
+  - type: dropdown
+    id: bounty-size
+    attributes:
+      label: Bounty Size
+      options:
+        - "Small (10 pts)"
+        - "Medium (30 pts)"
+        - "Large (75 pts)"
+        - "Extreme (150 pts)"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: difficulty
+    attributes:
+      label: Difficulty
+      options:
+        - Easy
+        - Medium
+        - Hard
+    validations:
+      required: true
+
+  - type: textarea
+    id: description
+    attributes:
+      label: Description
+      description: What needs to be done to complete this bounty.
+      placeholder: |
+        Describe the specific task, including:
+        - What the contributor needs to do
+        - Links to relevant files in the repo
+        - Any context or motivation for the change
+    validations:
+      required: true
+
+  - type: textarea
+    id: acceptance-criteria
+    attributes:
+      label: Acceptance Criteria
+      description: What "done" looks like. The PR must meet all criteria.
+      placeholder: |
+        - [ ] Criterion 1
+        - [ ] Criterion 2
+        - [ ] CI passes
+    validations:
+      required: true
+
+  - type: textarea
+    id: relevant-files
+    attributes:
+      label: Relevant Files
+      description: Links to files or directories related to this bounty.
+      placeholder: |
+        - `path/to/file.py`
+        - `path/to/directory/`
+
+  - type: textarea
+    id: resources
+    attributes:
+      label: Resources
+      description: Links to docs, issues, or external references that will help.
+      placeholder: |
+        - Related issue: #XXXX
+        - Docs: https://...
