@@ -113,7 +113,13 @@ function NewTabPopover({ open, onClose, anchorRef, discoverAgents, onFromScratch
   useEffect(() => {
     if (open && anchorRef.current) {
       const rect = anchorRef.current.getBoundingClientRect();
-      setPos({ top: rect.bottom + 4, left: rect.left });
+      const POPUP_WIDTH = 240; // w-60 = 15rem = 240px
+      const overflows = rect.left + POPUP_WIDTH > window.innerWidth - 8;
+      console.log("Anchor rect:", rect, "Overflows:", overflows);
+setPos({
+  top: rect.bottom + 4,
+  left: overflows ? rect.right - POPUP_WIDTH : rect.left,
+});
     }
   }, [open, anchorRef]);
 
