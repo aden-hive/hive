@@ -196,6 +196,102 @@ describe("sseEventToChatMessage", () => {
     );
   });
 
+  it("different inner_turn values produce different message IDs", () => {
+    const e1 = makeEvent({
+      type: "client_output_delta",
+      node_id: "queen",
+      execution_id: "exec-1",
+      data: { snapshot: "first response", iteration: 0, inner_turn: 0 },
+    });
+    const e2 = makeEvent({
+      type: "client_output_delta",
+      node_id: "queen",
+      execution_id: "exec-1",
+      data: { snapshot: "after tool call", iteration: 0, inner_turn: 1 },
+    });
+    const r1 = sseEventToChatMessage(e1, "t");
+    const r2 = sseEventToChatMessage(e2, "t");
+    expect(r1!.id).not.toBe(r2!.id);
+  });
+
+  it("same inner_turn produces same ID (streaming upsert within one LLM call)", () => {
+    const e1 = makeEvent({
+      type: "client_output_delta",
+      node_id: "queen",
+      execution_id: "exec-1",
+      data: { snapshot: "partial", iteration: 0, inner_turn: 1 },
+    });
+    const e2 = makeEvent({
+      type: "client_output_delta",
+      node_id: "queen",
+      execution_id: "exec-1",
+      data: { snapshot: "partial response", iteration: 0, inner_turn: 1 },
+    });
+    expect(sseEventToChatMessage(e1, "t")!.id).toBe(
+      sseEventToChatMessage(e2, "t")!.id,
+    );
+  });
+
+  it("absent inner_turn produces same ID as inner_turn=0 (backward compat)", () => {
+    const withField = makeEvent({
+      type: "client_output_delta",
+      node_id: "queen",
+      execution_id: "exec-1",
+      data: { snapshot: "hello", iteration: 2, inner_turn: 0 },
+    });
+    const withoutField = makeEvent({
+      type: "client_output_delta",
+      node_id: "queen",
+      execution_id: "exec-1",
+      data: { snapshot: "hello", iteration: 2 },
+    });
+    expect(sseEventToChatMessage(withField, "t")!.id).toBe(
+      sseEventToChatMessage(withoutField, "t")!.id,
+    );
+  });
+
+  it("inner_turn=0 produces no suffix (matches old ID format)", () => {
+    const event = makeEvent({
+      type: "client_output_delta",
+      node_id: "queen",
+      execution_id: "exec-1",
+      data: { snapshot: "hello", iteration: 3, inner_turn: 0 },
+    });
+    const result = sseEventToChatMessage(event, "t");
+    expect(result!.id).toBe("stream-exec-1-3-queen");
+  });
+
+  it("inner_turn>0 adds -t suffix to ID", () => {
+    const event = makeEvent({
+      type: "client_output_delta",
+      node_id: "queen",
+      execution_id: "exec-1",
+      data: { snapshot: "hello", iteration: 3, inner_turn: 2 },
+    });
+    const result = sseEventToChatMessage(event, "t");
+    expect(result!.id).toBe("stream-exec-1-3-t2-queen");
+  });
+
+  it("llm_text_delta also uses inner_turn for distinct IDs", () => {
+    const e1 = makeEvent({
+      type: "llm_text_delta",
+      node_id: "research",
+      execution_id: "exec-1",
+      data: { snapshot: "first", inner_turn: 0 },
+    });
+    const e2 = makeEvent({
+      type: "llm_text_delta",
+      node_id: "research",
+      execution_id: "exec-1",
+      data: { snapshot: "second", inner_turn: 1 },
+    });
+    const r1 = sseEventToChatMessage(e1, "t");
+    const r2 = sseEventToChatMessage(e2, "t");
+    expect(r1!.id).not.toBe(r2!.id);
+    expect(r1!.id).toBe("stream-exec-1-research");
+    expect(r2!.id).toBe("stream-exec-1-t1-research");
+  });
+
   it("uses timestamp fallback when both turnId and execution_id are null", () => {
     const event = makeEvent({
       type: "client_output_delta",

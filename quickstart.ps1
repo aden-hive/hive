@@ -6,7 +6,7 @@
 .DESCRIPTION
     An interactive setup wizard that:
     1. Installs Python dependencies via uv
-    2. Installs Playwright browser for web scraping
+    2. Checks for Chrome/Edge browser for web automation
     3. Helps configure LLM API keys
     4. Verifies everything works
 
@@ -518,22 +518,14 @@ try {
         exit 1
     }
 
-    # Install Playwright browser
-    Write-Host "  Installing Playwright browser... " -NoNewline
-    $null = & uv run python -c "import playwright" 2>&1
-    $importExitCode = $LASTEXITCODE
-    if ($importExitCode -eq 0) {
-        $null = & uv run python -m playwright install chromium 2>&1
-        $playwrightExitCode = $LASTEXITCODE
-
-        if ($playwrightExitCode -eq 0) {
-            Write-Ok "ok"
-        } else {
-            Write-Warn "skipped (install manually: uv run python -m playwright install chromium)"
-        }
+    # Check for Chrome/Edge (required for GCU browser tools)
+    Write-Host "  Checking for Chrome/Edge browser... " -NoNewline
+    $null = & uv run python -c "from gcu.browser.chrome_finder import find_chrome; assert find_chrome()" 2>&1
+    $chromeCheckExit = $LASTEXITCODE
+    if ($chromeCheckExit -eq 0) {
+        Write-Ok "ok"
     } else {
-
-        Write-Warn "skipped"
+        Write-Warn "not found - install Chrome or Edge for browser tools"
     }
 } finally {
     Pop-Location
@@ -810,26 +802,26 @@ $DefaultModels = @{
 # Model choices: array of hashtables per provider
 $ModelChoices = @{
     anthropic = @(
-        @{ Id = "claude-haiku-4-5-20251001";  Label = "Haiku 4.5 - Fast + cheap (recommended)"; MaxTokens = 8192 },
-        @{ Id = "claude-sonnet-4-20250514";   Label = "Sonnet 4 - Fast + capable";              MaxTokens = 8192 },
-        @{ Id = "claude-sonnet-4-5-20250929"; Label = "Sonnet 4.5 - Best balance";              MaxTokens = 16384 },
-        @{ Id = "claude-opus-4-6";            Label = "Opus 4.6 - Most capable";                MaxTokens = 32768 }
+        @{ Id = "claude-haiku-4-5-20251001";  Label = "Haiku 4.5 - Fast + cheap (recommended)"; MaxTokens = 8192;  MaxContextTokens = 180000 },
+        @{ Id = "claude-sonnet-4-20250514";   Label = "Sonnet 4 - Fast + capable";              MaxTokens = 8192;  MaxContextTokens = 180000 },
+        @{ Id = "claude-sonnet-4-5-20250929"; Label = "Sonnet 4.5 - Best balance";              MaxTokens = 16384; MaxContextTokens = 180000 },
+        @{ Id = "claude-opus-4-6";            Label = "Opus 4.6 - Most capable";                MaxTokens = 32768; MaxContextTokens = 180000 }
     )
     openai = @(
-        @{ Id = "gpt-5-mini"; Label = "GPT-5 Mini - Fast + cheap (recommended)"; MaxTokens = 16384 },
-        @{ Id = "gpt-5.2";   Label = "GPT-5.2 - Most capable";                   MaxTokens = 16384 }
+        @{ Id = "gpt-5-mini"; Label = "GPT-5 Mini - Fast + cheap (recommended)"; MaxTokens = 16384; MaxContextTokens = 120000 },
+        @{ Id = "gpt-5.2";   Label = "GPT-5.2 - Most capable";                   MaxTokens = 16384; MaxContextTokens = 120000 }
     )
     gemini = @(
-        @{ Id = "gemini-3-flash-preview"; Label = "Gemini 3 Flash - Fast (recommended)"; MaxTokens = 8192 },
-        @{ Id = "gemini-3.1-pro-preview";  Label = "Gemini 3.1 Pro - Best quality";        MaxTokens = 8192 }
+        @{ Id = "gemini-3-flash-preview"; Label = "Gemini 3 Flash - Fast (recommended)"; MaxTokens = 8192; MaxContextTokens = 900000 },
+        @{ Id = "gemini-3.1-pro-preview";  Label = "Gemini 3.1 Pro - Best quality";       MaxTokens = 8192; MaxContextTokens = 900000 }
     )
     groq = @(
-        @{ Id = "moonshotai/kimi-k2-instruct-0905"; Label = "Kimi K2 - Best quality (recommended)"; MaxTokens = 8192 },
-        @{ Id = "openai/gpt-oss-120b";              Label = "GPT-OSS 120B - Fast reasoning";        MaxTokens = 8192 }
+        @{ Id = "moonshotai/kimi-k2-instruct-0905"; Label = "Kimi K2 - Best quality (recommended)"; MaxTokens = 8192; MaxContextTokens = 120000 },
+        @{ Id = "openai/gpt-oss-120b";              Label = "GPT-OSS 120B - Fast reasoning";        MaxTokens = 8192; MaxContextTokens = 120000 }
     )
     cerebras = @(
-        @{ Id = "zai-glm-4.7";                    Label = "ZAI-GLM 4.7 - Best quality (recommended)"; MaxTokens = 8192 },
-        @{ Id = "qwen3-235b-a22b-instruct-2507";  Label = "Qwen3 235B - Frontier reasoning";          MaxTokens = 8192 }
+        @{ Id = "zai-glm-4.7";                    Label = "ZAI-GLM 4.7 - Best quality (recommended)"; MaxTokens = 8192; MaxContextTokens = 120000 },
+        @{ Id = "qwen3-235b-a22b-instruct-2507";  Label = "Qwen3 235B - Frontier reasoning";          MaxTokens = 8192; MaxContextTokens = 120000 }
     )
 }
 
@@ -838,10 +830,10 @@ function Get-ModelSelection {
 
     $choices = $ModelChoices[$ProviderId]
     if (-not $choices -or $choices.Count -eq 0) {
-        return @{ Model = $DefaultModels[$ProviderId]; MaxTokens = 8192 }
+        return @{ Model = $DefaultModels[$ProviderId]; MaxTokens = 8192; MaxContextTokens = 120000 }
     }
     if ($choices.Count -eq 1) {
-        return @{ Model = $choices[0].Id; MaxTokens = $choices[0].MaxTokens }
+        return @{ Model = $choices[0].Id; MaxTokens = $choices[0].MaxTokens; MaxContextTokens = $choices[0].MaxContextTokens }
     }
 
     # Find default index from previous model (if same provider)
@@ -874,7 +866,7 @@ function Get-ModelSelection {
                 $sel = $choices[$num - 1]
                 Write-Host ""
                 Write-Ok "Model: $($sel.Id)"
-                return @{ Model = $sel.Id; MaxTokens = $sel.MaxTokens }
+                return @{ Model = $sel.Id; MaxTokens = $sel.MaxTokens; MaxContextTokens = $sel.MaxContextTokens }
             }
         }
         Write-Color -Text "Invalid choice. Please enter 1-$($choices.Count)" -Color Red
@@ -891,11 +883,12 @@ Write-Step -Number "" -Text "Configuring LLM provider..."
 $HiveConfigDir  = Join-Path $env:USERPROFILE ".hive"
 $HiveConfigFile = Join-Path $HiveConfigDir "configuration.json"
 
-$SelectedProviderId = ""
-$SelectedEnvVar     = ""
-$SelectedModel      = ""
-$SelectedMaxTokens  = 8192
-$SubscriptionMode   = ""
+$SelectedProviderId      = ""
+$SelectedEnvVar          = ""
+$SelectedModel           = ""
+$SelectedMaxTokens       = 8192
+$SelectedMaxContextTokens = 120000
+$SubscriptionMode        = ""
 
 # ── Credential detection (silent — just set flags) ───────────
 $ClaudeCredDetected = $false
@@ -1071,20 +1064,22 @@ switch ($num) {
             Write-Host ""
             exit 1
         }
-        $SubscriptionMode   = "claude_code"
-        $SelectedProviderId = "anthropic"
-        $SelectedModel      = "claude-opus-4-6"
-        $SelectedMaxTokens  = 32768
+        $SubscriptionMode        = "claude_code"
+        $SelectedProviderId      = "anthropic"
+        $SelectedModel           = "claude-opus-4-6"
+        $SelectedMaxTokens       = 32768
+        $SelectedMaxContextTokens = 180000
         Write-Host ""
         Write-Ok "Using Claude Code subscription"
     }
     2 {
         # ZAI Code Subscription
-        $SubscriptionMode   = "zai_code"
-        $SelectedProviderId = "openai"
-        $SelectedEnvVar     = "ZAI_API_KEY"
-        $SelectedModel      = "glm-5"
-        $SelectedMaxTokens  = 32768
+        $SubscriptionMode        = "zai_code"
+        $SelectedProviderId      = "openai"
+        $SelectedEnvVar          = "ZAI_API_KEY"
+        $SelectedModel           = "glm-5"
+        $SelectedMaxTokens       = 32768
+        $SelectedMaxContextTokens = 120000
         Write-Host ""
         Write-Ok "Using ZAI Code subscription"
         Write-Color -Text "  Model: glm-5 | API: api.z.ai" -Color DarkGray
@@ -1113,21 +1108,23 @@ switch ($num) {
             }
         }
         if ($CodexCredDetected) {
-            $SubscriptionMode   = "codex"
-            $SelectedProviderId = "openai"
-            $SelectedModel      = "gpt-5.3-codex"
-            $SelectedMaxTokens  = 16384
+            $SubscriptionMode        = "codex"
+            $SelectedProviderId      = "openai"
+            $SelectedModel           = "gpt-5.3-codex"
+            $SelectedMaxTokens       = 16384
+            $SelectedMaxContextTokens = 120000
             Write-Host ""
             Write-Ok "Using OpenAI Codex subscription"
         }
     }
     4 {
         # Kimi Code Subscription
-        $SubscriptionMode   = "kimi_code"
-        $SelectedProviderId = "kimi"
-        $SelectedEnvVar     = "KIMI_API_KEY"
-        $SelectedModel      = "kimi-k2.5"
-        $SelectedMaxTokens  = 32768
+        $SubscriptionMode        = "kimi_code"
+        $SelectedProviderId      = "kimi"
+        $SelectedEnvVar          = "KIMI_API_KEY"
+        $SelectedModel           = "kimi-k2.5"
+        $SelectedMaxTokens       = 32768
+        $SelectedMaxContextTokens = 120000
         Write-Host ""
         Write-Ok "Using Kimi Code subscription"
         Write-Color -Text "  Model: kimi-k2.5 | API: api.kimi.com/coding" -Color DarkGray
@@ -1349,8 +1346,9 @@ if ($SubscriptionMode -eq "kimi_code") {
 # Prompt for model if not already selected (manual provider path)
 if ($SelectedProviderId -and -not $SelectedModel) {
     $modelSel = Get-ModelSelection $SelectedProviderId
-    $SelectedModel     = $modelSel.Model
-    $SelectedMaxTokens = $modelSel.MaxTokens
+    $SelectedModel            = $modelSel.Model
+    $SelectedMaxTokens        = $modelSel.MaxTokens
+    $SelectedMaxContextTokens = $modelSel.MaxContextTokens
 }
 
 # Save configuration
@@ -1367,9 +1365,10 @@ if ($SelectedProviderId) {
 
     $config = @{
         llm = @{
-            provider       = $SelectedProviderId
-            model          = $SelectedModel
-            max_tokens     = $SelectedMaxTokens
+            provider           = $SelectedProviderId
+            model              = $SelectedModel
+            max_tokens         = $SelectedMaxTokens
+            max_context_tokens = $SelectedMaxContextTokens
         }
         created_at = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ss+00:00")
     }
