@@ -17,8 +17,8 @@ from pathlib import Path
 from typing import Any
 
 try:
-    import litellm
-    from litellm.exceptions import RateLimitError
+    import litellm  # type: ignore
+    from litellm.exceptions import RateLimitError  # type: ignore
 except ImportError:
     litellm = None  # type: ignore[assignment]
     RateLimitError = Exception  # type: ignore[assignment, misc]
