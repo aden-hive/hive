@@ -1661,6 +1661,9 @@ class GraphExecutor:
                 node_visit_counts=dict(node_visit_counts),
             )
 
+        except (KeyboardInterrupt, SystemExit):
+            raise
+
         except Exception as e:
             import traceback
 
