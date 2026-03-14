@@ -208,6 +208,44 @@ class TestViewFileTool:
         assert "error" in result
         assert "Failed to read file" in result["error"]
 
+    def test_view_file_truncation_does_not_split_multibyte_chars(
+        self, view_file_fn, mock_workspace, mock_secure_path, tmp_path
+    ):
+        """Regression: content[:max_size] treats a byte limit as a char limit.
+        Byte-slicing the encoded buffer + errors='ignore' is the correct fix.
+        """
+        # 5 emoji × 4 bytes = 20 bytes; max_size=6 fits exactly one (4 bytes)
+        emoji_content = "🌍🌎🌏🌐🌑"
+        test_file = tmp_path / "emoji.txt"
+        test_file.write_text(emoji_content, encoding="utf-8")
+
+        result = view_file_fn(path="emoji.txt", max_size=6, **mock_workspace)
+
+        assert result["success"] is True
+        assert "[... Content truncated due to size limit ...]" in result["content"]
+        retained = result["content"].split("\n\n[... Content truncated due to size limit ...]")[0]
+        retained.encode("utf-8")  # raises if truncation left a partial sequence
+        for ch in retained:
+            assert ord(ch) > 0, "Broken/null character found after truncation"
+
+    def test_view_file_size_bytes_matches_actual_encoding(
+        self, view_file_fn, mock_workspace, mock_secure_path, tmp_path
+    ):
+        """Regression: size_bytes was hardcoded to utf-8 regardless of encoding param."""
+        content = "Hello"
+        test_file = tmp_path / "utf16.txt"
+        test_file.write_text(content, encoding="utf-16")
+
+        result = view_file_fn(path="utf16.txt", encoding="utf-16", **mock_workspace)
+
+        assert result["success"] is True
+        assert result["content"] == content
+        # utf-16: BOM(2) + 5×2 = 12 bytes, not the 5 utf-8 would give
+        expected_bytes = len(content.encode("utf-16"))
+        assert result["size_bytes"] == expected_bytes, (
+            f"expected {expected_bytes} (utf-16), got {result['size_bytes']}"
+        )
+
     def test_offset_without_hashline_returns_error(
         self, view_file_fn, mock_workspace, mock_secure_path, tmp_path
     ):
