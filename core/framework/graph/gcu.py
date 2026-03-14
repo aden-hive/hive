@@ -83,15 +83,33 @@ Follow these rules for reliable, efficient browser interaction.
   then `browser_start`, then retry.
 
 ## Tab Management
-- Use `browser_tabs` to list open tabs when managing multiple pages.
-- Pass `target_id` to tools when operating on a specific tab.
-- Open background tabs with `browser_open(url=..., background=true)`
-  to avoid losing your current context.
-- Popup tabs (target="_blank" links, window.open()) are auto-tracked.
-  Check `browser_tabs` if unexpected tabs appear.
-- Close tabs you no longer need with `browser_close` to free resources.
-- Use `browser_close_all` to close all tabs except the active one
-  when cleaning up after multi-tab workflows.
+
+**Close tabs as soon as you are done with them** — not only at the end of the task.
+After reading or extracting data from a tab, close it immediately.
+
+**Decision rules:**
+- Finished reading/extracting from a tab? → `browser_close(target_id=...)`
+- Completed a multi-tab workflow? → `browser_close_finished()` to clean up all your tabs
+- More than 3 tabs open? → stop and close finished ones before opening more
+- Popup appeared that you didn't need? → close it immediately
+
+**Origin awareness:** `browser_tabs` returns an `origin` field for each tab:
+- `"agent"` — you opened it; you own it; close it when done
+- `"popup"` — opened by a link or script; close after extracting what you need
+- `"startup"` or `"user"` — leave these alone unless the task requires it
+
+**Cleanup tools:**
+- `browser_close(target_id=...)` — close one specific tab
+- `browser_close_finished()` — close all your agent/popup tabs (safe: leaves startup/user tabs)
+- `browser_close_all()` — close everything except the active tab (use only for full reset)
+
+**Multi-tab workflow pattern:**
+1. Open background tabs with `browser_open(url=..., background=true)` to stay on current tab
+2. Process each tab and close it with `browser_close` when done
+3. When the full workflow completes, call `browser_close_finished()` to confirm cleanup
+4. Check `browser_tabs` at any point — it shows `origin` and `age_seconds` per tab
+
+Never accumulate tabs. Treat every tab you open as a resource you must free.
 
 ## Login & Auth Walls
 - If you see a "Log in" or "Sign up" prompt instead of expected

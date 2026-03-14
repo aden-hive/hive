@@ -440,7 +440,9 @@ class SessionManager:
             if meta_path.exists():
                 existing_meta = json.loads(meta_path.read_text(encoding="utf-8"))
             existing_meta["agent_name"] = _agent_name
-            existing_meta["agent_path"] = str(session.worker_path) if session.worker_path else str(agent_path)
+            existing_meta["agent_path"] = (
+                str(session.worker_path) if session.worker_path else str(agent_path)
+            )
             meta_path.write_text(json.dumps(existing_meta), encoding="utf-8")
         except OSError:
             pass
