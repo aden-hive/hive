@@ -262,7 +262,7 @@ class EventBus:
         self._session_log: IO[str] | None = None
         self._session_log_iteration_offset: int = 0
         # Accumulator for client_output_delta snapshots — flushed on llm_turn_complete.
-        # Key: (stream_id, node_id, execution_id, iteration) → latest AgentEvent
+        # Key: (stream_id, node_id, execution_id, iteration, inner_turn) → latest AgentEvent
         self._pending_output_snapshots: dict[tuple, AgentEvent] = {}
 
     def set_session_log(self, path: Path, *, iteration_offset: int = 0) -> None:
@@ -328,6 +328,7 @@ class EventBus:
                 event.node_id,
                 event.execution_id,
                 event.data.get("iteration"),
+                event.data.get("inner_turn", 0),
             )
             self._pending_output_snapshots[key] = event
             return
@@ -361,7 +362,7 @@ class EventBus:
         to_flush: list[tuple] = []
         for key, _evt in self._pending_output_snapshots.items():
             if stream_id is not None:
-                k_stream, k_node, k_exec, _ = key
+                k_stream, k_node, k_exec, _, _ = key
                 if k_stream != stream_id or k_node != node_id or k_exec != execution_id:
                     continue
             to_flush.append(key)
@@ -749,6 +750,7 @@ class EventBus:
         content: str,
         snapshot: str,
         execution_id: str | None = None,
+        inner_turn: int = 0,
     ) -> None:
         """Emit LLM text delta event."""
         await self.publish(
@@ -757,7 +759,7 @@ class EventBus:
                 stream_id=stream_id,
                 node_id=node_id,
                 execution_id=execution_id,
-                data={"content": content, "snapshot": snapshot},
+                data={"content": content, "snapshot": snapshot, "inner_turn": inner_turn},
             )
         )
 
@@ -873,9 +875,10 @@ class EventBus:
         snapshot: str,
         execution_id: str | None = None,
         iteration: int | None = None,
+        inner_turn: int = 0,
     ) -> None:
         """Emit client output delta event (client_facing=True nodes)."""
-        data: dict = {"content": content, "snapshot": snapshot}
+        data: dict = {"content": content, "snapshot": snapshot, "inner_turn": inner_turn}
         if iteration is not None:
             data["iteration"] = iteration
         await self.publish(

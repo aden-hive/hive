@@ -6,7 +6,7 @@
 .DESCRIPTION
     An interactive setup wizard that:
     1. Installs Python dependencies via uv
-    2. Installs Playwright browser for web scraping
+    2. Checks for Chrome/Edge browser for web automation
     3. Helps configure LLM API keys
     4. Verifies everything works
 
@@ -577,8 +577,7 @@ try {
             Write-Warn "skipped (install manually: uv run python -m playwright install chromium)"
         }
     } else {
-
-        Write-Warn "skipped"
+        Write-Warn "not found - install Chrome or Edge for browser tools"
     }
 } finally {
     Pop-Location

@@ -4,7 +4,7 @@
 #
 # An interactive setup wizard that:
 # 1. Installs Python dependencies
-# 2. Installs Playwright browser for web scraping
+# 2. Checks for Chrome/Edge browser for web automation
 # 3. Helps configure LLM API keys
 # 4. Verifies everything works
 #
@@ -253,16 +253,12 @@ else
     exit 1
 fi
 
-# Install Playwright browser
-echo -n "  Installing Playwright browser... "
-if uv run python -c "import playwright" > /dev/null 2>&1; then
-    if uv run python -m playwright install chromium > /dev/null 2>&1; then
-        echo -e "${GREEN}ok${NC}"
-    else
-        echo -e "${YELLOW}⏭${NC}"
-    fi
+# Check for Chrome/Edge (required for GCU browser tools)
+echo -n "  Checking for Chrome/Edge browser... "
+if uv run python -c "from gcu.browser.chrome_finder import find_chrome; assert find_chrome()" > /dev/null 2>&1; then
+    echo -e "${GREEN}ok${NC}"
 else
-    echo -e "${YELLOW}⏭${NC}"
+    echo -e "${YELLOW}not found — install Chrome or Edge for browser tools${NC}"
 fi
 
 cd "$SCRIPT_DIR"

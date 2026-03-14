@@ -2257,21 +2257,24 @@ if __name__ == "__main__":
     )
 
     # -- mcp_servers.json --
-    _write(
-        "mcp_servers.json",
-        json.dumps(
-            {
-                "hive-tools": {
-                    "transport": "stdio",
-                    "command": "uv",
-                    "args": ["run", "python", "mcp_server.py", "--stdio"],
-                    "cwd": "../../tools",
-                    "description": "Hive tools MCP server",
-                }
-            },
-            indent=2,
-        ),
-    )
+    mcp_config: dict = {
+        "hive-tools": {
+            "transport": "stdio",
+            "command": "uv",
+            "args": ["run", "python", "mcp_server.py", "--stdio"],
+            "cwd": "../../tools",
+            "description": "Hive tools MCP server",
+        },
+        "gcu-tools": {
+            "transport": "stdio",
+            "command": "uv",
+            "args": ["run", "python", "-m", "gcu.server", "--stdio"],
+            "cwd": "../../tools",
+            "description": "GCU browser automation tools",
+        },
+    }
+
+    _write("mcp_servers.json", json.dumps(mcp_config, indent=2))
 
     # -- tests/conftest.py --
     _write(

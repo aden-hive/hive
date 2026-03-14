@@ -44,6 +44,7 @@ def register_worker_monitoring_tools(
     storage_path: Path,
     stream_id: str = "monitoring",
     worker_graph_id: str | None = None,
+    default_session_id: str | None = None,
 ) -> int:
     """Register worker monitoring tools bound to *event_bus* and *storage_path*.
 
@@ -55,6 +56,12 @@ def register_worker_monitoring_tools(
         stream_id: Stream ID used when emitting events.
         worker_graph_id: The primary worker graph's ID. Included in health summary
                          so the judge can populate ticket identity fields accurately.
+        default_session_id: When set, ``get_worker_health_summary`` uses this
+                            session ID as the default instead of auto-discovering
+                            the most-recent-by-mtime session. Callers should pass
+                            the queen's own session ID so that after a cold-restore
+                            the monitoring tool reads the correct worker session
+                            rather than a stale orphaned one.
 
     Returns:
         Number of tools registered.
@@ -97,23 +104,29 @@ def register_worker_monitoring_tools(
             if not sessions_dir.exists():
                 return json.dumps({"error": "No sessions found — worker has not started yet"})
 
-            candidates = [
-                d for d in sessions_dir.iterdir() if d.is_dir() and (d / "state.json").exists()
-            ]
-            if not candidates:
-                return json.dumps({"error": "No sessions found — worker has not started yet"})
+            # Prefer the queen's own session ID (set at registration time) over
+            # mtime-based discovery, which can pick a stale orphaned session after
+            # a cold-restore when a newer-but-empty session directory exists.
+            if default_session_id and (sessions_dir / default_session_id).is_dir():
+                session_id = default_session_id
+            else:
+                candidates = [
+                    d for d in sessions_dir.iterdir() if d.is_dir() and (d / "state.json").exists()
+                ]
+                if not candidates:
+                    return json.dumps({"error": "No sessions found — worker has not started yet"})
 
-            def _sort_key(d: Path):
-                try:
-                    state = json.loads((d / "state.json").read_text(encoding="utf-8"))
-                    # in_progress/running sorts before completed/failed
-                    priority = 0 if state.get("status", "") in ("in_progress", "running") else 1
-                    return (priority, -d.stat().st_mtime)
-                except Exception:
-                    return (2, 0)
+                def _sort_key(d: Path):
+                    try:
+                        state = json.loads((d / "state.json").read_text(encoding="utf-8"))
+                        # in_progress/running sorts before completed/failed
+                        priority = 0 if state.get("status", "") in ("in_progress", "running") else 1
+                        return (priority, -d.stat().st_mtime)
+                    except Exception:
+                        return (2, 0)
 
-            candidates.sort(key=_sort_key)
-            session_id = candidates[0].name
+                candidates.sort(key=_sort_key)
+                session_id = candidates[0].name
 
         # Resolve log paths
         session_dir = storage_path / "sessions" / session_id

@@ -113,7 +113,13 @@ function NewTabPopover({ open, onClose, anchorRef, discoverAgents, onFromScratch
   useEffect(() => {
     if (open && anchorRef.current) {
       const rect = anchorRef.current.getBoundingClientRect();
-      setPos({ top: rect.bottom + 4, left: rect.left });
+      const POPUP_WIDTH = 240; // w-60 = 15rem = 240px
+      const overflows = rect.left + POPUP_WIDTH > window.innerWidth - 8;
+      console.log("Anchor rect:", rect, "Overflows:", overflows);
+setPos({
+  top: rect.bottom + 4,
+  left: overflows ? rect.right - POPUP_WIDTH : rect.left,
+});
     }
   }, [open, anchorRef]);
 
@@ -2813,10 +2819,10 @@ export default function Workspace() {
       <div className="flex flex-1 min-h-0">
 
         {/* ── Pipeline graph + chat ──────────────────────────────────── */}
-        <div className={`${((activeAgentState?.queenPhase === "planning" || activeAgentState?.queenPhase === "building") && activeAgentState?.draftGraph) || activeAgentState?.originalDraft ? "w-[500px] min-w-[400px]" : "w-[300px] min-w-[240px]"} bg-card/30 flex flex-col border-r border-border/30 transition-[width] duration-200`}>
+        <div className={`${activeAgentState?.queenPhase === "planning" || activeAgentState?.queenPhase === "building" || activeAgentState?.originalDraft ? "w-[500px] min-w-[400px]" : "w-[300px] min-w-[240px]"} bg-card/30 flex flex-col border-r border-border/30 transition-[width] duration-200`}>
           <div className="flex-1 min-h-0">
-            {(activeAgentState?.queenPhase === "planning" || activeAgentState?.queenPhase === "building") && activeAgentState?.draftGraph ? (
-              <DraftGraph draft={activeAgentState.draftGraph} building={activeAgentState?.queenBuilding} onRun={handleRun} onPause={handlePause} runState={activeAgentState?.workerRunState ?? "idle"} />
+            {activeAgentState?.queenPhase === "planning" || activeAgentState?.queenPhase === "building" ? (
+              <DraftGraph draft={activeAgentState?.draftGraph ?? null} loading={!activeAgentState?.draftGraph} building={activeAgentState?.queenBuilding} onRun={handleRun} onPause={handlePause} runState={activeAgentState?.workerRunState ?? "idle"} />
             ) : activeAgentState?.originalDraft ? (
               <DraftGraph
                 draft={activeAgentState.originalDraft}
@@ -3089,7 +3095,15 @@ export default function Workspace() {
         agentLabel={activeWorkerLabel}
         agentPath={credentialAgentPath || activeAgentState?.agentPath || (!activeWorker.startsWith("new-agent") ? activeWorker : undefined)}
         open={credentialsOpen}
-        onClose={() => { setCredentialsOpen(false); setCredentialAgentPath(null); setDismissedBanner(null); }}
+        onClose={() => {
+          setCredentialsOpen(false);
+          setCredentialAgentPath(null);
+          // Keep credentials_required error set — clearing it here triggers
+          // the auto-load effect which retries session creation immediately,
+          // causing an infinite modal loop when credentials are still missing.
+          // The error is only cleared in onCredentialChange (below) when the
+          // user actually saves valid credentials.
+        }}
         credentials={activeSession?.credentials || []}
         onCredentialChange={() => {
           // Clear credential error so the auto-load effect retries session creation
