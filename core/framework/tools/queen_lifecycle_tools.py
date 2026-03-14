@@ -2853,6 +2853,16 @@ def register_queen_lifecycle_tools(
         else:
             parts.append("No issues detected")
 
+        # Latest subagent progress (if any delegation is in flight)
+        bus = _get_event_bus()
+        if bus:
+            sa_reports = bus.get_history(event_type=EventType.SUBAGENT_REPORT, limit=1)
+            if sa_reports:
+                latest = sa_reports[0]
+                sa_msg = str(latest.data.get("message", ""))[:200]
+                ago = _format_time_ago(latest.timestamp)
+                parts.append(f"Latest subagent update ({ago}): {sa_msg}")
+
         return ". ".join(parts) + "."
 
     def _format_activity(bus: EventBus, preamble: dict[str, Any], last_n: int) -> str:
@@ -2980,6 +2990,10 @@ def register_queen_lifecycle_tools(
                 duration = evt.data.get("duration_s")
                 dur_str = f", {duration:.1f}s" if duration else ""
                 lines.append(f"  {name} ({node}) — {status}{dur_str}")
+                result_text = evt.data.get("result", "")
+                if result_text:
+                    preview = str(result_text)[:300].replace("\n", " ")
+                    lines.append(f"    Result: {preview}")
         else:
             lines.append("No recent tool calls.")
 
@@ -3146,15 +3160,19 @@ def register_queen_lifecycle_tools(
                 for evt in running
             ]
         if tool_completed:
-            result["recent_tool_calls"] = [
-                {
+            recent_calls = []
+            for evt in tool_completed[:last_n]:
+                entry: dict[str, Any] = {
                     "tool": evt.data.get("tool_name"),
                     "error": bool(evt.data.get("is_error")),
                     "node": evt.node_id,
                     "time": evt.timestamp.isoformat(),
                 }
-                for evt in tool_completed[:last_n]
-            ]
+                result_text = evt.data.get("result", "")
+                if result_text:
+                    entry["result_preview"] = str(result_text)[:300]
+                recent_calls.append(entry)
+            result["recent_tool_calls"] = recent_calls
 
         # Node transitions
         edges = bus.get_history(event_type=EventType.EDGE_TRAVERSED, limit=last_n)
@@ -3206,6 +3224,18 @@ def register_queen_lifecycle_tools(
             )
         if issues:
             result["issues"] = issues
+
+        # Subagent activity (in-flight progress from delegated subagents)
+        sa_reports = bus.get_history(event_type=EventType.SUBAGENT_REPORT, limit=last_n)
+        if sa_reports:
+            result["subagent_activity"] = [
+                {
+                    "subagent": evt.data.get("subagent_id"),
+                    "message": str(evt.data.get("message", ""))[:300],
+                    "time": evt.timestamp.isoformat(),
+                }
+                for evt in sa_reports[:last_n]
+            ]
 
         # Constraint violations
         violations = bus.get_history(event_type=EventType.CONSTRAINT_VIOLATION, limit=5)

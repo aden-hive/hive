@@ -4679,7 +4679,7 @@ class EventLoopNode(NodeProtocol):
             )
 
         subagent_node = EventLoopNode(
-            event_bus=None,  # Subagents don't emit events to parent's bus
+            event_bus=self._event_bus,  # Subagent events visible to Queen via shared bus
             judge=SubagentJudge(task=task, max_iterations=max_iter),
             config=LoopConfig(
                 max_iterations=max_iter,  # Tighter budget
@@ -4694,25 +4694,42 @@ class EventLoopNode(NodeProtocol):
             conversation_store=subagent_conv_store,
         )
 
+        # Inject a unique GCU browser profile for this subagent so that
+        # concurrent GCU subagents (run via asyncio.gather) each get their own
+        # isolated BrowserContext.  asyncio.gather copies the current context
+        # for each coroutine, so the reset token is safe to call in finally.
+        _profile_token = None
+        try:
+            from gcu.browser.session import set_active_profile as _set_gcu_profile
+
+            _profile_token = _set_gcu_profile(f"{agent_id}-{subagent_instance}")
+        except ImportError:
+            pass  # GCU tools not installed; no-op
+
         try:
             logger.info("🚀 Starting subagent '%s' execution...", agent_id)
             start_time = time.time()
             result = await subagent_node.execute(subagent_ctx)
             latency_ms = int((time.time() - start_time) * 1000)
 
+            separator = "-" * 60
             logger.info(
-                "\n" + "-" * 60 + "\n"
+                "\n%s\n"
                 "✅ SUBAGENT '%s' COMPLETED\n"
-                "-" * 60 + "\n"
+                "%s\n"
                 "Success: %s\n"
                 "Latency: %dms\n"
                 "Tokens used: %s\n"
-                "Output keys: %s\n" + "-" * 60,
+                "Output keys: %s\n"
+                "%s",
+                separator,
                 agent_id,
+                separator,
                 result.success,
                 latency_ms,
                 result.tokens_used,
                 list(result.output.keys()) if result.output else [],
+                separator,
             )
 
             result_json = {
@@ -4758,3 +4775,29 @@ class EventLoopNode(NodeProtocol):
                 content=json.dumps(result_json, indent=2),
                 is_error=True,
             )
+        finally:
+            # Restore the GCU profile context that was set before this subagent ran.
+            if _profile_token is not None:
+                from gcu.browser.session import _active_profile as _gcu_profile_var
+
+                _gcu_profile_var.reset(_profile_token)
+
+                # Stop the browser session for this subagent's profile so tabs are
+                # closed immediately rather than accumulating until server shutdown.
+                if self._tool_executor is not None:
+                    _subagent_profile = f"{agent_id}-{subagent_instance}"
+                    try:
+                        _stop_use = ToolUse(
+                            id="gcu-cleanup",
+                            name="browser_stop",
+                            input={"profile": _subagent_profile},
+                        )
+                        _stop_result = self._tool_executor(_stop_use)
+                        if asyncio.iscoroutine(_stop_result) or asyncio.isfuture(_stop_result):
+                            await _stop_result
+                    except Exception as _gcu_exc:
+                        logger.warning(
+                            "GCU browser_stop failed for profile %r: %s",
+                            _subagent_profile,
+                            _gcu_exc,
+                        )

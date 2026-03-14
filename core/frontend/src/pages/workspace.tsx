@@ -3089,7 +3089,15 @@ export default function Workspace() {
         agentLabel={activeWorkerLabel}
         agentPath={credentialAgentPath || activeAgentState?.agentPath || (!activeWorker.startsWith("new-agent") ? activeWorker : undefined)}
         open={credentialsOpen}
-        onClose={() => { setCredentialsOpen(false); setCredentialAgentPath(null); setDismissedBanner(null); }}
+        onClose={() => {
+          setCredentialsOpen(false);
+          setCredentialAgentPath(null);
+          // Keep credentials_required error set — clearing it here triggers
+          // the auto-load effect which retries session creation immediately,
+          // causing an infinite modal loop when credentials are still missing.
+          // The error is only cleared in onCredentialChange (below) when the
+          // user actually saves valid credentials.
+        }}
         credentials={activeSession?.credentials || []}
         onCredentialChange={() => {
           // Clear credential error so the auto-load effect retries session creation

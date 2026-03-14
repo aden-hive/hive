@@ -132,6 +132,7 @@ async def create_queen(
             session.worker_path,
             stream_id="queen",
             worker_graph_id=session.worker_runtime._graph_id,
+            default_session_id=session.id,
         )
 
     queen_tools = list(queen_registry.get_tools().values())
