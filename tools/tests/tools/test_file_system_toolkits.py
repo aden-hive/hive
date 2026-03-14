@@ -391,6 +391,46 @@ class TestListDirTool:
         assert entries_by_name["subdir"]["type"] == "directory"
         assert entries_by_name["subdir"]["size_bytes"] is None
 
+    def test_list_directory_with_broken_symlink(
+        self, list_dir_fn, mock_workspace, mock_secure_path, tmp_path
+    ):
+        """Listing a directory with broken symlinks does not crash."""
+        (tmp_path / "file1.txt").write_text("content", encoding="utf-8")
+        (tmp_path / "subdir").mkdir()
+        broken_link = tmp_path / "broken_link"
+        broken_link.symlink_to("non_existent_file")
+
+        result = list_dir_fn(path=".", **mock_workspace)
+
+        assert result["success"] is True
+        assert result["total_count"] == 3
+        assert len(result["entries"]) == 3
+
+        entries_by_name = {e["name"]: e for e in result["entries"]}
+
+        assert entries_by_name["file1.txt"]["type"] == "file"
+        assert entries_by_name["subdir"]["type"] == "directory"
+        assert entries_by_name["broken_link"]["type"] == "broken_symlink"
+        assert entries_by_name["broken_link"]["size_bytes"] is None
+
+    def test_list_directory_with_multiple_broken_symlinks(
+        self, list_dir_fn, mock_workspace, mock_secure_path, tmp_path
+    ):
+        """Listing a directory with multiple broken symlinks handles all correctly."""
+        (tmp_path / "normal_file.txt").write_text("content", encoding="utf-8")
+        (tmp_path / "broken1").symlink_to("non_existent_1")
+        (tmp_path / "broken2").symlink_to("non_existent_2")
+
+        result = list_dir_fn(path=".", **mock_workspace)
+
+        assert result["success"] is True
+        assert result["total_count"] == 3
+
+        entries_by_name = {e["name"]: e for e in result["entries"]}
+        assert entries_by_name["normal_file.txt"]["type"] == "file"
+        assert entries_by_name["broken1"]["type"] == "broken_symlink"
+        assert entries_by_name["broken2"]["type"] == "broken_symlink"
+
 
 class TestReplaceFileContentTool:
     """Tests for replace_file_content tool."""

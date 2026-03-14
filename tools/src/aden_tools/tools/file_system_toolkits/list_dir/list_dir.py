@@ -23,6 +23,7 @@ def register_tools(mcp: FastMCP) -> None:
             Path must point to an existing directory
             Returns file names, types, and sizes
             Does not recurse into subdirectories
+            Broken symlinks are reported as type "broken_symlink"
 
         Args:
             path: The directory path (relative to session root)
@@ -45,12 +46,29 @@ def register_tools(mcp: FastMCP) -> None:
             entries = []
             for item in items:
                 full_path = os.path.join(secure_path, item)
-                is_dir = os.path.isdir(full_path)
-                entry = {
-                    "name": item,
-                    "type": "directory" if is_dir else "file",
-                    "size_bytes": os.path.getsize(full_path) if not is_dir else None,
-                }
+                try:
+                    is_dir = os.path.isdir(full_path)
+                    if is_dir:
+                        entry = {
+                            "name": item,
+                            "type": "directory",
+                            "size_bytes": None,
+                        }
+                    else:
+                        entry = {
+                            "name": item,
+                            "type": "file",
+                            "size_bytes": os.path.getsize(full_path),
+                        }
+                except OSError:
+                    if os.path.islink(full_path):
+                        entry = {
+                            "name": item,
+                            "type": "broken_symlink",
+                            "size_bytes": None,
+                        }
+                    else:
+                        raise
                 entries.append(entry)
 
             return {"success": True, "path": path, "entries": entries, "total_count": len(entries)}
