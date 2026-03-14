@@ -72,6 +72,7 @@ from .file_system_toolkits.replace_file_content import (
 )
 from .file_system_toolkits.view_file import register_tools as register_view_file
 from .file_system_toolkits.write_to_file import register_tools as register_write_to_file
+from .freshdesk_tool import register_tools as register_freshdesk
 from .github_tool import register_tools as register_github
 from .gitlab_tool import register_tools as register_gitlab
 from .gmail_tool import register_tools as register_gmail
@@ -299,6 +300,7 @@ def _register_unverified(
     register_zendesk(mcp, credentials=credentials)
     register_zoho_crm(mcp, credentials=credentials)
     register_zoom(mcp, credentials=credentials)
+    register_freshdesk(mcp, credentials=credentials)
 
 
 def register_all_tools(
