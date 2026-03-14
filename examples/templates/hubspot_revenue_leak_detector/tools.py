@@ -379,12 +379,19 @@ def _detect_revenue_leaks(cycle: int, deals_json: str | None = None) -> dict:
     total_at_risk = int(sum(leak.get("value", 0) for leak in leaks))
     ghosted_count = sum(1 for leak in leaks if leak["type"] == "GHOSTED")
 
-    # Contradiction detection: warn if deals exist but no leaks detected
+    # Contradiction detection: escalate and halt if deals exist but no leaks detected
     warning = None
     if len(deals) > 0 and len(leaks) == 0:
         warning = f"CONTRADICTION: {len(deals)} deals scanned but 0 leaks detected. Verify thresholds and deal data."
 
-    if (
+    # If contradiction detected, escalate to critical severity and halt immediately
+    # This prevents pipeline from continuing with inconsistent data
+    if warning:
+        severity = "critical"
+        halt = True
+        print("  🚨  CONTRADICTION DETECTED - HALTING PIPELINE")
+        print(f"  {warning}")
+    elif (
         ghosted_count >= _LEAK_THRESHOLDS["critical_ghosted_count"]
         or total_at_risk >= _LEAK_THRESHOLDS["critical_at_risk_usd"]
     ):
@@ -406,7 +413,9 @@ def _detect_revenue_leaks(cycle: int, deals_json: str | None = None) -> dict:
     if not halt and cycle_num >= MAX_TOTAL_CYCLES:
         halt = True
 
-    if warning:
+    if warning and not halt:
+        # This block shouldn't be reached after the contradiction check above,
+        # but kept as a safety net
         print(f"  ⚠️  {warning}")
 
     print(

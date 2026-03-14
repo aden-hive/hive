@@ -130,11 +130,21 @@ STEP 1 — Detect leaks:
     cycle:      the 'cycle' value from context
     deals_json: the 'deals_json' value from context (pass it through verbatim)
 
-STEP 2 — Set outputs (all values as strings):
+STEP 2 — Check for contradictions:
+  If detect_revenue_leaks result contains a 'warning' key:
+  This indicates a contradiction (deals exist but 0 leaks detected).
+  DO NOT continue normally — this is a critical data inconsistency.
+  Immediately halt the pipeline by setting:
+    "severity" → "critical"
+    "halt"     → "true"
+  Log the contradiction message before halting.
+  Do NOT proceed to STEP 3 if warning is present.
+
+STEP 3 — Set outputs (all values as strings):
   Call set_output for each key:
     "cycle"         → cycle value returned by detect_revenue_leaks
     "leak_count"    → leak_count returned by detect_revenue_leaks
-    "severity"      → severity returned by detect_revenue_leaks
+    "severity"      → severity returned by detect_revenue_leaks (use 'critical' if warning present)
     "total_at_risk" → total_at_risk returned by detect_revenue_leaks
     "halt"          → halt returned by detect_revenue_leaks ("true" or "false")
     "leaks_json"    → leaks_json returned by detect_revenue_leaks (pass verbatim)
