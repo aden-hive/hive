@@ -6,7 +6,7 @@ Analyze a GitHub issue, verify claims against the codebase, and close invalid is
 
 User provides a GitHub issue URL or number, e.g.:
 - `/triage-issue 1970`
-- `/triage-issue https://github.com/adenhq/hive/issues/1970`
+- `/triage-issue https://github.com/aden-hive/hive/issues/1970`
 
 ## Workflow
 

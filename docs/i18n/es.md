@@ -73,7 +73,7 @@ Usa Hive cuando necesites:
 - **[Guia de Auto-Hospedaje](https://docs.adenhq.com/getting-started/quickstart)** - Despliega Hive en tu infraestructura
 - **[Registro de Cambios](https://github.com/aden-hive/hive/releases)** - Ultimas actualizaciones y versiones
 - **[Hoja de Ruta](../roadmap.md)** - Funciones y planes proximos
-- **[Reportar Problemas](https://github.com/adenhq/hive/issues)** - Reportes de bugs y solicitudes de funciones
+- **[Reportar Problemas](https://github.com/aden-hive/hive/issues)** - Reportes de bugs y solicitudes de funciones
 - **[Contribuir](../../CONTRIBUTING.md)** - Como contribuir y enviar PRs
 
 ## Inicio Rapido

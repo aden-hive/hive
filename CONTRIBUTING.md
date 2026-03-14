@@ -1,5 +1,6 @@
 # Contributing to Aden Hive
 
+Thank you for your interest in contributing to the Aden Agent Framework! This document provides guidelines and information for contributors. We're especially looking for help building tools, integrations ([check #2805](https://github.com/aden-hive/hive/issues/2805)), and example agents for the framework. If you're interested in extending its functionality, this is the perfect place to start.
 > **"The best way to predict the future is to invent it."** — Alan Kay
 
 Welcome to Aden Hive, an open-source AI agent framework built for developers who demand production-grade reliability, cross-platform support, and real-world performance. This guide will help you contribute effectively, whether you're fixing bugs, adding features, improving documentation, or building new tools.

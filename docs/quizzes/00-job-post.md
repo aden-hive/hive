@@ -104,7 +104,7 @@ This is an opportunity to work on cutting-edge AI infrastructure alongside a sma
 **Show us what you can do by contributing to our open-source project:**
 
 1. **Solve an existing issue**
-   - Browse our [GitHub Issues](https://github.com/adenhq/hive/issues)
+   - Browse our [GitHub Issues](https://github.com/aden-hive/hive/issues)
    - Look for issues labeled `good first issue` or `help wanted`
    - Comment on the issue to claim it
    - Submit a Pull Request with your solution
@@ -152,6 +152,6 @@ This is an opportunity to work on cutting-edge AI infrastructure alongside a sma
 
 ---
 
-**Questions?** Email us at `contact@adenhq.com` or open an issue on [GitHub](https://github.com/adenhq/hive).
+**Questions?** Email us at `contact@adenhq.com` or open an issue on [GitHub](https://github.com/aden-hive/hive).
 
 Made with 🔥 Passion in San Francisco
