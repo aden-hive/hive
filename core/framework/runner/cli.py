@@ -485,7 +485,84 @@ def cmd_run(args: argparse.Namespace) -> int:
         print("=" * 60)
         print()
 
-    result = asyncio.run(runner.run(context, session_state=session_state))
+    while True:
+        try:
+            result = asyncio.run(runner.run(context, session_state=session_state))
+            
+            # If the error is returned in result.error instead of raising directly
+            error_str = str(result.error) if not result.success and result.error else ""
+            is_auth_error = "AuthenticationError" in error_str or "API key" in error_str
+            
+            if not is_auth_error:
+                break
+                
+        except Exception as e:
+            error_str = str(e)
+            if "AuthenticationError" not in type(e).__name__ and "AuthenticationError" not in error_str:
+                raise
+        
+        # --- Interactive Fallback ---
+        if not sys.stdin.isatty():
+            if 'result' not in locals():
+                raise RuntimeError(error_str)
+            break
+            
+        print(f"\n[!] Authentication Error: {error_str.splitlines()[-1] if error_str else 'Missing or invalid API Key'}", file=sys.stderr)
+        
+        import getpass
+        import os
+        from pathlib import Path
+        
+        print("\nIt looks like your API key is missing or invalid.")
+        api_key = getpass.getpass("Please paste your API key to continue: ").strip()
+        
+        if not api_key:
+            print("No key provided. Exiting.", file=sys.stderr)
+            return 1
+            
+        # Infer a likely key name from the model
+        key_name = "ANTHROPIC_API_KEY"
+        if args.model:
+            model_lower = args.model.lower()
+            if "gpt" in model_lower or "openai" in model_lower:
+                key_name = "OPENAI_API_KEY"
+            elif "gemini" in model_lower or "google" in model_lower:
+                key_name = "GEMINI_API_KEY"
+            elif "claude" in model_lower or "anthropic" in model_lower:
+                key_name = "ANTHROPIC_API_KEY"
+        
+        # 4. Set current process environment variables
+        os.environ[key_name] = api_key
+        
+        # 3. Persist to ~/.hive/configuration.json
+        config_path = Path("~/.hive/configuration.json").expanduser()
+        config_data = {}
+        if config_path.exists():
+            try:
+                with open(config_path, "r", encoding="utf-8") as f:
+                    config_data = json.load(f)
+            except json.JSONDecodeError:
+                pass
+                
+        if "credentials" not in config_data:
+            config_data["credentials"] = {}
+        # Ensure we don't accidentally wipe existing configs
+        config_data["credentials"][key_name] = api_key
+        
+        config_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(config_path, "w", encoding="utf-8") as f:
+            json.dump(config_data, f, indent=2)
+            
+        print(f"\nSaved {key_name} to {config_path}")
+        print("Retrying agent execution...\n")
+        
+        # Reload the runner so it picks up the new credentials
+        try:
+            from framework.runner import AgentRunner
+            runner = AgentRunner.load(args.agent_path, model=args.model)
+        except Exception as e:
+            print(f"Error reloading agent: {e}", file=sys.stderr)
+            return 1
 
     # Format output
     output = {
