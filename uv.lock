@@ -832,7 +832,7 @@ wheels = [
 
 [[package]]
 name = "framework"
-version = "0.5.1"
+version = "0.7.1"
 source = { editable = "core" }
 dependencies = [
     { name = "anthropic" },

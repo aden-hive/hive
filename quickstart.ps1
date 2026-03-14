@@ -18,6 +18,10 @@
 # Use "Continue" so stderr from external tools (uv, python) does not
 # terminate the script.  Errors are handled via $LASTEXITCODE checks.
 $ErrorActionPreference = "Continue"
+$ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Definition
+$UvHelperPath = Join-Path $ScriptDir "scripts\uv-discovery.ps1"
+
+. $UvHelperPath
 
 # ============================================================
 # Colors / helpers
@@ -94,7 +98,6 @@ function Prompt-Choice {
         Write-Color -Text "Invalid choice. Please enter 1-$($Options.Count)" -Color Red
     }
 }
-
 
 # ============================================================
 # Windows Defender Exclusion Functions
@@ -276,9 +279,6 @@ function Add-DefenderExclusions {
     }
 }
 
-# Get the directory where this script lives
-$ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Definition
-
 # ============================================================
 # Banner
 # ============================================================
@@ -352,10 +352,10 @@ Write-Host ""
 # Check / install uv
 # ============================================================
 
-$uvCmd = Get-Command uv -ErrorAction SilentlyContinue
+$uvInfo = Get-WorkingUvInfo
 
 # If uv not in PATH, check if it exists in default location
-if (-not $uvCmd) {
+if (-not $uvInfo) {
     $uvDir = Join-Path $env:USERPROFILE ".local\bin"
     $uvExePath = Join-Path $uvDir "uv.exe"
 
@@ -371,16 +371,16 @@ if (-not $uvCmd) {
 
         # Refresh PATH for current session
         $env:Path = [System.Environment]::GetEnvironmentVariable("Path", "User") + ";" + [System.Environment]::GetEnvironmentVariable("Path", "Machine")
-        $uvCmd = Get-Command uv -ErrorAction SilentlyContinue
+        $uvInfo = Get-WorkingUvInfo
 
-        if ($uvCmd) {
+        if ($uvInfo) {
             Write-Ok "uv is now in PATH"
         }
     }
 }
 
 # If still not found, install it
-if (-not $uvCmd) {
+if (-not $uvInfo) {
     Write-Warn "uv not found. Installing..."
     try {
         # Official uv installer for Windows
@@ -397,13 +397,13 @@ if (-not $uvCmd) {
 
         # Refresh PATH for current session
         $env:Path = [System.Environment]::GetEnvironmentVariable("Path", "User") + ";" + [System.Environment]::GetEnvironmentVariable("Path", "Machine")
-        $uvCmd = Get-Command uv -ErrorAction SilentlyContinue
+        $uvInfo = Get-WorkingUvInfo
     } catch {
         Write-Color -Text "Error: uv installation failed" -Color Red
         Write-Host "Please install uv manually from https://astral.sh/uv/"
         exit 1
     }
-    if (-not $uvCmd) {
+    if (-not $uvInfo) {
         Write-Color -Text "Error: uv not found after installation" -Color Red
         Write-Host "Please close and reopen PowerShell, then run this script again."
         Write-Host "Or install uv manually from https://astral.sh/uv/"
@@ -412,8 +412,8 @@ if (-not $uvCmd) {
     Write-Ok "uv installed successfully"
 }
 
-$uvVersion = & uv --version
-Write-Ok "uv detected: $uvVersion"
+$UvCmd = $uvInfo.Path
+Write-Ok "uv detected: $($uvInfo.Version)"
 Write-Host ""
 
 # Check for Node.js (needed for frontend dashboard)
@@ -503,7 +503,7 @@ try {
     if (Test-Path "pyproject.toml") {
         Write-Host "  Installing workspace packages... " -NoNewline
 
-        $syncOutput = & uv sync 2>&1
+        $syncOutput = & $UvCmd sync 2>&1
         $syncExitCode = $LASTEXITCODE
 
         if ($syncExitCode -eq 0) {
@@ -518,9 +518,9 @@ try {
         exit 1
     }
 
-    # Check for Chrome/Edge (required for GCU browser tools)
+    # Keep browser setup scoped to detecting the system browser used by GCU.
     Write-Host "  Checking for Chrome/Edge browser... " -NoNewline
-    $null = & uv run python -c "from gcu.browser.chrome_finder import find_chrome; assert find_chrome()" 2>&1
+    $null = & $UvCmd run python -c "from gcu.browser.chrome_finder import find_chrome; assert find_chrome()" 2>&1
     $chromeCheckExit = $LASTEXITCODE
     if ($chromeCheckExit -eq 0) {
         Write-Ok "ok"
@@ -720,7 +720,7 @@ $imports = @(
 $modulesToCheck = @("framework", "aden_tools", "litellm")
 
 try {
-    $checkOutput = & uv run python scripts/check_requirements.py @modulesToCheck 2>&1 | Out-String
+    $checkOutput = & $UvCmd run python scripts/check_requirements.py @modulesToCheck 2>&1 | Out-String
     $resultJson = $null
     
     # Try to parse JSON result
@@ -1091,7 +1091,7 @@ switch ($num) {
             Write-Warn "Codex credentials not found. Starting OAuth login..."
             Write-Host ""
             try {
-                & uv run python (Join-Path $ScriptDir "core\codex_oauth.py") 2>&1
+                & $UvCmd run python (Join-Path $ScriptDir "core\codex_oauth.py") 2>&1
                 if ($LASTEXITCODE -eq 0) {
                     $CodexCredDetected = $true
                 } else {
@@ -1164,7 +1164,7 @@ switch ($num) {
                 # Health check the new key
                 Write-Host "  Verifying API key... " -NoNewline
                 try {
-                    $hcResult = & uv run python (Join-Path $ScriptDir "scripts/check_llm_key.py") $SelectedProviderId $apiKey 2>$null
+                    $hcResult = & $UvCmd run python (Join-Path $ScriptDir "scripts/check_llm_key.py") $SelectedProviderId $apiKey 2>$null
                     $hcJson = $hcResult | ConvertFrom-Json
                     if ($hcJson.valid -eq $true) {
                         Write-Color -Text "ok" -Color Green
@@ -1239,7 +1239,7 @@ if ($SubscriptionMode -eq "zai_code") {
             # Health check the new key
             Write-Host "  Verifying ZAI API key... " -NoNewline
             try {
-                $hcResult = & uv run python (Join-Path $ScriptDir "scripts/check_llm_key.py") "zai" $apiKey "https://api.z.ai/api/coding/paas/v4" 2>$null
+                $hcResult = & $UvCmd run python (Join-Path $ScriptDir "scripts/check_llm_key.py") "zai" $apiKey "https://api.z.ai/api/coding/paas/v4" 2>$null
                 $hcJson = $hcResult | ConvertFrom-Json
                 if ($hcJson.valid -eq $true) {
                     Write-Color -Text "ok" -Color Green
@@ -1307,7 +1307,7 @@ if ($SubscriptionMode -eq "kimi_code") {
             # Health check the new key
             Write-Host "  Verifying Kimi API key... " -NoNewline
             try {
-                $hcResult = & uv run python (Join-Path $ScriptDir "scripts/check_llm_key.py") "kimi" $apiKey "https://api.kimi.com/coding" 2>$null
+                $hcResult = & $UvCmd run python (Join-Path $ScriptDir "scripts/check_llm_key.py") "kimi" $apiKey "https://api.kimi.com/coding" 2>$null
                 $hcJson = $hcResult | ConvertFrom-Json
                 if ($hcJson.valid -eq $true) {
                     Write-Color -Text "ok" -Color Green
@@ -1459,7 +1459,7 @@ if ($credKey) {
 } else {
     Write-Host "  Generating encryption key... " -NoNewline
     try {
-        $generatedKey = & uv run python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())" 2>$null
+        $generatedKey = & $UvCmd run python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())" 2>$null
         if ($LASTEXITCODE -eq 0 -and $generatedKey) {
             Write-Ok "ok"
             $generatedKey = $generatedKey.Trim()
@@ -1508,7 +1508,7 @@ if ($credKey) {
     Write-Ok "Credential store initialized at ~/.hive/credentials/"
 
     Write-Host "  Verifying credential store... " -NoNewline
-    $verifyOut = & uv run python -c "from framework.credentials.storage import EncryptedFileStorage; storage = EncryptedFileStorage(); print('ok')" 2>$null
+    $verifyOut = & $UvCmd run python -c "from framework.credentials.storage import EncryptedFileStorage; storage = EncryptedFileStorage(); print('ok')" 2>$null
     if ($verifyOut -match "ok") {
         Write-Ok "ok"
     } else {
@@ -1529,7 +1529,7 @@ $verifyErrors = 0
 $verifyModules = @("framework", "aden_tools")
 
 try {
-    $verifyOutput = & uv run python scripts/check_requirements.py @verifyModules 2>&1 | Out-String
+    $verifyOutput = & $UvCmd run python scripts/check_requirements.py @verifyModules 2>&1 | Out-String
     $verifyJson = $null
     
     try {
@@ -1539,7 +1539,7 @@ try {
         # Fall back to basic checks if JSON parsing fails
         foreach ($mod in $verifyModules) {
             Write-Host "  $([char]0x2B21) $mod... " -NoNewline
-            $null = & uv run python -c "import $mod" 2>&1
+            $null = & $UvCmd run python -c "import $mod" 2>&1
             if ($LASTEXITCODE -eq 0) { Write-Ok "ok" }
             else { Write-Fail "failed"; $verifyErrors++ }
         }
@@ -1559,7 +1559,7 @@ try {
 }
 
 Write-Host "  $([char]0x2B21) litellm... " -NoNewline
-$null = & uv run python -c "import litellm" 2>&1
+$null = & $UvCmd run python -c "import litellm" 2>&1
 if ($LASTEXITCODE -eq 0) { Write-Ok "ok" } else { Write-Warn "skipped" }
 
 Write-Host "  $([char]0x2B21) MCP config... " -NoNewline
