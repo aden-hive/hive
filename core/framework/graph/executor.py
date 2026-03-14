@@ -33,6 +33,8 @@ from framework.runtime.core import Runtime
 from framework.schemas.checkpoint import Checkpoint
 from framework.storage.checkpoint_store import CheckpointStore
 
+logger = logging.getLogger(__name__)
+
 
 def _default_max_context_tokens() -> int:
     """Resolve max_context_tokens from global config, falling back to 32000."""
@@ -953,9 +955,7 @@ class GraphExecutor:
                             input={"profile": _gcu_profile},
                         )
                         _stop_result = self.tool_executor(_stop_use)
-                        if asyncio.iscoroutine(_stop_result) or asyncio.isfuture(
-                            _stop_result
-                        ):
+                        if asyncio.iscoroutine(_stop_result) or asyncio.isfuture(_stop_result):
                             await _stop_result
                     except ImportError:
                         pass  # GCU not installed

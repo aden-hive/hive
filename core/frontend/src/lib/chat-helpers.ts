@@ -56,10 +56,15 @@ export function sseEventToChatMessage(
       const iterTid = iter != null ? String(iter) : tid;
       const iterIdKey = eid && iterTid ? `${eid}-${iterTid}` : eid || iterTid || `t-${Date.now()}`;
 
+      // Distinguish multiple LLM calls within the same iteration (inner tool loop).
+      // inner_turn=0 (or absent) produces no suffix for backward compat.
+      const innerTurn = event.data?.inner_turn as number | undefined;
+      const innerSuffix = innerTurn != null && innerTurn > 0 ? `-t${innerTurn}` : "";
+
       const snapshot = (event.data?.snapshot as string) || (event.data?.content as string) || "";
       if (!snapshot) return null;
       return {
-        id: `stream-${iterIdKey}-${event.node_id}`,
+        id: `stream-${iterIdKey}${innerSuffix}-${event.node_id}`,
         agent: agentDisplayName || event.node_id || "Agent",
         agentColor: "",
         content: snapshot,
@@ -91,10 +96,13 @@ export function sseEventToChatMessage(
     }
 
     case "llm_text_delta": {
+      const llmInnerTurn = event.data?.inner_turn as number | undefined;
+      const llmInnerSuffix = llmInnerTurn != null && llmInnerTurn > 0 ? `-t${llmInnerTurn}` : "";
+
       const snapshot = (event.data?.snapshot as string) || (event.data?.content as string) || "";
       if (!snapshot) return null;
       return {
-        id: `stream-${idKey}-${event.node_id}`,
+        id: `stream-${idKey}${llmInnerSuffix}-${event.node_id}`,
         agent: event.node_id || "Agent",
         agentColor: "",
         content: snapshot,
