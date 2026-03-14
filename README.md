@@ -50,7 +50,7 @@ Hive is designed for developers and teams who want to build many **autonomous AI
 Hive is a good fit if you:
 
 - Want AI agents that **execute real business processes**, not demos
-- Need **fast or high volume agent execution** over open workflow
+- Need **fast or high-volume agent execution** over open workflows
 - Need **self-healing and adaptive agents** that improve over time
 - Require **human-in-the-loop control**, observability, and cost limits
 - Plan to run agents in **production environments**
@@ -149,7 +149,7 @@ Now you can run an agent by selecting the agent (either an existing agent or exa
 <a href="https://github.com/aden-hive/hive/tree/main/tools/src/aden_tools/tools"><img width="100%" alt="Integration" src="https://github.com/user-attachments/assets/a1573f93-cf02-4bb8-b3d5-b305b05b1e51" /></a>
 Hive is built to be model-agnostic and system-agnostic.
 
-- **LLM flexibility** - Hive Framework is designed to support various types of LLMs, including hosted and local models through LiteLLM-compatible providers.
+- **LLM flexibility** - The Hive Framework is designed to support various types of LLMs, including hosted and local models through LiteLLM-compatible providers.
 - **Business system connectivity** - Hive Framework is designed to connect to all kinds of business systems as tools, such as CRM, support, messaging, data, file, and internal APIs via MCP.
 
 ## Why Aden
