@@ -2813,10 +2813,10 @@ export default function Workspace() {
       <div className="flex flex-1 min-h-0">
 
         {/* ── Pipeline graph + chat ──────────────────────────────────── */}
-        <div className={`${((activeAgentState?.queenPhase === "planning" || activeAgentState?.queenPhase === "building") && activeAgentState?.draftGraph) || activeAgentState?.originalDraft ? "w-[500px] min-w-[400px]" : "w-[300px] min-w-[240px]"} bg-card/30 flex flex-col border-r border-border/30 transition-[width] duration-200`}>
+        <div className={`${activeAgentState?.queenPhase === "planning" || activeAgentState?.queenPhase === "building" || activeAgentState?.originalDraft ? "w-[500px] min-w-[400px]" : "w-[300px] min-w-[240px]"} bg-card/30 flex flex-col border-r border-border/30 transition-[width] duration-200`}>
           <div className="flex-1 min-h-0">
-            {(activeAgentState?.queenPhase === "planning" || activeAgentState?.queenPhase === "building") && activeAgentState?.draftGraph ? (
-              <DraftGraph draft={activeAgentState.draftGraph} building={activeAgentState?.queenBuilding} onRun={handleRun} onPause={handlePause} runState={activeAgentState?.workerRunState ?? "idle"} />
+            {activeAgentState?.queenPhase === "planning" || activeAgentState?.queenPhase === "building" ? (
+              <DraftGraph draft={activeAgentState?.draftGraph ?? null} loading={!activeAgentState?.draftGraph} building={activeAgentState?.queenBuilding} onRun={handleRun} onPause={handlePause} runState={activeAgentState?.workerRunState ?? "idle"} />
             ) : activeAgentState?.originalDraft ? (
               <DraftGraph
                 draft={activeAgentState.originalDraft}
