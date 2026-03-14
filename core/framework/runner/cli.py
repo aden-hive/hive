@@ -520,16 +520,22 @@ def cmd_run(args: argparse.Namespace) -> int:
             print("No key provided. Exiting.", file=sys.stderr)
             return 1
             
-        # Infer a likely key name from the model
-        key_name = "ANTHROPIC_API_KEY"
+        # Infer a likely key name from the model (used as a suggestion only)
+        suggested_key_name = "ANTHROPIC_API_KEY"
         if args.model:
             model_lower = args.model.lower()
             if "gpt" in model_lower or "openai" in model_lower:
-                key_name = "OPENAI_API_KEY"
+                suggested_key_name = "OPENAI_API_KEY"
             elif "gemini" in model_lower or "google" in model_lower:
-                key_name = "GEMINI_API_KEY"
+                suggested_key_name = "GEMINI_API_KEY"
             elif "claude" in model_lower or "anthropic" in model_lower:
-                key_name = "ANTHROPIC_API_KEY"
+                suggested_key_name = "ANTHROPIC_API_KEY"
+        
+        # Let the user confirm or override the environment variable name
+        user_key_name = input(
+            f"Environment variable name to store this key [{suggested_key_name}]: "
+        ).strip()
+        key_name = user_key_name or suggested_key_name
         
         # 4. Set current process environment variables
         os.environ[key_name] = api_key
