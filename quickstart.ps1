@@ -18,6 +18,10 @@
 # Use "Continue" so stderr from external tools (uv, python) does not
 # terminate the script.  Errors are handled via $LASTEXITCODE checks.
 $ErrorActionPreference = "Continue"
+$ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Definition
+$UvHelperPath = Join-Path $ScriptDir "scripts\uv-discovery.ps1"
+
+. $UvHelperPath
 
 # ============================================================
 # Colors / helpers
@@ -94,52 +98,6 @@ function Prompt-Choice {
         Write-Color -Text "Invalid choice. Please enter 1-$($Options.Count)" -Color Red
     }
 }
-
-function Get-WorkingUvInfo {
-    <#
-    .SYNOPSIS
-        Find a runnable uv executable, not just a PATH entry named "uv"
-    .OUTPUTS
-        Hashtable with Path and Version, or $null if no working uv is found
-    #>
-    # pyenv-win can expose a uv shim that exists on PATH but fails at runtime.
-    # Verify each candidate with `uv --version` before trusting it.
-    $candidates = @()
-
-    $commands = @(Get-Command uv -All -ErrorAction SilentlyContinue)
-    foreach ($cmd in $commands) {
-        if ($cmd.Source) {
-            $candidates += $cmd.Source
-        } elseif ($cmd.Definition) {
-            $candidates += $cmd.Definition
-        } elseif ($cmd.Name) {
-            $candidates += $cmd.Name
-        }
-    }
-
-    $defaultUvExe = Join-Path $env:USERPROFILE ".local\bin\uv.exe"
-    if (Test-Path $defaultUvExe) {
-        $candidates += $defaultUvExe
-    }
-
-    foreach ($candidate in ($candidates | Where-Object { $_ } | Select-Object -Unique)) {
-        try {
-            $versionOutput = & $candidate --version 2>$null
-            $version = ($versionOutput | Out-String).Trim()
-            if ($LASTEXITCODE -eq 0 -and -not [string]::IsNullOrWhiteSpace($version)) {
-                return @{
-                    Path = $candidate
-                    Version = $version
-                }
-            }
-        } catch {
-            # Try the next candidate.
-        }
-    }
-
-    return $null
-}
-
 
 # ============================================================
 # Windows Defender Exclusion Functions
@@ -320,9 +278,6 @@ function Add-DefenderExclusions {
         Failed = $failed
     }
 }
-
-# Get the directory where this script lives
-$ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Definition
 
 # ============================================================
 # Banner
@@ -563,19 +518,12 @@ try {
         exit 1
     }
 
-    # Install Playwright browser
-    Write-Host "  Installing Playwright browser... " -NoNewline
-    $null = & $UvCmd run python -c "import playwright" 2>&1
-    $importExitCode = $LASTEXITCODE
-    if ($importExitCode -eq 0) {
-        $null = & $UvCmd run python -m playwright install chromium 2>&1
-        $playwrightExitCode = $LASTEXITCODE
-
-        if ($playwrightExitCode -eq 0) {
-            Write-Ok "ok"
-        } else {
-            Write-Warn "skipped (install manually: uv run python -m playwright install chromium)"
-        }
+    # Keep browser setup scoped to detecting the system browser used by GCU.
+    Write-Host "  Checking for Chrome/Edge browser... " -NoNewline
+    $null = & $UvCmd run python -c "from gcu.browser.chrome_finder import find_chrome; assert find_chrome()" 2>&1
+    $chromeCheckExit = $LASTEXITCODE
+    if ($chromeCheckExit -eq 0) {
+        Write-Ok "ok"
     } else {
         Write-Warn "not found - install Chrome or Edge for browser tools"
     }

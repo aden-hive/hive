@@ -10,40 +10,9 @@
 
 $ErrorActionPreference = "Stop"
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Definition
+$UvHelperPath = Join-Path $ScriptDir "scripts\uv-discovery.ps1"
 
-function Get-WorkingUvPath {
-    # pyenv-win can expose a non-functional uv shim, so verify candidates first.
-    $candidates = @()
-
-    $commands = @(Get-Command uv -All -ErrorAction SilentlyContinue)
-    foreach ($cmd in $commands) {
-        if ($cmd.Source) {
-            $candidates += $cmd.Source
-        } elseif ($cmd.Definition) {
-            $candidates += $cmd.Definition
-        } elseif ($cmd.Name) {
-            $candidates += $cmd.Name
-        }
-    }
-
-    $defaultUvExe = Join-Path $env:USERPROFILE ".local\bin\uv.exe"
-    if (Test-Path $defaultUvExe) {
-        $candidates += $defaultUvExe
-    }
-
-    foreach ($candidate in ($candidates | Where-Object { $_ } | Select-Object -Unique)) {
-        try {
-            $null = & $candidate --version 2>$null
-            if ($LASTEXITCODE -eq 0) {
-                return $candidate
-            }
-        } catch {
-            # Try the next candidate.
-        }
-    }
-
-    return $null
-}
+. $UvHelperPath
 
 # ── Validate project directory ──────────────────────────────────────
 
@@ -64,11 +33,12 @@ if (-not (Test-Path (Join-Path $ScriptDir ".venv"))) {
 
 # ── Ensure uv is available ──────────────────────────────────────────
 
-$uvExe = Get-WorkingUvPath
-if (-not $uvExe) {
+$uvInfo = Get-WorkingUvInfo
+if (-not $uvInfo) {
     Write-Error "uv is not installed or is not runnable. Run .\quickstart.ps1 first."
     exit 1
 }
+$uvExe = $uvInfo.Path
 
 # ── Load environment variables from Windows Registry ────────────────
 # Windows stores User-level env vars in the registry. New terminal
