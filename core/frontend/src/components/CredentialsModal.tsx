@@ -126,8 +126,13 @@ export default function CredentialsModal({
         // No real path — no credentials to show
         setRows([]);
       }
-    } catch {
-      // Backend unavailable — fall back to legacy props or empty
+    } catch (err) {
+      // Surface the error so the modal shows a meaningful message
+      const message =
+        err instanceof Error ? err.message : "Failed to check credentials";
+      setError(message);
+
+      // Fall back to legacy props or empty rows
       if (legacyCredentials) {
         setRows(legacyCredentials.map(c => ({
           ...c,
@@ -289,11 +294,18 @@ export default function CredentialsModal({
           {/* Status banner */}
           {!loading && (
             <div className={`mx-5 mt-4 px-3 py-2.5 rounded-lg border text-xs font-medium flex items-center gap-2 ${
-              allRequiredMet
-                ? "bg-emerald-500/10 border-emerald-500/20 text-emerald-600"
-                : "bg-destructive/5 border-destructive/20 text-destructive"
+              error && rows.length === 0
+                ? "bg-destructive/5 border-destructive/20 text-destructive"
+                : allRequiredMet
+                  ? "bg-emerald-500/10 border-emerald-500/20 text-emerald-600"
+                  : "bg-destructive/5 border-destructive/20 text-destructive"
             }`}>
-              {allRequiredMet ? (
+              {error && rows.length === 0 ? (
+                <>
+                  <AlertCircle className="w-3.5 h-3.5 flex-shrink-0" />
+                  <span className="break-words">Failed to check credentials: {error}</span>
+                </>
+              ) : allRequiredMet ? (
                 <>
                   <Shield className="w-3.5 h-3.5" />
                   {rows.length === 0
