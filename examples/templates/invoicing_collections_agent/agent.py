@@ -11,7 +11,7 @@ from framework.runner.tool_registry import ToolRegistry
 from framework.runtime.agent_runtime import create_agent_runtime
 from framework.runtime.execution_stream import EntryPointSpec
 
-from .config import default_config, metadata
+from .config import COLLECTION_CONFIG, default_config, metadata
 from .nodes import (
     scan_invoices_node,
     classify_overdue_node,
@@ -272,6 +272,8 @@ class InvoicingCollectionsAgent:
         )
 
     async def run(self, context, session_state=None):
+        # Inject collection_config so downstream nodes can access it
+        context.setdefault("collection_config", COLLECTION_CONFIG)
         await self.start()
         try:
             result = await self.trigger_and_wait(
