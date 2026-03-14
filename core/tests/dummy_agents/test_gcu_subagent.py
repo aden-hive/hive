@@ -25,6 +25,7 @@ def _has_gcu_server() -> bool:
     """Check if the GCU MCP server module is available."""
     try:
         import gcu.server  # noqa: F401
+
         return True
     except ImportError:
         return False
@@ -114,15 +115,16 @@ async def test_gcu_subagent_delegation(runtime, llm_provider, tool_registry, tmp
                         node.tools.append(tool_name)
 
     executor = make_executor(
-        runtime, llm_provider,
+        runtime,
+        llm_provider,
         tool_registry=tool_registry,
         storage_path=tmp_path / "storage",
     )
 
     result = await executor.execute(
-        graph, _gcu_goal(),
-        {"task": "Use the browser to navigate to https://example.com and "
-         "report the page title."},
+        graph,
+        _gcu_goal(),
+        {"task": "Use the browser to navigate to https://example.com and report the page title."},
         validate_graph=False,
     )
 
@@ -154,15 +156,19 @@ async def test_gcu_subagent_returns_data(runtime, llm_provider, tool_registry, t
                         node.tools.append(tool_name)
 
     executor = make_executor(
-        runtime, llm_provider,
+        runtime,
+        llm_provider,
         tool_registry=tool_registry,
         storage_path=tmp_path / "storage",
     )
 
     result = await executor.execute(
-        graph, _gcu_goal(),
-        {"task": "Use the browser to visit https://example.com and report "
-         "what domain the page is on."},
+        graph,
+        _gcu_goal(),
+        {
+            "task": "Use the browser to visit https://example.com and report "
+            "what domain the page is on."
+        },
         validate_graph=False,
     )
 

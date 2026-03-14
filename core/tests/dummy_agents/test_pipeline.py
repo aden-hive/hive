@@ -50,8 +50,7 @@ def _build_pipeline_graph(conversation_mode: str = "continuous") -> GraphSpec:
                 system_prompt=(
                     "You are a transform node. Read the 'value' input from the user "
                     "message, convert it to UPPERCASE, then call set_output with "
-                    "key='transformed' and the uppercased value. "
-                    + SET_OUTPUT_INSTRUCTION
+                    "key='transformed' and the uppercased value. " + SET_OUTPUT_INSTRUCTION
                 ),
             ),
             NodeSpec(
@@ -64,8 +63,7 @@ def _build_pipeline_graph(conversation_mode: str = "continuous") -> GraphSpec:
                 system_prompt=(
                     "You are the output node. Read the 'value' input from the user "
                     "message, prefix it with 'Result: ', then call set_output with "
-                    "key='result' and the prefixed value. "
-                    + SET_OUTPUT_INSTRUCTION
+                    "key='result' and the prefixed value. " + SET_OUTPUT_INSTRUCTION
                 ),
             ),
         ],

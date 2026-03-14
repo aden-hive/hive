@@ -116,9 +116,7 @@ async def test_parallel_both_succeed(runtime, goal, llm_provider):
     config = ParallelExecutionConfig(on_branch_failure="fail_all")
     executor = make_executor(runtime, llm_provider, parallel_config=config)
 
-    result = await executor.execute(
-        graph, goal, {"topic": "remote work"}, validate_graph=False
-    )
+    result = await executor.execute(graph, goal, {"topic": "remote work"}, validate_graph=False)
 
     assert result.success
     assert "split" in result.path
@@ -134,9 +132,7 @@ async def test_parallel_branch_failure_fail_all(runtime, goal, llm_provider):
     executor = make_executor(runtime, llm_provider, parallel_config=config)
     executor.register_node("analyze_b", FailNode(error="branch B failed"))
 
-    result = await executor.execute(
-        graph, goal, {"topic": "remote work"}, validate_graph=False
-    )
+    result = await executor.execute(graph, goal, {"topic": "remote work"}, validate_graph=False)
 
     assert not result.success
 
@@ -149,9 +145,7 @@ async def test_parallel_branch_failure_continue_others(runtime, goal, llm_provid
     executor = make_executor(runtime, llm_provider, parallel_config=config)
     executor.register_node("analyze_b", FailNode(error="branch B failed"))
 
-    result = await executor.execute(
-        graph, goal, {"topic": "remote work"}, validate_graph=False
-    )
+    result = await executor.execute(graph, goal, {"topic": "remote work"}, validate_graph=False)
 
     # With continue_others, execution can proceed past failed branches
     assert result.output.get("merged") is not None or result.output.get("result_a") is not None

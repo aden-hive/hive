@@ -61,7 +61,8 @@ async def test_worker_example_tool(runtime, llm_provider, tool_registry):
     executor = make_executor(runtime, llm_provider, tool_registry=tool_registry)
 
     result = await executor.execute(
-        graph, _worker_goal(),
+        graph,
+        _worker_goal(),
         {"task": "Use the example_tool to process the message 'hello world' with uppercase=true"},
         validate_graph=False,
     )
@@ -77,9 +78,12 @@ async def test_worker_time_tool(runtime, llm_provider, tool_registry):
     executor = make_executor(runtime, llm_provider, tool_registry=tool_registry)
 
     result = await executor.execute(
-        graph, _worker_goal(),
-        {"task": "Use get_current_time to find the current time in UTC, "
-         "and report the day of the week as the result"},
+        graph,
+        _worker_goal(),
+        {
+            "task": "Use get_current_time to find the current time in UTC, "
+            "and report the day of the week as the result"
+        },
         validate_graph=False,
     )
 
@@ -92,17 +96,21 @@ async def test_worker_data_tools(runtime, llm_provider, tool_registry, tmp_path)
     """Worker uses save_data and load_data to store and retrieve data."""
     graph = _build_worker_graph(tools=["save_data", "load_data"])
     executor = make_executor(
-        runtime, llm_provider,
+        runtime,
+        llm_provider,
         tool_registry=tool_registry,
         storage_path=tmp_path / "storage",
     )
 
     result = await executor.execute(
-        graph, _worker_goal(),
-        {"task": f"Use save_data to save the text 'test payload' to a file called "
-         f"'test.txt' in the data_dir '{tmp_path}/data'. "
-         f"Then use load_data to read it back from the same data_dir. "
-         f"Report what you loaded as the result."},
+        graph,
+        _worker_goal(),
+        {
+            "task": f"Use save_data to save the text 'test payload' to a file called "
+            f"'test.txt' in the data_dir '{tmp_path}/data'. "
+            f"Then use load_data to read it back from the same data_dir. "
+            f"Report what you loaded as the result."
+        },
         validate_graph=False,
     )
 
@@ -117,10 +125,13 @@ async def test_worker_multi_tool(runtime, llm_provider, tool_registry):
     executor = make_executor(runtime, llm_provider, tool_registry=tool_registry)
 
     result = await executor.execute(
-        graph, _worker_goal(),
-        {"task": "First use get_current_time to find the current day of the week. "
-         "Then use example_tool to process that day name with uppercase=true. "
-         "Report the uppercased day name as the result."},
+        graph,
+        _worker_goal(),
+        {
+            "task": "First use get_current_time to find the current day of the week. "
+            "Then use example_tool to process that day name with uppercase=true. "
+            "Report the uppercased day name as the result."
+        },
         validate_graph=False,
     )
 

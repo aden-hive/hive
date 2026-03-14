@@ -40,6 +40,7 @@ def _detect_claude_code_token() -> str | None:
     """Check if Claude Code subscription credentials are available."""
     try:
         from framework.runner.runner import get_claude_code_token
+
         return get_claude_code_token()
     except Exception:
         return None
@@ -49,6 +50,7 @@ def _detect_codex_token() -> str | None:
     """Check if Codex subscription credentials are available."""
     try:
         from framework.runner.runner import get_codex_token
+
         return get_codex_token()
     except Exception:
         return None
@@ -58,6 +60,7 @@ def _detect_kimi_code_token() -> str | None:
     """Check if Kimi Code subscription credentials are available."""
     try:
         from framework.runner.runner import get_kimi_code_token
+
         return get_kimi_code_token()
     except Exception:
         return None
@@ -73,31 +76,37 @@ def detect_available() -> list[dict]:
     # Subscription-based providers
     token = _detect_claude_code_token()
     if token:
-        available.append({
-            "name": "Claude Code (subscription)",
-            "model": "claude-sonnet-4-20250514",
-            "api_key": token,
-            "source": "claude_code_sub",
-            "extra_headers": {"authorization": f"Bearer {token}"},
-        })
+        available.append(
+            {
+                "name": "Claude Code (subscription)",
+                "model": "claude-sonnet-4-20250514",
+                "api_key": token,
+                "source": "claude_code_sub",
+                "extra_headers": {"authorization": f"Bearer {token}"},
+            }
+        )
 
     token = _detect_codex_token()
     if token:
-        available.append({
-            "name": "Codex (subscription)",
-            "model": "gpt-5-mini",
-            "api_key": token,
-            "source": "codex_sub",
-        })
+        available.append(
+            {
+                "name": "Codex (subscription)",
+                "model": "gpt-5-mini",
+                "api_key": token,
+                "source": "codex_sub",
+            }
+        )
 
     token = _detect_kimi_code_token()
     if token:
-        available.append({
-            "name": "Kimi Code (subscription)",
-            "model": "moonshotai/kimi-k2-instruct-0905",
-            "api_key": token,
-            "source": "kimi_sub",
-        })
+        available.append(
+            {
+                "name": "Kimi Code (subscription)",
+                "model": "moonshotai/kimi-k2-instruct-0905",
+                "api_key": token,
+                "source": "kimi_sub",
+            }
+        )
 
     # API key providers (env vars)
     for env_var, name, default_model in API_KEY_PROVIDERS:
@@ -154,6 +163,7 @@ def prompt_provider_selection() -> dict:
 
 # ── test runner ──────────────────────────────────────────────────────
 
+
 def parse_junit_xml(xml_path: str) -> dict[str, dict]:
     """Parse JUnit XML and group results by agent (test file)."""
     tree = ET.parse(xml_path)
@@ -172,8 +182,11 @@ def parse_junit_xml(xml_path: str) -> dict[str, dict]:
 
             if agent_name not in agents:
                 agents[agent_name] = {
-                    "total": 0, "passed": 0, "failed": 0,
-                    "time": 0.0, "tests": [],
+                    "total": 0,
+                    "passed": 0,
+                    "failed": 0,
+                    "time": 0.0,
+                    "tests": [],
                 }
 
             agents[agent_name]["total"] += 1
@@ -281,7 +294,7 @@ def print_table(agents: dict[str, dict], total_time: float, verbose: bool = Fals
                     if reason:
                         # Wrap long reasons
                         for i in range(0, len(reason), 100):
-                            print(f"    {reason[i:i+100]}")
+                            print(f"    {reason[i : i + 100]}")
         print()
 
 
@@ -297,6 +310,7 @@ def main() -> int:
 
     # Step 2: inject selection into conftest module state
     from tests.dummy_agents.conftest import set_llm_selection
+
     set_llm_selection(
         model=provider["model"],
         api_key=provider["api_key"],

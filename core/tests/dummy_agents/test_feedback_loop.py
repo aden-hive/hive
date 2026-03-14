@@ -81,11 +81,13 @@ async def test_feedback_loop_terminates(runtime, goal, llm_provider):
     executor.register_node("draft", SuccessNode(output={"draft_output": "v1"}))
     executor.register_node(
         "review",
-        StatefulNode([
-            NodeResult(success=True, output={"approved": False}),
-            NodeResult(success=True, output={"approved": False}),
-            NodeResult(success=True, output={"approved": True}),
-        ]),
+        StatefulNode(
+            [
+                NodeResult(success=True, output={"approved": False}),
+                NodeResult(success=True, output={"approved": False}),
+                NodeResult(success=True, output={"approved": True}),
+            ]
+        ),
     )
     executor.register_node("done", SuccessNode(output={"final": "done"}))
 
@@ -103,10 +105,12 @@ async def test_feedback_loop_visit_counts(runtime, goal, llm_provider):
     executor.register_node("draft", SuccessNode(output={"draft_output": "v1"}))
     executor.register_node(
         "review",
-        StatefulNode([
-            NodeResult(success=True, output={"approved": False}),
-            NodeResult(success=True, output={"approved": True}),
-        ]),
+        StatefulNode(
+            [
+                NodeResult(success=True, output={"approved": False}),
+                NodeResult(success=True, output={"approved": True}),
+            ]
+        ),
     )
     executor.register_node("done", SuccessNode(output={"final": "done"}))
 
@@ -125,9 +129,11 @@ async def test_feedback_loop_early_exit(runtime, goal, llm_provider):
     executor.register_node("draft", SuccessNode(output={"draft_output": "perfect"}))
     executor.register_node(
         "review",
-        StatefulNode([
-            NodeResult(success=True, output={"approved": True}),
-        ]),
+        StatefulNode(
+            [
+                NodeResult(success=True, output={"approved": True}),
+            ]
+        ),
     )
     executor.register_node("done", SuccessNode(output={"final": "done"}))
 

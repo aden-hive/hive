@@ -41,8 +41,7 @@ def _build_branch_graph() -> GraphSpec:
                     "1. set_output(key='score', value='<number>') — a score between 0.0 "
                     "and 1.0 where >0.5 means positive\n"
                     "2. set_output(key='label', value='positive') or "
-                    "set_output(key='label', value='negative')\n\n"
-                    + SET_OUTPUT_INSTRUCTION
+                    "set_output(key='label', value='negative')\n\n" + SET_OUTPUT_INSTRUCTION
                 ),
             ),
             NodeSpec(

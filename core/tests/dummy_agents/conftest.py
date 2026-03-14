@@ -39,6 +39,7 @@ def set_llm_selection(
 
 # ── collection hook: skip entire directory when not configured ───────
 
+
 def pytest_collection_modifyitems(config, items):
     """Skip all dummy_agents tests when no LLM is configured.
 
