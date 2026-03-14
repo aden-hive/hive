@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Hive Dashboard</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <header>
+        <h1>Hive Dashboard</h1>
+        <p class="subtitle">Agent Monitoring & Management</p>
+    </header>
+
+    <main>
+        <section class="stats-bar">
+            <div class="stat">
+                <span class="stat-value" id="total-agents">0</span>
+                <span class="stat-label">Total Agents</span>
+            </div>
+            <div class="stat">
+                <span class="stat-value online" id="online-count">0</span>
+                <span class="stat-label">Online</span>
+            </div>
+            <div class="stat">
+                <span class="stat-value degraded" id="degraded-count">0</span>
+                <span class="stat-label">Degraded</span>
+            </div>
+            <div class="stat">
+                <span class="stat-value offline" id="offline-count">0</span>
+                <span class="stat-label">Offline</span>
+            </div>
+            <div class="stat">
+                <span class="stat-value" id="total-cost">$0.00</span>
+                <span class="stat-label">Cost Today</span>
+            </div>
+        </section>
+
+        <section class="agents-section">
+            <div class="section-header">
+                <h2>Agents</h2>
+                <div class="controls">
+                    <select id="status-filter">
+                        <option value="all">All Status</option>
+                        <option value="online">Online</option>
+                        <option value="degraded">Degraded</option>
+                        <option value="offline">Offline</option>
+                    </select>
+                    <button id="refresh-btn">Refresh</button>
+                </div>
+            </div>
+            <div class="agents-grid" id="agents-grid">
+                <!-- Agent cards will be inserted here -->
+            </div>
+        </section>
+
+        <section class="activity-section">
+            <h2>Recent Activity</h2>
+            <div class="activity-log" id="activity-log">
+                <!-- Activity items will be inserted here -->
+            </div>
+        </section>
+    </main>
+
+    <footer>
+        <p>Hive Agent Framework &bull; <span id="last-updated">Never</span></p>
+    </footer>
+
+    <script src="app.js"></script>
+</body>
+</html>
