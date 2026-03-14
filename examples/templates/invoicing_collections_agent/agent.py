@@ -295,9 +295,7 @@ class InvoicingCollectionsAgent:
             "entry_node": self.entry_node,
             "entry_points": self.entry_points,
             "terminal_nodes": self.terminal_nodes,
-            "client_facing_nodes": [
-                n.id for n in self.nodes if n.client_facing
-            ],
+            "client_facing_nodes": [n.id for n in self.nodes if n.client_facing],
         }
 
     def validate(self):
@@ -315,9 +313,7 @@ class InvoicingCollectionsAgent:
                 errors.append(f"Terminal node '{t}' not found")
         for ep_id, nid in self.entry_points.items():
             if nid not in node_ids:
-                errors.append(
-                    f"Entry point '{ep_id}' references unknown node '{nid}'"
-                )
+                errors.append(f"Entry point '{ep_id}' references unknown node '{nid}'")
         return {"valid": len(errors) == 0, "errors": errors, "warnings": warnings}
 
 

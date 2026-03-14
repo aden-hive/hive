@@ -7,7 +7,7 @@ import sys
 
 import click
 
-from .agent import default_agent, InvoicingCollectionsAgent
+from .agent import default_agent
 
 
 def setup_logging(verbose=False, debug=False):
@@ -33,9 +33,7 @@ def cli():
 def run(invoice_file, verbose):
     """Execute the agent."""
     setup_logging(verbose=verbose)
-    result = asyncio.run(
-        default_agent.run({"invoice_file_path": invoice_file or ""})
-    )
+    result = asyncio.run(default_agent.run({"invoice_file_path": invoice_file or ""}))
     click.echo(
         json.dumps(
             {"success": result.success, "output": result.output},
