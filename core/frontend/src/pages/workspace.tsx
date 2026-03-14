@@ -1584,9 +1584,17 @@ export default function Workspace() {
           const chatMsg = sseEventToChatMessage(event, agentType, displayName, currentTurn);
           if (isQueen) console.log('[QUEEN] chatMsg:', chatMsg?.id, chatMsg?.content?.slice(0, 50), 'turn:', currentTurn);
           if (chatMsg && !suppressQueenMessages) {
-            if (isQueen) {
+            // Queen may emit multiple client_output_delta / llm_text_delta snapshots
+            // for a single execution as it iterates internally. Use a stable ID so
+            // those snapshots collapse into a single bubble instead of rendering as
+            // multiple independent replies to the same user message.
+            if (isQueen && (event.type === "client_output_delta" || event.type === "llm_text_delta") && event.execution_id) {
+              chatMsg.id = `queen-stream-${event.execution_id}`;
+            }
+            if (isQueen){
               chatMsg.role = role;
               chatMsg.phase = queenPhaseRef.current[agentType] as ChatMessage["phase"];
+
             }
             upsertChatMessage(agentType, chatMsg, {
               reconcileOptimisticUser: event.type === "client_input_received",
@@ -2769,9 +2777,8 @@ export default function Workspace() {
   }, []);
 
   const activeWorkerLabel = activeAgentState?.displayName || formatAgentDisplayName(baseAgentType(activeWorker));
-
-
   return (
+
     <div className="flex flex-col h-screen bg-background overflow-hidden">
       <TopBar
         tabs={agentTabs}
@@ -3122,5 +3129,6 @@ export default function Workspace() {
         }}
       />
     </div>
+
   );
 }
