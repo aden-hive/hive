@@ -13,6 +13,7 @@ from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
 from framework.observability import set_trace_context
+from framework.runtime.core import RuntimeNotStartedError
 from framework.schemas.decision import Decision, DecisionType, Option, Outcome
 from framework.schemas.run import Run, RunStatus
 from framework.storage.concurrent import ConcurrentStorage
@@ -76,6 +77,7 @@ class StreamRuntime:
         stream_id: str,
         storage: ConcurrentStorage,
         outcome_aggregator: "OutcomeAggregator | None" = None,
+        strict_mode: bool = True,
     ):
         """
         Initialize stream runtime.
@@ -84,10 +86,14 @@ class StreamRuntime:
             stream_id: Unique identifier for this stream
             storage: Concurrent storage backend
             outcome_aggregator: Optional aggregator for cross-stream evaluation
+            strict_mode: If True, raise RuntimeNotStartedError when methods
+                are called without an active run. If False, log warnings and
+                return empty values (legacy behavior).
         """
         self.stream_id = stream_id
         self._storage = storage
         self._outcome_aggregator = outcome_aggregator
+        self._strict_mode = strict_mode
 
         # Track runs by execution_id (thread-safe via lock)
         self._runs: dict[str, Run] = {}
@@ -228,10 +234,18 @@ class StreamRuntime:
             context: Additional context available when deciding
 
         Returns:
-            The decision ID, or empty string if no run in progress
+            The decision ID, or empty string if no run in progress and strict_mode is False
+
+        Raises:
+            RuntimeNotStartedError: If no run is active for the execution and strict_mode is True
         """
         run = self._runs.get(execution_id)
         if run is None:
+            if self._strict_mode:
+                raise RuntimeNotStartedError(
+                    f"decide() called but no run is active for execution {execution_id}. "
+                    f"Call start_run() before making decisions."
+                )
             logger.warning(f"decide called but no run for execution {execution_id}: {intent}")
             return ""
 
@@ -303,9 +317,17 @@ class StreamRuntime:
             state_changes: What state changed as a result
             tokens_used: LLM tokens consumed
             latency_ms: Time taken in milliseconds
+
+        Raises:
+            RuntimeNotStartedError: If no run is active for the execution and strict_mode is True
         """
         run = self._runs.get(execution_id)
         if run is None:
+            if self._strict_mode:
+                raise RuntimeNotStartedError(
+                    f"record_outcome() called but no run is active for execution {execution_id}. "
+                    f"Call start_run() before recording outcomes."
+                )
             logger.warning(f"record_outcome called but no run for execution {execution_id}")
             return
 
@@ -353,10 +375,18 @@ class StreamRuntime:
             suggested_fix: What might fix it (if known)
 
         Returns:
-            The problem ID, or empty string if no run in progress
+            The problem ID, or empty string if no run in progress and strict_mode is False
+
+        Raises:
+            RuntimeNotStartedError: If no run is active for the execution and strict_mode is True
         """
         run = self._runs.get(execution_id)
         if run is None:
+            if self._strict_mode:
+                raise RuntimeNotStartedError(
+                    f"report_problem() called but no run is active for execution {execution_id}. "
+                    f"Call start_run() before reporting problems."
+                )
             logger.warning(
                 f"report_problem called but no run for execution {execution_id}: "
                 f"[{severity}] {description}"

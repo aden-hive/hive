@@ -21,6 +21,17 @@ from framework.storage.backend import FileStorage
 logger = logging.getLogger(__name__)
 
 
+class RuntimeNotStartedError(RuntimeError):
+    """
+    Raised when runtime methods are called without an active run.
+
+    This exception is raised in strict mode when decide(), record_outcome(),
+    or report_problem() is called before start_run() or after end_run().
+    """
+
+    pass
+
+
 class Runtime:
     """
     The runtime environment that agents execute within.
@@ -55,8 +66,20 @@ class Runtime:
         runtime.end_run(success=True, narrative="Qualified 10 leads successfully")
     """
 
-    def __init__(self, storage_path: str | Path):
-        # Validate and create storage path if needed
+    def __init__(
+        self,
+        storage_path: str | Path,
+        strict_mode: bool = True,
+    ):
+        """
+        Initialize the Runtime.
+
+        Args:
+            storage_path: Path to store run data
+            strict_mode: If True, raise RuntimeNotStartedError when methods
+                are called without an active run. If False, log warnings and
+                return empty values (legacy behavior).
+        """
         path = Path(storage_path) if isinstance(storage_path, str) else storage_path
         if not path.exists():
             logger.warning(f"Storage path does not exist, creating: {path}")
@@ -65,6 +88,7 @@ class Runtime:
         self.storage = FileStorage(storage_path)
         self._current_run: Run | None = None
         self._current_node: str = "unknown"
+        self._strict_mode = strict_mode
 
     @property
     def execution_id(self) -> str:
@@ -185,9 +209,17 @@ class Runtime:
 
         Returns:
             The decision ID (use to record outcome later), or empty string if no run
+            and strict_mode is False
+
+        Raises:
+            RuntimeNotStartedError: If no run is active and strict_mode is True
         """
         if self._current_run is None:
-            # Gracefully handle case where run ended during exception handling
+            if self._strict_mode:
+                raise RuntimeNotStartedError(
+                    "decide() called but no run is active. "
+                    "Call start_run() before making decisions."
+                )
             logger.warning(f"decide called but no run in progress: {intent}")
             return ""
 
@@ -248,10 +280,16 @@ class Runtime:
             state_changes: What state changed as a result
             tokens_used: LLM tokens consumed
             latency_ms: Time taken in milliseconds
+
+        Raises:
+            RuntimeNotStartedError: If no run is active and strict_mode is True
         """
         if self._current_run is None:
-            # Gracefully handle case where run ended during exception handling
-            # This can happen in cascading error scenarios
+            if self._strict_mode:
+                raise RuntimeNotStartedError(
+                    "record_outcome() called but no run is active. "
+                    "Call start_run() before recording outcomes."
+                )
             logger.warning(
                 f"record_outcome called but no run in progress (decision_id={decision_id})"
             )
@@ -293,11 +331,17 @@ class Runtime:
             suggested_fix: What might fix it (if known)
 
         Returns:
-            The problem ID, or empty string if no run in progress
+            The problem ID, or empty string if no run in progress and strict_mode is False
+
+        Raises:
+            RuntimeNotStartedError: If no run is active and strict_mode is True
         """
         if self._current_run is None:
-            # Gracefully handle case where run ended during exception handling
-            # Log the problem since we can't store it, then return empty ID
+            if self._strict_mode:
+                raise RuntimeNotStartedError(
+                    "report_problem() called but no run is active. "
+                    "Call start_run() before reporting problems."
+                )
             logger.warning(
                 f"report_problem called but no run in progress: [{severity}] {description}"
             )

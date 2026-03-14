@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 
 from framework import Runtime
+from framework.runtime.core import RuntimeNotStartedError
 from framework.schemas.decision import DecisionType
 
 
@@ -81,9 +82,9 @@ class TestDecisionRecording:
 
         runtime.end_run(success=True)
 
-    def test_decision_without_run_is_graceful(self, tmp_path: Path):
-        """Recording decisions without a run logs warning and returns empty string."""
-        runtime = Runtime(tmp_path)
+    def test_decision_without_run_is_graceful_in_non_strict_mode(self, tmp_path: Path):
+        """Recording decisions without a run logs warning and returns empty string in non-strict mode."""
+        runtime = Runtime(tmp_path, strict_mode=False)
 
         # Should not raise, but log a warning and return empty string
         decision_id = runtime.decide(
@@ -93,6 +94,18 @@ class TestDecisionRecording:
             reasoning="Test",
         )
         assert decision_id == ""
+
+    def test_decision_without_run_raises_in_strict_mode(self, tmp_path: Path):
+        """Recording decisions without a run raises RuntimeNotStartedError in strict mode."""
+        runtime = Runtime(tmp_path, strict_mode=True)
+
+        with pytest.raises(RuntimeNotStartedError, match="no run is active"):
+            runtime.decide(
+                intent="Test",
+                options=[{"id": "a", "description": "A"}],
+                chosen="a",
+                reasoning="Test",
+            )
 
     def test_decision_with_node_context(self, tmp_path: Path):
         """Test decision with node ID context."""
@@ -272,6 +285,79 @@ class TestProblemReporting:
         assert problem.decision_id == decision_id
 
         runtime.end_run(success=True)
+
+
+class TestStrictMode:
+    """Test strict mode behavior for runtime methods."""
+
+    def test_record_outcome_without_run_raises_in_strict_mode(self, tmp_path: Path):
+        """Recording outcome without a run raises RuntimeNotStartedError in strict mode."""
+        runtime = Runtime(tmp_path, strict_mode=True)
+
+        with pytest.raises(RuntimeNotStartedError, match="no run is active"):
+            runtime.record_outcome(
+                decision_id="dec_0",
+                success=True,
+                result={"data": "test"},
+            )
+
+    def test_record_outcome_without_run_is_graceful_in_non_strict_mode(self, tmp_path: Path):
+        """Recording outcome without a run logs warning and returns in non-strict mode."""
+        runtime = Runtime(tmp_path, strict_mode=False)
+
+        # Should not raise, just log a warning
+        runtime.record_outcome(
+            decision_id="dec_0",
+            success=True,
+            result={"data": "test"},
+        )
+
+    def test_report_problem_without_run_raises_in_strict_mode(self, tmp_path: Path):
+        """Reporting problem without a run raises RuntimeNotStartedError in strict mode."""
+        runtime = Runtime(tmp_path, strict_mode=True)
+
+        with pytest.raises(RuntimeNotStartedError, match="no run is active"):
+            runtime.report_problem(
+                severity="critical",
+                description="Test problem",
+            )
+
+    def test_report_problem_without_run_is_graceful_in_non_strict_mode(self, tmp_path: Path):
+        """Reporting problem without a run logs warning and returns empty string in non-strict mode."""
+        runtime = Runtime(tmp_path, strict_mode=False)
+
+        # Should not raise, just log a warning and return empty string
+        problem_id = runtime.report_problem(
+            severity="critical",
+            description="Test problem",
+        )
+        assert problem_id == ""
+
+    def test_strict_mode_default_is_true(self, tmp_path: Path):
+        """Strict mode should be enabled by default."""
+        runtime = Runtime(tmp_path)
+
+        with pytest.raises(RuntimeNotStartedError):
+            runtime.decide(
+                intent="Test",
+                options=[{"id": "a", "description": "A"}],
+                chosen="a",
+                reasoning="Test",
+            )
+
+    def test_methods_work_after_end_run_in_strict_mode(self, tmp_path: Path):
+        """Methods should raise after end_run() in strict mode."""
+        runtime = Runtime(tmp_path, strict_mode=True)
+        runtime.start_run("test_goal", "Test")
+        runtime.end_run(success=True)
+
+        with pytest.raises(RuntimeNotStartedError, match="no run is active"):
+            runtime.decide(
+                intent="Test",
+                options=[{"id": "a", "description": "A"}],
+                chosen="a",
+                reasoning="Test",
+            )
 
 
 class TestConvenienceMethods:
