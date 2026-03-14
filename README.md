@@ -420,6 +420,16 @@ Visit [docs.adenhq.com](https://docs.adenhq.com/) for complete guides, API refer
 
 Contributions are welcome! Fork the repository, create your feature branch, implement your changes, and submit a pull request. See [CONTRIBUTING.md](CONTRIBUTING.md) for detailed guidelines.
 
+## Star History
+
+<a href="https://star-history.com/#aden-hive/hive&Date">
+ <picture>
+   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=aden-hive/hive&type=Date&theme=dark" />
+   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=aden-hive/hive&type=Date" />
+   <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=aden-hive/hive&type=Date" />
+ </picture>
+</a>
+
 ---
 
 <p align="center">
