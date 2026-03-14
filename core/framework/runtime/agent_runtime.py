@@ -132,6 +132,8 @@ class AgentRuntime:
         accounts_data: list[dict] | None = None,
         tool_provider_map: dict[str, str] | None = None,
         event_bus: "EventBus | None" = None,
+        skills_catalog_prompt: str = "",
+        protocols_prompt: str = "",
     ):
         """
         Initialize agent runtime.
@@ -153,6 +155,8 @@ class AgentRuntime:
             event_bus: Optional external EventBus. If provided, the runtime shares
                 this bus instead of creating its own. Used by SessionManager to
                 share a single bus between queen, worker, and judge.
+            skills_catalog_prompt: Available skills catalog for system prompt
+            protocols_prompt: Default skill operational protocols for system prompt
         """
         self.graph = graph
         self.goal = goal
@@ -160,6 +164,8 @@ class AgentRuntime:
         self._runtime_log_store = runtime_log_store
         self._checkpoint_config = checkpoint_config
         self.accounts_prompt = accounts_prompt
+        self.skills_catalog_prompt = skills_catalog_prompt
+        self.protocols_prompt = protocols_prompt
 
         # Primary graph identity
         self._graph_id: str = graph_id or "primary"
@@ -293,6 +299,8 @@ class AgentRuntime:
                     accounts_prompt=self._accounts_prompt,
                     accounts_data=self._accounts_data,
                     tool_provider_map=self._tool_provider_map,
+                    skills_catalog_prompt=self.skills_catalog_prompt,
+                    protocols_prompt=self.protocols_prompt,
                 )
                 await stream.start()
                 self._streams[ep_id] = stream
@@ -393,7 +401,8 @@ class AgentRuntime:
 
                 tc = spec.trigger_config
                 cron_expr = tc.get("cron")
-                interval = tc.get("interval_minutes")
+                _raw_interval = tc.get("interval_minutes")
+                interval = float(_raw_interval) if _raw_interval is not None else None
                 run_immediately = tc.get("run_immediately", False)
 
                 if cron_expr:
@@ -544,7 +553,7 @@ class AgentRuntime:
                             ep_id,
                             cron_expr,
                             run_immediately,
-                            idle_timeout=tc.get("idle_timeout_seconds", 300),
+                            idle_timeout=float(tc.get("idle_timeout_seconds", 300)),
                         )()
                     )
                     self._timer_tasks.append(task)
@@ -674,7 +683,7 @@ class AgentRuntime:
                             ep_id,
                             interval,
                             run_immediately,
-                            idle_timeout=tc.get("idle_timeout_seconds", 300),
+                            idle_timeout=float(tc.get("idle_timeout_seconds", 300)),
                         )()
                     )
                     self._timer_tasks.append(task)
@@ -921,6 +930,8 @@ class AgentRuntime:
                 accounts_prompt=self._accounts_prompt,
                 accounts_data=self._accounts_data,
                 tool_provider_map=self._tool_provider_map,
+                skills_catalog_prompt=self.skills_catalog_prompt,
+                protocols_prompt=self.protocols_prompt,
             )
             if self._running:
                 await stream.start()
@@ -999,7 +1010,8 @@ class AgentRuntime:
             if spec.trigger_type != "timer":
                 continue
             tc = spec.trigger_config
-            interval = tc.get("interval_minutes")
+            _raw_interval = tc.get("interval_minutes")
+            interval = float(_raw_interval) if _raw_interval is not None else None
             run_immediately = tc.get("run_immediately", False)
 
             if interval and interval > 0 and self._running:
@@ -1144,7 +1156,7 @@ class AgentRuntime:
                         ep_id,
                         interval,
                         run_immediately,
-                        idle_timeout=tc.get("idle_timeout_seconds", 300),
+                        idle_timeout=float(tc.get("idle_timeout_seconds", 300)),
                     )()
                 )
                 timer_tasks.append(task)
@@ -1699,6 +1711,8 @@ def create_agent_runtime(
     accounts_data: list[dict] | None = None,
     tool_provider_map: dict[str, str] | None = None,
     event_bus: "EventBus | None" = None,
+    skills_catalog_prompt: str = "",
+    protocols_prompt: str = "",
 ) -> AgentRuntime:
     """
     Create and configure an AgentRuntime with entry points.
@@ -1725,6 +1739,8 @@ def create_agent_runtime(
         accounts_data: Raw account data for per-node prompt generation.
         tool_provider_map: Tool name to provider name mapping for account routing.
         event_bus: Optional external EventBus to share with other components.
+        skills_catalog_prompt: Available skills catalog for system prompt.
+        protocols_prompt: Default skill operational protocols for system prompt.
 
     Returns:
         Configured AgentRuntime (not yet started)
@@ -1751,6 +1767,8 @@ def create_agent_runtime(
         accounts_data=accounts_data,
         tool_provider_map=tool_provider_map,
         event_bus=event_bus,
+        skills_catalog_prompt=skills_catalog_prompt,
+        protocols_prompt=protocols_prompt,
     )
 
     for spec in entry_points:
