@@ -28,11 +28,23 @@ def cli():
 
 
 @cli.command()
-@click.option("--file", "-f", "invoice_file", help="Path to invoice CSV file")
+@click.option(
+    "--file",
+    "-f",
+    "invoice_file",
+    help="Path to invoice CSV file (defaults to bundled sample data)",
+)
 @click.option("--verbose", "-v", is_flag=True)
 def run(invoice_file, verbose):
     """Execute the agent."""
     setup_logging(verbose=verbose)
+    if not invoice_file:
+        # Default to bundled sample data for offline testing
+        from pathlib import Path
+
+        sample = Path(__file__).parent / "data" / "sample_invoices.csv"
+        if sample.exists():
+            invoice_file = str(sample)
     result = asyncio.run(default_agent.run({"invoice_file_path": invoice_file or ""}))
     click.echo(
         json.dumps(
