@@ -1,5 +1,6 @@
 import { memo, useMemo, useState, useRef, useEffect, useCallback } from "react";
 import { Play, Pause, Loader2, CheckCircle2 } from "lucide-react";
+import { isRunButtonDisabled, type QueenPhase } from "@/lib/run-button-state";
 
 export type NodeStatus = "running" | "complete" | "pending" | "error" | "looping";
 
@@ -31,7 +32,7 @@ interface AgentGraphProps {
   version?: string;
   runState?: RunState;
   building?: boolean;
-  queenPhase?: "planning" | "building" | "staging" | "running";
+  queenPhase?: QueenPhase;
 }
 
 // --- Extracted RunButton so hover state survives parent re-renders ---
@@ -400,6 +401,8 @@ export default function AgentGraph({ nodes, title: _title, onNodeClick, onRun, o
     return { layers, cols, maxCols, nodeW, colSpacing, firstColX };
   }, [nodes, forwardEdges]);
 
+  const runDisabled = isRunButtonDisabled(nodes.length, queenPhase);
+
   if (nodes.length === 0) {
     return (
       <div className="flex flex-col h-full">
@@ -412,7 +415,7 @@ export default function AgentGraph({ nodes, title: _title, onNodeClick, onRun, o
               </span>
             )}
           </div>
-          <RunButton runState={runState} disabled={nodes.length === 0 || queenPhase === "building" || queenPhase === "planning"} onRun={handleRun} onPause={onPause ?? (() => {})} btnRef={runBtnRef} />
+          <RunButton runState={runState} disabled={runDisabled} onRun={handleRun} onPause={onPause ?? (() => {})} btnRef={runBtnRef} />
         </div>
         <div className="flex-1 flex items-center justify-center px-5">
           {building ? (
@@ -748,7 +751,7 @@ export default function AgentGraph({ nodes, title: _title, onNodeClick, onRun, o
             </span>
           )}
         </div>
-        <RunButton runState={runState} disabled={nodes.length === 0} onRun={handleRun} onPause={onPause ?? (() => {})} btnRef={runBtnRef} />
+        <RunButton runState={runState} disabled={runDisabled} onRun={handleRun} onPause={onPause ?? (() => {})} btnRef={runBtnRef} />
       </div>
 
       {/* Graph */}

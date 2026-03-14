@@ -51,6 +51,16 @@ def ensure_credential_key_env() -> None:
                     if found and value:
                         os.environ[var_name] = value
                         logger.debug("Loaded %s from shell config", var_name)
+        # Also load the currently configured LLM env var even if it's not in CREDENTIAL_SPECS.
+        # This keeps quickstart-written keys available to fresh processes on Unix shells.
+        from framework.config import get_hive_config
+
+        llm_env_var = str(get_hive_config().get("llm", {}).get("api_key_env_var", "")).strip()
+        if llm_env_var and not os.environ.get(llm_env_var):
+            found, value = check_env_var_in_shell_config(llm_env_var)
+            if found and value:
+                os.environ[llm_env_var] = value
+                logger.debug("Loaded configured LLM env var %s from shell config", llm_env_var)
     except ImportError:
         pass
 

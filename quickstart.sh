@@ -385,6 +385,7 @@ if [ "$USE_ASSOC_ARRAYS" = true ]; then
         ["GOOGLE_API_KEY"]="Google AI"
         ["GROQ_API_KEY"]="Groq"
         ["CEREBRAS_API_KEY"]="Cerebras"
+        ["OPENROUTER_API_KEY"]="OpenRouter"
         ["MISTRAL_API_KEY"]="Mistral"
         ["TOGETHER_API_KEY"]="Together AI"
         ["DEEPSEEK_API_KEY"]="DeepSeek"
@@ -398,6 +399,7 @@ if [ "$USE_ASSOC_ARRAYS" = true ]; then
         ["GOOGLE_API_KEY"]="google"
         ["GROQ_API_KEY"]="groq"
         ["CEREBRAS_API_KEY"]="cerebras"
+        ["OPENROUTER_API_KEY"]="openrouter"
         ["MISTRAL_API_KEY"]="mistral"
         ["TOGETHER_API_KEY"]="together"
         ["DEEPSEEK_API_KEY"]="deepseek"
@@ -521,9 +523,9 @@ if [ "$USE_ASSOC_ARRAYS" = true ]; then
     }
 else
     # Bash 3.2 - use parallel indexed arrays
-    PROVIDER_ENV_VARS=(ANTHROPIC_API_KEY OPENAI_API_KEY MINIMAX_API_KEY GEMINI_API_KEY GOOGLE_API_KEY GROQ_API_KEY CEREBRAS_API_KEY MISTRAL_API_KEY TOGETHER_API_KEY DEEPSEEK_API_KEY)
-    PROVIDER_DISPLAY_NAMES=("Anthropic (Claude)" "OpenAI (GPT)" "MiniMax" "Google Gemini" "Google AI" "Groq" "Cerebras" "Mistral" "Together AI" "DeepSeek")
-    PROVIDER_ID_LIST=(anthropic openai minimax gemini google groq cerebras mistral together deepseek)
+    PROVIDER_ENV_VARS=(ANTHROPIC_API_KEY OPENAI_API_KEY MINIMAX_API_KEY GEMINI_API_KEY GOOGLE_API_KEY GROQ_API_KEY CEREBRAS_API_KEY OPENROUTER_API_KEY MISTRAL_API_KEY TOGETHER_API_KEY DEEPSEEK_API_KEY)
+    PROVIDER_DISPLAY_NAMES=("Anthropic (Claude)" "OpenAI (GPT)" "MiniMax" "Google Gemini" "Google AI" "Groq" "Cerebras" "OpenRouter" "Mistral" "Together AI" "DeepSeek")
+    PROVIDER_ID_LIST=(anthropic openai minimax gemini google groq cerebras openrouter mistral together deepseek)
 
     # Default models by provider id (parallel arrays)
     MODEL_PROVIDER_IDS=(anthropic openai minimax gemini groq cerebras mistral together_ai deepseek)
@@ -701,10 +703,57 @@ detect_shell_rc() {
 SHELL_RC_FILE=$(detect_shell_rc)
 SHELL_NAME=$(basename "$SHELL")
 
+# Normalize user-pasted OpenRouter model IDs:
+# - trim whitespace
+# - strip leading "openrouter/" if present
+normalize_openrouter_model_id() {
+    local raw="$1"
+    # Trim leading/trailing whitespace
+    raw="${raw#"${raw%%[![:space:]]*}"}"
+    raw="${raw%"${raw##*[![:space:]]}"}"
+    if [[ "$raw" =~ ^[Oo][Pp][Ee][Nn][Rr][Oo][Uu][Tt][Ee][Rr]/(.+)$ ]]; then
+        raw="${BASH_REMATCH[1]}"
+    fi
+    printf '%s' "$raw"
+}
+
 # Prompt the user to choose a model for their selected provider.
 # Sets SELECTED_MODEL, SELECTED_MAX_TOKENS, and SELECTED_MAX_CONTEXT_TOKENS.
 prompt_model_selection() {
     local provider_id="$1"
+
+    if [ "$provider_id" = "openrouter" ]; then
+        local default_model=""
+        if [ -n "$PREV_MODEL" ] && [ "$provider_id" = "$PREV_PROVIDER" ]; then
+            default_model="$(normalize_openrouter_model_id "$PREV_MODEL")"
+        fi
+        echo ""
+        echo -e "${BOLD}Enter your OpenRouter model id:${NC}"
+        echo -e "  ${DIM}Paste from openrouter.ai (example: x-ai/grok-4.20-beta)${NC}"
+        echo -e "  ${DIM}If calls fail with guardrail/privacy errors: openrouter.ai/settings/privacy${NC}"
+        echo ""
+        local input_model=""
+        while true; do
+            if [ -n "$default_model" ]; then
+                read -r -p "Model id [$default_model]: " input_model || true
+                input_model="${input_model:-$default_model}"
+            else
+                read -r -p "Model id: " input_model || true
+            fi
+            local normalized_model
+            normalized_model="$(normalize_openrouter_model_id "$input_model")"
+            if [ -n "$normalized_model" ]; then
+                SELECTED_MODEL="$normalized_model"
+                SELECTED_MAX_TOKENS=8192
+                SELECTED_MAX_CONTEXT_TOKENS=120000
+                echo ""
+                echo -e "${GREEN}⬢${NC} Model: ${DIM}$SELECTED_MODEL${NC}"
+                return
+            fi
+            echo -e "${RED}Model id cannot be empty.${NC}"
+        done
+    fi
+
     local count
     count="$(get_model_choice_count "$provider_id")"
 
@@ -798,10 +847,14 @@ save_configuration() {
         max_context_tokens=120000
     fi
 
-    mkdir -p "$HIVE_CONFIG_DIR"
-
-    $PYTHON_CMD -c "
+    uv run python -c "
 import json
+from datetime import datetime, timezone
+from pathlib import Path
+
+cfg_path = Path.home() / '.hive' / 'configuration.json'
+cfg_path.parent.mkdir(parents=True, exist_ok=True)
+
 config = {
     'llm': {
         'provider': '$provider_id',
@@ -810,7 +863,7 @@ config = {
         'max_context_tokens': $max_context_tokens,
         'api_key_env_var': '$env_var'
     },
-    'created_at': '$(date -u +"%Y-%m-%dT%H:%M:%S+00:00")'
+    'created_at': datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%S+00:00')
 }
 if '$use_claude_code_sub' == 'true':
     config['llm']['use_claude_code_subscription'] = True
@@ -822,10 +875,42 @@ if '$use_codex_sub' == 'true':
     config['llm'].pop('api_key_env_var', None)
 if '$api_base':
     config['llm']['api_base'] = '$api_base'
-with open('$HIVE_CONFIG_FILE', 'w') as f:
+tmp_path = cfg_path.parent / (cfg_path.name + '.tmp')
+with open(tmp_path, 'w', encoding='utf-8') as f:
     json.dump(config, f, indent=2)
+tmp_path.replace(cfg_path)
 print(json.dumps(config, indent=2))
-" 2>/dev/null
+"
+}
+
+# Verify that configuration was persisted exactly as selected.
+# Args: provider_id env_var model [api_base]
+verify_configuration() {
+    local provider_id="$1"
+    local env_var="$2"
+    local model="$3"
+    local api_base="${4:-}"
+
+    uv run python -c "
+import json
+import sys
+from pathlib import Path
+
+cfg_path = Path.home() / '.hive' / 'configuration.json'
+with open(cfg_path, encoding='utf-8-sig') as f:
+    cfg = json.load(f)
+llm = cfg.get('llm', {})
+
+ok = (llm.get('provider') == '$provider_id' and llm.get('model') == '$model')
+if '$env_var':
+    ok = ok and (llm.get('api_key_env_var') == '$env_var')
+if '$api_base':
+    ok = ok and (llm.get('api_base') == '$api_base')
+
+if not ok:
+    print(json.dumps(llm, indent=2))
+    sys.exit(1)
+"
 }
 
 # Source shell rc file to pick up existing env vars (temporarily disable set -e)
@@ -901,10 +986,12 @@ PREV_MODEL=""
 PREV_ENV_VAR=""
 PREV_SUB_MODE=""
 if [ -f "$HIVE_CONFIG_FILE" ]; then
-    eval "$($PYTHON_CMD -c "
+    eval "$(uv run python -c "
 import json, sys
+from pathlib import Path
 try:
-    with open('$HIVE_CONFIG_FILE') as f:
+    cfg_path = Path.home() / '.hive' / 'configuration.json'
+    with open(cfg_path, encoding='utf-8-sig') as f:
         c = json.load(f)
     llm = c.get('llm', {})
     print(f'PREV_PROVIDER={llm.get(\"provider\", \"\")}')
@@ -954,6 +1041,7 @@ if [ -n "$PREV_SUB_MODE" ] || [ -n "$PREV_PROVIDER" ]; then
                 gemini)    DEFAULT_CHOICE=8 ;;
                 groq)      DEFAULT_CHOICE=9 ;;
                 cerebras)  DEFAULT_CHOICE=10 ;;
+                openrouter) DEFAULT_CHOICE=11 ;;
                 minimax)   DEFAULT_CHOICE=4 ;;
                 kimi)      DEFAULT_CHOICE=5 ;;
             esac
@@ -1004,10 +1092,10 @@ fi
 echo ""
 echo -e "  ${CYAN}${BOLD}API key providers:${NC}"
 
-# 6-10) API key providers — show (credential detected) if key already set
-PROVIDER_MENU_ENVS=(ANTHROPIC_API_KEY OPENAI_API_KEY GEMINI_API_KEY GROQ_API_KEY CEREBRAS_API_KEY)
-PROVIDER_MENU_NAMES=("Anthropic (Claude) - Recommended" "OpenAI (GPT)" "Google Gemini - Free tier available" "Groq - Fast, free tier" "Cerebras - Fast, free tier")
-for idx in 0 1 2 3 4; do
+# 6-11) API key providers — show (credential detected) if key already set
+PROVIDER_MENU_ENVS=(ANTHROPIC_API_KEY OPENAI_API_KEY GEMINI_API_KEY GROQ_API_KEY CEREBRAS_API_KEY OPENROUTER_API_KEY)
+PROVIDER_MENU_NAMES=("Anthropic (Claude) - Recommended" "OpenAI (GPT)" "Google Gemini - Free tier available" "Groq - Fast, free tier" "Cerebras - Fast, free tier" "OpenRouter - Bring any OpenRouter model")
+for idx in "${!PROVIDER_MENU_ENVS[@]}"; do
     num=$((idx + 6))
     env_var="${PROVIDER_MENU_ENVS[$idx]}"
     if [ -n "${!env_var}" ]; then
@@ -1017,7 +1105,8 @@ for idx in 0 1 2 3 4; do
     fi
 done
 
-echo -e "  ${CYAN}11)${NC} Skip for now"
+SKIP_CHOICE=$((6 + ${#PROVIDER_MENU_ENVS[@]}))
+echo -e "  ${CYAN}$SKIP_CHOICE)${NC} Skip for now"
 echo ""
 
 if [ -n "$DEFAULT_CHOICE" ]; then
@@ -1027,15 +1116,15 @@ fi
 
 while true; do
     if [ -n "$DEFAULT_CHOICE" ]; then
-        read -r -p "Enter choice (1-11) [$DEFAULT_CHOICE]: " choice || true
+        read -r -p "Enter choice (1-$SKIP_CHOICE) [$DEFAULT_CHOICE]: " choice || true
         choice="${choice:-$DEFAULT_CHOICE}"
     else
-        read -r -p "Enter choice (1-11): " choice || true
+        read -r -p "Enter choice (1-$SKIP_CHOICE): " choice || true
     fi
-    if [[ "$choice" =~ ^[0-9]+$ ]] && [ "$choice" -ge 1 ] && [ "$choice" -le 11 ]; then
+    if [[ "$choice" =~ ^[0-9]+$ ]] && [ "$choice" -ge 1 ] && [ "$choice" -le "$SKIP_CHOICE" ]; then
         break
     fi
-    echo -e "${RED}Invalid choice. Please enter 1-11${NC}"
+    echo -e "${RED}Invalid choice. Please enter 1-$SKIP_CHOICE${NC}"
 done
 
 case $choice in
@@ -1162,6 +1251,13 @@ case $choice in
         SIGNUP_URL="https://cloud.cerebras.ai/"
         ;;
     11)
+        SELECTED_ENV_VAR="OPENROUTER_API_KEY"
+        SELECTED_PROVIDER_ID="openrouter"
+        SELECTED_API_BASE="https://openrouter.ai/api/v1"
+        PROVIDER_NAME="OpenRouter"
+        SIGNUP_URL="https://openrouter.ai/keys"
+        ;;
+    "$SKIP_CHOICE")
         echo ""
         echo -e "${YELLOW}Skipped.${NC} An LLM API key is required to test and use worker agents."
         echo -e "Add your API key later by running:"
@@ -1202,7 +1298,7 @@ if { [ -z "$SUBSCRIPTION_MODE" ] || [ "$SUBSCRIPTION_MODE" = "minimax_code" ] ||
             echo -e "${GREEN}⬢${NC} API key saved to $SHELL_RC_FILE"
             # Health check the new key
             echo -n "  Verifying API key... "
-            if { [ "$SUBSCRIPTION_MODE" = "minimax_code" ] || [ "$SUBSCRIPTION_MODE" = "kimi_code" ]; } && [ -n "${SELECTED_API_BASE:-}" ]; then
+            if [ -n "${SELECTED_API_BASE:-}" ]; then
                 HC_RESULT=$(uv run python "$SCRIPT_DIR/scripts/check_llm_key.py" "$SELECTED_PROVIDER_ID" "$API_KEY" "$SELECTED_API_BASE" 2>/dev/null) || true
             else
                 HC_RESULT=$(uv run python "$SCRIPT_DIR/scripts/check_llm_key.py" "$SELECTED_PROVIDER_ID" "$API_KEY" 2>/dev/null) || true
@@ -1314,18 +1410,37 @@ fi
 if [ -n "$SELECTED_PROVIDER_ID" ]; then
     echo ""
     echo -n "  Saving configuration... "
+    SAVE_OK=true
     if [ "$SUBSCRIPTION_MODE" = "claude_code" ]; then
-        save_configuration "$SELECTED_PROVIDER_ID" "" "$SELECTED_MODEL" "$SELECTED_MAX_TOKENS" "$SELECTED_MAX_CONTEXT_TOKENS" "true" "" > /dev/null
+        save_configuration "$SELECTED_PROVIDER_ID" "" "$SELECTED_MODEL" "$SELECTED_MAX_TOKENS" "$SELECTED_MAX_CONTEXT_TOKENS" "true" "" > /dev/null || SAVE_OK=false
     elif [ "$SUBSCRIPTION_MODE" = "codex" ]; then
-        save_configuration "$SELECTED_PROVIDER_ID" "" "$SELECTED_MODEL" "$SELECTED_MAX_TOKENS" "$SELECTED_MAX_CONTEXT_TOKENS" "" "" "true" > /dev/null
+        save_configuration "$SELECTED_PROVIDER_ID" "" "$SELECTED_MODEL" "$SELECTED_MAX_TOKENS" "$SELECTED_MAX_CONTEXT_TOKENS" "" "" "true" > /dev/null || SAVE_OK=false
     elif [ "$SUBSCRIPTION_MODE" = "zai_code" ]; then
-        save_configuration "$SELECTED_PROVIDER_ID" "$SELECTED_ENV_VAR" "$SELECTED_MODEL" "$SELECTED_MAX_TOKENS" "$SELECTED_MAX_CONTEXT_TOKENS" "" "https://api.z.ai/api/coding/paas/v4" > /dev/null
+        save_configuration "$SELECTED_PROVIDER_ID" "$SELECTED_ENV_VAR" "$SELECTED_MODEL" "$SELECTED_MAX_TOKENS" "$SELECTED_MAX_CONTEXT_TOKENS" "" "https://api.z.ai/api/coding/paas/v4" > /dev/null || SAVE_OK=false
     elif [ "$SUBSCRIPTION_MODE" = "minimax_code" ]; then
-        save_configuration "$SELECTED_PROVIDER_ID" "$SELECTED_ENV_VAR" "$SELECTED_MODEL" "$SELECTED_MAX_TOKENS" "$SELECTED_MAX_CONTEXT_TOKENS" "" "$SELECTED_API_BASE" > /dev/null
+        save_configuration "$SELECTED_PROVIDER_ID" "$SELECTED_ENV_VAR" "$SELECTED_MODEL" "$SELECTED_MAX_TOKENS" "$SELECTED_MAX_CONTEXT_TOKENS" "" "$SELECTED_API_BASE" > /dev/null || SAVE_OK=false
     elif [ "$SUBSCRIPTION_MODE" = "kimi_code" ]; then
-        save_configuration "$SELECTED_PROVIDER_ID" "$SELECTED_ENV_VAR" "$SELECTED_MODEL" "$SELECTED_MAX_TOKENS" "$SELECTED_MAX_CONTEXT_TOKENS" "" "$SELECTED_API_BASE" > /dev/null
+        save_configuration "$SELECTED_PROVIDER_ID" "$SELECTED_ENV_VAR" "$SELECTED_MODEL" "$SELECTED_MAX_TOKENS" "$SELECTED_MAX_CONTEXT_TOKENS" "" "$SELECTED_API_BASE" > /dev/null || SAVE_OK=false
+    elif [ "$SELECTED_PROVIDER_ID" = "openrouter" ]; then
+        save_configuration "$SELECTED_PROVIDER_ID" "$SELECTED_ENV_VAR" "$SELECTED_MODEL" "$SELECTED_MAX_TOKENS" "$SELECTED_MAX_CONTEXT_TOKENS" "" "$SELECTED_API_BASE" > /dev/null || SAVE_OK=false
     else
-        save_configuration "$SELECTED_PROVIDER_ID" "$SELECTED_ENV_VAR" "$SELECTED_MODEL" "$SELECTED_MAX_TOKENS" "$SELECTED_MAX_CONTEXT_TOKENS" > /dev/null
+        save_configuration "$SELECTED_PROVIDER_ID" "$SELECTED_ENV_VAR" "$SELECTED_MODEL" "$SELECTED_MAX_TOKENS" "$SELECTED_MAX_CONTEXT_TOKENS" > /dev/null || SAVE_OK=false
+    fi
+    if [ "$SAVE_OK" = false ]; then
+        echo -e "${RED}failed${NC}"
+        echo -e "${YELLOW}  Could not write ~/.hive/configuration.json. Please rerun quickstart.${NC}"
+        exit 1
+    fi
+    VERIFY_API_BASE=""
+    if [ "$SUBSCRIPTION_MODE" = "zai_code" ]; then
+        VERIFY_API_BASE="https://api.z.ai/api/coding/paas/v4"
+    elif [ "$SUBSCRIPTION_MODE" = "minimax_code" ] || [ "$SUBSCRIPTION_MODE" = "kimi_code" ] || [ "$SELECTED_PROVIDER_ID" = "openrouter" ]; then
+        VERIFY_API_BASE="${SELECTED_API_BASE:-}"
+    fi
+    if ! verify_configuration "$SELECTED_PROVIDER_ID" "$SELECTED_ENV_VAR" "$SELECTED_MODEL" "$VERIFY_API_BASE"; then
+        echo -e "${RED}failed${NC}"
+        echo -e "${YELLOW}  Configuration verification failed for ~/.hive/configuration.json.${NC}"
+        exit 1
     fi
     echo -e "${GREEN}⬢${NC}"
     echo -e "  ${DIM}~/.hive/configuration.json${NC}"
@@ -1340,24 +1455,24 @@ echo ""
 echo -e "${GREEN}⬢${NC} Browser automation enabled"
 
 # Patch gcu_enabled into configuration.json
-if [ -f "$HIVE_CONFIG_FILE" ]; then
-    uv run python -c "
+uv run python -c "
 import json
-with open('$HIVE_CONFIG_FILE') as f:
-    config = json.load(f)
+from datetime import datetime, timezone
+from pathlib import Path
+
+cfg_path = Path.home() / '.hive' / 'configuration.json'
+cfg_path.parent.mkdir(parents=True, exist_ok=True)
+if cfg_path.exists():
+    with open(cfg_path, encoding='utf-8-sig') as f:
+        config = json.load(f)
+else:
+    config = {'created_at': datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%S+00:00')}
 config['gcu_enabled'] = True
-with open('$HIVE_CONFIG_FILE', 'w') as f:
+tmp_path = cfg_path.parent / (cfg_path.name + '.tmp')
+with open(tmp_path, 'w', encoding='utf-8') as f:
     json.dump(config, f, indent=2)
+tmp_path.replace(cfg_path)
 "
-else
-    mkdir -p "$HIVE_CONFIG_DIR"
-    uv run python -c "
-import json
-config = {'gcu_enabled': True, 'created_at': '$(date -u +"%Y-%m-%dT%H:%M:%S+00:00")'}
-with open('$HIVE_CONFIG_FILE', 'w') as f:
-    json.dump(config, f, indent=2)
-"
-fi
 
 echo ""
 
@@ -1557,6 +1672,9 @@ if [ -n "$SELECTED_PROVIDER_ID" ]; then
     elif [ "$SUBSCRIPTION_MODE" = "minimax_code" ]; then
         echo -e "  ${GREEN}⬢${NC} MiniMax Coding Key → ${DIM}$SELECTED_MODEL${NC}"
         echo -e "  ${DIM}API: api.minimax.io/v1 (OpenAI-compatible)${NC}"
+    elif [ "$SELECTED_PROVIDER_ID" = "openrouter" ]; then
+        echo -e "  ${GREEN}⬢${NC} OpenRouter API Key → ${DIM}$SELECTED_MODEL${NC}"
+        echo -e "  ${DIM}API: openrouter.ai/api/v1 (OpenAI-compatible)${NC}"
     else
         echo -e "  ${CYAN}$SELECTED_PROVIDER_ID${NC} → ${DIM}$SELECTED_MODEL${NC}"
     fi
@@ -1601,40 +1719,26 @@ if [ "$CODEX_AVAILABLE" = true ]; then
     echo ""
 fi
 
-# Auto-launch dashboard if frontend was built
-if [ "$FRONTEND_BUILT" = true ]; then
-    echo -e "${BOLD}Launching dashboard...${NC}"
-    echo ""
-    echo -e "  ${DIM}Starting server on http://localhost:8787${NC}"
-    echo -e "  ${DIM}Press Ctrl+C to stop${NC}"
-    echo ""
-    echo -e "  ${DIM}Tip: You can restart the dashboard anytime with:${NC} ${CYAN}hive open${NC}"
-    echo ""
-    # exec replaces the quickstart process with hive open
-    exec "$SCRIPT_DIR/hive" open
-else
-    # No frontend — show manual instructions
-    echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-    echo -e "${BOLD}⚠️  IMPORTANT: Load your new configuration${NC}"
-    echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-    echo ""
-    echo -e "  Your API keys have been saved to ${CYAN}$SHELL_RC_FILE${NC}"
-    echo -e "  To use them, either:"
-    echo ""
-    echo -e "  ${GREEN}Option 1:${NC} Source your shell config now:"
-    echo -e "     ${CYAN}source $SHELL_RC_FILE${NC}"
-    echo ""
-    echo -e "  ${GREEN}Option 2:${NC} Open a new terminal window"
-    echo ""
-    echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-    echo ""
+# Setup-only mode: quickstart never auto-launches the dashboard.
+echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+echo -e "${BOLD}IMPORTANT: Load your new configuration${NC}"
+echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+echo ""
+echo -e "  Your API keys have been saved to ${CYAN}$SHELL_RC_FILE${NC}"
+echo -e "  To use them, either:"
+echo ""
+echo -e "  ${GREEN}Option 1:${NC} Source your shell config now:"
+echo -e "     ${CYAN}source $SHELL_RC_FILE${NC}"
+echo ""
+echo -e "  ${GREEN}Option 2:${NC} Open a new terminal window"
+echo ""
+echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+echo ""
 
-    echo -e "${BOLD}Run an Agent:${NC}"
-    echo ""
-    echo -e "  Launch the interactive dashboard to browse and run agents:"
-    echo -e "  You can start an example agent or an agent built by yourself:"
-    echo -e "     ${CYAN}hive open${NC}"
-    echo ""
-    echo -e "${DIM}Run ./quickstart.sh again to reconfigure.${NC}"
-    echo ""
-fi
+echo -e "${BOLD}Run an Agent:${NC}"
+echo ""
+echo -e "  Launch the interactive dashboard when you're ready:"
+echo -e "     ${CYAN}hive open${NC}"
+echo ""
+echo -e "${DIM}Run ./quickstart.sh again to reconfigure.${NC}"
+echo ""

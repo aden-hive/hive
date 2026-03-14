@@ -2822,7 +2822,7 @@ export default function Workspace() {
         <div className={`${activeAgentState?.queenPhase === "planning" || activeAgentState?.queenPhase === "building" || activeAgentState?.originalDraft ? "w-[500px] min-w-[400px]" : "w-[300px] min-w-[240px]"} bg-card/30 flex flex-col border-r border-border/30 transition-[width] duration-200`}>
           <div className="flex-1 min-h-0">
             {activeAgentState?.queenPhase === "planning" || activeAgentState?.queenPhase === "building" ? (
-              <DraftGraph draft={activeAgentState?.draftGraph ?? null} loading={!activeAgentState?.draftGraph} building={activeAgentState?.queenBuilding} onRun={handleRun} onPause={handlePause} runState={activeAgentState?.workerRunState ?? "idle"} />
+              <DraftGraph draft={activeAgentState?.draftGraph ?? null} loading={!activeAgentState?.draftGraph} building={activeAgentState?.queenBuilding} onRun={handleRun} onPause={handlePause} runState={activeAgentState?.workerRunState ?? "idle"} queenPhase={activeAgentState?.queenPhase ?? "building"} />
             ) : activeAgentState?.originalDraft ? (
               <DraftGraph
                 draft={activeAgentState.originalDraft}
@@ -2830,6 +2830,7 @@ export default function Workspace() {
                 onRun={handleRun}
                 onPause={handlePause}
                 runState={activeAgentState?.workerRunState ?? "idle"}
+                queenPhase={activeAgentState?.queenPhase ?? "building"}
                 flowchartMap={activeAgentState.flowchartMap ?? undefined}
                 runtimeNodes={currentGraph.nodes}
                 onRuntimeNodeClick={(runtimeNodeId) => {

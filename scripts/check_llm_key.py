@@ -56,6 +56,22 @@ def check_openai_compatible(api_key: str, endpoint: str, name: str) -> dict:
     return {"valid": False, "message": f"{name} API returned status {r.status_code}"}
 
 
+def check_openrouter(
+    api_key: str, api_base: str = "https://openrouter.ai/api/v1", **_: str
+) -> dict:
+    """Validate OpenRouter key against GET /models."""
+    endpoint = f"{api_base.rstrip('/')}/models"
+    with httpx.Client(timeout=TIMEOUT) as client:
+        r = client.get(endpoint, headers={"Authorization": f"Bearer {api_key}"})
+    if r.status_code in (200, 429):
+        return {"valid": True, "message": "OpenRouter API key valid"}
+    if r.status_code == 401:
+        return {"valid": False, "message": "Invalid OpenRouter API key"}
+    if r.status_code == 403:
+        return {"valid": False, "message": "OpenRouter API key lacks permissions"}
+    return {"valid": False, "message": f"OpenRouter API returned status {r.status_code}"}
+
+
 def check_minimax(
     api_key: str, api_base: str = "https://api.minimax.io/v1", **_: str
 ) -> dict:
@@ -129,6 +145,7 @@ PROVIDERS = {
     "cerebras": lambda key, **kw: check_openai_compatible(
         key, "https://api.cerebras.ai/v1/models", "Cerebras"
     ),
+    "openrouter": lambda key, **kw: check_openrouter(key),
     "minimax": lambda key, **kw: check_minimax(key),
     # Kimi For Coding uses an Anthropic-compatible endpoint; check via /v1/messages
     # with empty messages (same as check_anthropic, triggers 400 not 401).
@@ -157,6 +174,8 @@ def main() -> None:
     try:
         if api_base and provider_id == "minimax":
             result = check_minimax(api_key, api_base)
+        elif api_base and provider_id == "openrouter":
+            result = check_openrouter(api_key, api_base)
         elif api_base and provider_id == "kimi":
             # Kimi uses an Anthropic-compatible endpoint; check via /v1/messages
             result = check_anthropic_compatible(

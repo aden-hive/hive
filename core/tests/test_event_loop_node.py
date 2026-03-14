@@ -538,6 +538,118 @@ class TestClientFacingBlocking:
         assert result.output["answer"] == "help provided"
 
     @pytest.mark.asyncio
+    async def test_duplicate_ask_user_after_answer_is_blocked(
+        self, runtime, memory, client_spec
+    ):
+        """Repeated identical ask_user should not block the user a second time."""
+        client_spec.output_keys = ["answer"]
+        llm = MockStreamingLLM(
+            scenarios=[
+                tool_call_scenario(
+                    "ask_user",
+                    {
+                        "question": "Proceed with this design?",
+                        "options": ["Yes", "No"],
+                    },
+                    tool_use_id="ask_1",
+                ),
+                tool_call_scenario(
+                    "ask_user",
+                    {
+                        "question": "Proceed with this design?",
+                        "options": ["Yes", "No"],
+                    },
+                    tool_use_id="ask_2",
+                ),
+                tool_call_scenario(
+                    "set_output",
+                    {"key": "answer", "value": "accepted"},
+                    tool_use_id="set_1",
+                ),
+                text_scenario("Proceeding."),
+            ]
+        )
+        bus = EventBus()
+        received = []
+
+        async def capture(e):
+            received.append(e)
+
+        bus.subscribe(
+            event_types=[EventType.CLIENT_INPUT_REQUESTED],
+            handler=capture,
+        )
+        node = EventLoopNode(event_bus=bus, config=LoopConfig(max_iterations=6))
+        ctx = build_ctx(runtime, client_spec, memory, llm)
+
+        async def user_responds():
+            await asyncio.sleep(0.05)
+            await node.inject_event("Yes, proceed with this design", is_client_input=True)
+
+        task = asyncio.create_task(user_responds())
+        result = await node.execute(ctx)
+        await task
+
+        assert result.success is True
+        assert result.output["answer"] == "accepted"
+        assert len(received) == 1
+
+    @pytest.mark.asyncio
+    async def test_duplicate_ask_user_multiple_after_answer_is_blocked(
+        self, runtime, memory, client_spec
+    ):
+        """Repeated identical ask_user_multiple should not re-open the same widget."""
+        client_spec.output_keys = ["answer"]
+        questions = [
+            {"id": "scope", "prompt": "What scope?", "options": ["Small", "Large"]},
+            {"id": "format", "prompt": "Which format?", "options": ["JSON", "CSV"]},
+        ]
+        llm = MockStreamingLLM(
+            scenarios=[
+                tool_call_scenario(
+                    "ask_user_multiple",
+                    {"questions": questions},
+                    tool_use_id="ask_multi_1",
+                ),
+                tool_call_scenario(
+                    "ask_user_multiple",
+                    {"questions": questions},
+                    tool_use_id="ask_multi_2",
+                ),
+                tool_call_scenario(
+                    "set_output",
+                    {"key": "answer", "value": "captured"},
+                    tool_use_id="set_1",
+                ),
+                text_scenario("Captured."),
+            ]
+        )
+        bus = EventBus()
+        received = []
+
+        async def capture(e):
+            received.append(e)
+
+        bus.subscribe(
+            event_types=[EventType.CLIENT_INPUT_REQUESTED],
+            handler=capture,
+        )
+        node = EventLoopNode(event_bus=bus, config=LoopConfig(max_iterations=6))
+        ctx = build_ctx(runtime, client_spec, memory, llm)
+
+        async def user_responds():
+            await asyncio.sleep(0.05)
+            await node.inject_event("[scope]: Small\n[format]: JSON", is_client_input=True)
+
+        task = asyncio.create_task(user_responds())
+        result = await node.execute(ctx)
+        await task
+
+        assert result.success is True
+        assert result.output["answer"] == "captured"
+        assert len(received) == 1
+
+    @pytest.mark.asyncio
     async def test_client_facing_does_not_block_on_tools(self, runtime, memory):
         """client_facing + tool calls (no ask_user) should NOT block."""
         spec = NodeSpec(
@@ -1529,6 +1641,34 @@ class TestTransientErrorRetry:
         with pytest.raises(ValueError, match="bad request"):
             await node.execute(ctx)
         assert llm._call_index == 1  # only tried once
+
+    @pytest.mark.asyncio
+    async def test_client_facing_non_transient_error_does_not_crash(
+        self, runtime, node_spec, memory
+    ):
+        """Client-facing non-transient errors should wait for input, not crash on token vars."""
+        node_spec.output_keys = []
+        node_spec.client_facing = True
+        llm = ErrorThenSuccessLLM(
+            error=ValueError("bad request: blocked by policy"),
+            fail_count=100,  # always fails
+            success_scenario=text_scenario("unreachable"),
+        )
+        ctx = build_ctx(runtime, node_spec, memory, llm)
+        node = EventLoopNode(
+            config=LoopConfig(
+                max_iterations=1,
+                max_stream_retries=0,
+                stream_retry_backoff_base=0.01,
+            ),
+        )
+        node._await_user_input = AsyncMock(return_value=None)
+
+        result = await node.execute(ctx)
+
+        assert result.success is False
+        assert "Max iterations" in (result.error or "")
+        node._await_user_input.assert_awaited_once()
 
     @pytest.mark.asyncio
     async def test_transient_error_exhausts_retries(self, runtime, node_spec, memory):

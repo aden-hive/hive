@@ -2,7 +2,7 @@
 
 import logging
 
-from framework.config import get_hive_config
+from framework.config import get_api_base, get_hive_config, get_preferred_model
 
 
 class TestGetHiveConfig:
@@ -21,3 +21,47 @@ class TestGetHiveConfig:
         assert result == {}
         assert "Failed to load Hive config" in caplog.text
         assert str(config_file) in caplog.text
+
+
+class TestOpenRouterConfig:
+    """OpenRouter config composition and fallback behavior."""
+
+    def test_get_preferred_model_for_openrouter(self, tmp_path, monkeypatch):
+        config_file = tmp_path / "configuration.json"
+        config_file.write_text(
+            '{"llm":{"provider":"openrouter","model":"x-ai/grok-4.20-beta"}}',
+            encoding="utf-8",
+        )
+        monkeypatch.setattr("framework.config.HIVE_CONFIG_FILE", config_file)
+
+        assert get_preferred_model() == "openrouter/x-ai/grok-4.20-beta"
+
+    def test_get_preferred_model_normalizes_openrouter_prefixed_model(self, tmp_path, monkeypatch):
+        config_file = tmp_path / "configuration.json"
+        config_file.write_text(
+            '{"llm":{"provider":"openrouter","model":"openrouter/x-ai/grok-4.20-beta"}}',
+            encoding="utf-8",
+        )
+        monkeypatch.setattr("framework.config.HIVE_CONFIG_FILE", config_file)
+
+        assert get_preferred_model() == "openrouter/x-ai/grok-4.20-beta"
+
+    def test_get_api_base_falls_back_to_openrouter_default(self, tmp_path, monkeypatch):
+        config_file = tmp_path / "configuration.json"
+        config_file.write_text(
+            '{"llm":{"provider":"openrouter","model":"x-ai/grok-4.20-beta"}}',
+            encoding="utf-8",
+        )
+        monkeypatch.setattr("framework.config.HIVE_CONFIG_FILE", config_file)
+
+        assert get_api_base() == "https://openrouter.ai/api/v1"
+
+    def test_get_api_base_keeps_explicit_openrouter_api_base(self, tmp_path, monkeypatch):
+        config_file = tmp_path / "configuration.json"
+        config_file.write_text(
+            '{"llm":{"provider":"openrouter","model":"x-ai/grok-4.20-beta","api_base":"https://proxy.example/v1"}}',
+            encoding="utf-8",
+        )
+        monkeypatch.setattr("framework.config.HIVE_CONFIG_FILE", config_file)
+
+        assert get_api_base() == "https://proxy.example/v1"

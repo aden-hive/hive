@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState, useCallback } from "react";
 import { Loader2 } from "lucide-react";
 import type { DraftGraph as DraftGraphData, DraftNode } from "@/api/types";
+import { isRunButtonDisabled, type QueenPhase } from "@/lib/run-button-state";
 import { RunButton } from "./AgentGraph";
 import type { GraphNode, RunState } from "./AgentGraph";
 
@@ -91,6 +92,7 @@ interface DraftGraphProps {
   onPause?: () => void;
   /** Current run state — drives the RunButton appearance. */
   runState?: RunState;
+  queenPhase?: QueenPhase;
 }
 
 // Layout constants — tuned for a ~500px panel (484px after px-2 padding)
@@ -357,13 +359,14 @@ function Tooltip({ node, style }: { node: DraftNode; style: React.CSSProperties 
   );
 }
 
-export default function DraftGraph({ draft, onNodeClick, flowchartMap, runtimeNodes, onRuntimeNodeClick, building, loading, onRun, onPause, runState = "idle" }: DraftGraphProps) {
+export default function DraftGraph({ draft, onNodeClick, flowchartMap, runtimeNodes, onRuntimeNodeClick, building, loading, onRun, onPause, runState = "idle", queenPhase }: DraftGraphProps) {
   const [hoveredNode, setHoveredNode] = useState<string | null>(null);
   const [mousePos, setMousePos] = useState<{ x: number; y: number } | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const runBtnRef = useRef<HTMLButtonElement>(null);
   const [containerW, setContainerW] = useState(484);
   const chrome = useDraftChromeColors();
+  const runDisabled = isRunButtonDisabled(draft?.nodes.length ?? 0, queenPhase);
 
   // Shift-to-pin tooltip
   const shiftHeld = useRef(false);
@@ -1011,7 +1014,7 @@ export default function DraftGraph({ draft, onNodeClick, flowchartMap, runtimeNo
           )}
         </div>
         {onRun && (
-          <RunButton runState={runState} disabled={draft.nodes.length === 0} onRun={onRun} onPause={onPause ?? (() => {})} btnRef={runBtnRef} />
+          <RunButton runState={runState} disabled={runDisabled} onRun={onRun} onPause={onPause ?? (() => {})} btnRef={runBtnRef} />
         )}
       </div>
 
