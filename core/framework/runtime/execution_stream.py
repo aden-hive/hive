@@ -869,6 +869,9 @@ class ExecutionStream:
                 self._write_run_event(execution_id, ctx.run_id, "run_cancelled")
                 # Don't re-raise - we've handled it and saved state
 
+            except (KeyboardInterrupt, SystemExit):
+                raise
+
             except Exception as e:
                 ctx.status = "failed"
                 logger.error(f"Execution {execution_id} failed: {e}")

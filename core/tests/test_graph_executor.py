@@ -245,3 +245,87 @@ async def test_executor_no_events_without_event_bus():
     result = await executor.execute(graph=graph, goal=goal)
 
     assert result.success is True
+
+
+class KeyboardInterruptNode:
+    def validate_input(self, ctx):
+        return []
+
+    async def execute(self, ctx):
+        raise KeyboardInterrupt()
+
+
+class SystemExitNode:
+    def validate_input(self, ctx):
+        return []
+
+    async def execute(self, ctx):
+        raise SystemExit(1)
+
+
+@pytest.mark.asyncio
+async def test_executor_keyboard_interrupt_propagates():
+    runtime = DummyRuntime()
+
+    graph = GraphSpec(
+        id="graph-ki",
+        goal_id="g-ki",
+        nodes=[
+            NodeSpec(
+                id="n1",
+                name="node1",
+                description="test node",
+                node_type="event_loop",
+                input_keys=[],
+                output_keys=[],
+                max_retries=0,
+            )
+        ],
+        edges=[],
+        entry_node="n1",
+        terminal_nodes=["n1"],
+    )
+
+    executor = GraphExecutor(
+        runtime=runtime,
+        node_registry={"n1": KeyboardInterruptNode()},
+    )
+
+    goal = Goal(id="g-ki", name="ki-test", description="keyboard interrupt test")
+
+    with pytest.raises(KeyboardInterrupt):
+        await executor.execute(graph=graph, goal=goal)
+
+
+@pytest.mark.asyncio
+async def test_executor_system_exit_propagates():
+    runtime = DummyRuntime()
+
+    graph = GraphSpec(
+        id="graph-se",
+        goal_id="g-se",
+        nodes=[
+            NodeSpec(
+                id="n1",
+                name="node1",
+                description="test node",
+                node_type="event_loop",
+                input_keys=[],
+                output_keys=[],
+                max_retries=0,
+            )
+        ],
+        edges=[],
+        entry_node="n1",
+        terminal_nodes=["n1"],
+    )
+
+    executor = GraphExecutor(
+        runtime=runtime,
+        node_registry={"n1": SystemExitNode()},
+    )
+
+    goal = Goal(id="g-se", name="se-test", description="system exit test")
+
+    with pytest.raises(SystemExit):
+        await executor.execute(graph=graph, goal=goal)
