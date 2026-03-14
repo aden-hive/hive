@@ -1202,7 +1202,7 @@ class GraphExecutor:
                     }
 
                     self.runtime.end_run(
-                        success=True,
+                        success=False,
                         output_data=saved_memory,
                         narrative=f"Paused at {node_spec.name} after {steps} steps",
                     )
@@ -1214,14 +1214,14 @@ class GraphExecutor:
 
                     if self.runtime_logger:
                         await self.runtime_logger.end_run(
-                            status="success",
+                            status="paused",
                             duration_ms=total_latency,
                             node_path=path,
                             execution_quality=exec_quality,
                         )
 
                     return ExecutionResult(
-                        success=True,
+                        success=False,
                         output=saved_memory,
                         steps_executed=steps,
                         total_tokens=total_tokens,
