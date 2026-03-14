@@ -77,6 +77,18 @@ class TimingNode(NodeProtocol):
         )
 
 
+class ExceptionNode(NodeProtocol):
+    """Raises an exception during execution."""
+
+    def __init__(self, message: str = "Branch crashed"):
+        self.executed = False
+        self.message = message
+
+    async def execute(self, ctx: NodeContext) -> NodeResult:
+        self.executed = True
+        raise RuntimeError(self.message)
+
+
 # --- Fixtures ---
 
 
@@ -492,3 +504,267 @@ async def test_parallel_disabled_uses_sequential(runtime, goal):
     # Only one branch should have executed (sequential follows first edge)
     executed_count = sum([b1_impl.executed, b2_impl.executed])
     assert executed_count == 1
+
+
+# === 12. All branches execute even when one raises exception ===
+
+
+@pytest.mark.asyncio
+async def test_all_branches_execute_despite_exception(runtime, goal):
+    """All branches should execute even when one raises an exception."""
+    b1 = NodeSpec(
+        id="b1", name="B1", description="ok", node_type="event_loop", output_keys=["b1_out"]
+    )
+    b2 = NodeSpec(
+        id="b2",
+        name="B2",
+        description="crashes",
+        node_type="event_loop",
+        output_keys=["b2_out"],
+        max_retries=1,
+    )
+    b3 = NodeSpec(
+        id="b3", name="B3", description="ok", node_type="event_loop", output_keys=["b3_out"]
+    )
+
+    graph = _make_fanout_graph([b1, b2, b3])
+
+    config = ParallelExecutionConfig(on_branch_failure="continue_others")
+    executor = GraphExecutor(
+        runtime=runtime, enable_parallel_execution=True, parallel_config=config
+    )
+    executor.register_node("source", SuccessNode({"data": "x"}))
+    b1_impl = SuccessNode({"b1_out": "ok"})
+    b2_impl = ExceptionNode("Branch B2 crashed!")
+    b3_impl = SuccessNode({"b3_out": "ok"})
+    executor.register_node("b1", b1_impl)
+    executor.register_node("b2", b2_impl)
+    executor.register_node("b3", b3_impl)
+
+    result = await executor.execute(graph, goal, {})
+
+    assert b1_impl.executed, "Branch B1 should have executed"
+    assert b2_impl.executed, "Branch B2 should have executed (despite exception)"
+    assert b3_impl.executed, "Branch B3 should have executed"
+    assert result.success, "Execution should succeed with continue_others strategy"
+
+
+# === 13. Memory conflict strategy: error ===
+
+
+@pytest.mark.asyncio
+async def test_memory_conflict_error_strategy(runtime, goal):
+    """memory_conflict_strategy='error' should raise when branches write same key."""
+    b1 = NodeSpec(
+        id="b1", name="B1", description="branch 1", node_type="event_loop", output_keys=["b1_key"]
+    )
+    b2 = NodeSpec(
+        id="b2", name="B2", description="branch 2", node_type="event_loop", output_keys=["b2_key"]
+    )
+
+    graph = _make_fanout_graph([b1, b2])
+
+    config = ParallelExecutionConfig(
+        on_branch_failure="continue_others", memory_conflict_strategy="error"
+    )
+    executor = GraphExecutor(
+        runtime=runtime, enable_parallel_execution=True, parallel_config=config
+    )
+    executor.register_node("source", SuccessNode({"data": "x"}))
+    executor.register_node("b1", SuccessNode({"shared": "value1", "b1_key": "b1"}))
+    executor.register_node("b2", SuccessNode({"shared": "value2", "b2_key": "b2"}))
+
+    result = await executor.execute(graph, goal, {})
+
+    assert not result.success
+    assert "conflict" in result.error.lower() or "shared" in result.error.lower()
+
+
+# === 14. Memory conflict strategy: first_wins ===
+
+
+@pytest.mark.asyncio
+async def test_memory_conflict_first_wins_strategy(runtime, goal):
+    """memory_conflict_strategy='first_wins' should keep first value for conflicting keys."""
+    b1 = NodeSpec(
+        id="b1", name="B1", description="branch 1", node_type="event_loop", output_keys=["b1_key"]
+    )
+    b2 = NodeSpec(
+        id="b2", name="B2", description="branch 2", node_type="event_loop", output_keys=["b2_key"]
+    )
+    merge = NodeSpec(
+        id="merge",
+        name="Merge",
+        description="fan-in",
+        node_type="event_loop",
+        input_keys=["shared"],
+        output_keys=["merged"],
+    )
+
+    graph = _make_fanout_graph([b1, b2], fan_in_node=merge)
+
+    config = ParallelExecutionConfig(
+        on_branch_failure="continue_others", memory_conflict_strategy="first_wins"
+    )
+    executor = GraphExecutor(
+        runtime=runtime, enable_parallel_execution=True, parallel_config=config
+    )
+
+    captured_memory = {}
+    execution_order = []
+
+    class OrderTrackingSuccessNode(NodeProtocol):
+        def __init__(self, output: dict, label: str):
+            self._output = output
+            self.label = label
+
+        async def execute(self, ctx: NodeContext) -> NodeResult:
+            execution_order.append(self.label)
+            return NodeResult(success=True, output=self._output, tokens_used=10, latency_ms=5)
+
+    class MemoryCaptureNode(NodeProtocol):
+        def __init__(self, output: dict):
+            self._output = output
+
+        async def execute(self, ctx: NodeContext) -> NodeResult:
+            captured_memory.update(ctx.memory.read_all())
+            execution_order.append("merge")
+            return NodeResult(success=True, output=self._output, tokens_used=10, latency_ms=5)
+
+    executor.register_node("source", OrderTrackingSuccessNode({"data": "x"}, "source"))
+    executor.register_node("b1", OrderTrackingSuccessNode({"shared": "first_value"}, "b1"))
+    executor.register_node("b2", OrderTrackingSuccessNode({"shared": "second_value"}, "b2"))
+    executor.register_node("merge", MemoryCaptureNode({"merged": "done"}))
+
+    result = await executor.execute(graph, goal, {})
+
+    assert result.success, f"Execution failed: {result.error}"
+    assert "b1" in execution_order, "Branch B1 should have executed"
+    assert "b2" in execution_order, "Branch B2 should have executed"
+    assert "merge" in execution_order, "Merge node should have executed"
+    assert captured_memory.get("shared") == "first_value", (
+        f"First value should win, got: {captured_memory.get('shared')}"
+    )
+
+
+# === 15. Memory conflict strategy: last_wins (default) ===
+
+
+@pytest.mark.asyncio
+async def test_memory_conflict_last_wins_strategy(runtime, goal):
+    """memory_conflict_strategy='last_wins' should keep last value for conflicting keys."""
+    b1 = NodeSpec(
+        id="b1", name="B1", description="branch 1", node_type="event_loop", output_keys=["b1_key"]
+    )
+    b2 = NodeSpec(
+        id="b2", name="B2", description="branch 2", node_type="event_loop", output_keys=["b2_key"]
+    )
+    merge = NodeSpec(
+        id="merge",
+        name="Merge",
+        description="fan-in",
+        node_type="event_loop",
+        input_keys=["shared"],
+        output_keys=["merged"],
+    )
+
+    graph = _make_fanout_graph([b1, b2], fan_in_node=merge)
+
+    config = ParallelExecutionConfig(
+        on_branch_failure="continue_others", memory_conflict_strategy="last_wins"
+    )
+    executor = GraphExecutor(
+        runtime=runtime, enable_parallel_execution=True, parallel_config=config
+    )
+
+    captured_memory = {}
+    execution_order = []
+
+    class OrderTrackingSuccessNode(NodeProtocol):
+        def __init__(self, output: dict, label: str):
+            self._output = output
+            self.label = label
+
+        async def execute(self, ctx: NodeContext) -> NodeResult:
+            execution_order.append(self.label)
+            return NodeResult(success=True, output=self._output, tokens_used=10, latency_ms=5)
+
+    class MemoryCaptureNode(NodeProtocol):
+        def __init__(self, output: dict):
+            self._output = output
+
+        async def execute(self, ctx: NodeContext) -> NodeResult:
+            captured_memory.update(ctx.memory.read_all())
+            execution_order.append("merge")
+            return NodeResult(success=True, output=self._output, tokens_used=10, latency_ms=5)
+
+    executor.register_node("source", OrderTrackingSuccessNode({"data": "x"}, "source"))
+    executor.register_node("b1", OrderTrackingSuccessNode({"shared": "first_value"}, "b1"))
+    executor.register_node("b2", OrderTrackingSuccessNode({"shared": "second_value"}, "b2"))
+    executor.register_node("merge", MemoryCaptureNode({"merged": "done"}))
+
+    result = await executor.execute(graph, goal, {})
+
+    assert result.success, f"Execution failed: {result.error}"
+    assert "b1" in execution_order, "Branch B1 should have executed"
+    assert "b2" in execution_order, "Branch B2 should have executed"
+    assert "merge" in execution_order, "Merge node should have executed"
+    assert captured_memory.get("shared") == "second_value", (
+        f"Last value should win, got: {captured_memory.get('shared')}"
+    )
+
+
+# === 16. Exception in one branch doesn't hide other branch results ===
+
+
+@pytest.mark.asyncio
+async def test_exception_doesnt_hide_other_branch_results(runtime, goal):
+    """When one branch raises an exception, successful branch outputs should still be available."""
+    b1 = NodeSpec(
+        id="b1", name="B1", description="ok", node_type="event_loop", output_keys=["b1_out"]
+    )
+    b2 = NodeSpec(
+        id="b2",
+        name="B2",
+        description="crashes",
+        node_type="event_loop",
+        output_keys=["b2_out"],
+        max_retries=1,
+    )
+    merge = NodeSpec(
+        id="merge",
+        name="Merge",
+        description="fan-in",
+        node_type="event_loop",
+        input_keys=["b1_out"],
+        output_keys=["merged"],
+    )
+
+    graph = _make_fanout_graph([b1, b2], fan_in_node=merge)
+
+    config = ParallelExecutionConfig(on_branch_failure="continue_others")
+    executor = GraphExecutor(
+        runtime=runtime, enable_parallel_execution=True, parallel_config=config
+    )
+
+    captured_memory = {}
+
+    class MemoryCaptureNode(NodeProtocol):
+        def __init__(self, output: dict):
+            self._output = output
+
+        async def execute(self, ctx: NodeContext) -> NodeResult:
+            captured_memory.update(ctx.memory.read_all())
+            return NodeResult(success=True, output=self._output, tokens_used=10, latency_ms=5)
+
+    executor.register_node("source", SuccessNode({"data": "x"}))
+    executor.register_node("b1", SuccessNode({"b1_out": "successful_output"}))
+    executor.register_node("b2", ExceptionNode("Branch B2 crashed!"))
+    executor.register_node("merge", MemoryCaptureNode({"merged": "done"}))
+
+    result = await executor.execute(graph, goal, {})
+
+    assert result.success
+    assert captured_memory.get("b1_out") == "successful_output", (
+        "Successful branch output should be available"
+    )

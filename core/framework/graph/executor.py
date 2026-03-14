@@ -2059,13 +2059,20 @@ class GraphExecutor:
 
         async def execute_single_branch(
             branch: ParallelBranch,
-        ) -> tuple[ParallelBranch, NodeResult | Exception]:
-            """Execute a single branch with retry logic."""
+        ) -> tuple[ParallelBranch, NodeResult | Exception, dict[str, Any]]:
+            """Execute a single branch with retry logic.
+
+            Returns:
+                Tuple of (branch, result_or_exception, output_dict)
+                output_dict contains the branch's outputs to be merged with
+                conflict resolution after all branches complete.
+            """
+            branch_outputs: dict[str, Any] = {}
             node_spec = graph.get_node(branch.node_id)
             if node_spec is None:
                 branch.status = "failed"
                 branch.error = f"Node {branch.node_id} not found in graph"
-                return branch, RuntimeError(branch.error)
+                return branch, RuntimeError(branch.error), branch_outputs
 
             # Get node implementation to check its type
             branch_impl = self._get_node_implementation(node_spec, graph.cleanup_llm_model)
@@ -2143,17 +2150,14 @@ class GraphExecutor:
                         )
 
                     if result.success:
-                        # Write outputs to shared memory using async write
-                        for key, value in result.output.items():
-                            await memory.write_async(key, value)
-
+                        branch_outputs = dict(result.output)
                         branch.result = result
                         branch.status = "completed"
                         self.logger.info(
                             f"      ✓ Branch {node_spec.name}: success "
                             f"(tokens: {result.tokens_used}, latency: {result.latency_ms}ms)"
                         )
-                        return branch, result
+                        return branch, result, branch_outputs
 
                     self.logger.warning(
                         f"      ↻ Branch {node_spec.name}: "
@@ -2168,7 +2172,7 @@ class GraphExecutor:
                     f"      ✗ Branch {node_spec.name}: "
                     f"failed after {effective_max_retries} attempts"
                 )
-                return branch, last_result
+                return branch, last_result, branch_outputs
 
             except Exception as e:
                 import traceback
@@ -2189,19 +2193,31 @@ class GraphExecutor:
                         stacktrace=stack_trace,
                     )
 
-                return branch, e
+                return branch, e, branch_outputs
 
-        # Execute all branches concurrently
+        # Execute all branches concurrently with return_exceptions=True
+        # to collect all results including exceptions
         tasks = [execute_single_branch(b) for b in branches.values()]
-        results = await asyncio.gather(*tasks, return_exceptions=False)
+        raw_results = await asyncio.gather(*tasks, return_exceptions=True)
 
-        # Process results
+        # Process results - handle exceptions from gather itself
+        results: list[tuple[ParallelBranch, NodeResult | Exception, dict[str, Any]]] = []
+        for i, raw in enumerate(raw_results):
+            if isinstance(raw, Exception):
+                branch = list(branches.values())[i]
+                branch.status = "failed"
+                branch.error = str(raw)
+                results.append((branch, raw, {}))
+            else:
+                results.append(raw)
+
         total_tokens = 0
         total_latency = 0
         branch_results: dict[str, NodeResult] = {}
         failed_branches: list[ParallelBranch] = []
+        branch_outputs_list: list[tuple[str, dict[str, Any]]] = []
 
-        for branch, result in results:
+        for branch, result, outputs in results:
             path.append(branch.node_id)
 
             if isinstance(result, Exception):
@@ -2212,6 +2228,32 @@ class GraphExecutor:
                 total_tokens += result.tokens_used
                 total_latency += result.latency_ms
                 branch_results[branch.branch_id] = result
+                branch_outputs_list.append((branch.branch_id, outputs))
+
+        # Apply memory conflict resolution for successful branch outputs
+        if branch_outputs_list:
+            conflict_strategy = self._parallel_config.memory_conflict_strategy
+            merged_outputs: dict[str, Any] = {}
+            key_sources: dict[str, str] = {}
+
+            for branch_id, outputs in branch_outputs_list:
+                for key, value in outputs.items():
+                    if key in merged_outputs:
+                        existing_source = key_sources[key]
+                        if conflict_strategy == "error":
+                            raise RuntimeError(
+                                f"Memory conflict: key '{key}' written by multiple branches "
+                                f"({existing_source}, {branch_id})"
+                            )
+                        elif conflict_strategy == "first_wins":
+                            continue
+                        # else: last_wins (default) - overwrite
+                    merged_outputs[key] = value
+                    key_sources[key] = branch_id
+
+            # Write merged outputs to shared memory
+            for key, value in merged_outputs.items():
+                await memory.write_async(key, value)
 
         # Handle failures based on config
         if failed_branches:
