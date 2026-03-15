@@ -54,12 +54,7 @@ def _get(
         if resp.status_code == 404:
             return {"error": f"Not found: {path}"}
         if resp.status_code != 200:
-            return {
-                    "error": (
-                    f"HuggingFace Inference API error "
-                    f"{resp.status_code}: {resp.text[:500]}"
-                    )
-            }
+            return {"error": (f"HuggingFace API error {resp.status_code}: {resp.text[:500]}")}
         return resp.json()
     except httpx.TimeoutException:
         return {"error": "Request to HuggingFace timed out"}
@@ -68,7 +63,9 @@ def _get(
 
 
 def _post(
-    url: str, token: str | None, payload: dict[str, Any],
+    url: str,
+    token: str | None,
+    payload: dict[str, Any],
     timeout: float = 120.0,
 ) -> dict[str, Any] | list:
     """Make a POST request to the HuggingFace Inference API."""
@@ -91,7 +88,7 @@ def _post(
                 resp.json()
                 if resp.headers.get("content-type", "").startswith("application/json")
                 else {}
-                    )
+            )
             estimated = body.get("estimated_time", "unknown")
             return {
                 "error": "Model is loading",
@@ -100,10 +97,7 @@ def _post(
             }
         if resp.status_code != 200:
             return {
-                "error": (
-                    f"HuggingFace Inference API error "
-                    f"{resp.status_code}: {resp.text[:500]}"
-                )
+                "error": (f"HuggingFace Inference API error {resp.status_code}: {resp.text[:500]}")
             }
         return resp.json()
     except httpx.TimeoutException:
@@ -518,8 +512,7 @@ def register_tools(
             if resp.status_code != 200:
                 return {
                     "error": (
-                        f"Failed to list endpoints "
-                        f"(HTTP {resp.status_code}): {resp.text[:500]}"
+                        f"Failed to list endpoints (HTTP {resp.status_code}): {resp.text[:500]}"
                     )
                 }
             data = resp.json()
@@ -561,5 +554,5 @@ def register_tools(
                         else ""
                     ),
                 }
-                    )
+            )
         return {"endpoints": endpoints, "count": len(endpoints)}
