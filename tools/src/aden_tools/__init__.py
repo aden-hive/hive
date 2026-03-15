@@ -25,6 +25,7 @@ from .credentials import (
 )
 
 # Utilities (no external dependencies)
+from .logging import configure_logging, get_logger
 from .utils import get_env_var
 
 
@@ -42,6 +43,8 @@ __all__ = [
     "__version__",
     # Utilities
     "get_env_var",
+    "configure_logging",
+    "get_logger",
     # Credentials
     "CredentialStoreAdapter",
     "CredentialSpec",
