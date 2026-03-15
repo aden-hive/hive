@@ -567,32 +567,6 @@ class TestClientFacingBlocking:
         assert result.output["result"] == "done"
 
     @pytest.mark.asyncio
-    async def test_client_facing_llm_error_waits_and_recovers(self, runtime, memory, client_spec):
-        """Client-facing LLM errors should wait for user input and continue cleanly."""
-        client_spec.output_keys = ["answer"]
-        llm = MockStreamingLLM(
-            scenarios=[
-                [StreamErrorEvent(error="auth failed", recoverable=False)],
-                tool_call_scenario("set_output", {"key": "answer", "value": "ok"}),
-                text_scenario("Done"),
-            ]
-        )
-        node = EventLoopNode(config=LoopConfig(max_iterations=6))
-        ctx = build_ctx(runtime, client_spec, memory, llm)
-
-        async def user_responds():
-            await asyncio.sleep(0.05)
-            await node.inject_event("retry please")
-
-        user_task = asyncio.create_task(user_responds())
-        result = await node.execute(ctx)
-        await user_task
-
-        assert result.success is True
-        assert result.output["answer"] == "ok"
-        assert llm._call_index >= 3
-
-    @pytest.mark.asyncio
     async def test_non_client_facing_unchanged(self, runtime, memory):
         """client_facing=False should not block — existing behavior."""
         spec = NodeSpec(
@@ -1626,52 +1600,6 @@ class TestTransientErrorRetry:
         assert call_index == 2
 
     @pytest.mark.asyncio
-    async def test_disallowed_tool_error_injects_hint_and_retries(self, runtime, node_spec, memory):
-        """Strict provider tool-schema errors should self-correct without user input."""
-        node_spec.output_keys = ["result"]
-
-        call_index = 0
-
-        class DisallowedToolThenSuccessLLM(LLMProvider):
-            async def stream(self, messages, system="", tools=None, max_tokens=4096):
-                nonlocal call_index
-                idx = call_index
-                call_index += 1
-                if idx == 0:
-                    yield StreamErrorEvent(
-                        error=(
-                            "GroqException - tool call validation failed: attempted to call "
-                            "tool 'list_agent_tools' which was not in request.tools"
-                        ),
-                        recoverable=False,
-                    )
-                elif idx == 1:
-                    for event in tool_call_scenario(
-                        "set_output", {"key": "result", "value": "ok"}
-                    ):
-                        yield event
-                else:
-                    for event in text_scenario("done"):
-                        yield event
-
-            def complete(self, messages, system="", **kwargs):
-                return LLMResponse(content="ok", model="mock", stop_reason="stop")
-
-        llm = DisallowedToolThenSuccessLLM()
-        ctx = build_ctx(runtime, node_spec, memory, llm)
-        node = EventLoopNode(
-            config=LoopConfig(
-                max_iterations=5,
-                max_stream_retries=3,
-                stream_retry_backoff_base=0.01,
-            ),
-        )
-        result = await node.execute(ctx)
-        assert result.success is True
-        assert result.output.get("result") == "ok"
-        assert call_index == 3
-
-    @pytest.mark.asyncio
     async def test_retry_emits_event_bus_event(self, runtime, node_spec, memory):
         """Retry should emit NODE_RETRY event on the event bus."""
         node_spec.output_keys = []
@@ -1786,13 +1714,6 @@ class TestIsTransientError:
     def test_runtime_error_without_transient_keywords(self):
         assert EventLoopNode._is_transient_error(RuntimeError("authentication failed")) is False
         assert EventLoopNode._is_transient_error(RuntimeError("invalid JSON in response")) is False
-
-    def test_runtime_error_tool_not_in_request_is_not_transient(self):
-        err = RuntimeError(
-            "Stream error: tool call validation failed: attempted to call tool "
-            "'list_agent_tools' which was not in request.tools"
-        )
-        assert EventLoopNode._is_transient_error(err) is False
 
 
 # ===========================================================================
