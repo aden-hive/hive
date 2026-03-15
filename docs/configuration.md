@@ -50,6 +50,109 @@ export GROQ_API_KEY="..."
 
 The framework supports 100+ LLM providers through [LiteLLM](https://docs.litellm.ai/docs/providers). Set the corresponding environment variable for your provider.
 
+### Provider Configuration Examples
+
+Below are step-by-step examples for the most common providers. After setting the environment variable, run `./quickstart.sh` (or edit `~/.hive/configuration.json` directly) to point the framework at that provider.
+
+#### Anthropic (default)
+
+```bash
+export ANTHROPIC_API_KEY="sk-ant-api03-..."
+```
+
+`~/.hive/configuration.json`:
+```json
+{
+  "llm": {
+    "provider": "anthropic",
+    "model": "claude-sonnet-4-5-20250929",
+    "api_key_env_var": "ANTHROPIC_API_KEY"
+  }
+}
+```
+
+#### OpenAI
+
+```bash
+export OPENAI_API_KEY="sk-proj-..."
+```
+
+`~/.hive/configuration.json`:
+```json
+{
+  "llm": {
+    "provider": "openai",
+    "model": "gpt-4o",
+    "api_key_env_var": "OPENAI_API_KEY"
+  }
+}
+```
+
+#### Google Gemini
+
+```bash
+export GEMINI_API_KEY="AIza..."
+```
+
+`~/.hive/configuration.json`:
+```json
+{
+  "llm": {
+    "provider": "gemini",
+    "model": "gemini/gemini-1.5-pro",
+    "api_key_env_var": "GEMINI_API_KEY"
+  }
+}
+```
+
+#### Groq (fast inference)
+
+```bash
+export GROQ_API_KEY="gsk_..."
+```
+
+`~/.hive/configuration.json`:
+```json
+{
+  "llm": {
+    "provider": "groq",
+    "model": "groq/llama-3.3-70b-versatile",
+    "api_key_env_var": "GROQ_API_KEY"
+  }
+}
+```
+
+#### Ollama (local, no API key)
+
+```bash
+# Start the Ollama daemon first:
+ollama pull llama3
+ollama serve
+```
+
+`~/.hive/configuration.json`:
+```json
+{
+  "llm": {
+    "provider": "ollama",
+    "model": "ollama/llama3",
+    "api_base": "http://localhost:11434"
+  }
+}
+```
+
+#### Per-agent model override
+
+To use a different model for a specific agent without changing the global default, set `model` in the agent's `config.py`:
+
+```python
+# examples/templates/my_agent/config.py
+CONFIG = {
+    "model": "gemini/gemini-1.5-flash",  # overrides ~/.hive/configuration.json
+    "max_tokens": 4096,
+}
+```
+
 ### Search & Tools (optional)
 
 ```bash
