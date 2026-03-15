@@ -47,7 +47,12 @@ def get_preferred_model() -> str:
     """Return the user's preferred LLM model string (e.g. 'anthropic/claude-sonnet-4-20250514')."""
     llm = get_hive_config().get("llm", {})
     if llm.get("provider") and llm.get("model"):
-        return f"{llm['provider']}/{llm['model']}"
+        provider = llm["provider"]
+        model = llm["model"]
+        # Avoid double-prefixing if model already includes the provider (e.g. "ollama/qwen2.5:7b")
+        if model.startswith(f"{provider}/"):
+            return model
+        return f"{provider}/{model}"
     return "anthropic/claude-sonnet-4-20250514"
 
 
