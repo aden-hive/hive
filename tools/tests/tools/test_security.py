@@ -240,7 +240,10 @@ class TestGetSecurePath:
         target_file = session_dir / "target.txt"
         target_file.write_text("content", encoding="utf-8")
         symlink_path = session_dir / "link_to_target"
-        symlink_path.symlink_to(target_file)
+        try:
+            symlink_path.symlink_to(target_file)
+        except OSError:
+            pytest.skip("Symlink creation requires elevated privileges on this platform")
 
         # Path through symlink should resolve
         result = get_secure_path("link_to_target", **ids)
@@ -265,7 +268,10 @@ class TestGetSecurePath:
         outside_target = self.workspaces_dir / "outside_file.txt"
         outside_target.write_text("sensitive data", encoding="utf-8")
         symlink_path = session_dir / "escape_link"
-        symlink_path.symlink_to(outside_target)
+        try:
+            symlink_path.symlink_to(outside_target)
+        except OSError:
+            pytest.skip("Symlink creation requires elevated privileges on this platform")
 
         # get_secure_path accepts the lexical path (symlink is inside session)
         result = get_secure_path("escape_link", **ids)
