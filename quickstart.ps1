@@ -317,7 +317,9 @@ Write-Host ""
 Write-Step -Number "1" -Text "Step 1: Checking Python..."
 
 # On Windows "python3.x" aliases don't exist; prefer "python" then "python3"
+# Also try the Windows Python Launcher (py.exe) with explicit version flags.
 $PythonCmd = $null
+$PythonExtraArg = $null  # extra arg for py launcher (e.g. "-3.12")
 foreach ($candidate in @("python", "python3", "python3.13", "python3.12", "python3.11")) {
     try {
         $ver = & $candidate -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')" 2>$null
@@ -335,6 +337,25 @@ foreach ($candidate in @("python", "python3", "python3.13", "python3.12", "pytho
     }
 }
 
+# Fall back to Windows Python Launcher (py.exe) with explicit version flags.
+# This handles the common case where the default "python" points to an older
+# version but a newer one is registered with the py launcher.
+if (-not $PythonCmd) {
+    foreach ($pyVer in @("3.13", "3.12", "3.11")) {
+        try {
+            $verFlag = "-$pyVer"
+            $ver = & py $verFlag -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')" 2>$null
+            if ($LASTEXITCODE -eq 0 -and $ver) {
+                $PythonCmd = "py"
+                $PythonExtraArg = $verFlag
+                break
+            }
+        } catch {
+            # py launcher not available or this version not installed, continue
+        }
+    }
+}
+
 if (-not $PythonCmd) {
     Write-Color -Text "Python 3.11+ is not installed or not on PATH." -Color Red
     Write-Host ""
@@ -344,8 +365,13 @@ if (-not $PythonCmd) {
     exit 1
 }
 
-$PythonVersion = & $PythonCmd -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')"
-Write-Ok "Python $PythonVersion ($PythonCmd)"
+if ($PythonExtraArg) {
+    $PythonVersion = & $PythonCmd $PythonExtraArg -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')"
+    Write-Ok "Python $PythonVersion ($PythonCmd $PythonExtraArg)"
+} else {
+    $PythonVersion = & $PythonCmd -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')"
+    Write-Ok "Python $PythonVersion ($PythonCmd)"
+}
 Write-Host ""
 
 # ============================================================
