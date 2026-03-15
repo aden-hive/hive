@@ -150,6 +150,10 @@ EMPTY_STREAM_RETRY_DELAY = 1.0  # seconds
 # Directory for dumping failed requests
 FAILED_REQUESTS_DIR = Path.home() / ".hive" / "failed_requests"
 
+# Maximum number of dump files to retain in ~/.hive/failed_requests/.
+# Older files are pruned automatically to prevent unbounded disk growth.
+MAX_FAILED_REQUEST_DUMPS = 50
+
 
 def _estimate_tokens(model: str, messages: list[dict]) -> tuple[int, str]:
     """Estimate token count for messages. Returns (token_count, method)."""
@@ -164,6 +168,24 @@ def _estimate_tokens(model: str, messages: list[dict]) -> tuple[int, str]:
     # Fallback: rough estimate based on character count (~4 chars per token)
     total_chars = sum(len(str(m.get("content", ""))) for m in messages)
     return total_chars // 4, "estimate"
+
+
+def _prune_failed_request_dumps(max_files: int = MAX_FAILED_REQUEST_DUMPS) -> None:
+    """Remove oldest dump files when the count exceeds *max_files*.
+
+    Best-effort: never raises — a pruning failure must not break retry logic.
+    """
+    try:
+        all_dumps = sorted(
+            FAILED_REQUESTS_DIR.glob("*.json"),
+            key=lambda f: f.stat().st_mtime,
+        )
+        excess = len(all_dumps) - max_files
+        if excess > 0:
+            for old_file in all_dumps[:excess]:
+                old_file.unlink(missing_ok=True)
+    except Exception:
+        pass  # Best-effort — never block the caller
 
 
 def _dump_failed_request(
@@ -196,6 +218,9 @@ def _dump_failed_request(
 
     with open(filepath, "w", encoding="utf-8") as f:
         json.dump(dump_data, f, indent=2, default=str)
+
+    # Prune old dumps to prevent unbounded disk growth
+    _prune_failed_request_dumps()
 
     return str(filepath)
 
