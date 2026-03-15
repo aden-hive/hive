@@ -84,30 +84,70 @@ intake → research → compile-report
 
 ## Usage
 
-### Basic Usage
+### CLI
+
+```bash
+# Interactive mode (recommended) — agent will ask you for topics
+hive run examples/templates/tech_news_reporter
+
+# Non-interactive — skip the intake question, go straight to research
+hive run examples/templates/tech_news_reporter \
+  --input '{"research_brief": "Focus on LLM reasoning benchmarks and AI safety news from the past week"}'
+```
+
+### Python API
 
 ```python
-from framework.runner import AgentRunner
+import asyncio
+from examples.templates.tech_news_reporter.agent import TechNewsReporterAgent
 
-# Load the agent
-runner = AgentRunner.load("examples/templates/tech_news_reporter")
+async def main():
+    agent = TechNewsReporterAgent()
+    result = await agent.run(
+        context={
+            "research_brief": "Focus on LLM reasoning benchmarks and AI safety news"
+        }
+    )
+    print(result.success)          # True
+    print(result.output.get("report_file"))  # path or URL to the generated report
 
-# Run with input
-result = await runner.run({"input_key": "value"})
+asyncio.run(main())
+```
 
-# Access results
-print(result.output)
-print(result.status)
+### Example Interaction
+
+```
+Agent: Hello! I can research the latest tech and AI news for you.
+       Do you have specific topics to focus on, or would you like a general roundup?
+
+User:  Cover recent developments in open-source LLMs and AI regulation in the EU.
+
+Agent: [searches the web, scrapes top stories, compiles report]
+       Your report is ready: http://localhost:8787/files/tech_news_2026-03-15.html
+
+       Summary (5 stories across 3 topics):
+       • Llama 4 achieves state-of-the-art on MMLU — Meta AI Blog
+       • EU AI Act enforcement timeline confirmed — TechCrunch
+       • Mistral releases Mixtral 8x22B weights — Mistral AI
+       ...
 ```
 
 ### Input Schema
 
-The agent's entry node `intake` requires:
+The agent accepts an optional `research_brief` string in the initial context. If omitted, the `intake` node asks the user interactively.
 
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `research_brief` | `str` | No | Topics or focus areas for the research (e.g. "AI safety, open-source LLMs") |
 
 ### Output Schema
 
-Terminal nodes: `compile-report`
+The terminal node `compile-report` writes the following to shared state:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `report_file` | `str` | Path or served URL of the generated HTML report |
+| `articles_data` | `list[dict]` | Raw list of scraped articles with title, summary, url, topic |
 
 ## Version History
 
