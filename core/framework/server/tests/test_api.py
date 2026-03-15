@@ -127,7 +127,30 @@ class MockRuntime:
         pass
 
     async def get_goal_progress(self):
-        return {"progress": 0.5, "criteria": []}
+        return {
+            "overall_progress": 0.5,
+            "progress": 0.5,
+            "criteria_status": {
+                "criterion_1": {
+                    "description": "Complete the task",
+                    "met": False,
+                    "progress": 0.5,
+                    "evidence": ["half done"],
+                }
+            },
+            "criteria": [
+                {
+                    "criterion_id": "criterion_1",
+                    "description": "Complete the task",
+                    "met": False,
+                    "progress": 0.5,
+                    "evidence": ["half done"],
+                }
+            ],
+            "constraint_violations": [],
+            "metrics": {"total_decisions": 2},
+            "recommendation": "continue",
+        }
 
     def find_awaiting_node(self):
         return None, None
@@ -628,6 +651,11 @@ class TestExecution:
             assert resp.status == 200
             data = await resp.json()
             assert data["progress"] == 0.5
+            assert data["overall_progress"] == 0.5
+            assert data["criteria"][0]["criterion_id"] == "criterion_1"
+            assert data["criteria_status"]["criterion_1"]["progress"] == 0.5
+            assert data["recommendation"] == "continue"
+            assert "updated_at" in data
 
 
 class TestResume:
