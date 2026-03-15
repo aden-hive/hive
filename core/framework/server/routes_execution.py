@@ -3,6 +3,7 @@
 import asyncio
 import json
 import logging
+from datetime import UTC, datetime
 from typing import Any
 
 from aiohttp import web
@@ -252,7 +253,28 @@ async def handle_goal_progress(request: web.Request) -> web.Response:
         return web.json_response({"error": "No worker loaded in this session"}, status=503)
 
     progress = await session.worker_runtime.get_goal_progress()
-    return web.json_response(progress, dumps=lambda obj: json.dumps(obj, default=str))
+
+    normalized = dict(progress or {})
+    overall_progress = float(normalized.get("overall_progress", normalized.get("progress", 0.0)) or 0.0)
+    criteria_status = normalized.get("criteria_status") or {}
+    criteria = normalized.get("criteria")
+    if criteria is None:
+        criteria = [
+            {"criterion_id": criterion_id, **status}
+            for criterion_id, status in criteria_status.items()
+            if isinstance(status, dict)
+        ]
+
+    normalized["overall_progress"] = overall_progress
+    normalized["progress"] = overall_progress
+    normalized["criteria_status"] = criteria_status
+    normalized["criteria"] = criteria
+    normalized.setdefault("constraint_violations", [])
+    normalized.setdefault("metrics", {})
+    normalized.setdefault("recommendation", "continue")
+    normalized.setdefault("updated_at", datetime.now(UTC).isoformat())
+
+    return web.json_response(normalized, dumps=lambda obj: json.dumps(obj, default=str))
 
 
 async def handle_resume(request: web.Request) -> web.Response:

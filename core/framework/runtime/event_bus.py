@@ -606,16 +606,31 @@ class EventBus:
         stream_id: str,
         progress: float,
         criteria_status: dict[str, Any],
+        *,
+        criteria: list[dict[str, Any]] | None = None,
+        constraint_violations: list[dict[str, Any]] | None = None,
+        metrics: dict[str, Any] | None = None,
+        recommendation: str | None = None,
+        updated_at: str | None = None,
     ) -> None:
         """Emit goal progress event."""
+        payload: dict[str, Any] = {
+            "progress": progress,
+            "overall_progress": progress,
+            "criteria_status": criteria_status,
+            "criteria": criteria if criteria is not None else list(criteria_status.values()),
+            "constraint_violations": constraint_violations or [],
+            "metrics": metrics or {},
+            "recommendation": recommendation or "continue",
+        }
+        if updated_at is not None:
+            payload["updated_at"] = updated_at
+
         await self.publish(
             AgentEvent(
                 type=EventType.GOAL_PROGRESS,
                 stream_id=stream_id,
-                data={
-                    "progress": progress,
-                    "criteria_status": criteria_status,
-                },
+                data=payload,
             )
         )
 

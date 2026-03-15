@@ -8,7 +8,7 @@ concurrent executions collectively achieve the goal.
 import asyncio
 import logging
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
 from framework.schemas.decision import Decision, Outcome
@@ -297,6 +297,13 @@ class OutcomeAggregator:
             # Determine recommendation
             result["recommendation"] = self._get_recommendation(result)
 
+            result["criteria"] = [
+                {"criterion_id": criterion_id, **status}
+                for criterion_id, status in result["criteria_status"].items()
+            ]
+            result["progress"] = result["overall_progress"]
+            result["updated_at"] = datetime.now(UTC).isoformat()
+
             # Publish progress event
             if self._event_bus:
                 # Get any stream ID for the event
@@ -306,6 +313,11 @@ class OutcomeAggregator:
                         stream_id=list(stream_ids)[0],
                         progress=result["overall_progress"],
                         criteria_status=result["criteria_status"],
+                        criteria=result["criteria"],
+                        constraint_violations=result["constraint_violations"],
+                        metrics=result["metrics"],
+                        recommendation=result["recommendation"],
+                        updated_at=result["updated_at"],
                     )
 
             return result
