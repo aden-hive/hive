@@ -197,6 +197,14 @@ class EdgeSpec(BaseModel):
                 expr_vars or "none matched",
             )
             return result
+        except NameError as e:
+            # A NameError almost always means a typo in condition_expr.
+            # Raise immediately so the developer sees a clear error rather
+            # than the edge silently evaluating to False.
+            raise ValueError(
+                f"Edge '{self.id}' condition references undefined variable: {e}. "
+                f"Available context keys: {sorted(context.keys())}"
+            ) from e
         except Exception as e:
             logger.warning(f"      ⚠ Condition evaluation failed: {self.condition_expr}")
             logger.warning(f"         Error: {e}")
