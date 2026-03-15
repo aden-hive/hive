@@ -11,11 +11,14 @@ Goals are:
 - Versionable: Can evolve based on runtime feedback
 """
 
+import logging
 from datetime import datetime
 from enum import StrEnum
 from typing import Any
 
 from pydantic import BaseModel, Field
+
+logger = logging.getLogger(__name__)
 
 
 class GoalStatus(StrEnum):
@@ -168,11 +171,48 @@ class Goal(BaseModel):
         return met_weight >= total_weight * 0.9  # 90% threshold
 
     def check_constraint(self, constraint_id: str, value: Any) -> bool:
-        """Check if a specific constraint is satisfied."""
+        """Check if a specific constraint is satisfied.
+
+        Evaluates the constraint's ``check`` expression (if set) using
+        :func:`~framework.graph.safe_eval.safe_eval` with ``value`` bound
+        to the name ``value`` in the evaluation context.
+
+        - If ``check`` is empty the constraint is assumed satisfied (True).
+        - If ``check`` is ``"llm_judge"`` or an unresolvable function name,
+          validation is skipped and True is returned with a warning.
+        - Hard constraints that raise during evaluation are treated as
+          *not satisfied* (False); soft constraints fall back to True.
+        """
         for c in self.constraints:
             if c.id == constraint_id:
-                # This would be expanded with actual evaluation logic
-                return True
+                if not c.check:
+                    return True
+
+                if c.check == "llm_judge":
+                    logger.warning(
+                        "Constraint '%s' uses llm_judge which is not yet "
+                        "implemented; treating as satisfied.",
+                        constraint_id,
+                    )
+                    return True
+
+                # Evaluate as a Python expression via safe_eval
+                from framework.graph.safe_eval import safe_eval
+
+                try:
+                    result = safe_eval(c.check, {"value": value})
+                    return bool(result)
+                except Exception as exc:
+                    logger.warning(
+                        "Constraint '%s' evaluation failed (%s); "
+                        "treating as %s.",
+                        constraint_id,
+                        exc,
+                        "not satisfied" if c.constraint_type == "hard" else "satisfied",
+                    )
+                    return c.constraint_type != "hard"
+
+        # Constraint ID not found — nothing to enforce
         return True
 
     def to_prompt_context(self) -> str:
