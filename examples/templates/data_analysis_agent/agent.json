@@ -1,0 +1,281 @@
+{
+  "agent": {
+    "id": "data_analysis_agent",
+    "name": "Data Analysis Agent",
+    "version": "1.0.0",
+    "description": "Analyzes CSV datasets using pandas. Accepts a CSV file path, performs exploratory data analysis (EDA), generates summary statistics, and answers natural-language questions about the data."
+  },
+  "graph": {
+    "id": "data-analysis-agent-graph",
+    "goal_id": "analyze-csv-dataset",
+    "version": "1.0.0",
+    "entry_node": "intake",
+    "entry_points": {
+      "start": "intake"
+    },
+    "pause_nodes": [],
+    "terminal_nodes": [
+      "report"
+    ],
+    "conversation_mode": "single",
+    "identity_prompt": "You are a data analyst. You load CSV datasets, compute summary statistics, identify patterns, and answer questions about the data clearly and accurately. You always base conclusions on the actual data, never on assumptions.",
+    "nodes": [
+      {
+        "id": "intake",
+        "name": "Dataset Intake",
+        "description": "Receive the CSV file path and any initial question or analysis goal from the user",
+        "node_type": "event_loop",
+        "input_keys": [
+          "csv_path"
+        ],
+        "output_keys": [
+          "dataset_path",
+          "analysis_goal"
+        ],
+        "nullable_output_keys": [
+          "analysis_goal"
+        ],
+        "input_schema": {},
+        "output_schema": {},
+        "success_criteria": "The CSV file path has been confirmed and the analysis goal or question has been captured.",
+        "system_prompt": "You are a data analysis intake specialist.\n\nThe user wants to analyze a CSV dataset.\n\n**STEP 1 — Confirm the dataset (text only, NO tool calls):**\n1. Confirm the file path provided\n2. Ask what they want to learn from the data (or confirm the goal if already stated)\n3. If no specific question is given, state you will perform a general EDA\n\nKeep it brief — one short message.\n\n**STEP 2 — After the user responds, call set_output:**\n- set_output(\"dataset_path\", \"The CSV file path exactly as provided\")\n- set_output(\"analysis_goal\", \"What the user wants to know, or null for general EDA\")",
+        "tools": [],
+        "model": null,
+        "function": null,
+        "routes": {},
+        "max_retries": 2,
+        "retry_on": [],
+        "max_node_visits": 2,
+        "output_model": null,
+        "max_validation_retries": 2,
+        "client_facing": true
+      },
+      {
+        "id": "load_and_explore",
+        "name": "Load & Explore",
+        "description": "Load the CSV with pandas and generate summary statistics and EDA",
+        "node_type": "event_loop",
+        "input_keys": [
+          "dataset_path",
+          "analysis_goal"
+        ],
+        "output_keys": [
+          "eda_summary",
+          "column_info",
+          "sample_rows"
+        ],
+        "nullable_output_keys": [
+          "analysis_goal"
+        ],
+        "input_schema": {},
+        "output_schema": {},
+        "success_criteria": "The CSV has been loaded, shape reported, all columns described (dtype, null count, basic stats), and a sample of rows captured.",
+        "system_prompt": "You are a data analyst. Load the CSV dataset and perform exploratory data analysis.\n\nUse the execute_python tool to run pandas code:\n\n```python\nimport pandas as pd\n\ndf = pd.read_csv(dataset_path)\n\n# Basic info\nprint(\"Shape:\", df.shape)\nprint(\"\\nColumn dtypes:\")\nprint(df.dtypes)\nprint(\"\\nNull counts:\")\nprint(df.isnull().sum())\nprint(\"\\nDescriptive stats:\")\nprint(df.describe(include='all'))\nprint(\"\\nFirst 5 rows:\")\nprint(df.head())\n```\n\nAnalyze the output and call set_output (one per turn):\n- set_output(\"eda_summary\", \"Structured EDA: shape, key stats, notable patterns, data quality issues (nulls, dtypes)\")\n- set_output(\"column_info\", [{\"name\": col, \"dtype\": dtype, \"nulls\": count, \"unique\": count}])\n- set_output(\"sample_rows\", \"First 5 rows as a readable table\")",
+        "tools": [
+          "execute_python"
+        ],
+        "model": null,
+        "function": null,
+        "routes": {},
+        "max_retries": 3,
+        "retry_on": [],
+        "max_node_visits": 1,
+        "output_model": null,
+        "max_validation_retries": 2,
+        "client_facing": false
+      },
+      {
+        "id": "answer",
+        "name": "Answer Questions",
+        "description": "Answer the user's specific analysis question using the data",
+        "node_type": "event_loop",
+        "input_keys": [
+          "dataset_path",
+          "analysis_goal",
+          "eda_summary",
+          "column_info"
+        ],
+        "output_keys": [
+          "analysis_result",
+          "findings"
+        ],
+        "nullable_output_keys": [
+          "analysis_goal"
+        ],
+        "input_schema": {},
+        "output_schema": {},
+        "success_criteria": "The analysis question has been answered with evidence from the data. Findings are specific and cited.",
+        "system_prompt": "You are a data analyst answering questions about a dataset.\n\nYou have the EDA summary. Now answer the analysis goal or perform deeper analysis.\n\nIf a specific question was asked:\n1. Use execute_python to run targeted pandas queries to answer it\n2. Compute relevant aggregations, correlations, or filters\n3. Back every claim with numbers from the data\n\nIf no specific question (general EDA):\n1. Identify the 3-5 most interesting findings\n2. Note any data quality issues\n3. Suggest potential next analyses\n\nCall set_output:\n- set_output(\"analysis_result\", \"Direct answer to the analysis goal, with supporting numbers\")\n- set_output(\"findings\", \"Bulleted list of key findings and insights\")",
+        "tools": [
+          "execute_python"
+        ],
+        "model": null,
+        "function": null,
+        "routes": {},
+        "max_retries": 3,
+        "retry_on": [],
+        "max_node_visits": 2,
+        "output_model": null,
+        "max_validation_retries": 2,
+        "client_facing": false
+      },
+      {
+        "id": "report",
+        "name": "Deliver Report",
+        "description": "Present the analysis results to the user and save an HTML report",
+        "node_type": "event_loop",
+        "input_keys": [
+          "eda_summary",
+          "column_info",
+          "sample_rows",
+          "analysis_result",
+          "findings",
+          "dataset_path"
+        ],
+        "output_keys": [
+          "delivery_status"
+        ],
+        "nullable_output_keys": [],
+        "input_schema": {},
+        "output_schema": {},
+        "success_criteria": "The analysis report has been presented to the user and delivery confirmed.",
+        "system_prompt": "Present the data analysis results to the user.\n\n**STEP 1 — Build and save an HTML report (tool calls, then NO text yet):**\n\nCreate an HTML report with:\n- Dataset overview (shape, columns)\n- Summary statistics table\n- Sample rows\n- Key findings\n- Answer to the analysis goal\n\nSave it:\n  save_data(filename=\"analysis_report.html\", data=\"<html>...</html>\")\n  serve_file_to_user(filename=\"analysis_report.html\", label=\"Data Analysis Report\")\n\n**STEP 2 — Present results (text, NO tool calls):**\n\nShare:\n1. A short executive summary (2-3 sentences)\n2. The top 3-5 findings as bullet points\n3. The file link from serve_file_to_user\n\nAsk if they have questions or want further analysis.\n\n**STEP 3 — After user responds:**\n- Answer any follow-up questions\n- When done: set_output(\"delivery_status\", \"completed\")",
+        "tools": [
+          "execute_python",
+          "save_data",
+          "serve_file_to_user",
+          "load_data"
+        ],
+        "model": null,
+        "function": null,
+        "routes": {},
+        "max_retries": 3,
+        "retry_on": [],
+        "max_node_visits": 3,
+        "output_model": null,
+        "max_validation_retries": 2,
+        "client_facing": true
+      }
+    ],
+    "edges": [
+      {
+        "id": "intake-to-load",
+        "source": "intake",
+        "target": "load_and_explore",
+        "condition": "on_success",
+        "condition_expr": null,
+        "priority": 1,
+        "input_mapping": {}
+      },
+      {
+        "id": "load-to-answer",
+        "source": "load_and_explore",
+        "target": "answer",
+        "condition": "on_success",
+        "condition_expr": null,
+        "priority": 1,
+        "input_mapping": {}
+      },
+      {
+        "id": "answer-to-report",
+        "source": "answer",
+        "target": "report",
+        "condition": "on_success",
+        "condition_expr": null,
+        "priority": 1,
+        "input_mapping": {}
+      }
+    ],
+    "max_steps": 40,
+    "max_retries_per_node": 3,
+    "description": "Analyzes CSV datasets: loads with pandas, performs EDA, answers questions about the data, and delivers an HTML report.",
+    "created_at": "2026-03-15T00:00:00.000000"
+  },
+  "goal": {
+    "id": "analyze-csv-dataset",
+    "name": "Analyze CSV Dataset",
+    "description": "Load a CSV dataset, perform exploratory data analysis, answer questions about the data, and deliver a structured report.",
+    "status": "draft",
+    "success_criteria": [
+      {
+        "id": "data-loaded",
+        "description": "CSV dataset is successfully loaded and shape reported",
+        "metric": "data_loaded",
+        "target": "true",
+        "weight": 0.25,
+        "met": false
+      },
+      {
+        "id": "eda-complete",
+        "description": "Summary statistics and column info computed for all columns",
+        "metric": "eda_complete",
+        "target": "true",
+        "weight": 0.25,
+        "met": false
+      },
+      {
+        "id": "question-answered",
+        "description": "Analysis goal or question answered with data-backed evidence",
+        "metric": "question_answered",
+        "target": "true",
+        "weight": 0.25,
+        "met": false
+      },
+      {
+        "id": "report-delivered",
+        "description": "HTML report delivered to the user",
+        "metric": "report_delivered",
+        "target": "true",
+        "weight": 0.25,
+        "met": false
+      }
+    ],
+    "constraints": [
+      {
+        "id": "data-backed",
+        "description": "All findings must be backed by actual data computations, not assumptions",
+        "constraint_type": "quality",
+        "category": "accuracy",
+        "check": ""
+      }
+    ],
+    "context": {},
+    "required_capabilities": [],
+    "input_schema": {
+      "csv_path": {
+        "type": "string",
+        "description": "Path to the CSV file to analyze"
+      }
+    },
+    "output_schema": {
+      "eda_summary": {
+        "type": "string",
+        "description": "EDA summary with shape, stats, and data quality notes"
+      },
+      "analysis_result": {
+        "type": "string",
+        "description": "Answer to the analysis goal with supporting data"
+      },
+      "findings": {
+        "type": "string",
+        "description": "Bulleted list of key findings"
+      }
+    },
+    "version": "1.0.0",
+    "parent_version": null,
+    "evolution_reason": null,
+    "created_at": "2026-03-15 00:00:00.000000",
+    "updated_at": "2026-03-15 00:00:00.000000"
+  },
+  "required_tools": [
+    "execute_python",
+    "save_data",
+    "serve_file_to_user",
+    "load_data"
+  ],
+  "metadata": {
+    "created_at": "2026-03-15T00:00:00.000000",
+    "node_count": 4,
+    "edge_count": 3
+  }
+}
