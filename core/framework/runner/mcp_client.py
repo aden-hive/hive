@@ -37,6 +37,10 @@ class MCPServerConfig:
     # Optional metadata
     description: str = ""
 
+    # Configurable timeouts (seconds)
+    connection_timeout: float = 10.0
+    event_loop_timeout: float = 5.0
+
 
 @dataclass
 class MCPTool:
@@ -153,6 +157,29 @@ class MCPClient:
         if not self.config.command:
             raise ValueError("command is required for STDIO transport")
 
+        # Validate args
+        if not isinstance(self.config.args, list):
+            raise ValueError(
+                f"MCPServerConfig.args must be a list, got {type(self.config.args).__name__!r}"
+            )
+        bad_args = [a for a in self.config.args if not isinstance(a, str)]
+        if bad_args:
+            raise ValueError(
+                f"MCPServerConfig.args must contain only strings; "
+                f"found non-string items: {bad_args!r}"
+            )
+
+        # Validate cwd (only on non-Windows; on Windows cwd is ignored, see below)
+        if self.config.cwd is not None and os.name != "nt":
+            if not os.path.exists(self.config.cwd):
+                raise ValueError(
+                    f"MCPServerConfig.cwd does not exist: {self.config.cwd!r}"
+                )
+            if not os.path.isdir(self.config.cwd):
+                raise ValueError(
+                    f"MCPServerConfig.cwd is not a directory: {self.config.cwd!r}"
+                )
+
         try:
             import threading
 
@@ -231,12 +258,12 @@ class MCPClient:
             self._loop_thread.start()
 
             # Wait for loop to start
-            loop_started.wait(timeout=5)
+            loop_started.wait(timeout=self.config.event_loop_timeout)
             if not loop_started.is_set():
                 raise RuntimeError("Event loop failed to start")
 
             # Wait for connection to be ready
-            connection_ready.wait(timeout=10)
+            connection_ready.wait(timeout=self.config.connection_timeout)
             if connection_error:
                 raise connection_error[0]
 
