@@ -2177,8 +2177,29 @@ class GraphExecutor:
                         )
 
                     if result.success:
-                        # Write outputs to shared memory using async write
+                        # Write outputs to shared memory, honouring memory_conflict_strategy
+                        conflict_strategy = self._parallel_config.memory_conflict_strategy
                         for key, value in result.output.items():
+                            existing = memory.read(key)
+                            if existing is not None and existing != value:
+                                if conflict_strategy == "first_wins":
+                                    self.logger.debug(
+                                        f"      ⑃ Memory conflict on '{key}': "
+                                        f"keeping first value (first_wins)"
+                                    )
+                                    continue  # skip — first writer wins
+                                elif conflict_strategy == "error":
+                                    raise RuntimeError(
+                                        f"Parallel branch memory conflict on key '{key}': "
+                                        f"two branches wrote different values and "
+                                        f"memory_conflict_strategy='error'"
+                                    )
+                                # default: "last_wins" — fall through to write
+                                else:
+                                    self.logger.debug(
+                                        f"      ⑃ Memory conflict on '{key}': "
+                                        f"overwriting with branch value (last_wins)"
+                                    )
                             await memory.write_async(key, value)
 
                         branch.result = result
@@ -2225,9 +2246,28 @@ class GraphExecutor:
 
                 return branch, e
 
-        # Execute all branches concurrently
-        tasks = [execute_single_branch(b) for b in branches.values()]
-        results = await asyncio.gather(*tasks, return_exceptions=False)
+        # Execute all branches concurrently with per-branch timeout
+        timeout = self._parallel_config.branch_timeout_seconds
+        tasks = [
+            asyncio.wait_for(execute_single_branch(b), timeout=timeout)
+            for b in branches.values()
+        ]
+        # return_exceptions=True so a TimeoutError in one branch doesn't cancel siblings;
+        # the result-processing loop below already handles isinstance(result, Exception).
+        raw_results = await asyncio.gather(*tasks, return_exceptions=True)
+        # Unwrap: asyncio.wait_for raises TimeoutError as the exception, which lands
+        # here as the gather result.  Re-pair each with its branch for uniform handling.
+        results = []
+        for branch, raw in zip(branches.values(), raw_results, strict=True):
+            if isinstance(raw, BaseException):
+                if isinstance(raw, asyncio.TimeoutError):
+                    self.logger.warning(
+                        f"      ⏱ Branch {branch.node_id} timed out "
+                        f"after {timeout}s"
+                    )
+                results.append((branch, raw))
+            else:
+                results.append(raw)
 
         # Process results
         total_tokens = 0
