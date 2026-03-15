@@ -8,8 +8,13 @@ from framework.config import (
     get_api_key,
     get_hive_config,
     get_llm_extra_kwargs,
+    get_llm_runtime_fingerprint,
     resolve_llm_auth_mode,
 )
+
+
+def _write_config(config_file, payload) -> None:
+    config_file.write_text(json.dumps(payload), encoding="utf-8")
 
 
 class TestGetHiveConfig:
@@ -30,65 +35,109 @@ class TestGetHiveConfig:
         assert str(config_file) in caplog.text
 
 
-def _write_config(tmp_path, monkeypatch, llm: dict):
-    config_file = tmp_path / "configuration.json"
-    config_file.write_text(json.dumps({"llm": llm}))
-    monkeypatch.setattr("framework.config.HIVE_CONFIG_FILE", config_file)
+class TestLLMAuthMode:
+    def test_explicit_api_key_auth_mode_ignores_stale_subscription_flags(
+        self, tmp_path, monkeypatch
+    ):
+        config_file = tmp_path / "configuration.json"
+        _write_config(
+            config_file,
+            {
+                "llm": {
+                    "provider": "openai",
+                    "model": "gpt-4.1",
+                    "auth_mode": "api_key",
+                    "api_key_env_var": "OPENAI_API_KEY",
+                    "api_base": "https://api.openai.com/v1",
+                    "use_codex_subscription": True,
+                }
+            },
+        )
 
+        monkeypatch.setattr("framework.config.HIVE_CONFIG_FILE", config_file)
+        monkeypatch.setenv("OPENAI_API_KEY", "api-key-123")
 
-def test_api_key_auth_mode_ignores_stale_subscription_flags(tmp_path, monkeypatch):
-    _write_config(
-        tmp_path,
-        monkeypatch,
-        {
-            "provider": "groq",
-            "model": "openai/gpt-oss-120b",
-            "auth_mode": "api_key",
-            "api_key_env_var": "GROQ_API_KEY",
-            "use_codex_subscription": True,  # stale legacy flag should be ignored
-        },
-    )
-    monkeypatch.setenv("GROQ_API_KEY", "groq-test-key")
+        assert resolve_llm_auth_mode() == "api_key"
+        assert get_api_key() == "api-key-123"
+        assert get_api_base() == "https://api.openai.com/v1"
+        assert get_llm_extra_kwargs() == {}
 
-    assert resolve_llm_auth_mode() == "api_key"
-    assert get_api_key() == "groq-test-key"
-    assert get_api_base() is None
-    assert get_llm_extra_kwargs() == {}
+    def test_codex_auth_mode_uses_codex_backend_and_headers(self, tmp_path, monkeypatch):
+        config_file = tmp_path / "configuration.json"
+        _write_config(
+            config_file,
+            {
+                "llm": {
+                    "provider": "openai",
+                    "model": "gpt-5.3-codex",
+                    "auth_mode": "codex",
+                }
+            },
+        )
 
+        monkeypatch.setattr("framework.config.HIVE_CONFIG_FILE", config_file)
+        monkeypatch.setattr("framework.runner.runner.get_codex_token", lambda: "codex-token")
+        monkeypatch.setattr("framework.runner.runner.get_codex_account_id", lambda: "acct-123")
 
-def test_codex_auth_mode_uses_codex_token_flow(tmp_path, monkeypatch):
-    _write_config(
-        tmp_path,
-        monkeypatch,
-        {
-            "provider": "openai",
-            "model": "gpt-5.3-codex",
-            "auth_mode": "codex",
-        },
-    )
-    monkeypatch.setattr("framework.runner.runner.get_codex_token", lambda: "codex-token")
-    monkeypatch.setattr("framework.runner.runner.get_codex_account_id", lambda: None)
+        assert resolve_llm_auth_mode() == "codex"
+        assert get_api_key() == "codex-token"
+        assert get_api_base() == "https://chatgpt.com/backend-api/codex"
+        assert get_llm_extra_kwargs() == {
+            "extra_headers": {
+                "Authorization": "Bearer codex-token",
+                "User-Agent": "CodexBar",
+                "ChatGPT-Account-Id": "acct-123",
+            },
+            "store": False,
+            "allowed_openai_params": ["store"],
+        }
 
-    assert resolve_llm_auth_mode() == "codex"
-    assert get_api_key() == "codex-token"
-    assert get_api_base() == "https://chatgpt.com/backend-api/codex"
+    def test_legacy_subscription_flags_still_resolve(self, tmp_path, monkeypatch):
+        config_file = tmp_path / "configuration.json"
+        _write_config(
+            config_file,
+            {
+                "llm": {
+                    "provider": "anthropic",
+                    "model": "claude-sonnet-4-20250514",
+                    "use_claude_code_subscription": True,
+                }
+            },
+        )
 
-    extra = get_llm_extra_kwargs()
-    assert extra["extra_headers"]["Authorization"] == "Bearer codex-token"
-    assert extra["store"] is False
+        monkeypatch.setattr("framework.config.HIVE_CONFIG_FILE", config_file)
 
+        assert resolve_llm_auth_mode() == "claude_code"
 
-def test_legacy_subscription_flags_still_supported(tmp_path, monkeypatch):
-    _write_config(
-        tmp_path,
-        monkeypatch,
-        {
-            "provider": "openai",
-            "model": "gpt-5.3-codex",
-            "use_codex_subscription": True,
-        },
-    )
-    monkeypatch.setattr("framework.runner.runner.get_codex_token", lambda: "legacy-codex-token")
+    def test_runtime_fingerprint_changes_when_auth_mode_changes(self, tmp_path, monkeypatch):
+        config_file = tmp_path / "configuration.json"
+        monkeypatch.setattr("framework.config.HIVE_CONFIG_FILE", config_file)
 
-    assert resolve_llm_auth_mode() == "codex"
-    assert get_api_key() == "legacy-codex-token"
+        _write_config(
+            config_file,
+            {
+                "llm": {
+                    "provider": "openai",
+                    "model": "gpt-5.3-codex",
+                    "auth_mode": "codex",
+                }
+            },
+        )
+        monkeypatch.setattr("framework.runner.runner.get_codex_token", lambda: "codex-token")
+        codex_fingerprint = get_llm_runtime_fingerprint()
+
+        _write_config(
+            config_file,
+            {
+                "llm": {
+                    "provider": "openai",
+                    "model": "gpt-4.1",
+                    "auth_mode": "api_key",
+                    "api_key_env_var": "OPENAI_API_KEY",
+                }
+            },
+        )
+        monkeypatch.setenv("OPENAI_API_KEY", "api-key-123")
+        api_key_fingerprint = get_llm_runtime_fingerprint()
+
+        assert codex_fingerprint != api_key_fingerprint

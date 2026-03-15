@@ -1143,40 +1143,26 @@ class AgentRunner:
             config = get_hive_config()
             llm_config = config.get("llm", {})
             auth_mode = resolve_llm_auth_mode(llm_config)
-            api_base = get_api_base()
+            api_base = get_api_base(llm_config)
+            extra_kwargs = get_llm_extra_kwargs(llm_config)
+            api_key = get_api_key(llm_config)
 
-            api_key = None
-            if auth_mode == "claude_code":
-                api_key = get_claude_code_token()
-                if not api_key:
-                    print("Warning: Claude Code subscription configured but no token found.")
-                    print("Run 'claude' to authenticate, then try again.")
-            elif auth_mode == "codex":
-                api_key = get_codex_token()
-                if not api_key:
-                    print("Warning: Codex subscription configured but no token found.")
-                    print("Run 'codex' to authenticate, then try again.")
-            elif auth_mode == "kimi_code":
-                api_key = get_kimi_code_token()
-                if not api_key:
-                    print("Warning: Kimi Code subscription configured but no key found.")
-                    print("Run 'kimi /login' to authenticate, then try again.")
-            else:
-                # API-key mode: honor quickstart-selected env var/provider config.
-                api_key = get_api_key()
+            if auth_mode == "claude_code" and not api_key:
+                print("Warning: Claude Code subscription configured but no token found.")
+                print("Run 'claude' to authenticate, then try again.")
+            elif auth_mode == "codex" and not api_key:
+                print("Warning: Codex subscription configured but no token found.")
+                print("Run 'codex' to authenticate, then try again.")
+            elif auth_mode == "kimi_code" and not api_key:
+                print("Warning: Kimi Code subscription configured but no key found.")
+                print("Run 'kimi /login' to authenticate, then try again.")
 
-            if api_key and auth_mode in {"claude_code", "codex", "kimi_code"}:
+            if api_key:
                 self._llm = LiteLLMProvider(
                     model=self.model,
                     api_key=api_key,
                     api_base=api_base,
-                    **get_llm_extra_kwargs(),
-                )
-            elif api_key and auth_mode == "api_key":
-                self._llm = LiteLLMProvider(
-                    model=self.model,
-                    api_key=api_key,
-                    api_base=api_base,
+                    **extra_kwargs,
                 )
             else:
                 # Local models (e.g. Ollama) don't need an API key
@@ -1185,6 +1171,11 @@ class AgentRunner:
                         model=self.model,
                         api_base=api_base,
                     )
+                elif auth_mode != "api_key":
+                    # Explicit subscription auth should fail closed. Falling back to a
+                    # generic API key here would keep stale live sessions on the old
+                    # provider path after the user switched auth modes.
+                    pass
                 else:
                     # Fall back to environment variable
                     # First check api_key_env_var from config (set by quickstart)
@@ -1225,6 +1216,21 @@ class AgentRunner:
                             f"Failed to initialize LLM for local model '{self.model}'. "
                             f"Ensure your local LLM server is running "
                             f"(e.g. 'ollama serve' for Ollama)."
+                        )
+                    if auth_mode == "claude_code":
+                        raise CredentialError(
+                            "Claude Code subscription configured but no token found. "
+                            "Run 'claude' to authenticate, then try again."
+                        )
+                    if auth_mode == "codex":
+                        raise CredentialError(
+                            "Codex subscription configured but no token found. "
+                            "Run 'codex' to authenticate, then try again."
+                        )
+                    if auth_mode == "kimi_code":
+                        raise CredentialError(
+                            "Kimi Code subscription configured but no key found. "
+                            "Run 'kimi /login' to authenticate, then try again."
                         )
                     api_key_env = self._get_api_key_env_var(self.model)
                     hint = (

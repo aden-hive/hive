@@ -19,6 +19,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from framework.config import get_llm_runtime_fingerprint
 from framework.runtime.triggers import TriggerDefinition
 
 logger = logging.getLogger(__name__)
@@ -32,6 +33,8 @@ class Session:
     event_bus: Any  # EventBus — owned by session
     llm: Any  # LLMProvider — owned by session
     loaded_at: float
+    requested_model: str | None = None
+    llm_config_fingerprint: str | None = None
     # Queen (always present once started)
     queen_executor: Any = None  # GraphExecutor for queen input injection
     queen_task: asyncio.Task | None = None
@@ -94,7 +97,7 @@ class SessionManager:
 
         Internal helper — use create_session() or create_session_with_worker().
         """
-        from framework.config import RuntimeConfig
+        from framework.config import RuntimeConfig, get_preferred_model
         from framework.llm.litellm import LiteLLMProvider
         from framework.runtime.event_bus import EventBus
 
@@ -106,7 +109,8 @@ class SessionManager:
                 raise ValueError(f"Session '{resolved_id}' already exists")
 
         # Load LLM config from ~/.hive/configuration.json
-        rc = RuntimeConfig(model=model or self._model or RuntimeConfig().model)
+        resolved_model = model or self._model or get_preferred_model()
+        rc = RuntimeConfig(model=resolved_model)
 
         # Session owns these — shared with queen and worker
         llm = LiteLLMProvider(
@@ -122,6 +126,8 @@ class SessionManager:
             event_bus=event_bus,
             llm=llm,
             loaded_at=time.time(),
+            requested_model=model,
+            llm_config_fingerprint=get_llm_runtime_fingerprint(model=model),
         )
 
         async with self._lock:
@@ -888,6 +894,13 @@ class SessionManager:
 
     def get_session(self, session_id: str) -> Session | None:
         return self._sessions.get(session_id)
+
+    def is_session_stale(self, session: Session) -> bool:
+        """Return whether the current Hive LLM config no longer matches this session."""
+        if not session.llm_config_fingerprint:
+            return False
+        current_fingerprint = get_llm_runtime_fingerprint(model=session.requested_model)
+        return current_fingerprint != session.llm_config_fingerprint
 
     def get_session_by_worker_id(self, worker_id: str) -> Session | None:
         """Find a session by its loaded worker's ID."""
