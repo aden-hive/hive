@@ -71,10 +71,12 @@ def main():
         prog="hive",
         description="Aden Hive - Build and run goal-driven agents",
     )
+    from framework.config import get_preferred_model
+
     parser.add_argument(
         "--model",
-        default="claude-haiku-4-5-20251001",
-        help="Anthropic model to use",
+        default=get_preferred_model(),
+        help="LLM model to use (default: from ~/.hive/configuration.json or get_preferred_model())",
     )
 
     subparsers = parser.add_subparsers(dest="command", required=True)
