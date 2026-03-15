@@ -147,7 +147,7 @@ uv run python -c "import aden_tools; print('✓ aden_tools OK')"
 uv run python -c "import litellm; print('✓ litellm OK')"
 
 # Run an agent (after building one with coder-tools)
-PYTHONPATH=exports uv run python -m your_agent_name validate
+PYTHONPATH=exports uv run python -m support_ticket_agent validate
 ```
 
 ---
@@ -206,7 +206,7 @@ hive/                                    # Repository root
 │   └── README.md                        # Tools documentation
 │
 ├── exports/                             # AGENT PACKAGES (user-created, gitignored)
-│   └── your_agent_name/                 # Created via coder-tools workflow
+│   └── support_ticket_agent/            # Example: created via coder-tools workflow
 │
 ├── examples/                            # Example agents
 │   └── templates/                       # Pre-built template agents
@@ -270,13 +270,13 @@ Use the coder-tools MCP tools from your IDE agent chat (e.g., initialize_and_bui
 4. **Validate the Agent**
 
    ```bash
-   PYTHONPATH=exports uv run python -m your_agent_name validate
+   PYTHONPATH=exports uv run python -m support_ticket_agent validate
    ```
 
 5. **Test the Agent**
    Run tests with:
    ```bash
-   PYTHONPATH=exports uv run python -m your_agent_name test
+   PYTHONPATH=exports uv run python -m support_ticket_agent test
    ```
 
 ### Manual Agent Development
@@ -327,7 +327,7 @@ hive run exports/my_agent --tui
 
 ```
 
-> **Using Python directly:** `PYTHONPATH=exports uv run python -m agent_name run --input '{...}'`
+> **Using Python directly:** `PYTHONPATH=exports uv run python -m support_ticket_agent run --input '{"ticket": "Login broken", "customer_id": "CUST-42"}'`
 
 ---
 
@@ -337,10 +337,10 @@ hive run exports/my_agent --tui
 
 ```bash
 # Run tests for an agent
-PYTHONPATH=exports uv run python -m agent_name test
+cd core && uv run python -m pytest ../exports/support_ticket_agent/tests/
 ```
 
-This generates and runs:
+This exercises:
 
 - **Constraint tests** - Verify agent respects constraints
 - **Success tests** - Verify agent achieves success criteria
@@ -350,17 +350,11 @@ This generates and runs:
 
 ```bash
 # Run all tests for an agent
-PYTHONPATH=exports uv run python -m agent_name test
+cd core && uv run python -m pytest ../exports/support_ticket_agent/tests/ -v
 
-# Run specific test type
-PYTHONPATH=exports uv run python -m agent_name test --type constraint
-PYTHONPATH=exports uv run python -m agent_name test --type success
-
-# Run with parallel execution
-PYTHONPATH=exports uv run python -m agent_name test --parallel 4
-
-# Fail fast (stop on first failure)
-PYTHONPATH=exports uv run python -m agent_name test --fail-fast
+# Run with the deep_research_agent template (pre-built example)
+PYTHONPATH=core:examples/templates uv run python -m deep_research_agent info
+PYTHONPATH=core:examples/templates uv run python -m deep_research_agent validate
 ```
 
 ### Writing Custom Tests
