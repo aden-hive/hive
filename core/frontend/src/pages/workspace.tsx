@@ -14,9 +14,10 @@ import { executionApi } from "@/api/execution";
 import { graphsApi } from "@/api/graphs";
 import { sessionsApi } from "@/api/sessions";
 import { useMultiSSE } from "@/hooks/use-sse";
-import type { LiveSession, AgentEvent, DiscoverEntry, NodeSpec, DraftGraph as DraftGraphData } from "@/api/types";
+import type { LiveSession, AgentEvent, DiscoverEntry, NodeSpec, DraftGraph as DraftGraphData, GoalProgress } from "@/api/types";
 import { sseEventToChatMessage, formatAgentDisplayName } from "@/lib/chat-helpers";
 import { topologyToGraphNodes } from "@/lib/graph-converter";
+import { goalProgressSummary, normalizeGoalProgress, type NormalizedGoalProgress } from "@/lib/goal-progress";
 import { ApiError } from "@/api/client";
 
 const makeId = () => Math.random().toString(36).slice(2, 9);
@@ -57,6 +58,107 @@ function TimerCountdown({ initialSeconds }: { initialSeconds: number }) {
 
   if (remaining <= 0) return <span className="text-amber-400/80">firing...</span>;
   return <span>{formatCountdown(remaining)}</span>;
+}
+
+
+function GoalProgressCard({
+  progress,
+  expanded,
+  onToggle,
+}: {
+  progress: NormalizedGoalProgress | null;
+  expanded: boolean;
+  onToggle: () => void;
+}) {
+  if (!progress) return null;
+
+  const percent = Math.round(progress.progress * 100);
+  const constraintCount = progress.constraint_violations.length;
+  const updatedLabel = progress.updated_at
+    ? new Date(progress.updated_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+    : null;
+
+  return (
+    <div className="mx-4 mt-4 mb-2 rounded-2xl border border-primary/15 bg-card/70 shadow-sm backdrop-blur-sm">
+      <button
+        type="button"
+        onClick={onToggle}
+        className="w-full rounded-2xl px-4 py-3 text-left transition-colors hover:bg-muted/20"
+      >
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-primary/80">Execution progress</p>
+            <div className="mt-1 flex items-baseline gap-2">
+              <span className="text-2xl font-semibold text-foreground">{percent}%</span>
+              <span className="text-xs text-muted-foreground">{goalProgressSummary(progress)}</span>
+            </div>
+          </div>
+          <div className="text-right">
+            <div className={`inline-flex items-center rounded-full px-2 py-1 text-[10px] font-medium ${
+              progress.recommendation === "complete"
+                ? "bg-emerald-500/15 text-emerald-400"
+                : progress.recommendation === "adjust"
+                  ? "bg-amber-500/15 text-amber-400"
+                  : "bg-primary/10 text-primary"
+            }`}>
+              {progress.recommendation}
+            </div>
+            {updatedLabel && <p className="mt-1 text-[10px] text-muted-foreground">Updated {updatedLabel}</p>}
+          </div>
+        </div>
+
+        <div className="mt-3 h-2 overflow-hidden rounded-full bg-muted/60">
+          <div className="h-full rounded-full bg-primary transition-[width] duration-300" style={{ width: `${percent}%` }} />
+        </div>
+
+        <div className="mt-3 flex flex-wrap gap-2 text-[11px] text-muted-foreground">
+          <span className="rounded-full bg-muted/40 px-2 py-1">
+            {progress.criteria.filter((criterion) => criterion.met).length}/{progress.criteria.length || 0} criteria met
+          </span>
+          {typeof progress.metrics.total_decisions === "number" && (
+            <span className="rounded-full bg-muted/40 px-2 py-1">{String(progress.metrics.total_decisions)} decisions</span>
+          )}
+          {constraintCount > 0 && (
+            <span className="rounded-full bg-amber-500/10 px-2 py-1 text-amber-400">{constraintCount} constraints flagged</span>
+          )}
+        </div>
+      </button>
+
+      {expanded && (
+        <div className="border-t border-border/40 px-4 py-3">
+          {progress.criteria.length > 0 ? (
+            <div className="space-y-3">
+              {progress.criteria.map((criterion) => {
+                const criterionPercent = Math.round(criterion.progress * 100);
+                return (
+                  <div key={criterion.criterion_id} className="rounded-xl border border-border/40 bg-background/40 p-3">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="text-sm font-medium text-foreground">{criterion.description}</p>
+                        {criterion.evidence.length > 0 && (
+                          <p className="mt-1 text-xs text-muted-foreground line-clamp-2">
+                            {criterion.evidence.join(" • ")}
+                          </p>
+                        )}
+                      </div>
+                      <span className={`rounded-full px-2 py-1 text-[10px] font-medium ${criterion.met ? "bg-emerald-500/15 text-emerald-400" : "bg-muted/50 text-muted-foreground"}`}>
+                        {criterion.met ? "met" : `${criterionPercent}%`}
+                      </span>
+                    </div>
+                    <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-muted/60">
+                      <div className="h-full rounded-full bg-primary" style={{ width: `${criterionPercent}%` }} />
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          ) : (
+            <p className="text-xs text-muted-foreground">Goal criteria will appear once the worker records outcome data.</p>
+          )}
+        </div>
+      )}
+    </div>
+  );
 }
 
 // --- Session types ---
@@ -329,6 +431,9 @@ interface AgentBackendState {
   activeToolCalls: Record<string, { name: string; done: boolean; streamId: string }>;
   /** Agent folder path — set after scaffolding, used for credential queries */
   agentPath: string | null;
+  goalProgress: NormalizedGoalProgress | null;
+  goalProgressExpanded: boolean;
+  goalProgressLoading: boolean;
   /** Structured question text from ask_user with options */
   pendingQuestion: string | null;
   /** Predefined choices from ask_user (1-3 items); UI appends "Other" */
@@ -369,6 +474,9 @@ function defaultAgentState(): AgentBackendState {
     workerIsTyping: false,
     llmSnapshots: {},
     activeToolCalls: {},
+    goalProgress: null,
+    goalProgressExpanded: false,
+    goalProgressLoading: false,
     pendingQuestion: null,
     pendingOptions: null,
     pendingQuestions: null,
@@ -594,8 +702,34 @@ export default function Workspace() {
     }));
   }, []);
 
+  const applyGoalProgress = useCallback((agentType: string, payload: GoalProgress | Record<string, unknown> | null | undefined) => {
+    const normalized = normalizeGoalProgress(payload);
+    setAgentStates(prev => ({
+      ...prev,
+      [agentType]: {
+        ...(prev[agentType] || defaultAgentState()),
+        goalProgress: normalized,
+        goalProgressLoading: false,
+      },
+    }));
+  }, []);
+
   // Derive active agent's backend state
   const activeAgentState = agentStates[activeWorker];
+
+  const refreshGoalProgress = useCallback(async (agentType: string, sessionId?: string | null) => {
+    const resolvedSessionId = sessionId || agentStates[agentType]?.sessionId;
+    if (!resolvedSessionId) return;
+
+    updateAgentState(agentType, { goalProgressLoading: true });
+    try {
+      const payload = await executionApi.goalProgress(resolvedSessionId);
+      applyGoalProgress(agentType, payload);
+    } catch (error) {
+      console.debug("[hive] failed to refresh goal progress", error);
+      updateAgentState(agentType, { goalProgressLoading: false });
+    }
+  }, [agentStates, applyGoalProgress, updateAgentState]);
 
   // Reset dismissed banner when the error clears so it re-appears if the same error returns
   const currentError = activeAgentState?.error;
@@ -1170,6 +1304,26 @@ export default function Workspace() {
     }
   }, [agentStates, fetchGraphForAgent]);
 
+  useEffect(() => {
+    const runningAgents = Object.entries(agentStates).filter(([, state]) => state.sessionId && state.workerRunState === "running");
+    if (runningAgents.length === 0) return;
+
+    const intervalId = window.setInterval(() => {
+      for (const [agentType, state] of runningAgents) {
+        void refreshGoalProgress(agentType, state.sessionId);
+      }
+    }, 5000);
+
+    return () => window.clearInterval(intervalId);
+  }, [agentStates, refreshGoalProgress]);
+
+  useEffect(() => {
+    for (const [agentType, state] of Object.entries(agentStates)) {
+      if (!state.sessionId || state.loading || state.goalProgress || state.goalProgressLoading) continue;
+      void refreshGoalProgress(agentType, state.sessionId);
+    }
+  }, [agentStates, refreshGoalProgress]);
+
   // --- Fetch draft graph when a session is in planning phase ---
   // Covers initial load, tab switches, reconnects, and cold restores.
   const fetchedDraftSessionsRef = useRef<Set<string>>(new Set());
@@ -1491,6 +1645,10 @@ export default function Workspace() {
       const shouldMarkQueenReady = isQueen && !agentStates[agentType]?.queenReady;
 
       switch (event.type) {
+        case "goal_progress":
+          applyGoalProgress(agentType, event.data);
+          break;
+
         case "execution_started":
           if (isQueen) {
             turnCounterRef.current[turnKey] = currentTurn + 1;
@@ -1537,6 +1695,8 @@ export default function Workspace() {
               pendingQuestionSource: null,
             });
             markAllNodesAs(agentType, ["running", "looping", "complete", "error"], "pending");
+            const sessionId = agentStates[agentType]?.sessionId;
+            if (sessionId) void refreshGoalProgress(agentType, sessionId);
           }
           break;
 
@@ -1571,7 +1731,10 @@ export default function Workspace() {
             // Re-fetch graph topology so timer countdowns refresh
             const sid = agentStates[agentType]?.sessionId;
             const gid = agentStates[agentType]?.graphId;
-            if (sid) fetchGraphForAgent(agentType, sid, gid || undefined);
+            if (sid) {
+              fetchGraphForAgent(agentType, sid, gid || undefined);
+              void refreshGoalProgress(agentType, sid);
+            }
           }
           break;
 
@@ -1598,6 +1761,11 @@ export default function Workspace() {
             upsertChatMessage(agentType, chatMsg, {
               reconcileOptimisticUser: event.type === "client_input_received",
             });
+          }
+
+          if (event.type === "execution_paused" || event.type === "execution_failed") {
+            const sessionId = agentStates[agentType]?.sessionId;
+            if (sessionId) void refreshGoalProgress(agentType, sessionId);
           }
 
           // Mark streaming when LLM text is actively arriving
@@ -2274,7 +2442,7 @@ export default function Workspace() {
           break;
       }
     },
-    [agentStates, updateAgentState, updateGraphNodeStatus, markAllNodesAs, upsertChatMessage, appendNodeLog, fetchGraphForAgent],
+    [agentStates, updateAgentState, updateGraphNodeStatus, markAllNodesAs, upsertChatMessage, appendNodeLog, fetchGraphForAgent, applyGoalProgress, refreshGoalProgress],
   );
 
   // --- Multi-session SSE subscription ---
@@ -2911,7 +3079,13 @@ export default function Workspace() {
             )}
 
             {activeSession && (
-              <ChatPanel
+              <>
+                <GoalProgressCard
+                  progress={activeAgentState?.goalProgress ?? null}
+                  expanded={activeAgentState?.goalProgressExpanded ?? false}
+                  onToggle={() => updateAgentState(activeWorker, { goalProgressExpanded: !(activeAgentState?.goalProgressExpanded ?? false) })}
+                />
+                <ChatPanel
                 messages={activeSession.messages}
                 onSend={handleSend}
                 onCancel={handleCancelQueen}
@@ -2935,6 +3109,7 @@ export default function Workspace() {
                 onMultiQuestionSubmit={handleMultiQuestionAnswer}
                 onQuestionDismiss={handleQuestionDismiss}
               />
+              </>
             )}
           </div>
           {resolvedSelectedNode && (
