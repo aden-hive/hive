@@ -7,6 +7,9 @@ commands on the host system.
 
 Design: uses a blocklist (not allowlist) so agents can run arbitrary
 dev commands (uv, pytest, git, etc.) while blocking known-dangerous ops.
+This blocks explicit nested shell executables (bash, sh, pwsh, etc.),
+but callers still execute via shell=True, so shell parsing remains a
+known limitation of this guardrail.
 """
 
 import re
@@ -104,7 +107,7 @@ _BLOCKED_PATTERNS: list[re.Pattern[str]] = [
     # su — switch user
     re.compile(r"\bsu\s+", re.IGNORECASE),
     # python/python3 with -c flag (inline code execution)
-    re.compile(r"\bpython[23]?\s+-c\b", re.IGNORECASE),
+    re.compile(r"\bpython[23]?\s+-c(?=\s|['\"]|$)", re.IGNORECASE),
     # ruby/perl/node with -e flag (inline code execution)
     re.compile(r"\bruby\s+-e\b", re.IGNORECASE),
     re.compile(r"\bperl\s+-e\b", re.IGNORECASE),
@@ -136,7 +139,8 @@ _SHELL_SPLIT_PATTERN = re.compile(r"\s*(?:;|&&|\|\||\|)\s*")
 
 def _normalize_executable_name(token: str) -> str:
     """Normalize executable names for matching (e.g. cmd.exe -> cmd)."""
-    normalized = token.lower()
+    normalized = token.lower().strip("\"'")
+    normalized = re.split(r"[\\/]", normalized)[-1]
     if normalized.endswith(".exe"):
         return normalized[:-4]
     return normalized

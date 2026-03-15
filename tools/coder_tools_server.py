@@ -25,6 +25,12 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
+_TOOLS_SRC = Path(__file__).resolve().parent / "src"
+if _TOOLS_SRC.is_dir():
+    tools_src = str(_TOOLS_SRC)
+    if tools_src not in sys.path:
+        sys.path.insert(0, tools_src)
+
 
 def setup_logger():
     if not logger.handlers:
@@ -53,61 +59,10 @@ if "--stdio" in sys.argv:
 from fastmcp import FastMCP  # noqa: E402
 
 # Import command sanitizer — shared module in aden_tools
-try:
-    from aden_tools.tools.file_system_toolkits.command_sanitizer import (
-        CommandBlockedError,
-        validate_command,
-    )
-except ImportError:
-    # Fallback: inline minimal blocklist when aden_tools is not on sys.path.
-    # This keeps the coder-tools server self-contained for standalone usage.
-    import re as _re
-
-    class CommandBlockedError(Exception):  # type: ignore[no-redef]
-        pass
-
-    _BLOCKED_EXEC = {
-        "curl", "wget", "nc", "ncat", "netcat", "nmap", "ssh", "scp", "sftp",
-        "ftp", "telnet", "rsync", "invoke-webrequest", "iwr", "irm", "certutil",
-        "useradd", "userdel", "usermod", "adduser", "deluser", "passwd",
-        "net", "shutdown", "reboot", "halt", "poweroff", "mkfs", "fdisk",
-        "diskpart", "format", "bash", "sh", "zsh", "dash", "csh", "ksh",
-        "powershell", "pwsh", "cmd", "cmd.exe", "wscript", "cscript",
-        "mshta", "regsvr32", "security",
-    }
-    _BLOCKED_PAT = [
-        _re.compile(r"\brm\s+(-[rRf]+\s+)*(/|~|\.\.|C:\\)", _re.I),
-        _re.compile(r"\bsudo\b", _re.I),
-        _re.compile(r"\bpython[23]?\s+-c\b", _re.I),
-        _re.compile(r"/dev/tcp/", _re.I),
-        _re.compile(r"\bcat\s+.*(\.ssh|/etc/shadow|credential_key)", _re.I),
-        _re.compile(r"\$\(.*\b(curl|wget|nc)\b.*\)", _re.I),
-    ]
-    _SPLIT = _re.compile(r"\s*(?:;|&&|\|\||\|)\s*")
-
-    def validate_command(command: str) -> None:  # type: ignore[no-redef]
-        if not command or not command.strip():
-            return
-        s = command.strip()
-        for p in _BLOCKED_PAT:
-            m = p.search(s)
-            if m:
-                raise CommandBlockedError(
-                    f"Command blocked for safety: matched dangerous pattern '{m.group()}'."
-                )
-        for seg in _SPLIT.split(s):
-            tokens = seg.strip().split()
-            for t in tokens:
-                if "=" in t and not t.startswith("-"):
-                    continue
-                executable = t.lower()
-                if executable.endswith(".exe"):
-                    executable = executable[:-4]
-                if executable in _BLOCKED_EXEC:
-                    raise CommandBlockedError(
-                        f"Command blocked for safety: '{t}' is not allowed."
-                    )
-                break
+from aden_tools.tools.file_system_toolkits.command_sanitizer import (  # noqa: E402
+    CommandBlockedError,
+    validate_command,
+)
 
 mcp = FastMCP("coder-tools")
 
@@ -265,6 +220,8 @@ def run_command(command: str, cwd: str = "", timeout: int = 120) -> str:
 
     PYTHONPATH is automatically set to include core/ and exports/.
     Output is truncated at 30K chars with a notice.
+    Commands still execute with shell=True, so the sanitizer blocks
+    explicit nested shell executables but cannot remove shell parsing.
 
     Args:
         command: Shell command to execute

