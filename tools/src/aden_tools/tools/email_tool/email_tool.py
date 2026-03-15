@@ -12,7 +12,6 @@ import os
 from typing import TYPE_CHECKING, Literal
 
 import httpx
-import resend
 from fastmcp import FastMCP
 
 if TYPE_CHECKING:
@@ -35,6 +34,8 @@ def register_tools(
         bcc: list[str] | None = None,
     ) -> dict:
         """Send email using Resend API."""
+        import resend  # lazy import — optional dependency
+
         resend.api_key = api_key
         try:
             payload: dict = {
