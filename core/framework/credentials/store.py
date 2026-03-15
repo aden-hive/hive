@@ -109,7 +109,7 @@ class CredentialStore:
             provider: The provider to register
         """
         self._providers[provider.provider_id] = provider
-        logger.debug(f"Registered credential provider: {provider.provider_id}")
+        logger.debug("Registered credential provider: %s", provider.provider_id)
 
     def get_provider(self, provider_id: str) -> CredentialProvider | None:
         """
@@ -334,7 +334,7 @@ class CredentialStore:
         with self._lock:
             self._storage.save(credential)
             self._add_to_cache(credential)
-            logger.info(f"Saved credential '{credential.id}'")
+            logger.info("Saved credential '%s'", credential.id)
 
     def delete_credential(self, credential_id: str) -> bool:
         """
@@ -350,7 +350,7 @@ class CredentialStore:
             self._remove_from_cache(credential_id)
             result = self._storage.delete(credential_id)
             if result:
-                logger.info(f"Deleted credential '{credential_id}'")
+                logger.info("Deleted credential '%s'", credential_id)
             return result
 
     def list_credentials(self) -> list[str]:
@@ -514,7 +514,7 @@ class CredentialStore:
         """Refresh a credential using its provider."""
         provider = self.get_provider_for_credential(credential)
         if provider is None:
-            logger.warning(f"No provider found for credential '{credential.id}'")
+            logger.warning("No provider found for credential '%s'", credential.id)
             return credential
 
         try:
@@ -525,11 +525,11 @@ class CredentialStore:
             self._storage.save(refreshed)
             self._add_to_cache(refreshed)
 
-            logger.info(f"Refreshed credential '{credential.id}'")
+            logger.info("Refreshed credential '%s'", credential.id)
             return refreshed
 
         except CredentialRefreshError as e:
-            logger.error(f"Failed to refresh credential '{credential.id}': {e}")
+            logger.error("Failed to refresh credential '%s': %s", credential.id, e)
             return credential
 
     def refresh_credential(self, credential_id: str) -> CredentialObject | None:
@@ -752,7 +752,7 @@ class CredentialStore:
             # Initial sync
             if auto_sync:
                 synced = provider.sync_all(store)
-                logger.info(f"Synced {synced} credentials from Aden server")
+                logger.info("Synced %s credentials from Aden server", synced)
 
             return store
 
@@ -761,5 +761,5 @@ class CredentialStore:
             return cls(storage=local_storage, **kwargs)
 
         except Exception as e:
-            logger.warning(f"Failed to setup Aden sync: {e}. Using local storage.")
+            logger.warning("Failed to setup Aden sync: %s. Using local storage.", e)
             return cls(storage=local_storage, **kwargs)

@@ -102,7 +102,7 @@ class ConcurrentStorage:
 
         self._running = True
         self._batch_task = asyncio.create_task(self._batch_writer())
-        logger.info(f"ConcurrentStorage started: {self.base_path}")
+        logger.info("ConcurrentStorage started: %s", self.base_path)
 
     async def stop(self) -> None:
         """Stop the batch writer and flush pending writes."""
@@ -353,7 +353,7 @@ class ConcurrentStorage:
                     await self._flush_batch(batch)
                 raise
             except Exception as e:
-                logger.error(f"Batch writer error: {e}")
+                logger.error("Batch writer error: %s", e)
                 # Continue running despite errors
 
     async def _flush_batch(self, batch: list[tuple[str, Any]]) -> None:
@@ -361,7 +361,7 @@ class ConcurrentStorage:
         if not batch:
             return
 
-        logger.debug(f"Flushing batch of {len(batch)} items")
+        logger.debug("Flushing batch of %s items", len(batch))
 
         for item_type, item in batch:
             try:
@@ -371,7 +371,7 @@ class ConcurrentStorage:
                     # This fixes the race condition where cache was updated before write completed
                     self._cache[f"run:{item.id}"] = CacheEntry(item, time.time())
             except Exception as e:
-                logger.error(f"Failed to save {item_type}: {e}")
+                logger.error("Failed to save %s: %s", item_type, e)
                 # Cache is NOT updated on failure - prevents stale/inconsistent cache state
 
     async def _flush_pending(self) -> None:

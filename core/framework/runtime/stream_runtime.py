@@ -143,7 +143,7 @@ class StreamRuntime:
         self._current_nodes[execution_id] = "unknown"
 
         logger.debug(
-            f"Started run {run_id} for execution {execution_id} in stream {self.stream_id}"
+            "Started run %s for execution %s in stream %s", run_id, execution_id, self.stream_id
         )
         return run_id
 
@@ -165,7 +165,7 @@ class StreamRuntime:
         """
         run = self._runs.get(execution_id)
         if run is None:
-            logger.warning(f"end_run called but no run for execution {execution_id}")
+            logger.warning("end_run called but no run for execution %s", execution_id)
             return
 
         status = RunStatus.COMPLETED if success else RunStatus.FAILED
@@ -175,14 +175,14 @@ class StreamRuntime:
         # Save to storage asynchronously
         asyncio.create_task(self._save_run(execution_id, run))
 
-        logger.debug(f"Ended run {run.id} for execution {execution_id}: {status.value}")
+        logger.debug("Ended run %s for execution %s: %s", run.id, execution_id, status.value)
 
     async def _save_run(self, execution_id: str, run: Run) -> None:
         """Save run to storage and clean up."""
         try:
             await self._storage.save_run(run)
         except Exception as e:
-            logger.error(f"Failed to save run {run.id}: {e}")
+            logger.error("Failed to save run %s: %s", run.id, e)
         finally:
             # Clean up
             self._runs.pop(execution_id, None)
@@ -232,7 +232,7 @@ class StreamRuntime:
         """
         run = self._runs.get(execution_id)
         if run is None:
-            logger.warning(f"decide called but no run for execution {execution_id}: {intent}")
+            logger.warning("decide called but no run for execution %s: %s", execution_id, intent)
             return ""
 
         # Build Option objects
@@ -306,7 +306,7 @@ class StreamRuntime:
         """
         run = self._runs.get(execution_id)
         if run is None:
-            logger.warning(f"record_outcome called but no run for execution {execution_id}")
+            logger.warning("record_outcome called but no run for execution %s", execution_id)
             return
 
         outcome = Outcome(
@@ -358,8 +358,7 @@ class StreamRuntime:
         run = self._runs.get(execution_id)
         if run is None:
             logger.warning(
-                f"report_problem called but no run for execution {execution_id}: "
-                f"[{severity}] {description}"
+                "report_problem called but no run for execution %s: [%s] %s", execution_id, severity, description
             )
             return ""
 

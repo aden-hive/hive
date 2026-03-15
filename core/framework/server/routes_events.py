@@ -67,7 +67,7 @@ def _parse_event_types(query_param: str | None) -> list[EventType]:
         try:
             result.append(EventType(name))
         except ValueError:
-            logger.warning(f"Unknown event type filter: {name}")
+            logger.warning("Unknown event type filter: %s", name)
 
     return result or DEFAULT_EVENT_TYPES
 

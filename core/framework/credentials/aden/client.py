@@ -333,7 +333,7 @@ class AdenCredentialClient:
                 if attempt < self.config.retry_attempts - 1:
                     delay = self.config.retry_delay * (2**attempt)
                     logger.warning(
-                        f"Aden request failed (attempt {attempt + 1}), retrying in {delay}s: {e}"
+                        "Aden request failed (attempt %s), retrying in %ss: %s", attempt + 1, delay, e
                     )
                     time.sleep(delay)
                 else:

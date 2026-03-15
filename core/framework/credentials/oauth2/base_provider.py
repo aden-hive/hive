@@ -282,7 +282,7 @@ class BaseOAuth2Provider(CredentialProvider):
             # RFC 7009: 200 indicates success (even if token was already invalid)
             return response.status_code == 200
         except Exception as e:
-            logger.error(f"Token revocation failed: {e}")
+            logger.error("Token revocation failed: %s", e)
             return False
 
     # --- CredentialProvider Interface ---
@@ -324,7 +324,7 @@ class BaseOAuth2Provider(CredentialProvider):
             credential.set_key("refresh_token", new_token.refresh_token)
 
         credential.last_refreshed = datetime.now(UTC)
-        logger.info(f"Refreshed OAuth2 credential '{credential.id}'")
+        logger.info("Refreshed OAuth2 credential '%s'", credential.id)
 
         return credential
 

@@ -129,13 +129,13 @@ class TokenLifecycleManager:
             if result.success and result.token:
                 token = result.token
             elif result.needs_reauthorization:
-                logger.warning(f"Token for {self.credential_id} needs reauthorization")
+                logger.warning("Token for %s needs reauthorization", self.credential_id)
                 return None
             else:
                 # Use existing token if still technically valid
                 if token.is_expired:
                     return None
-                logger.warning(f"Refresh failed for {self.credential_id}, using existing token")
+                logger.warning("Refresh failed for %s, using existing token", self.credential_id)
 
         self._cached_token = token
         self._cache_time = datetime.now(UTC)
@@ -208,7 +208,7 @@ class TokenLifecycleManager:
             if result.success and result.token:
                 token = result.token
             elif result.needs_reauthorization:
-                logger.warning(f"Token for {self.credential_id} needs reauthorization")
+                logger.warning("Token for %s needs reauthorization", self.credential_id)
                 return None
             else:
                 if token.is_expired:
@@ -310,7 +310,7 @@ class TokenLifecycleManager:
             if self.on_token_refreshed:
                 self.on_token_refreshed(new_token)
 
-            logger.info(f"Token refreshed for {self.credential_id}")
+            logger.info("Token refreshed for %s", self.credential_id)
             return TokenRefreshResult(success=True, token=new_token)
 
         except Exception as e:
@@ -327,7 +327,7 @@ class TokenLifecycleManager:
             if self.on_refresh_failed:
                 self.on_refresh_failed(error_msg)
 
-            logger.error(f"Token refresh failed for {self.credential_id}: {e}")
+            logger.error("Token refresh failed for %s: %s", self.credential_id, e)
             return TokenRefreshResult(success=False, error=error_msg)
 
     def invalidate_cache(self) -> None:

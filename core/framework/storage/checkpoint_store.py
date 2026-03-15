@@ -64,7 +64,7 @@ class CheckpointStore:
             with atomic_write(checkpoint_path) as f:
                 f.write(checkpoint.model_dump_json(indent=2))
 
-            logger.debug(f"Saved checkpoint {checkpoint.checkpoint_id}")
+            logger.debug("Saved checkpoint %s", checkpoint.checkpoint_id)
 
         # Write checkpoint file (blocking I/O in thread)
         await asyncio.to_thread(_write)
@@ -91,13 +91,13 @@ class CheckpointStore:
             checkpoint_path = self.checkpoints_dir / f"{checkpoint_id}.json"
 
             if not checkpoint_path.exists():
-                logger.warning(f"Checkpoint file not found: {checkpoint_path}")
+                logger.warning("Checkpoint file not found: %s", checkpoint_path)
                 return None
 
             try:
                 return Checkpoint.model_validate_json(checkpoint_path.read_text(encoding="utf-8"))
             except Exception as e:
-                logger.error(f"Failed to load checkpoint {checkpoint_id}: {e}")
+                logger.error("Failed to load checkpoint %s: %s", checkpoint_id, e)
                 return None
 
         # Load index to get checkpoint ID if not provided
@@ -127,7 +127,7 @@ class CheckpointStore:
                     self.index_path.read_text(encoding="utf-8")
                 )
             except Exception as e:
-                logger.error(f"Failed to load checkpoint index: {e}")
+                logger.error("Failed to load checkpoint index: %s", e)
                 return None
 
         return await asyncio.to_thread(_read)
@@ -177,15 +177,15 @@ class CheckpointStore:
             checkpoint_path = self.checkpoints_dir / f"{checkpoint_id}.json"
 
             if not checkpoint_path.exists():
-                logger.warning(f"Checkpoint file not found: {checkpoint_path}")
+                logger.warning("Checkpoint file not found: %s", checkpoint_path)
                 return False
 
             try:
                 checkpoint_path.unlink()
-                logger.info(f"Deleted checkpoint {checkpoint_id}")
+                logger.info("Deleted checkpoint %s", checkpoint_id)
                 return True
             except Exception as e:
-                logger.error(f"Failed to delete checkpoint {checkpoint_id}: {e}")
+                logger.error("Failed to delete checkpoint %s: %s", checkpoint_id, e)
                 return False
 
         # Delete checkpoint file
@@ -226,7 +226,7 @@ class CheckpointStore:
                 if created < cutoff:
                     old_checkpoints.append(cp.checkpoint_id)
             except Exception as e:
-                logger.warning(f"Failed to parse timestamp for {cp.checkpoint_id}: {e}")
+                logger.warning("Failed to parse timestamp for %s: %s", cp.checkpoint_id, e)
 
         # Delete old checkpoints
         deleted_count = 0
@@ -235,7 +235,7 @@ class CheckpointStore:
                 deleted_count += 1
 
         if deleted_count > 0:
-            logger.info(f"Pruned {deleted_count} checkpoints older than {max_age_days} days")
+            logger.info("Pruned %s checkpoints older than %s days", deleted_count, max_age_days)
 
         return deleted_count
 
@@ -288,7 +288,7 @@ class CheckpointStore:
         # Write updated index
         await asyncio.to_thread(_write, index)
 
-        logger.debug(f"Updated index with checkpoint {checkpoint.checkpoint_id}")
+        logger.debug("Updated index with checkpoint %s", checkpoint.checkpoint_id)
 
     async def _update_index_remove(self, checkpoint_id: str) -> None:
         """
@@ -324,4 +324,4 @@ class CheckpointStore:
         # Write updated index
         await asyncio.to_thread(_write, index)
 
-        logger.debug(f"Removed checkpoint {checkpoint_id} from index")
+        logger.debug("Removed checkpoint %s from index", checkpoint_id)

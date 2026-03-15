@@ -134,7 +134,7 @@ class SharedStateManager:
             execution_id: Execution to clean up
         """
         self._execution_state.pop(execution_id, None)
-        logger.debug(f"Cleaned up state for execution: {execution_id}")
+        logger.debug("Cleaned up state for execution: %s", execution_id)
 
     def cleanup_stream(self, stream_id: str) -> None:
         """
@@ -145,7 +145,7 @@ class SharedStateManager:
         """
         self._stream_state.pop(stream_id, None)
         self._stream_locks.pop(stream_id, None)
-        logger.debug(f"Cleaned up state for stream: {stream_id}")
+        logger.debug("Cleaned up state for stream: %s", stream_id)
 
     # === LOW-LEVEL STATE OPERATIONS ===
 

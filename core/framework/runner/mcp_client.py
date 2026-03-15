@@ -240,7 +240,7 @@ class MCPClient:
             if connection_error:
                 raise connection_error[0]
 
-            logger.info(f"Connected to MCP server '{self.config.name}' via STDIO (persistent)")
+            logger.info("Connected to MCP server '%s' via STDIO (persistent)", self.config.name)
         except Exception as e:
             raise RuntimeError(f"Failed to connect to MCP server: {e}") from e
 
@@ -260,10 +260,10 @@ class MCPClient:
             response = self._http_client.get("/health")
             response.raise_for_status()
             logger.info(
-                f"Connected to MCP server '{self.config.name}' via HTTP at {self.config.url}"
+                "Connected to MCP server '%s' via HTTP at %s", self.config.name, self.config.url
             )
         except Exception as e:
-            logger.warning(f"Health check failed for MCP server '{self.config.name}': {e}")
+            logger.warning("Health check failed for MCP server '%s': %s", self.config.name, e)
             # Continue anyway, server might not have health endpoint
 
     def _discover_tools(self) -> None:
@@ -286,10 +286,10 @@ class MCPClient:
 
             tool_names = list(self._tools.keys())
             logger.info(
-                f"Discovered {len(self._tools)} tools from '{self.config.name}': {tool_names}"
+                "Discovered %s tools from '%s': %s", len(self._tools), self.config.name, tool_names
             )
         except Exception as e:
-            logger.error(f"Failed to discover tools from '{self.config.name}': {e}")
+            logger.error("Failed to discover tools from '%s': %s", self.config.name, e)
             raise
 
     async def _list_tools_stdio_async(self) -> list[dict]:
@@ -456,7 +456,7 @@ class MCPClient:
                 "MCP session cleanup was cancelled; proceeding with best-effort shutdown"
             )
         except Exception as e:
-            logger.warning(f"Error closing MCP session: {e}")
+            logger.warning("Error closing MCP session: %s", e)
         finally:
             self._session = None
 
@@ -473,7 +473,7 @@ class MCPClient:
             if "cancel scope" in msg or "different task" in msg:
                 logger.debug("STDIO context teardown (known anyio quirk): %s", e)
             else:
-                logger.warning(f"Error closing STDIO context: {e}")
+                logger.warning("Error closing STDIO context: %s", e)
         finally:
             self._stdio_context = None
 
@@ -482,7 +482,7 @@ class MCPClient:
             try:
                 self._errlog_handle.close()
             except Exception as e:
-                logger.debug(f"Error closing errlog handle: {e}")
+                logger.debug("Error closing errlog handle: %s", e)
             finally:
                 self._errlog_handle = None
 
@@ -506,15 +506,15 @@ class MCPClient:
                 except TimeoutError:
                     # Cleanup took too long - may indicate stuck resources or slow MCP server
                     cleanup_attempted = True
-                    logger.warning(f"Async cleanup timed out after {self._CLEANUP_TIMEOUT} seconds")
+                    logger.warning("Async cleanup timed out after %s seconds", self._CLEANUP_TIMEOUT)
                 except RuntimeError as e:
                     # Likely: loop stopped between is_running() check and run_coroutine_threadsafe()
                     cleanup_attempted = True
-                    logger.debug(f"Event loop stopped during async cleanup: {e}")
+                    logger.debug("Event loop stopped during async cleanup: %s", e)
                 except Exception as e:
                     # Cleanup was attempted but failed (e.g., error in _cleanup_stdio_async())
                     cleanup_attempted = True
-                    logger.warning(f"Error during async cleanup: {e}")
+                    logger.warning("Error during async cleanup: %s", e)
 
                 # Now stop the event loop
                 try:
@@ -540,7 +540,7 @@ class MCPClient:
                 if self._loop_thread.is_alive():
                     logger.warning(
                         "Event loop thread for STDIO MCP connection did not terminate "
-                        f"within {self._THREAD_JOIN_TIMEOUT}s; thread may still be running."
+                        "within %ss; thread may still be running.", self._THREAD_JOIN_TIMEOUT
                     )
 
             # Clear remaining references
@@ -564,7 +564,7 @@ class MCPClient:
             self._http_client = None
 
         self._connected = False
-        logger.info(f"Disconnected from MCP server '{self.config.name}'")
+        logger.info("Disconnected from MCP server '%s'", self.config.name)
 
     def __enter__(self):
         """Context manager entry."""

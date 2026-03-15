@@ -97,7 +97,7 @@ FEEDBACK: (reason if RETRY, empty if ACCEPT)"""
             return PhaseVerdict(action="ACCEPT", confidence=0.5, feedback="")
         return _parse_verdict(response.content)
     except Exception as e:
-        logger.warning(f"Level 2 judge failed, accepting by default: {e}")
+        logger.warning("Level 2 judge failed, accepting by default: %s", e)
         # On failure, don't block — Level 0 already passed
         return PhaseVerdict(action="ACCEPT", confidence=0.5, feedback="")
 

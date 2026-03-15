@@ -155,8 +155,7 @@ class EncryptedFileStorage(CredentialStorage):
                 # Generate new key
                 self._key = Fernet.generate_key()
                 logger.warning(
-                    f"Generated new encryption key. To persist credentials across restarts, "
-                    f"set {key_env_var}={self._key.decode()}"
+                    "Generated new encryption key. To persist credentials across restarts, set %s=%s", key_env_var, self._key.decode()
                 )
 
         self._fernet = Fernet(self._key)
@@ -188,7 +187,7 @@ class EncryptedFileStorage(CredentialStorage):
 
         # Update index
         self._update_index(credential.id, "save", credential.credential_type.value)
-        logger.debug(f"Saved encrypted credential '{credential.id}'")
+        logger.debug("Saved encrypted credential '%s'", credential.id)
 
     def load(self, credential_id: str) -> CredentialObject | None:
         """Load and decrypt credential."""
@@ -218,7 +217,7 @@ class EncryptedFileStorage(CredentialStorage):
         if cred_path.exists():
             cred_path.unlink()
             self._update_index(credential_id, "delete")
-            logger.debug(f"Deleted credential '{credential_id}'")
+            logger.debug("Deleted credential '%s'", credential_id)
             return True
         return False
 

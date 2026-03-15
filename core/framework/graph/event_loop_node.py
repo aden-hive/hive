@@ -4025,11 +4025,7 @@ class EventLoopNode(NodeProtocol):
         ]
 
         logger.info(
-            f"Restored event loop: iteration={start_iteration}, "
-            f"messages={conversation.message_count}, "
-            f"outputs={list(accumulator.values.keys())}, "
-            f"stall_window={len(recent_responses)}, "
-            f"doom_window={len(recent_tool_fingerprints)}"
+            "Restored event loop: iteration=%s, messages=%s, outputs=%s, stall_window=%s, doom_window=%s", start_iteration, conversation.message_count, list(accumulator.values.keys()), len(recent_responses), len(recent_tool_fingerprints)
         )
         return EventLoopNode._RestoredState(
             conversation=conversation,
@@ -4138,7 +4134,7 @@ class EventLoopNode(NodeProtocol):
         # Check executor-level pause event (for /pause command, Ctrl+Z)
         if ctx.pause_event and ctx.pause_event.is_set():
             completed = iteration  # 0-indexed: iteration=3 means 3 iterations completed (0,1,2)
-            logger.info(f"⏸ Pausing after {completed} iteration(s) completed (executor-level)")
+            logger.info("⏸ Pausing after %s iteration(s) completed (executor-level)", completed)
             return True
 
         # Check context-level pause flags (legacy/alternative methods)
@@ -4150,7 +4146,7 @@ class EventLoopNode(NodeProtocol):
                 pause_requested = False
         if pause_requested:
             completed = iteration
-            logger.info(f"⏸ Pausing after {completed} iteration(s) completed (context-level)")
+            logger.info("⏸ Pausing after %s iteration(s) completed (context-level)", completed)
             return True
 
         return False

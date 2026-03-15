@@ -129,7 +129,7 @@ class AdenCachedStorage(CredentialStorage):
         self._local.save(credential)
         self._cache_timestamps[credential.id] = datetime.now(UTC)
         self._index_provider(credential)
-        logger.debug(f"Cached credential '{credential.id}'")
+        logger.debug("Cached credential '%s'", credential.id)
 
     def load(self, credential_id: str) -> CredentialObject | None:
         """
@@ -169,7 +169,7 @@ class AdenCachedStorage(CredentialStorage):
                     result = self._load_by_id(rid)
                     if result is not None:
                         logger.info(
-                            f"Loaded credential '{credential_id}' via provider index (id='{rid}')"
+                            "Loaded credential '%s' via provider index (id='%s')", credential_id, rid
                         )
                         return result
 
@@ -190,7 +190,7 @@ class AdenCachedStorage(CredentialStorage):
 
         # If we prefer local and have a fresh cache, use it
         if self._prefer_local and local_cred and self._is_cache_fresh(credential_id):
-            logger.debug(f"Using cached credential '{credential_id}'")
+            logger.debug("Using cached credential '%s'", credential_id)
             return local_cred
 
         # If nothing local, there's nothing to refresh from Aden.
@@ -204,11 +204,11 @@ class AdenCachedStorage(CredentialStorage):
             aden_cred = self._aden_provider.fetch_from_aden(credential_id)
             if aden_cred:
                 self.save(aden_cred)
-                logger.debug(f"Fetched credential '{credential_id}' from Aden")
+                logger.debug("Fetched credential '%s' from Aden", credential_id)
                 return aden_cred
         except Exception as e:
-            logger.warning(f"Failed to fetch '{credential_id}' from Aden: {e}")
-            logger.info(f"Using stale cached credential '{credential_id}'")
+            logger.warning("Failed to fetch '%s' from Aden: %s", credential_id, e)
+            logger.info("Using stale cached credential '%s'", credential_id)
             return local_cred
 
         return local_cred
@@ -299,7 +299,7 @@ class AdenCachedStorage(CredentialStorage):
             credential_id: The credential identifier.
         """
         self._cache_timestamps.pop(credential_id, None)
-        logger.debug(f"Invalidated cache for '{credential_id}'")
+        logger.debug("Invalidated cache for '%s'", credential_id)
 
     def invalidate_all(self) -> None:
         """Invalidate all cache entries."""
@@ -329,7 +329,7 @@ class AdenCachedStorage(CredentialStorage):
                 self._provider_index[provider_name] = []
             if credential.id not in self._provider_index[provider_name]:
                 self._provider_index[provider_name].append(credential.id)
-            logger.debug(f"Indexed provider '{provider_name}' -> '{credential.id}'")
+            logger.debug("Indexed provider '%s' -> '%s'", provider_name, credential.id)
 
             # Index by alias for multi-account routing
             alias_key = credential.keys.get("_alias")
@@ -372,7 +372,7 @@ class AdenCachedStorage(CredentialStorage):
                 self._index_provider(cred)
                 if len(self._provider_index) > before:
                     indexed += 1
-        logger.debug(f"Rebuilt provider index with {indexed} mappings")
+        logger.debug("Rebuilt provider index with %s mappings", indexed)
         return indexed
 
     def sync_all_from_aden(self) -> int:
@@ -392,7 +392,7 @@ class AdenCachedStorage(CredentialStorage):
 
             for info in integrations:
                 if info.status != "active":
-                    logger.warning(f"Skipping integration '{info.alias}': status={info.status}")
+                    logger.warning("Skipping integration '%s': status=%s", info.alias, info.status)
                     continue
 
                 try:
@@ -400,12 +400,12 @@ class AdenCachedStorage(CredentialStorage):
                     if cred:
                         self.save(cred)
                         synced += 1
-                        logger.info(f"Synced credential '{info.alias}' from Aden")
+                        logger.info("Synced credential '%s' from Aden", info.alias)
                 except Exception as e:
-                    logger.warning(f"Failed to sync '{info.alias}': {e}")
+                    logger.warning("Failed to sync '%s': %s", info.alias, e)
 
         except Exception as e:
-            logger.error(f"Failed to list integrations from Aden: {e}")
+            logger.error("Failed to list integrations from Aden: %s", e)
 
         return synced
 

@@ -465,7 +465,7 @@ class GraphExecutor:
         if tool_errors:
             self.logger.error("❌ Tool validation failed:")
             for err in tool_errors:
-                self.logger.error(f"   • {err}")
+                self.logger.error("   • %s", err)
             return ExecutionResult(
                 success=False,
                 error=(
@@ -499,8 +499,7 @@ class GraphExecutor:
             # [RESTORED] Type safety check
             if not isinstance(memory_data, dict):
                 self.logger.warning(
-                    f"⚠️ Invalid memory data type in session state: "
-                    f"{type(memory_data).__name__}, expected dict"
+                    "⚠️ Invalid memory data type in session state: %s, expected dict", type(memory_data).__name__
                 )
             else:
                 # Restore memory from previous session.
@@ -509,7 +508,7 @@ class GraphExecutor:
                 # positives on the code-indicator heuristic.
                 for key, value in memory_data.items():
                     memory.write(key, value, validate=False)
-                self.logger.info(f"📥 Restored session state with {len(memory_data)} memory keys")
+                self.logger.info("📥 Restored session state with %s memory keys", len(memory_data))
 
         # Write new input data to memory (each key individually).
         # Skip when resuming from a paused session — restored memory already
@@ -534,7 +533,7 @@ class GraphExecutor:
         if session_state and "node_visit_counts" in session_state:
             node_visit_counts = dict(session_state["node_visit_counts"])
             if node_visit_counts:
-                self.logger.info(f"📥 Restored node visit counts: {node_visit_counts}")
+                self.logger.info("📥 Restored node visit counts: %s", node_visit_counts)
 
                 # If resuming at a specific node (paused_at), that node was counted
                 # but never completed, so decrement its count
@@ -547,8 +546,7 @@ class GraphExecutor:
                     old_count = node_visit_counts[paused_at]
                     node_visit_counts[paused_at] -= 1
                     self.logger.info(
-                        f"📥 Decremented visit count for paused node '{paused_at}': "
-                        f"{old_count} -> {node_visit_counts[paused_at]}"
+                        "📥 Decremented visit count for paused node '%s': %s -> %s", paused_at, old_count, node_visit_counts[paused_at]
                     )
 
         # Determine entry point (may differ if resuming)
@@ -560,8 +558,7 @@ class GraphExecutor:
 
                 if checkpoint:
                     self.logger.info(
-                        f"🔄 Resuming from checkpoint: {checkpoint_id} "
-                        f"(node: {checkpoint.current_node})"
+                        "🔄 Resuming from checkpoint: %s (node: %s)", checkpoint_id, checkpoint.current_node
                     )
 
                     # Restore memory from checkpoint
@@ -577,38 +574,36 @@ class GraphExecutor:
                     path.extend(checkpoint.execution_path)
 
                     self.logger.info(
-                        f"📥 Restored memory with {len(checkpoint.shared_memory)} keys, "
-                        f"resuming at node: {current_node_id}"
+                        "📥 Restored memory with %s keys, resuming at node: %s", len(checkpoint.shared_memory), current_node_id
                     )
                 else:
                     self.logger.warning(
-                        f"Checkpoint {checkpoint_id} not found, resuming from normal entry point"
+                        "Checkpoint %s not found, resuming from normal entry point", checkpoint_id
                     )
                     # Check if resuming from paused_at (fallback to session state)
                     paused_at = session_state.get("paused_at") if session_state else None
                     if paused_at and graph.get_node(paused_at) is not None:
                         current_node_id = paused_at
-                        self.logger.info(f"🔄 Resuming from paused node: {paused_at}")
+                        self.logger.info("🔄 Resuming from paused node: %s", paused_at)
                     else:
                         current_node_id = graph.get_entry_point(session_state)
 
             except Exception as e:
                 self.logger.error(
-                    f"Failed to load checkpoint {checkpoint_id}: {e}, "
-                    f"resuming from normal entry point"
+                    "Failed to load checkpoint %s: %s, resuming from normal entry point", checkpoint_id, e
                 )
                 # Check if resuming from paused_at (fallback to session state)
                 paused_at = session_state.get("paused_at") if session_state else None
                 if paused_at and graph.get_node(paused_at) is not None:
                     current_node_id = paused_at
-                    self.logger.info(f"🔄 Resuming from paused node: {paused_at}")
+                    self.logger.info("🔄 Resuming from paused node: %s", paused_at)
                 else:
                     current_node_id = graph.get_entry_point(session_state)
         else:
             # Check if resuming from paused_at (session state resume)
             paused_at = session_state.get("paused_at") if session_state else None
             node_ids = [n.id for n in graph.nodes]
-            self.logger.debug(f"paused_at={paused_at}, available node IDs={node_ids}")
+            self.logger.debug("paused_at=%s, available node IDs=%s", paused_at, node_ids)
 
             if paused_at and graph.get_node(paused_at) is not None:
                 # Resume from paused_at node directly (works for any node, not just pause_nodes)
@@ -620,17 +615,16 @@ class GraphExecutor:
                     if execution_path:
                         path.extend(execution_path)
                         self.logger.info(
-                            f"🔄 Resuming from paused node: {paused_at} "
-                            f"(restored path: {execution_path})"
+                            "🔄 Resuming from paused node: %s (restored path: %s)", paused_at, execution_path
                         )
                     else:
-                        self.logger.info(f"🔄 Resuming from paused node: {paused_at}")
+                        self.logger.info("🔄 Resuming from paused node: %s", paused_at)
                 else:
-                    self.logger.info(f"🔄 Resuming from paused node: {paused_at}")
+                    self.logger.info("🔄 Resuming from paused node: %s", paused_at)
             else:
                 # Fall back to normal entry point logic
                 self.logger.warning(
-                    f"⚠ paused_at={paused_at} is not a valid node, falling back to entry point"
+                    "⚠ paused_at=%s is not a valid node, falling back to entry point", paused_at
                 )
                 current_node_id = graph.get_entry_point(session_state)
 
@@ -700,7 +694,7 @@ class GraphExecutor:
                 )
 
         if session_state and current_node_id != graph.entry_node:
-            self.logger.info(f"🔄 Resuming from: {current_node_id}")
+            self.logger.info("🔄 Resuming from: %s", current_node_id)
 
             # Emit resume event
             if self._event_bus:
@@ -721,9 +715,9 @@ class GraphExecutor:
             session_id = self._get_runtime_log_session_id()
             self.runtime_logger.start_run(goal_id=goal.id, session_id=session_id)
 
-        self.logger.info(f"🚀 Starting execution: {goal.name}")
-        self.logger.info(f"   Goal: {goal.description}")
-        self.logger.info(f"   Entry node: {graph.entry_node}")
+        self.logger.info("🚀 Starting execution: %s", goal.name)
+        self.logger.info("   Goal: %s", goal.description)
+        self.logger.info("   Entry node: %s", graph.entry_node)
 
         # Set per-execution data_dir so data tools (save_data, load_data, etc.)
         # and spillover files share the same session-scoped directory.
@@ -801,8 +795,7 @@ class GraphExecutor:
                 max_visits = getattr(node_spec, "max_node_visits", 0)
                 if max_visits > 0 and node_visit_counts[current_node_id] > max_visits:
                     self.logger.warning(
-                        f"   ⊘ Node '{node_spec.name}' visit limit reached "
-                        f"({node_visit_counts[current_node_id]}/{max_visits}), skipping"
+                        "   ⊘ Node '%s' visit limit reached (%s/%s), skipping", node_spec.name, node_visit_counts[current_node_id], max_visits
                     )
                     # Skip execution — follow outgoing edges using current memory
                     skip_result = NodeResult(success=True, output=memory.read_all())
@@ -834,21 +827,21 @@ class GraphExecutor:
                         if memory.read(key) is not None:
                             memory.write(key, None, validate=False)
                             self.logger.info(
-                                f"   🧹 Cleared stale nullable output '{key}' from previous visit"
+                                "   🧹 Cleared stale nullable output '%s' from previous visit", key
                             )
 
                 # Check if pause (HITL) before execution
                 if current_node_id in graph.pause_nodes:
-                    self.logger.info(f"⏸ Paused at HITL node: {node_spec.name}")
+                    self.logger.info("⏸ Paused at HITL node: %s", node_spec.name)
                     # Execute this node, then pause
                     # (We'll check again after execution and save state)
 
                 # Expose current node for external injection routing
                 self.current_node_id = current_node_id
 
-                self.logger.info(f"\n▶ Step {steps}: {node_spec.name} ({node_spec.node_type})")
-                self.logger.info(f"   Inputs: {node_spec.input_keys}")
-                self.logger.info(f"   Outputs: {node_spec.output_keys}")
+                self.logger.info("\n▶ Step %s: %s (%s)", steps, node_spec.name, node_spec.node_type)
+                self.logger.info("   Inputs: %s", node_spec.input_keys)
+                self.logger.info("   Outputs: %s", node_spec.output_keys)
 
                 # Continuous mode: accumulate tools and output keys from this node
                 if is_continuous and node_spec.tools:
@@ -897,7 +890,7 @@ class GraphExecutor:
                             value_str = str(value)
                             if len(value_str) > 200:
                                 value_str = value_str[:200] + "..."
-                            self.logger.info(f"      {key}: {value_str}")
+                            self.logger.info("      %s: %s", key, value_str)
 
                 # Get or create node implementation
                 node_impl = self._get_node_implementation(node_spec, graph.cleanup_llm_model)
@@ -905,7 +898,7 @@ class GraphExecutor:
                 # Validate inputs
                 validation_errors = node_impl.validate_input(ctx)
                 if validation_errors:
-                    self.logger.warning(f"⚠ Validation warnings: {validation_errors}")
+                    self.logger.warning("⚠ Validation warnings: %s", validation_errors)
                     self.runtime.report_problem(
                         severity="warning",
                         description=f"Validation errors for {current_node_id}: {validation_errors}",
@@ -1010,7 +1003,7 @@ class GraphExecutor:
                             nullable_keys=node_spec.nullable_output_keys,
                         )
                         if not validation.success:
-                            self.logger.error(f"   ✗ Output validation failed: {validation.error}")
+                            self.logger.error("   ✗ Output validation failed: %s", validation.error)
                             result = NodeResult(
                                 success=False,
                                 error=f"Output validation failed: {validation.error}",
@@ -1021,13 +1014,12 @@ class GraphExecutor:
 
                 if result.success:
                     self.logger.info(
-                        f"   ✓ Success (tokens: {result.tokens_used}, "
-                        f"latency: {result.latency_ms}ms)"
+                        "   ✓ Success (tokens: %s, latency: %sms)", result.tokens_used, result.latency_ms
                     )
 
                     # Generate and log human-readable summary
                     summary = result.to_summary(node_spec)
-                    self.logger.info(f"   📝 Summary: {summary}")
+                    self.logger.info("   📝 Summary: %s", summary)
 
                     # Log what was written to memory (detailed view)
                     if result.output:
@@ -1036,7 +1028,7 @@ class GraphExecutor:
                             value_str = str(value)
                             if len(value_str) > 200:
                                 value_str = value_str[:200] + "..."
-                            self.logger.info(f"      {key}: {value_str}")
+                            self.logger.info("      %s: %s", key, value_str)
 
                     # Write node outputs to memory BEFORE edge evaluation
                     # This enables direct key access in conditional expressions (e.g., "score > 80")
@@ -1045,7 +1037,7 @@ class GraphExecutor:
                         for key, value in result.output.items():
                             memory.write(key, value, validate=False)
                 else:
-                    self.logger.error(f"   ✗ Failed: {result.error}")
+                    self.logger.error("   ✗ Failed: %s", result.error)
 
                 total_tokens += result.tokens_used
                 total_latency += result.latency_ms
@@ -1068,8 +1060,7 @@ class GraphExecutor:
 
                     if isinstance(node_impl, EventLoopNode) and max_retries > 0:
                         self.logger.warning(
-                            f"EventLoopNode '{node_spec.id}' has max_retries={max_retries}. "
-                            "Overriding to 0 — event loop nodes handle retry internally via judge."
+                            "EventLoopNode '%s' has max_retries=%s. Overriding to 0 — event loop nodes handle retry internally via judge.", node_spec.id, max_retries
                         )
                         max_retries = 0
 
@@ -1081,12 +1072,12 @@ class GraphExecutor:
                         retry_count = node_retry_counts[current_node_id]
                         # Backoff formula: 1.0 * (2^(retry - 1)) -> 1s, 2s, 4s...
                         delay = 1.0 * (2 ** (retry_count - 1))
-                        self.logger.info(f"   Using backoff: Sleeping {delay}s before retry...")
+                        self.logger.info("   Using backoff: Sleeping %ss before retry...", delay)
                         await asyncio.sleep(delay)
                         # --------------------------------------
 
                         self.logger.info(
-                            f"   ↻ Retrying ({node_retry_counts[current_node_id]}/{max_retries})..."
+                            "   ↻ Retrying (%s/%s)...", node_retry_counts[current_node_id], max_retries
                         )
 
                         # Emit retry event
@@ -1105,7 +1096,7 @@ class GraphExecutor:
                     else:
                         # Max retries exceeded - check for failure handlers
                         self.logger.error(
-                            f"   ✗ Max retries ({max_retries}) exceeded for node {current_node_id}"
+                            "   ✗ Max retries (%s) exceeded for node %s", max_retries, current_node_id
                         )
 
                         # Check if there's an ON_FAILURE edge to follow
@@ -1120,7 +1111,7 @@ class GraphExecutor:
 
                         if next_node:
                             # Found a failure handler - route to it
-                            self.logger.info(f"   → Routing to failure handler: {next_node}")
+                            self.logger.info("   → Routing to failure handler: %s", next_node)
                             current_node_id = next_node
                             continue  # Continue execution with handler
                         else:
@@ -1244,13 +1235,13 @@ class GraphExecutor:
 
                 # Check if this is a terminal node - if so, we're done
                 if node_spec.id in graph.terminal_nodes:
-                    self.logger.info(f"✓ Reached terminal node: {node_spec.name}")
+                    self.logger.info("✓ Reached terminal node: %s", node_spec.name)
                     break
 
                 # Determine next node
                 if result.next_node:
                     # Router explicitly set next node
-                    self.logger.info(f"   → Router directing to: {result.next_node}")
+                    self.logger.info("   → Router directing to: %s", result.next_node)
 
                     # Emit edge traversed event for router-directed edge
                     if self._event_bus:
@@ -1319,7 +1310,7 @@ class GraphExecutor:
 
                         # Continue from fan-in node
                         if fan_in_node:
-                            self.logger.info(f"   ⑃ Fan-in: converging at {fan_in_node}")
+                            self.logger.info("   ⑃ Fan-in: converging at %s", fan_in_node)
                             current_node_id = fan_in_node
                             self._write_progress(current_node_id, path, memory, node_visit_counts)
                         else:
@@ -1340,7 +1331,7 @@ class GraphExecutor:
                             self.logger.info("   → No more edges, ending execution")
                             break
                         next_spec = graph.get_node(next_node)
-                        self.logger.info(f"   → Next: {next_spec.name if next_spec else next_node}")
+                        self.logger.info("   → Next: %s", next_spec.name if next_spec else next_node)
 
                         # Emit edge traversed event for sequential edge
                         if self._event_bus:
@@ -1541,10 +1532,10 @@ class GraphExecutor:
             output = memory.read_all()
 
             self.logger.info("\n✓ Execution complete!")
-            self.logger.info(f"   Steps: {steps}")
-            self.logger.info(f"   Path: {' → '.join(path)}")
-            self.logger.info(f"   Total tokens: {total_tokens}")
-            self.logger.info(f"   Total latency: {total_latency}ms")
+            self.logger.info("   Steps: %s", steps)
+            self.logger.info("   Path: %s", " → ".join(path))
+            self.logger.info("   Total tokens: %s", total_tokens)
+            self.logger.info("   Total latency: %sms", total_latency)
 
             # Calculate execution quality metrics
             total_retries_count = sum(node_retry_counts.values())
@@ -1746,10 +1737,10 @@ class GraphExecutor:
                                     latest_clean.checkpoint_id
                                 )
                                 self.logger.info(
-                                    f"💾 Marked checkpoint for resume: {latest_clean.checkpoint_id}"
+                                    "💾 Marked checkpoint for resume: %s", latest_clean.checkpoint_id
                                 )
                 except Exception as checkpoint_err:
-                    self.logger.warning(f"Failed to mark checkpoint for resume: {checkpoint_err}")
+                    self.logger.warning("Failed to mark checkpoint for resume: %s", checkpoint_err)
 
             return ExecutionResult(
                 success=False,
@@ -2086,10 +2077,10 @@ class GraphExecutor:
                 edge=edge,
             )
 
-        self.logger.info(f"   ⑂ Fan-out: executing {len(branches)} branches in parallel")
+        self.logger.info("   ⑂ Fan-out: executing %s branches in parallel", len(branches))
         for branch in branches.values():
             target_spec = graph.get_node(branch.node_id)
-            self.logger.info(f"      • {target_spec.name if target_spec else branch.node_id}")
+            self.logger.info("      • %s", target_spec.name if target_spec else branch.node_id)
 
         async def execute_single_branch(
             branch: ParallelBranch,
@@ -2110,9 +2101,7 @@ class GraphExecutor:
 
             if isinstance(branch_impl, EventLoopNode) and effective_max_retries > 1:
                 self.logger.warning(
-                    f"EventLoopNode '{node_spec.id}' has "
-                    f"max_retries={effective_max_retries}. Overriding "
-                    "to 1 — event loop nodes handle retry internally."
+                    "EventLoopNode '%s' has max_retries=%s. Overriding to 1 — event loop nodes handle retry internally.", node_spec.id, effective_max_retries
                 )
                 effective_max_retries = 1
 
@@ -2150,7 +2139,7 @@ class GraphExecutor:
                         )
 
                     self.logger.info(
-                        f"      ▶ Branch {node_spec.name}: executing (attempt {attempt + 1})"
+                        "      ▶ Branch %s: executing (attempt %s)", node_spec.name, attempt + 1
                     )
                     result = await node_impl.execute(ctx)
                     last_result = result
@@ -2184,14 +2173,12 @@ class GraphExecutor:
                         branch.result = result
                         branch.status = "completed"
                         self.logger.info(
-                            f"      ✓ Branch {node_spec.name}: success "
-                            f"(tokens: {result.tokens_used}, latency: {result.latency_ms}ms)"
+                            "      ✓ Branch %s: success (tokens: %s, latency: %sms)", node_spec.name, result.tokens_used, result.latency_ms
                         )
                         return branch, result
 
                     self.logger.warning(
-                        f"      ↻ Branch {node_spec.name}: "
-                        f"retry {attempt + 1}/{effective_max_retries}"
+                        "      ↻ Branch %s: retry %s/%s", node_spec.name, attempt + 1, effective_max_retries
                     )
 
                 # All retries exhausted
@@ -2199,8 +2186,7 @@ class GraphExecutor:
                 branch.error = last_result.error if last_result else "Unknown error"
                 branch.result = last_result
                 self.logger.error(
-                    f"      ✗ Branch {node_spec.name}: "
-                    f"failed after {effective_max_retries} attempts"
+                    "      ✗ Branch %s: failed after %s attempts", node_spec.name, effective_max_retries
                 )
                 return branch, last_result
 
@@ -2210,7 +2196,7 @@ class GraphExecutor:
                 stack_trace = traceback.format_exc()
                 branch.status = "failed"
                 branch.error = str(e)
-                self.logger.error(f"      ✗ Branch {branch.node_id}: exception - {e}")
+                self.logger.error("      ✗ Branch %s: exception - %s", branch.node_id, e)
 
                 # Log the crashing branch node to L2 with full stack trace
                 if self.runtime_logger and node_spec is not None:
@@ -2254,11 +2240,11 @@ class GraphExecutor:
                 raise RuntimeError(f"Parallel execution failed: branches {failed_names} failed")
             elif self._parallel_config.on_branch_failure == "continue_others":
                 self.logger.warning(
-                    f"⚠ Some branches failed ({failed_names}), continuing with successful ones"
+                    "⚠ Some branches failed (%s), continuing with successful ones", failed_names
                 )
 
         self.logger.info(
-            f"   ⑃ Fan-out complete: {len(branch_results)}/{len(branches)} branches succeeded"
+            "   ⑃ Fan-out complete: %s/%s branches succeeded", len(branch_results), len(branches)
         )
         return branch_results, total_tokens, total_latency
 

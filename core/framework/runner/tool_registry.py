@@ -440,7 +440,7 @@ class ToolRegistry:
             with open(config_path, encoding="utf-8") as f:
                 config = json.load(f)
         except Exception as e:
-            logger.warning(f"Failed to load MCP config from {config_path}: {e}")
+            logger.warning("Failed to load MCP config from %s: %s", config_path, e)
             return
 
         base_dir = config_path.parent
@@ -459,7 +459,7 @@ class ToolRegistry:
                 self.register_mcp_server(server_config)
             except Exception as e:
                 name = server_config.get("name", "unknown")
-                logger.warning(f"Failed to register MCP server '{name}': {e}")
+                logger.warning("Failed to register MCP server '%s': %s", name, e)
 
         # Snapshot credential files and ADEN_API_KEY so we can detect mid-session changes
         self._mcp_cred_snapshot = self._snapshot_credentials()
@@ -555,7 +555,7 @@ class ToolRegistry:
                                 return result[0]
                             return result
                         except Exception as e:
-                            logger.error(f"MCP tool '{tool_name}' execution failed: {e}")
+                            logger.error("MCP tool '%s' execution failed: %s", tool_name, e)
                             return {"error": str(e)}
 
                     return executor
@@ -570,11 +570,11 @@ class ToolRegistry:
                 self._mcp_server_tools[server_name].add(mcp_tool.name)
                 count += 1
 
-            logger.info(f"Registered {count} tools from MCP server '{config.name}'")
+            logger.info("Registered %s tools from MCP server '%s'", count, config.name)
             return count
 
         except Exception as e:
-            logger.error(f"Failed to register MCP server: {e}")
+            logger.error("Failed to register MCP server: %s", e)
             if "Connection closed" in str(e) and os.name == "nt":
                 logger.debug(
                     "On Windows, check that the MCP subprocess starts (e.g. uv in PATH, "
@@ -712,7 +712,7 @@ class ToolRegistry:
             try:
                 client.disconnect()
             except Exception as e:
-                logger.warning(f"Error disconnecting MCP client during resync: {e}")
+                logger.warning("Error disconnecting MCP client during resync: %s", e)
         self._mcp_clients.clear()
 
         # 2. Remove MCP-registered tools
@@ -732,7 +732,7 @@ class ToolRegistry:
             try:
                 client.disconnect()
             except Exception as e:
-                logger.warning(f"Error disconnecting MCP client: {e}")
+                logger.warning("Error disconnecting MCP client: %s", e)
         self._mcp_clients.clear()
 
     def __del__(self):

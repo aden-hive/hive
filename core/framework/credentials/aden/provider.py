@@ -171,7 +171,7 @@ class AdenSyncProvider(CredentialProvider):
             # Update credential with new values
             credential = self._update_credential_from_aden(credential, aden_response)
 
-            logger.info(f"Refreshed credential '{credential.id}' via Aden server")
+            logger.info("Refreshed credential '%s' via Aden server", credential.id)
 
             # Report usage if enabled
             if self._report_usage:
@@ -184,7 +184,7 @@ class AdenSyncProvider(CredentialProvider):
             return credential
 
         except AdenRefreshError as e:
-            logger.error(f"Aden refresh failed for '{credential.id}': {e}")
+            logger.error("Aden refresh failed for '%s': %s", credential.id, e)
 
             if e.requires_reauthorization:
                 raise CredentialRefreshError(
@@ -197,13 +197,13 @@ class AdenSyncProvider(CredentialProvider):
             ) from e
 
         except AdenClientError as e:
-            logger.error(f"Aden client error for '{credential.id}': {e}")
+            logger.error("Aden client error for '%s': %s", credential.id, e)
 
             # Check if local token is still valid
             access_key = credential.keys.get("access_token")
             if access_key and access_key.expires_at:
                 if datetime.now(UTC) < access_key.expires_at:
-                    logger.warning(f"Aden unavailable, using cached token for '{credential.id}'")
+                    logger.warning("Aden unavailable, using cached token for '%s'", credential.id)
                     return credential
 
             raise CredentialRefreshError(
@@ -298,7 +298,7 @@ class AdenSyncProvider(CredentialProvider):
 
             for info in integrations:
                 if info.status != "active":
-                    logger.warning(f"Skipping connection '{info.alias}': status={info.status}")
+                    logger.warning("Skipping connection '%s': status=%s", info.alias, info.status)
                     continue
 
                 try:
@@ -306,12 +306,12 @@ class AdenSyncProvider(CredentialProvider):
                     if cred:
                         store.save_credential(cred)
                         synced += 1
-                        logger.info(f"Synced credential '{info.alias}' from Aden")
+                        logger.info("Synced credential '%s' from Aden", info.alias)
                 except Exception as e:
-                    logger.warning(f"Failed to sync '{info.alias}': {e}")
+                    logger.warning("Failed to sync '%s': %s", info.alias, e)
 
         except AdenClientError as e:
-            logger.error(f"Failed to list integrations from Aden: {e}")
+            logger.error("Failed to list integrations from Aden: %s", e)
 
         return synced
 

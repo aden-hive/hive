@@ -59,7 +59,7 @@ class Runtime:
         # Validate and create storage path if needed
         path = Path(storage_path) if isinstance(storage_path, str) else storage_path
         if not path.exists():
-            logger.warning(f"Storage path does not exist, creating: {path}")
+            logger.warning("Storage path does not exist, creating: %s", path)
             path.mkdir(parents=True, exist_ok=True)
 
         self.storage = FileStorage(storage_path)
@@ -188,7 +188,7 @@ class Runtime:
         """
         if self._current_run is None:
             # Gracefully handle case where run ended during exception handling
-            logger.warning(f"decide called but no run in progress: {intent}")
+            logger.warning("decide called but no run in progress: %s", intent)
             return ""
 
         # Build Option objects
@@ -253,7 +253,7 @@ class Runtime:
             # Gracefully handle case where run ended during exception handling
             # This can happen in cascading error scenarios
             logger.warning(
-                f"record_outcome called but no run in progress (decision_id={decision_id})"
+                "record_outcome called but no run in progress (decision_id=%s)", decision_id
             )
             return
 
@@ -299,7 +299,7 @@ class Runtime:
             # Gracefully handle case where run ended during exception handling
             # Log the problem since we can't store it, then return empty ID
             logger.warning(
-                f"report_problem called but no run in progress: [{severity}] {description}"
+                "report_problem called but no run in progress: [%s] %s", severity, description
             )
             return ""
 

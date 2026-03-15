@@ -267,7 +267,7 @@ class ExecutionStream:
             return
 
         self._running = True
-        logger.info(f"ExecutionStream '{self.stream_id}' started")
+        logger.info("ExecutionStream '%s' started", self.stream_id)
 
         # Emit stream started event
         if self._scoped_event_bus:
@@ -392,7 +392,7 @@ class ExecutionStream:
         self._execution_tasks.clear()
         self._active_executions.clear()
 
-        logger.info(f"ExecutionStream '{self.stream_id}' stopped")
+        logger.info("ExecutionStream '%s' stopped", self.stream_id)
 
         # Emit stream stopped event
         if self._scoped_event_bus:
@@ -538,7 +538,7 @@ class ExecutionStream:
         task = asyncio.create_task(self._run_execution(ctx))
         self._execution_tasks[execution_id] = task
 
-        logger.debug(f"Queued execution {execution_id} for stream {self.stream_id}")
+        logger.debug("Queued execution %s for stream %s", execution_id, self.stream_id)
         return execution_id
 
     # Errors that indicate resurrection won't help — the same error will recur.
@@ -804,13 +804,13 @@ class ExecutionStream:
                         {"error": result.error or "Unknown error"},
                     )
 
-                logger.debug(f"Execution {execution_id} completed: success={result.success}")
+                logger.debug("Execution %s completed: success=%s", execution_id, result.success)
 
             except asyncio.CancelledError:
                 # Execution was cancelled
                 # The executor catches CancelledError and returns a paused result,
                 # but if cancellation happened before executor started, we won't have a result
-                logger.info(f"Execution {execution_id} cancelled")
+                logger.info("Execution %s cancelled", execution_id)
 
                 # Check if we have a result (executor completed and returned)
                 try:
@@ -871,7 +871,7 @@ class ExecutionStream:
 
             except Exception as e:
                 ctx.status = "failed"
-                logger.error(f"Execution {execution_id} failed: {e}")
+                logger.error("Execution %s failed: %s", execution_id, e)
 
                 # Store error result with retention
                 self._record_execution_result(
@@ -1048,11 +1048,11 @@ class ExecutionStream:
 
             # Write state.json
             await self._session_store.write_state(execution_id, state)
-            logger.debug(f"Wrote state.json for session {execution_id} (status={status})")
+            logger.debug("Wrote state.json for session %s (status=%s)", execution_id, status)
 
         except Exception as e:
             # Log but don't fail the execution
-            logger.error(f"Failed to write state.json for {execution_id}: {e}")
+            logger.error("Failed to write state.json for %s: %s", execution_id, e)
 
     def _create_modified_graph(self) -> "GraphSpec":
         """Create a graph with the entry point overridden.

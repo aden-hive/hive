@@ -238,7 +238,7 @@ class AgentRuntime:
             raise ValueError(f"Entry node '{spec.entry_node}' not found in graph")
 
         self._entry_points[spec.id] = spec
-        logger.info(f"Registered entry point: {spec.id} -> {spec.entry_node}")
+        logger.info("Registered entry point: %s -> %s", spec.id, spec.entry_node)
 
     def unregister_entry_point(self, entry_point_id: str) -> bool:
         """
@@ -333,8 +333,7 @@ class AgentRuntime:
                 event_types = [_ET(et) for et in tc.get("event_types", [])]
                 if not event_types:
                     logger.warning(
-                        f"Entry point '{ep_id}' has trigger_type='event' "
-                        "but no event_types in trigger_config"
+                        "Entry point '%s' has trigger_type='event' but no event_types in trigger_config", ep_id
                     )
                     continue
 
@@ -711,7 +710,7 @@ class AgentRuntime:
 
             self._running = True
             self._timers_paused = False
-            logger.info(f"AgentRuntime started with {len(self._streams)} streams")
+            logger.info("AgentRuntime started with %s streams", len(self._streams))
 
     async def stop(self) -> None:
         """Stop the agent runtime and all streams."""

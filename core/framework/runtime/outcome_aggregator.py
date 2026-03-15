@@ -148,7 +148,7 @@ class OutcomeAggregator:
         self._decisions_by_id[key] = record
         self._total_decisions += 1
 
-        logger.debug(f"Recorded decision {decision.id} from {stream_id}/{execution_id}")
+        logger.debug("Recorded decision %s from %s/%s", decision.id, stream_id, execution_id)
 
     def record_outcome(
         self,
@@ -177,7 +177,7 @@ class OutcomeAggregator:
             else:
                 self._failed_outcomes += 1
 
-            logger.debug(f"Recorded outcome for {decision_id}: success={outcome.success}")
+            logger.debug("Recorded outcome for %s: success=%s", decision_id, outcome.success)
 
     def record_constraint_violation(
         self,
@@ -207,7 +207,7 @@ class OutcomeAggregator:
         )
 
         self._constraint_violations.append(check)
-        logger.warning(f"Constraint violation: {constraint_id} - {violation_details}")
+        logger.warning("Constraint violation: %s - %s", constraint_id, violation_details)
 
         # Publish event if event bus available
         if self._event_bus and stream_id:

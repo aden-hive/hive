@@ -147,7 +147,7 @@ class CredentialProvider(ABC):
         Returns:
             True if revocation succeeded, False otherwise
         """
-        logger.warning(f"Provider '{self.provider_id}' does not support revocation")
+        logger.warning("Provider '%s' does not support revocation", self.provider_id)
         return False
 
     def can_handle(self, credential: CredentialObject) -> bool:
@@ -189,7 +189,7 @@ class StaticProvider(CredentialProvider):
 
         Returns the credential unchanged.
         """
-        logger.debug(f"Static credential '{credential.id}' does not need refresh")
+        logger.debug("Static credential '%s' does not need refresh", credential.id)
         return credential
 
     def validate(self, credential: CredentialObject) -> bool:

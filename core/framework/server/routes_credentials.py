@@ -179,7 +179,7 @@ async def handle_check_agent(request: web.Request) -> web.Response:
             }
         )
     except Exception as e:
-        logger.exception(f"Error checking agent credentials: {e}")
+        logger.exception("Error checking agent credentials: %s", e)
         return web.json_response(
             {"error": "Internal server error while checking credentials"},
             status=500,

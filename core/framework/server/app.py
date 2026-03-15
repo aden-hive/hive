@@ -162,7 +162,7 @@ async def error_middleware(request: web.Request, handler):
     except web.HTTPException:
         raise  # Let aiohttp handle its own HTTP exceptions
     except Exception as e:
-        logger.exception(f"Unhandled error: {e}")
+        logger.exception("Unhandled error: %s", e)
         return web.json_response(
             {"error": str(e), "type": type(e).__name__},
             status=500,
@@ -276,7 +276,7 @@ def _setup_static_serving(app: web.Application) -> None:
         logger.debug("No frontend/dist found — skipping static file serving")
         return
 
-    logger.info(f"Serving frontend from {dist_dir}")
+    logger.info("Serving frontend from %s", dist_dir)
 
     async def handle_spa(request: web.Request) -> web.FileResponse:
         """Serve static files with SPA fallback to index.html."""

@@ -96,7 +96,7 @@ class SessionStore:
                 f.write(state.model_dump_json(indent=2))
 
         await asyncio.to_thread(_write)
-        logger.debug(f"Wrote state.json for session {session_id}")
+        logger.debug("Wrote state.json for session %s", session_id)
 
     async def read_state(self, session_id: str) -> SessionState | None:
         """
@@ -163,7 +163,7 @@ class SessionStore:
                     sessions.append(state)
 
                 except Exception as e:
-                    logger.warning(f"Failed to load {state_path}: {e}")
+                    logger.warning("Failed to load %s: %s", state_path, e)
                     continue
 
             # Sort by updated_at descending (most recent first)
@@ -191,7 +191,7 @@ class SessionStore:
                 return False
 
             shutil.rmtree(session_path)
-            logger.info(f"Deleted session {session_id}")
+            logger.info("Deleted session %s", session_id)
             return True
 
         return await asyncio.to_thread(_delete)

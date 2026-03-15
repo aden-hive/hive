@@ -418,7 +418,7 @@ class EventBus:
         )
 
         self._subscriptions[sub_id] = subscription
-        logger.debug(f"Subscription {sub_id} registered for {event_types}")
+        logger.debug("Subscription %s registered for %s", sub_id, event_types)
 
         return sub_id
 
@@ -434,7 +434,7 @@ class EventBus:
         """
         if subscription_id in self._subscriptions:
             del self._subscriptions[subscription_id]
-            logger.debug(f"Subscription {subscription_id} removed")
+            logger.debug("Subscription %s removed", subscription_id)
             return True
         return False
 
@@ -534,7 +534,7 @@ class EventBus:
                 try:
                     await handler(event)
                 except Exception as e:
-                    logger.error(f"Handler error for {event.type}: {e}")
+                    logger.error("Handler error for %s: %s", event.type, e)
 
         # Run all handlers concurrently
         await asyncio.gather(*[run_handler(h) for h in handlers], return_exceptions=True)
