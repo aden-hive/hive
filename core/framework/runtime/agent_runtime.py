@@ -154,6 +154,15 @@ class AgentRuntime:
                 this bus instead of creating its own. Used by SessionManager to
                 share a single bus between queen, worker, and judge.
         """
+        if graph is None:
+            raise ValueError("AgentRuntime requires a graph; got None.")
+        if goal is None:
+            raise ValueError("AgentRuntime requires a goal; got None.")
+        if storage_path is None:
+            raise ValueError("AgentRuntime requires a storage_path; got None.")
+        if isinstance(storage_path, str) and not storage_path.strip():
+            raise ValueError("AgentRuntime requires a non-empty storage_path.")
+
         self.graph = graph
         self.goal = goal
         self._config = config or AgentRuntimeConfig()
