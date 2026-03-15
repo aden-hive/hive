@@ -234,9 +234,7 @@ class TestHuggingFaceRunInference:
     def test_successful_inference(self, tool_fns):
         mock_resp = MagicMock()
         mock_resp.status_code = 200
-        mock_resp.json.return_value = [
-            {"generated_text": "This is a summary of the input text."}
-        ]
+        mock_resp.json.return_value = [{"generated_text": "This is a summary of the input text."}]
         with (
             patch.dict("os.environ", ENV),
             patch(
@@ -384,4 +382,3 @@ class TestHuggingFaceListInferenceEndpoints:
 
         assert result["count"] == 0
         assert result["endpoints"] == []
-
