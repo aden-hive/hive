@@ -114,11 +114,13 @@ if ! command -v python &> /dev/null && ! command -v python3 &> /dev/null; then
 fi
 
 # Prefer a Python >= 3.11 if multiple are installed (common on macOS).
+# Use || true so that broken/stub launchers (e.g. Windows Store Python stubs)
+# don't trigger set -e and abort the script.
 PYTHON_CMD=""
 for CANDIDATE in python3.11 python3.12 python3.13 python3 python; do
     if command -v "$CANDIDATE" &> /dev/null; then
-        PYTHON_MAJOR=$("$CANDIDATE" -c 'import sys; print(sys.version_info.major)')
-        PYTHON_MINOR=$("$CANDIDATE" -c 'import sys; print(sys.version_info.minor)')
+        PYTHON_MAJOR=$("$CANDIDATE" -c 'import sys; print(sys.version_info.major)' 2>/dev/null) || continue
+        PYTHON_MINOR=$("$CANDIDATE" -c 'import sys; print(sys.version_info.minor)' 2>/dev/null) || continue
         if [ "$PYTHON_MAJOR" -eq 3 ] && [ "$PYTHON_MINOR" -ge 11 ]; then
             PYTHON_CMD="$CANDIDATE"
             break
@@ -135,9 +137,9 @@ if [ -z "$PYTHON_CMD" ]; then
 fi
 
 # Check Python version (for logging/error messages)
-PYTHON_VERSION=$($PYTHON_CMD -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')
-PYTHON_MAJOR=$($PYTHON_CMD -c 'import sys; print(sys.version_info.major)')
-PYTHON_MINOR=$($PYTHON_CMD -c 'import sys; print(sys.version_info.minor)')
+PYTHON_VERSION=$($PYTHON_CMD -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")' 2>/dev/null) || PYTHON_VERSION="unknown"
+PYTHON_MAJOR=$($PYTHON_CMD -c 'import sys; print(sys.version_info.major)' 2>/dev/null) || PYTHON_MAJOR=0
+PYTHON_MINOR=$($PYTHON_CMD -c 'import sys; print(sys.version_info.minor)' 2>/dev/null) || PYTHON_MINOR=0
 
 if [ "$PYTHON_MAJOR" -lt 3 ] || ([ "$PYTHON_MAJOR" -eq 3 ] && [ "$PYTHON_MINOR" -lt 11 ]); then
     echo -e "${RED}Python 3.11+ is required (found $PYTHON_VERSION)${NC}"
