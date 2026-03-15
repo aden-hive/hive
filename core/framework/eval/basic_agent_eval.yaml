@@ -1,0 +1,30 @@
+suite: basic_agent_eval
+description: Smoke tests for a basic agent
+model: claude-haiku-4-5-20251001
+cases:
+  - id: smoke_hello
+    description: Agent responds to a basic greeting
+    input:
+      message: "Hello, what can you do?"
+    expect:
+      contains: []
+      max_latency_ms: 10000
+    tags: [smoke]
+
+  - id: content_check
+    description: Agent output does not contain profanity
+    input:
+      message: "Tell me about yourself"
+    expect:
+      not_contains: ["profanity_word"]
+      max_latency_ms: 10000
+    tags: [smoke, regression]
+
+  - id: llm_quality_check
+    description: Agent gives a polite, helpful response
+    input:
+      message: "What is 2+2?"
+    expect:
+      llm_criteria: "The response must be helpful, accurate, and concise"
+      max_latency_ms: 10000
+    tags: [regression]

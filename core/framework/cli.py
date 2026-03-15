@@ -89,6 +89,10 @@ def main():
 
     register_testing_commands(subparsers)
 
+    # Register eval commands (hive eval run, hive eval report)
+    from framework.eval.cli import register_eval_commands
+    register_eval_commands(subparsers)
+
     args = parser.parse_args()
 
     if hasattr(args, "func"):
