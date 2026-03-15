@@ -4,8 +4,9 @@ Structured logging with automatic trace context propagation.
 Key Features:
 - Zero developer friction: Standard logger.info() calls get automatic context
 - ContextVar-based propagation: Thread-safe and async-safe
-- Dual output modes: JSON for production, human-readable for development
-- Correlation IDs: trace_id follows entire request flow automatically
+- Dual output modes: JSON for production (full trace_id/execution_id), human-readable for terminal
+- Terminal omits trace_id/execution_id for readability
+- Use ENV=production for file logs with full traceability
 
 Architecture:
     Runtime.start_run() → Generates trace_id, sets context once
@@ -101,10 +102,11 @@ class StructuredFormatter(logging.Formatter):
 
 class HumanReadableFormatter(logging.Formatter):
     """
-    Human-readable formatter for development.
+    Human-readable formatter for development (terminal output).
 
-    Provides colorized logs with trace context for local debugging.
-    Includes trace_id prefix for correlation - AUTOMATIC!
+    Provides colorized logs for local debugging. Omits trace_id and execution_id
+    from the terminal for readability; use ENV=production (JSON file logs) when
+    traceability is needed.
     """
 
     COLORS = {
@@ -118,18 +120,11 @@ class HumanReadableFormatter(logging.Formatter):
 
     def format(self, record: logging.LogRecord) -> str:
         """Format log record as human-readable string."""
-        # Get trace context - AUTOMATIC!
+        # Get trace context; omit trace_id and execution_id in terminal for readability
         context = trace_context.get() or {}
-        trace_id = context.get("trace_id", "")
-        execution_id = context.get("execution_id", "")
         agent_id = context.get("agent_id", "")
 
-        # Build context prefix
         prefix_parts = []
-        if trace_id:
-            prefix_parts.append(f"trace:{trace_id[:8]}")
-        if execution_id:
-            prefix_parts.append(f"exec:{execution_id[-8:]}")
         if agent_id:
             prefix_parts.append(f"agent:{agent_id}")
 
