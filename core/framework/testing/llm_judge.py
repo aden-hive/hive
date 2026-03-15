@@ -106,7 +106,12 @@ Respond with JSON: {{"passes": true/false, "explanation": "..."}}"""
                     max_tokens=500,
                     messages=[{"role": "user", "content": prompt}],
                 )
-                return self._parse_json_result(response.content[0].text.strip())
+                text_block = next(
+                    (b for b in (response.content or []) if hasattr(b, "text")),
+                    None,
+                )
+                raw_text = text_block.text.strip() if text_block else ""
+                return self._parse_json_result(raw_text)
             else:
                 # Use env-based fallback (LiteLLM or AnthropicProvider)
                 active_provider = fallback_provider
