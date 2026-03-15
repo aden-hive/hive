@@ -89,9 +89,23 @@ export interface ReplayResult {
   checkpoint_id: string;
 }
 
-export interface GoalProgress {
+export interface GoalProgressCriterion {
+  criterion_id: string;
+  description: string;
+  met: boolean;
   progress: number;
-  criteria: unknown[];
+  evidence: string[];
+}
+
+export interface GoalProgress {
+  overall_progress: number;
+  progress: number;
+  criteria_status: Record<string, GoalProgressCriterion>;
+  criteria: GoalProgressCriterion[];
+  constraint_violations: Array<Record<string, unknown>>;
+  metrics: Record<string, unknown>;
+  recommendation: string;
+  updated_at?: string | null;
 }
 
 // --- Session types ---
