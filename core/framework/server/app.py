@@ -278,9 +278,22 @@ def _setup_static_serving(app: web.Application) -> None:
 
     logger.info(f"Serving frontend from {dist_dir}")
 
-    async def handle_spa(request: web.Request) -> web.FileResponse:
-        """Serve static files with SPA fallback to index.html."""
+    async def handle_spa(request: web.Request) -> web.Response:
+        """Serve static files with SPA fallback to index.html.
+
+        API paths that don't match a registered route must not be served
+        as HTML — return a JSON 404 so clients get a proper error response
+        instead of unexpected HTML.
+        """
         rel_path = request.match_info.get("path", "")
+
+        # Never serve HTML for unmatched /api/* paths
+        if rel_path.startswith("api/") or rel_path == "api":
+            return web.json_response(
+                {"error": f"API route not found: /{rel_path}"},
+                status=404,
+            )
+
         file_path = (dist_dir / rel_path).resolve()
 
         if file_path.is_file() and file_path.is_relative_to(dist_dir):

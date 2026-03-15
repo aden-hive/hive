@@ -103,10 +103,11 @@ async def handle_inject(request: web.Request) -> web.Response:
 
 
 async def handle_chat(request: web.Request) -> web.Response:
-    """POST /api/sessions/{session_id}/chat — send a message to the queen.
+    """POST /api/sessions/{session_id}/chat — smart-route a message.
 
-    The input box is permanently connected to the queen agent.
-    Worker input is handled separately via /worker-input.
+    Routing priority (documented behavior):
+    1. If the worker runtime has a node awaiting input, inject there.
+    2. Otherwise, send to the queen.
 
     Body: {"message": "hello"}
     """
@@ -120,6 +121,25 @@ async def handle_chat(request: web.Request) -> web.Response:
     if not message:
         return web.json_response({"error": "message is required"}, status=400)
 
+    # 1. Worker-first: inject into a waiting worker node when available
+    if session.worker_runtime is not None:
+        node_id, graph_id = session.worker_runtime.find_awaiting_node()
+        if node_id:
+            delivered = await session.worker_runtime.inject_input(
+                node_id,
+                message,
+                graph_id=graph_id,
+                is_client_input=True,
+            )
+            return web.json_response(
+                {
+                    "status": "worker",
+                    "delivered": delivered,
+                    "node_id": node_id,
+                }
+            )
+
+    # 2. Fall through to the queen
     queen_executor = session.queen_executor
     if queen_executor is not None:
         node = queen_executor.node_registry.get("queen")
