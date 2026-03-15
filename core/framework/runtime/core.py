@@ -319,7 +319,7 @@ class Runtime:
         options: list[dict[str, Any]],
         chosen: str,
         reasoning: str,
-        executor: Callable,
+        executor: Callable[[], Any],
         **kwargs,
     ) -> tuple[str, Any]:
         """
