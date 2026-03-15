@@ -20,6 +20,8 @@ import argparse
 import sys
 from pathlib import Path
 
+from framework.config import DEFAULT_HIVE_MODEL
+
 
 def _configure_paths():
     """Auto-configure sys.path so agents in exports/ are discoverable.
@@ -73,8 +75,8 @@ def main():
     )
     parser.add_argument(
         "--model",
-        default="claude-haiku-4-5-20251001",
-        help="Anthropic model to use",
+        default=DEFAULT_HIVE_MODEL,
+        help="LLM model to use (any LiteLLM-compatible name)",
     )
 
     subparsers = parser.add_subparsers(dest="command", required=True)

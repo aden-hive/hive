@@ -21,6 +21,11 @@ from framework.graph.edge import DEFAULT_MAX_TOKENS
 HIVE_CONFIG_FILE = Path.home() / ".hive" / "configuration.json"
 logger = logging.getLogger(__name__)
 
+# Single source of truth for the fallback model used when no configuration exists.
+# Both the CLI (framework/cli.py --model default) and get_preferred_model() reference
+# this constant so they always agree when the user has no ~/.hive/configuration.json.
+DEFAULT_HIVE_MODEL = "anthropic/claude-haiku-4-5-20251001"
+
 
 def get_hive_config() -> dict[str, Any]:
     """Load hive configuration from ~/.hive/configuration.json."""
@@ -44,11 +49,15 @@ def get_hive_config() -> dict[str, Any]:
 
 
 def get_preferred_model() -> str:
-    """Return the user's preferred LLM model string (e.g. 'anthropic/claude-sonnet-4-20250514')."""
+    """Return the user's preferred LLM model string (e.g. 'anthropic/claude-haiku-4-5-20251001').
+
+    Falls back to DEFAULT_HIVE_MODEL when no configuration file is present,
+    matching the default used by the hive CLI --model flag.
+    """
     llm = get_hive_config().get("llm", {})
     if llm.get("provider") and llm.get("model"):
         return f"{llm['provider']}/{llm['model']}"
-    return "anthropic/claude-sonnet-4-20250514"
+    return DEFAULT_HIVE_MODEL
 
 
 def get_max_tokens() -> int:
