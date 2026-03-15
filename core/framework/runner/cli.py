@@ -1271,7 +1271,16 @@ def _getch() -> str:
 def _read_key() -> str:
     """Read a key, handling arrow key escape sequences."""
     ch = _getch()
-    if ch == "\x1b":  # Escape sequence start
+    if sys.platform == "win32":
+        # Windows: msvcrt returns \xe0 (invalid UTF-8, decoded as "")
+        # or \x00, followed by a scan-code byte for extended keys.
+        if ch in ("", "\x00"):
+            scan = _getch()
+            if scan == "M":    # 0x4d — Right arrow
+                return "RIGHT"
+            elif scan == "K":  # 0x4b — Left arrow
+                return "LEFT"
+    elif ch == "\x1b":  # Unix: escape sequence start
         ch2 = _getch()
         if ch2 == "[":
             ch3 = _getch()
