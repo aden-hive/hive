@@ -984,6 +984,7 @@ def cmd_shell(args: argparse.Namespace) -> int:
     session_memory = {}
     conversation_history = []
     agent_session_state = None  # Track paused agent state
+    had_failure = False  # Track any failed run to set exit code
 
     while True:
         try:
@@ -1089,6 +1090,8 @@ def cmd_shell(args: argparse.Namespace) -> int:
         result = asyncio.run(runner.run(run_context, session_state=agent_session_state))
 
         status_str = "SUCCESS" if result.success else "FAILED"
+        if not result.success:
+            had_failure = True
         print(f"\nStatus: {status_str}")
         print(f"Steps executed: {result.steps_executed}")
         print(f"Path: {' → '.join(result.path)}")
@@ -1150,7 +1153,7 @@ def cmd_shell(args: argparse.Namespace) -> int:
         print()
 
     runner.cleanup()
-    return 0
+    return 1 if had_failure else 0
 
 
 def _get_framework_agents_dir() -> Path:
