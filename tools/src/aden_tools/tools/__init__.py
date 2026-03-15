@@ -46,6 +46,7 @@ from .calendar_tool import register_tools as register_calendar
 from .calendly_tool import register_tools as register_calendly
 from .cloudinary_tool import register_tools as register_cloudinary
 from .confluence_tool import register_tools as register_confluence
+from .country_info_tool import register_tools as register_country_info
 from .csv_tool import register_tools as register_csv
 from .databricks_tool import register_tools as register_databricks
 from .discord_tool import register_tools as register_discord
@@ -232,6 +233,7 @@ def _register_unverified(
 ) -> None:
     """Register unverified (new/community) tools."""
     # --- No credentials ---
+    register_country_info(mcp)
     register_duckduckgo(mcp)
     register_yahoo_finance(mcp)
     register_youtube_transcript(mcp)
