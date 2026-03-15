@@ -417,6 +417,14 @@ class GraphExecutor:
         )
         return s1 + "\n\n" + s2
 
+    def _get_runtime_log_session_id(self) -> str:
+        """Return the session-backed execution ID for runtime logging, if any."""
+        if not self._storage_path:
+            return ""
+        if self._storage_path.parent.name != "sessions":
+            return ""
+        return self._storage_path.name
+
     async def execute(
         self,
         graph: GraphSpec,
@@ -710,10 +718,7 @@ class GraphExecutor:
         )
 
         if self.runtime_logger:
-            # Extract session_id from storage_path if available (for unified sessions)
-            session_id = ""
-            if self._storage_path and self._storage_path.name.startswith("session_"):
-                session_id = self._storage_path.name
+            session_id = self._get_runtime_log_session_id()
             self.runtime_logger.start_run(goal_id=goal.id, session_id=session_id)
 
         self.logger.info(f"🚀 Starting execution: {goal.name}")
