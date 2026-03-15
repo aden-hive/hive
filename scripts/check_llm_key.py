@@ -135,6 +135,25 @@ PROVIDERS = {
     "kimi": lambda key, **kw: check_anthropic_compatible(
         key, "https://api.kimi.com/coding/v1/messages", "Kimi"
     ),
+    # OpenAI-compatible providers
+    "deepseek": lambda key, **kw: check_openai_compatible(
+        key, "https://api.deepseek.com/v1/models", "DeepSeek"
+    ),
+    "openrouter": lambda key, **kw: check_openai_compatible(
+        key, "https://openrouter.ai/api/v1/models", "OpenRouter"
+    ),
+    "together": lambda key, **kw: check_openai_compatible(
+        key, "https://api.together.xyz/v1/models", "Together AI"
+    ),
+    "mistral": lambda key, **kw: check_openai_compatible(
+        key, "https://api.mistral.ai/v1/models", "Mistral"
+    ),
+    "xai": lambda key, **kw: check_openai_compatible(
+        key, "https://api.x.ai/v1/models", "xAI"
+    ),
+    "perplexity": lambda key, **kw: check_openai_compatible(
+        key, "https://api.perplexity.ai/models", "Perplexity"
+    ),
 }
 
 
