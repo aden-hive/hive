@@ -302,11 +302,30 @@ class OutcomeAggregator:
                 # Get any stream ID for the event
                 stream_ids = {d.stream_id for d in self._decisions}
                 if stream_ids:
+                    stream_id = list(stream_ids)[0]
                     await self._event_bus.emit_goal_progress(
-                        stream_id=list(stream_ids)[0],
+                        stream_id=stream_id,
                         progress=result["overall_progress"],
                         criteria_status=result["criteria_status"],
                     )
+                    # Emit dedicated adjustment signal so Guardian and other
+                    # subscribers can react autonomously without polling.
+                    if result["recommendation"] == "adjust":
+                        violations = result.get("constraint_violations", [])
+                        hard_violations = [
+                            v
+                            for v in violations
+                            if self._is_hard_constraint(v["constraint_id"])
+                        ]
+                        reason = (
+                            "constraint_violation" if hard_violations else "low_progress_stall"
+                        )
+                        await self._event_bus.emit_goal_adjustment_needed(
+                            stream_id=stream_id,
+                            overall_progress=result["overall_progress"],
+                            reason=reason,
+                            criteria_status=result["criteria_status"],
+                        )
 
             return result
 

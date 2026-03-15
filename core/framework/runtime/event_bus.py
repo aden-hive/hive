@@ -73,6 +73,7 @@ class EventType(StrEnum):
     # Goal tracking
     GOAL_PROGRESS = "goal_progress"
     GOAL_ACHIEVED = "goal_achieved"
+    GOAL_ADJUSTMENT_NEEDED = "goal_adjustment_needed"
     CONSTRAINT_VIOLATION = "constraint_violation"
 
     # Stream lifecycle
@@ -614,6 +615,37 @@ class EventBus:
                 stream_id=stream_id,
                 data={
                     "progress": progress,
+                    "criteria_status": criteria_status,
+                },
+            )
+        )
+
+    async def emit_goal_adjustment_needed(
+        self,
+        stream_id: str,
+        overall_progress: float,
+        reason: str,
+        criteria_status: dict[str, Any],
+    ) -> None:
+        """Emit a goal-adjustment-needed event.
+
+        Published when OutcomeAggregator determines that the running agent
+        requires course correction (stagnation or hard-constraint violation).
+        Subscribers such as Guardian can react autonomously without polling.
+
+        Args:
+            stream_id: ID of the stream that triggered evaluation.
+            overall_progress: Current overall progress score (0.0–1.0).
+            reason: ``"constraint_violation"`` or ``"low_progress_stall"``.
+            criteria_status: Per-criterion status dict from evaluate_goal_progress.
+        """
+        await self.publish(
+            AgentEvent(
+                type=EventType.GOAL_ADJUSTMENT_NEEDED,
+                stream_id=stream_id,
+                data={
+                    "overall_progress": overall_progress,
+                    "reason": reason,
                     "criteria_status": criteria_status,
                 },
             )
