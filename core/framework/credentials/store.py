@@ -528,9 +528,9 @@ class CredentialStore:
             logger.info(f"Refreshed credential '{credential.id}'")
             return refreshed
 
-        except CredentialRefreshError as e:
-            logger.error(f"Failed to refresh credential '{credential.id}': {e}")
-            return credential
+        except CredentialRefreshError:
+            logger.error(f"Failed to refresh credential '{credential.id}'")
+            raise
 
     def refresh_credential(self, credential_id: str) -> CredentialObject | None:
         """
