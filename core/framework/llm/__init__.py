@@ -1,6 +1,14 @@
 """LLM provider abstraction."""
 
-from framework.llm.provider import LLMProvider, LLMResponse
+from framework.llm.provider import (
+    LLMAuthError,
+    LLMError,
+    LLMProvider,
+    LLMRateLimitError,
+    LLMResponse,
+    ModelNotFoundError,
+    TokenLimitExceededError,
+)
 from framework.llm.stream_events import (
     FinishEvent,
     ReasoningDeltaEvent,
@@ -14,6 +22,11 @@ from framework.llm.stream_events import (
 )
 
 __all__ = [
+    "LLMError",
+    "TokenLimitExceededError",
+    "LLMRateLimitError",
+    "LLMAuthError",
+    "ModelNotFoundError",
     "LLMProvider",
     "LLMResponse",
     "StreamEvent",

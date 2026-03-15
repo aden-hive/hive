@@ -47,6 +47,37 @@ class ToolResult:
     is_error: bool = False
 
 
+class LLMError(Exception):
+    """Base class for all LLM-specific errors.
+
+    Catching ``LLMError`` allows callers to distinguish provider failures
+    from other exceptions and implement graceful fallback or retry logic.
+    """
+
+
+class TokenLimitExceededError(LLMError):
+    """Raised when the request exceeds the model's context window.
+
+    Callers should either shorten the context or switch to a model with
+    a larger context window.
+    """
+
+
+class LLMRateLimitError(LLMError):
+    """Raised when the provider returns a rate-limit / quota-exceeded error.
+
+    Callers may want to back off and retry after a delay.
+    """
+
+
+class LLMAuthError(LLMError):
+    """Raised when the API key is missing, invalid, or lacks permissions."""
+
+
+class ModelNotFoundError(LLMError):
+    """Raised when the requested model does not exist or is not accessible."""
+
+
 class LLMProvider(ABC):
     """
     Abstract LLM provider - plug in any LLM backend.

@@ -23,10 +23,48 @@ except ImportError:
     litellm = None  # type: ignore[assignment]
     RateLimitError = Exception  # type: ignore[assignment, misc]
 
-from framework.llm.provider import LLMProvider, LLMResponse, Tool
+from framework.llm.provider import (
+    LLMAuthError,
+    LLMProvider,
+    LLMRateLimitError,
+    LLMResponse,
+    ModelNotFoundError,
+    TokenLimitExceededError,
+    Tool,
+)
 from framework.llm.stream_events import StreamEvent
 
 logger = logging.getLogger(__name__)
+
+
+def _classify_litellm_error(exc: BaseException) -> None:
+    """Re-raise *exc* as a typed :mod:`framework.llm.provider` exception.
+
+    Maps the most common LiteLLM exception classes to our hierarchy so
+    callers can catch ``TokenLimitExceededError``, ``LLMRateLimitError``,
+    etc. without importing LiteLLM directly.
+
+    If the exception does not map to a known type, it is re-raised as-is.
+    """
+    try:
+        from litellm.exceptions import (
+            AuthenticationError,
+            ContextWindowExceededError,
+            NotFoundError,
+            RateLimitError as LiteLLMRateLimitError,
+        )
+    except ImportError:
+        raise exc from None
+
+    if isinstance(exc, ContextWindowExceededError):
+        raise TokenLimitExceededError(str(exc)) from exc
+    if isinstance(exc, LiteLLMRateLimitError):
+        raise LLMRateLimitError(str(exc)) from exc
+    if isinstance(exc, AuthenticationError):
+        raise LLMAuthError(str(exc)) from exc
+    if isinstance(exc, NotFoundError):
+        raise ModelNotFoundError(str(exc)) from exc
+    raise exc
 
 
 def _patch_litellm_anthropic_oauth() -> None:
@@ -529,7 +567,7 @@ class LiteLLMProvider(LLMProvider):
                         f"~{token_count} tokens ({token_method}). "
                         f"Full request dumped to: {dump_path}"
                     )
-                    raise
+                    _classify_litellm_error(e)
                 wait = _compute_retry_delay(attempt, exception=e)
                 logger.warning(
                     f"[retry] {model} rate limited (429): {e!s}. "
@@ -539,6 +577,11 @@ class LiteLLMProvider(LLMProvider):
                     f"(attempt {attempt + 1}/{retries})"
                 )
                 time.sleep(wait)
+            except Exception as exc:
+                # Classify context-window, auth, and model-not-found errors so
+                # callers receive a typed framework exception instead of a raw
+                # LiteLLM exception.
+                _classify_litellm_error(exc)
         # unreachable, but satisfies type checker
         raise RuntimeError("Exhausted rate limit retries")
 
@@ -729,7 +772,7 @@ class LiteLLMProvider(LLMProvider):
                         f"~{token_count} tokens ({token_method}). "
                         f"Full request dumped to: {dump_path}"
                     )
-                    raise
+                    _classify_litellm_error(e)
                 wait = _compute_retry_delay(attempt, exception=e)
                 logger.warning(
                     f"[async-retry] {model} rate limited (429): {e!s}. "
@@ -739,6 +782,8 @@ class LiteLLMProvider(LLMProvider):
                     f"(attempt {attempt + 1}/{retries})"
                 )
                 await asyncio.sleep(wait)
+            except Exception as exc:
+                _classify_litellm_error(exc)
         raise RuntimeError("Exhausted rate limit retries")
 
     async def acomplete(
