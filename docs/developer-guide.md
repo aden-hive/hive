@@ -333,48 +333,57 @@ hive run exports/my_agent --tui
 
 ## Testing Agents
 
-### Using Built-in Test Commands
+### Running Framework Unit Tests
 
 ```bash
-# Run tests for an agent
-PYTHONPATH=exports uv run python -m agent_name test
+# Run all core framework tests
+cd core && uv run python -m pytest
+
+# Run all tools tests
+cd tools && uv run python -m pytest
+
+# Run a specific test file
+cd core && uv run python -m pytest tests/test_plan.py
+
+# Run tests matching a keyword
+cd core && uv run python -m pytest -k "safe_eval"
+
+# Run with parallel execution (requires pytest-xdist)
+cd core && uv run python -m pytest -n 4
+
+# Stop on first failure
+cd core && uv run python -m pytest -x
 ```
 
-This generates and runs:
+### Running Agent Integration Tests
 
-- **Constraint tests** - Verify agent respects constraints
-- **Success tests** - Verify agent achieves success criteria
-- **Integration tests** - End-to-end workflows
-
-### Manual Testing
+Each agent template in `examples/templates/` includes its own test suite under `tests/`:
 
 ```bash
-# Run all tests for an agent
-PYTHONPATH=exports uv run python -m agent_name test
+# Run all tests for an agent template
+PYTHONPATH=examples uv run python -m pytest examples/templates/deep_research_agent/tests/
 
-# Run specific test type
-PYTHONPATH=exports uv run python -m agent_name test --type constraint
-PYTHONPATH=exports uv run python -m agent_name test --type success
+# Run constraint tests only
+PYTHONPATH=examples uv run python -m pytest examples/templates/deep_research_agent/tests/ -k "constraint"
 
-# Run with parallel execution
-PYTHONPATH=exports uv run python -m agent_name test --parallel 4
-
-# Fail fast (stop on first failure)
-PYTHONPATH=exports uv run python -m agent_name test --fail-fast
+# Run with verbose output
+PYTHONPATH=examples uv run python -m pytest examples/templates/deep_research_agent/tests/ -v
 ```
 
 ### Writing Custom Tests
 
 ```python
-# exports/my_agent/tests/test_custom.py
+# examples/templates/my_agent/tests/test_custom.py
+import asyncio
 import pytest
 from framework.runner import AgentRunner
 
-def test_ticket_categorization():
-    """Test that tickets are categorized correctly"""
-    runner = AgentRunner.from_file("exports/my_agent/agent.json")
+@pytest.mark.asyncio
+async def test_ticket_categorization():
+    """Test that tickets are categorized correctly."""
+    runner = AgentRunner.load("examples/templates/my_agent")
 
-    result = runner.run({
+    result = await runner.run({
         "ticket_content": "I can't log in to my account"
     })
 
