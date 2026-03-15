@@ -1,0 +1,221 @@
+{
+  "agent": {
+    "id": "professional_rewriter",
+    "name": "Professional Rewriter",
+    "version": "1.0.0",
+    "description": "Rewrites informal or casual text into polished, professional communication. Returns the rewritten text along with tone assessment, a summary of changes made, and a final quality check."
+  },
+  "graph": {
+    "id": "professional-rewriter-graph",
+    "goal_id": "professional-rewriting",
+    "version": "1.0.0",
+    "entry_node": "intake",
+    "entry_points": {
+      "start": "intake"
+    },
+    "pause_nodes": [],
+    "terminal_nodes": [
+      "deliver"
+    ],
+    "conversation_mode": "single",
+    "identity_prompt": "You are a professional communications expert. You transform informal, casual, or unclear text into polished, professional writing while preserving the original intent and key information.",
+    "nodes": [
+      {
+        "id": "intake",
+        "name": "Intake",
+        "description": "Receive the informal text and any context about the intended audience or purpose",
+        "node_type": "event_loop",
+        "input_keys": [
+          "text"
+        ],
+        "output_keys": [
+          "original_text",
+          "context"
+        ],
+        "nullable_output_keys": [
+          "context"
+        ],
+        "input_schema": {},
+        "output_schema": {},
+        "success_criteria": "The original text has been captured and any relevant context (audience, purpose, formality level) has been noted.",
+        "system_prompt": "You are a professional writing assistant intake specialist.\n\nThe user wants to rewrite some text to sound more professional.\n\n**STEP 1 — Read the text (text only, NO tool calls):**\n1. Confirm you received the text\n2. Briefly describe what type of communication it is (email, message, report, etc.)\n3. If the intended audience or purpose is unclear, ask one clarifying question\n4. If the context is clear, skip straight to step 2\n\n**STEP 2 — After any clarification, call set_output:**\n- set_output(\"original_text\", \"The exact original text provided by the user\")\n- set_output(\"context\", \"Brief note on the intended audience and purpose, or null if not specified\")",
+        "tools": [],
+        "model": null,
+        "function": null,
+        "routes": {},
+        "max_retries": 2,
+        "retry_on": [],
+        "max_node_visits": 2,
+        "output_model": null,
+        "max_validation_retries": 2,
+        "client_facing": true
+      },
+      {
+        "id": "rewrite",
+        "name": "Rewrite",
+        "description": "Rewrite the text in a professional tone, analyzing changes and tone",
+        "node_type": "event_loop",
+        "input_keys": [
+          "original_text",
+          "context"
+        ],
+        "output_keys": [
+          "rewritten_text",
+          "tone",
+          "changes_made",
+          "final_check"
+        ],
+        "nullable_output_keys": [
+          "context"
+        ],
+        "input_schema": {},
+        "output_schema": {},
+        "success_criteria": "The rewritten text is polished and professional. The tone has been identified, changes are documented, and a final quality check confirms the rewrite preserves the original intent.",
+        "system_prompt": "You are a professional communications expert. Rewrite the provided text.\n\nRewriting guidelines:\n- Use formal, clear, and concise language\n- Replace slang, contractions, and informal phrases\n- Improve sentence structure and flow\n- Maintain the original meaning and key information\n- Match the appropriate tone for the context (business formal, friendly professional, etc.)\n\nProduce your outputs using set_output (one key per call, in separate turns):\n\n1. set_output(\"rewritten_text\", \"The polished, professional version of the original text\")\n2. set_output(\"tone\", \"The identified tone: e.g., 'formal business', 'warm professional', 'assertive professional'\")\n3. set_output(\"changes_made\", \"A brief list of the main changes made: e.g., removed slang, restructured sentences, added formal greeting\")\n4. set_output(\"final_check\", \"Confirmation that the rewrite preserves the original intent and is ready to use\")",
+        "tools": [],
+        "model": null,
+        "function": null,
+        "routes": {},
+        "max_retries": 3,
+        "retry_on": [],
+        "max_node_visits": 1,
+        "output_model": null,
+        "max_validation_retries": 2,
+        "client_facing": false
+      },
+      {
+        "id": "deliver",
+        "name": "Deliver",
+        "description": "Present the rewritten text and outputs to the user",
+        "node_type": "event_loop",
+        "input_keys": [
+          "original_text",
+          "rewritten_text",
+          "tone",
+          "changes_made",
+          "final_check"
+        ],
+        "output_keys": [
+          "delivery_status"
+        ],
+        "nullable_output_keys": [],
+        "input_schema": {},
+        "output_schema": {},
+        "success_criteria": "The user has received the rewritten text and the session is complete.",
+        "system_prompt": "Present the professional rewrite to the user.\n\n**STEP 1 — Present the results (text only, NO tool calls):**\n\nFormat your response as:\n\n---\n**Professional Version:**\n[rewritten_text]\n\n---\n**Tone:** [tone]\n\n**Changes Made:** [changes_made]\n\n**Quality Check:** [final_check]\n---\n\nAsk if they'd like any adjustments.\n\n**STEP 2 — After the user responds:**\n- If they want changes, incorporate them and present the revised version\n- When they're satisfied: set_output(\"delivery_status\", \"completed\")",
+        "tools": [],
+        "model": null,
+        "function": null,
+        "routes": {},
+        "max_retries": 2,
+        "retry_on": [],
+        "max_node_visits": 3,
+        "output_model": null,
+        "max_validation_retries": 2,
+        "client_facing": true
+      }
+    ],
+    "edges": [
+      {
+        "id": "intake-to-rewrite",
+        "source": "intake",
+        "target": "rewrite",
+        "condition": "on_success",
+        "condition_expr": null,
+        "priority": 1,
+        "input_mapping": {}
+      },
+      {
+        "id": "rewrite-to-deliver",
+        "source": "rewrite",
+        "target": "deliver",
+        "condition": "on_success",
+        "condition_expr": null,
+        "priority": 1,
+        "input_mapping": {}
+      }
+    ],
+    "max_steps": 30,
+    "max_retries_per_node": 3,
+    "description": "Rewrites informal text into professional communication with tone analysis and change summary.",
+    "created_at": "2026-03-15T00:00:00.000000"
+  },
+  "goal": {
+    "id": "professional-rewriting",
+    "name": "Professional Rewriting",
+    "description": "Transform informal or casual text into polished, professional communication while preserving the original intent.",
+    "status": "draft",
+    "success_criteria": [
+      {
+        "id": "professional-tone",
+        "description": "Output text uses professional language free of slang and informalities",
+        "metric": "tone_quality",
+        "target": "professional",
+        "weight": 0.4,
+        "met": false
+      },
+      {
+        "id": "intent-preserved",
+        "description": "Rewritten text preserves the meaning and intent of the original",
+        "metric": "intent_preservation",
+        "target": "true",
+        "weight": 0.4,
+        "met": false
+      },
+      {
+        "id": "changes-documented",
+        "description": "A summary of changes is provided",
+        "metric": "changes_present",
+        "target": "true",
+        "weight": 0.2,
+        "met": false
+      }
+    ],
+    "constraints": [
+      {
+        "id": "preserve-intent",
+        "description": "The rewritten text must preserve the original meaning and key information",
+        "constraint_type": "quality",
+        "category": "accuracy",
+        "check": ""
+      }
+    ],
+    "context": {},
+    "required_capabilities": [],
+    "input_schema": {
+      "text": {
+        "type": "string",
+        "description": "The informal text to rewrite professionally"
+      }
+    },
+    "output_schema": {
+      "rewritten_text": {
+        "type": "string",
+        "description": "The professional version of the text"
+      },
+      "tone": {
+        "type": "string",
+        "description": "The identified professional tone"
+      },
+      "changes_made": {
+        "type": "string",
+        "description": "Summary of changes made during rewriting"
+      },
+      "final_check": {
+        "type": "string",
+        "description": "Quality confirmation that intent is preserved"
+      }
+    },
+    "version": "1.0.0",
+    "parent_version": null,
+    "evolution_reason": null,
+    "created_at": "2026-03-15 00:00:00.000000",
+    "updated_at": "2026-03-15 00:00:00.000000"
+  },
+  "required_tools": [],
+  "metadata": {
+    "created_at": "2026-03-15T00:00:00.000000",
+    "node_count": 3,
+    "edge_count": 2
+  }
+}
