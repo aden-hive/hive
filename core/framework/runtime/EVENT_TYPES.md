@@ -392,7 +392,15 @@ Goal completion progress update.
 
 ### `goal_achieved`
 
-Not currently emitted — reserved for explicit goal completion signals.
+Emitted when a graph execution reaches a terminal node successfully, signalling that the goal has been achieved.
+
+| Data Field         | Type   | Description                              |
+| ------------------ | ------ | ---------------------------------------- |
+| `goal_name`        | `str`  | Name of the achieved goal                |
+| `goal_description` | `str`  | Human-readable description of the goal   |
+| `output`           | `dict` | Final output from the execution          |
+
+**Emitted by:** `GraphExecutor` at terminal-node success, via `emit_goal_achieved()`.
 
 ---
 
