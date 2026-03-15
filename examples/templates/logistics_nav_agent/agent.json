@@ -1,0 +1,222 @@
+{
+  "agent": {
+    "id": "logistics_nav_agent",
+    "name": "Logistics Navigation Agent",
+    "version": "1.0.0",
+    "description": "Caitlyn — a logistics dispatch agent that plans routes, calculates ETAs, selects carriers, and generates dispatch manifests for shipments."
+  },
+  "graph": {
+    "id": "logistics-nav-agent-graph",
+    "goal_id": "logistics-dispatch",
+    "version": "1.0.0",
+    "entry_node": "intake",
+    "entry_points": {
+      "start": "intake"
+    },
+    "pause_nodes": [],
+    "terminal_nodes": [
+      "dispatch"
+    ],
+    "conversation_mode": "continuous",
+    "identity_prompt": "You are Caitlyn, a logistics navigation agent. You plan efficient routes, calculate realistic ETAs, select appropriate carriers, and produce clear dispatch manifests. You are precise with addresses, weights, and deadlines.",
+    "nodes": [
+      {
+        "id": "intake",
+        "name": "Logistics Intake",
+        "description": "Gather shipment details: origin, destination, cargo, constraints, and deadline",
+        "node_type": "event_loop",
+        "input_keys": [
+          "request"
+        ],
+        "output_keys": [
+          "shipment_brief"
+        ],
+        "nullable_output_keys": [
+          "request"
+        ],
+        "input_schema": {},
+        "output_schema": {},
+        "success_criteria": "Shipment brief includes: origin address, destination address, cargo description, weight/dimensions, deadline, and any special handling requirements.",
+        "system_prompt": "You are Caitlyn, a logistics intake specialist.\n\nCollect the following shipment details from the user:\n1. **Origin** — full pickup address\n2. **Destination** — full delivery address\n3. **Cargo** — description, weight, dimensions\n4. **Deadline** — required delivery date/time\n5. **Special requirements** — fragile, temperature-controlled, hazmat, etc.\n\nIf any required detail is missing, ask for it. Once you have everything:\n\ncall set_output(\"shipment_brief\", \"A structured summary with all shipment details: origin, destination, cargo specs, deadline, and special requirements.\")",
+        "tools": [],
+        "model": null,
+        "function": null,
+        "routes": {},
+        "max_retries": 3,
+        "retry_on": [],
+        "max_node_visits": 1,
+        "output_model": null,
+        "max_validation_retries": 2,
+        "client_facing": true
+      },
+      {
+        "id": "plan_route",
+        "name": "Route Planning",
+        "description": "Research routing options, calculate ETAs, and evaluate carrier options",
+        "node_type": "event_loop",
+        "input_keys": [
+          "shipment_brief"
+        ],
+        "output_keys": [
+          "route_plan",
+          "carrier_options",
+          "estimated_eta"
+        ],
+        "nullable_output_keys": [],
+        "input_schema": {},
+        "output_schema": {},
+        "success_criteria": "Route plan identifies at least one viable route with ETA. At least two carrier options are evaluated with cost and transit time estimates.",
+        "system_prompt": "You are Caitlyn, planning the optimal logistics route.\n\nGiven the shipment brief:\n1. **Research routing** — use web_search to find distance, typical transit times, and any road/regulatory restrictions for the origin-to-destination corridor\n2. **Evaluate carriers** — research 2-3 carrier options (e.g. FedEx, UPS, regional freight, LTL carriers) for this shipment type and route\n3. **Calculate ETA** — based on distance, carrier speed, and deadline\n4. **Check restrictions** — any permits needed for oversized, hazmat, or cross-border shipments?\n\nThen use set_output (separate turns):\n- set_output(\"route_plan\", \"Recommended route with waypoints, distance, and transit time\")\n- set_output(\"carrier_options\", [{\"carrier\": \"...\", \"service\": \"...\", \"est_cost\": \"...\", \"transit_days\": ...}])\n- set_output(\"estimated_eta\", \"ISO datetime or date string\")",
+        "tools": [
+          "web_search",
+          "web_scrape"
+        ],
+        "model": null,
+        "function": null,
+        "routes": {},
+        "max_retries": 3,
+        "retry_on": [],
+        "max_node_visits": 2,
+        "output_model": null,
+        "max_validation_retries": 2,
+        "client_facing": false
+      },
+      {
+        "id": "dispatch",
+        "name": "Dispatch & Manifest",
+        "description": "Generate dispatch manifest, present carrier recommendation, and confirm with user",
+        "node_type": "event_loop",
+        "input_keys": [
+          "shipment_brief",
+          "route_plan",
+          "carrier_options",
+          "estimated_eta"
+        ],
+        "output_keys": [
+          "dispatch_manifest",
+          "confirmation_status"
+        ],
+        "nullable_output_keys": [],
+        "input_schema": {},
+        "output_schema": {},
+        "success_criteria": "Dispatch manifest has been generated and saved. User has confirmed carrier selection and received the manifest file link.",
+        "system_prompt": "You are Caitlyn, finalizing the dispatch.\n\n**STEP 1 — Generate and save the dispatch manifest:**\n\nCreate a dispatch manifest as an HTML file with:\n- Shipment ID (generate a unique ID like LOG-{date}-{random})\n- Origin & destination with full addresses\n- Cargo details (description, weight, dimensions)\n- Recommended carrier and service level\n- Route summary and waypoints\n- Estimated pickup and delivery dates\n- Special handling instructions\n- Emergency contact info placeholder\n\nSave it: save_data(filename=\"dispatch_manifest.html\", data=\"<html>...</html>\")\nGet link: serve_file_to_user(filename=\"dispatch_manifest.html\", label=\"Dispatch Manifest\")\n\n**STEP 2 — Present recommendation to user:**\n\nSummarize:\n- Recommended carrier and why\n- Route overview and ETA\n- Cost estimate\n- Any special requirements or permits needed\n\nInclude the manifest file link and ask for confirmation.\n\n**STEP 3 — After user confirms:**\n- set_output(\"dispatch_manifest\", \"Path or content reference to the saved manifest\")\n- set_output(\"confirmation_status\", \"confirmed\")",
+        "tools": [
+          "save_data",
+          "serve_file_to_user",
+          "load_data"
+        ],
+        "model": null,
+        "function": null,
+        "routes": {},
+        "max_retries": 3,
+        "retry_on": [],
+        "max_node_visits": 1,
+        "output_model": null,
+        "max_validation_retries": 2,
+        "client_facing": true
+      }
+    ],
+    "edges": [
+      {
+        "id": "intake-to-plan",
+        "source": "intake",
+        "target": "plan_route",
+        "condition": "on_success",
+        "condition_expr": null,
+        "priority": 1,
+        "input_mapping": {}
+      },
+      {
+        "id": "plan-to-dispatch",
+        "source": "plan_route",
+        "target": "dispatch",
+        "condition": "on_success",
+        "condition_expr": null,
+        "priority": 1,
+        "input_mapping": {}
+      }
+    ],
+    "max_steps": 50,
+    "max_retries_per_node": 3,
+    "description": "Caitlyn — a logistics dispatch agent that plans routes, evaluates carriers, and generates dispatch manifests.",
+    "created_at": "2026-03-15T00:00:00.000000"
+  },
+  "goal": {
+    "id": "logistics-dispatch",
+    "name": "Logistics Dispatch",
+    "description": "Plan an efficient shipment route, select the best carrier, and produce a complete dispatch manifest.",
+    "status": "draft",
+    "success_criteria": [
+      {
+        "id": "route-planned",
+        "description": "A viable route with ETA has been identified",
+        "metric": "route_plan_present",
+        "target": "true",
+        "weight": 0.3,
+        "met": false
+      },
+      {
+        "id": "carrier-selected",
+        "description": "At least one carrier option evaluated and recommended",
+        "metric": "carrier_options_count",
+        "target": ">=1",
+        "weight": 0.3,
+        "met": false
+      },
+      {
+        "id": "manifest-generated",
+        "description": "Dispatch manifest saved and presented to user",
+        "metric": "manifest_saved",
+        "target": "true",
+        "weight": 0.25,
+        "met": false
+      },
+      {
+        "id": "user-confirmed",
+        "description": "User confirmed the dispatch plan",
+        "metric": "confirmation_status",
+        "target": "confirmed",
+        "weight": 0.15,
+        "met": false
+      }
+    ],
+    "constraints": [
+      {
+        "id": "accurate-addresses",
+        "description": "Origin and destination addresses must be complete and accurate",
+        "constraint_type": "quality",
+        "category": "accuracy",
+        "check": ""
+      },
+      {
+        "id": "deadline-respected",
+        "description": "Recommended carrier must be able to meet the stated deadline",
+        "constraint_type": "functional",
+        "category": "timeliness",
+        "check": ""
+      }
+    ],
+    "context": {},
+    "required_capabilities": [],
+    "input_schema": {},
+    "output_schema": {},
+    "version": "1.0.0",
+    "parent_version": null,
+    "evolution_reason": null,
+    "created_at": "2026-03-15 00:00:00.000000",
+    "updated_at": "2026-03-15 00:00:00.000000"
+  },
+  "required_tools": [
+    "load_data",
+    "save_data",
+    "serve_file_to_user",
+    "web_scrape",
+    "web_search"
+  ],
+  "metadata": {
+    "created_at": "2026-03-15T00:00:00.000000",
+    "node_count": 3,
+    "edge_count": 2
+  }
+}
