@@ -143,19 +143,30 @@ hive/
 
 ## Running an Agent
 
+> **Note:** All `hive` commands must be run from the **project root** (`hive/`), either using the local wrapper (`./hive`) or via `uv run hive`. Running from a subdirectory will fail with a directory mismatch error.
+
 ```bash
 # Launch the web dashboard in your browser
-hive open
+./hive open
+# or: uv run hive open
 
 # Browse and run agents in terminal
-hive tui
+./hive tui
+# or: uv run hive tui
 
 # Run a specific agent
-hive run exports/my_agent --input '{"task": "Your input here"}'
+./hive run exports/my_agent --input '{"task": "Your input here"}'
+# or: uv run hive run exports/my_agent --input '{"task": "Your input here"}'
 
 # Run with TUI dashboard
-hive run exports/my_agent --tui
+./hive run exports/my_agent --tui
+```
 
+**Windows (PowerShell):** Use `.\hive.ps1` instead of `./hive`:
+
+```powershell
+.\hive.ps1 open
+.\hive.ps1 run exports\my_agent --input '{"task": "Your input here"}'
 ```
 
 ## API Keys Setup
