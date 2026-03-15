@@ -35,19 +35,33 @@ def register_memory_commands(subparsers):
 
     # List sessions command
     list_parser = memory_subparsers.add_parser(
-        "list-sessions",
-        help="List all agent sessions",
-        description="List all available agent sessions with basic metadata",
+        "list",
+        help="List all sessions with metadata",
+        description="List all sessions with rich table output and filtering options",
     )
     list_parser.add_argument(
-        "--agent",
-        help="Filter by agent name",
+        "--agent-id",
+        help="Filter by agent ID",
+    )
+    list_parser.add_argument(
+        "--status",
+        choices=["active", "paused", "completed"],
+        help="Filter by status",
     )
     list_parser.add_argument(
         "--limit",
         type=int,
         default=20,
         help="Maximum number of sessions to show (default: 20)",
+    )
+    list_parser.add_argument(
+        "--storage",
+        help="Storage path (default: ~/.hive/agents)",
+    )
+    list_parser.add_argument(
+        "--size",
+        action="store_true",
+        help="Show disk usage",
     )
     list_parser.set_defaults(func=cmd_list_sessions)
 
@@ -69,22 +83,94 @@ def register_memory_commands(subparsers):
     )
     inspect_parser.set_defaults(func=cmd_inspect_session)
 
-    # Cleanup command
+    # Export command
+    export_parser = memory_subparsers.add_parser(
+        "export",
+        help="Export session memory",
+        description="Export session data to various formats",
+    )
+    export_parser.add_argument(
+        "session_id",
+        help="Session ID to export",
+    )
+    export_parser.add_argument(
+        "--format",
+        choices=["json", "csv", "markdown"],
+        default="json",
+        help="Export format (default: json)",
+    )
+    export_parser.add_argument(
+        "--storage",
+        help="Storage path (default: ~/.hive/agents)",
+    )
+    export_parser.set_defaults(func=cmd_export_session)
+
+    # Checkpoint create command
+    checkpoint_create_parser = memory_subparsers.add_parser(
+        "checkpoint",
+        help="Create a named checkpoint for rollback",
+        description="Create a checkpoint for rollback and safety",
+    )
+    checkpoint_create_subparsers = checkpoint_create_parser.add_subparsers(
+        dest="checkpoint_command",
+        required=True,
+        help="Checkpoint operations",
+    )
+
+    checkpoint_create_parser = checkpoint_create_subparsers.add_parser(
+        "create",
+        help="Create a checkpoint",
+        description="Create a named checkpoint for rollback",
+    )
+    checkpoint_create_parser.add_argument(
+        "session_id",
+        help="Session ID to create checkpoint for",
+    )
+    checkpoint_create_parser.add_argument(
+        "--label",
+        help="Checkpoint label (default: timestamp)",
+    )
+    checkpoint_create_parser.add_argument(
+        "--storage",
+        help="Storage path (default: ~/.hive/agents)",
+    )
+    checkpoint_create_parser.set_defaults(func=cmd_checkpoint_create)
+
+    # Cleanup command (enhanced)
     cleanup_parser = memory_subparsers.add_parser(
         "cleanup",
-        help="Clean up session memory",
-        description="Remove old or unnecessary session data",
+        help="Delete old sessions safely",
+        description="Delete old sessions with age filtering and confirmation",
     )
     cleanup_parser.add_argument(
-        "session_id",
-        help="Session ID to clean up",
+        "--older-than",
+        help="Delete sessions older than duration (e.g., 7d, 24h, 30d)",
+    )
+    cleanup_parser.add_argument(
+        "--status",
+        choices=["active", "paused", "completed"],
+        help="Only cleanup specific status",
     )
     cleanup_parser.add_argument(
         "--dry-run",
         action="store_true",
         help="Show what would be deleted without actually deleting",
     )
-    cleanup_parser.set_defaults(func=cmd_cleanup_session)
+    cleanup_parser.add_argument(
+        "--force",
+        action="store_true",
+        help="Skip confirmation prompts",
+    )
+    cleanup_parser.add_argument(
+        "--yes",
+        action="store_true",
+        help="Skip confirmation prompts (alias for --force)",
+    )
+    cleanup_parser.add_argument(
+        "--storage",
+        help="Storage path (default: ~/.hive/agents)",
+    )
+    cleanup_parser.set_defaults(func=cmd_cleanup_enhanced)
 
     # Analyze command
     analyze_parser = memory_subparsers.add_parser(
@@ -102,24 +188,6 @@ def register_memory_commands(subparsers):
         help="Show summary statistics only",
     )
     analyze_parser.set_defaults(func=cmd_analyze_session)
-
-    # Export command
-    export_parser = memory_subparsers.add_parser(
-        "export",
-        help="Export session memory",
-        description="Export session data to various formats",
-    )
-    export_parser.add_argument(
-        "session_id",
-        help="Session ID to export",
-    )
-    export_parser.add_argument(
-        "--format",
-        choices=["json", "csv", "markdown"],
-        default="json",
-        help="Export format (default: json)",
-    )
-    export_parser.set_defaults(func=cmd_export_session)
 
     # Search command
     search_parser = memory_subparsers.add_parser(
@@ -303,52 +371,229 @@ def cmd_inspect_session(args):
 
 
 def cmd_cleanup_session(args):
-    """Clean up a session."""
-    try:
-        store = get_session_store()
-        session_path = store.base_path / args.session_id
+    """Clean up a session (original simple version)."""
+    async def _cleanup():
+        try:
+            store = get_session_store()
+            session_path = store.base_path / args.session_id
+            
+            if not session_path.exists():
+                print(f"Session {args.session_id} not found.")
+                return
+            
+            if args.dry_run:
+                print(f"🔍 Dry run - would clean up session: {args.session_id}")
+                
+                # Show what would be deleted
+                files = list(session_path.rglob("*"))
+                files = [f for f in files if f.is_file()]
+                total_size = sum(f.stat().st_size for f in files)
+                
+                print(f"  Files to delete: {len(files)}")
+                print(f"  Space to free: {format_size(total_size)}")
+                
+                for file_path in files[:10]:  # Show first 10
+                    rel_path = file_path.relative_to(session_path)
+                    print(f"    - {rel_path}")
+                
+                if len(files) > 10:
+                    print(f"    ... and {len(files) - 10} more files")
+            else:
+                print(f"🧹 Cleaning up session: {args.session_id}")
+                
+                # Calculate size before deletion
+                files = list(session_path.rglob("*"))
+                files = [f for f in files if f.is_file()]
+                total_size = sum(f.stat().st_size for f in files)
+                
+                # Delete session directory
+                import shutil
+                shutil.rmtree(session_path)
+                
+                print(f"  ✅ Deleted {len(files)} files")
+                print(f"  ✅ Freed {format_size(total_size)}")
+                print(f"  ✅ Session {args.session_id} cleaned up successfully")
+            
+        except Exception as e:
+            print(f"Error cleaning up session: {e}", file=sys.stderr)
+            sys.exit(1)
+    
+    asyncio.run(_cleanup())
 
-        if not session_path.exists():
-            print(f"Session {args.session_id} not found.")
-            return
 
-        if args.dry_run:
-            print(f"🔍 Dry run - would clean up session: {args.session_id}")
+def cmd_cleanup_enhanced(args):
+    """Enhanced cleanup with age filtering and rich table output."""
+    async def _cleanup():
+        try:
+            store = get_session_store()
+            sessions_dir = store.sessions_dir
+            
+            if not sessions_dir.exists():
+                print("No sessions found.")
+                return
+            
+            # Parse age filter
+            max_age_seconds = None
+            if args.older_than:
+                if args.older_than.endswith('d'):
+                    days = int(args.older_than[:-1])
+                    max_age_seconds = days * 24 * 3600
+                elif args.older_than.endswith('h'):
+                    hours = int(args.older_than[:-1])
+                    max_age_seconds = hours * 3600
+                elif args.older_than.endswith('m'):
+                    minutes = int(args.older_than[:-1])
+                    max_age_seconds = minutes * 60
+                else:
+                    print(f"Invalid age format: {args.older_than}. Use 7d, 24h, or 30m")
+                    return
+            
+            # Find sessions to delete
+            sessions_to_delete = []
+            total_size = 0
+            
+            for session_dir in sessions_dir.iterdir():
+                if not session_dir.is_dir():
+                    continue
+                
+                # Check status filter
+                if args.status:
+                    state_file = session_dir / "state.json"
+                    if state_file.exists():
+                        try:
+                            with open(state_file, 'r') as f:
+                                state = json.load(f)
+                            if state.get('status') != args.status:
+                                continue
+                        except:
+                            continue
+                
+                # Check age filter
+                if max_age_seconds:
+                    state_file = session_dir / "state.json"
+                    if state_file.exists():
+                        try:
+                            with open(state_file, 'r') as f:
+                                state = json.load(f)
+                            created_str = state.get('created_at', '')
+                            if created_str:
+                                from datetime import datetime
+                                created = datetime.fromisoformat(created_str.replace('Z', '+00:00'))
+                                age_seconds = (datetime.now() - created).total_seconds()
+                                if age_seconds < max_age_seconds:
+                                    continue
+                        except:
+                            continue
+                
+                # Calculate size
+                session_size = sum(
+                    f.stat().st_size for f in session_dir.rglob('*') 
+                    if f.is_file()
+                )
+                total_size += session_size
+                sessions_to_delete.append({
+                    'id': session_dir.name,
+                    'size': session_size,
+                    'path': session_dir
+                })
+            
+            if not sessions_to_delete:
+                print("No sessions match the criteria.")
+                return
+            
+            # Display rich table
+            print(f"\nFound {len(sessions_to_delete)} sessions to delete:")
+            print("┏━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━┳━━━━━━━━━━━━━━━┳━━━━━━━━━━━┳━━━━━━━━━━━┓")
+            print("┃ Session ID ┃ Size ┃ ┡━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━╇━━━━━━━━━━━━━━━╇━━━━━━━━━━━┩")
+            print("┡━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━╇━━━━━━━━━━━━━━━╇━━━━━━━━━━━┩")
+            
+            for session in sessions_to_delete:
+                print(f"┃ {session['id'][:20]:<20} ┃ {format_size(session['size']):<10} ┃ ┡━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━╇━━━━━━━━━━━━━━━╇━━━━━━━━━━━┩")
+            
+            print("└────────────────────┴──────────┴─────────────────┴─────────────────┘")
+            print(f"Total: {len(sessions_to_delete)} sessions, {format_size(total_size)}")
+            
+            if args.dry_run:
+                print(f"\nDry run completed. Use --force to actually delete.")
+                return
+            
+            # Confirm deletion
+            if not args.force and not args.yes:
+                response = input(f"Delete these {len(sessions_to_delete)} sessions? [y/N]: ")
+                if response.lower() not in ['y', 'yes']:
+                    print("Cancelled.")
+                    return
+            
+            # Delete sessions
+            deleted_count = 0
+            for session in sessions_to_delete:
+                try:
+                    import shutil
+                    shutil.rmtree(session['path'])
+                    deleted_count += 1
+                except Exception as e:
+                    print(f"Error deleting {session['id']}: {e}")
+            
+            print(f"✅ Deleted {deleted_count} sessions")
+            print(f"✅ Freed {format_size(total_size)}")
+            
+        except Exception as e:
+            print(f"Error during cleanup: {e}", file=sys.stderr)
+            sys.exit(1)
+    
+    asyncio.run(_cleanup())
 
-            # Show what would be deleted
-            files = list(session_path.rglob("*"))
-            files = [f for f in files if f.is_file()]
-            total_size = sum(f.stat().st_size for f in files)
 
-            print(f"  Files to delete: {len(files)}")
-            print(f"  Space to free: {format_size(total_size)}")
-
-            for file_path in files[:10]:  # Show first 10
-                rel_path = file_path.relative_to(session_path)
-                print(f"    - {rel_path}")
-
-            if len(files) > 10:
-                print(f"    ... and {len(files) - 10} more files")
-        else:
-            print(f"🧹 Cleaning up session: {args.session_id}")
-
-            # Calculate size before deletion
-            files = list(session_path.rglob("*"))
-            files = [f for f in files if f.is_file()]
-            total_size = sum(f.stat().st_size for f in files)
-
-            # Delete the session directory
-            import shutil
-
-            shutil.rmtree(session_path)
-
-            print(f"  ✅ Deleted {len(files)} files")
-            print(f"  ✅ Freed {format_size(total_size)}")
-            print(f"  ✅ Session {args.session_id} cleaned up successfully")
-
-    except Exception as e:
-        print(f"Error cleaning up session: {e}", file=sys.stderr)
-        sys.exit(1)
+def cmd_checkpoint_create(args):
+    """Create a checkpoint for a session."""
+    async def _create_checkpoint():
+        try:
+            store = get_session_store()
+            session_path = store.base_path / args.session_id
+            
+            if not session_path.exists():
+                print(f"Session {args.session_id} not found.")
+                return
+            
+            # Generate checkpoint label
+            from datetime import datetime
+            label = args.label or datetime.now().strftime("ckpt_%Y%m%d_%H%M%S")
+            
+            # Create checkpoints directory
+            checkpoints_dir = session_path / "checkpoints"
+            checkpoints_dir.mkdir(exist_ok=True)
+            
+            checkpoint_path = checkpoints_dir / f"{label}.json"
+            
+            # Read current state
+            state_file = session_path / "state.json"
+            if state_file.exists():
+                with open(state_file, 'r') as f:
+                    state_data = json.load(f)
+            else:
+                state_data = {}
+            
+            # Add checkpoint metadata
+            checkpoint_data = {
+                **state_data,
+                'checkpoint_label': label,
+                'checkpoint_timestamp': datetime.now().isoformat(),
+                'checkpoint_type': 'manual'
+            }
+            
+            # Write checkpoint
+            with open(checkpoint_path, 'w') as f:
+                json.dump(checkpoint_data, f, indent=2)
+            
+            print(f"✓ Created checkpoint: {label}")
+            print(f"Session: {args.session_id}")
+            print(f"Timestamp: {checkpoint_data['checkpoint_timestamp']}")
+            
+        except Exception as e:
+            print(f"Error creating checkpoint: {e}", file=sys.stderr)
+            sys.exit(1)
+    
+    asyncio.run(_create_checkpoint())
 
 
 def cmd_analyze_session(args):
