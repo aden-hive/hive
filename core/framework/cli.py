@@ -14,6 +14,14 @@ Testing commands:
     hive test-debug <agent_path> <test_name>
     hive test-list <agent_path>
     hive test-stats <agent_path>
+
+Memory management commands:
+    hive memory list-sessions [--agent <agent_name>] [--limit <limit>]
+    hive memory inspect <session_id> [--type <memory_type>]
+    hive memory cleanup <session_id> [--dry-run]
+    hive memory analyze <session_id> [--summary]
+    hive memory export <session_id> [--format <format>]
+    hive memory search <session_id> <query> [--type <memory_type>]
 """
 
 import argparse
@@ -88,6 +96,11 @@ def main():
     from framework.testing.cli import register_testing_commands
 
     register_testing_commands(subparsers)
+
+    # Register memory management commands (memory list-sessions, inspect, cleanup, etc.)
+    from framework.memory.cli import register_memory_commands
+
+    register_memory_commands(subparsers)
 
     args = parser.parse_args()
 
