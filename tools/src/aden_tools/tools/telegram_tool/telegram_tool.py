@@ -324,6 +324,20 @@ class _TelegramClient:
         )
         return self._handle_response(response)
 
+    def get_updates(self, timeout: int = 0) -> dict[str, Any]:
+        """Get incoming updates via long polling.
+
+        API ref: https://core.telegram.org/bots/api#getupdates
+        Used to automatically discover chat_id from recent messages.
+        """
+        params: dict[str, Any] = {"timeout": timeout}
+        response = httpx.get(
+            f"{self._base_url}/getUpdates",
+            params=params,
+            timeout=30.0,
+        )
+        return self._handle_response(response)
+
 
 def register_tools(
     mcp: FastMCP,
@@ -341,6 +355,18 @@ def register_tools(
                 )
             return token
         return os.getenv("TELEGRAM_BOT_TOKEN")
+
+    def _get_chat_id() -> str | None:
+        """Get default Telegram chat ID from credential manager or environment."""
+        if credentials is not None:
+            chat_id = credentials.get("telegram_chat_id")
+            if chat_id is not None and not isinstance(chat_id, str):
+                raise TypeError(
+                    f"Expected string from credentials.get('telegram_chat_id'), "
+                    f"got {type(chat_id).__name__}"
+                )
+            return chat_id
+        return os.getenv("TELEGRAM_CHAT_ID")
 
     def _get_client() -> _TelegramClient | dict[str, str]:
         """Get a Telegram client, or return an error dict if no credentials."""
@@ -797,6 +823,62 @@ def register_tools(
                 parse_mode=parse_mode if parse_mode else None,
                 duration=duration if duration > 0 else None,
             )
+        except httpx.TimeoutException:
+            return {"error": "Telegram request timed out"}
+        except httpx.RequestError as e:
+            return {"error": f"Network error: {e}"}
+
+    @mcp.tool()
+    def telegram_get_chat_id() -> dict[str, Any]:
+        """
+        Get the default Telegram chat ID configured for this agent.
+
+        First checks the configured chat_id from environment or credential store.
+        If not configured, attempts to auto-discover by fetching recent updates
+        from the Telegram Bot API.
+
+        Returns:
+            Dict with 'chat_id' on success, or error dict on failure.
+            Auto-discovery works if someone has sent a message to the bot recently.
+        """
+        # First try configured chat_id
+        chat_id = _get_chat_id()
+        if chat_id:
+            return {"chat_id": chat_id}
+
+        # Try to auto-discover from recent updates
+        client = _get_client()
+        if isinstance(client, dict):
+            return client
+
+        try:
+            updates_result = client.get_updates()
+            if isinstance(updates_result, dict):
+                result = updates_result.get("result", [])
+                if result and isinstance(result, list) and len(result) > 0:
+                    # Get the most recent message's chat_id
+                    last_update = result[-1]
+                    message = last_update.get("message", {})
+                    chat_id = str(message.get("chat", {}).get("id", ""))
+                    if chat_id:
+                        return {
+                            "chat_id": chat_id,
+                            "source": "auto_discovered",
+                            "note": (
+                                f"Chat ID discovered from most recent update. "
+                                f"Consider setting TELEGRAM_CHAT_ID={chat_id} "
+                                f"environment variable for persistence."
+                            ),
+                        }
+
+            return {
+                "error": "No chat ID configured and no recent updates found",
+                "help": (
+                    "Set TELEGRAM_CHAT_ID environment variable, or send a message "
+                    "to your bot and retry. To manually find your chat ID: "
+                    "https://api.telegram.org/bot<TOKEN>/getUpdates"
+                ),
+            }
         except httpx.TimeoutException:
             return {"error": "Telegram request timed out"}
         except httpx.RequestError as e:
