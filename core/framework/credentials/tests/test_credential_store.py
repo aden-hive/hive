@@ -375,6 +375,44 @@ class TestCompositeStorage:
         assert primary.exists("test")
         assert not fallback.exists("test")
 
+    def test_fallback_when_primary_raises_error(self):
+        """Test fallback is attempted when primary storage raises CredentialError."""
+        from core.framework.credentials.models import CredentialDecryptionError
+
+        class FailingStorage(InMemoryStorage):
+            def load(self, credential_id: str):
+                raise CredentialDecryptionError("Simulated primary failure")
+
+        primary = FailingStorage()
+        fallback = InMemoryStorage()
+        fallback.save(
+            CredentialObject(
+                id="test", keys={"k": CredentialKey(name="k", value=SecretStr("fallback"))}
+            )
+        )
+
+        storage = CompositeStorage(primary, [fallback])
+        cred = storage.load("test")
+
+        assert cred is not None
+        assert cred.get_key("k") == "fallback"
+
+    def test_raises_original_error_if_no_fallback_succeeds(self):
+        """Test original CredentialError is raised if fallbacks return None."""
+        from core.framework.credentials.models import CredentialDecryptionError
+
+        class FailingStorage(InMemoryStorage):
+            def load(self, credential_id: str):
+                raise CredentialDecryptionError("Simulated primary failure")
+
+        primary = FailingStorage()
+        fallback = InMemoryStorage()  # Empty fallback
+
+        storage = CompositeStorage(primary, [fallback])
+
+        with pytest.raises(CredentialDecryptionError, match="Simulated primary failure"):
+            storage.load("test")
+
 
 class TestStaticProvider:
     """Tests for StaticProvider."""
