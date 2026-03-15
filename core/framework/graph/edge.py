@@ -35,6 +35,44 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_MAX_TOKENS = 8192
 
+# Key-name substrings that suggest sensitive data — used to redact values from
+# the LLM routing prompt (defense-in-depth; credentials are normally kept out of
+# shared memory, but node outputs can occasionally contain processed secrets).
+_SENSITIVE_KEY_PATTERNS: frozenset[str] = frozenset(
+    {
+        "token",
+        "secret",
+        "password",
+        "passwd",
+        "api_key",
+        "apikey",
+        "credential",
+        "auth",
+        "bearer",
+        "private_key",
+        "privatekey",
+        "access_key",
+        "client_secret",
+    }
+)
+
+
+def _sanitize_memory_for_prompt(memory: dict[str, Any]) -> dict[str, Any]:
+    """Return a copy of *memory* with sensitive values redacted.
+
+    A value is redacted when any of the ``_SENSITIVE_KEY_PATTERNS`` substrings
+    appear (case-insensitive) in the key name.  The redacted placeholder is
+    ``"[REDACTED]"`` so the LLM can still see that the key exists.
+    """
+    result: dict[str, Any] = {}
+    for k, v in memory.items():
+        k_lower = k.lower()
+        if any(pat in k_lower for pat in _SENSITIVE_KEY_PATTERNS):
+            result[k] = "[REDACTED]"
+        else:
+            result[k] = v
+    return result
+
 
 class EdgeCondition(StrEnum):
     """When an edge should be traversed."""
@@ -220,6 +258,10 @@ class EdgeSpec(BaseModel):
         is the best next step toward achieving the goal.
         """
         # Build context for LLM
+        _mem_ctx = json.dumps(
+            {k: str(v)[:100] for k, v in list(_sanitize_memory_for_prompt(memory).items())[:5]},
+            indent=2,
+        )
         prompt = f"""You are evaluating whether to proceed along an edge in an agent workflow.
 
 **Goal**: {goal.name}
@@ -235,7 +277,7 @@ Should we proceed to: {target_node_name or self.target}?
 Edge description: {self.description or "No description"}
 
 **Context from memory**:
-{json.dumps({k: str(v)[:100] for k, v in list(memory.items())[:5]}, indent=2)}
+{_mem_ctx}
 
 Evaluate whether proceeding to this next node is the right step toward achieving the goal.
 Consider:
