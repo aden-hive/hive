@@ -11,6 +11,7 @@ from fastmcp import FastMCP
 
 try:
     import dns.exception
+    import dns.flags
     import dns.name
     import dns.query
     import dns.rdatatype
@@ -198,14 +199,35 @@ def _check_dkim(resolver: dns.resolver.Resolver, domain: str) -> dict:
 
 
 def _check_dnssec(resolver: dns.resolver.Resolver, domain: str) -> dict:
-    """Check if DNSSEC is enabled."""
+    """Check if DNSSEC is enabled and validated.
+
+    Uses a known-validating resolver (Google/Cloudflare) with the EDNS DO bit
+    set so that DNSSEC signatures are requested, then verifies the Authenticated
+    Data (AD) flag in the response rather than merely checking for DNSKEY record
+    existence (which gives false positives/negatives with non-validating resolvers).
+    """
     try:
-        answers = resolver.resolve(domain, "DNSKEY")
-        if answers:
+        validating_resolver = dns.resolver.Resolver()
+        validating_resolver.nameservers = ["8.8.8.8", "1.1.1.1"]
+        validating_resolver.timeout = 10
+        validating_resolver.lifetime = 10
+        # Request DNSSEC signatures via EDNS DO bit; 4096-byte payload for large responses
+        validating_resolver.use_edns(0, dns.flags.DO, 4096)
+
+        # SOA records are mandatory, so we can rely on their presence for the AD check
+        response = validating_resolver.resolve(domain, "SOA")
+        if bool(response.response.flags & dns.flags.AD):
             return {"enabled": True, "issues": []}
-    except dns.resolver.NoAnswer:
-        pass
-    except (dns.resolver.NXDOMAIN, dns.exception.DNSException):
+
+        return {
+            "enabled": False,
+            "issues": [
+                "DNSSEC records may exist but signatures were not validated "
+                "(AD flag not set by resolver). The domain may be vulnerable "
+                "to DNS spoofing and cache poisoning."
+            ],
+        }
+    except (dns.resolver.NoAnswer, dns.resolver.NXDOMAIN, dns.exception.DNSException):
         pass
 
     return {
