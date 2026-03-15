@@ -202,6 +202,9 @@ class GraphExecutor:
         self.enable_parallel_execution = enable_parallel_execution
         self._parallel_config = parallel_config or ParallelExecutionConfig()
 
+        # Cache for per-model LLM providers (avoids re-instantiating for same model)
+        self._llm_cache: dict[str, LLMProvider] = {}
+
         # Pause/resume control
         self._pause_requested = asyncio.Event()
 
@@ -1772,6 +1775,68 @@ class GraphExecutor:
 
                 ToolRegistry.reset_execution_context(_ctx_token)
 
+    def _resolve_llm(self, model: str | None, graph: "GraphSpec | None") -> "LLMProvider":
+        """Resolve an LLM provider using the three-tier model hierarchy.
+
+        Tier 1 (highest): node_spec.model (passed as *model*)
+        Tier 2:           graph.default_model
+        Tier 3 (lowest):  self.llm (global provider)
+
+        Providers are cached by model string to avoid re-instantiation.
+        Emits a WARNING when a per-node model is requested but self.llm is
+        None (no global provider configured), then falls back to None.
+        """
+        # Determine the target model string
+        resolved_model: str | None = None
+        if model:
+            resolved_model = model
+        elif graph is not None and getattr(graph, "default_model", None):
+            resolved_model = graph.default_model
+
+        # If no override, return the global provider as-is
+        if not resolved_model:
+            return self.llm  # type: ignore[return-value]
+
+        # If the resolved model matches the global provider's model, reuse it
+        global_model = getattr(self.llm, "model", None)
+        if global_model and resolved_model == global_model:
+            return self.llm  # type: ignore[return-value]
+
+        # Cache lookup / creation
+        if resolved_model in self._llm_cache:
+            return self._llm_cache[resolved_model]
+
+        if self.llm is None:
+            self.logger.warning(
+                "Per-node model '%s' requested but no global LLM provider is configured; "
+                "node will run without an LLM.",
+                resolved_model,
+            )
+            return None  # type: ignore[return-value]
+
+        # Clone the global provider with the overridden model string
+        try:
+            from framework.llm.litellm import LiteLLMProvider
+
+            api_key = getattr(self.llm, "api_key", None)
+            api_base = getattr(self.llm, "api_base", None)
+            provider: LLMProvider = LiteLLMProvider(
+                model=resolved_model,
+                api_key=api_key,
+                api_base=api_base,
+            )
+        except Exception as exc:
+            self.logger.warning(
+                "Could not create LLM provider for model '%s': %s — falling back to global.",
+                resolved_model,
+                exc,
+            )
+            return self.llm  # type: ignore[return-value]
+
+        self._llm_cache[resolved_model] = provider
+        self.logger.info("Resolved per-node model '%s' for node.", resolved_model)
+        return provider
+
     def _build_context(
         self,
         node_spec: NodeSpec,
@@ -1818,13 +1883,16 @@ class GraphExecutor:
 
         goal_context = goal.to_prompt_context()
 
+        # Three-tier model resolution: node override → graph default → global
+        resolved_llm = self._resolve_llm(node_spec.model, graph)
+
         return NodeContext(
             runtime=self.runtime,
             node_id=node_spec.id,
             node_spec=node_spec,
             memory=scoped_memory,
             input_data=input_data,
-            llm=self.llm,
+            llm=resolved_llm,
             available_tools=available_tools,
             goal_context=goal_context,
             goal=goal,  # Pass Goal object for LLM-powered routers
