@@ -93,9 +93,9 @@ class TestLiteLLMProviderInit:
     def test_init_ollama_no_key_needed(self):
         """Test that Ollama models don't require API key."""
         with patch.dict(os.environ, {}, clear=True):
-            # Should not raise.
+            # Should not raise; ollama/ is normalised to ollama_chat/ for tool-call support.
             provider = LiteLLMProvider(model="ollama/llama3")
-            assert provider.model == "ollama/llama3"
+            assert provider.model == "ollama_chat/llama3"
 
 
 class TestLiteLLMProviderComplete:
@@ -1084,3 +1084,111 @@ class TestIsLocalModel:
         from framework.runner.runner import AgentRunner
 
         assert AgentRunner._is_local_model(model) is False
+
+
+# ---------------------------------------------------------------------------
+# Ollama helper functions
+# ---------------------------------------------------------------------------
+
+
+class TestIsOllamaModel:
+    """Tests for _is_ollama_model()."""
+
+    @pytest.mark.parametrize(
+        "model",
+        [
+            "ollama/llama3",
+            "ollama/mistral:7b",
+            "ollama_chat/llama3",
+            "ollama_chat/qwen2.5:72b",
+        ],
+    )
+    def test_ollama_models_return_true(self, model):
+        assert _is_ollama_model(model) is True
+
+    @pytest.mark.parametrize(
+        "model",
+        [
+            "gpt-4o-mini",
+            "anthropic/claude-3-haiku",
+            "openai/gpt-4o",
+            "gemini/gemini-1.5-flash",
+            "llama3",
+            "",
+        ],
+    )
+    def test_non_ollama_models_return_false(self, model):
+        assert _is_ollama_model(model) is False
+
+
+class TestEnsureOllamaChatPrefix:
+    """Tests for _ensure_ollama_chat_prefix()."""
+
+    @pytest.mark.parametrize(
+        ("input_model", "expected"),
+        [
+            ("ollama/llama3", "ollama_chat/llama3"),
+            ("ollama/mistral:7b", "ollama_chat/mistral:7b"),
+            ("ollama/qwen2.5:72b-instruct", "ollama_chat/qwen2.5:72b-instruct"),
+        ],
+    )
+    def test_rewrites_ollama_to_ollama_chat(self, input_model, expected):
+        assert _ensure_ollama_chat_prefix(input_model) == expected
+
+    @pytest.mark.parametrize(
+        "model",
+        [
+            "ollama_chat/llama3",
+            "gpt-4o-mini",
+            "anthropic/claude-3-haiku",
+            "gemini/gemini-1.5-flash",
+            "",
+        ],
+    )
+    def test_leaves_non_ollama_prefix_unchanged(self, model):
+        assert _ensure_ollama_chat_prefix(model) == model
+
+
+class TestGetLlmExtraKwargsOllama:
+    """Tests for num_ctx injection via get_llm_extra_kwargs() for Ollama."""
+
+    def test_ollama_provider_returns_num_ctx(self):
+        """Ollama config should inject num_ctx with default 16384."""
+        config = {
+            "llm": {"provider": "ollama", "model": "ollama/llama3"},
+        }
+        with patch("framework.config.get_hive_config", return_value=config):
+            from framework.config import get_llm_extra_kwargs
+
+            result = get_llm_extra_kwargs()
+        assert result == {"num_ctx": 16384}
+
+    def test_ollama_provider_respects_custom_num_ctx(self):
+        """User-specified num_ctx in config should take precedence."""
+        config = {
+            "llm": {"provider": "ollama", "model": "ollama/llama3", "num_ctx": 32768},
+        }
+        with patch("framework.config.get_hive_config", return_value=config):
+            from framework.config import get_llm_extra_kwargs
+
+            result = get_llm_extra_kwargs()
+        assert result == {"num_ctx": 32768}
+
+    def test_non_ollama_provider_returns_empty(self):
+        """Non-Ollama provider without subscriptions should return empty dict."""
+        config = {
+            "llm": {"provider": "anthropic", "model": "claude-3-haiku"},
+        }
+        with patch("framework.config.get_hive_config", return_value=config):
+            from framework.config import get_llm_extra_kwargs
+
+            result = get_llm_extra_kwargs()
+        assert result == {}
+
+    def test_empty_config_returns_empty(self):
+        """Missing config should return empty dict."""
+        with patch("framework.config.get_hive_config", return_value={}):
+            from framework.config import get_llm_extra_kwargs
+
+            result = get_llm_extra_kwargs()
+        assert result == {}
