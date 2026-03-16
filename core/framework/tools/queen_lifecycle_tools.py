@@ -46,7 +46,6 @@ from framework.runner.preload_validation import credential_errors_to_json, valid
 from framework.runtime.event_bus import AgentEvent, EventType
 from framework.server.app import validate_agent_path
 from framework.tools.flowchart_utils import (
-    FLOWCHART_FILENAME,
     FLOWCHART_TYPES,
     classify_flowchart_node,
     load_flowchart_file,
@@ -291,7 +290,6 @@ def build_worker_profile(runtime: AgentRuntime, agent_path: Path | str | None = 
 
     lines.append("\nStatus at session start: idle (not started).")
     return "\n".join(lines)
-
 
 
 # FLOWCHART_TYPES is imported from framework.tools.flowchart_utils

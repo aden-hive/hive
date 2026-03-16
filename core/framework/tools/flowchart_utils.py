@@ -355,12 +355,8 @@ def generate_fallback_flowchart(
         # Enrich with Goal metadata
         if goal:
             draft["goal"] = goal.description or goal.name or ""
-            draft["success_criteria"] = [
-                sc.description for sc in (goal.success_criteria or [])
-            ]
-            draft["constraints"] = [
-                c.description for c in (goal.constraints or [])
-            ]
+            draft["success_criteria"] = [sc.description for sc in (goal.success_criteria or [])]
+            draft["constraints"] = [c.description for c in (goal.constraints or [])]
 
         # Use entry_node/terminal_nodes from GraphSpec if available
         if graph.entry_node:

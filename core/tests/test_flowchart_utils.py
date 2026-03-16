@@ -1,7 +1,6 @@
 """Tests for framework/tools/flowchart_utils.py."""
 
 import json
-from pathlib import Path
 from types import SimpleNamespace
 
 from framework.tools.flowchart_utils import (
@@ -15,14 +14,27 @@ from framework.tools.flowchart_utils import (
 )
 
 
-def _make_node(id, name="Node", description="", node_type="event_loop",
-               tools=None, input_keys=None, output_keys=None,
-               success_criteria="", sub_agents=None):
+def _make_node(
+    id,
+    name="Node",
+    description="",
+    node_type="event_loop",
+    tools=None,
+    input_keys=None,
+    output_keys=None,
+    success_criteria="",
+    sub_agents=None,
+):
     """Create a minimal node-like object matching NodeSpec interface."""
     return SimpleNamespace(
-        id=id, name=name, description=description, node_type=node_type,
-        tools=tools or [], input_keys=input_keys or [],
-        output_keys=output_keys or [], success_criteria=success_criteria,
+        id=id,
+        name=name,
+        description=description,
+        node_type=node_type,
+        tools=tools or [],
+        input_keys=input_keys or [],
+        output_keys=output_keys or [],
+        success_criteria=success_criteria,
         sub_agents=sub_agents or [],
     )
 
@@ -30,17 +42,20 @@ def _make_node(id, name="Node", description="", node_type="event_loop",
 def _make_edge(source, target, condition="on_success", description=""):
     """Create a minimal edge-like object matching EdgeSpec interface."""
     return SimpleNamespace(
-        source=source, target=target,
+        source=source,
+        target=target,
         condition=SimpleNamespace(value=condition),
         description=description,
     )
 
 
-def _make_goal(name="Test Goal", description="A test goal",
-               success_criteria=None, constraints=None):
+def _make_goal(
+    name="Test Goal", description="A test goal", success_criteria=None, constraints=None
+):
     """Create a minimal goal-like object matching Goal interface."""
     return SimpleNamespace(
-        name=name, description=description,
+        name=name,
+        description=description,
         success_criteria=success_criteria or [],
         constraints=constraints or [],
     )
@@ -49,7 +64,8 @@ def _make_goal(name="Test Goal", description="A test goal",
 def _make_graph(nodes, edges, entry_node=None, terminal_nodes=None):
     """Create a minimal graph-like object matching GraphSpec interface."""
     return SimpleNamespace(
-        nodes=nodes, edges=edges,
+        nodes=nodes,
+        edges=edges,
         entry_node=entry_node or (nodes[0].id if nodes else ""),
         terminal_nodes=terminal_nodes or [],
     )
@@ -76,22 +92,19 @@ class TestClassifyFlowchartNode:
         assert result == "browser"
 
     def test_subprocess_node(self):
-        node = {"id": "n2", "node_type": "event_loop", "tools": [],
-                "sub_agents": ["sub1"]}
+        node = {"id": "n2", "node_type": "event_loop", "tools": [], "sub_agents": ["sub1"]}
         edges = [{"source": "n1", "target": "n2"}, {"source": "n2", "target": "n3"}]
         result = classify_flowchart_node(node, 1, 3, edges, set())
         assert result == "subprocess"
 
     def test_default_is_process(self):
-        node = {"id": "n2", "node_type": "event_loop", "tools": [],
-                "description": "do stuff"}
+        node = {"id": "n2", "node_type": "event_loop", "tools": [], "description": "do stuff"}
         edges = [{"source": "n1", "target": "n2"}, {"source": "n2", "target": "n3"}]
         result = classify_flowchart_node(node, 1, 3, edges, set())
         assert result == "process"
 
     def test_explicit_override(self):
-        node = {"id": "n2", "node_type": "event_loop", "tools": [],
-                "flowchart_type": "database"}
+        node = {"id": "n2", "node_type": "event_loop", "tools": [], "flowchart_type": "database"}
         edges = [{"source": "n1", "target": "n2"}]
         result = classify_flowchart_node(node, 1, 3, edges, set())
         assert result == "database"
@@ -148,8 +161,7 @@ class TestSynthesizeDraftFromRuntime:
 
         # Legend should contain all types
         assert draft["flowchart_legend"] == {
-            k: {"shape": v["shape"], "color": v["color"]}
-            for k, v in FLOWCHART_TYPES.items()
+            k: {"shape": v["shape"], "color": v["color"]} for k, v in FLOWCHART_TYPES.items()
         }
 
     def test_graph_with_sub_agents(self):
