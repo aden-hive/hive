@@ -20,9 +20,7 @@ def register_skill_commands(subparsers) -> None:
     skill_sub = skill_parser.add_subparsers(dest="skill_command", required=True)
 
     # hive skill list
-    list_parser = skill_sub.add_parser(
-        "list", help="List discovered skills across all scopes"
-    )
+    list_parser = skill_sub.add_parser("list", help="List discovered skills across all scopes")
     list_parser.add_argument(
         "--project-dir",
         default=None,
@@ -117,6 +115,6 @@ def cmd_skill_trust(args) -> int:
     store.trust(repo_key, project_path=str(project_path))
 
     print(f"✓ Trusted: {repo_key}")
-    print(f"  Stored in ~/.hive/trusted_repos.json")
-    print(f"  Skills from this repository will load without prompting in future runs.")
+    print("  Stored in ~/.hive/trusted_repos.json")
+    print("  Skills from this repository will load without prompting in future runs.")
     return 0

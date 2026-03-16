@@ -1338,8 +1338,8 @@ class AgentRunner:
         skills_catalog_prompt = ""
         protocols_prompt = ""
         try:
-            from framework.skills.config import SkillsConfig
             from framework.skills.catalog import SkillCatalog
+            from framework.skills.config import SkillsConfig
             from framework.skills.defaults import DefaultSkillManager
             from framework.skills.discovery import DiscoveryConfig, SkillDiscovery
 
@@ -1355,6 +1355,7 @@ class AgentRunner:
 
             # Trust-gate project-scope skills (AS-13)
             from framework.skills.trust import TrustGate
+
             discovered = TrustGate(interactive=self._interactive).filter_and_gate(
                 discovered, project_dir=self.agent_path
             )

@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import logging
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -52,9 +52,7 @@ def _try_fix_yaml(raw: str) -> str:
         if m:
             key_part, value_part = m.group(1), m.group(2)
             # If value contains a colon and isn't already quoted
-            if ":" in value_part and not (
-                value_part.startswith('"') or value_part.startswith("'")
-            ):
+            if ":" in value_part and not (value_part.startswith('"') or value_part.startswith("'")):
                 value_part = f'"{value_part}"'
             fixed.append(f"{key_part}{value_part}")
         else:

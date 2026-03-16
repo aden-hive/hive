@@ -11,7 +11,7 @@ from framework.skills.defaults import DefaultSkillManager
 from framework.skills.discovery import DiscoveryConfig, SkillDiscovery
 from framework.skills.models import TrustStatus
 from framework.skills.parser import ParsedSkill, parse_skill_md
-from framework.skills.trust import TrustGate, TrustedRepoStore
+from framework.skills.trust import TrustedRepoStore, TrustGate
 
 __all__ = [
     "DefaultSkillConfig",

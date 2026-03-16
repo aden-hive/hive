@@ -3,23 +3,17 @@
 from __future__ import annotations
 
 import json
-from datetime import UTC, datetime
-from pathlib import Path
 from unittest.mock import MagicMock, patch
-
-import pytest
 
 from framework.skills.parser import ParsedSkill
 from framework.skills.trust import (
     ProjectTrustClassification,
     ProjectTrustDetector,
-    TrustGate,
-    TrustedRepoEntry,
     TrustedRepoStore,
+    TrustGate,
     _is_localhost_remote,
     _normalize_remote_url,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -53,10 +47,7 @@ class TestNormalizeRemoteUrl:
         assert _normalize_remote_url("https://github.com/org/repo") == "github.com/org/repo"
 
     def test_ssh_url_format(self):
-        assert (
-            _normalize_remote_url("ssh://git@github.com/org/repo.git")
-            == "github.com/org/repo"
-        )
+        assert _normalize_remote_url("ssh://git@github.com/org/repo.git") == "github.com/org/repo"
 
     def test_lowercased(self):
         assert _normalize_remote_url("git@GitHub.COM:Org/Repo.git") == "github.com/org/repo"
@@ -65,10 +56,7 @@ class TestNormalizeRemoteUrl:
         assert _normalize_remote_url("https://github.com/org/repo/") == "github.com/org/repo"
 
     def test_gitlab(self):
-        assert (
-            _normalize_remote_url("git@gitlab.com:team/project.git")
-            == "gitlab.com/team/project"
-        )
+        assert _normalize_remote_url("git@gitlab.com:team/project.git") == "gitlab.com/team/project"
 
 
 # ---------------------------------------------------------------------------
@@ -238,6 +226,7 @@ class TestProjectTrustDetector:
 
     def test_git_timeout_treated_as_trusted(self, tmp_path):
         import subprocess
+
         (tmp_path / ".git").mkdir()
         store = TrustedRepoStore(tmp_path / "t.json")
         det = ProjectTrustDetector(store)
@@ -287,9 +276,7 @@ class TestTrustGate:
         skill = make_skill("proj-skill", "project")
         gate = TrustGate(store=store, interactive=False)
         with patch("subprocess.run") as m:
-            m.return_value = MagicMock(
-                returncode=0, stdout="git@github.com:trusted/repo.git\n"
-            )
+            m.return_value = MagicMock(returncode=0, stdout="git@github.com:trusted/repo.git\n")
             result = gate.filter_and_gate([skill], project_dir=tmp_path)
         assert any(s.name == "proj-skill" for s in result)
 
@@ -322,9 +309,11 @@ class TestTrustGate:
             print_fn=outputs.append,
             input_fn=lambda _: "1",  # trust this session
         )
-        with patch("sys.stdin.isatty", return_value=True), patch(
-            "sys.stdout.isatty", return_value=True
-        ), patch("subprocess.run") as m:
+        with (
+            patch("sys.stdin.isatty", return_value=True),
+            patch("sys.stdout.isatty", return_value=True),
+            patch("subprocess.run") as m,
+        ):
             m.return_value = MagicMock(
                 returncode=0, stdout="https://github.com/stranger/repo.git\n"
             )
@@ -344,9 +333,11 @@ class TestTrustGate:
             print_fn=lambda _: None,
             input_fn=lambda _: "2",  # trust permanently
         )
-        with patch("sys.stdin.isatty", return_value=True), patch(
-            "sys.stdout.isatty", return_value=True
-        ), patch("subprocess.run") as m:
+        with (
+            patch("sys.stdin.isatty", return_value=True),
+            patch("sys.stdout.isatty", return_value=True),
+            patch("subprocess.run") as m,
+        ):
             m.return_value = MagicMock(
                 returncode=0, stdout="https://github.com/stranger/repo.git\n"
             )
@@ -365,9 +356,11 @@ class TestTrustGate:
             print_fn=lambda _: None,
             input_fn=lambda _: "3",  # deny
         )
-        with patch("sys.stdin.isatty", return_value=True), patch(
-            "sys.stdout.isatty", return_value=True
-        ), patch("subprocess.run") as m:
+        with (
+            patch("sys.stdin.isatty", return_value=True),
+            patch("sys.stdout.isatty", return_value=True),
+            patch("subprocess.run") as m,
+        ):
             m.return_value = MagicMock(
                 returncode=0, stdout="https://github.com/stranger/repo.git\n"
             )
@@ -394,9 +387,11 @@ class TestTrustGate:
             print_fn=lambda _: None,
             input_fn=lambda _: (_ for _ in ()).throw(KeyboardInterrupt()),
         )
-        with patch("sys.stdin.isatty", return_value=True), patch(
-            "sys.stdout.isatty", return_value=True
-        ), patch("subprocess.run") as m:
+        with (
+            patch("sys.stdin.isatty", return_value=True),
+            patch("sys.stdout.isatty", return_value=True),
+            patch("subprocess.run") as m,
+        ):
             m.return_value = MagicMock(
                 returncode=0, stdout="https://github.com/stranger/repo.git\n"
             )
@@ -407,9 +402,7 @@ class TestTrustGate:
         """Security notice (NFR-5) should be shown the first time only."""
         # Use a temp sentinel path
         sentinel = tmp_path / ".skill_trust_notice_shown"
-        monkeypatch.setattr(
-            "framework.skills.trust._NOTICE_SENTINEL_PATH", sentinel
-        )
+        monkeypatch.setattr("framework.skills.trust._NOTICE_SENTINEL_PATH", sentinel)
         assert not sentinel.exists()
 
         (tmp_path / ".git").mkdir()
@@ -422,9 +415,11 @@ class TestTrustGate:
             print_fn=output_lines.append,
             input_fn=lambda _: "3",
         )
-        with patch("sys.stdin.isatty", return_value=True), patch(
-            "sys.stdout.isatty", return_value=True
-        ), patch("subprocess.run") as m:
+        with (
+            patch("sys.stdin.isatty", return_value=True),
+            patch("sys.stdout.isatty", return_value=True),
+            patch("subprocess.run") as m,
+        ):
             m.return_value = MagicMock(
                 returncode=0, stdout="https://github.com/stranger/repo.git\n"
             )
@@ -436,9 +431,11 @@ class TestTrustGate:
         # Second run should NOT show the notice again
         output_lines.clear()
         skill2 = make_skill("notice-skill-2", "project")
-        with patch("sys.stdin.isatty", return_value=True), patch(
-            "sys.stdout.isatty", return_value=True
-        ), patch("subprocess.run") as m:
+        with (
+            patch("sys.stdin.isatty", return_value=True),
+            patch("sys.stdout.isatty", return_value=True),
+            patch("subprocess.run") as m,
+        ):
             m.return_value = MagicMock(
                 returncode=0, stdout="https://github.com/stranger/repo.git\n"
             )
@@ -459,15 +456,15 @@ class TestTrustGate:
             print_fn=lambda _: None,
             input_fn=lambda _: "3",  # deny project skills
         )
-        with patch("sys.stdin.isatty", return_value=True), patch(
-            "sys.stdout.isatty", return_value=True
-        ), patch("subprocess.run") as m:
+        with (
+            patch("sys.stdin.isatty", return_value=True),
+            patch("sys.stdout.isatty", return_value=True),
+            patch("subprocess.run") as m,
+        ):
             m.return_value = MagicMock(
                 returncode=0, stdout="https://github.com/stranger/repo.git\n"
             )
-            result = gate.filter_and_gate(
-                [fw_skill, user_skill, proj_skill], project_dir=tmp_path
-            )
+            result = gate.filter_and_gate([fw_skill, user_skill, proj_skill], project_dir=tmp_path)
         names = {s.name for s in result}
         assert "fw" in names
         assert "usr" in names

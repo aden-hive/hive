@@ -14,7 +14,7 @@ import logging
 import subprocess
 import sys
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from enum import StrEnum
 from pathlib import Path
@@ -158,9 +158,7 @@ class ProjectTrustDetector:
     def __init__(self, store: TrustedRepoStore | None = None) -> None:
         self._store = store or TrustedRepoStore()
 
-    def classify(
-        self, project_dir: Path | None
-    ) -> tuple[ProjectTrustClassification, str]:
+    def classify(self, project_dir: Path | None) -> tuple[ProjectTrustClassification, str]:
         """Return (classification, repo_key).
 
         repo_key is empty string for ALWAYS_TRUSTED cases without a remote.
@@ -398,7 +396,8 @@ class TrustGate:
         project_dir: Path | None,
         repo_key: str,
     ) -> str:
-        """Show the security notice (once) and consent prompt. Return 'session' | 'permanent' | 'denied'."""
+        """Show the security notice (once) and consent prompt.
+        Return 'session' | 'permanent' | 'denied'."""
         from framework.credentials.setup import Colors
 
         if not sys.stdout.isatty():
@@ -459,7 +458,10 @@ class TrustGate:
         p("  Options:")
         p(f"    {Colors.CYAN}1){Colors.NC} Trust this session only")
         p(f"    {Colors.CYAN}2){Colors.NC} Trust permanently  — remember for future runs")
-        p(f"    {Colors.DIM}3) Deny              — skip all project-scope skills from this repo{Colors.NC}")
+        p(
+            f"    {Colors.DIM}3) Deny"
+            f"              — skip all project-scope skills from this repo{Colors.NC}"
+        )
         p(f"{Colors.YELLOW}{'─' * 60}{Colors.NC}")
 
     def _prompt_consent(self, Colors) -> str:  # noqa: N803
@@ -472,6 +474,4 @@ class TrustGate:
                     return mapping[choice]
             except (KeyboardInterrupt, EOFError):
                 return "denied"
-            self._print(
-                f"{Colors.RED}Invalid choice. Enter 1, 2, or 3.{Colors.NC}"
-            )
+            self._print(f"{Colors.RED}Invalid choice. Enter 1, 2, or 3.{Colors.NC}")

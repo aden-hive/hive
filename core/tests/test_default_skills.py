@@ -1,18 +1,20 @@
 """Tests for default skills — parsing, token budget, and configuration."""
 
+from pathlib import Path
+
 import pytest
 
 from framework.skills.config import DefaultSkillConfig, SkillsConfig
 from framework.skills.defaults import (
-    SKILL_REGISTRY,
     SHARED_MEMORY_KEYS,
+    SKILL_REGISTRY,
     DefaultSkillManager,
 )
 from framework.skills.parser import parse_skill_md
-from pathlib import Path
 
-
-_DEFAULT_SKILLS_DIR = Path(__file__).resolve().parent.parent / "framework" / "skills" / "_default_skills"
+_DEFAULT_SKILLS_DIR = (
+    Path(__file__).resolve().parent.parent / "framework" / "skills" / "_default_skills"
+)
 
 
 class TestDefaultSkillFiles:
@@ -101,9 +103,7 @@ class TestDefaultSkillManager:
         assert len(manager.active_skill_names) == 5
 
     def test_disable_all_via_convention(self):
-        config = SkillsConfig.from_agent_vars(
-            default_skills={"_all": {"enabled": False}}
-        )
+        config = SkillsConfig.from_agent_vars(default_skills={"_all": {"enabled": False}})
         manager = DefaultSkillManager(config)
         manager.load()
 
@@ -111,6 +111,7 @@ class TestDefaultSkillManager:
 
     def test_log_active_skills(self, caplog):
         import logging
+
         with caplog.at_level(logging.INFO, logger="framework.skills.defaults"):
             manager = DefaultSkillManager()
             manager.load()
@@ -120,6 +121,7 @@ class TestDefaultSkillManager:
 
     def test_log_all_disabled(self, caplog):
         import logging
+
         config = SkillsConfig(all_defaults_disabled=True)
         with caplog.at_level(logging.INFO, logger="framework.skills.defaults"):
             manager = DefaultSkillManager(config)
@@ -159,15 +161,11 @@ class TestSkillsConfig:
         assert config.skills == ["deep-research"]
 
     def test_from_agent_vars_bool_shorthand(self):
-        config = SkillsConfig.from_agent_vars(
-            default_skills={"hive.note-taking": False}
-        )
+        config = SkillsConfig.from_agent_vars(default_skills={"hive.note-taking": False})
         assert config.is_default_enabled("hive.note-taking") is False
 
     def test_from_agent_vars_all_disabled(self):
-        config = SkillsConfig.from_agent_vars(
-            default_skills={"_all": {"enabled": False}}
-        )
+        config = SkillsConfig.from_agent_vars(default_skills={"_all": {"enabled": False}})
         assert config.all_defaults_disabled is True
 
     def test_get_default_overrides(self):
