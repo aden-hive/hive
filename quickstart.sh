@@ -360,13 +360,6 @@ fi
 
 echo ""
 
-# ============================================================
-# Step 4: Verify Claude Code Skills
-# ============================================================
-
-echo -e "${BLUE}Step 4: Verifying Claude Code skills...${NC}"
-echo ""
-
 # Provider configuration - use associative arrays (Bash 4+) or indexed arrays (Bash 3.2)
 if [ "$USE_ASSOC_ARRAYS" = true ]; then
     # Bash 4+ - use associative arrays (cleaner and more efficient)
@@ -1327,7 +1320,7 @@ fi
 echo ""
 
 # ============================================================
-# Step 4b: Browser Automation (GCU) — always enabled
+# Browser Automation (GCU) — always enabled
 # ============================================================
 
 echo -e "${GREEN}⬢${NC} Browser automation enabled"
@@ -1355,10 +1348,10 @@ fi
 echo ""
 
 # ============================================================
-# Step 5: Initialize Credential Store
+# Step 4: Initialize Credential Store
 # ============================================================
 
-echo -e "${YELLOW}⬢${NC} ${BLUE}${BOLD}Step 5: Initializing credential store...${NC}"
+echo -e "${YELLOW}⬢${NC} ${BLUE}${BOLD}Step 4: Initializing credential store...${NC}"
 echo ""
 echo -e "${DIM}The credential store encrypts API keys and secrets for your agents.${NC}"
 echo ""
@@ -1425,10 +1418,10 @@ fi
 echo ""
 
 # ============================================================
-# Step 6: Verify Setup
+# Step 5: Verify Setup
 # ============================================================
 
-echo -e "${YELLOW}⬢${NC} ${BLUE}${BOLD}Step 6: Verifying installation...${NC}"
+echo -e "${YELLOW}⬢${NC} ${BLUE}${BOLD}Step 5: Verifying installation...${NC}"
 echo ""
 
 ERRORS=0
@@ -1489,10 +1482,10 @@ if [ $ERRORS -gt 0 ]; then
 fi
 
 # ============================================================
-# Step 7: Install hive CLI globally
+# Step 6: Install hive CLI globally
 # ============================================================
 
-echo -e "${YELLOW}⬢${NC} ${BLUE}${BOLD}Step 7: Installing hive CLI...${NC}"
+echo -e "${YELLOW}⬢${NC} ${BLUE}${BOLD}Step 6: Installing hive CLI...${NC}"
 echo ""
 
 # Ensure ~/.local/bin exists and is in PATH
