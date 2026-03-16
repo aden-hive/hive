@@ -47,25 +47,34 @@ class RuntimeLogStore:
         self._base_path = base_path
         # Note: _runs_dir is determined per-run_id by _get_run_dir()
 
+    def _session_logs_dir(self, run_id: str) -> Path:
+        """Return the unified session-backed logs directory for a run ID."""
+        is_runtime_logs = self._base_path.name == "runtime_logs"
+        root = self._base_path.parent if is_runtime_logs else self._base_path
+        return root / "sessions" / run_id / "logs"
+
+    def _legacy_run_dir(self, run_id: str) -> Path:
+        """Return the deprecated standalone runs directory for a run ID."""
+        return self._base_path / "runs" / run_id
+
     def _get_run_dir(self, run_id: str) -> Path:
         """Determine run directory path based on run_id format.
 
-        - New format (session_*): {storage_root}/sessions/{run_id}/logs/
+        - Session-backed runs: {storage_root}/sessions/{run_id}/logs/
         - Old format (anything else): {base_path}/runs/{run_id}/ (deprecated)
         """
-        if run_id.startswith("session_"):
-            is_runtime_logs = self._base_path.name == "runtime_logs"
-            root = self._base_path.parent if is_runtime_logs else self._base_path
-            return root / "sessions" / run_id / "logs"
+        session_run_dir = self._session_logs_dir(run_id)
+        if session_run_dir.exists() or run_id.startswith("session_"):
+            return session_run_dir
         import warnings
 
         warnings.warn(
             f"Reading logs from deprecated location for run_id={run_id}. "
-            "New sessions use unified storage at sessions/session_*/logs/",
+            "New sessions use unified storage at sessions/<session_id>/logs/",
             DeprecationWarning,
             stacklevel=3,
         )
-        return self._base_path / "runs" / run_id
+        return self._legacy_run_dir(run_id)
 
     # -------------------------------------------------------------------
     # Incremental write (sync — called from locked sections)
@@ -75,6 +84,10 @@ class RuntimeLogStore:
         """Create the run directory immediately. Called by start_run()."""
         run_dir = self._get_run_dir(run_id)
         run_dir.mkdir(parents=True, exist_ok=True)
+
+    def ensure_session_run_dir(self, run_id: str) -> None:
+        """Create the unified session-backed log directory immediately."""
+        self._session_logs_dir(run_id).mkdir(parents=True, exist_ok=True)
 
     def append_step(self, run_id: str, step: NodeStepLog) -> None:
         """Append one JSONL line to tool_logs.jsonl. Sync."""
@@ -200,17 +213,17 @@ class RuntimeLogStore:
         run_ids = []
 
         # Scan new location: base_path/sessions/{session_id}/logs/
-        # Determine the correct base path for sessions
         is_runtime_logs = self._base_path.name == "runtime_logs"
         root = self._base_path.parent if is_runtime_logs else self._base_path
         sessions_dir = root / "sessions"
 
         if sessions_dir.exists():
             for session_dir in sessions_dir.iterdir():
-                if session_dir.is_dir() and session_dir.name.startswith("session_"):
-                    logs_dir = session_dir / "logs"
-                    if logs_dir.exists() and logs_dir.is_dir():
-                        run_ids.append(session_dir.name)
+                if not session_dir.is_dir():
+                    continue
+                logs_dir = session_dir / "logs"
+                if logs_dir.exists() and logs_dir.is_dir():
+                    run_ids.append(session_dir.name)
 
         # Scan old location: base_path/runs/ (deprecated)
         old_runs_dir = self._base_path / "runs"

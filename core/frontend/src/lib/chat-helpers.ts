@@ -1,10 +1,10 @@
 /**
- * Pure functions for converting backend messages and SSE events into ChatMessage objects.
+ * Pure functions for converting SSE events into ChatMessage objects.
  * No React dependencies — just JSON in, object out.
  */
 
 import type { ChatMessage } from "@/components/ChatPanel";
-import type { AgentEvent, Message } from "@/api/types";
+import type { AgentEvent } from "@/api/types";
 
 /**
  * Derive a human-readable display name from a raw agent identifier.
@@ -102,10 +102,15 @@ export function sseEventToChatMessage(
       const iterTid = iter != null ? String(iter) : tid;
       const iterIdKey = eid && iterTid ? `${eid}-${iterTid}` : eid || iterTid || `t-${Date.now()}`;
 
+      // Distinguish multiple LLM calls within the same iteration (inner tool loop).
+      // inner_turn=0 (or absent) produces no suffix for backward compat.
+      const innerTurn = event.data?.inner_turn as number | undefined;
+      const innerSuffix = innerTurn != null && innerTurn > 0 ? `-t${innerTurn}` : "";
+
       const snapshot = (event.data?.snapshot as string) || (event.data?.content as string) || "";
       if (!snapshot) return null;
       return {
-        id: `stream-${iterIdKey}-${event.node_id}`,
+        id: `stream-${iterIdKey}${innerSuffix}-${event.node_id}`,
         agent: agentDisplayName || event.node_id || "Agent",
         agentColor: "",
         content: snapshot,
@@ -121,11 +126,29 @@ export function sseEventToChatMessage(
       // create a worker_input_request message and set awaitingInput state.
       return null;
 
+    case "client_input_received": {
+      const userContent = (event.data?.content as string) || "";
+      if (!userContent) return null;
+      return {
+        id: `user-input-${event.timestamp}`,
+        agent: "You",
+        agentColor: "",
+        content: userContent,
+        timestamp: "",
+        type: "user",
+        thread,
+        createdAt,
+      };
+    }
+
     case "llm_text_delta": {
+      const llmInnerTurn = event.data?.inner_turn as number | undefined;
+      const llmInnerSuffix = llmInnerTurn != null && llmInnerTurn > 0 ? `-t${llmInnerTurn}` : "";
+
       const snapshot = (event.data?.snapshot as string) || (event.data?.content as string) || "";
       if (!snapshot) return null;
       return {
-        id: `stream-${idKey}-${event.node_id}`,
+        id: `stream-${idKey}${llmInnerSuffix}-${event.node_id}`,
         agent: event.node_id || "Agent",
         agentColor: "",
         content: snapshot,
@@ -167,4 +190,26 @@ export function sseEventToChatMessage(
     default:
       return null;
   }
+}
+
+type QueenPhase = "planning" | "building" | "staging" | "running";
+const VALID_PHASES = new Set<string>(["planning", "building", "staging", "running"]);
+
+/**
+ * Scan an array of persisted events and return the last queen phase seen,
+ * or null if no phase event exists.  Reads both `queen_phase_changed` events
+ * and the per-iteration `phase` metadata on `node_loop_iteration` events.
+ */
+export function extractLastPhase(events: AgentEvent[]): QueenPhase | null {
+  let last: QueenPhase | null = null;
+  for (const evt of events) {
+    const phase =
+      evt.type === "queen_phase_changed" ? (evt.data?.phase as string) :
+      evt.type === "node_loop_iteration" ? (evt.data?.phase as string | undefined) :
+      undefined;
+    if (phase && VALID_PHASES.has(phase)) {
+      last = phase as QueenPhase;
+    }
+  }
+  return last;
 }

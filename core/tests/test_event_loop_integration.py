@@ -572,7 +572,7 @@ async def test_event_loop_conversation_compaction():
     judge = CountingJudge(retry_count=3)
     node = EventLoopNode(
         judge=judge,
-        config=LoopConfig(max_iterations=10, max_history_tokens=200),
+        config=LoopConfig(max_iterations=10, max_context_tokens=200),
     )
     result = await node.execute(ctx)
 

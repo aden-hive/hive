@@ -142,17 +142,27 @@ def save_aden_api_key(key: str) -> None:
     os.environ[ADEN_ENV_VAR] = key
 
 
-def delete_aden_api_key() -> None:
-    """Remove ADEN_API_KEY from the encrypted store and ``os.environ``."""
+def delete_aden_api_key() -> bool:
+    """Remove ADEN_API_KEY from the encrypted store and ``os.environ``.
+
+    Returns True if the key existed and was deleted, False otherwise.
+    """
+    deleted = False
     try:
         from .storage import EncryptedFileStorage
 
         storage = EncryptedFileStorage()
-        storage.delete(ADEN_CREDENTIAL_ID)
+        deleted = storage.delete(ADEN_CREDENTIAL_ID)
+    except (FileNotFoundError, PermissionError) as e:
+        logger.debug("Could not delete %s from encrypted store: %s", ADEN_CREDENTIAL_ID, e)
     except Exception:
-        logger.debug("Could not delete %s from encrypted store", ADEN_CREDENTIAL_ID)
-
+        logger.warning(
+            "Unexpected error deleting %s from encrypted store",
+            ADEN_CREDENTIAL_ID,
+            exc_info=True,
+        )
     os.environ.pop(ADEN_ENV_VAR, None)
+    return deleted
 
 
 # ---------------------------------------------------------------------------
@@ -167,8 +177,10 @@ def _read_credential_key_file() -> str | None:
             value = CREDENTIAL_KEY_PATH.read_text(encoding="utf-8").strip()
             if value:
                 return value
+    except (FileNotFoundError, PermissionError) as e:
+        logger.debug("Could not read %s: %s", CREDENTIAL_KEY_PATH, e)
     except Exception:
-        logger.debug("Could not read %s", CREDENTIAL_KEY_PATH)
+        logger.warning("Unexpected error reading %s", CREDENTIAL_KEY_PATH, exc_info=True)
     return None
 
 
@@ -196,6 +208,12 @@ def _read_aden_from_encrypted_store() -> str | None:
         cred = storage.load(ADEN_CREDENTIAL_ID)
         if cred:
             return cred.get_key("api_key")
+    except (FileNotFoundError, PermissionError, KeyError) as e:
+        logger.debug("Could not load %s from encrypted store: %s", ADEN_CREDENTIAL_ID, e)
     except Exception:
-        logger.debug("Could not load %s from encrypted store", ADEN_CREDENTIAL_ID)
+        logger.warning(
+            "Unexpected error loading %s from encrypted store",
+            ADEN_CREDENTIAL_ID,
+            exc_info=True,
+        )
     return None

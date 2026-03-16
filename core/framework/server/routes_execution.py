@@ -125,6 +125,18 @@ async def handle_chat(request: web.Request) -> web.Response:
         node = queen_executor.node_registry.get("queen")
         if node is not None and hasattr(node, "inject_event"):
             await node.inject_event(message, is_client_input=True)
+            # Publish to EventBus so the session event log captures user messages
+            from framework.runtime.event_bus import AgentEvent, EventType
+
+            await session.event_bus.publish(
+                AgentEvent(
+                    type=EventType.CLIENT_INPUT_RECEIVED,
+                    stream_id="queen",
+                    node_id="queen",
+                    execution_id=session.id,
+                    data={"content": message},
+                )
+            )
             return web.json_response(
                 {
                     "status": "queen",

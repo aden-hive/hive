@@ -27,11 +27,23 @@ from framework.graph.node import (
     SharedMemory,
 )
 from framework.graph.validator import OutputValidator
-from framework.llm.provider import LLMProvider, Tool
+from framework.llm.provider import LLMProvider, Tool, ToolUse
 from framework.observability import set_trace_context
 from framework.runtime.core import Runtime
 from framework.schemas.checkpoint import Checkpoint
 from framework.storage.checkpoint_store import CheckpointStore
+
+logger = logging.getLogger(__name__)
+
+
+def _default_max_context_tokens() -> int:
+    """Resolve max_context_tokens from global config, falling back to 32000."""
+    try:
+        from framework.config import get_max_context_tokens
+
+        return get_max_context_tokens()
+    except Exception:
+        return 32_000
 
 
 @dataclass
@@ -138,6 +150,7 @@ class GraphExecutor:
         tool_provider_map: dict[str, str] | None = None,
         dynamic_tools_provider: Callable | None = None,
         dynamic_prompt_provider: Callable | None = None,
+        iteration_metadata_provider: Callable | None = None,
     ):
         """
         Initialize the executor.
@@ -183,6 +196,7 @@ class GraphExecutor:
         self.tool_provider_map = tool_provider_map
         self.dynamic_tools_provider = dynamic_tools_provider
         self.dynamic_prompt_provider = dynamic_prompt_provider
+        self.iteration_metadata_provider = iteration_metadata_provider
 
         # Parallel execution settings
         self.enable_parallel_execution = enable_parallel_execution
@@ -330,7 +344,7 @@ class GraphExecutor:
                 _depth,
             )
         else:
-            max_tokens = getattr(conversation, "_max_history_tokens", 32000)
+            max_tokens = getattr(conversation, "_max_context_tokens", 32000)
             target_tokens = max_tokens // 2
             target_chars = target_tokens * 4
 
@@ -402,6 +416,14 @@ class GraphExecutor:
             _depth + 1,
         )
         return s1 + "\n\n" + s2
+
+    def _get_runtime_log_session_id(self) -> str:
+        """Return the session-backed execution ID for runtime logging, if any."""
+        if not self._storage_path:
+            return ""
+        if self._storage_path.parent.name != "sessions":
+            return ""
+        return self._storage_path.name
 
     async def execute(
         self,
@@ -696,10 +718,7 @@ class GraphExecutor:
         )
 
         if self.runtime_logger:
-            # Extract session_id from storage_path if available (for unified sessions)
-            session_id = ""
-            if self._storage_path and self._storage_path.name.startswith("session_"):
-                session_id = self._storage_path.name
+            session_id = self._get_runtime_log_session_id()
             self.runtime_logger.start_run(goal_id=goal.id, session_id=session_id)
 
         self.logger.info(f"🚀 Starting execution: {goal.name}")
@@ -924,6 +943,33 @@ class GraphExecutor:
                 # Execute node
                 self.logger.info("   Executing...")
                 result = await node_impl.execute(ctx)
+
+                # GCU tab cleanup: stop the browser profile after a top-level GCU node
+                # finishes so tabs don't accumulate. Mirrors the subagent cleanup in
+                # EventLoopNode._execute_subagent().
+                if node_spec.node_type == "gcu" and self.tool_executor is not None:
+                    try:
+                        from gcu.browser.session import (
+                            _active_profile as _gcu_profile_var,
+                        )
+
+                        _gcu_profile = _gcu_profile_var.get()
+                        _stop_use = ToolUse(
+                            id="gcu-cleanup",
+                            name="browser_stop",
+                            input={"profile": _gcu_profile},
+                        )
+                        _stop_result = self.tool_executor(_stop_use)
+                        if asyncio.iscoroutine(_stop_result) or asyncio.isfuture(_stop_result):
+                            await _stop_result
+                    except ImportError:
+                        pass  # GCU not installed
+                    except Exception as _gcu_exc:
+                        logger.warning(
+                            "GCU browser_stop failed for profile %r: %s",
+                            _gcu_profile,
+                            _gcu_exc,
+                        )
 
                 # Emit node-completed event (skip event_loop nodes)
                 if self._event_bus and node_spec.node_type != "event_loop":
@@ -1799,6 +1845,7 @@ class GraphExecutor:
             shared_node_registry=self.node_registry,  # For subagent escalation routing
             dynamic_tools_provider=self.dynamic_tools_provider,
             dynamic_prompt_provider=self.dynamic_prompt_provider,
+            iteration_metadata_provider=self.iteration_metadata_provider,
         )
 
     VALID_NODE_TYPES = {
@@ -1872,7 +1919,7 @@ class GraphExecutor:
                     max_tool_calls_per_turn=lc.get("max_tool_calls_per_turn", 30),
                     tool_call_overflow_margin=lc.get("tool_call_overflow_margin", 0.5),
                     stall_detection_threshold=lc.get("stall_detection_threshold", 3),
-                    max_history_tokens=lc.get("max_history_tokens", 32000),
+                    max_context_tokens=lc.get("max_context_tokens", _default_max_context_tokens()),
                     max_tool_result_chars=lc.get("max_tool_result_chars", 30_000),
                     spillover_dir=spillover,
                     hooks=lc.get("hooks", {}),
@@ -2039,6 +2086,10 @@ class GraphExecutor:
                 edge=edge,
             )
 
+        # Track which branch wrote which key for memory conflict detection
+        fanout_written_keys: dict[str, str] = {}  # key -> branch_id that wrote it
+        fanout_keys_lock = asyncio.Lock()
+
         self.logger.info(f"   ⑂ Fan-out: executing {len(branches)} branches in parallel")
         for branch in branches.values():
             target_spec = graph.get_node(branch.node_id)
@@ -2130,8 +2181,31 @@ class GraphExecutor:
                         )
 
                     if result.success:
-                        # Write outputs to shared memory using async write
+                        # Write outputs to shared memory with conflict detection
+                        conflict_strategy = self._parallel_config.memory_conflict_strategy
                         for key, value in result.output.items():
+                            async with fanout_keys_lock:
+                                prior_branch = fanout_written_keys.get(key)
+                                if prior_branch and prior_branch != branch.branch_id:
+                                    if conflict_strategy == "error":
+                                        raise RuntimeError(
+                                            f"Memory conflict: key '{key}' already written "
+                                            f"by branch '{prior_branch}', "
+                                            f"conflicting write from '{branch.branch_id}'"
+                                        )
+                                    elif conflict_strategy == "first_wins":
+                                        self.logger.debug(
+                                            f"      ⚠ Skipping write to '{key}' "
+                                            f"(first_wins: already set by {prior_branch})"
+                                        )
+                                        continue
+                                    else:
+                                        # last_wins (default): write and log
+                                        self.logger.debug(
+                                            f"      ⚠ Key '{key}' overwritten "
+                                            f"(last_wins: {prior_branch} -> {branch.branch_id})"
+                                        )
+                                fanout_written_keys[key] = branch.branch_id
                             await memory.write_async(key, value)
 
                         branch.result = result
@@ -2178,9 +2252,11 @@ class GraphExecutor:
 
                 return branch, e
 
-        # Execute all branches concurrently
-        tasks = [execute_single_branch(b) for b in branches.values()]
-        results = await asyncio.gather(*tasks, return_exceptions=False)
+        # Execute all branches concurrently with per-branch timeout
+        timeout = self._parallel_config.branch_timeout_seconds
+        branch_list = list(branches.values())
+        tasks = [asyncio.wait_for(execute_single_branch(b), timeout=timeout) for b in branch_list]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
 
         # Process results
         total_tokens = 0
@@ -2188,17 +2264,33 @@ class GraphExecutor:
         branch_results: dict[str, NodeResult] = {}
         failed_branches: list[ParallelBranch] = []
 
-        for branch, result in results:
-            path.append(branch.node_id)
+        for i, result in enumerate(results):
+            branch = branch_list[i]
 
-            if isinstance(result, Exception):
+            if isinstance(result, asyncio.TimeoutError):
+                # Branch timed out
+                branch.status = "timed_out"
+                branch.error = f"Branch timed out after {timeout}s"
+                self.logger.warning(
+                    f"      ⏱ Branch {graph.get_node(branch.node_id).name}: "
+                    f"timed out after {timeout}s"
+                )
+                path.append(branch.node_id)
                 failed_branches.append(branch)
-            elif result is None or not result.success:
+            elif isinstance(result, Exception):
+                path.append(branch.node_id)
                 failed_branches.append(branch)
             else:
-                total_tokens += result.tokens_used
-                total_latency += result.latency_ms
-                branch_results[branch.branch_id] = result
+                returned_branch, node_result = result
+                path.append(returned_branch.node_id)
+                if node_result is None or isinstance(node_result, Exception):
+                    failed_branches.append(returned_branch)
+                elif not node_result.success:
+                    failed_branches.append(returned_branch)
+                else:
+                    total_tokens += node_result.tokens_used
+                    total_latency += node_result.latency_ms
+                    branch_results[returned_branch.branch_id] = node_result
 
         # Handle failures based on config
         if failed_branches:
