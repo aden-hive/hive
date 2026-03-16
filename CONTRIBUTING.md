@@ -121,8 +121,14 @@ uv sync
 6. Make your changes
 7. Run checks and tests:
    ```bash
-   make check    # Lint and format checks (ruff check + ruff format --check)
+   make check    # Lint and format checks
    make test     # Core tests
+   ```
+   On Windows (no make), run directly:
+   ```powershell
+   uv run ruff check core/ tools/
+   uv run ruff format --check core/ tools/
+   uv run pytest core/tests/
    ```
 8. Commit your changes following our commit conventions
 9. Push to your fork and submit a Pull Request
@@ -222,8 +228,7 @@ else:  # linux
 - **Node.js 18+** (optional, for frontend development)
 
 > **Windows Users:**
-> If you are on native Windows, it is recommended to use **WSL (Windows Subsystem for Linux)**.
-> Alternatively, make sure to run PowerShell or Git Bash with Python 3.11+ installed, and disable "App Execution Aliases" in Windows settings.
+> Native Windows is supported. Use `.\quickstart.ps1` for setup and `.\hive.ps1` to run (PowerShell 5.1+). Disable "App Execution Aliases" in Windows settings to avoid Python path conflicts. WSL is also an option but not required.
 
 > **Tip:** Installing Claude Code skills is optional for running existing agents, but required if you plan to **build new agents**.
 
