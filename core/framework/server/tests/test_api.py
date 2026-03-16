@@ -81,7 +81,7 @@ class MockStream:
     _active_executors: dict = field(default_factory=dict)
     active_execution_ids: set = field(default_factory=set)
 
-    async def cancel_execution(self, execution_id: str) -> bool:
+    async def cancel_execution(self, execution_id: str, reason: str | None = None) -> bool:
         return execution_id in self._execution_tasks
 
 
@@ -172,8 +172,10 @@ def _make_session(
     rt = runtime or MockRuntime(graph=graph, log_store=log_store)
     runner = MagicMock()
     runner.intro_message = "Test intro"
+    runner.cleanup_async = AsyncMock()
 
     mock_event_bus = MagicMock()
+    mock_event_bus.publish = AsyncMock()
     mock_llm = MagicMock()
 
     queen_executor = _make_queen_executor() if with_queen else None
@@ -429,27 +431,18 @@ class TestSessionCRUD:
             assert "graphs" in data
 
     @pytest.mark.asyncio
-<<<<<<< HEAD
     async def test_list_sessions_hides_stale_live_sessions_without_stopping(self):
-=======
-    async def test_list_sessions_excludes_stale_live_sessions(self):
->>>>>>> e8477e7b642cf616cbb32e4eaf80a567448760b9
         session = _make_session(llm_config_fingerprint="stale-fingerprint")
         app = _make_app_with_session(session)
         manager = app["manager"]
         manager.is_session_stale = MagicMock(return_value=True)
-<<<<<<< HEAD
         manager.stop_session = AsyncMock(
             side_effect=lambda session_id: manager._sessions.pop(session_id, None) is not None
         )
-=======
-        manager.stop_session = AsyncMock(return_value=True)
->>>>>>> e8477e7b642cf616cbb32e4eaf80a567448760b9
 
         async with TestClient(TestServer(app)) as client:
             resp = await client.get("/api/sessions")
             data = await resp.json()
-<<<<<<< HEAD
             assert manager.get_session("test_agent") is session
 
         assert resp.status == 200
@@ -477,15 +470,6 @@ class TestSessionCRUD:
     async def test_reconnect_session_stops_stale_live_session_and_returns_cold_info(
         self, tmp_agent_dir
     ):
-=======
-
-        assert resp.status == 200
-        assert data["sessions"] == []
-        assert ("test_agent",) in [call.args for call in manager.stop_session.await_args_list]
-
-    @pytest.mark.asyncio
-    async def test_get_session_stops_stale_live_session_and_returns_cold_info(self, tmp_agent_dir):
->>>>>>> e8477e7b642cf616cbb32e4eaf80a567448760b9
         tmp_path, _, _ = tmp_agent_dir
         session_id = "test_agent"
         cold_parts_dir = (
@@ -503,7 +487,6 @@ class TestSessionCRUD:
         app = _make_app_with_session(session)
         manager = app["manager"]
         manager.is_session_stale = MagicMock(return_value=True)
-<<<<<<< HEAD
         manager.stop_session = AsyncMock(
             side_effect=lambda target_id: manager._sessions.pop(target_id, None) is not None
         )
@@ -512,13 +495,6 @@ class TestSessionCRUD:
             resp = await client.post(f"/api/sessions/{session_id}/reconnect")
             data = await resp.json()
             assert manager.get_session(session_id) is None
-=======
-        manager.stop_session = AsyncMock(return_value=True)
-
-        async with TestClient(TestServer(app)) as client:
-            resp = await client.get(f"/api/sessions/{session_id}")
-            data = await resp.json()
->>>>>>> e8477e7b642cf616cbb32e4eaf80a567448760b9
 
         assert resp.status == 200
         assert data["session_id"] == session_id
@@ -652,14 +628,14 @@ class TestExecution:
             assert data["delivered"] is True
 
     @pytest.mark.asyncio
-    async def test_chat_injects_when_node_waiting(self):
-        """When a node is awaiting input, /chat should inject instead of trigger."""
+    async def test_worker_input_injects_when_node_waiting(self):
+        """Worker input is delivered through the dedicated /worker-input route."""
         session = _make_session()
         session.worker_runtime.find_awaiting_node = lambda: ("chat_node", "primary")
         app = _make_app_with_session(session)
         async with TestClient(TestServer(app)) as client:
             resp = await client.post(
-                "/api/sessions/test_agent/chat",
+                "/api/sessions/test_agent/worker-input",
                 json={"message": "user reply"},
             )
             assert resp.status == 200
@@ -1740,7 +1716,11 @@ class TestSSEFormat:
 
 class TestErrorMiddleware:
     @pytest.mark.asyncio
-    async def test_404_on_unknown_api_route(self):
+    async def test_404_on_unknown_api_route(self, monkeypatch):
+        # Dist assets make create_app() register the SPA fallback, which would
+        # otherwise turn this API-middleware test into an environment-dependent
+        # frontend file-serving check.
+        monkeypatch.setattr("framework.server.app._setup_static_serving", lambda app: None)
         app = create_app()
         async with TestClient(TestServer(app)) as client:
             resp = await client.get("/api/nonexistent")

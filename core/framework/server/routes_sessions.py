@@ -68,7 +68,6 @@ def _session_to_live_dict(session) -> dict:
     }
 
 
-<<<<<<< HEAD
 def _session_to_detail_dict(session) -> dict:
     """Serialize a live Session with optional worker graph metadata."""
     data = _session_to_live_dict(session)
@@ -109,17 +108,6 @@ def _session_to_detail_dict(session) -> dict:
         data["graphs"] = session.worker_runtime.list_graphs()
 
     return data
-=======
-async def _drop_stale_live_session(manager: SessionManager, session) -> bool:
-    """Stop live sessions whose cached LLM config no longer matches Hive config."""
-    if not manager.is_session_stale(session):
-        return False
-    # Live sessions cache their LLM at creation time. When auth/model settings
-    # change, drop the live session so the next reconnect rehydrates with the
-    # latest config instead of silently reusing stale credentials.
-    await manager.stop_session(session.id)
-    return True
->>>>>>> e8477e7b642cf616cbb32e4eaf80a567448760b9
 
 
 def _credential_error_response(exc: Exception, agent_path: str | None) -> web.Response | None:
@@ -237,7 +225,6 @@ async def handle_create_session(request: web.Request) -> web.Response:
 async def handle_list_live_sessions(request: web.Request) -> web.Response:
     """GET /api/sessions — list all active sessions."""
     manager = _get_manager(request)
-<<<<<<< HEAD
     # Keep GET read-only. Stale live sessions are hidden here and recycled on
     # reconnect so listing sessions never mutates server state.
     sessions = [
@@ -245,13 +232,6 @@ async def handle_list_live_sessions(request: web.Request) -> web.Response:
         for session in manager.list_sessions()
         if not manager.is_session_stale(session)
     ]
-=======
-    sessions = []
-    for session in manager.list_sessions():
-        if await _drop_stale_live_session(manager, session):
-            continue
-        sessions.append(_session_to_live_dict(session))
->>>>>>> e8477e7b642cf616cbb32e4eaf80a567448760b9
     return web.json_response({"sessions": sessions})
 
 
@@ -265,10 +245,6 @@ async def handle_get_live_session(request: web.Request) -> web.Response:
     manager = _get_manager(request)
     session_id = request.match_info["session_id"]
     session = manager.get_session(session_id)
-
-    if session is not None and await _drop_stale_live_session(manager, session):
-        session = None
-
     if session is None:
         if manager.is_loading(session_id):
             return web.json_response(

@@ -41,13 +41,10 @@ def _runner_for_setup_unit_test() -> AgentRunner:
     return runner
 
 
-<<<<<<< HEAD
 def _raise_credential_store_fallback() -> None:
     raise AssertionError("credential store fallback should not run")
 
 
-=======
->>>>>>> e8477e7b642cf616cbb32e4eaf80a567448760b9
 def test_minimax_provider_prefix_maps_to_minimax_api_key():
     runner = _runner_for_unit_test()
     assert runner._get_api_key_env_var("minimax/minimax-text-01") == "MINIMAX_API_KEY"
@@ -87,13 +84,7 @@ def test_setup_does_not_fallback_to_api_key_for_missing_subscription_token(monke
             calls.append(kwargs)
 
     monkeypatch.setattr("framework.llm.litellm.LiteLLMProvider", _DummyLLM)
-<<<<<<< HEAD
     runner._get_api_key_from_credential_store = _raise_credential_store_fallback
-=======
-    runner._get_api_key_from_credential_store = lambda: (_ for _ in ()).throw(
-        AssertionError("credential store fallback should not run")
-    )
->>>>>>> e8477e7b642cf616cbb32e4eaf80a567448760b9
 
     runner._setup()
 

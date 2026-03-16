@@ -11,11 +11,7 @@ import logging
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
-<<<<<<< HEAD
 from typing import Any, Literal, cast
-=======
-from typing import Any, Literal
->>>>>>> e8477e7b642cf616cbb32e4eaf80a567448760b9
 
 from framework.graph.edge import DEFAULT_MAX_TOKENS
 
@@ -91,11 +87,7 @@ def resolve_llm_auth_mode(llm: dict[str, Any] | None = None) -> LLMAuthMode:
     llm = _get_llm_config(llm)
     auth_mode = str(llm.get("auth_mode", "")).strip().lower()
     if auth_mode in _SUPPORTED_AUTH_MODES:
-<<<<<<< HEAD
         return cast(LLMAuthMode, auth_mode)
-=======
-        return auth_mode
->>>>>>> e8477e7b642cf616cbb32e4eaf80a567448760b9
     if llm.get("use_claude_code_subscription"):
         return "claude_code"
     if llm.get("use_codex_subscription"):
@@ -210,15 +202,11 @@ def get_llm_runtime_fingerprint(
     model: str | None = None,
     llm: dict[str, Any] | None = None,
 ) -> str:
-<<<<<<< HEAD
     """Return a stable digest of the effective LLM runtime settings.
 
     Excludes live credential material so routine OAuth token refreshes do not
     make an unchanged session look stale.
     """
-=======
-    """Return a stable digest of the effective LLM runtime settings."""
->>>>>>> e8477e7b642cf616cbb32e4eaf80a567448760b9
     llm = _get_llm_config(llm)
     payload = {
         "auth_mode": resolve_llm_auth_mode(llm),
@@ -226,11 +214,6 @@ def get_llm_runtime_fingerprint(
         "model": model or _get_preferred_model(llm),
         "api_base": get_api_base(llm),
         "api_key_env_var": llm.get("api_key_env_var"),
-<<<<<<< HEAD
-=======
-        "api_key": get_api_key(llm),
-        "extra_kwargs": get_llm_extra_kwargs(llm),
->>>>>>> e8477e7b642cf616cbb32e4eaf80a567448760b9
     }
     encoded = json.dumps(
         payload,

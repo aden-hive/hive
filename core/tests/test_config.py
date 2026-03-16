@@ -141,7 +141,6 @@ class TestLLMAuthMode:
         api_key_fingerprint = get_llm_runtime_fingerprint()
 
         assert codex_fingerprint != api_key_fingerprint
-<<<<<<< HEAD
 
     def test_runtime_fingerprint_ignores_rotating_subscription_tokens(self, tmp_path, monkeypatch):
         config_file = tmp_path / "configuration.json"
@@ -163,5 +162,3 @@ class TestLLMAuthMode:
         second = get_llm_runtime_fingerprint()
 
         assert first == second
-=======
->>>>>>> e8477e7b642cf616cbb32e4eaf80a567448760b9
