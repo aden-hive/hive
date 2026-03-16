@@ -605,9 +605,7 @@ class MCPClient:
             if self._sse_context:
                 await self._sse_context.__aexit__(None, None, None)
         except asyncio.CancelledError:
-            logger.debug(
-                "SSE context cleanup was cancelled; proceeding with best-effort shutdown"
-            )
+            logger.debug("SSE context cleanup was cancelled; proceeding with best-effort shutdown")
         except Exception as e:
             logger.warning(f"Error closing SSE context: {e}")
         finally:
