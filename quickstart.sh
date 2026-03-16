@@ -32,6 +32,9 @@ NC='\033[0m' # No Color
 # Get the directory where this script is located
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 
+# Hive LLM router endpoint
+HIVE_LLM_ENDPOINT="https://api.adenhq.com"
+
 # Helper function for prompts
 prompt_yes_no() {
     local prompt="$1"
@@ -906,7 +909,7 @@ try:
     elif llm.get('use_codex_subscription'): sub = 'codex'
     elif llm.get('use_kimi_code_subscription'): sub = 'kimi_code'
     elif llm.get('provider', '') == 'minimax' or 'api.minimax.io' in llm.get('api_base', ''): sub = 'minimax_code'
-    elif llm.get('provider', '') == 'hive' or 'api.adenhq.com' in llm.get('api_base', ''): sub = 'hive_llm'
+    elif llm.get('provider', '') == 'hive' or 'adenhq.com' in llm.get('api_base', ''): sub = 'hive_llm'
     elif 'api.z.ai' in llm.get('api_base', ''): sub = 'zai_code'
     print(f'PREV_SUB_MODE={sub}')
 except Exception:
@@ -1138,15 +1141,27 @@ case $choice in
         SUBSCRIPTION_MODE="hive_llm"
         SELECTED_PROVIDER_ID="hive"
         SELECTED_ENV_VAR="HIVE_API_KEY"
-        SELECTED_MODEL="kimi-2.5"
         SELECTED_MAX_TOKENS=32768
         SELECTED_MAX_CONTEXT_TOKENS=120000
-        SELECTED_API_BASE="https://api.adenhq.com"
+        SELECTED_API_BASE="$HIVE_LLM_ENDPOINT"
         PROVIDER_NAME="Hive"
         SIGNUP_URL="https://adenhq.com"
         echo ""
         echo -e "${GREEN}⬢${NC} Using Hive LLM"
-        echo -e "  ${DIM}Model: kimi-2.5 | API: api.adenhq.com${NC}"
+        echo ""
+        echo -e "  Select a model:"
+        echo -e "  ${CYAN}1)${NC} queen              ${DIM}(default — Hive flagship)${NC}"
+        echo -e "  ${CYAN}2)${NC} kimi-2.5"
+        echo -e "  ${CYAN}3)${NC} GLM-5"
+        echo ""
+        read -r -p "  Enter model choice (1-3) [1]: " hive_model_choice || true
+        hive_model_choice="${hive_model_choice:-1}"
+        case "$hive_model_choice" in
+            2) SELECTED_MODEL="kimi-2.5" ;;
+            3) SELECTED_MODEL="GLM-5" ;;
+            *) SELECTED_MODEL="queen" ;;
+        esac
+        echo -e "  ${DIM}Model: $SELECTED_MODEL | API: ${HIVE_LLM_ENDPOINT}${NC}"
         ;;
     7)
         SELECTED_ENV_VAR="ANTHROPIC_API_KEY"

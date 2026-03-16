@@ -158,9 +158,7 @@ def _model_supports_cache_control(model: str) -> bool:
 # enforces a coding-agent whitelist that blocks unknown User-Agents.
 KIMI_API_BASE = "https://api.kimi.com/coding"
 
-# Hive LLM uses an Anthropic-compatible endpoint at api.adenhq.com.
-# litellm's Anthropic handler appends /v1/messages, so the base is just the host.
-HIVE_API_BASE = "https://api.adenhq.com"
+from framework.config import HIVE_LLM_ENDPOINT as HIVE_API_BASE
 
 # Empty-stream retries use a short fixed delay, not the rate-limit backoff.
 # Conversation-structure issues are deterministic — long waits don't help.

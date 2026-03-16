@@ -16,6 +16,8 @@ import sys
 
 import httpx
 
+from framework.config import HIVE_LLM_ENDPOINT
+
 TIMEOUT = 10.0
 
 
@@ -137,7 +139,7 @@ PROVIDERS = {
     ),
     # Hive LLM uses an Anthropic-compatible endpoint
     "hive": lambda key, **kw: check_anthropic_compatible(
-        key, "https://api.adenhq.com/v1/messages", "Hive"
+        key, f"{HIVE_LLM_ENDPOINT}/v1/messages", "Hive"
     ),
 }
 

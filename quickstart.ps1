@@ -21,6 +21,9 @@ $ErrorActionPreference = "Continue"
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Definition
 $UvHelperPath = Join-Path $ScriptDir "scripts\uv-discovery.ps1"
 
+# Hive LLM router endpoint
+$HiveLlmEndpoint = "https://api.adenhq.com"
+
 . $UvHelperPath
 
 # ============================================================
@@ -938,7 +941,7 @@ if (Test-Path $HiveConfigFile) {
             elseif ($prevLlm.use_kimi_code_subscription) { $PrevSubMode = "kimi_code" }
             elseif ($prevLlm.api_base -and $prevLlm.api_base -like "*api.z.ai*") { $PrevSubMode = "zai_code" }
             elseif ($prevLlm.api_base -and $prevLlm.api_base -like "*api.kimi.com*") { $PrevSubMode = "kimi_code" }
-            elseif ($prevLlm.provider -eq "hive" -or ($prevLlm.api_base -and $prevLlm.api_base -like "*api.adenhq.com*")) { $PrevSubMode = "hive_llm" }
+            elseif ($prevLlm.provider -eq "hive" -or ($prevLlm.api_base -and $prevLlm.api_base -like "*adenhq.com*")) { $PrevSubMode = "hive_llm" }
         }
     } catch { }
 }
@@ -1141,12 +1144,24 @@ switch ($num) {
         $SubscriptionMode        = "hive_llm"
         $SelectedProviderId      = "hive"
         $SelectedEnvVar          = "HIVE_API_KEY"
-        $SelectedModel           = "kimi-2.5"
         $SelectedMaxTokens       = 32768
         $SelectedMaxContextTokens = 120000
         Write-Host ""
         Write-Ok "Using Hive LLM"
-        Write-Color -Text "  Model: kimi-2.5 | API: api.adenhq.com" -Color DarkGray
+        Write-Host ""
+        Write-Host "  Select a model:"
+        Write-Host "  " -NoNewline; Write-Color -Text "1)" -Color Cyan -NoNewline; Write-Host " queen              " -NoNewline; Write-Color -Text "(default - Hive flagship)" -Color DarkGray
+        Write-Host "  " -NoNewline; Write-Color -Text "2)" -Color Cyan -NoNewline; Write-Host " kimi-2.5"
+        Write-Host "  " -NoNewline; Write-Color -Text "3)" -Color Cyan -NoNewline; Write-Host " GLM-5"
+        Write-Host ""
+        $hiveModelChoice = Read-Host "  Enter model choice (1-3) [1]"
+        if (-not $hiveModelChoice) { $hiveModelChoice = "1" }
+        switch ($hiveModelChoice) {
+            "2" { $SelectedModel = "kimi-2.5" }
+            "3" { $SelectedModel = "GLM-5" }
+            default { $SelectedModel = "queen" }
+        }
+        Write-Color -Text "  Model: $SelectedModel | API: $HiveLlmEndpoint" -Color DarkGray
     }
     { $_ -ge 6 -and $_ -le 10 } {
         # API key providers
@@ -1388,7 +1403,7 @@ if ($SubscriptionMode -eq "hive_llm") {
             # Health check the new key
             Write-Host "  Verifying Hive API key... " -NoNewline
             try {
-                $hcOutput = & $PythonCmd scripts/check_llm_key.py hive $apiKey "https://api.adenhq.com" 2>&1
+                $hcOutput = & $PythonCmd scripts/check_llm_key.py hive $apiKey "$HiveLlmEndpoint" 2>&1
                 $hcJson = $hcOutput | ConvertFrom-Json
                 if ($hcJson.valid -eq $true) {
                     Write-Color -Text "ok" -Color Green
@@ -1464,7 +1479,7 @@ if ($SelectedProviderId) {
         $config.llm["api_base"] = "https://api.kimi.com/coding"
         $config.llm["api_key_env_var"] = $SelectedEnvVar
     } elseif ($SubscriptionMode -eq "hive_llm") {
-        $config.llm["api_base"] = "https://api.adenhq.com"
+        $config.llm["api_base"] = $HiveLlmEndpoint
         $config.llm["api_key_env_var"] = $SelectedEnvVar
     } else {
         $config.llm["api_key_env_var"] = $SelectedEnvVar
