@@ -45,35 +45,29 @@ def register_skill_commands(subparsers) -> None:
 
 def cmd_skill_list(args) -> int:
     """List all discovered skills grouped by scope."""
-    from framework.skills.discovery import SkillDiscovery
-    from framework.skills.models import SkillScope, TrustStatus
+    from framework.skills.discovery import DiscoveryConfig, SkillDiscovery
 
     project_dir = Path(args.project_dir).resolve() if args.project_dir else Path.cwd()
-    skills = SkillDiscovery().discover(project_dir)
+    skills = SkillDiscovery(DiscoveryConfig(project_root=project_dir)).discover()
 
     if not skills:
         print("No skills discovered.")
         return 0
 
     scope_headers = {
-        SkillScope.PROJECT: "PROJECT SKILLS",
-        SkillScope.USER: "USER SKILLS",
-        SkillScope.FRAMEWORK: "FRAMEWORK SKILLS",
+        "project": "PROJECT SKILLS",
+        "user": "USER SKILLS",
+        "framework": "FRAMEWORK SKILLS",
     }
 
-    for scope in (SkillScope.PROJECT, SkillScope.USER, SkillScope.FRAMEWORK):
+    for scope in ("project", "user", "framework"):
         scope_skills = [s for s in skills if s.source_scope == scope]
         if not scope_skills:
             continue
         print(f"\n{scope_headers[scope]}")
         print("─" * 40)
         for skill in scope_skills:
-            trust_note = (
-                "  [pending trust]"
-                if skill.trust_status == TrustStatus.PENDING_CONSENT
-                else ""
-            )
-            print(f"  • {skill.name}{trust_note}")
+            print(f"  • {skill.name}")
             print(f"    {skill.description}")
             print(f"    {skill.location}")
 

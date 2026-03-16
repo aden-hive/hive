@@ -9,7 +9,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from framework.skills.models import SkillEntry, SkillScope, TrustStatus
+from framework.skills.parser import ParsedSkill
 from framework.skills.trust import (
     ProjectTrustClassification,
     ProjectTrustDetector,
@@ -26,18 +26,14 @@ from framework.skills.trust import (
 # ---------------------------------------------------------------------------
 
 
-def make_skill(name: str = "test-skill", scope: SkillScope = SkillScope.PROJECT) -> SkillEntry:
-    return SkillEntry(
+def make_skill(name: str = "test-skill", scope: str = "project") -> ParsedSkill:
+    return ParsedSkill(
         name=name,
         description="Test skill",
-        location=Path(f"/fake/{name}/SKILL.md"),
-        base_dir=Path(f"/fake/{name}"),
+        location=f"/fake/{name}/SKILL.md",
+        base_dir=f"/fake/{name}",
         source_scope=scope,
-        trust_status=(
-            TrustStatus.PENDING_CONSENT
-            if scope == SkillScope.PROJECT
-            else TrustStatus.TRUSTED
-        ),
+        body="Test skill instructions.",
     )
 
 
@@ -265,33 +261,30 @@ class TestProjectTrustDetector:
 
 class TestTrustGate:
     def test_framework_scope_always_passes(self, tmp_path):
-        skill = make_skill("fw-skill", SkillScope.FRAMEWORK)
-        skill.trust_status = TrustStatus.TRUSTED
+        skill = make_skill("fw-skill", "framework")
         gate = TrustGate(store=TrustedRepoStore(tmp_path / "t.json"), interactive=False)
         result = gate.filter_and_gate([skill], project_dir=None)
         assert any(s.name == "fw-skill" for s in result)
 
     def test_user_scope_always_passes(self, tmp_path):
-        skill = make_skill("user-skill", SkillScope.USER)
-        skill.trust_status = TrustStatus.TRUSTED
+        skill = make_skill("user-skill", "user")
         gate = TrustGate(store=TrustedRepoStore(tmp_path / "t.json"), interactive=False)
         result = gate.filter_and_gate([skill], project_dir=None)
         assert any(s.name == "user-skill" for s in result)
 
     def test_no_project_skills_returns_early(self, tmp_path):
         """When there are no project-scope skills, trust detection is skipped."""
-        fw = make_skill("fw", SkillScope.FRAMEWORK)
-        fw.trust_status = TrustStatus.TRUSTED
+        fw = make_skill("fw", "framework")
         gate = TrustGate(store=TrustedRepoStore(tmp_path / "t.json"), interactive=False)
         result = gate.filter_and_gate([fw], project_dir=tmp_path)
         assert result == [fw]
 
     def test_trusted_project_skills_pass(self, tmp_path):
-        """Project skills from a trusted repo pass through as TRUSTED."""
+        """Project skills from a trusted repo pass through."""
         (tmp_path / ".git").mkdir()
         store = TrustedRepoStore(tmp_path / "t.json")
         store.trust("github.com/trusted/repo")
-        skill = make_skill("proj-skill", SkillScope.PROJECT)
+        skill = make_skill("proj-skill", "project")
         gate = TrustGate(store=store, interactive=False)
         with patch("subprocess.run") as m:
             m.return_value = MagicMock(
@@ -299,7 +292,6 @@ class TestTrustGate:
             )
             result = gate.filter_and_gate([skill], project_dir=tmp_path)
         assert any(s.name == "proj-skill" for s in result)
-        assert result[0].trust_status == TrustStatus.TRUSTED
 
     def test_untrusted_headless_skips_and_logs(self, tmp_path, caplog):
         """In non-interactive mode, untrusted project skills are skipped."""
@@ -307,7 +299,7 @@ class TestTrustGate:
 
         (tmp_path / ".git").mkdir()
         store = TrustedRepoStore(tmp_path / "t.json")
-        skill = make_skill("evil-skill", SkillScope.PROJECT)
+        skill = make_skill("evil-skill", "project")
         gate = TrustGate(store=store, interactive=False)
         with patch("subprocess.run") as m:
             m.return_value = MagicMock(
@@ -316,14 +308,13 @@ class TestTrustGate:
             with caplog.at_level(logging.WARNING):
                 result = gate.filter_and_gate([skill], project_dir=tmp_path)
         assert not any(s.name == "evil-skill" for s in result)
-        assert skill.trust_status == TrustStatus.DENIED
         assert "untrusted" in caplog.text.lower() or "skipping" in caplog.text.lower()
 
     def test_interactive_consent_session_only(self, tmp_path):
         """Option 1 (session only) includes skills without writing to store."""
         (tmp_path / ".git").mkdir()
         store = TrustedRepoStore(tmp_path / "t.json")
-        skill = make_skill("session-skill", SkillScope.PROJECT)
+        skill = make_skill("session-skill", "project")
         outputs = []
         gate = TrustGate(
             store=store,
@@ -339,7 +330,6 @@ class TestTrustGate:
             )
             result = gate.filter_and_gate([skill], project_dir=tmp_path)
         assert any(s.name == "session-skill" for s in result)
-        assert skill.trust_status == TrustStatus.TRUSTED
         # Must NOT persist to trusted store
         assert not store.is_trusted("github.com/stranger/repo")
 
@@ -347,7 +337,7 @@ class TestTrustGate:
         """Option 2 (permanent) includes skills and persists to trusted store."""
         (tmp_path / ".git").mkdir()
         store = TrustedRepoStore(tmp_path / "t.json")
-        skill = make_skill("perm-skill", SkillScope.PROJECT)
+        skill = make_skill("perm-skill", "project")
         gate = TrustGate(
             store=store,
             interactive=True,
@@ -368,7 +358,7 @@ class TestTrustGate:
         """Option 3 (deny) excludes project skills."""
         (tmp_path / ".git").mkdir()
         store = TrustedRepoStore(tmp_path / "t.json")
-        skill = make_skill("bad-skill", SkillScope.PROJECT)
+        skill = make_skill("bad-skill", "project")
         gate = TrustGate(
             store=store,
             interactive=True,
@@ -383,23 +373,21 @@ class TestTrustGate:
             )
             result = gate.filter_and_gate([skill], project_dir=tmp_path)
         assert not any(s.name == "bad-skill" for s in result)
-        assert skill.trust_status == TrustStatus.DENIED
 
     def test_env_var_override_trusts_all(self, tmp_path, monkeypatch):
         """HIVE_TRUST_PROJECT_SKILLS=1 bypasses gating entirely."""
         monkeypatch.setenv("HIVE_TRUST_PROJECT_SKILLS", "1")
         store = TrustedRepoStore(tmp_path / "t.json")
-        skill = make_skill("env-skill", SkillScope.PROJECT)
+        skill = make_skill("env-skill", "project")
         gate = TrustGate(store=store, interactive=False)
         result = gate.filter_and_gate([skill], project_dir=tmp_path)
         assert any(s.name == "env-skill" for s in result)
-        assert skill.trust_status == TrustStatus.TRUSTED
 
     def test_keyboard_interrupt_treated_as_deny(self, tmp_path):
         """Ctrl-C during consent prompt should deny cleanly."""
         (tmp_path / ".git").mkdir()
         store = TrustedRepoStore(tmp_path / "t.json")
-        skill = make_skill("interrupted-skill", SkillScope.PROJECT)
+        skill = make_skill("interrupted-skill", "project")
         gate = TrustGate(
             store=store,
             interactive=True,
@@ -426,7 +414,7 @@ class TestTrustGate:
 
         (tmp_path / ".git").mkdir()
         store = TrustedRepoStore(tmp_path / "t.json")
-        skill = make_skill("notice-skill", SkillScope.PROJECT)
+        skill = make_skill("notice-skill", "project")
         output_lines: list[str] = []
         gate = TrustGate(
             store=store,
@@ -447,7 +435,7 @@ class TestTrustGate:
 
         # Second run should NOT show the notice again
         output_lines.clear()
-        skill2 = make_skill("notice-skill-2", SkillScope.PROJECT)
+        skill2 = make_skill("notice-skill-2", "project")
         with patch("sys.stdin.isatty", return_value=True), patch(
             "sys.stdout.isatty", return_value=True
         ), patch("subprocess.run") as m:
@@ -462,11 +450,9 @@ class TestTrustGate:
         """Framework and user skills should pass through even if project skills are denied."""
         (tmp_path / ".git").mkdir()
         store = TrustedRepoStore(tmp_path / "t.json")
-        fw_skill = make_skill("fw", SkillScope.FRAMEWORK)
-        fw_skill.trust_status = TrustStatus.TRUSTED
-        user_skill = make_skill("usr", SkillScope.USER)
-        user_skill.trust_status = TrustStatus.TRUSTED
-        proj_skill = make_skill("proj", SkillScope.PROJECT)
+        fw_skill = make_skill("fw", "framework")
+        user_skill = make_skill("usr", "user")
+        proj_skill = make_skill("proj", "project")
         gate = TrustGate(
             store=store,
             interactive=True,

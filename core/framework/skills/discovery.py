@@ -1,310 +1,182 @@
-"""Skill discovery — scans all scope locations and parses SKILL.md files.
+"""Skill discovery — scan standard directories for SKILL.md files.
 
-Implements PRD §4.1 (discovery) and §4.2 (parsing) of the Agent Skills standard.
-Precedence (highest first): project/.hive > project/.agents > user/.hive >
-user/.agents > framework/defaults.  Within the same name, first wins.
+Implements the Agent Skills standard discovery paths plus Hive-specific
+locations. Resolves name collisions deterministically.
 """
 
 from __future__ import annotations
 
 import logging
-import re
+from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
-from framework.skills.models import SkillEntry, SkillScope, TrustStatus
+from framework.skills.parser import ParsedSkill, parse_skill_md
 
 logger = logging.getLogger(__name__)
 
-# Directories to skip when scanning (PRD §4.1)
-_SKIP_DIRS = frozenset({".git", "node_modules", "__pycache__", ".venv", ".env"})
+# Directories to skip during scanning
+_SKIP_DIRS = frozenset({
+    ".git",
+    "node_modules",
+    "__pycache__",
+    ".venv",
+    "venv",
+    ".mypy_cache",
+    ".pytest_cache",
+    ".ruff_cache",
+})
 
-_MAX_DEPTH = 4
-_MAX_DIRS_PER_SCOPE = 2000
+# Scope priority (higher = takes precedence)
+_SCOPE_PRIORITY = {
+    "framework": 0,
+    "user": 1,
+    "project": 2,
+}
+
+# Within the same scope, Hive-specific paths override cross-client paths.
+# We encode this by scanning cross-client first, then Hive-specific (later wins).
 
 
-def _framework_defaults_dir() -> Path:
-    """Return the framework built-in defaults directory."""
-    return Path(__file__).parent / "defaults"
+@dataclass
+class DiscoveryConfig:
+    """Configuration for skill discovery."""
+
+    project_root: Path | None = None
+    skip_user_scope: bool = False
+    skip_framework_scope: bool = False
+    max_depth: int = 4
+    max_dirs: int = 2000
 
 
 class SkillDiscovery:
-    """Discovers skills across all scopes per the Agent Skills standard."""
+    """Scans standard directories for SKILL.md files and resolves collisions."""
 
-    def discover(self, project_dir: Path | None) -> list[SkillEntry]:
-        """Scan all scope locations and return deduplicated, ordered skill list.
+    def __init__(self, config: DiscoveryConfig | None = None):
+        self._config = config or DiscoveryConfig()
 
-        Args:
-            project_dir: Root of the current project (for project-scope scan).
-                         Pass None to skip project-scope discovery.
+    def discover(self) -> list[ParsedSkill]:
+        """Scan all scopes and return deduplicated skill list.
 
-        Returns:
-            Skills in precedence order; project > user > framework.
-            Project-scope skills are marked PENDING_CONSENT.
-            Name collisions are resolved deterministically (first wins) with a warning.
+        Scanning order (lowest to highest precedence):
+        1. Framework defaults
+        2. User cross-client (~/.agents/skills/)
+        3. User Hive-specific (~/.hive/skills/)
+        4. Project cross-client (<project>/.agents/skills/)
+        5. Project Hive-specific (<project>/.hive/skills/)
+
+        Later entries override earlier ones on name collision.
         """
-        scan_locations: list[tuple[SkillScope, Path]] = []
+        all_skills: list[ParsedSkill] = []
 
-        if project_dir is not None:
-            scan_locations += [
-                (SkillScope.PROJECT, project_dir / ".hive" / "skills"),
-                (SkillScope.PROJECT, project_dir / ".agents" / "skills"),
-            ]
+        # Framework scope (lowest precedence)
+        if not self._config.skip_framework_scope:
+            framework_dir = Path(__file__).parent / "_default_skills"
+            if framework_dir.is_dir():
+                all_skills.extend(self._scan_scope(framework_dir, "framework"))
 
-        scan_locations += [
-            (SkillScope.USER, Path.home() / ".hive" / "skills"),
-            (SkillScope.USER, Path.home() / ".agents" / "skills"),
-            (SkillScope.FRAMEWORK, _framework_defaults_dir()),
-        ]
+        # User scope
+        if not self._config.skip_user_scope:
+            home = Path.home()
 
-        seen_names: dict[str, SkillEntry] = {}  # name -> first (highest precedence) entry
+            # Cross-client (lower precedence within user scope)
+            user_agents = home / ".agents" / "skills"
+            if user_agents.is_dir():
+                all_skills.extend(self._scan_scope(user_agents, "user"))
 
-        for scope, root in scan_locations:
-            if not root.is_dir():
-                continue
-            for entry in self._scan_scope(root, scope):
-                if entry.name in seen_names:
-                    winner = seen_names[entry.name]
-                    logger.warning(
-                        "skill_collision: name=%s winner=%s (scope=%s) skipped=%s (scope=%s)",
-                        entry.name,
-                        winner.location,
-                        winner.source_scope,
-                        entry.location,
-                        entry.source_scope,
-                    )
-                else:
-                    seen_names[entry.name] = entry
+            # Hive-specific (higher precedence within user scope)
+            user_hive = home / ".hive" / "skills"
+            if user_hive.is_dir():
+                all_skills.extend(self._scan_scope(user_hive, "user"))
 
-        return list(seen_names.values())
+        # Project scope (highest precedence)
+        if self._config.project_root:
+            root = self._config.project_root
 
-    def _scan_scope(self, root: Path, scope: SkillScope) -> list[SkillEntry]:
-        """Walk a single skill root directory, parsing each SKILL.md found."""
-        entries: list[SkillEntry] = []
-        dirs_visited = 0
+            # Cross-client
+            project_agents = root / ".agents" / "skills"
+            if project_agents.is_dir():
+                all_skills.extend(self._scan_scope(project_agents, "project"))
 
-        # BFS with depth tracking
-        queue: list[tuple[Path, int]] = [(root, 0)]
-        while queue:
-            current, depth = queue.pop(0)
-            dirs_visited += 1
-            if dirs_visited > _MAX_DIRS_PER_SCOPE:
+            # Hive-specific
+            project_hive = root / ".hive" / "skills"
+            if project_hive.is_dir():
+                all_skills.extend(self._scan_scope(project_hive, "project"))
+
+        resolved = self._resolve_collisions(all_skills)
+
+        logger.info(
+            "Skill discovery: found %d skills (%d after dedup) across all scopes",
+            len(all_skills),
+            len(resolved),
+        )
+        return resolved
+
+    def _scan_scope(self, root: Path, scope: str) -> list[ParsedSkill]:
+        """Scan a single directory for skill directories containing SKILL.md."""
+        skills: list[ParsedSkill] = []
+        dirs_scanned = 0
+
+        for skill_md in self._find_skill_files(root, depth=0):
+            if dirs_scanned >= self._config.max_dirs:
                 logger.warning(
-                    "skill_scan: max dirs (%d) reached in scope=%s root=%s",
-                    _MAX_DIRS_PER_SCOPE,
-                    scope,
+                    "Hit max directory limit (%d) scanning %s",
+                    self._config.max_dirs,
                     root,
                 )
                 break
 
-            skill_md = current / "SKILL.md"
-            if skill_md.is_file():
-                entry = _parse_skill_md(skill_md, scope)
-                if entry is not None:
-                    entries.append(entry)
-                # Don't descend into skill directories
+            parsed = parse_skill_md(skill_md, source_scope=scope)
+            if parsed is not None:
+                skills.append(parsed)
+            dirs_scanned += 1
+
+        return skills
+
+    def _find_skill_files(self, directory: Path, depth: int) -> list[Path]:
+        """Recursively find SKILL.md files up to max_depth."""
+        if depth > self._config.max_depth:
+            return []
+
+        results: list[Path] = []
+
+        try:
+            entries = sorted(directory.iterdir())
+        except OSError:
+            return []
+
+        for entry in entries:
+            if not entry.is_dir():
+                continue
+            if entry.name in _SKIP_DIRS:
                 continue
 
-            if depth < _MAX_DEPTH:
-                try:
-                    for child in sorted(current.iterdir()):
-                        if child.is_dir() and child.name not in _SKIP_DIRS:
-                            queue.append((child, depth + 1))
-                except PermissionError:
-                    pass
+            skill_md = entry / "SKILL.md"
+            if skill_md.is_file():
+                results.append(skill_md)
+            else:
+                # Recurse into subdirectories
+                results.extend(self._find_skill_files(entry, depth + 1))
 
-        return entries
+        return results
 
+    def _resolve_collisions(self, skills: list[ParsedSkill]) -> list[ParsedSkill]:
+        """Resolve name collisions deterministically.
 
-def _parse_skill_md(path: Path, scope: SkillScope) -> SkillEntry | None:
-    """Parse a SKILL.md file, returning a SkillEntry or None on failure.
+        Later entries in the list override earlier ones (because we scan
+        from lowest to highest precedence). On collision, log a warning.
+        """
+        seen: dict[str, ParsedSkill] = {}
 
-    Lenient validation per PRD §4.2:
-    - Skip only if description is missing/empty or YAML is unparseable.
-    - Warn (but load) on name/directory mismatch or name > 64 chars.
-    """
-    try:
-        text = path.read_text(encoding="utf-8")
-    except OSError as e:
-        logger.error("skill_parse_error: path=%s error=%s", path, e)
-        return None
+        for skill in skills:
+            if skill.name in seen:
+                existing = seen[skill.name]
+                logger.warning(
+                    "Skill name collision: '%s' from %s overrides %s",
+                    skill.name,
+                    skill.location,
+                    existing.location,
+                )
+            seen[skill.name] = skill
 
-    frontmatter, _ = _split_frontmatter(text)
-    if frontmatter is None:
-        logger.error(
-            "skill_parse_error: path=%s error=no YAML frontmatter found", path
-        )
-        return None
-
-    data = _load_yaml(frontmatter, path)
-    if data is None:
-        return None  # already logged
-
-    if not isinstance(data, dict):
-        logger.error("skill_parse_error: path=%s error=frontmatter is not a mapping", path)
-        return None
-
-    # Required: description
-    description = data.get("description", "")
-    if not description or not str(description).strip():
-        logger.error(
-            "skill_parse_error: path=%s error=description missing or empty — skipping",
-            path,
-        )
-        return None
-
-    # Required: name (warn if missing, fall back to directory name)
-    name = data.get("name", "")
-    if not name or not str(name).strip():
-        logger.warning(
-            "skill_parse_warning: path=%s warning=name missing, using directory name",
-            path,
-        )
-        name = path.parent.name
-
-    name = str(name).strip()
-    description = str(description).strip()
-
-    # Non-blocking warnings
-    if len(name) > 64:
-        logger.warning(
-            "skill_parse_warning: path=%s warning=name exceeds 64 chars (%d)",
-            path,
-            len(name),
-        )
-    if name != path.parent.name:
-        logger.warning(
-            "skill_parse_warning: path=%s warning=name=%r does not match directory=%r",
-            path,
-            name,
-            path.parent.name,
-        )
-
-    # Optional fields
-    license_val = data.get("license")
-    compatibility = _ensure_list(data.get("compatibility", []))
-    allowed_tools = _ensure_list(data.get("allowed-tools", []))
-    metadata = data.get("metadata") or {}
-    if not isinstance(metadata, dict):
-        metadata = {}
-
-    trust = (
-        TrustStatus.PENDING_CONSENT
-        if scope == SkillScope.PROJECT
-        else TrustStatus.TRUSTED
-    )
-
-    return SkillEntry(
-        name=name,
-        description=description,
-        location=path.resolve(),
-        base_dir=path.parent.resolve(),
-        source_scope=scope,
-        trust_status=trust,
-        license=str(license_val) if license_val else None,
-        compatibility=compatibility,
-        allowed_tools=allowed_tools,
-        metadata=metadata,
-    )
-
-
-# ---------------------------------------------------------------------------
-# YAML helpers
-# ---------------------------------------------------------------------------
-
-
-def _split_frontmatter(text: str) -> tuple[str | None, str]:
-    """Split SKILL.md text into (frontmatter, body).
-
-    Returns (None, full_text) if no valid frontmatter delimiters found.
-    Strips a leading BOM and any leading blank lines before the opening ``---``
-    (a common heredoc artifact).
-    """
-    # Strip BOM and leading blank lines — heredoc and some editors add them
-    text = text.lstrip("\ufeff\r\n")
-
-    if not text.startswith("---"):
-        return None, text
-
-    # Find closing ---
-    rest = text[3:]
-    # Allow --- or ---\n as opener
-    if rest.startswith("\n"):
-        rest = rest[1:]
-    elif rest.startswith("\r\n"):
-        rest = rest[2:]
-
-    end = re.search(r"^---\s*$", rest, re.MULTILINE)
-    if end is None:
-        return None, text
-
-    frontmatter = rest[: end.start()]
-    body = rest[end.end() :]
-    if body.startswith("\n"):
-        body = body[1:]
-
-    return frontmatter, body
-
-
-def _load_yaml(frontmatter_text: str, path: Path) -> dict | None:
-    """Parse YAML frontmatter with AS-15 colon-fixup fallback."""
-    try:
-        import yaml
-    except ImportError:
-        logger.error(
-            "skill_parse_error: PyYAML is not installed; cannot parse %s", path
-        )
-        return None
-
-    # First attempt: parse as-is
-    try:
-        return yaml.safe_load(frontmatter_text)
-    except yaml.YAMLError:
-        pass
-
-    # Second attempt: AS-15 colon-value fixup
-    fixed = _fix_unquoted_colon_values(frontmatter_text)
-    try:
-        result = yaml.safe_load(fixed)
-        logger.warning(
-            "skill_parse_warning: path=%s warning=needed colon-fixup to parse YAML",
-            path,
-        )
-        return result
-    except yaml.YAMLError as e:
-        logger.error(
-            "skill_parse_error: path=%s error=YAML unparseable even after fixup: %s",
-            path,
-            e,
-        )
-        return None
-
-
-def _fix_unquoted_colon_values(text: str) -> str:
-    """Wrap string values that contain unquoted colons in double quotes.
-
-    Handles the common case of ``description: Multi-step research: finds sources``.
-    Only touches lines that are a simple ``key: value`` mapping and whose stripped
-    value is not already quoted or a YAML block/flow indicator character.
-    """
-    lines = text.splitlines()
-    fixed = []
-    for line in lines:
-        # Capture key + everything after the colon separator
-        m = re.match(r'^(\s*[\w][\w\-]*\s*:\s*)(.*\S.*)$', line)
-        if m:
-            value = m.group(2).strip()
-            # Only fix if value has a colon AND is not already quoted/structured
-            if ":" in value and not re.match(r'^["\'\[\{>|#]', value):
-                escaped = value.replace('"', '\\"')
-                line = m.group(1) + f'"{escaped}"'
-        fixed.append(line)
-    return "\n".join(fixed)
-
-
-def _ensure_list(value: object) -> list[str]:
-    """Coerce a YAML value to a list of strings."""
-    if isinstance(value, list):
-        return [str(v) for v in value]
-    if isinstance(value, str):
-        return [value]
-    return []
+        return list(seen.values())

@@ -67,7 +67,7 @@ SLACK_CREDENTIALS = {
         help_url="https://api.slack.com/apps",
         description="Slack Bot Token (starts with xoxb-)",
         # Auth method support
-        aden_supported=True,
+        aden_supported=False,
         aden_provider_name="slack",
         direct_api_key_supported=True,
         api_key_instructions="""To get a Slack Bot Token:

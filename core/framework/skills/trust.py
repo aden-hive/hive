@@ -20,7 +20,7 @@ from enum import StrEnum
 from pathlib import Path
 from urllib.parse import urlparse
 
-from framework.skills.models import SkillEntry, SkillScope, TrustStatus
+from framework.skills.parser import ParsedSkill
 
 logger = logging.getLogger(__name__)
 
@@ -315,9 +315,9 @@ class TrustGate:
 
     def filter_and_gate(
         self,
-        skills: list[SkillEntry],
+        skills: list[ParsedSkill],
         project_dir: Path | None,
-    ) -> list[SkillEntry]:
+    ) -> list[ParsedSkill]:
         """Return the subset of skills that are trusted for loading.
 
         - Framework and user-scope skills: always included.
@@ -326,12 +326,8 @@ class TrustGate:
         import os
 
         # Separate project skills from always-trusted scopes
-        always_trusted = [
-            s for s in skills if s.source_scope != SkillScope.PROJECT
-        ]
-        project_skills = [
-            s for s in skills if s.source_scope == SkillScope.PROJECT
-        ]
+        always_trusted = [s for s in skills if s.source_scope != "project"]
+        project_skills = [s for s in skills if s.source_scope == "project"]
 
         if not project_skills:
             return always_trusted
@@ -343,8 +339,6 @@ class TrustGate:
                 _ENV_TRUST_ALL,
                 len(project_skills),
             )
-            for s in project_skills:
-                s.trust_status = TrustStatus.TRUSTED
             return always_trusted + project_skills
 
         classification, repo_key = self._detector.classify(project_dir)
@@ -353,8 +347,6 @@ class TrustGate:
             ProjectTrustClassification.ALWAYS_TRUSTED,
             ProjectTrustClassification.TRUSTED_BY_USER,
         ):
-            for s in project_skills:
-                s.trust_status = TrustStatus.TRUSTED
             logger.info(
                 "skill_trust: project skills trusted classification=%s repo=%s count=%d",
                 classification,
@@ -378,8 +370,6 @@ class TrustGate:
                 repo_key,
                 len(project_skills),
             )
-            for s in project_skills:
-                s.trust_status = TrustStatus.DENIED
             return always_trusted
 
         # Interactive consent flow
@@ -393,24 +383,18 @@ class TrustGate:
         )
 
         if decision == "session":
-            for s in project_skills:
-                s.trust_status = TrustStatus.TRUSTED
             return always_trusted + project_skills
 
         if decision == "permanent":
             self._store.trust(repo_key, project_path=str(project_dir or ""))
-            for s in project_skills:
-                s.trust_status = TrustStatus.TRUSTED
             return always_trusted + project_skills
 
         # denied
-        for s in project_skills:
-            s.trust_status = TrustStatus.DENIED
         return always_trusted
 
     def _run_consent_flow(
         self,
-        project_skills: list[SkillEntry],
+        project_skills: list[ParsedSkill],
         project_dir: Path | None,
         repo_key: str,
     ) -> str:
@@ -446,7 +430,7 @@ class TrustGate:
 
     def _print_consent_prompt(
         self,
-        project_skills: list[SkillEntry],
+        project_skills: list[ParsedSkill],
         project_dir: Path | None,
         repo_key: str,
         Colors,  # noqa: N803

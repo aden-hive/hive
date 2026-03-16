@@ -473,6 +473,8 @@ class EventLoopNode(NodeProtocol):
                     focus_prompt=ctx.node_spec.system_prompt,
                     narrative=ctx.narrative or None,
                     accounts_prompt=ctx.accounts_prompt or None,
+                    skills_catalog_prompt=ctx.skills_catalog_prompt or None,
+                    protocols_prompt=ctx.protocols_prompt or None,
                 )
                 if conversation.system_prompt != _current_prompt:
                     conversation.update_system_prompt(_current_prompt)
@@ -493,6 +495,12 @@ class EventLoopNode(NodeProtocol):
                 # Append connected accounts info if available
                 if ctx.accounts_prompt:
                     system_prompt = f"{system_prompt}\n\n{ctx.accounts_prompt}"
+
+                # Append skill catalog and operational protocols
+                if ctx.skills_catalog_prompt:
+                    system_prompt = f"{system_prompt}\n\n{ctx.skills_catalog_prompt}"
+                if ctx.protocols_prompt:
+                    system_prompt = f"{system_prompt}\n\n{ctx.protocols_prompt}"
 
                 # Inject agent working memory (adapt.md).
                 # If it doesn't exist yet, seed it with available context.
