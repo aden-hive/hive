@@ -66,15 +66,16 @@ class RuntimeLogger:
         """
         if session_id:
             self._run_id = session_id
+            self._store.ensure_session_run_dir(self._run_id)
         else:
             ts = datetime.now(UTC).strftime("%Y%m%dT%H%M%S")
             short_uuid = uuid.uuid4().hex[:8]
             self._run_id = f"{ts}_{short_uuid}"
+            self._store.ensure_run_dir(self._run_id)
 
         self._goal_id = goal_id
         self._started_at = datetime.now(UTC).isoformat()
         self._logged_node_ids = set()
-        self._store.ensure_run_dir(self._run_id)
         return self._run_id
 
     def log_step(

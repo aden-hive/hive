@@ -126,7 +126,8 @@ def append_episodic_entry(content: str) -> None:
     """
     ep_path = episodic_memory_path()
     ep_path.parent.mkdir(parents=True, exist_ok=True)
-    today_str = date.today().strftime("%B %-d, %Y")
+    today = date.today()
+    today_str = f"{today.strftime('%B')} {today.day}, {today.year}"
     timestamp = datetime.now().strftime("%H:%M")
     if not ep_path.exists():
         header = f"# {today_str}\n\n"
@@ -325,7 +326,8 @@ async def consolidate_queen_memory(
 
         existing_semantic = read_semantic_memory()
         today_journal = read_episodic_memory()
-        today_str = date.today().strftime("%B %-d, %Y")
+        today = date.today()
+        today_str = f"{today.strftime('%B')} {today.day}, {today.year}"
         adapt_path = session_dir / "data" / "adapt.md"
 
         user_msg = (

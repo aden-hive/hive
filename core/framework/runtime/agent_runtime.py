@@ -8,6 +8,7 @@ while preserving the goal-driven approach.
 import asyncio
 import logging
 import time
+import uuid
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -399,11 +400,16 @@ class AgentRuntime:
                     # Cron expression mode — takes priority over interval_minutes
                     try:
                         from croniter import croniter
+                    except ImportError as e:
+                        raise RuntimeError(
+                            "croniter is required for cron-based entry points. "
+                            "Install it with: uv pip install croniter"
+                        ) from e
 
-                        # Validate the expression upfront
+                    try:
                         if not croniter.is_valid(cron_expr):
                             raise ValueError(f"Invalid cron expression: {cron_expr}")
-                    except (ImportError, ValueError) as e:
+                    except ValueError as e:
                         logger.warning(
                             "Entry point '%s' has invalid cron config: %s",
                             ep_id,
@@ -822,7 +828,8 @@ class AgentRuntime:
         if stream is None:
             raise ValueError(f"Entry point '{entry_point_id}' not found")
 
-        return await stream.execute(input_data, correlation_id, session_state)
+        run_id = uuid.uuid4().hex[:12]
+        return await stream.execute(input_data, correlation_id, session_state, run_id=run_id)
 
     async def trigger_and_wait(
         self,
@@ -1359,8 +1366,8 @@ class AgentRuntime:
                 allowed_keys = set(entry_node.input_keys)
 
         # Search primary graph's streams for an active session.
-        # Skip isolated streams (e.g. health judge) — they have their own
-        # session directories and must never be used as a shared session.
+        # Skip isolated streams — they have their own session directories
+        # and must never be used as a shared session.
         all_streams: list[tuple[str, ExecutionStream]] = []
         for _gid, reg in self._graphs.items():
             for ep_id, stream in reg.streams.items():
