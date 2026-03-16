@@ -1584,12 +1584,15 @@ export default function Workspace() {
           const chatMsg = sseEventToChatMessage(event, agentType, displayName, currentTurn);
           if (isQueen) console.log('[QUEEN] chatMsg:', chatMsg?.id, chatMsg?.content?.slice(0, 50), 'turn:', currentTurn);
           if (chatMsg && !suppressQueenMessages) {
-            // Queen may emit multiple client_output_delta / llm_text_delta snapshots
-            // for a single execution as it iterates internally. Use a stable ID so
-            // those snapshots collapse into a single bubble instead of rendering as
-            // multiple independent replies to the same user message.
+            // Queen emits multiple client_output_delta / llm_text_delta snapshots
+            // across iterations and inner tool-loop turns.  Build a stable ID that
+            // groups streaming deltas for the *same* output (same execution +
+            // iteration + inner_turn) into one bubble, while keeping distinct
+            // outputs as separate bubbles so earlier text isn't overwritten.
             if (isQueen && (event.type === "client_output_delta" || event.type === "llm_text_delta") && event.execution_id) {
-              chatMsg.id = `queen-stream-${event.execution_id}`;
+              const iter = event.data?.iteration ?? 0;
+              const inner = event.data?.inner_turn ?? 0;
+              chatMsg.id = `queen-stream-${event.execution_id}-${iter}-${inner}`;
             }
             if (isQueen) {
               chatMsg.role = role;
