@@ -1334,54 +1334,18 @@ class AgentRunner:
         except Exception:
             pass  # Best-effort — agent works without account info
 
-        # Skill discovery and default skill loading
-        skills_catalog_prompt = ""
-        protocols_prompt = ""
-        try:
-            from framework.skills.config import SkillsConfig
-            from framework.skills.catalog import SkillCatalog
-            from framework.skills.defaults import DefaultSkillManager
-            from framework.skills.discovery import DiscoveryConfig, SkillDiscovery
+        # Skill configuration — the runtime handles discovery, loading, and
+        # prompt rasterization.  The runner just builds the config.
+        from framework.skills.config import SkillsConfig
+        from framework.skills.manager import SkillsManagerConfig
 
-            # Build skills config from agent module vars
-            skills_config = SkillsConfig.from_agent_vars(
+        skills_manager_config = SkillsManagerConfig(
+            skills_config=SkillsConfig.from_agent_vars(
                 default_skills=getattr(self, "_agent_default_skills", None),
                 skills=getattr(self, "_agent_skills", None),
-            )
-
-            # Discover community skills
-            discovery = SkillDiscovery(DiscoveryConfig(project_root=self.agent_path))
-            discovered = discovery.discover()
-
-            # Build catalog (community skills only — defaults handled separately)
-            catalog = SkillCatalog(discovered)
-            skills_catalog_prompt = catalog.to_prompt()
-
-            # Handle pre-activated skills
-            if skills_config.skills:
-                pre_activated = catalog.build_pre_activated_prompt(skills_config.skills)
-                if pre_activated:
-                    if skills_catalog_prompt:
-                        skills_catalog_prompt = f"{skills_catalog_prompt}\n\n{pre_activated}"
-                    else:
-                        skills_catalog_prompt = pre_activated
-
-            # Load and configure default skills
-            default_mgr = DefaultSkillManager(config=skills_config)
-            default_mgr.load()
-            default_mgr.log_active_skills()
-            protocols_prompt = default_mgr.build_protocols_prompt()
-        except Exception:
-            logger.warning("Skill system init failed (non-fatal)", exc_info=True)
-
-        if protocols_prompt:
-            logger.info(
-                "Skill system ready: protocols=%d chars, catalog=%d chars",
-                len(protocols_prompt),
-                len(skills_catalog_prompt),
-            )
-        else:
-            logger.warning("Skill system produced empty protocols_prompt")
+            ),
+            project_root=self.agent_path,
+        )
 
         self._setup_agent_runtime(
             tools,
@@ -1390,8 +1354,7 @@ class AgentRunner:
             accounts_data=accounts_data,
             tool_provider_map=tool_provider_map,
             event_bus=event_bus,
-            skills_catalog_prompt=skills_catalog_prompt,
-            protocols_prompt=protocols_prompt,
+            skills_manager_config=skills_manager_config,
         )
 
     def _get_api_key_env_var(self, model: str) -> str | None:
@@ -1487,8 +1450,7 @@ class AgentRunner:
         accounts_data: list[dict] | None = None,
         tool_provider_map: dict[str, str] | None = None,
         event_bus=None,
-        skills_catalog_prompt: str = "",
-        protocols_prompt: str = "",
+        skills_manager_config=None,
     ) -> None:
         """Set up multi-entry-point execution using AgentRuntime."""
         entry_points = []
@@ -1548,8 +1510,7 @@ class AgentRunner:
             accounts_data=accounts_data,
             tool_provider_map=tool_provider_map,
             event_bus=event_bus,
-            skills_catalog_prompt=skills_catalog_prompt,
-            protocols_prompt=protocols_prompt,
+            skills_manager_config=skills_manager_config,
         )
 
         # Pass intro_message through for TUI display

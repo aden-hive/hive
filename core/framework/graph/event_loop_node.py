@@ -225,6 +225,12 @@ class LoopConfig:
     cf_grace_turns: int = 1
     tool_doom_loop_enabled: bool = True
 
+    # --- Per-tool-call timeout ---
+    # Maximum seconds a single tool call may take before being killed.
+    # Prevents hung MCP servers (especially browser/GCU tools) from
+    # blocking the entire event loop indefinitely.  0 = no timeout.
+    tool_call_timeout_seconds: float = 120.0
+
     # --- Lifecycle hooks ---
     # Hooks are async callables keyed by event name.  Supported events:
     #   "session_start"    — fires once after the first user message is added,
@@ -3356,7 +3362,14 @@ class EventLoopNode(NodeProtocol):
         return False, ""
 
     async def _execute_tool(self, tc: ToolCallEvent) -> ToolResult:
-        """Execute a tool call, handling both sync and async executors."""
+        """Execute a tool call, handling both sync and async executors.
+
+        Applies ``tool_call_timeout_seconds`` from LoopConfig to prevent
+        hung MCP servers from blocking the event loop indefinitely.
+        The initial executor call is offloaded to a thread pool so that
+        sync executors (MCP STDIO tools that block on ``future.result()``)
+        don't freeze the event loop.
+        """
         if self._tool_executor is None:
             return ToolResult(
                 tool_use_id=tc.tool_use_id,
@@ -3364,9 +3377,39 @@ class EventLoopNode(NodeProtocol):
                 is_error=True,
             )
         tool_use = ToolUse(id=tc.tool_use_id, name=tc.tool_name, input=tc.tool_input)
-        result = self._tool_executor(tool_use)
-        if asyncio.iscoroutine(result) or asyncio.isfuture(result):
-            result = await result
+        timeout = self._config.tool_call_timeout_seconds
+
+        async def _run() -> ToolResult:
+            # Offload the executor call to a thread.  Sync MCP executors
+            # block on future.result() — running in a thread keeps the
+            # event loop free so asyncio.wait_for can fire the timeout.
+            loop = asyncio.get_running_loop()
+            result = await loop.run_in_executor(
+                None, self._tool_executor, tool_use
+            )
+            # Async executors return a coroutine — await it on the loop
+            if asyncio.iscoroutine(result) or asyncio.isfuture(result):
+                result = await result
+            return result
+
+        try:
+            if timeout > 0:
+                result = await asyncio.wait_for(_run(), timeout=timeout)
+            else:
+                result = await _run()
+        except TimeoutError:
+            logger.warning(
+                "Tool '%s' timed out after %.0fs", tc.tool_name, timeout
+            )
+            return ToolResult(
+                tool_use_id=tc.tool_use_id,
+                content=(
+                    f"Tool '{tc.tool_name}' timed out after {timeout:.0f}s. "
+                    "The operation took too long and was cancelled. "
+                    "Try a simpler request or a different approach."
+                ),
+                is_error=True,
+            )
         return result
 
     def _record_learning(self, key: str, value: Any) -> None:
@@ -4619,11 +4662,21 @@ class EventLoopNode(NodeProtocol):
         subagent_tool_names = set(subagent_spec.tools or [])
         tool_source = ctx.all_tools if ctx.all_tools else ctx.available_tools
 
-        subagent_tools = [
-            t
-            for t in tool_source
-            if t.name in subagent_tool_names and t.name != "delegate_to_sub_agent"
-        ]
+        # GCU auto-population: GCU nodes declare tools=[] because the runner
+        # auto-populates them at setup time.  But that expansion doesn't reach
+        # subagents invoked via delegate_to_sub_agent — the subagent spec still
+        # has the original empty list.  When a GCU subagent has no declared
+        # tools, include all catalog tools so browser tools are available.
+        if subagent_spec.node_type == "gcu" and not subagent_tool_names:
+            subagent_tools = [
+                t for t in tool_source if t.name != "delegate_to_sub_agent"
+            ]
+        else:
+            subagent_tools = [
+                t
+                for t in tool_source
+                if t.name in subagent_tool_names and t.name != "delegate_to_sub_agent"
+            ]
 
         missing = subagent_tool_names - {t.name for t in subagent_tools}
         if missing:
