@@ -1,6 +1,6 @@
 # Draft Flowchart System — Complete Reference
 
-The draft flowchart system bridges user-facing workflow design (planning phase) and the runtime agent graph (execution phase). During planning, the queen agent creates an ISO 5807 flowchart that the user reviews. On approval, decision nodes are dissolved into runtime-compatible structures, and the original flowchart is preserved for live status overlay during execution.
+The draft flowchart system bridges user-facing workflow design (planning phase) and the runtime agent graph (execution phase). During planning, the queen agent creates a flowchart that the user reviews. On approval, decision nodes are dissolved into runtime-compatible structures, and the original flowchart is preserved for live status overlay during execution.
 
 ---
 
@@ -20,7 +20,7 @@ DraftGraph (SSE) ────►    │  Decision diamonds     │              
     │                     │  merged into           │          Flowchart Map
     ▼                     │  predecessor criteria   │          inverts to
 Frontend renders          │                        │          overlay status
-ISO 5807 flowchart        │  Original draft        │          on original
+Flowchart with            │  Original draft        │          on original
 with diamond              │  preserved             │          flowchart
 decisions                 │                        │
                           └──────────────────────┘
@@ -206,7 +206,7 @@ After `save_agent_draft` processes the input, it stores and emits an enriched dr
       "sub_agents": [],
       "flowchart_type": "start",
       "flowchart_shape": "stadium",
-      "flowchart_color": "#4CAF50"
+      "flowchart_color": "#3fa66a"
     },
     {
       "id": "check-tier",
@@ -216,7 +216,7 @@ After `save_agent_draft` processes the input, it stores and emits an enriched dr
       "decision_clause": "Is lead score > 80?",
       "flowchart_type": "decision",
       "flowchart_shape": "diamond",
-      "flowchart_color": "#FF9800"
+      "flowchart_color": "#d89d26"
     }
   ],
   "edges": [
@@ -246,10 +246,10 @@ After `save_agent_draft` processes the input, it stores and emits an enriched dr
     }
   ],
   "flowchart_legend": {
-    "start":    { "shape": "stadium",    "color": "#4CAF50" },
-    "terminal": { "shape": "stadium",    "color": "#F44336" },
-    "process":  { "shape": "rectangle",  "color": "#2196F3" },
-    "decision": { "shape": "diamond",    "color": "#FF9800" }
+    "start":    { "shape": "stadium",    "color": "#3fa66a" },
+    "terminal": { "shape": "stadium",    "color": "#a04444" },
+    "process":  { "shape": "rectangle",  "color": "#616d83" },
+    "decision": { "shape": "diamond",    "color": "#d89d26" }
   }
 }
 ```
@@ -258,7 +258,7 @@ After `save_agent_draft` processes the input, it stores and emits an enriched dr
 
 | Field | Type | Description |
 |---|---|---|
-| `flowchart_type` | `string` | The resolved ISO 5807 symbol type |
+| `flowchart_type` | `string` | The resolved flowchart symbol type |
 | `flowchart_shape` | `string` | SVG shape identifier for the frontend renderer |
 | `flowchart_color` | `string` | Hex color code for the symbol |
 
@@ -388,7 +388,7 @@ The runtime Level 2 judge evaluates the decision clause against the node's conve
 
 An SVG-based flowchart renderer that operates in two modes:
 
-1. **Planning mode** — renders the draft graph with ISO 5807 shapes during the planning phase
+1. **Planning mode** — renders the draft graph with flowchart shapes during the planning phase
 2. **Runtime overlay mode** — renders the original (pre-dissolution) draft with live execution status when `flowchartMap` and `runtimeNodes` props are provided
 
 #### Props
@@ -422,7 +422,7 @@ Constants:
 
 #### Shape Rendering
 
-The `FlowchartShape` component renders each ISO 5807 shape as SVG primitives. Each shape receives:
+The `FlowchartShape` component renders each flowchart shape as SVG primitives. Each shape receives:
 - `x, y, w, h` — bounding box in SVG units
 - `color` — the hex color from the flowchart type
 - `selected` — hover state (increases fill opacity from 18% to 28%, brightens stroke)
@@ -482,17 +482,22 @@ const STATUS_COLORS = {
 
 ### Workspace Integration (`workspace.tsx`)
 
-The workspace conditionally renders `DraftGraph` in three scenarios:
+The workspace always renders a single `<DraftGraph>` component, selecting the best available draft:
 
-| Condition | Renders | Panel Width |
-|---|---|---|
-| `queenPhase === "planning"` and `draftGraph` exists | `<DraftGraph draft={draftGraph} />` | 500px |
-| `originalDraft` exists (post-planning) | `<DraftGraph draft={originalDraft} flowchartMap={...} runtimeNodes={...} />` | 500px |
-| Neither | `<AgentGraph ... />` (runtime pipeline view) | 300px |
+```tsx
+<DraftGraph
+  draft={activeAgentState?.originalDraft ?? activeAgentState?.draftGraph ?? null}
+  loading={activeAgentState?.queenPhase === "planning" && !activeAgentState?.draftGraph}
+  flowchartMap={activeAgentState?.flowchartMap ?? undefined}
+  runtimeNodes={currentGraph.nodes}
+/>
+```
+
+The graph panel is user-resizable (drag handle on the right edge, 15%–50% of viewport width, default 30%).
 
 **State management:**
 - `draftGraph`: Set by `draft_graph_updated` SSE event during planning; cleared on phase change
-- `originalDraft` + `flowchartMap`: Fetched from `GET /api/sessions/{id}/flowchart-map` when phase transitions away from planning
+- `originalDraft` + `flowchartMap`: Fetched from `GET /api/sessions/{id}/flowchart-map` when phase transitions away from planning. For template/legacy agents, `originalDraft` is generated at load time via `generate_fallback_flowchart()`.
 
 ---
 
