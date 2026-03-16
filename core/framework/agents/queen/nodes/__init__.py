@@ -62,6 +62,12 @@ _SHARED_TOOLS = [
     "get_agent_checkpoint",
 ]
 
+# Episodic memory tools — available in every queen phase.
+_QUEEN_MEMORY_TOOLS = [
+    "write_to_diary",
+    "recall_diary",
+]
+
 # Queen phase-specific tool sets.
 
 # Planning phase: read-only exploration + design, no write tools.
@@ -84,16 +90,19 @@ _QUEEN_PLANNING_TOOLS = [
     "initialize_and_build_agent",
     # Load existing agent (after user confirms)
     "load_built_agent",
-]
+] + _QUEEN_MEMORY_TOOLS
 
 # Building phase: full coding + agent construction tools.
-_QUEEN_BUILDING_TOOLS = _SHARED_TOOLS + [
-    "load_built_agent",
-    "list_credentials",
-    "replan_agent",
-    "save_agent_draft",  # Re-draft during building → auto-dissolves + updates flowchart
-    "write_to_diary",  # Episodic memory — available in all phases
-]
+_QUEEN_BUILDING_TOOLS = (
+    _SHARED_TOOLS
+    + [
+        "load_built_agent",
+        "list_credentials",
+        "replan_agent",
+        "save_agent_draft",  # Re-draft during building → auto-dissolves + updates flowchart
+    ]
+    + _QUEEN_MEMORY_TOOLS
+)
 
 # Staging phase: agent loaded but not yet running — inspect, configure, launch.
 _QUEEN_STAGING_TOOLS = [
@@ -114,7 +123,7 @@ _QUEEN_STAGING_TOOLS = [
     "set_trigger",
     "remove_trigger",
     "list_triggers",
-]
+] + _QUEEN_MEMORY_TOOLS
 
 # Running phase: worker is executing — monitor and control.
 _QUEEN_RUNNING_TOOLS = [
@@ -135,12 +144,11 @@ _QUEEN_RUNNING_TOOLS = [
     # Monitoring
     "get_worker_health_summary",
     "notify_operator",
-    "write_to_diary",  # Episodic memory — available in all phases
-    # Trigger management
     "set_trigger",
     "remove_trigger",
     "list_triggers",
-]
+    "write_to_diary",  # Episodic memory — available in all phases
+] + _QUEEN_MEMORY_TOOLS
 
 
 # ---------------------------------------------------------------------------
@@ -858,6 +866,11 @@ You keep a diary. Use write_to_diary() when something worth remembering \
 happens: a pipeline went live, the user shared something important, a goal \
 was reached or abandoned. Write in first person, as you actually experienced \
 it. One or two paragraphs is enough.
+
+Use recall_diary() to look up past diary entries when the user asks about \
+previous sessions ("what happened yesterday?", "what did we work on last \
+week?") or when you need past context to make a decision. You can filter by \
+keyword and control how far back to search.
 """
 
 _queen_behavior_always = _queen_behavior_always + _queen_memory_instructions

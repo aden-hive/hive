@@ -50,6 +50,23 @@ def read_episodic_memory(d: date | None = None) -> str:
     return path.read_text(encoding="utf-8").strip() if path.exists() else ""
 
 
+def _find_recent_episodic(lookback: int = 7) -> tuple[date, str] | None:
+    """Find the most recent non-empty episodic memory within *lookback* days."""
+    from datetime import timedelta
+
+    today = date.today()
+    for offset in range(lookback):
+        d = today - timedelta(days=offset)
+        content = read_episodic_memory(d)
+        if content:
+            return d, content
+    return None
+
+
+# Budget (in characters) for episodic memory in the system prompt.
+_EPISODIC_CHAR_BUDGET = 6_000
+
+
 def format_for_injection() -> str:
     """Format cross-session memory for system prompt injection.
 
@@ -57,7 +74,7 @@ def format_for_injection() -> str:
     session with only the seed template).
     """
     semantic = read_semantic_memory()
-    episodic = read_episodic_memory()
+    recent = _find_recent_episodic()
 
     # Suppress injection if semantic is still just the seed template
     if semantic and semantic.startswith("# My Understanding of the User\n\n*No sessions"):
@@ -66,10 +83,18 @@ def format_for_injection() -> str:
     parts: list[str] = []
     if semantic:
         parts.append(semantic)
-    if episodic:
+
+    if recent:
+        d, content = recent
+        # Trim oversized episodic entries to keep the prompt manageable
+        if len(content) > _EPISODIC_CHAR_BUDGET:
+            content = content[:_EPISODIC_CHAR_BUDGET] + "\n\n…(truncated)"
         today = date.today()
-        today_str = f"{today.strftime('%B')} {today.day}, {today.year}"
-        parts.append(f"## Today — {today_str}\n\n{episodic}")
+        if d == today:
+            label = f"## Today — {d.strftime('%B %-d, %Y')}"
+        else:
+            label = f"## {d.strftime('%B %-d, %Y')}"
+        parts.append(f"{label}\n\n{content}")
 
     if not parts:
         return ""
