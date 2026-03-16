@@ -1589,56 +1589,6 @@ def _interactive_multi(agents_dir: Path) -> int:
     return 0
 
 
-def cmd_sessions_list(args: argparse.Namespace) -> int:
-    """List agent sessions."""
-    print("⚠ Sessions list command not yet implemented")
-    print("This will be available once checkpoint infrastructure is complete.")
-    print(f"\nAgent: {args.agent_path}")
-    print(f"Status filter: {args.status}")
-    print(f"Has checkpoints: {args.has_checkpoints}")
-    return 1
-
-
-def cmd_sessions_show(args: argparse.Namespace) -> int:
-    """Show detailed session information."""
-    print("⚠ Session show command not yet implemented")
-    print("This will be available once checkpoint infrastructure is complete.")
-    print(f"\nAgent: {args.agent_path}")
-    print(f"Session: {args.session_id}")
-    return 1
-
-
-def cmd_sessions_checkpoints(args: argparse.Namespace) -> int:
-    """List checkpoints for a session."""
-    print("⚠ Session checkpoints command not yet implemented")
-    print("This will be available once checkpoint infrastructure is complete.")
-    print(f"\nAgent: {args.agent_path}")
-    print(f"Session: {args.session_id}")
-    return 1
-
-
-def cmd_pause(args: argparse.Namespace) -> int:
-    """Pause a running session."""
-    print("⚠ Pause command not yet implemented")
-    print("This will be available once executor pause integration is complete.")
-    print(f"\nAgent: {args.agent_path}")
-    print(f"Session: {args.session_id}")
-    return 1
-
-
-def cmd_resume(args: argparse.Namespace) -> int:
-    """Resume a session from checkpoint."""
-    print("⚠ Resume command not yet implemented")
-    print("This will be available once checkpoint resume integration is complete.")
-    print(f"\nAgent: {args.agent_path}")
-    print(f"Session: {args.session_id}")
-    if args.checkpoint:
-        print(f"Checkpoint: {args.checkpoint}")
-    if args.tui:
-        print("Mode: TUI")
-    return 1
-
-
 def cmd_replay(args: argparse.Namespace) -> int:
     """Replay a session with frozen LLM/tool responses for root-cause analysis."""
     from framework.runner import AgentRunner
