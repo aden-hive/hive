@@ -33,3 +33,7 @@
 ## Worker Agent Errors
 19. **Adding client-facing intake node to workers** — The queen owns intake. Workers should start with an autonomous processing node. Client-facing nodes in workers are for mid-execution review/approval only.
 20. **Putting `escalate` or `set_output` in NodeSpec `tools=[]`** — These are synthetic framework tools, auto-injected at runtime. Only list MCP tools from `list_agent_tools()`.
+
+## Planning Errors
+21. **Committing to execution without intent validation** — Never start building or running an agent for a goal that is ambiguous (e.g., "research Aden"). Always ask for clarification first if the target could refer to multiple entities.
+22. **Ignoring feasibility and resource constraints** — Before proposing a design, verify that required credentials are available and that the task is realistically achievable with current tools and budget.
