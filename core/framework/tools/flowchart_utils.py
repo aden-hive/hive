@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 FLOWCHART_FILENAME = "flowchart.json"
 
 # ── Flowchart type catalogue (9 types) ───────────────────────────────────────
-_FLOWCHART_TYPES = {
+FLOWCHART_TYPES = {
     "start": {"shape": "stadium", "color": "#3fa66a"},  # sage green
     "terminal": {"shape": "stadium", "color": "#a04444"},  # dusty red
     "process": {"shape": "rectangle", "color": "#616d83"},  # blue-gray
@@ -30,7 +30,7 @@ _FLOWCHART_TYPES = {
 }
 
 # Backward-compat remap: old type names → canonical type
-_FLOWCHART_REMAP: dict[str, str] = {
+FLOWCHART_REMAP: dict[str, str] = {
     "delay": "process",
     "manual_operation": "process",
     "preparation": "process",
@@ -113,16 +113,15 @@ def classify_flowchart_node(
     """
     # Explicit override from the queen
     explicit = node.get("flowchart_type", "").strip()
-    if explicit and explicit in _FLOWCHART_TYPES:
+    if explicit and explicit in FLOWCHART_TYPES:
         return explicit
-    if explicit and explicit in _FLOWCHART_REMAP:
-        return _FLOWCHART_REMAP[explicit]
+    if explicit and explicit in FLOWCHART_REMAP:
+        return FLOWCHART_REMAP[explicit]
 
     node_id = node["id"]
     node_type = node.get("node_type", "event_loop")
     node_tools = set(node.get("tools") or [])
     desc = (node.get("description") or "").lower()
-    name = (node.get("name") or "").lower()
 
     # GCU / browser automation nodes → hexagon
     if node_type == "gcu":
@@ -252,7 +251,7 @@ def synthesize_draft_from_runtime(
             "sub_agents": list(rn.sub_agents) if getattr(rn, "sub_agents", None) else [],
         }
         fc_type = classify_flowchart_node(node, i, total, edges, terminal_ids)
-        fc_meta = _FLOWCHART_TYPES[fc_type]
+        fc_meta = FLOWCHART_TYPES[fc_type]
         node["flowchart_type"] = fc_type
         node["flowchart_shape"] = fc_meta["shape"]
         node["flowchart_color"] = fc_meta["color"]
@@ -320,7 +319,7 @@ def synthesize_draft_from_runtime(
         "terminal_nodes": sorted(terminal_ids),
         "flowchart_legend": {
             fc_type: {"shape": meta["shape"], "color": meta["color"]}
-            for fc_type, meta in _FLOWCHART_TYPES.items()
+            for fc_type, meta in FLOWCHART_TYPES.items()
         },
     }
 

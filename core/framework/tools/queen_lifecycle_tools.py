@@ -47,7 +47,7 @@ from framework.runtime.event_bus import AgentEvent, EventType
 from framework.server.app import validate_agent_path
 from framework.tools.flowchart_utils import (
     FLOWCHART_FILENAME,
-    _FLOWCHART_TYPES,
+    FLOWCHART_TYPES,
     classify_flowchart_node,
     load_flowchart_file,
     save_flowchart_file,
@@ -294,7 +294,7 @@ def build_worker_profile(runtime: AgentRuntime, agent_path: Path | str | None = 
 
 
 
-# _FLOWCHART_TYPES is imported from framework.tools.flowchart_utils
+# FLOWCHART_TYPES is imported from framework.tools.flowchart_utils
 
 
 def _read_agent_triggers_json(agent_path: Path) -> list[dict]:
@@ -585,7 +585,7 @@ def _dissolve_planning_nodes(
         if not predecessors:
             # Decision at start: convert to regular process node
             d_node["flowchart_type"] = "process"
-            fc_meta = _FLOWCHART_TYPES["process"]
+            fc_meta = FLOWCHART_TYPES["process"]
             d_node["flowchart_shape"] = fc_meta["shape"]
             d_node["flowchart_color"] = fc_meta["color"]
             if not d_node.get("success_criteria"):
@@ -1196,7 +1196,7 @@ def register_queen_lifecycle_tools(
             if not predecessors:
                 # Decision at start: convert to regular process node
                 d_node["flowchart_type"] = "process"
-                fc_meta = _FLOWCHART_TYPES["process"]
+                fc_meta = FLOWCHART_TYPES["process"]
                 d_node["flowchart_shape"] = fc_meta["shape"]
                 d_node["flowchart_color"] = fc_meta["color"]
                 if not d_node.get("success_criteria"):
@@ -1748,7 +1748,7 @@ def register_queen_lifecycle_tools(
                 validated_edges,
                 terminal_ids,
             )
-            fc_meta = _FLOWCHART_TYPES[fc_type]
+            fc_meta = FLOWCHART_TYPES[fc_type]
             node["flowchart_type"] = fc_type
             node["flowchart_shape"] = fc_meta["shape"]
             node["flowchart_color"] = fc_meta["color"]
@@ -1766,7 +1766,7 @@ def register_queen_lifecycle_tools(
             # Color legend for the frontend
             "flowchart_legend": {
                 fc_type: {"shape": meta["shape"], "color": meta["color"]}
-                for fc_type, meta in _FLOWCHART_TYPES.items()
+                for fc_type, meta in FLOWCHART_TYPES.items()
             },
         }
 

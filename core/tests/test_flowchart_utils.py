@@ -6,7 +6,7 @@ from types import SimpleNamespace
 
 from framework.tools.flowchart_utils import (
     FLOWCHART_FILENAME,
-    _FLOWCHART_TYPES,
+    FLOWCHART_TYPES,
     classify_flowchart_node,
     generate_fallback_flowchart,
     load_flowchart_file,
@@ -149,7 +149,7 @@ class TestSynthesizeDraftFromRuntime:
         # Legend should contain all types
         assert draft["flowchart_legend"] == {
             k: {"shape": v["shape"], "color": v["color"]}
-            for k, v in _FLOWCHART_TYPES.items()
+            for k, v in FLOWCHART_TYPES.items()
         }
 
     def test_graph_with_sub_agents(self):
