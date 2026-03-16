@@ -229,7 +229,7 @@ class LoopConfig:
     # Maximum seconds a single tool call may take before being killed.
     # Prevents hung MCP servers (especially browser/GCU tools) from
     # blocking the entire event loop indefinitely.  0 = no timeout.
-    tool_call_timeout_seconds: float = 120.0
+    tool_call_timeout_seconds: float = 60.0
 
     # --- Lifecycle hooks ---
     # Hooks are async callables keyed by event name.  Supported events:

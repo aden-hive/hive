@@ -205,6 +205,17 @@ class GraphExecutor:
         self.skills_catalog_prompt = skills_catalog_prompt
         self.protocols_prompt = protocols_prompt
 
+        if protocols_prompt:
+            self.logger.info(
+                "GraphExecutor[%s] received protocols_prompt (%d chars)",
+                stream_id, len(protocols_prompt),
+            )
+        else:
+            self.logger.warning(
+                "GraphExecutor[%s] received EMPTY protocols_prompt",
+                stream_id,
+            )
+
         # Parallel execution settings
         self.enable_parallel_execution = enable_parallel_execution
         self._parallel_config = parallel_config or ParallelExecutionConfig()
