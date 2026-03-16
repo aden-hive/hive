@@ -907,6 +907,83 @@ class TestOpenRouterToolCompatFallback:
 
     @pytest.mark.asyncio
     @patch("litellm.acompletion")
+    async def test_stream_tool_compat_parses_plain_text_tool_call_lines(
+        self,
+        mock_acompletion,
+    ):
+        """Plain textual tool-call lines should execute as tools, not user-visible text."""
+        from framework.llm.stream_events import FinishEvent, TextDeltaEvent, ToolCallEvent
+
+        provider = LiteLLMProvider(
+            model="openrouter/liquid/lfm-2.5-1.2b-thinking:free",
+            api_key="test-key",
+        )
+        tools = [
+            Tool(
+                name="ask_user",
+                description="Ask the user a single multiple-choice question",
+                parameters={
+                    "properties": {
+                        "question": {"type": "string"},
+                        "options": {"type": "array"},
+                    },
+                    "required": ["question", "options"],
+                },
+            )
+        ]
+
+        compat_response = MagicMock()
+        compat_response.choices = [MagicMock()]
+        compat_response.choices[0].message.content = (
+            "Queen has been loaded. It's ready to assist with your planning needs.\n\n"
+            "ask_user('What would you like to do?', ['Define a new agent', "
+            "'Diagnose an existing agent', 'Explore tools'])"
+        )
+        compat_response.choices[0].finish_reason = "stop"
+        compat_response.model = provider.model
+        compat_response.usage.prompt_tokens = 11
+        compat_response.usage.completion_tokens = 7
+
+        async def side_effect(*args, **kwargs):
+            if kwargs.get("stream"):
+                raise RuntimeError(
+                    'OpenrouterException - {"error":{"message":"No endpoints found '
+                    'that support tool use.","code":404}}'
+                )
+            return compat_response
+
+        mock_acompletion.side_effect = side_effect
+
+        events = []
+        async for event in provider.stream(
+            messages=[{"role": "user", "content": "hello"}],
+            system="Use tools when needed.",
+            tools=tools,
+            max_tokens=128,
+        ):
+            events.append(event)
+
+        tool_calls = [event for event in events if isinstance(event, ToolCallEvent)]
+        assert len(tool_calls) == 1
+        assert tool_calls[0].tool_name == "ask_user"
+        assert tool_calls[0].tool_input == {
+            "question": "What would you like to do?",
+            "options": ["Define a new agent", "Diagnose an existing agent", "Explore tools"],
+        }
+
+        text_events = [event for event in events if isinstance(event, TextDeltaEvent)]
+        assert len(text_events) == 1
+        assert "ask_user(" not in text_events[0].snapshot
+        assert text_events[0].snapshot == (
+            "Queen has been loaded. It's ready to assist with your planning needs."
+        )
+
+        finish_events = [event for event in events if isinstance(event, FinishEvent)]
+        assert len(finish_events) == 1
+        assert finish_events[0].stop_reason == "tool_calls"
+
+    @pytest.mark.asyncio
+    @patch("litellm.acompletion")
     async def test_stream_tool_compat_treats_non_json_as_plain_text(self, mock_acompletion):
         """If fallback output is not valid JSON, preserve it as assistant text."""
         from framework.llm.stream_events import FinishEvent, TextDeltaEvent, ToolCallEvent

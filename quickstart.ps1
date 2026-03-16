@@ -857,6 +857,39 @@ function Get-ModelSelection {
             }
             $normalizedModel = Normalize-OpenRouterModelId $rawModel
             if (-not [string]::IsNullOrWhiteSpace($normalizedModel)) {
+                $openrouterKey = $null
+                if ($SelectedEnvVar) {
+                    $openrouterKey = [System.Environment]::GetEnvironmentVariable($SelectedEnvVar, "Process")
+                    if (-not $openrouterKey) {
+                        $openrouterKey = [System.Environment]::GetEnvironmentVariable($SelectedEnvVar, "User")
+                    }
+                }
+
+                if ($openrouterKey) {
+                    Write-Host "  Verifying model id... " -NoNewline
+                    try {
+                        $modelApiBase = if ($SelectedApiBase) { $SelectedApiBase } else { "https://openrouter.ai/api/v1" }
+                        $hcResult = & uv run python (Join-Path $ScriptDir "scripts/check_llm_key.py") "openrouter" $openrouterKey $modelApiBase $normalizedModel 2>$null
+                        $hcJson = $hcResult | ConvertFrom-Json
+                        if ($hcJson.valid -eq $true) {
+                            Write-Color -Text "ok" -Color Green
+                        } elseif ($hcJson.valid -eq $false) {
+                            Write-Color -Text "failed" -Color Red
+                            Write-Warn $hcJson.message
+                            Write-Host ""
+                            continue
+                        } else {
+                            Write-Color -Text "--" -Color Yellow
+                            Write-Color -Text "  Could not verify model id (network issue). Continuing with your selection." -Color DarkGray
+                        }
+                    } catch {
+                        Write-Color -Text "--" -Color Yellow
+                        Write-Color -Text "  Could not verify model id (network issue). Continuing with your selection." -Color DarkGray
+                    }
+                } else {
+                    Write-Color -Text "  Skipping model verification (OpenRouter key not available in current shell)." -Color DarkGray
+                }
+
                 Write-Host ""
                 Write-Ok "Model: $normalizedModel"
                 return @{ Model = $normalizedModel; MaxTokens = 8192; MaxContextTokens = 120000 }

@@ -1,7 +1,7 @@
 """Validate an LLM API key without consuming tokens.
 
 Usage:
-    python scripts/check_llm_key.py <provider_id> <api_key> [api_base]
+    python scripts/check_llm_key.py <provider_id> <api_key> [api_base] [model]
 
 Exit codes:
     0 = valid key
@@ -17,6 +17,29 @@ import sys
 import httpx
 
 TIMEOUT = 10.0
+
+
+def _extract_error_message(response: httpx.Response) -> str:
+    """Best-effort extraction of a provider error message."""
+    try:
+        payload = response.json()
+    except Exception:
+        text = (response.text or "").strip()
+        return text[:240] if text else ""
+
+    if isinstance(payload, dict):
+        error_value = payload.get("error")
+        if isinstance(error_value, dict):
+            message = error_value.get("message")
+            if isinstance(message, str) and message.strip():
+                return message.strip()
+        if isinstance(error_value, str) and error_value.strip():
+            return error_value.strip()
+        message = payload.get("message")
+        if isinstance(message, str) and message.strip():
+            return message.strip()
+
+    return ""
 
 
 def check_anthropic(api_key: str, **_: str) -> dict:
@@ -70,6 +93,51 @@ def check_openrouter(
     if r.status_code == 403:
         return {"valid": False, "message": "OpenRouter API key lacks permissions"}
     return {"valid": False, "message": f"OpenRouter API returned status {r.status_code}"}
+
+
+def check_openrouter_model(
+    api_key: str,
+    model: str,
+    api_base: str = "https://openrouter.ai/api/v1",
+    **_: str,
+) -> dict:
+    """Validate that an OpenRouter model ID is routable with this key."""
+    endpoint = f"{api_base.rstrip('/')}/chat/completions"
+    with httpx.Client(timeout=TIMEOUT) as client:
+        r = client.post(
+            endpoint,
+            headers={
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json",
+            },
+            json={
+                "model": model,
+                "messages": [{"role": "user", "content": "Hello, are you working?"}],
+                "max_tokens": 1,
+            },
+        )
+    if r.status_code == 200:
+        return {"valid": True, "message": f"OpenRouter model is available: {model}"}
+    if r.status_code == 429:
+        return {
+            "valid": True,
+            "message": "OpenRouter model check rate-limited; assuming model is reachable",
+        }
+    if r.status_code == 401:
+        return {"valid": False, "message": "Invalid OpenRouter API key"}
+    if r.status_code == 403:
+        return {"valid": False, "message": "OpenRouter API key lacks permissions"}
+
+    detail = _extract_error_message(r)
+    if r.status_code in (400, 404, 422):
+        base = f"OpenRouter model is not available: {model}"
+        return {"valid": False, "message": f"{base}. {detail}" if detail else base}
+
+    suffix = f": {detail}" if detail else ""
+    return {
+        "valid": False,
+        "message": f"OpenRouter model check returned status {r.status_code}{suffix}",
+    }
 
 
 def check_minimax(
@@ -145,7 +213,7 @@ PROVIDERS = {
     "cerebras": lambda key, **kw: check_openai_compatible(
         key, "https://api.cerebras.ai/v1/models", "Cerebras"
     ),
-    "openrouter": lambda key, **kw: check_openrouter(key),
+    "openrouter": lambda key, **kw: check_openrouter(key, **kw),
     "minimax": lambda key, **kw: check_minimax(key),
     # Kimi For Coding uses an Anthropic-compatible endpoint; check via /v1/messages
     # with empty messages (same as check_anthropic, triggers 400 not 401).
@@ -161,7 +229,7 @@ def main() -> None:
             json.dumps(
                 {
                     "valid": False,
-                    "message": "Usage: check_llm_key.py <provider> <key> [api_base]",
+                    "message": "Usage: check_llm_key.py <provider> <key> [api_base] [model]",
                 }
             )
         )
@@ -170,9 +238,16 @@ def main() -> None:
     provider_id = sys.argv[1]
     api_key = sys.argv[2]
     api_base = sys.argv[3] if len(sys.argv) > 3 else ""
+    model = sys.argv[4] if len(sys.argv) > 4 else ""
 
     try:
-        if api_base and provider_id == "minimax":
+        if provider_id == "openrouter" and model:
+            result = check_openrouter_model(
+                api_key,
+                model=model,
+                api_base=(api_base or "https://openrouter.ai/api/v1"),
+            )
+        elif api_base and provider_id == "minimax":
             result = check_minimax(api_key, api_base)
         elif api_base and provider_id == "openrouter":
             result = check_openrouter(api_key, api_base)

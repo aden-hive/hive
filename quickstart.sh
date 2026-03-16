@@ -743,6 +743,35 @@ prompt_model_selection() {
             local normalized_model
             normalized_model="$(normalize_openrouter_model_id "$input_model")"
             if [ -n "$normalized_model" ]; then
+                local openrouter_key=""
+                if [ -n "${SELECTED_ENV_VAR:-}" ]; then
+                    openrouter_key="${!SELECTED_ENV_VAR:-}"
+                fi
+
+                if [ -n "$openrouter_key" ]; then
+                    local model_hc_result=""
+                    local model_hc_valid=""
+                    local model_hc_msg=""
+                    local model_hc_base="${SELECTED_API_BASE:-https://openrouter.ai/api/v1}"
+                    echo -n "  Verifying model id... "
+                    model_hc_result="$(uv run python "$SCRIPT_DIR/scripts/check_llm_key.py" "openrouter" "$openrouter_key" "$model_hc_base" "$normalized_model" 2>/dev/null)" || true
+                    model_hc_valid="$(echo "$model_hc_result" | $PYTHON_CMD -c "import json,sys; print(json.loads(sys.stdin.read()).get('valid',''))" 2>/dev/null)" || true
+                    model_hc_msg="$(echo "$model_hc_result" | $PYTHON_CMD -c "import json,sys; print(json.loads(sys.stdin.read()).get('message',''))" 2>/dev/null)" || true
+                    if [ "$model_hc_valid" = "True" ]; then
+                        echo -e "${GREEN}ok${NC}"
+                    elif [ "$model_hc_valid" = "False" ]; then
+                        echo -e "${RED}failed${NC}"
+                        echo -e "  ${YELLOW}⚠ $model_hc_msg${NC}"
+                        echo ""
+                        continue
+                    else
+                        echo -e "${YELLOW}--${NC}"
+                        echo -e "  ${DIM}Could not verify model id (network issue). Continuing with your selection.${NC}"
+                    fi
+                else
+                    echo -e "  ${DIM}Skipping model verification (OpenRouter key not available in current shell).${NC}"
+                fi
+
                 SELECTED_MODEL="$normalized_model"
                 SELECTED_MAX_TOKENS=8192
                 SELECTED_MAX_CONTEXT_TOKENS=120000

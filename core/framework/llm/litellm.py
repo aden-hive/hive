@@ -1048,21 +1048,52 @@ class LiteLLMProvider(LLMProvider):
         content: str,
         tools: list[Tool],
     ) -> tuple[str, list[dict[str, Any]]]:
-        """Parse textual OpenRouter tool-call markers into synthetic tool calls."""
+        """Parse textual OpenRouter tool calls into synthetic tool calls.
+
+        Supports both:
+        - Marker wrapped payloads: <|tool_call_start|>...<|tool_call_end|>
+        - Plain one-line tool calls: ask_user("...", ["..."])
+        """
         tools_by_name = {tool.name: tool for tool in tools}
         compat_prefix = f"openrouter_compat_{time.time_ns()}"
         tool_calls: list[dict[str, Any]] = []
+        segment_index = 0
 
-        for block_index, match in enumerate(OPENROUTER_TOOL_CALL_RE.finditer(content)):
-            tool_calls.extend(
-                self._parse_openrouter_text_tool_call_block(
-                    block=match.group(1),
-                    tools_by_name=tools_by_name,
-                    compat_prefix=f"{compat_prefix}_{block_index}",
-                )
+        for match in OPENROUTER_TOOL_CALL_RE.finditer(content):
+            parsed_calls = self._parse_openrouter_text_tool_call_block(
+                block=match.group(1),
+                tools_by_name=tools_by_name,
+                compat_prefix=f"{compat_prefix}_{segment_index}",
             )
+            if parsed_calls:
+                segment_index += 1
+                tool_calls.extend(parsed_calls)
 
-        stripped_text = OPENROUTER_TOOL_CALL_RE.sub("", content).strip()
+        stripped_content = OPENROUTER_TOOL_CALL_RE.sub("", content)
+        retained_lines: list[str] = []
+        for line in stripped_content.splitlines():
+            stripped_line = line.strip()
+            if not stripped_line:
+                retained_lines.append(line)
+                continue
+
+            candidate = stripped_line
+            if candidate.startswith("`") and candidate.endswith("`") and len(candidate) > 1:
+                candidate = candidate[1:-1].strip()
+
+            parsed_calls = self._parse_openrouter_text_tool_call_block(
+                block=candidate,
+                tools_by_name=tools_by_name,
+                compat_prefix=f"{compat_prefix}_{segment_index}",
+            )
+            if parsed_calls:
+                segment_index += 1
+                tool_calls.extend(parsed_calls)
+                continue
+
+            retained_lines.append(line)
+
+        stripped_text = "\n".join(retained_lines).strip()
         return stripped_text, tool_calls
 
     def _parse_openrouter_text_tool_call_block(
