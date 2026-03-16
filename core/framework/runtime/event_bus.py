@@ -159,6 +159,7 @@ class EventType(StrEnum):
     TRIGGER_DEACTIVATED = "trigger_deactivated"
     TRIGGER_FIRED = "trigger_fired"
     TRIGGER_REMOVED = "trigger_removed"
+    TRIGGER_UPDATED = "trigger_updated"
 
 
 @dataclass
