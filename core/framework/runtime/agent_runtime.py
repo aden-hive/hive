@@ -134,6 +134,7 @@ class AgentRuntime:
         event_bus: "EventBus | None" = None,
         skills_catalog_prompt: str = "",
         protocols_prompt: str = "",
+        skill_dirs: list[str] | None = None,
     ):
         """
         Initialize agent runtime.
@@ -157,6 +158,7 @@ class AgentRuntime:
                 share a single bus between queen, worker, and judge.
             skills_catalog_prompt: Available skills catalog for system prompt
             protocols_prompt: Default skill operational protocols for system prompt
+            skill_dirs: Skill base directories for Tier 3 resource access
         """
         self.graph = graph
         self.goal = goal
@@ -166,6 +168,7 @@ class AgentRuntime:
         self.accounts_prompt = accounts_prompt
         self.skills_catalog_prompt = skills_catalog_prompt
         self.protocols_prompt = protocols_prompt
+        self.skill_dirs: list[str] = skill_dirs or []
 
         # Primary graph identity
         self._graph_id: str = graph_id or "primary"
@@ -301,6 +304,7 @@ class AgentRuntime:
                     tool_provider_map=self._tool_provider_map,
                     skills_catalog_prompt=self.skills_catalog_prompt,
                     protocols_prompt=self.protocols_prompt,
+                    skill_dirs=self.skill_dirs,
                 )
                 await stream.start()
                 self._streams[ep_id] = stream
@@ -937,6 +941,7 @@ class AgentRuntime:
                 tool_provider_map=self._tool_provider_map,
                 skills_catalog_prompt=self.skills_catalog_prompt,
                 protocols_prompt=self.protocols_prompt,
+                skill_dirs=self.skill_dirs,
             )
             if self._running:
                 await stream.start()
@@ -1718,6 +1723,7 @@ def create_agent_runtime(
     event_bus: "EventBus | None" = None,
     skills_catalog_prompt: str = "",
     protocols_prompt: str = "",
+    skill_dirs: list[str] | None = None,
 ) -> AgentRuntime:
     """
     Create and configure an AgentRuntime with entry points.
@@ -1746,6 +1752,7 @@ def create_agent_runtime(
         event_bus: Optional external EventBus to share with other components.
         skills_catalog_prompt: Available skills catalog for system prompt.
         protocols_prompt: Default skill operational protocols for system prompt.
+        skill_dirs: Skill base directories for Tier 3 resource access.
 
     Returns:
         Configured AgentRuntime (not yet started)
@@ -1774,6 +1781,7 @@ def create_agent_runtime(
         event_bus=event_bus,
         skills_catalog_prompt=skills_catalog_prompt,
         protocols_prompt=protocols_prompt,
+        skill_dirs=skill_dirs,
     )
 
     for spec in entry_points:

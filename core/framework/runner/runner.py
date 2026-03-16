@@ -1337,6 +1337,7 @@ class AgentRunner:
         # Skill discovery and default skill loading
         skills_catalog_prompt = ""
         protocols_prompt = ""
+        skill_dirs: list[str] = []
         try:
             from framework.skills.catalog import SkillCatalog
             from framework.skills.config import SkillsConfig
@@ -1362,6 +1363,7 @@ class AgentRunner:
 
             # Build catalog (community skills only — defaults handled separately)
             catalog = SkillCatalog(discovered)
+            skill_dirs = catalog.allowlisted_dirs
             skills_catalog_prompt = catalog.to_prompt()
 
             # Handle pre-activated skills
@@ -1390,6 +1392,7 @@ class AgentRunner:
             event_bus=event_bus,
             skills_catalog_prompt=skills_catalog_prompt,
             protocols_prompt=protocols_prompt,
+            skill_dirs=skill_dirs,
         )
 
     def _get_api_key_env_var(self, model: str) -> str | None:
@@ -1487,6 +1490,7 @@ class AgentRunner:
         event_bus=None,
         skills_catalog_prompt: str = "",
         protocols_prompt: str = "",
+        skill_dirs: list[str] | None = None,
     ) -> None:
         """Set up multi-entry-point execution using AgentRuntime."""
         entry_points = []
@@ -1548,6 +1552,7 @@ class AgentRunner:
             event_bus=event_bus,
             skills_catalog_prompt=skills_catalog_prompt,
             protocols_prompt=protocols_prompt,
+            skill_dirs=skill_dirs,
         )
 
         # Pass intro_message through for TUI display

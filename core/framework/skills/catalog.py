@@ -76,6 +76,7 @@ class SkillCatalog:
             lines.append(f"    <name>{escape(skill.name)}</name>")
             lines.append(f"    <description>{escape(skill.description)}</description>")
             lines.append(f"    <location>{escape(skill.location)}</location>")
+            lines.append(f"    <base_dir>{escape(skill.base_dir)}</base_dir>")
             lines.append("  </skill>")
         lines.append("</available_skills>")
 
