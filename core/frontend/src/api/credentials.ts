@@ -14,6 +14,7 @@ export interface AgentCredentialRequirement {
   env_var: string;
   description: string;
   help_url: string;
+  api_key_instructions: string;
   tools: string[];
   node_types: string[];
   available: boolean;

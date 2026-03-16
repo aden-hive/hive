@@ -241,6 +241,43 @@ def _dump_failed_request(
     return str(filepath)
 
 
+def _parse_gemini_retry_delay(exception: BaseException) -> float | None:
+    """Extract retryDelay from a Gemini JSON error body.
+
+    Gemini embeds retry timing in the error body as a google.rpc.RetryInfo
+    detail (e.g. "retryDelay": "19s") rather than in HTTP headers.
+    Returns the delay in seconds, or None if not found.
+    """
+    body = str(exception)
+    try:
+        # The error body may appear inside the exception message as a JSON string
+        start = body.find("{")
+        if start == -1:
+            return None
+        # Find the outermost JSON object
+        data = json.loads(body[start:body.rfind("}") + 1])
+        details = data.get("error", {}).get("details", [])
+        for detail in details:
+            if detail.get("@type", "").endswith("RetryInfo"):
+                raw = detail.get("retryDelay", "")
+                # Format is e.g. "19.165779407s" or "19s"
+                if raw.endswith("s"):
+                    return float(raw[:-1])
+    except (ValueError, KeyError, json.JSONDecodeError):
+        pass
+    return None
+
+
+def _is_daily_quota_error(exception: BaseException) -> bool:
+    """Return True when a 429 is a daily quota exhaustion (not a transient burst limit).
+
+    Daily quota errors have quotaId containing 'PerDay'. Retrying is pointless
+    until the quota resets — fail fast to avoid burning minutes of backoff.
+    """
+    body = str(exception)
+    return "PerDay" in body and "FreeTier" in body
+
+
 def _compute_retry_delay(
     attempt: int,
     exception: BaseException | None = None,
@@ -253,7 +290,8 @@ def _compute_retry_delay(
     1. retry-after-ms header (milliseconds, float)
     2. retry-after header as seconds (float)
     3. retry-after header as HTTP-date (RFC 7231)
-    4. Exponential backoff: backoff_base * 2^attempt
+    4. retryDelay field in Gemini JSON error body
+    5. Exponential backoff: backoff_base * 2^attempt
 
     All values are capped at max_delay seconds.
     """
@@ -291,6 +329,11 @@ def _compute_retry_delay(
                         return min(max(delay, 0), max_delay)
                     except (ValueError, TypeError, OverflowError):
                         pass
+
+        # Priority 4: Gemini embeds retry timing in the JSON error body
+        gemini_delay = _parse_gemini_retry_delay(exception)
+        if gemini_delay is not None:
+            return min(max(gemini_delay, 0), max_delay)
 
     # Fallback: exponential backoff
     delay = backoff_base * (2**attempt)
@@ -522,6 +565,13 @@ class LiteLLMProvider(LLMProvider):
                     error_type="rate_limit",
                     attempt=attempt,
                 )
+                if _is_daily_quota_error(e):
+                    logger.error(
+                        f"[retry] {model} daily quota exhausted — not retrying. "
+                        f"~{token_count} tokens ({token_method}). "
+                        f"Full request dumped to: {dump_path}"
+                    )
+                    raise
                 if attempt == retries:
                     logger.error(
                         f"[retry] GAVE UP on {model} after {retries + 1} "
@@ -722,6 +772,13 @@ class LiteLLMProvider(LLMProvider):
                     error_type="rate_limit",
                     attempt=attempt,
                 )
+                if _is_daily_quota_error(e):
+                    logger.error(
+                        f"[async-retry] {model} daily quota exhausted — not retrying. "
+                        f"~{token_count} tokens ({token_method}). "
+                        f"Full request dumped to: {dump_path}"
+                    )
+                    raise
                 if attempt == retries:
                     logger.error(
                         f"[async-retry] GAVE UP on {model} after {retries + 1} "
@@ -1256,12 +1313,32 @@ class LiteLLMProvider(LLMProvider):
                 return
 
             except RateLimitError as e:
+                if _is_daily_quota_error(e):
+                    logger.error(
+                        f"[stream-retry] {self.model} daily quota exhausted — not retrying."
+                    )
+                    yield StreamErrorEvent(
+                        recoverable=False,
+                        error=(
+                            f"Daily quota exhausted for {self.model}"
+                            " — please switch to a different model or try again tomorrow."
+                        ),
+                    )
+                    return
                 if attempt < RATE_LIMIT_MAX_RETRIES:
                     wait = _compute_retry_delay(attempt, exception=e)
                     logger.warning(
                         f"[stream-retry] {self.model} rate limited (429): {e!s}. "
                         f"Retrying in {wait:.1f}s "
                         f"(attempt {attempt + 1}/{RATE_LIMIT_MAX_RETRIES})"
+                    )
+                    yield StreamErrorEvent(
+                        recoverable=True,
+                        error=(
+                            f"Rate limited by {self.model}"
+                            f" — retrying in {wait:.0f}s"
+                            f" (attempt {attempt + 1}/{RATE_LIMIT_MAX_RETRIES})"
+                        ),
                     )
                     await asyncio.sleep(wait)
                     continue

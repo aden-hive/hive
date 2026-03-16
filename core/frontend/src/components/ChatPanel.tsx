@@ -28,6 +28,8 @@ interface ChatPanelProps {
   isWorkerWaiting?: boolean;
   /** When true the queen is busy (typing or streaming) — shows the stop button */
   isBusy?: boolean;
+  /** Rate limit or stall message to show below the typing indicator */
+  rateLimitMessage?: string | null;
   activeThread: string;
   /** When true, the input is disabled (e.g. during loading) */
   disabled?: boolean;
@@ -241,7 +243,7 @@ const MessageBubble = memo(function MessageBubble({ msg, queenPhase }: { msg: Ch
   );
 }, (prev, next) => prev.msg.id === next.msg.id && prev.msg.content === next.msg.content && prev.msg.phase === next.msg.phase && prev.queenPhase === next.queenPhase);
 
-export default function ChatPanel({ messages, onSend, isWaiting, isWorkerWaiting, isBusy, activeThread, disabled, onCancel, pendingQuestion, pendingOptions, pendingQuestions, onQuestionSubmit, onMultiQuestionSubmit, onQuestionDismiss, queenPhase }: ChatPanelProps) {
+export default function ChatPanel({ messages, onSend, isWaiting, isWorkerWaiting, isBusy, activeThread, disabled, onCancel, pendingQuestion, pendingOptions, pendingQuestions, onQuestionSubmit, onMultiQuestionSubmit, onQuestionDismiss, queenPhase, rateLimitMessage }: ChatPanelProps) {
   const [input, setInput] = useState("");
   const [readMap, setReadMap] = useState<Record<string, number>>({});
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -319,11 +321,15 @@ export default function ChatPanel({ messages, onSend, isWaiting, isWorkerWaiting
               <Crown className="w-4 h-4" style={{ color: queenColor }} />
             </div>
             <div className="border border-primary/20 bg-primary/5 rounded-2xl rounded-tl-md px-4 py-3">
-              <div className="flex gap-1.5">
-                <span className="w-1.5 h-1.5 rounded-full bg-muted-foreground animate-bounce" style={{ animationDelay: "0ms" }} />
-                <span className="w-1.5 h-1.5 rounded-full bg-muted-foreground animate-bounce" style={{ animationDelay: "150ms" }} />
-                <span className="w-1.5 h-1.5 rounded-full bg-muted-foreground animate-bounce" style={{ animationDelay: "300ms" }} />
-              </div>
+              {rateLimitMessage ? (
+                <p className="text-[11px] text-amber-500 leading-relaxed">{rateLimitMessage}</p>
+              ) : (
+                <div className="flex gap-1.5">
+                  <span className="w-1.5 h-1.5 rounded-full bg-muted-foreground animate-bounce" style={{ animationDelay: "0ms" }} />
+                  <span className="w-1.5 h-1.5 rounded-full bg-muted-foreground animate-bounce" style={{ animationDelay: "150ms" }} />
+                  <span className="w-1.5 h-1.5 rounded-full bg-muted-foreground animate-bounce" style={{ animationDelay: "300ms" }} />
+                </div>
+              )}
             </div>
           </div>
         )}

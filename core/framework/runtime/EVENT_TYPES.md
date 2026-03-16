@@ -255,13 +255,13 @@ A non-client-facing node is blocked waiting for input.
 
 ### `node_stalled`
 
-The node's LLM has produced identical responses for several consecutive turns (stall detection).
+The node has stalled. This covers two cases: the LLM produced similar responses for several consecutive turns (stall detection), or the LLM provider returned a rate limit or quota error during streaming.
 
-| Data Field | Type  | Description                                       |
-| ---------- | ----- | ------------------------------------------------- |
-| `reason`   | `str` | Always `"Consecutive identical responses detected"`|
+| Data Field | Type  | Description                                                                 |
+| ---------- | ----- | --------------------------------------------------------------------------- |
+| `reason`   | `str` | Human-readable stall reason, e.g. `"Consecutive similar responses detected"` or a rate limit message |
 
-**Emitted by:** `EventLoopNode._publish_stalled()`
+**Emitted by:** `EventLoopNode._publish_stalled()` (stall detection), `EventLoopNode._do_stream()` (LLM rate limit / quota errors)
 
 ---
 
