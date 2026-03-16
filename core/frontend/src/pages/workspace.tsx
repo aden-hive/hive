@@ -17,6 +17,7 @@ import { useMultiSSE } from "@/hooks/use-sse";
 import type { LiveSession, AgentEvent, DiscoverEntry, NodeSpec, DraftGraph as DraftGraphData } from "@/api/types";
 import { sseEventToChatMessage, formatAgentDisplayName } from "@/lib/chat-helpers";
 import { topologyToGraphNodes } from "@/lib/graph-converter";
+import { cronToLabel } from "@/lib/graphUtils";
 import { ApiError } from "@/api/client";
 
 const makeId = () => Math.random().toString(36).slice(2, 9);
@@ -557,7 +558,11 @@ export default function Workspace() {
   const [dismissedBanner, setDismissedBanner] = useState<string | null>(null);
   const [selectedNode, setSelectedNode] = useState<GraphNode | null>(null);
   const [triggerTaskDraft, setTriggerTaskDraft] = useState("");
+  const [triggerCronDraft, setTriggerCronDraft] = useState("");
   const [triggerTaskSaving, setTriggerTaskSaving] = useState(false);
+  const [triggerScheduleSaving, setTriggerScheduleSaving] = useState(false);
+  const [triggerCronSaved, setTriggerCronSaved] = useState(false);
+  const [triggerTaskSaved, setTriggerTaskSaved] = useState(false);
   const [newTabOpen, setNewTabOpen] = useState(false);
   const newTabBtnRef = useRef<HTMLButtonElement>(null);
   const [graphPanelPct, setGraphPanelPct] = useState(30);
@@ -2323,6 +2328,43 @@ export default function Workspace() {
           break;
         }
 
+        case "trigger_updated": {
+          const triggerId = event.data?.trigger_id as string;
+          if (triggerId) {
+            const nodeId = `__trigger_${triggerId}`;
+            const triggerConfig = (event.data?.trigger_config as Record<string, unknown>) || {};
+            const cron = triggerConfig.cron as string | undefined;
+            const interval = triggerConfig.interval_minutes as number | undefined;
+            const newLabel = cron
+              ? cronToLabel(cron)
+              : interval
+                ? `Every ${interval >= 60 ? `${interval / 60}h` : `${interval}m`}`
+                : undefined;
+            setSessionsByAgent(prev => {
+              const sessions = prev[agentType] || [];
+              const activeId = activeSessionRef.current[agentType] || sessions[0]?.id;
+              return {
+                ...prev,
+                [agentType]: sessions.map(s => {
+                  if (s.id !== activeId) return s;
+                  return {
+                    ...s,
+                    graphNodes: s.graphNodes.map(n => {
+                      if (n.id !== nodeId) return n;
+                      return {
+                        ...n,
+                        ...(newLabel ? { label: newLabel } : {}),
+                        triggerConfig: { ...n.triggerConfig, ...triggerConfig },
+                      };
+                    }),
+                  };
+                }),
+              };
+            });
+          }
+          break;
+        }
+
         case "trigger_removed": {
           const triggerId = event.data?.trigger_id as string;
           if (triggerId) {
@@ -2376,13 +2418,42 @@ export default function Workspace() {
   const liveSelectedNode = selectedNode && currentGraph.nodes.find(n => n.id === selectedNode.id);
   const resolvedSelectedNode = liveSelectedNode || selectedNode;
 
-  // Sync trigger task draft when selected trigger node changes
+  // Sync trigger drafts when selected trigger node changes
   useEffect(() => {
     if (resolvedSelectedNode?.nodeType === "trigger") {
       const tc = resolvedSelectedNode.triggerConfig as Record<string, unknown> | undefined;
       setTriggerTaskDraft((tc?.task as string) || "");
+      setTriggerCronDraft((tc?.cron as string) || "");
     }
   }, [resolvedSelectedNode?.id]);
+
+  const patchTriggerNode = useCallback((agentType: string, triggerNodeId: string, patch: { task?: string; trigger_config?: Record<string, unknown>; label?: string }) => {
+    setSessionsByAgent(prev => {
+      const sessions = prev[agentType] || [];
+      const activeId = activeSessionRef.current[agentType] || sessions[0]?.id;
+      return {
+        ...prev,
+        [agentType]: sessions.map(s => {
+          if (s.id !== activeId) return s;
+          return {
+            ...s,
+            graphNodes: s.graphNodes.map(n => {
+              if (n.id !== triggerNodeId) return n;
+              return {
+                ...n,
+                ...(patch.label ? { label: patch.label } : {}),
+                triggerConfig: {
+                  ...n.triggerConfig,
+                  ...(patch.trigger_config || {}),
+                  ...(patch.task !== undefined ? { task: patch.task } : {}),
+                },
+              };
+            }),
+          };
+        }),
+      };
+    });
+  }, []);
 
   // Build a flat list of all agent-type tabs for the tab bar
   const agentTabs = Object.entries(sessionsByAgent)
@@ -3052,18 +3123,64 @@ export default function Workspace() {
                       const interval = tc?.interval_minutes as number | undefined;
                       const eventTypes = tc?.event_types as string[] | undefined;
                       const scheduleLabel = cron
-                        ? `cron: ${cron}`
+                        ? cronToLabel(cron)
                         : interval
                           ? `Every ${interval >= 60 ? `${interval / 60}h` : `${interval}m`}`
                           : eventTypes?.length
                             ? eventTypes.join(", ")
                             : null;
-                      return scheduleLabel ? (
+                      const canEditCron = resolvedSelectedNode.triggerType === "timer";
+                      const cronChanged = canEditCron && triggerCronDraft.trim() !== (cron || "");
+                      return scheduleLabel || canEditCron ? (
                         <div>
                           <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider mb-1.5">Schedule</p>
-                          <p className="text-xs text-foreground/80 font-mono bg-muted/30 rounded-lg px-3 py-2 border border-border/20">
-                            {scheduleLabel}
-                          </p>
+                          {scheduleLabel && (
+                            <p className="text-xs text-foreground/80 font-mono bg-muted/30 rounded-lg px-3 py-2 border border-border/20">
+                              {scheduleLabel}
+                            </p>
+                          )}
+                          {canEditCron && (
+                            <>
+                              <input
+                                value={triggerCronDraft}
+                                onChange={(e) => setTriggerCronDraft(e.target.value)}
+                                placeholder="0 5 * * *"
+                                className="mt-1.5 w-full text-xs text-foreground/80 bg-muted/30 rounded-lg px-3 py-2 border border-border/20 font-mono focus:outline-none focus:border-primary/40"
+                              />
+                              <p className="text-[10px] text-muted-foreground/60 mt-1">
+                                Edit the cron expression for this timer trigger.
+                              </p>
+                              {cronChanged && (
+                                <button
+                                  disabled={triggerScheduleSaving || !triggerCronDraft.trim()}
+                                  onClick={async () => {
+                                    const sessionId = activeAgentState?.sessionId;
+                                    const triggerId = resolvedSelectedNode.id.replace("__trigger_", "");
+                                    const nextCron = triggerCronDraft.trim();
+                                    if (!sessionId || !nextCron) return;
+                                    const nextTriggerConfig: Record<string, unknown> = { cron: nextCron };
+                                    setTriggerScheduleSaving(true);
+                                    try {
+                                      await sessionsApi.updateTrigger(sessionId, triggerId, {
+                                        trigger_config: nextTriggerConfig,
+                                      });
+                                      patchTriggerNode(activeWorker, resolvedSelectedNode.id, {
+                                        trigger_config: nextTriggerConfig,
+                                        label: cronToLabel(nextCron),
+                                      });
+                                      setTriggerCronSaved(true);
+                                      setTimeout(() => setTriggerCronSaved(false), 2000);
+                                    } finally {
+                                      setTriggerScheduleSaving(false);
+                                    }
+                                  }}
+                                  className="mt-1.5 w-full text-[11px] px-3 py-1.5 rounded-lg border border-primary/30 text-primary hover:bg-primary/10 transition-colors disabled:opacity-50"
+                                >
+                                  {triggerScheduleSaving ? "Saving..." : triggerCronSaved ? "Saved" : "Save Cron"}
+                                </button>
+                              )}
+                            </>
+                          )}
                         </div>
                       ) : null;
                     })()}
@@ -3100,14 +3217,17 @@ export default function Workspace() {
                               if (!sessionId) return;
                               setTriggerTaskSaving(true);
                               try {
-                                await sessionsApi.updateTriggerTask(sessionId, triggerId, triggerTaskDraft);
+                                await sessionsApi.updateTrigger(sessionId, triggerId, { task: triggerTaskDraft });
+                                patchTriggerNode(activeWorker, resolvedSelectedNode.id, { task: triggerTaskDraft });
+                                setTriggerTaskSaved(true);
+                                setTimeout(() => setTriggerTaskSaved(false), 2000);
                               } finally {
                                 setTriggerTaskSaving(false);
                               }
                             }}
                             className="mt-1.5 w-full text-[11px] px-3 py-1.5 rounded-lg border border-primary/30 text-primary hover:bg-primary/10 transition-colors disabled:opacity-50"
                           >
-                            {triggerTaskSaving ? "Saving..." : "Save Task"}
+                            {triggerTaskSaving ? "Saving..." : triggerTaskSaved ? "Saved" : "Save Task"}
                           </button>
                         );
                       })()}
