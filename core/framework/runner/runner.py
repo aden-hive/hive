@@ -1372,7 +1372,16 @@ class AgentRunner:
             default_mgr.log_active_skills()
             protocols_prompt = default_mgr.build_protocols_prompt()
         except Exception:
-            logger.debug("Skill system init failed (non-fatal)", exc_info=True)
+            logger.warning("Skill system init failed (non-fatal)", exc_info=True)
+
+        if protocols_prompt:
+            logger.info(
+                "Skill system ready: protocols=%d chars, catalog=%d chars",
+                len(protocols_prompt),
+                len(skills_catalog_prompt),
+            )
+        else:
+            logger.warning("Skill system produced empty protocols_prompt")
 
         self._setup_agent_runtime(
             tools,

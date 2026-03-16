@@ -499,8 +499,16 @@ class EventLoopNode(NodeProtocol):
                 # Append skill catalog and operational protocols
                 if ctx.skills_catalog_prompt:
                     system_prompt = f"{system_prompt}\n\n{ctx.skills_catalog_prompt}"
+                    logger.info(
+                        "[%s] Injected skills catalog (%d chars)",
+                        node_id, len(ctx.skills_catalog_prompt),
+                    )
                 if ctx.protocols_prompt:
                     system_prompt = f"{system_prompt}\n\n{ctx.protocols_prompt}"
+                    logger.info(
+                        "[%s] Injected operational protocols (%d chars)",
+                        node_id, len(ctx.protocols_prompt),
+                    )
 
                 # Inject agent working memory (adapt.md).
                 # If it doesn't exist yet, seed it with available context.
