@@ -27,7 +27,8 @@ decisions                 │                        │
 ```
 
 **Key files:**
-- Backend: `core/framework/tools/queen_lifecycle_tools.py` — draft creation, classification, dissolution
+- Backend: `core/framework/tools/queen_lifecycle_tools.py` — draft creation, dissolution
+- Backend: `core/framework/tools/flowchart_utils.py` — type definitions, classification, persistence
 - Backend: `core/framework/server/routes_graphs.py` — REST endpoints
 - Frontend: `core/frontend/src/components/DraftGraph.tsx` — SVG flowchart renderer
 - Frontend: `core/frontend/src/api/types.ts` — TypeScript interfaces
@@ -114,17 +115,9 @@ decisions                 │                        │
       "type": "string",
       "enum": [
         "start", "terminal", "process", "decision",
-        "io", "document", "multi_document",
-        "subprocess", "preparation",
-        "manual_input", "manual_operation",
-        "delay", "display",
-        "database", "stored_data", "internal_storage",
-        "connector", "offpage_connector",
-        "merge", "extract", "sort", "collate",
-        "summing_junction", "or",
-        "browser", "comment", "alternate_process"
+        "io", "document", "database", "subprocess", "browser"
       ],
-      "description": "ISO 5807 flowchart symbol. Auto-detected if omitted."
+      "description": "Flowchart symbol type. Auto-detected if omitted."
     },
     "tools": {
       "type": "array",
@@ -290,67 +283,27 @@ Returned by `GET /api/sessions/{id}/flowchart-map` after `confirm_and_build()` d
 
 ---
 
-## 2. ISO 5807 Flowchart Types
-
-### Core Symbols
+## 2. Flowchart Types
 
 | Type | Shape | Color | SVG Primitive | Description |
 |---|---|---|---|---|
-| `start` | stadium | `#4CAF50` green | `<rect rx={h/2}>` | Entry point / start terminator |
-| `terminal` | stadium | `#F44336` red | `<rect rx={h/2}>` | End point / stop terminator |
-| `process` | rectangle | `#2196F3` blue | `<rect rx={4}>` | General processing step |
-| `decision` | diamond | `#FF9800` amber | `<polygon>` 4-point | Branching / conditional logic |
-| `io` | parallelogram | `#9C27B0` purple | `<polygon>` skewed | Data input or output |
-| `document` | document | `#607D8B` blue-grey | `<path>` wavy bottom | Single document output |
-| `multi_document` | multi_document | `#78909C` blue-grey | stacked `<rect>` + `<path>` | Multiple documents |
-| `subprocess` | subroutine | `#009688` teal | `<rect>` + inner `<line>` | Predefined process / sub-agent |
-| `preparation` | hexagon | `#795548` brown | `<polygon>` 6-point | Setup / initialization step |
-| `manual_input` | manual_input | `#E91E63` pink | `<polygon>` sloped top | Manual data entry |
-| `manual_operation` | trapezoid | `#AD1457` dark pink | `<polygon>` tapered bottom | Human-in-the-loop / approval |
-| `delay` | delay | `#FF5722` deep orange | `<path>` D-shape | Wait / pause / cooldown |
-| `display` | display | `#00BCD4` cyan | `<path>` pointed left | Display / render output |
-
-### Data Storage Symbols
-
-| Type | Shape | Color | SVG Primitive | Description |
-|---|---|---|---|---|
-| `database` | cylinder | `#8BC34A` light green | `<path>` + `<ellipse>` top/bottom | Database / direct access storage |
-| `stored_data` | stored_data | `#CDDC39` lime | `<path>` curved left | Generic data store |
-| `internal_storage` | internal_storage | `#FFC107` amber | `<rect>` + internal `<line>` grid | Internal memory / cache |
-
-### Connectors
-
-| Type | Shape | Color | SVG Primitive | Description |
-|---|---|---|---|---|
-| `connector` | circle | `#9E9E9E` grey | `<circle>` | On-page connector |
-| `offpage_connector` | pentagon | `#757575` dark grey | `<polygon>` 5-point | Off-page connector |
-
-### Flow Operations
-
-| Type | Shape | Color | SVG Primitive | Description |
-|---|---|---|---|---|
-| `merge` | triangle_inv | `#3F51B5` indigo | `<polygon>` inverted | Merge multiple flows |
-| `extract` | triangle | `#5C6BC0` indigo light | `<polygon>` upward | Extract / split flow |
-| `sort` | hourglass | `#7986CB` indigo lighter | `<polygon>` X-shape | Sort operation |
-| `collate` | hourglass_inv | `#9FA8DA` indigo lightest | `<polygon>` X-shape inv | Collate operation |
-| `summing_junction` | circle_cross | `#F06292` pink light | `<circle>` + cross `<line>` | Summing junction |
-| `or` | circle_bar | `#CE93D8` purple light | `<circle>` + plus `<line>` | Logical OR |
-
-### Domain-Specific (Hive)
-
-| Type | Shape | Color | SVG Primitive | Description |
-|---|---|---|---|---|
-| `browser` | hexagon | `#1A237E` dark indigo | `<polygon>` 6-point | Browser automation (GCU node) |
-| `comment` | flag | `#BDBDBD` light grey | `<path>` notched right | Annotation / comment |
-| `alternate_process` | rounded_rect | `#42A5F5` light blue | `<rect rx={12}>` | Alternate process variant |
+| `start` | stadium | `#3fa66a` sage green | `<rect rx={h/2}>` | Entry point / start terminator |
+| `terminal` | stadium | `#a04444` dusty red | `<rect rx={h/2}>` | End point / stop terminator |
+| `process` | rectangle | `#616d83` blue-gray | `<rect rx={4}>` | General processing step (default) |
+| `decision` | diamond | `#d89d26` warm amber | `<polygon>` 4-point | Branching / conditional logic |
+| `io` | parallelogram | `#7a4fa5` dusty purple | `<polygon>` skewed | Data input or output |
+| `document` | document | `#507485` steel blue | `<path>` wavy bottom | Document / report generation |
+| `database` | cylinder | `#459077` muted teal | `<path>` + `<ellipse>` | Database / data store |
+| `subprocess` | subroutine | `#4c7f7f` dark cyan | `<rect>` + inner `<line>` | Predefined process / sub-agent |
+| `browser` | hexagon | `#3a4a9b` deep blue | `<polygon>` 6-point | Browser automation (GCU node) |
 
 ---
 
 ## 3. Auto-Classification Priority
 
-When `flowchart_type` is omitted from a node, the backend classifies it automatically using this priority (function `_classify_flowchart_node` in `queen_lifecycle_tools.py`):
+When `flowchart_type` is omitted from a node, the backend classifies it automatically using this priority (function `classify_flowchart_node` in `flowchart_utils.py`):
 
-1. **Explicit override** — if `flowchart_type` is set and valid, use it
+1. **Explicit override** — if `flowchart_type` is set and valid, use it (old type names are remapped automatically)
 2. **Node type** — `gcu` nodes become `browser`
 3. **Position** — first node becomes `start`
 4. **Terminal detection** — nodes in `terminal_nodes` (or with no outgoing edges) become `terminal`
@@ -359,14 +312,8 @@ When `flowchart_type` is omitted from a node, the backend classifies it automati
 7. **Tool heuristics** — tool names match known patterns:
    - DB tools (`query_database`, `sql_query`, `read_table`, etc.) → `database`
    - Doc tools (`generate_report`, `create_document`, etc.) → `document`
-   - I/O tools (`send_email`, `post_to_slack`, `fetch_url`, etc.) → `io`
-   - Display tools (`serve_file_to_user`, `display_results`) → `display`
+   - I/O tools (`send_email`, `post_to_slack`, `fetch_url`, `display_results`, etc.) → `io`
 8. **Description keyword heuristics**:
-   - `"manual"`, `"approval"`, `"human review"` → `manual_operation`
-   - `"setup"`, `"prepare"`, `"configure"` → `preparation`
-   - `"wait"`, `"delay"`, `"pause"` → `delay`
-   - `"merge"`, `"combine"`, `"aggregate"` → `merge`
-   - `"display"`, `"show"`, `"render"` → `display`
    - `"database"`, `"data store"`, `"persist"` → `database`
    - `"report"`, `"document"`, `"summary"` → `document`
    - `"deliver"`, `"send"`, `"notify"` → `io`
