@@ -7,6 +7,7 @@ import inspect
 import json
 import logging
 import os
+import traceback
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -278,6 +279,15 @@ class ToolRegistry:
                             r = await result
                             return _wrap_result(tool_use.id, r)
                         except Exception as exc:
+                            logger.error(
+                                "Async tool '%s' execution failed for tool_use_id=%s: %s\n"
+                                "Inputs: %s\nTraceback:\n%s",
+                                tool_use.name,
+                                tool_use.id,
+                                exc,
+                                json.dumps(tool_use.input, default=str),
+                                traceback.format_exc(),
+                            )
                             return ToolResult(
                                 tool_use_id=tool_use.id,
                                 content=json.dumps({"error": str(exc)}),
@@ -288,6 +298,14 @@ class ToolRegistry:
 
                 return _wrap_result(tool_use.id, result)
             except Exception as e:
+                logger.error(
+                    "Tool '%s' execution failed for tool_use_id=%s: %s\nInputs: %s\nTraceback:\n%s",
+                    tool_use.name,
+                    tool_use.id,
+                    e,
+                    json.dumps(tool_use.input, default=str),
+                    traceback.format_exc(),
+                )
                 return ToolResult(
                     tool_use_id=tool_use.id,
                     content=json.dumps({"error": str(e)}),
@@ -588,7 +606,13 @@ class ToolRegistry:
                                 return result[0]
                             return result
                         except Exception as e:
-                            logger.error(f"MCP tool '{tool_name}' execution failed: {e}")
+                            logger.error(
+                                "MCP tool '%s' execution failed: %s\nInputs: %s\nTraceback:\n%s",
+                                tool_name,
+                                e,
+                                json.dumps(inputs, default=str),
+                                traceback.format_exc(),
+                            )
                             return {"error": str(e)}
 
                     return executor
