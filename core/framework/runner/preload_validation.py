@@ -1,6 +1,6 @@
 """Pre-load validation for agent graphs.
 
-Runs structural and credential checks before MCP servers are spawned.
+Runs structural, credential, and skill-trust checks before MCP servers are spawned.
 Fails fast with actionable error messages.
 """
 
@@ -8,7 +8,8 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING
+from pathlib import Path
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from framework.graph.edge import GraphSpec
@@ -33,6 +34,9 @@ class PreloadResult:
     valid: bool
     errors: list[str] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
+    # Populated after skill discovery + trust gating (AS-13).
+    # Type is SkillCatalog but kept as Any to avoid a hard import at module level.
+    skill_catalog: Any = None
 
 
 def validate_graph_structure(graph: GraphSpec) -> list[str]:
@@ -157,17 +161,61 @@ def credential_errors_to_json(exc: Exception) -> dict:
     }
 
 
+def validate_skills(
+    project_dir: Path | None,
+    *,
+    interactive: bool = True,
+    skip: bool = False,
+) -> Any:
+    """Discover and trust-gate project-scope skills (AS-13).
+
+    Returns a SkillCatalog containing only skills cleared for loading.
+    Framework and user-scope skills are always trusted.
+    Project-scope skills from untrusted repos require user consent.
+
+    Args:
+        project_dir: Root directory of the current project (used for project-scope scan).
+        interactive: If True (and stdin is a TTY), show consent prompt on untrusted repo.
+        skip: If True, skip skill discovery entirely.
+    """
+    from framework.skills.catalog import SkillCatalog
+
+    if skip:
+        return SkillCatalog()
+
+    from framework.skills.discovery import SkillDiscovery
+    from framework.skills.trust import TrustGate
+
+    raw = SkillDiscovery().discover(project_dir)
+    gate = TrustGate(interactive=interactive)
+    trusted = gate.filter_and_gate(raw, project_dir=project_dir)
+    catalog = SkillCatalog(trusted)
+
+    for skill in catalog.entries:
+        logger.info(
+            "skill_loaded: name=%s scope=%s path=%s",
+            skill.name,
+            skill.source_scope,
+            skill.location,
+        )
+
+    return catalog
+
+
 def run_preload_validation(
     graph: GraphSpec,
     *,
     interactive: bool = True,
     skip_credential_validation: bool = False,
+    project_dir: Path | None = None,
+    skip_skill_validation: bool = False,
 ) -> PreloadResult:
     """Run all pre-load validations.
 
     Order:
     1. Graph structure (includes GCU subagent-only checks) — non-recoverable
     2. Credentials — potentially recoverable via interactive setup
+    3. Skills — trust-gate project-scope skills (AS-13)
 
     Raises PreloadValidationError for structural issues.
     Raises CredentialError for credential issues.
@@ -184,4 +232,11 @@ def run_preload_validation(
         skip=skip_credential_validation,
     )
 
-    return PreloadResult(valid=True)
+    # 3. Skill discovery + trust gating
+    skill_catalog = validate_skills(
+        project_dir,
+        interactive=interactive,
+        skip=skip_skill_validation,
+    )
+
+    return PreloadResult(valid=True, skill_catalog=skill_catalog)

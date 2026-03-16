@@ -784,13 +784,15 @@ class AgentRunner:
 
         # AgentRuntime — unified execution path for all agents
         self._agent_runtime: AgentRuntime | None = None
-        # Pre-load validation: structural checks + credentials.
+        # Pre-load validation: structural checks + credentials + skill trust gating.
         # Fails fast with actionable guidance — no MCP noise on screen.
-        run_preload_validation(
+        _preload = run_preload_validation(
             self.graph,
             interactive=self._interactive,
             skip_credential_validation=self.skip_credential_validation,
+            project_dir=Path.cwd(),
         )
+        self._skill_catalog = _preload.skill_catalog
 
         # Auto-discover tools from tools.py
         tools_path = agent_path / "tools.py"
