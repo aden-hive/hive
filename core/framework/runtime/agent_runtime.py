@@ -400,11 +400,16 @@ class AgentRuntime:
                     # Cron expression mode — takes priority over interval_minutes
                     try:
                         from croniter import croniter
+                    except ImportError as e:
+                        raise RuntimeError(
+                            "croniter is required for cron-based entry points. "
+                            "Install it with: uv pip install croniter"
+                        ) from e
 
-                        # Validate the expression upfront
+                    try:
                         if not croniter.is_valid(cron_expr):
                             raise ValueError(f"Invalid cron expression: {cron_expr}")
-                    except (ImportError, ValueError) as e:
+                    except ValueError as e:
                         logger.warning(
                             "Entry point '%s' has invalid cron config: %s",
                             ep_id,
