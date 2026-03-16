@@ -28,6 +28,7 @@ from framework.runner.tool_registry import ToolRegistry
 from framework.runtime.agent_runtime import AgentRuntime, AgentRuntimeConfig, create_agent_runtime
 from framework.runtime.execution_stream import EntryPointSpec
 from framework.runtime.runtime_log_store import RuntimeLogStore
+from framework.tools.flowchart_utils import generate_fallback_flowchart
 
 if TYPE_CHECKING:
     from framework.runner.protocol import AgentMessage, CapabilityResponse
@@ -959,6 +960,9 @@ class AgentRunner:
 
             graph = GraphSpec(**graph_kwargs)
 
+            # Generate flowchart.json if missing (for template/legacy agents)
+            generate_fallback_flowchart(graph, goal, agent_path)
+
             # Read runtime config (webhook settings, etc.) if defined
             agent_runtime_config = getattr(agent_module, "runtime_config", None)
 
@@ -1002,6 +1006,9 @@ class AgentRunner:
             graph, goal = load_agent_export(export_data)
         except json.JSONDecodeError as exc:
             raise ValueError(f"Invalid JSON in agent export file: {agent_json_path}") from exc
+
+        # Generate flowchart.json if missing (for legacy JSON-based agents)
+        generate_fallback_flowchart(graph, goal, agent_path)
 
         return cls(
             agent_path=agent_path,
