@@ -32,6 +32,7 @@ from framework.observability import set_trace_context
 from framework.runtime.core import Runtime
 from framework.schemas.checkpoint import Checkpoint
 from framework.storage.checkpoint_store import CheckpointStore
+from framework.utils.io import atomic_write
 
 logger = logging.getLogger(__name__)
 
@@ -226,11 +227,11 @@ class GraphExecutor:
         """
         if not self._storage_path:
             return
+        state_path = self._storage_path / "state.json"
         try:
             import json as _json
             from datetime import datetime
 
-            state_path = self._storage_path / "state.json"
             if state_path.exists():
                 state_data = _json.loads(state_path.read_text(encoding="utf-8"))
             else:
@@ -253,9 +254,14 @@ class GraphExecutor:
             state_data["memory"] = memory_snapshot
             state_data["memory_keys"] = list(memory_snapshot.keys())
 
-            state_path.write_text(_json.dumps(state_data, indent=2), encoding="utf-8")
+            with atomic_write(state_path, encoding="utf-8") as f:
+                _json.dump(state_data, f, indent=2)
         except Exception:
-            pass  # Best-effort — never block execution
+            logger.warning(
+                "Failed to persist progress state to %s",
+                state_path,
+                exc_info=True,
+            )
 
     def _validate_tools(self, graph: GraphSpec) -> list[str]:
         """
