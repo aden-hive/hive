@@ -93,12 +93,16 @@ _QUEEN_PLANNING_TOOLS = [
 ] + _QUEEN_MEMORY_TOOLS
 
 # Building phase: full coding + agent construction tools.
-_QUEEN_BUILDING_TOOLS = _SHARED_TOOLS + [
-    "load_built_agent",
-    "list_credentials",
-    "replan_agent",
-    "save_agent_draft",  # Re-draft during building → auto-dissolves + updates flowchart
-] + _QUEEN_MEMORY_TOOLS
+_QUEEN_BUILDING_TOOLS = (
+    _SHARED_TOOLS
+    + [
+        "load_built_agent",
+        "list_credentials",
+        "replan_agent",
+        "save_agent_draft",  # Re-draft during building → auto-dissolves + updates flowchart
+    ]
+    + _QUEEN_MEMORY_TOOLS
+)
 
 # Staging phase: agent loaded but not yet running — inspect, configure, launch.
 _QUEEN_STAGING_TOOLS = [
@@ -143,7 +147,6 @@ _QUEEN_RUNNING_TOOLS = [
     "set_trigger",
     "remove_trigger",
     "list_triggers",
-    
     "write_to_diary",  # Episodic memory — available in all phases
 ] + _QUEEN_MEMORY_TOOLS
 
