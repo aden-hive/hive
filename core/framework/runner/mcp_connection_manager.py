@@ -221,9 +221,7 @@ class MCPConnectionManager:
                 if self._transitions:
                     pending = list(self._transitions.values())
                 else:
-                    cleanup_events = {
-                        name: threading.Event() for name in self._pool
-                    }
+                    cleanup_events = {name: threading.Event() for name in self._pool}
                     clients = list(self._pool.items())
                     self._transitions.update(cleanup_events)
                     self._pool.clear()
