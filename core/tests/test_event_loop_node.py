@@ -538,9 +538,7 @@ class TestClientFacingBlocking:
         assert result.output["answer"] == "help provided"
 
     @pytest.mark.asyncio
-    async def test_duplicate_ask_user_after_answer_is_blocked(
-        self, runtime, memory, client_spec
-    ):
+    async def test_duplicate_ask_user_after_answer_is_blocked(self, runtime, memory, client_spec):
         """Repeated identical ask_user should not block the user a second time."""
         client_spec.output_keys = ["answer"]
         llm = MockStreamingLLM(

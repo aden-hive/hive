@@ -775,7 +775,7 @@ class TestOpenRouterToolCompatFallback:
             if kwargs.get("stream"):
                 raise RuntimeError(
                     'OpenrouterException - {"error":{"message":"No endpoints found '
-                    'that support tool use. To learn more about provider routing, '
+                    "that support tool use. To learn more about provider routing, "
                     'visit: https://openrouter.ai/docs/guides/routing/provider-selection",'
                     '"code":404}}'
                 )

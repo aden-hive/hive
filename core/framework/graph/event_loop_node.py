@@ -1382,9 +1382,7 @@ class EventLoopNode(NodeProtocol):
                     questions=multi_qs,
                 )
                 if got_input and self._pending_input_signatures:
-                    self._recent_answered_input_signatures = set(
-                        self._pending_input_signatures
-                    )
+                    self._recent_answered_input_signatures = set(self._pending_input_signatures)
                 self._pending_input_signatures.clear()
                 # Emit deferred tool_call_completed for ask_user / ask_user_multiple
                 deferred = getattr(self, "_deferred_tool_complete", None)

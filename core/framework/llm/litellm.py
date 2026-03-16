@@ -1039,8 +1039,7 @@ class LiteLLMProvider(LLMProvider):
             return repaired
 
         raise ValueError(
-            f"Failed to parse tool call arguments for '{tool_name}' "
-            "(likely truncated JSON)."
+            f"Failed to parse tool call arguments for '{tool_name}' (likely truncated JSON)."
         )
 
     def _parse_openrouter_text_tool_calls(
