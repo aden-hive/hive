@@ -1,5 +1,5 @@
 import type { GraphTopology, NodeSpec } from "@/api/types";
-import type { GraphNode, NodeStatus } from "@/components/AgentGraph";
+import type { GraphNode, NodeStatus } from "@/components/graph-types";
 
 /**
  * Convert a backend GraphTopology (nodes + edges + entry_node) into

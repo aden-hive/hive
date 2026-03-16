@@ -2,7 +2,7 @@ import { useState, useCallback, useRef, useEffect, useMemo } from "react";
 import ReactDOM from "react-dom";
 import { useSearchParams, useNavigate } from "react-router-dom";
 import { Plus, KeyRound, Sparkles, Layers, ChevronLeft, Bot, Loader2, WifiOff, X } from "lucide-react";
-import AgentGraph, { type GraphNode, type NodeStatus } from "@/components/AgentGraph";
+import type { GraphNode, NodeStatus } from "@/components/graph-types";
 import DraftGraph from "@/components/DraftGraph";
 import ChatPanel, { type ChatMessage } from "@/components/ChatPanel";
 import TopBar from "@/components/TopBar";
@@ -557,6 +557,27 @@ export default function Workspace() {
   const [triggerTaskSaving, setTriggerTaskSaving] = useState(false);
   const [newTabOpen, setNewTabOpen] = useState(false);
   const newTabBtnRef = useRef<HTMLButtonElement>(null);
+  const [graphPanelPct, setGraphPanelPct] = useState(30);
+  const resizing = useRef(false);
+
+  // Drag-to-resize the graph panel
+  useEffect(() => {
+    const onMouseMove = (e: MouseEvent) => {
+      if (!resizing.current) return;
+      const pct = (e.clientX / window.innerWidth) * 100;
+      setGraphPanelPct(Math.max(15, Math.min(50, pct)));
+    };
+    const onMouseUp = () => {
+      resizing.current = false;
+      document.body.style.cursor = "";
+    };
+    window.addEventListener("mousemove", onMouseMove);
+    window.addEventListener("mouseup", onMouseUp);
+    return () => {
+      window.removeEventListener("mousemove", onMouseMove);
+      window.removeEventListener("mouseup", onMouseUp);
+    };
+  }, []);
 
   // Ref mirror of sessionsByAgent so SSE callback can read current graph
   // state without adding sessionsByAgent to its dependency array.
@@ -2827,38 +2848,32 @@ export default function Workspace() {
       {/* Main content area */}
       <div className="flex flex-1 min-h-0">
 
-        {/* ── Pipeline graph + chat ──────────────────────────────────── */}
-        <div className={`${activeAgentState?.queenPhase === "planning" || activeAgentState?.queenPhase === "building" || activeAgentState?.originalDraft ? "w-[500px] min-w-[400px]" : "w-[300px] min-w-[240px]"} bg-card/30 flex flex-col border-r border-border/30 transition-[width] duration-200`}>
+        {/* ── Draft flowchart + chat ─────────────────────────────────── */}
+        <div
+          className="bg-card/30 flex flex-col border-r border-border/30 relative"
+          style={{ width: `${graphPanelPct}%`, minWidth: 240, flexShrink: 0 }}
+        >
           <div className="flex-1 min-h-0">
-            {activeAgentState?.queenPhase === "planning" || activeAgentState?.queenPhase === "building" ? (
-              <DraftGraph draft={activeAgentState?.draftGraph ?? null} loading={!activeAgentState?.draftGraph} building={activeAgentState?.queenBuilding} onRun={handleRun} onPause={handlePause} runState={activeAgentState?.workerRunState ?? "idle"} />
-            ) : activeAgentState?.originalDraft ? (
-              <DraftGraph
-                draft={activeAgentState.originalDraft}
-                building={activeAgentState?.queenBuilding}
-                onRun={handleRun}
-                onPause={handlePause}
-                runState={activeAgentState?.workerRunState ?? "idle"}
-                flowchartMap={activeAgentState.flowchartMap ?? undefined}
-                runtimeNodes={currentGraph.nodes}
-                onRuntimeNodeClick={(runtimeNodeId) => {
-                  const node = currentGraph.nodes.find(n => n.id === runtimeNodeId);
-                  if (node) setSelectedNode(prev => prev?.id === node.id ? null : node);
-                }}
-              />
-            ) : (
-              <AgentGraph
-                nodes={currentGraph.nodes}
-                title={currentGraph.title}
-                onNodeClick={(node) => setSelectedNode(prev => prev?.id === node.id ? null : node)}
-                onRun={handleRun}
-                onPause={handlePause}
-                runState={activeAgentState?.workerRunState ?? "idle"}
-                building={activeAgentState?.queenBuilding ?? false}
-                queenPhase={activeAgentState?.queenPhase ?? "building"}
-              />
-            )}
+            <DraftGraph
+              draft={activeAgentState?.originalDraft ?? activeAgentState?.draftGraph ?? null}
+              loading={activeAgentState?.queenPhase === "planning" && !activeAgentState?.draftGraph}
+              building={activeAgentState?.queenBuilding}
+              onRun={handleRun}
+              onPause={handlePause}
+              runState={activeAgentState?.workerRunState ?? "idle"}
+              flowchartMap={activeAgentState?.flowchartMap ?? undefined}
+              runtimeNodes={currentGraph.nodes}
+              onRuntimeNodeClick={(runtimeNodeId) => {
+                const node = currentGraph.nodes.find(n => n.id === runtimeNodeId);
+                if (node) setSelectedNode(prev => prev?.id === node.id ? null : node);
+              }}
+            />
           </div>
+          {/* Resize handle */}
+          <div
+            className="absolute top-0 right-0 w-1 h-full cursor-col-resize hover:bg-primary/30 active:bg-primary/40 transition-colors z-10"
+            onMouseDown={() => { resizing.current = true; document.body.style.cursor = "col-resize"; }}
+          />
         </div>
         <div className="flex-1 min-w-0 flex">
           <div className="flex-1 min-w-0 relative">

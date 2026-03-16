@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { X, Cpu, Zap, Clock, RotateCcw, CheckCircle2, AlertCircle, Loader2, ChevronDown, ChevronRight, Copy, Check, Terminal, Wrench, BookOpen, GitBranch, Bot } from "lucide-react";
-import type { GraphNode, NodeStatus } from "./AgentGraph";
+import type { GraphNode, NodeStatus } from "./graph-types";
 import type { NodeSpec, ToolInfo, NodeCriteria } from "../api/types";
 import { graphsApi } from "../api/graphs";
 import { logsApi } from "../api/logs";
