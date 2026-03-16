@@ -1145,7 +1145,7 @@ case $choice in
         SELECTED_MAX_CONTEXT_TOKENS=120000
         SELECTED_API_BASE="$HIVE_LLM_ENDPOINT"
         PROVIDER_NAME="Hive"
-        SIGNUP_URL="https://adenhq.com"
+        SIGNUP_URL="https://discord.com/invite/hQdU7QDkgR"
         echo ""
         echo -e "${GREEN}⬢${NC} Using Hive LLM"
         echo ""
