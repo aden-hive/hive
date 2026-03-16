@@ -73,7 +73,7 @@ function useDraftChromeColors() {
 type DraftNodeStatus = "pending" | "running" | "complete" | "error";
 
 interface DraftGraphProps {
-  draft: DraftGraphData;
+  draft: DraftGraphData | null;
   onNodeClick?: (node: DraftNode) => void;
   /** Runtime node ID → list of original draft node IDs (post-dissolution mapping). */
   flowchartMap?: Record<string, string[]>;
@@ -83,6 +83,8 @@ interface DraftGraphProps {
   onRuntimeNodeClick?: (runtimeNodeId: string) => void;
   /** True while the queen is building the agent from the draft. */
   building?: boolean;
+  /** True while the queen is designing the draft (no draft yet). Shows a spinner. */
+  loading?: boolean;
   /** Called when the user clicks Run. */
   onRun?: () => void;
   /** Called when the user clicks Pause. */
@@ -355,7 +357,7 @@ function Tooltip({ node, style }: { node: DraftNode; style: React.CSSProperties 
   );
 }
 
-export default function DraftGraph({ draft, onNodeClick, flowchartMap, runtimeNodes, onRuntimeNodeClick, building, onRun, onPause, runState = "idle" }: DraftGraphProps) {
+export default function DraftGraph({ draft, onNodeClick, flowchartMap, runtimeNodes, onRuntimeNodeClick, building, loading, onRun, onPause, runState = "idle" }: DraftGraphProps) {
   const [hoveredNode, setHoveredNode] = useState<string | null>(null);
   const [mousePos, setMousePos] = useState<{ x: number; y: number } | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -463,7 +465,8 @@ export default function DraftGraph({ draft, onNodeClick, flowchartMap, runtimeNo
 
   const hasStatusOverlay = Object.keys(nodeStatuses).length > 0;
 
-  const { nodes, edges } = draft;
+  const nodes = draft?.nodes ?? [];
+  const edges = draft?.edges ?? [];
 
   const idxMap = useMemo(
     () => Object.fromEntries(nodes.map((n, i) => [n.id, i])),
@@ -655,25 +658,6 @@ export default function DraftGraph({ draft, onNodeClick, flowchartMap, runtimeNo
 
     return { layers, nodeW, firstColX, nodeXPositions, backEdgeOverflow, maxContentRight };
   }, [nodes, forwardEdges, backEdges.length, containerW, flowchartMap, idxMap]);
-
-  if (nodes.length === 0) {
-    return (
-      <div className="flex flex-col h-full">
-        <div className="px-4 pt-4 pb-2">
-          <p className="text-[11px] text-muted-foreground font-medium uppercase tracking-wider">
-            Draft
-          </p>
-        </div>
-        <div className="flex-1 flex items-center justify-center px-4">
-          <p className="text-xs text-muted-foreground/60 text-center italic">
-            No draft graph yet.
-            <br />
-            Describe your workflow to get started.
-          </p>
-        </div>
-      </div>
-    );
-  }
 
   const { layers, nodeW, nodeXPositions, backEdgeOverflow, maxContentRight } = layout;
 
@@ -981,6 +965,31 @@ export default function DraftGraph({ draft, onNodeClick, flowchartMap, runtimeNo
       </g>
     );
   };
+
+  if (loading || !draft || nodes.length === 0) {
+    return (
+      <div className="flex flex-col h-full">
+        <div className="px-4 pt-3 pb-1.5 flex items-center gap-2">
+          <p className="text-[11px] text-muted-foreground font-medium uppercase tracking-wider">Draft</p>
+          <span className="text-[9px] font-mono font-medium rounded px-1 py-0.5 leading-none border text-amber-500/60 border-amber-500/20">planning</span>
+        </div>
+        <div className="flex-1 flex flex-col items-center justify-center gap-3">
+          {loading || !draft ? (
+            <>
+              <Loader2 className="w-5 h-5 animate-spin text-muted-foreground/40" />
+              <p className="text-xs text-muted-foreground/50">Designing flowchart…</p>
+            </>
+          ) : (
+            <p className="text-xs text-muted-foreground/60 text-center italic">
+              No draft graph yet.
+              <br />
+              Describe your workflow to get started.
+            </p>
+          )}
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="flex flex-col h-full">

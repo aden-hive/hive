@@ -1928,6 +1928,11 @@ class EventLoopNode(NodeProtocol):
         # Accumulate ALL tool calls across inner iterations for L3 logging.
         # Unlike real_tool_results (reset each inner iteration), this persists.
         logged_tool_calls: list[dict] = []
+        # Counter for LLM calls within a single iteration.  Each pass through
+        # the inner tool loop starts a fresh LLM stream whose snapshot resets
+        # to "".  Without this, all calls share the same message ID on the
+        # frontend and the second call's text silently replaces the first.
+        inner_turn = 0
 
         # Inner tool loop: stream may produce tool calls requiring re-invocation
         while True:
@@ -1968,6 +1973,7 @@ class EventLoopNode(NodeProtocol):
             async def _do_stream(
                 _msgs: list = messages,  # noqa: B006
                 _tc: list[ToolCallEvent] = tool_calls,  # noqa: B006
+                inner_turn: int = inner_turn,
             ) -> None:
                 nonlocal accumulated_text, _stream_error
                 async for event in ctx.llm.stream(
@@ -1986,6 +1992,7 @@ class EventLoopNode(NodeProtocol):
                             ctx,
                             execution_id,
                             iteration=iteration,
+                            inner_turn=inner_turn,
                         )
 
                     elif isinstance(event, ToolCallEvent):
@@ -2214,6 +2221,7 @@ class EventLoopNode(NodeProtocol):
                             ctx=ctx,
                             execution_id=execution_id,
                             iteration=iteration,
+                            inner_turn=inner_turn,
                         )
 
                     result = ToolResult(
@@ -2667,6 +2675,7 @@ class EventLoopNode(NodeProtocol):
                 )
 
             # Tool calls processed -- loop back to stream with updated conversation
+            inner_turn += 1
 
     # -------------------------------------------------------------------
     # Synthetic tools: set_output, ask_user, escalate
@@ -4352,6 +4361,7 @@ class EventLoopNode(NodeProtocol):
         ctx: NodeContext,
         execution_id: str = "",
         iteration: int | None = None,
+        inner_turn: int = 0,
     ) -> None:
         if self._event_bus:
             if ctx.node_spec.client_facing:
@@ -4362,6 +4372,7 @@ class EventLoopNode(NodeProtocol):
                     snapshot=snapshot,
                     execution_id=execution_id,
                     iteration=iteration,
+                    inner_turn=inner_turn,
                 )
             else:
                 await self._event_bus.emit_llm_text_delta(
@@ -4370,6 +4381,7 @@ class EventLoopNode(NodeProtocol):
                     content=content,
                     snapshot=snapshot,
                     execution_id=execution_id,
+                    inner_turn=inner_turn,
                 )
 
     async def _publish_tool_started(
