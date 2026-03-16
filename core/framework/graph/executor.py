@@ -151,6 +151,7 @@ class GraphExecutor:
         dynamic_tools_provider: Callable | None = None,
         dynamic_prompt_provider: Callable | None = None,
         iteration_metadata_provider: Callable | None = None,
+        sub_graph_executor: Callable | None = None,
     ):
         """
         Initialize the executor.
@@ -176,6 +177,10 @@ class GraphExecutor:
                 tool list (for mode switching)
             dynamic_prompt_provider: Optional callback returning current
                 system prompt (for phase switching)
+            sub_graph_executor: Optional async callback for executing child
+                graphs. Signature: async (graph_id: str, goal_id: str,
+                input_data: dict) -> ExecutionResult. Enables hierarchical
+                agent execution (Manager-Worker, Researcher-Writer patterns).
         """
         self.runtime = runtime
         self.llm = llm
@@ -197,6 +202,7 @@ class GraphExecutor:
         self.dynamic_tools_provider = dynamic_tools_provider
         self.dynamic_prompt_provider = dynamic_prompt_provider
         self.iteration_metadata_provider = iteration_metadata_provider
+        self.sub_graph_executor = sub_graph_executor
 
         # Parallel execution settings
         self.enable_parallel_execution = enable_parallel_execution
@@ -1841,6 +1847,7 @@ class GraphExecutor:
             dynamic_tools_provider=self.dynamic_tools_provider,
             dynamic_prompt_provider=self.dynamic_prompt_provider,
             iteration_metadata_provider=self.iteration_metadata_provider,
+            sub_graph_executor=self.sub_graph_executor,
         )
 
     VALID_NODE_TYPES = {
@@ -2307,3 +2314,105 @@ class GraphExecutor:
             next_node=next_node,
             is_clean=is_clean,
         )
+
+
+def create_sub_graph_executor(
+    graph_loader: Callable[[str], tuple[GraphSpec, Goal] | None],
+    runtime: Runtime,
+    llm: LLMProvider | None = None,
+    tools: list[Tool] | None = None,
+    tool_executor: Callable | None = None,
+    event_bus: Any | None = None,
+) -> Callable:
+    """Create a sub_graph_executor callback for hierarchical agent execution.
+
+    This factory function creates a callback that can be passed to GraphExecutor
+    to enable the delegate_to_sub_graph tool. When invoked, the callback loads
+    the target graph and goal, creates a child executor, and runs the child graph.
+
+    Args:
+        graph_loader: Async or sync function that takes a graph_id and returns
+            a tuple of (GraphSpec, Goal) or None if not found. The caller is
+            responsible for loading graphs from files, database, or registry.
+        runtime: Runtime instance for decision logging (shared with parent).
+        llm: LLM provider for child executors (defaults to parent's).
+        tools: Available tools for child executors (defaults to parent's).
+        tool_executor: Tool executor for child executors (defaults to parent's).
+        event_bus: Event bus for child executors (defaults to parent's).
+
+    Returns:
+        Async callback function with signature:
+        async (graph_id: str, goal_id: str | None, input_data: dict) -> ExecutionResult
+
+    Example:
+        async def load_agent(agent_id: str) -> tuple[GraphSpec, Goal] | None:
+            # Load from registry, file, or database
+            spec = await registry.load_graph(agent_id)
+            goal = await registry.load_goal(agent_id)
+            return (spec, goal) if spec and goal else None
+
+        executor = GraphExecutor(
+            runtime=runtime,
+            llm=llm,
+            tools=tools,
+            tool_executor=tool_executor,
+            sub_graph_executor=create_sub_graph_executor(
+                graph_loader=load_agent,
+                runtime=runtime,
+                llm=llm,
+                tools=tools,
+                tool_executor=tool_executor,
+            ),
+        )
+    """
+
+    async def sub_graph_executor(
+        graph_id: str,
+        goal_id: str | None = None,
+        input_data: dict[str, Any] | None = None,
+    ) -> ExecutionResult:
+        """Execute a child graph and return the result.
+
+        Args:
+            graph_id: ID of the graph to execute.
+            goal_id: Optional goal ID (for multi-goal graphs).
+            input_data: Input data for the child execution.
+
+        Returns:
+            ExecutionResult from the child graph execution.
+        """
+        result = graph_loader(graph_id)
+        if asyncio.iscoroutine(result):
+            graph_goal_tuple = await result
+        else:
+            graph_goal_tuple = result
+
+        if graph_goal_tuple is None:
+            return ExecutionResult(
+                success=False,
+                error=f"Graph '{graph_id}' not found",
+            )
+
+        graph, goal = graph_goal_tuple
+
+        child_executor = GraphExecutor(
+            runtime=runtime,
+            llm=llm,
+            tools=tools,
+            tool_executor=tool_executor,
+            event_bus=event_bus,
+        )
+
+        logger.info(
+            "🔷 Executing sub-graph '%s' with goal '%s'",
+            graph_id,
+            goal.id if goal else "default",
+        )
+
+        return await child_executor.execute(
+            graph=graph,
+            goal=goal,
+            input_data=input_data or {},
+        )
+
+    return sub_graph_executor

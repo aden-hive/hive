@@ -580,6 +580,11 @@ class EventLoopNode(NodeProtocol):
             if delegate_tool:
                 tools.append(delegate_tool)
 
+        # Add delegate_to_sub_graph tool if sub_graph_executor is available
+        # and we are NOT in subagent mode (prevents nested graph execution)
+        if not ctx.is_subagent_mode and ctx.sub_graph_executor is not None:
+            tools.append(self._build_delegate_to_sub_graph_tool())
+
         # Add report_to_parent tool for sub-agents with a report callback
         if ctx.is_subagent_mode and ctx.report_callback is not None:
             tools.append(self._build_report_to_parent_tool())
@@ -658,6 +663,7 @@ class EventLoopNode(NodeProtocol):
                     "ask_user_multiple",
                     "escalate",
                     "delegate_to_sub_agent",
+                    "delegate_to_sub_graph",
                     "report_to_parent",
                 }
                 synthetic = [t for t in tools if t.name in _synthetic_names]
@@ -2098,6 +2104,7 @@ class EventLoopNode(NodeProtocol):
             ] = {}  # tool_use_id -> {start_timestamp, duration_s}
             pending_real: list[ToolCallEvent] = []
             pending_subagent: list[ToolCallEvent] = []
+            pending_subgraph: list[ToolCallEvent] = []
 
             for tc in tool_calls:
                 tool_call_count += 1
@@ -2334,6 +2341,16 @@ class EventLoopNode(NodeProtocol):
                     )
                     pending_subagent.append(tc)
 
+                elif tc.tool_name == "delegate_to_sub_graph":
+                    # --- Framework-level sub-graph execution ---
+                    # Queue for parallel execution in Phase 2c
+                    logger.info(
+                        "🔄 LLM requesting sub-graph execution: graph_id='%s', goal_id='%s'",
+                        tc.tool_input.get("graph_id", "?"),
+                        tc.tool_input.get("goal_id", "default"),
+                    )
+                    pending_subgraph.append(tc)
+
                 elif tc.tool_name == "report_to_parent":
                     # --- Report from sub-agent to parent (optionally blocking) ---
                     reported_to_parent = True
@@ -2513,6 +2530,63 @@ class EventLoopNode(NodeProtocol):
                         }
                     )
 
+            # Phase 2c: execute sub-graph delegations in parallel.
+            if pending_subgraph:
+
+                async def _timed_subgraph(
+                    _ctx: NodeContext,
+                    _tc: ToolCallEvent,
+                ) -> tuple[ToolResult | BaseException, str, float]:
+                    _s = time.time()
+                    _iso = datetime.now(UTC).isoformat()
+                    try:
+                        _r = await self._execute_sub_graph(_ctx, _tc.tool_input)
+                    except BaseException as _exc:
+                        _r = _exc
+                    _dur = round(time.time() - _s, 3)
+                    return _r, _iso, _dur
+
+                subgraph_timed = await asyncio.gather(
+                    *(_timed_subgraph(ctx, tc) for tc in pending_subgraph),
+                    return_exceptions=False,
+                )
+                for tc, entry in zip(pending_subgraph, subgraph_timed, strict=True):
+                    raw, _start_iso, _dur_s = entry
+                    _sg_timing = {
+                        "start_timestamp": _start_iso,
+                        "duration_s": _dur_s,
+                    }
+                    timing_by_id[tc.tool_use_id] = _sg_timing
+                    if isinstance(raw, BaseException):
+                        result = ToolResult(
+                            tool_use_id=tc.tool_use_id,
+                            content=json.dumps(
+                                {
+                                    "message": f"Sub-graph execution raised: {raw}",
+                                    "data": None,
+                                    "metadata": {"success": False, "error": str(raw)},
+                                }
+                            ),
+                            is_error=True,
+                        )
+                    else:
+                        result = ToolResult(
+                            tool_use_id=tc.tool_use_id,
+                            content=raw.content,
+                            is_error=raw.is_error,
+                        )
+                    results_by_id[tc.tool_use_id] = result
+                    logged_tool_calls.append(
+                        {
+                            "tool_use_id": tc.tool_use_id,
+                            "tool_name": "delegate_to_sub_graph",
+                            "tool_input": tc.tool_input,
+                            "content": result.content,
+                            "is_error": result.is_error,
+                            **_sg_timing,
+                        }
+                    )
+
             # Phase 3: record results into conversation in original order,
             # build logged/real lists, and publish completed events.
             for tc in tool_calls[:executed_in_batch]:
@@ -2527,6 +2601,7 @@ class EventLoopNode(NodeProtocol):
                     "ask_user_multiple",
                     "escalate",
                     "delegate_to_sub_agent",
+                    "delegate_to_sub_graph",
                     "report_to_parent",
                 ):
                     tool_entry = {
@@ -2960,6 +3035,64 @@ class EventLoopNode(NodeProtocol):
                     },
                 },
                 "required": ["message"],
+            },
+        )
+
+    def _build_delegate_to_sub_graph_tool(self) -> Tool:
+        """Build the synthetic delegate_to_sub_graph tool for hierarchical agent execution.
+
+        This tool enables a parent agent to execute a completely separate child
+        agent/graph (unlike delegate_to_sub_agent which only delegates to nodes
+        within the same graph). This is useful for Manager-Worker, Researcher-Writer,
+        and other hierarchical patterns.
+
+        Requires sub_graph_executor callback to be set in the NodeContext.
+        """
+        return Tool(
+            name="delegate_to_sub_graph",
+            description=(
+                "Execute a separate child agent/graph and return its results. "
+                "Use this for hierarchical delegation where you need to invoke "
+                "a completely different agent (e.g., a researcher calling a writer, "
+                "a manager delegating to a specialist worker).\n\n"
+                "The child agent runs autonomously with its own graph, goal, and tools. "
+                "Results are returned as structured JSON with success status, outputs, "
+                "and execution metadata."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "graph_id": {
+                        "type": "string",
+                        "description": (
+                            "The ID of the child graph/agent to execute. "
+                            "This should be a registered agent ID (e.g., 'email_agent', "
+                            "'research_agent')."
+                        ),
+                    },
+                    "goal_id": {
+                        "type": "string",
+                        "description": (
+                            "Optional goal ID to use for the child execution. "
+                            "If not provided, the child's default goal will be used."
+                        ),
+                    },
+                    "input_data": {
+                        "type": "object",
+                        "description": (
+                            "Input data to pass to the child agent. "
+                            "This will be available in the child's shared memory."
+                        ),
+                    },
+                    "task_description": {
+                        "type": "string",
+                        "description": (
+                            "Human-readable description of the task for the child agent. "
+                            "This helps with logging and debugging."
+                        ),
+                    },
+                },
+                "required": ["graph_id"],
             },
         )
 
@@ -4813,3 +4946,156 @@ class EventLoopNode(NodeProtocol):
                             _subagent_profile,
                             _gcu_exc,
                         )
+
+    async def _execute_sub_graph(
+        self,
+        ctx: NodeContext,
+        tool_input: dict[str, Any],
+    ) -> ToolResult:
+        """Execute a child graph via the sub_graph_executor callback.
+
+        This method enables hierarchical agent execution where a parent agent
+        can invoke a completely separate child agent/graph. The child graph
+        runs independently with its own goal, tools, and execution context.
+
+        Args:
+            ctx: Parent node's context (for memory access and callback).
+            tool_input: Tool call input containing:
+                - graph_id: The ID of the child graph to execute (required)
+                - goal_id: Optional goal ID for the child execution
+                - input_data: Optional input data to pass to the child
+                - task_description: Optional human-readable task description
+
+        Returns:
+            ToolResult with structured JSON containing:
+            - message: Human-readable result summary
+            - data: Child graph's output (if successful)
+            - metadata: Execution metadata (success, tokens, latency, etc.)
+        """
+        graph_id = tool_input.get("graph_id", "")
+        goal_id = tool_input.get("goal_id")
+        input_data = tool_input.get("input_data", {})
+        task_description = tool_input.get("task_description", "")
+
+        if not graph_id:
+            return ToolResult(
+                tool_use_id="",
+                content=json.dumps(
+                    {
+                        "message": "Missing required parameter: graph_id",
+                        "data": None,
+                        "metadata": {"success": False, "error": "missing_graph_id"},
+                    }
+                ),
+                is_error=True,
+            )
+
+        if ctx.sub_graph_executor is None:
+            return ToolResult(
+                tool_use_id="",
+                content=json.dumps(
+                    {
+                        "message": (
+                            "Sub-graph execution is not configured. "
+                            "The sub_graph_executor callback must be provided "
+                            "to the GraphExecutor."
+                        ),
+                        "data": None,
+                        "metadata": {"success": False, "error": "no_sub_graph_executor"},
+                    }
+                ),
+                is_error=True,
+            )
+
+        logger.info(
+            "\n" + "=" * 60 + "\n"
+            "🔷 SUB-GRAPH EXECUTION\n"
+            "=" * 60 + "\n"
+            "Parent Node: %s\n"
+            "Graph ID: %s\n"
+            "Goal ID: %s\n"
+            "Task: %s\n" + "=" * 60,
+            ctx.node_id,
+            graph_id,
+            goal_id or "(default)",
+            task_description[:200] + "..." if len(task_description) > 200 else task_description,
+        )
+
+        try:
+            start_time = time.time()
+
+            result = await ctx.sub_graph_executor(
+                graph_id=graph_id,
+                goal_id=goal_id,
+                input_data=input_data,
+            )
+
+            latency_ms = int((time.time() - start_time) * 1000)
+
+            separator = "-" * 60
+            logger.info(
+                "\n%s\n"
+                "✅ SUB-GRAPH '%s' COMPLETED\n"
+                "%s\n"
+                "Success: %s\n"
+                "Latency: %dms\n"
+                "Steps: %d\n"
+                "Tokens: %d\n"
+                "Output keys: %s\n"
+                "%s",
+                separator,
+                graph_id,
+                separator,
+                result.success,
+                latency_ms,
+                result.steps_executed,
+                result.total_tokens,
+                list(result.output.keys()) if result.output else [],
+                separator,
+            )
+
+            result_json = {
+                "message": (
+                    f"Child graph '{graph_id}' completed successfully"
+                    if result.success
+                    else f"Child graph '{graph_id}' failed: {result.error}"
+                ),
+                "data": result.output,
+                "metadata": {
+                    "graph_id": graph_id,
+                    "goal_id": goal_id,
+                    "success": result.success,
+                    "steps_executed": result.steps_executed,
+                    "total_tokens": result.total_tokens,
+                    "latency_ms": latency_ms,
+                    "error": result.error,
+                },
+            }
+
+            return ToolResult(
+                tool_use_id="",
+                content=json.dumps(result_json, indent=2, default=str),
+                is_error=not result.success,
+            )
+
+        except Exception as e:
+            logger.exception(
+                "\n" + "!" * 60 + "\n❌ SUB-GRAPH '%s' FAILED\nError: %s\n" + "!" * 60,
+                graph_id,
+                str(e),
+            )
+            result_json = {
+                "message": f"Child graph '{graph_id}' raised exception: {e}",
+                "data": None,
+                "metadata": {
+                    "graph_id": graph_id,
+                    "goal_id": goal_id,
+                    "success": False,
+                    "error": str(e),
+                },
+            }
+            return ToolResult(
+                tool_use_id="",
+                content=json.dumps(result_json, indent=2),
+                is_error=True,
+            )

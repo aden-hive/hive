@@ -570,6 +570,11 @@ class NodeContext:
     # the queen to record the current phase per iteration.
     iteration_metadata_provider: Any = None  # Callable[[], dict] | None
 
+    # Sub-graph executor callback — when set, enables hierarchical agent
+    # execution via the delegate_to_sub_graph tool.  Signature:
+    # async (graph_id: str, goal_id: str | None, input_data: dict) -> ExecutionResult
+    sub_graph_executor: Any = None  # Callable | None
+
 
 @dataclass
 class NodeResult:
