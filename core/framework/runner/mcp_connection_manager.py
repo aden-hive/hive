@@ -69,7 +69,10 @@ class MCPConnectionManager:
                     current = self._transitions.get(server_name)
                     if current is transition_event:
                         self._transitions.pop(server_name, None)
-                        if server_name not in self._pool and self._refcounts.get(server_name, 0) <= 0:
+                        if (
+                            server_name not in self._pool
+                            and self._refcounts.get(server_name, 0) <= 0
+                        ):
                             self._configs.pop(server_name, None)
                         transition_event.set()
                 raise
