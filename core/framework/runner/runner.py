@@ -1364,6 +1364,8 @@ class AgentRunner:
             return "MINIMAX_API_KEY"
         elif model_lower.startswith("kimi/"):
             return "KIMI_API_KEY"
+        elif model_lower.startswith("hive/"):
+            return "HIVE_API_KEY"
         else:
             # Default: assume OpenAI-compatible
             return "OPENAI_API_KEY"
@@ -1386,6 +1388,8 @@ class AgentRunner:
             cred_id = "minimax"
         elif model_lower.startswith("kimi/"):
             cred_id = "kimi"
+        elif model_lower.startswith("hive/"):
+            cred_id = "hive"
         # Add more mappings as providers are added to LLM_CREDENTIALS
 
         if cred_id is None:
