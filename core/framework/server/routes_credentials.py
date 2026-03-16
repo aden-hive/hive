@@ -103,7 +103,9 @@ async def handle_delete_credential(request: web.Request) -> web.Response:
     if credential_id == "aden_api_key":
         from framework.credentials.key_storage import delete_aden_api_key
 
-        delete_aden_api_key()
+        deleted = delete_aden_api_key()
+        if not deleted:
+            return web.json_response({"error": "Credential 'aden_api_key' not found"}, status=404)
         return web.json_response({"deleted": True})
 
     store = _get_store(request)
@@ -178,7 +180,10 @@ async def handle_check_agent(request: web.Request) -> web.Response:
         )
     except Exception as e:
         logger.exception(f"Error checking agent credentials: {e}")
-        return web.json_response({"error": str(e)}, status=500)
+        return web.json_response(
+            {"error": "Internal server error while checking credentials"},
+            status=500,
+        )
 
 
 def _status_to_dict(c) -> dict:
