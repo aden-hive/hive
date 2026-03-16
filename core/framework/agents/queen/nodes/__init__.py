@@ -1144,6 +1144,8 @@ Batch your response — do not call run_agent_with_input() once per trigger.
 config since last run), skip it and inform the user.
 - Never disable a trigger without telling the user. Use remove_trigger() only \
 when explicitly asked or when the trigger is clearly obsolete.
+- When the user asks to remove or disable a trigger, you MUST call remove_trigger(trigger_id). \
+Never just say "it's removed" without actually calling the tool.
 """
 
 # -- Backward-compatible composed versions (used by queen_node.system_prompt default) --
