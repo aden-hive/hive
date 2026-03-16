@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useRef, useState, useCallback } from "react";
 import { Loader2 } from "lucide-react";
 import type { DraftGraph as DraftGraphData, DraftNode } from "@/api/types";
-import { RunButton } from "./AgentGraph";
-import type { GraphNode, RunState } from "./AgentGraph";
+import { RunButton } from "./RunButton";
+import type { GraphNode, RunState } from "./graph-types";
 
 // Read a CSS custom property value (space-separated HSL components)
 function cssVar(name: string): string {
@@ -144,13 +144,9 @@ function FlowchartShape({
     case "rectangle":
       return <rect x={x} y={y} width={w} height={h} rx={4} {...common} />;
 
-    case "rounded_rect":
-      return <rect x={x} y={y} width={w} height={h} rx={12} {...common} />;
-
     case "diamond": {
       const cx = x + w / 2;
       const cy = y + h / 2;
-      // Keep diamond within bounding box
       return (
         <polygon
           points={`${cx},${y} ${x + w},${cy} ${cx},${y + h} ${x},${cy}`}
@@ -174,18 +170,6 @@ function FlowchartShape({
       return <path d={d} {...common} />;
     }
 
-    case "multi_document": {
-      const off = 3;
-      const d = `M ${x} ${y + 4 + off} Q ${x} ${y + off}, ${x + 8} ${y + off} L ${x + w - 8 - off} ${y + off} Q ${x + w - off} ${y + off}, ${x + w - off} ${y + 4 + off} L ${x + w - off} ${y + h - 8} C ${x + (w - off) * 0.75} ${y + h + 2}, ${x + (w - off) * 0.25} ${y + h - 10}, ${x} ${y + h - 4} Z`;
-      return (
-        <g>
-          <rect x={x + off * 2} y={y} width={w - off * 2} height={h - off} rx={4} fill={fill} stroke={stroke} strokeWidth={1.2} opacity={0.4} />
-          <rect x={x + off} y={y + off / 2} width={w - off} height={h - off} rx={4} fill={fill} stroke={stroke} strokeWidth={1.2} opacity={0.6} />
-          <path d={d} {...common} />
-        </g>
-      );
-    }
-
     case "subroutine": {
       const inset = 7;
       return (
@@ -207,34 +191,6 @@ function FlowchartShape({
       );
     }
 
-    case "manual_input":
-      return (
-        <polygon
-          points={`${x},${y + 10} ${x + w},${y} ${x + w},${y + h} ${x},${y + h}`}
-          {...common}
-        />
-      );
-
-    case "trapezoid": {
-      const inset = 12;
-      return (
-        <polygon
-          points={`${x},${y} ${x + w},${y} ${x + w - inset},${y + h} ${x + inset},${y + h}`}
-          {...common}
-        />
-      );
-    }
-
-    case "delay": {
-      const d = `M ${x} ${y + 4} Q ${x} ${y}, ${x + 4} ${y} L ${x + w * 0.65} ${y} A ${w * 0.35} ${h / 2} 0 0 1 ${x + w * 0.65} ${y + h} L ${x + 4} ${y + h} Q ${x} ${y + h}, ${x} ${y + h - 4} Z`;
-      return <path d={d} {...common} />;
-    }
-
-    case "display": {
-      const d = `M ${x + 16} ${y} L ${x + w * 0.65} ${y} A ${w * 0.35} ${h / 2} 0 0 1 ${x + w * 0.65} ${y + h} L ${x + 16} ${y + h} L ${x} ${y + h / 2} Z`;
-      return <path d={d} {...common} />;
-    }
-
     case "cylinder": {
       const ry = 7;
       return (
@@ -247,88 +203,6 @@ function FlowchartShape({
           <ellipse cx={x + w / 2} cy={y + h - ry} rx={w / 2} ry={ry} fill={fill} stroke={stroke} strokeWidth={1.2} />
         </g>
       );
-    }
-
-    case "stored_data": {
-      const d = `M ${x + 14} ${y} L ${x + w} ${y} A 10 ${h / 2} 0 0 0 ${x + w} ${y + h} L ${x + 14} ${y + h} A 10 ${h / 2} 0 0 1 ${x + 14} ${y} Z`;
-      return <path d={d} {...common} />;
-    }
-
-    case "internal_storage":
-      return (
-        <g>
-          <rect x={x} y={y} width={w} height={h} rx={4} {...common} />
-          <line x1={x + 10} y1={y} x2={x + 10} y2={y + h} stroke={stroke} strokeWidth={0.8} opacity={0.5} />
-          <line x1={x} y1={y + 10} x2={x + w} y2={y + 10} stroke={stroke} strokeWidth={0.8} opacity={0.5} />
-        </g>
-      );
-
-    case "circle": {
-      const r = Math.min(w, h) / 2 - 2;
-      return <circle cx={x + w / 2} cy={y + h / 2} r={r} {...common} />;
-    }
-
-    case "pentagon":
-      return (
-        <polygon
-          points={`${x},${y} ${x + w},${y} ${x + w},${y + h * 0.6} ${x + w / 2},${y + h} ${x},${y + h * 0.6}`}
-          {...common}
-        />
-      );
-
-    case "triangle_inv":
-      return (
-        <polygon
-          points={`${x},${y} ${x + w},${y} ${x + w / 2},${y + h}`}
-          {...common}
-        />
-      );
-
-    case "triangle":
-      return (
-        <polygon
-          points={`${x + w / 2},${y} ${x + w},${y + h} ${x},${y + h}`}
-          {...common}
-        />
-      );
-
-    case "hourglass":
-      return (
-        <polygon
-          points={`${x},${y} ${x + w},${y} ${x + w / 2},${y + h / 2} ${x + w},${y + h} ${x},${y + h} ${x + w / 2},${y + h / 2}`}
-          {...common}
-        />
-      );
-
-    case "circle_cross": {
-      const r = Math.min(w, h) / 2 - 2;
-      const cx = x + w / 2;
-      const cy = y + h / 2;
-      return (
-        <g>
-          <circle cx={cx} cy={cy} r={r} {...common} />
-          <line x1={cx - r * 0.7} y1={cy - r * 0.7} x2={cx + r * 0.7} y2={cy + r * 0.7} stroke={stroke} strokeWidth={1} />
-          <line x1={cx + r * 0.7} y1={cy - r * 0.7} x2={cx - r * 0.7} y2={cy + r * 0.7} stroke={stroke} strokeWidth={1} />
-        </g>
-      );
-    }
-
-    case "circle_bar": {
-      const r = Math.min(w, h) / 2 - 2;
-      const cx = x + w / 2;
-      const cy = y + h / 2;
-      return (
-        <g>
-          <circle cx={cx} cy={cy} r={r} {...common} />
-          <line x1={cx} y1={cy - r} x2={cx} y2={cy + r} stroke={stroke} strokeWidth={1} />
-          <line x1={cx - r} y1={cy} x2={cx + r} y2={cy} stroke={stroke} strokeWidth={1} />
-        </g>
-      );
-    }
-
-    case "flag": {
-      const d = `M ${x} ${y} L ${x + w} ${y} L ${x + w - 8} ${y + h / 2} L ${x + w} ${y + h} L ${x} ${y + h} Z`;
-      return <path d={d} {...common} />;
     }
 
     default:
@@ -977,7 +851,7 @@ export default function DraftGraph({ draft, onNodeClick, flowchartMap, runtimeNo
           {loading || !draft ? (
             <>
               <Loader2 className="w-5 h-5 animate-spin text-muted-foreground/40" />
-              <p className="text-xs text-muted-foreground/50">Designing flowchart…</p>
+              <p className="text-xs text-muted-foreground/50">Loading flowchart…</p>
             </>
           ) : (
             <p className="text-xs text-muted-foreground/60 text-center italic">
