@@ -597,10 +597,26 @@ class EventLoopNode(NodeProtocol):
         # - Node has sub_agents defined
         # - We are NOT in subagent mode (prevents nested delegation)
         if not ctx.is_subagent_mode:
-            sub_agents = getattr(ctx.node_spec, "sub_agents", [])
-            delegate_tool = self._build_delegate_tool(sub_agents, ctx.node_registry)
-            if delegate_tool:
-                tools.append(delegate_tool)
+            sub_agents = getattr(ctx.node_spec, "sub_agents", None) or []
+            if sub_agents:
+                delegate_tool = self._build_delegate_tool(sub_agents, ctx.node_registry)
+                if delegate_tool:
+                    tools.append(delegate_tool)
+                    logger.info(
+                        "[%s] delegate_to_sub_agent injected (sub_agents=%s)",
+                        node_id,
+                        sub_agents,
+                    )
+                else:
+                    logger.error(
+                        "[%s] _build_delegate_tool returned None for sub_agents=%s",
+                        node_id,
+                        sub_agents,
+                    )
+        else:
+            logger.debug(
+                "[%s] Skipped delegate tool (is_subagent_mode=True)", node_id
+            )
 
         # Add report_to_parent tool for sub-agents with a report callback
         if ctx.is_subagent_mode and ctx.report_callback is not None:
