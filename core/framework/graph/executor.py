@@ -27,11 +27,13 @@ from framework.graph.node import (
     SharedMemory,
 )
 from framework.graph.validator import OutputValidator
-from framework.llm.provider import LLMProvider, Tool
+from framework.llm.provider import LLMProvider, Tool, ToolUse
 from framework.observability import set_trace_context
 from framework.runtime.core import Runtime
 from framework.schemas.checkpoint import Checkpoint
 from framework.storage.checkpoint_store import CheckpointStore
+
+logger = logging.getLogger(__name__)
 
 
 def _default_max_context_tokens() -> int:
@@ -415,6 +417,14 @@ class GraphExecutor:
         )
         return s1 + "\n\n" + s2
 
+    def _get_runtime_log_session_id(self) -> str:
+        """Return the session-backed execution ID for runtime logging, if any."""
+        if not self._storage_path:
+            return ""
+        if self._storage_path.parent.name != "sessions":
+            return ""
+        return self._storage_path.name
+
     async def execute(
         self,
         graph: GraphSpec,
@@ -708,10 +718,7 @@ class GraphExecutor:
         )
 
         if self.runtime_logger:
-            # Extract session_id from storage_path if available (for unified sessions)
-            session_id = ""
-            if self._storage_path and self._storage_path.name.startswith("session_"):
-                session_id = self._storage_path.name
+            session_id = self._get_runtime_log_session_id()
             self.runtime_logger.start_run(goal_id=goal.id, session_id=session_id)
 
         self.logger.info(f"🚀 Starting execution: {goal.name}")
@@ -936,6 +943,33 @@ class GraphExecutor:
                 # Execute node
                 self.logger.info("   Executing...")
                 result = await node_impl.execute(ctx)
+
+                # GCU tab cleanup: stop the browser profile after a top-level GCU node
+                # finishes so tabs don't accumulate. Mirrors the subagent cleanup in
+                # EventLoopNode._execute_subagent().
+                if node_spec.node_type == "gcu" and self.tool_executor is not None:
+                    try:
+                        from gcu.browser.session import (
+                            _active_profile as _gcu_profile_var,
+                        )
+
+                        _gcu_profile = _gcu_profile_var.get()
+                        _stop_use = ToolUse(
+                            id="gcu-cleanup",
+                            name="browser_stop",
+                            input={"profile": _gcu_profile},
+                        )
+                        _stop_result = self.tool_executor(_stop_use)
+                        if asyncio.iscoroutine(_stop_result) or asyncio.isfuture(_stop_result):
+                            await _stop_result
+                    except ImportError:
+                        pass  # GCU not installed
+                    except Exception as _gcu_exc:
+                        logger.warning(
+                            "GCU browser_stop failed for profile %r: %s",
+                            _gcu_profile,
+                            _gcu_exc,
+                        )
 
                 # Emit node-completed event (skip event_loop nodes)
                 if self._event_bus and node_spec.node_type != "event_loop":

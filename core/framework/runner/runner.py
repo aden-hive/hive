@@ -1476,21 +1476,31 @@ class AgentRunner:
         # Pass intro_message through for TUI display
         self._agent_runtime.intro_message = self.intro_message
 
+    # ------------------------------------------------------------------
+    # Execution modes
+    #
+    # run()              – One-shot, blocking execution for worker agents
+    #                      (headless CLI via ``hive run``). Validates, runs
+    #                      the graph to completion, and returns the result.
+    #
+    # start() / trigger() – Long-lived runtime for the frontend (queen).
+    #                      start() boots the runtime; trigger() sends
+    #                      non-blocking execution requests. Used by the
+    #                      server session manager and API routes.
+    # ------------------------------------------------------------------
+
     async def run(
         self,
         input_data: dict | None = None,
         session_state: dict | None = None,
         entry_point_id: str | None = None,
     ) -> ExecutionResult:
-        """
-        Execute the agent with given input data.
+        """One-shot execution for worker agents (headless CLI).
 
-        Validates credentials before execution. If any required credentials
-        are missing, returns an error result with instructions on how to
-        provide them.
+        Validates credentials, runs the graph to completion, and returns
+        the result. Used by ``hive run`` and programmatic callers.
 
-        For single-entry-point agents, this is the standard execution path.
-        For multi-entry-point agents, you can optionally specify which entry point to use.
+        For the frontend (queen), use start() + trigger() instead.
 
         Args:
             input_data: Input data for the agent (e.g., {"lead_id": "123"})
@@ -1616,7 +1626,12 @@ class AgentRunner:
     # === Runtime API ===
 
     async def start(self) -> None:
-        """Start the agent runtime."""
+        """Boot the agent runtime for the frontend (queen).
+
+        Pair with trigger() to send execution requests. Used by the
+        server session manager. For headless worker agents, use run()
+        instead.
+        """
         if self._agent_runtime is None:
             self._setup()
 
@@ -1633,10 +1648,10 @@ class AgentRunner:
         input_data: dict[str, Any],
         correlation_id: str | None = None,
     ) -> str:
-        """
-        Trigger execution at a specific entry point (non-blocking).
+        """Send a non-blocking execution request to a running runtime.
 
-        Returns execution ID for tracking.
+        Used by the server API routes after start(). For headless
+        worker agents, use run() instead.
 
         Args:
             entry_point_id: Which entry point to trigger

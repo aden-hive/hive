@@ -433,6 +433,26 @@ class SessionManager:
         if agent_path.name != "queen" and session.worker_runtime:
             await self._notify_queen_worker_loaded(session)
 
+        # Update meta.json so cold-restore can discover this session by agent_path
+        storage_session_id = session.queen_resume_from or session.id
+        meta_path = Path.home() / ".hive" / "queen" / "session" / storage_session_id / "meta.json"
+        try:
+            _agent_name = (
+                session.worker_info.name
+                if session.worker_info
+                else str(agent_path.name).replace("_", " ").title()
+            )
+            existing_meta = {}
+            if meta_path.exists():
+                existing_meta = json.loads(meta_path.read_text(encoding="utf-8"))
+            existing_meta["agent_name"] = _agent_name
+            existing_meta["agent_path"] = (
+                str(session.worker_path) if session.worker_path else str(agent_path)
+            )
+            meta_path.write_text(json.dumps(existing_meta), encoding="utf-8")
+        except OSError:
+            pass
+
         # Restore previously active triggers from persisted session state
         if session.available_triggers and session.worker_runtime:
             try:

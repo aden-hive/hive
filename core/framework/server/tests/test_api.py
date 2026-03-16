@@ -214,11 +214,8 @@ def tmp_agent_dir(tmp_path, monkeypatch):
     return tmp_path, agent_name, base
 
 
-@pytest.fixture
-def sample_session(tmp_agent_dir):
-    """Create a sample session with state.json, checkpoints, and conversations."""
-    tmp_path, agent_name, base = tmp_agent_dir
-    session_id = "session_20260220_120000_abc12345"
+def _write_sample_session(base: Path, session_id: str):
+    """Create a sample worker session on disk."""
     session_dir = base / "sessions" / session_id
 
     # state.json
@@ -297,6 +294,20 @@ def sample_session(tmp_agent_dir):
     (logs_dir / "tool_logs.jsonl").write_text(json.dumps(step_a) + "\n" + json.dumps(step_b) + "\n")
 
     return session_id, session_dir, state
+
+
+@pytest.fixture
+def sample_session(tmp_agent_dir):
+    """Create a sample session with state.json, checkpoints, and conversations."""
+    _tmp_path, _agent_name, base = tmp_agent_dir
+    return _write_sample_session(base, "session_20260220_120000_abc12345")
+
+
+@pytest.fixture
+def custom_id_session(tmp_agent_dir):
+    """Create a sample session that uses a custom non-session_* ID."""
+    _tmp_path, _agent_name, base = tmp_agent_dir
+    return _write_sample_session(base, "my-custom-session")
 
 
 def _make_app_with_session(session):
@@ -418,18 +429,27 @@ class TestSessionCRUD:
             assert "graphs" in data
 
     @pytest.mark.asyncio
+<<<<<<< HEAD
     async def test_list_sessions_hides_stale_live_sessions_without_stopping(self):
+=======
+    async def test_list_sessions_excludes_stale_live_sessions(self):
+>>>>>>> e8477e7b642cf616cbb32e4eaf80a567448760b9
         session = _make_session(llm_config_fingerprint="stale-fingerprint")
         app = _make_app_with_session(session)
         manager = app["manager"]
         manager.is_session_stale = MagicMock(return_value=True)
+<<<<<<< HEAD
         manager.stop_session = AsyncMock(
             side_effect=lambda session_id: manager._sessions.pop(session_id, None) is not None
         )
+=======
+        manager.stop_session = AsyncMock(return_value=True)
+>>>>>>> e8477e7b642cf616cbb32e4eaf80a567448760b9
 
         async with TestClient(TestServer(app)) as client:
             resp = await client.get("/api/sessions")
             data = await resp.json()
+<<<<<<< HEAD
             assert manager.get_session("test_agent") is session
 
         assert resp.status == 200
@@ -457,6 +477,15 @@ class TestSessionCRUD:
     async def test_reconnect_session_stops_stale_live_session_and_returns_cold_info(
         self, tmp_agent_dir
     ):
+=======
+
+        assert resp.status == 200
+        assert data["sessions"] == []
+        assert ("test_agent",) in [call.args for call in manager.stop_session.await_args_list]
+
+    @pytest.mark.asyncio
+    async def test_get_session_stops_stale_live_session_and_returns_cold_info(self, tmp_agent_dir):
+>>>>>>> e8477e7b642cf616cbb32e4eaf80a567448760b9
         tmp_path, _, _ = tmp_agent_dir
         session_id = "test_agent"
         cold_parts_dir = (
@@ -474,6 +503,7 @@ class TestSessionCRUD:
         app = _make_app_with_session(session)
         manager = app["manager"]
         manager.is_session_stale = MagicMock(return_value=True)
+<<<<<<< HEAD
         manager.stop_session = AsyncMock(
             side_effect=lambda target_id: manager._sessions.pop(target_id, None) is not None
         )
@@ -482,6 +512,13 @@ class TestSessionCRUD:
             resp = await client.post(f"/api/sessions/{session_id}/reconnect")
             data = await resp.json()
             assert manager.get_session(session_id) is None
+=======
+        manager.stop_session = AsyncMock(return_value=True)
+
+        async with TestClient(TestServer(app)) as client:
+            resp = await client.get(f"/api/sessions/{session_id}")
+            data = await resp.json()
+>>>>>>> e8477e7b642cf616cbb32e4eaf80a567448760b9
 
         assert resp.status == 200
         assert data["session_id"] == session_id
@@ -875,6 +912,22 @@ class TestWorkerSessions:
             assert data["sessions"][0]["session_id"] == session_id
             assert data["sessions"][0]["status"] == "paused"
             assert data["sessions"][0]["steps"] == 5
+
+    @pytest.mark.asyncio
+    async def test_list_sessions_includes_custom_id(self, custom_id_session, tmp_agent_dir):
+        session_id, session_dir, state = custom_id_session
+        tmp_path, agent_name, base = tmp_agent_dir
+
+        session = _make_session(tmp_dir=tmp_path / ".hive" / "agents" / agent_name)
+        app = _make_app_with_session(session)
+
+        async with TestClient(TestServer(app)) as client:
+            resp = await client.get("/api/sessions/test_agent/worker-sessions")
+            assert resp.status == 200
+            data = await resp.json()
+            assert len(data["sessions"]) == 1
+            assert data["sessions"][0]["session_id"] == session_id
+            assert data["sessions"][0]["status"] == "paused"
 
     @pytest.mark.asyncio
     async def test_list_sessions_empty(self, tmp_agent_dir):
@@ -1374,6 +1427,28 @@ class TestLogs:
     @pytest.mark.asyncio
     async def test_logs_list_summaries(self, sample_session, tmp_agent_dir):
         session_id, session_dir, state = sample_session
+        tmp_path, agent_name, base = tmp_agent_dir
+
+        from framework.runtime.runtime_log_store import RuntimeLogStore
+
+        log_store = RuntimeLogStore(base)
+        session = _make_session(
+            tmp_dir=tmp_path / ".hive" / "agents" / agent_name,
+            log_store=log_store,
+        )
+        app = _make_app_with_session(session)
+
+        async with TestClient(TestServer(app)) as client:
+            resp = await client.get("/api/sessions/test_agent/logs")
+            assert resp.status == 200
+            data = await resp.json()
+            assert "logs" in data
+            assert len(data["logs"]) >= 1
+            assert data["logs"][0]["run_id"] == session_id
+
+    @pytest.mark.asyncio
+    async def test_logs_list_summaries_with_custom_id(self, custom_id_session, tmp_agent_dir):
+        session_id, session_dir, state = custom_id_session
         tmp_path, agent_name, base = tmp_agent_dir
 
         from framework.runtime.runtime_log_store import RuntimeLogStore
