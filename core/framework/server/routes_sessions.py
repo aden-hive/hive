@@ -868,7 +868,7 @@ async def handle_queen_messages(request: web.Request) -> web.Response:
     Reads directly from disk so it works for both live sessions and cold
     (post-server-restart) sessions — no live session required.
     """
-    session_id = request.match_info["session_id"]
+    session_id = safe_path_segment(request.match_info["session_id"])
 
     queen_dir = Path.home() / ".hive" / "queen" / "session" / session_id
     convs_dir = queen_dir / "conversations"
@@ -924,7 +924,7 @@ async def handle_session_events_history(request: web.Request) -> web.Response:
     replays these events through ``sseEventToChatMessage`` to fully reconstruct
     the UI state on resume.
     """
-    session_id = request.match_info["session_id"]
+    session_id = safe_path_segment(request.match_info["session_id"])
 
     queen_dir = Path.home() / ".hive" / "queen" / "session" / session_id
     events_path = queen_dir / "events.jsonl"
@@ -981,7 +981,7 @@ async def handle_delete_history_session(request: web.Request) -> web.Response:
     This is the frontend 'delete from history' action.
     """
     manager = _get_manager(request)
-    session_id = request.match_info["session_id"]
+    session_id = safe_path_segment(request.match_info["session_id"])
 
     # Stop the live session if it exists (best-effort)
     if manager.get_session(session_id):

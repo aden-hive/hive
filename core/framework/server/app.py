@@ -102,6 +102,10 @@ def cold_sessions_dir(session_id: str) -> Path | None:
     Returns None if meta.json is missing or has no agent_path.
     """
     import json
+    
+    # Must validate the injected argument since it comes directly from a URL path template
+    # inside handle_list_worker_sessions / handle_messages / etc via request.match_info
+    session_id = safe_path_segment(session_id)
 
     meta_path = Path.home() / ".hive" / "queen" / "session" / session_id / "meta.json"
     if not meta_path.exists():

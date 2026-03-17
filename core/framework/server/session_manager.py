@@ -950,6 +950,9 @@ class SessionManager:
         ~/.hive/queen/session/{session_id}/conversations/.  Returns None when
         no data is found so callers can fall through to a 404.
         """
+        from framework.server.app import safe_path_segment
+        session_id = safe_path_segment(session_id)
+        
         queen_dir = Path.home() / ".hive" / "queen" / "session" / session_id
         convs_dir = queen_dir / "conversations"
         if not convs_dir.exists():
