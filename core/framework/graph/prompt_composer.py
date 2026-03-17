@@ -26,6 +26,16 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+# Injected into every worker node's system prompt so the LLM understands
+# it is one step in a multi-node pipeline and should not overreach.
+EXECUTION_SCOPE_PREAMBLE = (
+    "EXECUTION SCOPE: You are one node in a multi-step workflow graph. "
+    "Focus ONLY on the task described in your instructions below. "
+    "Call set_output() for each of your declared output keys, then stop. "
+    "Do NOT attempt work that belongs to other nodes — the framework "
+    "routes data between nodes automatically."
+)
+
 
 def _with_datetime(prompt: str) -> str:
     """Append current datetime with local timezone to a system prompt."""
@@ -306,6 +316,12 @@ def build_transition_marker(
     # Next phase
     sections.append(f"\nNow entering: {next_node.name}")
     sections.append(f"  {next_node.description}")
+    if next_node.output_keys:
+        sections.append(
+            f"\nYour ONLY job in this phase: complete the task above and call "
+            f"set_output() for {next_node.output_keys}. Do NOT do work that "
+            f"belongs to later phases."
+        )
 
     # Reflection prompt (engineered metacognition)
     sections.append(
