@@ -152,6 +152,8 @@ class GraphExecutor:
         dynamic_tools_provider: Callable | None = None,
         dynamic_prompt_provider: Callable | None = None,
         iteration_metadata_provider: Callable | None = None,
+        skills_catalog_prompt: str = "",
+        protocols_prompt: str = "",
     ):
         """
         Initialize the executor.
@@ -177,6 +179,8 @@ class GraphExecutor:
                 tool list (for mode switching)
             dynamic_prompt_provider: Optional callback returning current
                 system prompt (for phase switching)
+            skills_catalog_prompt: Available skills catalog for system prompt
+            protocols_prompt: Default skill operational protocols for system prompt
         """
         self.runtime = runtime
         self.llm = llm
@@ -198,6 +202,20 @@ class GraphExecutor:
         self.dynamic_tools_provider = dynamic_tools_provider
         self.dynamic_prompt_provider = dynamic_prompt_provider
         self.iteration_metadata_provider = iteration_metadata_provider
+        self.skills_catalog_prompt = skills_catalog_prompt
+        self.protocols_prompt = protocols_prompt
+
+        if protocols_prompt:
+            self.logger.info(
+                "GraphExecutor[%s] received protocols_prompt (%d chars)",
+                stream_id,
+                len(protocols_prompt),
+            )
+        else:
+            self.logger.warning(
+                "GraphExecutor[%s] received EMPTY protocols_prompt",
+                stream_id,
+            )
 
         # Parallel execution settings
         self.enable_parallel_execution = enable_parallel_execution
@@ -1805,10 +1823,31 @@ class GraphExecutor:
             if node_spec.tools:
                 available_tools = [t for t in self.tools if t.name in node_spec.tools]
 
-        # Create scoped memory view
+        # Create scoped memory view.
+        # When permissions are restricted (non-empty key lists), auto-include
+        # _-prefixed keys used by default skill protocols so agents can read/write
+        # operational state (e.g. _working_notes, _batch_ledger) regardless of
+        # what the node declares.  When key lists are empty (unrestricted), leave
+        # unchanged — empty means "allow all".
+        read_keys = list(node_spec.input_keys)
+        write_keys = list(node_spec.output_keys)
+        # Only extend lists that were already restricted (non-empty).
+        # Empty means "allow all" — adding keys would accidentally
+        # activate the permission check and block legitimate reads/writes.
+        if read_keys or write_keys:
+            from framework.skills.defaults import SHARED_MEMORY_KEYS as _skill_keys
+
+            existing_underscore = [k for k in memory._data if k.startswith("_")]
+            extra_keys = set(_skill_keys) | set(existing_underscore)
+            for k in extra_keys:
+                if read_keys and k not in read_keys:
+                    read_keys.append(k)
+                if write_keys and k not in write_keys:
+                    write_keys.append(k)
+
         scoped_memory = memory.with_permissions(
-            read_keys=node_spec.input_keys,
-            write_keys=node_spec.output_keys,
+            read_keys=read_keys,
+            write_keys=write_keys,
         )
 
         # Build per-node accounts prompt (filtered to this node's tools)
@@ -1852,6 +1891,8 @@ class GraphExecutor:
             dynamic_tools_provider=self.dynamic_tools_provider,
             dynamic_prompt_provider=self.dynamic_prompt_provider,
             iteration_metadata_provider=self.iteration_metadata_provider,
+            skills_catalog_prompt=self.skills_catalog_prompt,
+            protocols_prompt=self.protocols_prompt,
         )
 
     VALID_NODE_TYPES = {

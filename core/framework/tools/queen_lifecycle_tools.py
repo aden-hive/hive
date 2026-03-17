@@ -36,6 +36,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import time
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -115,6 +116,9 @@ class QueenPhaseState:
     prompt_staging: str = ""
     prompt_running: str = ""
 
+    # Default skill operational protocols — appended to every phase prompt
+    protocols_prompt: str = ""
+
     def get_current_tools(self) -> list:
         """Return tools for the current phase."""
         if self.phase == "planning":
@@ -139,7 +143,12 @@ class QueenPhaseState:
         from framework.agents.queen.queen_memory import format_for_injection
 
         memory = format_for_injection()
-        return base + ("\n\n" + memory if memory else "")
+        parts = [base]
+        if self.protocols_prompt:
+            parts.append(self.protocols_prompt)
+        if memory:
+            parts.append(memory)
+        return "\n\n".join(parts)
 
     async def _emit_phase_event(self) -> None:
         """Publish a QUEEN_PHASE_CHANGED event so the frontend updates the tag."""
@@ -399,10 +408,11 @@ async def _start_trigger_timer(session: Any, trigger_id: str, tdef: Any) -> None
                 else:
                     await asyncio.sleep(float(interval_minutes) * 60)
 
-                # Record next fire time for introspection
+                # Record next fire time for introspection (monotonic, matches routes)
                 fire_times = getattr(session, "trigger_next_fire", None)
                 if fire_times is not None:
-                    fire_times[trigger_id] = datetime.now(tz=UTC).isoformat()
+                    _next_delay = float(interval_minutes) * 60 if interval_minutes else 60
+                    fire_times[trigger_id] = time.monotonic() + _next_delay
 
                 # Gate on worker being loaded
                 if getattr(session, "worker_runtime", None) is None:

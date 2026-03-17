@@ -299,6 +299,66 @@ class TestSubagentExecution:
         assert "metadata" in result_data
         assert result_data["metadata"]["agent_id"] == "researcher"
 
+    @pytest.mark.asyncio
+    async def test_gcu_subagent_auto_populates_tools_from_catalog(self, runtime):
+        """GCU subagent with tools=[] should receive all catalog tools (auto-populate).
+
+        GCU nodes declare tools=[] because the runner expands them at setup time.
+        But _execute_subagent filters by subagent_spec.tools, which is still empty.
+        The fix: when subagent is GCU with no declared tools, include all catalog tools.
+        """
+        gcu_spec = NodeSpec(
+            id="browser_worker",
+            name="Browser Worker",
+            description="GCU browser subagent",
+            node_type="gcu",
+            output_keys=["result"],
+            tools=[],  # Empty — expects auto-population
+        )
+
+        parent_spec = NodeSpec(
+            id="parent",
+            name="Parent",
+            description="Orchestrator",
+            node_type="event_loop",
+            output_keys=["result"],
+            sub_agents=["browser_worker"],
+        )
+
+        spy_llm = MockStreamingLLM(
+            [set_output_scenario("result", "scraped"), text_finish_scenario()]
+        )
+
+        browser_tool = Tool(name="browser_snapshot", description="Snapshot")
+
+        node = EventLoopNode(config=LoopConfig(max_iterations=5))
+        memory = SharedMemory()
+        scoped = memory.with_permissions(read_keys=[], write_keys=["result"])
+
+        ctx = NodeContext(
+            runtime=runtime,
+            node_id="parent",
+            node_spec=parent_spec,
+            memory=scoped,
+            input_data={},
+            llm=spy_llm,
+            available_tools=[],
+            all_tools=[browser_tool],
+            goal_context="",
+            goal=None,
+            node_registry={"browser_worker": gcu_spec},
+        )
+
+        result = await node._execute_subagent(ctx, "browser_worker", "Scrape example.com")
+        assert result.is_error is False
+
+        # Verify subagent LLM received browser tools from catalog
+        assert spy_llm.stream_calls, "LLM should have been called"
+        first_call_tools = spy_llm.stream_calls[0]["tools"]
+        tool_names = {t.name for t in first_call_tools} if first_call_tools else set()
+        assert "browser_snapshot" in tool_names
+        assert "delegate_to_sub_agent" not in tool_names
+
 
 # ---------------------------------------------------------------------------
 # Tests for nested subagent prevention

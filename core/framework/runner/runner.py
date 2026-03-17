@@ -962,6 +962,9 @@ class AgentRunner:
 
             # Generate flowchart.json if missing (for template/legacy agents)
             generate_fallback_flowchart(graph, goal, agent_path)
+            # Read skill configuration from agent module
+            agent_default_skills = getattr(agent_module, "default_skills", None)
+            agent_skills = getattr(agent_module, "skills", None)
 
             # Read runtime config (webhook settings, etc.) if defined
             agent_runtime_config = getattr(agent_module, "runtime_config", None)
@@ -974,7 +977,7 @@ class AgentRunner:
             configure_fn = getattr(agent_module, "configure_for_account", None)
             list_accts_fn = getattr(agent_module, "list_connected_accounts", None)
 
-            return cls(
+            runner = cls(
                 agent_path=agent_path,
                 graph=graph,
                 goal=goal,
@@ -990,6 +993,10 @@ class AgentRunner:
                 list_accounts=list_accts_fn,
                 credential_store=credential_store,
             )
+            # Stash skill config for use in _setup()
+            runner._agent_default_skills = agent_default_skills
+            runner._agent_skills = agent_skills
+            return runner
 
         # Fallback: load from agent.json (legacy JSON-based agents)
         agent_json_path = agent_path / "agent.json"
@@ -1010,7 +1017,7 @@ class AgentRunner:
         # Generate flowchart.json if missing (for legacy JSON-based agents)
         generate_fallback_flowchart(graph, goal, agent_path)
 
-        return cls(
+        runner = cls(
             agent_path=agent_path,
             graph=graph,
             goal=goal,
@@ -1021,6 +1028,9 @@ class AgentRunner:
             skip_credential_validation=skip_credential_validation or False,
             credential_store=credential_store,
         )
+        runner._agent_default_skills = None
+        runner._agent_skills = None
+        return runner
 
     def register_tool(
         self,
@@ -1330,6 +1340,19 @@ class AgentRunner:
         except Exception:
             pass  # Best-effort — agent works without account info
 
+        # Skill configuration — the runtime handles discovery, loading, and
+        # prompt rasterization.  The runner just builds the config.
+        from framework.skills.config import SkillsConfig
+        from framework.skills.manager import SkillsManagerConfig
+
+        skills_manager_config = SkillsManagerConfig(
+            skills_config=SkillsConfig.from_agent_vars(
+                default_skills=getattr(self, "_agent_default_skills", None),
+                skills=getattr(self, "_agent_skills", None),
+            ),
+            project_root=self.agent_path,
+        )
+
         self._setup_agent_runtime(
             tools,
             tool_executor,
@@ -1337,6 +1360,7 @@ class AgentRunner:
             accounts_data=accounts_data,
             tool_provider_map=tool_provider_map,
             event_bus=event_bus,
+            skills_manager_config=skills_manager_config,
         )
 
     def _get_api_key_env_var(self, model: str) -> str | None:
@@ -1432,6 +1456,7 @@ class AgentRunner:
         accounts_data: list[dict] | None = None,
         tool_provider_map: dict[str, str] | None = None,
         event_bus=None,
+        skills_manager_config=None,
     ) -> None:
         """Set up multi-entry-point execution using AgentRuntime."""
         entry_points = []
@@ -1491,6 +1516,7 @@ class AgentRunner:
             accounts_data=accounts_data,
             tool_provider_map=tool_provider_map,
             event_bus=event_bus,
+            skills_manager_config=skills_manager_config,
         )
 
         # Pass intro_message through for TUI display
